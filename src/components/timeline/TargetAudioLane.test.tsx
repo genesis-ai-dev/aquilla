@@ -3,7 +3,7 @@
 // resize-as-trim commits.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 const pauseAllTransports = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports }))
@@ -50,6 +50,9 @@ const pressPlay = async () => {
 }
 
 const base = {
+  // AQU-490: required on the lane so no call site can silently fall back to a
+  // threshold of one, which is the bug that made this tick lie in the product.
+  validationRequirementAudio: 1,
   pxPerSec: 40,
   viewStartSec: 0,
   viewEndSec: 100,
@@ -1531,6 +1534,37 @@ describe("TargetAudioLane — the play button (stage 5)", () => {
     expect(play).toHaveBeenCalledTimes(2)
   })
 
+  // 2026-09-30: fetching the clip took 14.6s on a slow connection with the
+  // button still saying "Play this clip". It says it is loading now, and a
+  // second press gives up the wait.
+  it("says it is loading while the clip arrives, and a second press gives up", async () => {
+    let arrive: (v: "ready") => void = () => {}
+    const play = vi.fn(() => ({ stop: () => {}, isPlaying: () => true, positionSec: () => null, audible: true }))
+    const factory = () => ({ prime: () => new Promise<"ready">((r) => { arrive = r }), play })
+    render(<TargetAudioLane {...base} previewFactory={factory as never} items={[item({}, 4000)]} />)
+    const button = screen.getByTestId("tl-target-c1-play")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Loading…"))
+    expect(button).toHaveAttribute("aria-busy", "true")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Play this clip"))
+    await act(async () => { arrive("ready") })
+    expect(play).not.toHaveBeenCalled()
+  })
+
+  it("plays once the clip has arrived", async () => {
+    let arrive: (v: "ready") => void = () => {}
+    const play = vi.fn(() => ({ stop: () => {}, isPlaying: () => true, positionSec: () => null, audible: true }))
+    const factory = () => ({ prime: () => new Promise<"ready">((r) => { arrive = r }), play })
+    render(<TargetAudioLane {...base} previewFactory={factory as never} items={[item({}, 4000)]} />)
+    const button = screen.getByTestId("tl-target-c1-play")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-label", "Loading…"))
+    await act(async () => { arrive("ready") })
+    expect(play).toHaveBeenCalledTimes(1)
+    expect(button).toHaveAttribute("aria-label", "Stop")
+  })
+
   it("leaves room for the record button on a chip wide enough for both", () => {
     render(
       <TargetAudioLane {...wired} items={[item({}, 4000)]} onOpenRecording={() => {}} />,
@@ -1847,5 +1881,106 @@ describe("TargetAudioLane — the trim handles cannot leave the section", () => 
     fireEvent.pointerUp(window, { clientX: 400 + 20 * 40 })
     const [, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
     expect(anchorSec).toBeCloseTo(19.95, 5)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-490 — the validation tick
+// ---------------------------------------------------------------------------
+
+/**
+ * Sam, 2026-09-22: with the project asking for two validators, a clip that ONE
+ * person had signed off wore a DOUBLE check for everybody — telling the second
+ * validator their work was done before they had started. Two faults behind it:
+ * `validationRequirementAudio` was never passed by TimelineEditor, so the
+ * effective threshold was always 1; and the expression had no viewer term at
+ * all, so it could only ever draw the "finished" icon.
+ *
+ * The rule is now the gutter's: your own vote below the threshold is a single
+ * check, a met threshold is a double one, and somebody else's lone vote is
+ * nothing at all.
+ */
+describe("TargetAudioLane — the validation tick", () => {
+  const withVotes = (validators: string[], validatorCount = validators.length) => {
+    const takeId = "audio-c1-1700000000-take.webm"
+    return item({
+      attachments: {
+        [takeId]: {
+          type: "audio", url: "frontier-audio://take",
+          role: "dub", validators, validatorCount,
+        },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+  }
+  const draw = (validators: string[], requirement: number, me = "ana") =>
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[withVotes(validators)]}
+        validationRequirementAudio={requirement}
+        session={{ username: me } as never}
+      />,
+    )
+  const tick = () => screen.queryByTestId("tl-target-c1-validated")
+
+  it("draws nothing when only someone else has validated below the threshold", () => {
+    draw(["bo"], 2)
+    expect(tick()).toBeNull()
+  })
+
+  it("draws nothing when nobody has validated", () => {
+    draw([], 2)
+    expect(tick()).toBeNull()
+  })
+
+  it("draws a SINGLE check when I have validated but the line has not", () => {
+    draw(["ana"], 2)
+    const mark = tick()
+    expect(mark).not.toBeNull()
+    expect(mark!.querySelector("svg")?.getAttribute("class")).toContain("lucide-check")
+    expect(mark!.querySelector("svg")?.getAttribute("class")).not.toContain("lucide-check-check")
+    expect(mark).toHaveAccessibleName(/you have validated/i)
+  })
+
+  it("draws a DOUBLE check once the threshold is met", () => {
+    draw(["ana", "bo"], 2)
+    const mark = tick()
+    expect(mark!.querySelector("svg")?.getAttribute("class")).toContain("lucide-check-check")
+    expect(mark).toHaveAccessibleName(/this take is validated/i)
+  })
+
+  // The threshold is the whole reason this was wrong in the product: the lane
+  // defaults it to 1, so a missing prop turned one vote into "finished".
+  it("honours the threshold rather than treating any vote as finished", () => {
+    draw(["bo"], 1)
+    expect(tick()!.querySelector("svg")?.getAttribute("class")).toContain("lucide-check-check")
+  })
+
+  // A signed-out or not-yet-resolved viewer must never read as "mine".
+  it("never reads a blank viewer as the validator", () => {
+    draw([""], 2, "")
+    expect(tick()).toBeNull()
+  })
+
+  // The imported programme clip is not a performance and never wears a tick.
+  it("ignores a source-role take", () => {
+    const takeId = "audio-c1-1700000000-take.webm"
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({
+          attachments: {
+            [takeId]: {
+              type: "audio", url: "frontier-audio://take",
+              role: "source", validators: ["ana", "bo"], validatorCount: 2,
+            },
+          },
+        } as unknown as Partial<CellData>)]}
+        validationRequirementAudio={1}
+        session={{ username: "ana" } as never}
+      />,
+    )
+    expect(tick()).toBeNull()
   })
 })

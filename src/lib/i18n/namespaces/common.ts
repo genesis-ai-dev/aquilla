@@ -588,8 +588,9 @@ export const common = defineNamespace({
       },
       "common.optionalFieldNote": {
         description:
-          "Small trailing qualifier appended after a field label to mark it as not " +
-          "required — the AI-provider endpoint form, and the invite-link email field.",
+          "Small trailing qualifier appended after a field label (or a section " +
+          "heading) to mark it as not required — the AI-provider endpoint form, the " +
+          "invite-link email field, and the translation-brief card's empty state.",
         screenshot: "project-settings",
       },
       "common.general": {

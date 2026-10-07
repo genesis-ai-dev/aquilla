@@ -24,6 +24,7 @@ import {
   hydrateContextualDrafts,
   resetContextualDraftsStore,
 } from "@/lib/contextual/drafts-store"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 // Capture target-side emits without touching IndexedDB / posthog. Every helper
 // EditorTable imports must be present so the module resolves. `vi.hoisted`
@@ -43,6 +44,11 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellUnwaive: vi.fn(() => Promise.resolve("unwaive-event")),
 }))
 vi.mock("@/lib/contextual/transport", () => ({ reviewContextualDraft }))
+// AQU-1572: the emit reports each validation itself (cell-telemetry.ts, at the
+// emit seam). With the emits mocked, any capture here would be the row
+// reporting a second time on its own.
+const { captureCellValidation } = vi.hoisted(() => ({ captureCellValidation: vi.fn() }))
+vi.mock("@/lib/cell-telemetry", () => ({ captureCellValidation, captureAudioAction: vi.fn() }))
 
 // happy-dom has no layout engine — replace the virtualized list with a trivial
 // "render every row" stand-in (same shim as EditorTable.editorActions.test).
@@ -173,6 +179,24 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     )
   })
 
+  // AQU-1572: "toggling text validation in the editor produces one cell
+  // validated event with medium=text". One emit is one event (the seam test
+  // pins that), so the click must reach exactly one emit and report nothing
+  // beside it.
+  it("reports a validation from the cell's control once, through its one emit", async () => {
+    emitCellValidate.mockClear()
+    captureCellValidation.mockClear()
+    renderTable("fr")
+    fireEvent.click(await screen.findByRole("button", { name: /Click to validate/ }))
+    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: "file-1", cellId: "cell-1", targetLang: "fr", surface: "cell",
+    }))
+    // A click is a review: not marked as the app's own vote.
+    expect(emitCellValidate).not.toHaveBeenCalledWith(expect.objectContaining({ auto: true }))
+    expect(captureCellValidation).not.toHaveBeenCalled()
+  })
+
   it("passes the default lane ('') unchanged so N=1 stays byte-identical", async () => {
     emitCellValidate.mockClear()
     renderTable("")
@@ -184,12 +208,36 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     )
   })
 
+  // AQU-581 review: the automatic validate that follows your own edit went to
+  // the MAIN language — editing Spanish validated the German row, and a member
+  // limited to Spanish had it refused ("…the main language at the time").
+  it("validates your own edit in the lane you edited, not the main language", async () => {
+    emitCellValidate.mockClear()
+    emitTargetCellCommit.mockClear()
+    reviewContextualDraft.mockClear()
+    hydrateContextualDrafts(attachContextualDrafts(project.id, "file-1", "fr"), [
+      { draftId: "draft-fr", cellId: "cell-1", text: "Bonjour le monde" },
+    ])
+    renderTable("fr", [], "")
+    fireEvent.click(await screen.findByRole("button", { name: "Use this translation" }))
+    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
+    expect(emitTargetCellCommit).toHaveBeenCalledWith(expect.objectContaining({ targetLang: "fr" }))
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ cellId: "cell-1", targetLang: "fr" }))
+    // AQU-1572: the vote an edit casts for itself is still reported, marked
+    // auto so the deliberate reviews can be counted without it.
+    expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ auto: true }))
+    emitTargetCellCommit.mockClear()
+  })
+
   it("AQU-633: disables the per-cell validate action outside the member's lane scope", async () => {
     emitCellValidate.mockClear()
     renderTable("fr", [{ kind: "lane", value: "es" }])
 
-    const button = await screen.findByRole("button", { name: /Click to validate/ })
-    expect(button).toBeDisabled()
+    const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
+    expect(button.getAttribute("aria-label")).not.toMatch(/click/i)
+    // aria-disabled rather than disabled, so its hover can still say why
+    // (2026-09-23). The click must still do nothing.
+    expect(button).toHaveAttribute("aria-disabled", "true")
     fireEvent.click(button)
     expect(emitCellValidate).not.toHaveBeenCalled()
   })
@@ -216,7 +264,7 @@ describe("EditorTable — active lane threads into target-side emits", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
 
-    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled())
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled(), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("Proposal must survive")).toBeInTheDocument()
     expect(screen.getByText("Outbox unavailable")).toBeInTheDocument()
     expect(reviewContextualDraft).not.toHaveBeenCalled()
@@ -232,7 +280,7 @@ describe("EditorTable — active lane threads into target-side emits", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
 
-    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled())
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled(), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("Plain text cannot replace IDML anchors")).toBeInTheDocument()
     expect(emitTargetCellCommit).not.toHaveBeenCalled()
     expect(reviewContextualDraft).not.toHaveBeenCalled()

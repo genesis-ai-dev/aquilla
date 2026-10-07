@@ -9,7 +9,7 @@ import { defineNamespace, plural } from "./types"
  *
  * NEVER translate (content, not chrome): the user's OWN rule `name` /
  * `description`, autofix pattern/replacement/flags, every `RuleCheck`
- * pattern, `concept.sourceTerm`, matched cell text. The ten BUILT-IN checks
+ * pattern, `concept.sourceTerm`, matched cell text. The BUILT-IN checks
  * are the one ambiguous case — `resolveBuiltinRules()` copies
  * `BUILTIN_CHECKS[id].name`/`.description` onto a `TranslationRule` so four
  * renderers can't structurally tell a built-in from a user rule apart. Those
@@ -46,6 +46,9 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.repeatedWord": "Word repeated in translation",
     "rules.infraction.builtin.unpairedSymbols": "Unpaired bracket/parenthesis/brace in translation",
     "rules.infraction.builtin.abbreviationMismatch": "Abbreviation from source missing in translation",
+    "rules.infraction.builtin.capitalization": "Lowercase letter where a capital is expected",
+    "rules.infraction.builtin.footnoteQuoteMismatch":
+      "This footnote quotes text that is not in the verse",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -81,6 +84,12 @@ export const rules = defineNamespace({
     "rules.builtin.abbreviationMismatch.name": "Abbreviation pass-through",
     "rules.builtin.abbreviationMismatch.description":
       "ALL-CAPS abbreviations from source missing in translation.",
+    "rules.builtin.capitalization.name": "Capitalization",
+    "rules.builtin.capitalization.description":
+      "A lowercase letter where a capital is expected — opening a sentence, or opening a paragraph or heading after its marker.",
+    "rules.builtin.footnoteQuoteMismatch.name": "Footnote quote",
+    "rules.builtin.footnoteQuoteMismatch.description":
+      "Text a footnote or cross-reference quotes from the verse must appear in that verse's translation.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -117,6 +126,14 @@ export const rules = defineNamespace({
     "rules.checkDrawer.checkedNoIssues": "Checked {summary} — no issues found.",
     "rules.checkDrawer.ruleViolations": "Rule violations ({count})",
     "rules.checkDrawer.termConsistency": "Term consistency ({count})",
+    "rules.checkDrawer.capitalization": "Capitalization ({count})",
+    "rules.checkDrawer.headingStartsLowercase": "Heading starts with a lowercase letter",
+    "rules.checkDrawer.mixedCaseHeadline": plural({
+      one: "{count} cell writes a capital inside this word",
+      other: "{count} cells write a capital inside this word",
+    }),
+    "rules.checkDrawer.caseExceptionsLearned":
+      "Not flagged — recurring in this text, so treated as the project's own spelling: {forms}",
     "rules.checkDrawer.otherTermsClean": plural({
       one: "{count} other term checked with no issues.",
       other: "{count} other terms checked with no issues.",
@@ -146,6 +163,14 @@ export const rules = defineNamespace({
       other: "{count} issues",
     }),
 
+    // ── Org rules as a top-level Settings section (AQU-1131) ────────────────
+    // "Rules" is the settled term — Paratext's "checks" and "standards" were
+    // both considered and dropped.
+    "rules.orgSettings.title": "Rules",
+    "rules.orgSettings.navHint": "Org-wide translation rules",
+    "rules.orgSettings.description":
+      "Rules every project in this organization is checked against. Project leads can promote a project rule up to here.",
+
     // ── RulesSurface (the /project/:id/rules view) ──────────────────────────
     "rules.usageSummary": "{fixes} fixes applied · {calls} LLM calls this project",
     "rules.promotion.requested": "Requested ✓",
@@ -157,10 +182,22 @@ export const rules = defineNamespace({
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
     "rules.surface.createOrgRuleDialog.description": "Create an org-scoped translation rule.",
     "rules.surface.usageTooltip": "LLM usage on this project",
-    "rules.surface.laneFilterAriaLabel": "Filter rules by lane",
-    "rules.surface.laneFilter.all": "All rules",
-    "rules.surface.laneFilter.projectWide": "Project-wide",
-    "rules.surface.laneFilterNoMatches": "No rules match this filter.",
+    "rules.surface.laneScope.ariaLabel": "Lane scope",
+    "rules.surface.laneScope.viewingLabel": "Viewing lane",
+    "rules.surface.laneScope.chooseLaneAriaLabel": "Viewing lane: {lane}. Choose another lane",
+    "rules.surface.laneScope.explainer":
+      "Rules marked All lanes, org rules and built-in checks apply in every lane. Rules marked This lane apply only in {lane}.",
+    "rules.surface.laneScope.sharedWithEditor": "Switching lanes here also switches the editor.",
+    "rules.surface.laneScope.badgeAll": "All lanes",
+    "rules.surface.laneScope.badgeThis": "This lane: {lane}",
+    "rules.surface.laneScope.badgeOther": "Other lane: {lane}",
+    "rules.surface.laneScope.notAppliedHere": "Not applied in {lane}.",
+    "rules.surface.laneScope.showOtherLanes": plural({
+      one: "Show {count} rule from other lanes",
+      other: "Show {count} rules from other lanes",
+    }),
+    "rules.surface.laneScope.hideOtherLanes": "Hide rules from other lanes",
+    "rules.surface.laneScope.noRulesInLane": "No project rules apply in {lane}.",
     "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
     "rules.surface.addOrgRuleButton": "Add Org Rule",
     // "Read-only" permission badge → common.readOnly (identical text)
@@ -184,7 +221,7 @@ export const rules = defineNamespace({
     "rules.surface.projectRulesCardTitle": "Project Rules ({count})",
     "rules.surface.noProjectRules.title": "No project rules yet",
     "rules.surface.noProjectRules.description":
-      "Add a rule, import a style guide, or suggest rules from your edits using the buttons above.",
+      "Add a rule or import a style guide using the buttons above, or suggest rules from your edits below.",
     "rules.surface.noProjectRules.orgRulesNote": "Org rules above also apply to this project.",
     "rules.surface.autofixBadge": "autofix",
     "rules.surface.tryToFixAllTooltip": "Opens the editor with this rule's drawer",
@@ -250,9 +287,13 @@ export const rules = defineNamespace({
     "rules.editor.mode.required": "Required",
     "rules.editor.mode.match": "Must match",
     "rules.editor.sideLabel": "Side",
+    "rules.editor.sideTargetOnlyNote":
+      "Forbidden and Required checks constrain the target. Use Must match for a rule that spans both sides.",
     "rules.editor.laneLabel": "Applies to",
     "rules.editor.lane.allLanes": "All lanes",
     "rules.editor.lane.defaultLane": "Default lane",
+    "rules.editor.lane.summaryAll": "This rule will apply in every lane.",
+    "rules.editor.lane.summaryOne": "This rule will apply only in {lane}. Other lanes ignore it.",
     "rules.editor.severityLabel": "Severity",
     "rules.editor.sourcePatternLabel": "Source pattern — when source contains this…",
     "rules.editor.targetPatternLabel": "…target must contain this pattern",
@@ -285,6 +326,10 @@ export const rules = defineNamespace({
 
     // ── RuleImportDialog ("Import from doc" — LLM-extracted rule drafts) ───
     "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or terminology.",
+    "rules.importDialog.extractionIncomplete":
+      "Extraction was cut off before a single complete rule came back, so nothing could be imported — this does not mean the document has no rules. Import one section at a time to get through it.",
+    "rules.importDialog.extractionPartial":
+      "Extraction was cut off partway, so these are not all of the document's rules. Import the remaining sections separately to catch the rest.",
     "rules.importDialog.extractionFailed": "Extraction failed",
     "rules.importDialog.unsupportedFileType": "Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.",
     "rules.importDialog.binaryFileTooLarge": "File too large ({size} MB). Maximum is 2 MB for PDF/DOCX.",
@@ -307,34 +352,30 @@ export const rules = defineNamespace({
     "rules.importDialog.dropZoneText": "Drop a {txt}, {md}, {pdf}, or {docx} file here",
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",
-    "rules.importDialog.pastePlaceholder": "Paste text here and it will be processed automatically…",
+    "rules.importDialog.pastePlaceholder": "Paste text here to process it…",
     "rules.importDialog.configureLlmFirst": "Configure your LLM endpoint in project settings first.",
     "rules.importDialog.candidatesProcessed": "{structured} of {candidates} candidates processed",
     "rules.importDialog.documentTooLarge": "Document is too large ({kb} KB). Please keep it under 200 KB of text.",
 
-    // ── RuleSuggestFromEditsDialog ("Suggest from edits") ──────────────────
+    // ── Suggested rules, reviewed in place in the project rules list ───────
     "rules.suggestFromEdits.noPatternsFound":
       "No edit patterns found. Translate some cells in this file to generate suggestions.",
-    "rules.suggestFromEdits.noTestablePatterns":
-      "The LLM didn't find any testable patterns in your edits. Try validating more diverse translations.",
     "rules.suggestFromEdits.analysisFailed": "Analysis failed",
-    "rules.suggestFromEdits.stats.repeated": "{count} repeated",
-    "rules.suggestFromEdits.stats.recent": "{count} recent",
-    "rules.suggestFromEdits.stats.pairs": "{count} from pairs",
-    "rules.suggestFromEdits.stats.human": "{count} human-authored",
-    "rules.suggestFromEdits.tooltip": "Mine your edits for rule patterns",
-    "rules.suggestFromEdits.tooltipUnconfigured": "Configure LLM in project settings first",
-    "rules.suggestFromEdits.triggerButton": "Suggest from edits",
-    "rules.suggestFromEdits.reviewTitle": plural({
-      one: "Review {count} suggested rule",
-      other: "Review {count} suggested rules",
-    }),
-    "rules.suggestFromEdits.title": "Suggest rules from your edits",
-    "rules.suggestFromEdits.description":
-      "Analyzes your repeated corrections, recent edits, and human-authored translations to propose testable rules. You'll review each suggestion before anything is saved.",
-    "rules.suggestFromEdits.analyzeButton": "Analyze my edits",
-    "rules.suggestFromEdits.miningLabel": "Mining edit patterns…",
-    "rules.suggestFromEdits.minedPatterns": "Mined patterns: {patterns}",
+    "rules.suggestFromEdits.corpusLoading": "Loading your translations…",
+    "rules.suggestFromEdits.corpusLoadFailed": "Couldn't load your translations: {message}",
+    "rules.suggestions.suggestButton": "Suggest rules from my edits",
+    "rules.suggestions.suggestMoreButton": "Suggest more",
+    "rules.suggestions.loading": "Reading your edits…",
+    "rules.suggestions.focusPlaceholder": "Optional topic, such as punctuation",
+    "rules.suggestions.focusAriaLabel": "What the suggested rules should be about",
+    "rules.suggestions.noneNew": "No new rules found in your edits.",
+    "rules.suggestions.noneNewFocused": "No new rules about “{focus}” found in your edits.",
+    "rules.suggestions.draftBadge": "Suggestion",
+    "rules.suggestions.itemAriaLabel": "Suggested rule: {name}",
+    "rules.suggestions.evidence": "Based on: {evidence}",
+    "rules.suggestions.addButton": "Add rule",
+    "rules.suggestions.dismissButton": "Dismiss",
+    "rules.suggestions.addFailed": "Couldn't add that rule. Try again.",
 
     // ── completion-service.ts (LLM completion request errors, lib/) ────────
     "rules.completion.failedToFetchModels": "Failed to fetch models: {status} {statusText}",
@@ -384,6 +425,10 @@ export const rules = defineNamespace({
 
     // ── RulesPage.tsx (standalone rules page) ────────────────────────────────
     "rules.loadingLabel": "Loading rules",
+    // AQU-1340: without this the list just omits every terminology rule, so it
+    // disagrees with what the editor enforces and gives no hint why.
+    "rules.terminologyUnavailableNotice":
+      "Terminology rules could not be loaded, so they are missing from this list.",
     "rules.page.heading": "Translation Rules",
     "rules.page.corpusLoadErrorPrefix": "Couldn't load the complete project corpus: {message}",
     "rules.page.readOnlySuffix": "Changes made here won't be saved.",
@@ -507,6 +552,21 @@ export const rules = defineNamespace({
         description: "Section heading in the check-file findings drawer, counting term-consistency findings.",
         placeholders: { count: "Number of flagged term-consistency findings." },
       },
+      "rules.checkDrawer.capitalization": {
+        description:
+          "Section heading in the check-file findings drawer, counting capitalization findings — a capital inside a word (e.g. 'tHe'), or a heading that opens lowercase.",
+        placeholders: { count: "Number of cells with a capitalization finding." },
+      },
+      "rules.checkDrawer.mixedCaseHeadline": {
+        description:
+          "Headline of one mixed-capitalization card, under the offending word itself (which is raw cell content and never translated).",
+        placeholders: { count: "How many cells use that exact word form." },
+      },
+      "rules.checkDrawer.caseExceptionsLearned": {
+        description:
+          "Footnote under the mixed-capitalization section naming the word forms the check learned to allow because they recur in the project's own text (a noun-class prefix like 'kiSwahili', a brand name). Lets a reviewer confirm or reject what was let through.",
+        placeholders: { forms: "The excepted word forms, comma-joined — raw cell content, never translated." },
+      },
       "rules.checkDrawer.otherTermsClean": {
         description:
           "Footnote under the term-consistency section listing how many checked terms had no issues.",
@@ -571,9 +631,41 @@ export const rules = defineNamespace({
           calls: "How many LLM calls the project has made (rule suggestion, harmonization, etc).",
         },
       },
-      "rules.surface.laneFilterAriaLabel": {
+      "rules.surface.laneScope.ariaLabel": {
+        description: "Accessible name of the lane-scope panel at the top of the Rules page (multi-lane projects).",
+      },
+      "rules.surface.laneScope.chooseLaneAriaLabel": {
+        description: "Accessible label of the button that opens the lane chooser on the Rules page.",
+        placeholders: { lane: "The name of the lane being viewed." },
+      },
+      "rules.surface.laneScope.notAppliedHere": {
+        description: "Note under a rule that belongs to another lane, shown when rules from other lanes are revealed.",
+        placeholders: { lane: "The name of the lane being viewed." },
+      },
+      "rules.surface.laneScope.showOtherLanes": {
+        description: "Button on the Project Rules card that reveals rules belonging to lanes other than the one being viewed.",
+        placeholders: { count: "How many rules belong to other lanes." },
+      },
+      "rules.surface.laneScope.noRulesInLane": {
+        description: "Shown in the Project Rules card when no project rule applies in the lane being viewed.",
+        placeholders: { lane: "The name of the lane being viewed." },
+      },
+      "rules.editor.lane.summaryOne": {
+        description: "Line beside the Save button of the rule editor when the rule is limited to one lane.",
+        placeholders: { lane: "The name of the lane the rule will apply in." },
+      },
+      "rules.surface.laneScope.explainer": {
         description:
-          "Accessible label for the lane-filter dropdown on the Project Rules card (multi-lane projects). Filters the listed rules by target-language lane.",
+          "Scope panel at the top of the Rules page (multi-lane projects). \"All lanes\" and \"This lane\" must match the badge texts rules.surface.laneScope.badgeAll / badgeThis.",
+        placeholders: { lane: "The name of the lane being viewed, e.g. \"French\"." },
+      },
+      "rules.surface.laneScope.badgeThis": {
+        description: "Badge on a rule that applies only in the lane being viewed.",
+        placeholders: { lane: "The lane name." },
+      },
+      "rules.surface.laneScope.badgeOther": {
+        description: "Badge on a rule that applies only in a different lane from the one being viewed.",
+        placeholders: { lane: "The name of the rule's own lane." },
       },
       "rules.surface.orgRulesCardTitle": {
         description: "Card heading for the org-scoped rules list.",
@@ -695,30 +787,28 @@ export const rules = defineNamespace({
           "Error from checkInputSize() (rule-extractor.ts) when a pasted/loaded document exceeds the 200 KB extraction limit.",
         placeholders: { kb: "The document's size in KB, whole number." },
       },
-      "rules.suggestFromEdits.stats.repeated": {
+      "rules.importDialog.extractionIncomplete": {
         description:
-          "One segment of the comma-joined mining-stats summary ('N repeated, N recent, …') after analyzing edits.",
-        placeholders: { count: "Number of repeated-correction candidates mined." },
+          "Error shown instead of noRulesFound when the LLM's extraction answer was cut off by its output cap before any complete rule came back. The distinction matters: noRulesFound says the DOCUMENT has nothing checkable in it, this says the EXTRACTION failed to finish. Keep the two clearly different in translation.",
       },
-      "rules.suggestFromEdits.stats.recent": {
-        description: "Mining-stats segment counting recently-edited-cell candidates.",
-        placeholders: { count: "Number of recent-edit candidates mined." },
+      "rules.importDialog.extractionPartial": {
+        description:
+          "Warning above the review list when extraction was cut off but some rules did come back, so the list under it is incomplete rather than everything the document contains.",
       },
-      "rules.suggestFromEdits.stats.pairs": {
-        description: "Mining-stats segment counting candidates from validated source/target pairs.",
-        placeholders: { count: "Number of validated-pair candidates mined." },
+      "rules.suggestions.noneNewFocused": {
+        description: "Shown under the suggest row when a topic-focused ask for rule suggestions found nothing new.",
+        placeholders: { focus: "The topic the user typed, e.g. 'punctuation' — user content, never translated." },
       },
-      "rules.suggestFromEdits.stats.human": {
-        description: "Mining-stats segment counting human-authored (non-AI-drafted) candidates.",
-        placeholders: { count: "Number of human-authored candidates mined." },
+      "rules.suggestions.focusAriaLabel": {
+        description: "Screen-reader label for the optional topic box beside the 'Suggest rules' button at the foot of the rules list.",
       },
-      "rules.suggestFromEdits.reviewTitle": {
-        description: "Dialog title once edit-mining + LLM suggestion finishes and drafts are ready for review.",
-        placeholders: { count: "Number of suggested rule drafts." },
+      "rules.suggestions.itemAriaLabel": {
+        description: "Screen-reader label for one suggested (not yet saved) rule in the rules list.",
+        placeholders: { name: "The suggested rule's name — LLM content, never translated." },
       },
-      "rules.suggestFromEdits.minedPatterns": {
-        description: "Summary line above the review list, showing the mining-stats breakdown.",
-        placeholders: { patterns: "Already-localized, comma-joined stats segments (see rules.suggestFromEdits.stats.*)." },
+      "rules.suggestions.evidence": {
+        description: "Small italic line under a suggested rule saying which of the user's edits it came from.",
+        placeholders: { evidence: "Evidence text from the edit miner, e.g. 'Repeated in 3 cells'." },
       },
       "rules.completion.failedToFetchModels": {
         description: "Thrown error when the model-list fetch for a custom OpenAI-compatible endpoint fails.",
@@ -834,6 +924,12 @@ export const rules = defineNamespace({
       },
       "rules.page.heading": {
         description: "Header title of the standalone Rules page.",
+      },
+      "rules.suggestFromEdits.corpusLoadFailed": {
+        description:
+          "Inline error in the 'Suggest rules from your edits' dialog when the " +
+          "project's translations couldn't be read, so Analyze is disabled.",
+        placeholders: { message: "The underlying fetch error's own message, verbatim (not translated)." },
       },
       "rules.page.corpusLoadErrorPrefix": {
         description:

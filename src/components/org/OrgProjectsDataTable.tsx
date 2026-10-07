@@ -1,8 +1,19 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { UserPlus, Users } from "lucide-react"
+import { UserPlus, Users, CloudDownload, CloudOff, HardDriveDownload } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import {
+  downloadProjectOffline,
+  removeOfflineProject,
+  getOfflineQueueDepth,
+  useDownloadProgress,
+  useOfflineProjectStatus,
+} from "@/lib/offline/download"
+import { toast } from "@/components/ui/toast"
+import { Spinner } from "@/components/ui/spinner"
 import {
   attentionRank,
   audioPct,
@@ -25,7 +36,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { TableEmptyState } from "@/components/ui/page"
-import { MenuItem } from "@/components/ui/menu-parts"
+import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { LaneChips } from "./LaneChips"
@@ -36,12 +47,20 @@ import { isManagedBy } from "./project-pm-filter"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { canOpenAssignUi } from "@/lib/sync/role-policy"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
   orgName?: string | null
   origin?: "member" | "shared"
   isNew?: boolean
+  /**
+   * AQU-1070: set when the row is a soft-archived project shown inline by the
+   * list's "Show archived" toggle. Absent/null for every live row, so the
+   * default list is unchanged.
+   */
+  archivedAt?: string | null
 }
 
 type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
@@ -63,6 +82,108 @@ function lensToSorting(lens: ProjectLens) {
       // sortUndefined: "last" on the column (direction-immune).
       return [{ id: "pm", desc: false }] as const
   }
+}
+
+/**
+ * Offline badge for the `name` column — Tauri desktop only, reusing the same
+ * `offline_projects` state and i18n keys as ProjectOverview.tsx's header
+ * badge (Phase 5). A standalone component (not inline in the `name` column's
+ * `cell` closure) so its hooks attach to their own component instance
+ * regardless of how react-table/`flexRender` invokes the outer cell function.
+ */
+function OfflineProjectBadge({ projectId }: { projectId: string }) {
+  const { store } = useOfflineStore()
+  const { t } = useI18n()
+  const status = useOfflineProjectStatus(store, projectId)
+  const progress = useDownloadProgress(projectId)
+
+  if (!isTauriRuntime()) return null
+
+  if (status?.status === "ready") {
+    return (
+      <Badge variant="secondary" className="shrink-0" data-testid="offline-ready-badge">
+        <HardDriveDownload className="size-3" aria-hidden />
+        {t("org.projectOverview.offlineReadyBadge")}
+      </Badge>
+    )
+  }
+  if (status?.status === "downloading") {
+    return (
+      <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
+        <Spinner className="size-3" />
+        {progress
+          ? t("org.projectOverview.offlineDownloadingProgress", {
+              done: progress.filesDone,
+              total: progress.filesTotal,
+            })
+          : t("org.projectOverview.offlineDownloading")}
+      </Badge>
+    )
+  }
+  return null
+}
+
+/**
+ * "Make available offline" / "Remove offline copy" row-menu items — Tauri
+ * desktop only, same handlers/error messages as ProjectOverview.tsx's
+ * overflow menu (Phase 5), just surfaced per-row here instead of on the
+ * single-project page. Errors go to a toast rather than inline text since a
+ * table row has no room for a persistent error message.
+ */
+function OfflineRowMenuItems({ projectId, jwt }: { projectId: string; jwt: string | null }) {
+  const { store } = useOfflineStore()
+  const { t } = useI18n()
+  const status = useOfflineProjectStatus(store, projectId)
+
+  if (!isTauriRuntime()) return null
+
+  async function handleMakeAvailableOffline() {
+    if (!store || !jwt) return
+    try {
+      await downloadProjectOffline(store, projectId, jwt)
+    } catch (e) {
+      toast.add({ type: "error", title: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  function handleRemoveOfflineCopy() {
+    if (!store) return
+    const queueDepth = getOfflineQueueDepth(store, projectId)
+    if (queueDepth > 0) {
+      toast.add({ type: "error", title: t("org.projectOverview.offlineRemoveBlocked", { count: queueDepth }) })
+      return
+    }
+    const result = removeOfflineProject(store, projectId)
+    if (!result.ok && result.reason === "queue-not-empty") {
+      // Lost a race with a write that queued between the check above and the
+      // removal itself — same message, fresh count.
+      toast.add({ type: "error", title: t("org.projectOverview.offlineRemoveBlocked", { count: result.queueDepth }) })
+    }
+  }
+
+  return (
+    <>
+      <MenuSeparator />
+      {status?.status === "ready" ? (
+        <MenuItem onClick={handleRemoveOfflineCopy}>
+          <CloudOff className="size-4" />
+          {t("org.projectOverview.removeOfflineCopy")}
+        </MenuItem>
+      ) : (
+        <MenuItem
+          onClick={() => {
+            void handleMakeAvailableOffline()
+          }}
+          disabled={!jwt || status?.status === "downloading"}
+        >
+          <CloudDownload className="size-4" />
+          {status?.status === "downloading"
+            ? t("org.projectOverview.offlineDownloading")
+            : t("org.projectOverview.makeAvailableOffline")}
+        </MenuItem>
+      )}
+    </>
+  )
 }
 
 /**
@@ -89,12 +210,19 @@ export function OrgProjectsDataTable({
   author,
   viewerUsername = null,
   allowSelfAssignment = false,
+  assignmentMinRole = ROLE.PROJECT_LEAD,
   callerUserId = null,
   onLanesChanged,
   toolbarLeading,
   toolbarTrailing,
   loading = false,
   loadingLabel,
+  searchValue,
+  onSearchChange,
+  searching = false,
+  hasMore = false,
+  onLoadMore,
+  loadingMore = false,
 }: {
   projects: OrgProjectRow[]
   now: number
@@ -128,6 +256,7 @@ export function OrgProjectsDataTable({
    */
   viewerUsername?: string | null
   allowSelfAssignment?: boolean
+  assignmentMinRole?: number
   callerUserId?: number | null
   /** Called after an assign/staff lane action, so the parent can refetch the
    * portfolio (per-lane rollups changed). */
@@ -138,6 +267,12 @@ export function OrgProjectsDataTable({
   toolbarTrailing?: ReactNode
   loading?: boolean
   loadingLabel?: string
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  searching?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
+  loadingMore?: boolean
 }) {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -160,7 +295,24 @@ export function OrgProjectsDataTable({
 
   const tableData = useMemo(() => projects, [projects])
 
-  const canAssign = Boolean(jwt && author != null) && !embedded
+  const archivedProjectIds = useMemo(
+    () => new Set(projects.filter((p) => p.archivedAt).map((p) => p.id)),
+    [projects],
+  )
+
+  const canAssignProject = useCallback(
+    (projectId: string) =>
+      Boolean(jwt && author != null) &&
+      !embedded &&
+      // AQU-1070: nothing about an archive should invite new work into it.
+      !archivedProjectIds.has(projectId) &&
+      canOpenAssignUi(
+        roleByProjectId?.get(projectId)?.level ?? null,
+        allowSelfAssignment,
+        assignmentMinRole,
+      ),
+    [jwt, author, embedded, archivedProjectIds, roleByProjectId, allowSelfAssignment, assignmentMinRole],
+  )
 
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
     () => {
@@ -190,6 +342,7 @@ export function OrgProjectsDataTable({
                     {t("org.guestOrgHome.newBadge")}
                   </Badge>
                 )}
+                {!embedded && <OfflineProjectBadge projectId={p.id} />}
               </span>
             )
           },
@@ -258,7 +411,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(translatedPct(row.original) * 100)
+            const pct = progressPercentOfFraction(translatedPct(row.original))
             return (
               <div
                 data-testid="project-table-translated-value"
@@ -283,7 +436,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(validatedPct(row.original) * 100)
+            const pct = progressPercentOfFraction(validatedPct(row.original))
             return (
               <div
                 data-testid="project-table-validated-value"
@@ -308,7 +461,7 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[4.5rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
-            const pct = Math.round(audioPct(row.original) * 100)
+            const pct = progressPercentOfFraction(audioPct(row.original))
             return (
               <div
                 data-testid="project-table-audio-value"
@@ -440,7 +593,7 @@ export function OrgProjectsDataTable({
           return (
             <span data-testid="project-table-deadline-status" className="block min-w-0 overflow-hidden">
               <ProjectStatus
-                archived={false}
+                archived={Boolean(p.archivedAt)}
                 reasons={portfolioAttentionReasons(p, tableNow)}
                 deadlineAt={p.deadlineAt}
               />
@@ -472,6 +625,10 @@ export function OrgProjectsDataTable({
           meta: { align: "right" as const, className: "w-10" },
           cell: ({ row }) => {
             const p = row.original
+            // AQU-1070: an archived row has no menu (see renderRowMenuItems), so
+            // it gets no ⋯ trigger either — the button reads its items from
+            // context and would otherwise open an empty popup.
+            if (p.archivedAt) return null
             return (
               <DataTableRowActionsButton
                 label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: p.name })}
@@ -504,7 +661,7 @@ export function OrgProjectsDataTable({
     : null
 
   return (
-    <div className={cn(embedded && "flex min-h-0 min-w-0 w-full flex-1 flex-col")}>
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col">
       <DataTable
         key={`${layout}:${initialLens}`}
         columns={columns}
@@ -513,22 +670,36 @@ export function OrgProjectsDataTable({
         getRowAttributes={(p) => ({
           "data-project-id": p.id,
           ...(p.origin === "shared" ? { "data-origin": "shared" } : {}),
+          ...(p.archivedAt ? { "data-archived": "true" } : {}),
         })}
-        rowClassName="group"
+        // AQU-1070: archived rows read as greyed-out so a PM scanning the list
+        // can tell a stood-down language from a live one without reading chips.
+        rowClassName={(p) => cn("group", p.archivedAt && "opacity-60")}
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
+        rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
         initialSorting={[...lensToSorting(initialLens)]}
         searchPlaceholder="Search projects…"
-        fillHeight={embedded}
+        searchValue={searchValue}
+        onSearchChange={onSearchChange}
+        searching={searching}
+        fillHeight
         loading={loading}
         loadingLabel={loadingLabel}
-        globalFilterFn={(row, _columnId, filterValue) => {
+        hasMore={hasMore}
+        onLoadMore={onLoadMore}
+        loadingMore={loadingMore}
+        globalFilterFn={
+          onSearchChange
+            ? undefined
+            : (row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
           const p = row.original
           // AQU-507: match PM username too, so the search box satisfies the
           // "filter by PM" half of the AC without a separate filter control.
           return `${p.name} ${p.orgName ?? ""} ${p.pm?.username ?? ""}`.toLowerCase().includes(q)
-        }}
+        }
+        }
         toolbar={
           <>
             {toolbarLeading}
@@ -547,7 +718,9 @@ export function OrgProjectsDataTable({
                     colSpan={colSpan}
                     orgId={orgId}
                     onAssign={
-                      canAssign ? (lane) => setAssignTarget({ projectId: p.id, lane }) : undefined
+                      canAssignProject(p.id)
+                        ? (lane) => setAssignTarget({ projectId: p.id, lane })
+                        : undefined
                     }
                     onStaffed={onLanesChanged}
                   />
@@ -556,9 +729,15 @@ export function OrgProjectsDataTable({
         renderRowMenuItems={
           embedded
             ? undefined
-            : (p) => (
+            : (p) =>
+                // AQU-1070: every entry here puts work or people INTO a project
+                // — Assign work, Add member, and (on desktop) taking a copy
+                // offline to edit. None of that belongs on an archive, and the
+                // workspace can't be opened while archived anyway, so the row
+                // carries no menu at all rather than a menu of dead ends.
+                p.archivedAt ? null : (
                 <>
-                  {canAssign && (
+                  {canAssignProject(p.id) && (
                     <MenuItem
                       onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
                     >
@@ -572,18 +751,25 @@ export function OrgProjectsDataTable({
                     <Users className="size-4" />
                     {t("org.teamDetail.addMemberButton")}
                   </MenuItem>
+                  <OfflineRowMenuItems projectId={p.id} jwt={jwt ?? null} />
                 </>
               )
         }
         emptyState={(table) => {
-          const search = String(table.getState().globalFilter ?? "").trim()
+          const search = (searchValue ?? String(table.getState().globalFilter ?? "")).trim()
           if (search) {
             return (
               <div className="flex flex-col items-center gap-3 py-10">
                 <p className="text-center text-sm text-muted-foreground">
                   {t("org.orgProjectsDataTable.noSearchMatch")}
                 </p>
-                <Button variant="outline" onClick={() => table.setGlobalFilter("")}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    table.setGlobalFilter("")
+                    onSearchChange?.("")
+                  }}
+                >
                   {t("common.clear")}
                 </Button>
               </div>
@@ -624,10 +810,11 @@ export function OrgProjectsDataTable({
             defaultLaneLabelByProjectId?.get(assignTarget.projectId),
           )}
           files={filesByProjectId?.get(assignTarget.projectId) ?? []}
-          roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? ROLE.PROJECT_LEAD}
+          roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? 0}
           jwt={jwt}
           author={author}
           allowSelfAssignment={allowSelfAssignment}
+          assignmentMinRole={assignmentMinRole}
           callerUserId={callerUserId}
           onAssigned={() => {
             onLanesChanged?.()

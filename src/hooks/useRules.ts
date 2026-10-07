@@ -130,13 +130,18 @@ export function useRules(
   // first (higher precedence), then compiled together so they share the
   // identical derive-on-read path. Subscribed concepts are already in
   // subscription-priority order from useSubscribedConcepts.
+  //
+  // The CONSUMING project's affix inventory (project.termMatching) governs
+  // every compiled concept, subscribed org termbases included — matching runs
+  // against THIS project's source text, so the morphology that matters is the
+  // one of the language being worked on here, not the termbase's owner org.
   const terminologyRules = useMemo(
     () =>
-      compileConceptsToRules([
-        ...(subscribedConcepts ?? []),
-        ...(terminology ?? []),
-      ]),
-    [subscribedConcepts, terminology],
+      compileConceptsToRules(
+        [...(subscribedConcepts ?? []), ...(terminology ?? [])],
+        project?.termMatching,
+      ),
+    [subscribedConcepts, terminology, project?.termMatching],
   )
 
   // Order: builtins → org rules → project rules → terminology

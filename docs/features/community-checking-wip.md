@@ -50,7 +50,7 @@ bytes already downloaded to a browser cannot be recalled.
 - The sample does not expose existing internal comment threads to guests.
 - Shared guest identity is a supplied name, not a verified identity.
 
-Apply `0090_community_checking.sql` before deploying either worker or the UI.
+Apply `0153_community_checking.sql` before deploying either worker or the UI.
 No new Cloudflare binding is required. This WIP is not deployed by this PR.
 
 ## Verification

@@ -36,6 +36,7 @@
     "identity": {
       "directory": "auth-worker",
       "requiredSecrets": [
+        "DISCORD_FEEDBACK_WEBHOOK_URL",
         "OPENROUTER_API_KEY",
         "RESEND_API_KEY",
         "SECRET_KEY",
@@ -51,7 +52,9 @@
           "apiHost": "api.aquilla.app",
           "routes": [
             "api.aquilla.app/identity/*",
-            "api.aquilla.app/chat/*"
+            "api.aquilla.app/chat/*",
+            "api.aquilla.app/.well-known/oauth-authorization-server/*",
+            "api.aquilla.app/.well-known/openai-apps-challenge"
           ],
           "requiredSecrets": [
             "FRONTIER_D1_API_TOKEN",
@@ -78,7 +81,9 @@
           "apiHost": "api.dev.aquilla.app",
           "routes": [
             "api.dev.aquilla.app/identity/*",
-            "api.dev.aquilla.app/chat/*"
+            "api.dev.aquilla.app/chat/*",
+            "api.dev.aquilla.app/.well-known/oauth-authorization-server/*",
+            "api.dev.aquilla.app/.well-known/openai-apps-challenge"
           ],
           "requiredSecrets": [
             "FRONTIER_D1_API_TOKEN",
@@ -121,8 +126,7 @@
             "DIARIZATION_MODAL_URL",
             "DIARIZATION_PUBLIC_BASE",
             "DIARIZATION_SHARED_SECRET",
-            "OMNIVOICE_TOKEN",
-            "OMNIVOICE_URL",
+            "INWORLD_API_KEY",
             "SEED_VC_TOKEN",
             "SEED_VC_URL"
           ],
@@ -130,7 +134,7 @@
             "ENVIRONMENT": "production",
             "AUTH_WORKER_URL": "https://api.aquilla.app/identity",
             "DEPLOYMENT_WORKER_NAME": "aquilla-sync-worker",
-            "POSTHOG_KEY": "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+            "POSTHOG_KEY": ""
           },
           "hyperdrives": {
             "HYPERDRIVE": "69bcc10e67464f2eaf4fe91a9141e7cd"

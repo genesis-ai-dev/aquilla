@@ -1,3 +1,4 @@
+import { usesHostedTranscription } from "./transcription-preference"
 // Main-thread orchestrator: audio bytes → 16kHz Float32 PCM → Whisper worker
 // → word-level timings. No Y.Doc dependency — timings are written back via the
 // Postgres event log (cell.audio.attach with timings payload).
@@ -12,10 +13,13 @@ import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import { setTranscribeStatus } from "./transcribe-status"
 import { fetchCellAudio, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
+import { applyCorrections } from "./transcript-corrections"
+import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { resolvePcmWindow, type PcmTrimWindow } from "./pcm-window"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { t } from "@/lib/i18n/standalone"
+import { transcribeHostedPcm } from "./transcribe-hosted"
 import type {
   ResultMessage,
   ErrorMessage,
@@ -39,12 +43,17 @@ export interface TranscriptionResult {
 }
 
 export interface TranscriptionOptions {
+  session?: FrontierSession | null
+  projectId?: string
   language?: string
   model?: string
   onProgress?: (p: TranscriptionProgress) => void
   /** AQU-646: transcribe only this window of the clip (shared imported clip →
    *  per-cell segment). Absent = whole clip (recorded takes). */
   trim?: PcmTrimWindow
+  /** The Transcribe button. A stored Cancel stays quiet on save, and this
+   *  press brings the download prompt back. */
+  askAgain?: boolean
 }
 
 const WHISPER_SAMPLE_RATE = 16000
@@ -180,7 +189,11 @@ export async function transcribeAudio(
   bytes: Uint8Array,
   opts: TranscriptionOptions = {},
 ): Promise<TranscriptionResult> {
-  const consented = await requestAiModelConsent(WHISPER_MODEL)
+  if (usesHostedTranscription(opts.session, opts.projectId)) {
+    const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
+    return transcribeHostedPcm(pcm, opts.session!.jwt, opts.projectId!, opts.language)
+  }
+  const consented = await requestAiModelConsent(WHISPER_MODEL, { askAgain: opts.askAgain })
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
   const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
   return runWhisperOnPcm(pcm, opts)
@@ -275,6 +288,8 @@ export interface TranscribeCellArgs {
    * trim wipe). An explicit argument cannot be silently omitted by a stub.
    */
   slot?: string
+  /** Set by the Transcribe button so a prior Cancel shows the prompt again. */
+  askAgain?: boolean
 }
 
 // Test seam: transcribeCell calls transcribeAudio through this binding so
@@ -297,7 +312,7 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  * was denied. Never throws — errors are stored in transcribe-status.
  */
 export async function transcribeCell(args: TranscribeCellArgs): Promise<number> {
-  const { cell, session, projectId, language, slot: slotArg } = args
+  const { cell, session, projectId, language, slot: slotArg, askAgain } = args
   const audioId = cell.selectedAudioId
   if (!audioId) return 0
 
@@ -349,7 +364,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     setTranscribeStatus(audioId, { kind: "transcribing" })
 
     // AQU-646: imported media segments share one clip — transcribe only this
-    // cell's trim window. Recorded takes have no trims (whole clip). And route
+    // cell's trim window (and, AQU-1210, a take only its kept part). And route
     // the language through the Whisper tag mapper (raw project language names
     // were being fed to transformers.js verbatim; unmapped → auto-detect).
     //
@@ -360,12 +375,26 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // comes from the audioId seed (source clip = fileId, takes = cellId).
     const isMediaCell = cell.medium === "media"
     const isSourceSegment = isMediaCell && !audioIdSeededWith(audioId, cell.id)
+    // AQU-1210: a TAKE is transcribed through its trim too, so the transcript
+    // is of the part that plays — the operator trimmed that silence (or a
+    // false start) off for a reason. An untrimmed take is still the whole clip.
+    // Unlike a source section, a take's word times stay on the CLIP's clock
+    // (WordTiming.t0 is "seconds from the start of the audio clip"), so they
+    // are shifted back by the head trim below.
+    const takeTrim = !isSourceSegment && attachment &&
+      ((attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null)
+      ? { trimStartMs: attachment.trimStartMs ?? null, trimEndMs: attachment.trimEndMs ?? null }
+      : undefined
     const trim = isSourceSegment
       ? { trimStartMs: attachment?.trimStartMs ?? null, trimEndMs: attachment?.trimEndMs ?? null }
-      : undefined
+      : takeTrim
+    const takeHeadSec = takeTrim?.trimStartMs ? takeTrim.trimStartMs / 1000 : 0
 
-    const result = await transcribeAudioImpl(bytes, {
+    const raw = await transcribeAudioImpl(bytes, {
+      session,
+      projectId,
       language: whisperLanguageFromTag(language) ?? undefined,
+      askAgain,
       trim,
       onProgress: (p) => {
         setTranscribeStatus(audioId, {
@@ -380,6 +409,20 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       },
     })
 
+    // AQU-463: replay the corrections a human has already made in this project
+    // over the raw ASR output. Whisper is wrong the same way every time in a
+    // low-resource language, and the translator has fixed that word before —
+    // they should not have to fix it again. Substitutions are token-for-token
+    // (see transcript-corrections.ts), so the chunk list keeps its length and
+    // the timings below are the ones ASR produced.
+    const learned = loadTranscriptCorrections(projectId)
+    const result = learned.length > 0
+      ? {
+          text: applyCorrections(raw.text, learned),
+          chunks: raw.chunks.map((c) => ({ ...c, text: applyCorrections(c.text, learned) })),
+        }
+      : raw
+
     const wordCount = result.chunks.length
 
     // Persist timings durably via the Postgres event log — re-attach the same audioId
@@ -392,7 +435,10 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       // AQU-646: for SOURCE segments align timings against the transcript itself
       // (there's no target text yet — the transcript IS the text karaoke maps);
       // takes (incl. dub takes on media cells) align against the translation.
-      const timings = alignChunks(result.chunks, isSourceSegment ? transcriptText : cell.translated)
+      const aligned = alignChunks(result.chunks, isSourceSegment ? transcriptText : cell.translated)
+      const timings = takeHeadSec > 0
+        ? aligned.map((w) => ({ ...w, t0: w.t0 + takeHeadSec, t1: w.t1 + takeHeadSec }))
+        : aligned
       // Signed-out transcribes (cache hit) have no session — the emit queues
       // to the local outbox and can throw a role-gate error, so swallow it:
       // transcription itself succeeded, and the timings re-emit on a manual

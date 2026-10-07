@@ -17,14 +17,16 @@
 
 import { audioObjectKey } from "../audio"
 import { isAuthorizedAdminBearer } from "../lib/admin-auth"
+import type { ReadonlyR2Bucket } from "../lib/readonly-r2"
 
 const RE = /^\/migrate\/audio-copy\/?$/
 
 export interface MigrateAudioCopyEnv {
   /** Destination: the live audio/media bucket. */
   SNAPSHOTS: R2Bucket
-  /** Source: GitLab's LFS object-storage bucket, bound read-only. */
-  LFS_SRC?: R2Bucket
+  /** Source: GitLab's LFS object-storage bucket. Enforced read-only — see
+   *  lib/readonly-r2.ts — not just documented as such. */
+  LFS_SRC?: ReadonlyR2Bucket
   ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string

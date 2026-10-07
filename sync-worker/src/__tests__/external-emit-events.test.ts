@@ -16,7 +16,7 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
-import { ALLOWED_EMIT_KINDS } from '../external/commands-emit-events'
+import { ALLOWED_EMIT_KINDS, emitKindEffectLabel } from '../external/commands-emit-events'
 import { handleEventsWriteRequest } from '../events/route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -135,7 +135,39 @@ describe('EmitEvents — validation + floors', () => {
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
+    // AQU-1179: the rejection NAMES the kind — a caller must be able to tell
+    // which of its events the door refused without diffing its own batch.
+    expect(JSON.stringify(body.error.details)).toContain('target.cell.commit')
     expect(JSON.stringify(body.error.details)).toContain('not an allowed EmitEvents kind')
+  })
+
+  // AQU-1571: an agent has NO door to audio votes — EmitEvents is the only
+  // generic event door and it does not list them. If that ever changes, the
+  // commit still re-enters events/route.ts, whose audio policy gates hold any
+  // token (validation-config-enforcement.test.ts pins that for src:
+  // 'external'); replace this test with one that commits through here.
+  it.each(['cell.audio.validate', 'cell.audio.unvalidate'])('cannot stage %s', async (kind) => {
+    expect(ALLOWED_EMIT_KINDS).not.toContain(kind)
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, [
+      { kind, fileId: FILE, cellId: 'cell-1', payload: { audioId: 'take-1' } },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(JSON.stringify(body.error.details)).toContain(`${kind}\\" is not an allowed EmitEvents kind`)
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('every allowlisted kind has a plain-language effect label (no raw kind reaches a reviewer)', () => {
+    for (const kind of ALLOWED_EMIT_KINDS) {
+      const one = emitKindEffectLabel(kind, 1)
+      const many = emitKindEffectLabel(kind, 3)
+      expect(one).not.toContain(kind)
+      expect(many).toContain('3')
+    }
+    // An unknown kind degrades to the raw kind rather than an empty line.
+    expect(emitKindEffectLabel('term.teleport', 2)).toBe('term.teleport × 2')
   })
 
   it('changeset floor is the max over event kinds: comment (200) + file.delete (500) needs 500', async () => {
@@ -152,6 +184,38 @@ describe('EmitEvents — validation + floors', () => {
     const { res, body } = await prepare(env, lead.token, events)
     expect(res.status).toBe(200)
     expect(body.changeset.status).toBe('staged')
+  })
+
+  it('uses the org assignment floor through agent prepare and commit', async () => {
+    const env = makeEnv(tdb.db)
+    const reviewer = await memberToken(tdb, 300)
+    await tdb.pg.query(
+      `INSERT INTO organizations (id, name, owner_user_id) VALUES (7, 'Test Org', $1)`,
+      [reviewer.userId],
+    )
+    await tdb.pg.query(`UPDATE projects SET org_id = 7 WHERE id = $1`, [PROJECT])
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version, updated_by)
+       VALUES (7, $1, 0, $2)`,
+      [JSON.stringify({ assignmentMinRole: 300 }), reviewer.userId],
+    )
+
+    const { res: prepared, body } = await prepare(env, reviewer.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'books',
+          scope: [{ fileId: FILE }],
+          scopeLabel: 'File X',
+          assigneeUserId: reviewer.userId,
+        },
+      },
+    ])
+    expect(prepared.status).toBe(200)
+
+    const { res: committed } = await commit(env, reviewer.token, body.changeset.id)
+    expect(committed.status).toBe(200)
+    expect(await tdb.rows('assignments')).toHaveLength(1)
   })
 
   it('rejects server-resolved pin fields supplied by the caller', async () => {
@@ -175,8 +239,13 @@ describe('EmitEvents — validation + floors', () => {
     ])
     expect(res.status).toBe(200)
     expect(body.summary.events).toEqual([
-      { kind: 'cell.validate', count: 1, testimony: true },
-      { kind: 'comment.create', count: 2, testimony: false },
+      {
+        kind: 'cell.validate',
+        count: 1,
+        testimony: true,
+        label: 'Mark a translation as validated — recorded under your name',
+      },
+      { kind: 'comment.create', count: 2, testimony: false, label: 'Add 2 comments' },
     ])
   })
 
@@ -384,6 +453,61 @@ describe('EmitEvents — commit', () => {
     expect(acells).toHaveLength(2)
   })
 
+  it("AQU-1628: a 'cells' scope assigns only the named cells, and an empty list is refused", async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const assignee = await memberToken(tdb, 400)
+    const { body: prep } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE, cellIds: ['cell-1'] }],
+          scopeLabel: '1 segment(s)',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(prep.changeset.status).toBe('staged')
+    expect((await commit(env, lead.token, prep.changeset.id)).res.status).toBe(200)
+
+    const assignments = await tdb.rows<{ cells_total: number; scope_kind: string }>('assignments')
+    expect(assignments).toHaveLength(1)
+    expect(assignments[0].scope_kind).toBe('cells')
+    expect(Number(assignments[0].cells_total)).toBe(1) // not both source cells in FILE
+    expect(await tdb.rows('assignment_cells')).toHaveLength(1)
+
+    // Widening an empty selection to the whole file is the bug, so the
+    // perimeter refuses it rather than resolving it to something.
+    const { res: emptyRes, body: emptyBody } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE, cellIds: [] }],
+          scopeLabel: '0 segment(s)',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(emptyRes.status).toBe(400)
+    expect(JSON.stringify(emptyBody)).toContain('cellIds')
+
+    // And a cells scope with no list at all is not silently a book scope.
+    const { res: missingRes } = await prepare(env, lead.token, [
+      {
+        kind: 'assignment.create',
+        payload: {
+          scopeKind: 'cells',
+          scope: [{ fileId: FILE }],
+          scopeLabel: 'whoops',
+          assigneeUserId: assignee.userId,
+        },
+      },
+    ])
+    expect(missingRes.status).toBe(400)
+  })
+
   it('the perimeter is the backstop: a mid-flight role revocation rejects the events', async () => {
     const env = makeEnv(tdb.db)
     const contributor = await memberToken(tdb, 400)
@@ -483,5 +607,309 @@ describe('EmitEvents — AQU-999 foreign comment floors', () => {
     ])
     expect(delRes.status).toBe(403)
     expect(delBody.error.message).toContain('maintainer')
+  })
+})
+
+// ── AQU-1179: terminology through the generic door ─────────────────────────
+// The ticket's widening: term.* is the only one of "term, rule, memory" that
+// has event kinds (rules live in the settings blob, memory in auth-worker), so
+// it is the whole of the v1 addition. What matters here is the SPLIT the
+// termbase authority draws — suggesting is contributor work, binding is
+// management work — surviving the trip through the changeset engine.
+
+/** Seed a concept straight into the projection (the state a prior term.create
+ *  would have left), so authority tests don't depend on the write path. */
+async function seedConcept(
+  tdb: TestDb,
+  conceptId: string,
+  status: 'draft' | 'active' = 'draft',
+): Promise<void> {
+  await tdb.pg.query(
+    `INSERT INTO concepts (
+       concept_id, project_id, source_term, renderings, notes,
+       status, case_sensitive, created_by, created_at, updated_at, deleted_at
+     ) VALUES ($1, $2, 'covenant', '[]'::jsonb, NULL, $3, 0, 'seeder', 1, 1, NULL)`,
+    [conceptId, PROJECT, status],
+  )
+}
+
+const DRAFT_TERM = {
+  kind: 'term.create',
+  payload: {
+    sourceTerm: 'covenant',
+    renderings: [{ rendering: 'заповіт', status: 'preferred' }],
+    status: 'draft',
+  },
+}
+
+describe('EmitEvents — terminology (AQU-1179)', () => {
+  it('a contributor suggests a draft term: prepare → commit → the concept lands', async () => {
+    const env = makeEnv(tdb.db)
+    const contributor = await memberToken(tdb, 400)
+    const { res, body: prep } = await prepare(env, contributor.token, [DRAFT_TERM])
+    expect(res.status).toBe(200)
+    expect(prep.summary.events).toEqual([
+      { kind: 'term.create', count: 1, testimony: false, label: 'Add a glossary term' },
+    ])
+
+    const { res: ok, body } = await commit(env, contributor.token, prep.changeset.id)
+    expect(ok.status).toBe(200)
+    expect(body.receipt.appliedCount).toBe(1)
+
+    const concepts = await tdb.rows<{
+      concept_id: string
+      source_term: string
+      status: string
+      created_by: string
+      renderings: unknown
+    }>('concepts')
+    expect(concepts).toHaveLength(1)
+    expect(concepts[0].source_term).toBe('covenant')
+    expect(concepts[0].status).toBe('draft')
+    expect(concepts[0].created_by).toBe(contributor.username)
+    // Server-minted concept id (the caller omitted one) — a real uuid, and the
+    // same one a crash-retry would re-post.
+    expect(concepts[0].concept_id).toMatch(/^[0-9a-f-]{36}$/)
+
+    // Project-scoped: the events row carries no file.
+    const events = await tdb.rows<{ kind: string; file_id: string | null }>('events')
+    const created = events.find((e) => e.kind === 'term.create')!
+    expect(created.file_id).toBeNull()
+
+    // Idempotent re-commit re-posts the same ids rather than a second concept.
+    await commit(env, contributor.token, prep.changeset.id)
+    expect(await tdb.rows('concepts')).toHaveLength(1)
+  })
+
+  it('binding term writes are denied below the org termbase floor; suggesting is not', async () => {
+    const env = makeEnv(tdb.db)
+    const contributor = await memberToken(tdb, 400)
+    await seedConcept(tdb, 'concept-1')
+
+    // Creating an already-active term IS approving it in one step.
+    const { res: activeRes, body: activeBody } = await prepare(env, contributor.token, [
+      { ...DRAFT_TERM, payload: { ...DRAFT_TERM.payload, status: 'active' } },
+    ])
+    expect(activeRes.status).toBe(403)
+    expect(activeBody.error.code).toBe('permission_denied')
+    expect(activeBody.error.message).toContain('500')
+
+    for (const event of [
+      { kind: 'term.approve', payload: { conceptId: 'concept-1' } },
+      { kind: 'term.update', payload: { conceptId: 'concept-1', sourceTerm: 'pact' } },
+      { kind: 'term.delete', payload: { conceptId: 'concept-1' } },
+      { kind: 'term.reject', payload: { conceptId: 'concept-1', mode: 'deprecate' } },
+    ]) {
+      const { res } = await prepare(env, contributor.token, [event])
+      expect(res.status, `${event.kind} must be gated`).toBe(403)
+    }
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+
+    // The same approve at the floor stages and lands.
+    const lead = await memberToken(tdb, 500)
+    const { body: prep } = await prepare(env, lead.token, [
+      { kind: 'term.approve', payload: { conceptId: 'concept-1' } },
+    ])
+    const { res: ok } = await commit(env, lead.token, prep.changeset.id)
+    expect(ok.status).toBe(200)
+    const concepts = await tdb.rows<{ status: string }>('concepts')
+    expect(concepts[0].status).toBe('active')
+  })
+
+  it('approving a concept that is not a draft is refused, not applied as a silent no-op', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1', 'active')
+    const { res, body } = await prepare(env, lead.token, [
+      { kind: 'term.approve', payload: { conceptId: 'concept-1' } },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.message).toContain('not a draft')
+  })
+
+  it('a term.create naming an existing concept is rejected rather than overwriting it', async () => {
+    const env = makeEnv(tdb.db)
+    const contributor = await memberToken(tdb, 400)
+    await seedConcept(tdb, 'concept-1')
+    const { res, body } = await prepare(env, contributor.token, [
+      { ...DRAFT_TERM, payload: { ...DRAFT_TERM.payload, conceptId: 'concept-1' } },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.message).toContain('already exists')
+  })
+
+  it('a term write against a missing concept rejects the whole plan at prepare', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const { res, body } = await prepare(env, lead.token, [
+      DRAFT_TERM,
+      { kind: 'term.approve', payload: { conceptId: 'ghost' } },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.message).toContain('events[1]')
+    expect(body.error.message).toContain('does not exist')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('rejects a scoped envelope and a laundered status patch', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1')
+
+    const { res: scoped, body: scopedBody } = await prepare(env, lead.token, [
+      { ...DRAFT_TERM, fileId: FILE },
+    ])
+    expect(scoped.status).toBe(400)
+    expect(JSON.stringify(scopedBody.error.details)).toContain('project-level')
+
+    const { res: laundered, body: launderedBody } = await prepare(env, lead.token, [
+      { kind: 'term.update', payload: { conceptId: 'concept-1', status: 'active' } },
+    ])
+    expect(laundered.status).toBe(400)
+    expect(JSON.stringify(launderedBody.error.details)).toContain('term.approve')
+  })
+
+  // ── inflection variants (AQU-1175) ─────────────────────────────────────
+  //
+  // `match` was dropped by the validators, so a term staged with variants came
+  // back configured and matched only its lemma. These tests are the producer →
+  // consumer trace (AGENTS.md rule 12): the caller's `match` through the
+  // validator, the changeset engine and the /events perimeter, out the other
+  // side as `concepts.match_options` — the column the matcher and the compiled
+  // terminology rules actually read. A unit test on the validator alone would
+  // still pass if the engine dropped the key again.
+
+  it('term.create carries match.forms through to concepts.match_options', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const { res, body: prep } = await prepare(env, lead.token, [
+      {
+        kind: 'term.create',
+        payload: {
+          sourceTerm: 'Боже Слово',
+          renderings: [{ rendering: 'Word of God', status: 'preferred' }],
+          status: 'active',
+          match: {
+            forms: ['Божого Слова', 'Божому Слову'],
+            excludedForms: ['Слово Боже'],
+            affixes: true,
+            foldMarks: false,
+          },
+        },
+      },
+    ])
+    expect(res.status).toBe(200)
+
+    const { res: ok } = await commit(env, lead.token, prep.changeset.id)
+    expect(ok.status).toBe(200)
+
+    const concepts = await tdb.rows<{ source_term: string; match_options: unknown }>('concepts')
+    expect(concepts).toHaveLength(1)
+    expect(concepts[0].source_term).toBe('Боже Слово')
+    const match =
+      typeof concepts[0].match_options === 'string'
+        ? JSON.parse(concepts[0].match_options)
+        : concepts[0].match_options
+    expect(match).toEqual({
+      foldMarks: false,
+      affixes: true,
+      forms: ['Божого Слова', 'Божому Слову'],
+      excludedForms: ['Слово Боже'],
+    })
+  })
+
+  it('term.update adds variants to an existing concept without touching its other fields', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1', 'active')
+
+    const { body: prep } = await prepare(env, lead.token, [
+      { kind: 'term.update', payload: { conceptId: 'concept-1', match: { forms: ['covenants'] } } },
+    ])
+    const { res: ok } = await commit(env, lead.token, prep.changeset.id)
+    expect(ok.status).toBe(200)
+
+    const concepts = await tdb.rows<{
+      source_term: string
+      status: string
+      match_options: unknown
+    }>('concepts')
+    const match =
+      typeof concepts[0].match_options === 'string'
+        ? JSON.parse(concepts[0].match_options)
+        : concepts[0].match_options
+    expect(match).toEqual({ forms: ['covenants'] })
+    // COALESCE-per-column: a match-only patch is a valid patch and leaves the
+    // rest of the concept alone.
+    expect(concepts[0].source_term).toBe('covenant')
+    expect(concepts[0].status).toBe('active')
+  })
+
+  it('a malformed match is rejected at prepare rather than silently dropped', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1', 'active')
+
+    const cases: [unknown, string][] = [
+      [{ forms: 'Божого Слова' }, 'match.forms must be an array'],
+      [{ forms: ['ok', ''] }, 'match.forms[1] must be a non-empty string'],
+      [{ affixes: 'yes' }, 'match.affixes must be a boolean'],
+      ['forms', 'match must be an object'],
+      [['forms'], 'match must be an object'],
+      [{ forms: Array.from({ length: 101 }, (_, i) => `f${i}`) }, 'at most 100 entries'],
+      // A near-miss key is the mistake this whole field exists to stop being
+      // silent: `form` would otherwise filter away and clear the options.
+      [{ form: ['Божого Слова'] }, 'match.form is not a match option'],
+      [{ forms: ['ok'], foldMark: true }, 'match.foldMark is not a match option'],
+    ]
+    for (const [match, expected] of cases) {
+      const { res, body } = await prepare(env, lead.token, [
+        { kind: 'term.update', payload: { conceptId: 'concept-1', match } },
+      ])
+      expect(res.status).toBe(400)
+      expect(JSON.stringify(body.error.details)).toContain(expected)
+    }
+    // Nothing landed: a rejected plan writes no concept row change.
+    const concepts = await tdb.rows<{ match_options: unknown }>('concepts')
+    expect(concepts[0].match_options).toBeNull()
+  })
+
+  it('match: {} clears the options rather than being rejected as empty', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1', 'active')
+    await tdb.db
+      .prepare(`UPDATE concepts SET match_options = ?::text::jsonb WHERE concept_id = ?`)
+      .bind(JSON.stringify({ forms: ['covenants'], affixes: true }), 'concept-1')
+      .run()
+
+    // `match` is replaced wholesale, so {} is the only way to say "no options",
+    // and it is a real patch — not "you patched nothing".
+    const { body: prep } = await prepare(env, lead.token, [
+      { kind: 'term.update', payload: { conceptId: 'concept-1', match: {} } },
+    ])
+    const { res: ok } = await commit(env, lead.token, prep.changeset.id)
+    expect(ok.status).toBe(200)
+
+    const concepts = await tdb.rows<{ match_options: unknown }>('concepts')
+    const match =
+      typeof concepts[0].match_options === 'string'
+        ? JSON.parse(concepts[0].match_options)
+        : concepts[0].match_options
+    expect(match).toEqual({})
+  })
+
+  it('a concept deleted between prepare and commit makes the plan stale, not a silent no-op', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    await seedConcept(tdb, 'concept-1')
+    const { body: prep } = await prepare(env, lead.token, [
+      { kind: 'term.update', payload: { conceptId: 'concept-1', sourceTerm: 'pact' } },
+    ])
+    await tdb.db.prepare(`UPDATE concepts SET deleted_at = 2 WHERE concept_id = ?`).bind('concept-1').run()
+
+    const { res, body } = await commit(env, lead.token, prep.changeset.id)
+    expect(res.status).toBe(409)
+    expect(body.error.code).toBe('plan_stale')
   })
 })

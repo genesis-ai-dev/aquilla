@@ -10,7 +10,7 @@
 // function needs to know terminology moved off the settings blob.
 
 import { syncWorkerHttpOrigin } from './sync-worker-url'
-import type { Concept, TermRendering } from '@/lib/terminology/types'
+import type { Concept, TermRendering, TermMatchOptions } from '@/lib/terminology/types'
 
 export class ConceptsReadError extends Error {
   status: number
@@ -31,6 +31,7 @@ interface ConceptRowWire {
   notes: string | null
   status: 'active' | 'draft' | 'deprecated'
   caseSensitive: boolean
+  matchOptions: TermMatchOptions | null
   createdBy: string | null
   createdAt: number
   updatedAt: number
@@ -58,6 +59,7 @@ function toConcept(row: ConceptRowWire): Concept {
     ...(row.createdBy != null ? { createdBy: row.createdBy } : {}),
     ...(row.updatedAt != null ? { updatedAt: new Date(row.updatedAt).toISOString() } : {}),
     ...(row.caseSensitive ? { caseSensitive: true } : {}),
+    ...(row.matchOptions ? { match: row.matchOptions } : {}),
   }
 }
 

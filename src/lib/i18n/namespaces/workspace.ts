@@ -31,6 +31,34 @@ export const workspace = defineNamespace({
       one: "{count} change was rejected because it conflicted with a newer edit from another session.",
       other: "{count} changes were rejected because they conflicted with newer edits from another session.",
     }),
+    // Tauri offline mode (Phase 3): a locally queued write lost the AD-2 head
+    // CAS on reconnect (someone else committed to the same cell while this
+    // device was offline). See src/lib/offline/conflicts.ts.
+    "workspace.offline.conflictToast": plural({
+      one: "{count} translation couldn't sync — it was changed elsewhere while you were offline.",
+      other: "{count} translations couldn't sync — they were changed elsewhere while you were offline.",
+    }),
+    "workspace.offline.conflictDismiss": "Dismiss",
+    "workspace.offline.conflictIndicatorTooltip": "This translation couldn't sync — it was changed elsewhere while you were offline. Review and re-apply your edit.",
+    // Tauri offline mode: the local store's leader worker stopped persisting
+    // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
+    "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
+    "workspace.offline.leaderStalledRestart": "Restart app",
+    // Tauri offline mode: the server refuses to sync a downloaded project —
+    // deleted, access removed, archived or frozen (src/lib/offline/project-access.ts).
+    "workspace.offline.projectUnavailableToast": "“{name}” is no longer available to you on the server, so this device has stopped syncing it.",
+    "workspace.offline.projectUnavailableHint": "It may have been deleted or archived, or your access was removed. You can still read the copy on this device.",
+    "workspace.offline.projectUnavailableQueued": plural({
+      one: "{count} change on this device hasn't been sent and can't be until your access is restored. Ask a project lead before removing the offline copy.",
+      other: "{count} changes on this device haven't been sent and can't be until your access is restored. Ask a project lead before removing the offline copy.",
+    }),
+    "workspace.offline.projectUnavailableRemove": "Remove offline copy",
+    // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
+    // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
+    "workspace.offline.connectivityOnline": "Online",
+    "workspace.offline.connectivityOffline": "Offline",
+    "workspace.offline.connectivityTooltipOnline": "Connected to the server.",
+    "workspace.offline.connectivityTooltipOffline": "No connection — working offline. Changes sync once you're back online.",
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
     "workspace.status.forbidden":
       "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
@@ -52,6 +80,11 @@ export const workspace = defineNamespace({
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
     "workspace.staleSibling.viewInHistory": "View in history",
+    // AQU-1340: a failed concepts read compiles to an EMPTY terminology rule
+    // set, which silently switches off every term check in the editor. Say so
+    // rather than letting the editor look like a project with no terminology.
+    "workspace.terminologyUnavailableBanner":
+      "Terminology checks are unavailable — the termbase could not be loaded, so term rules are not being applied.",
     "workspace.staleSource.message":
       "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
     "workspace.focusLock.editingNotice":
@@ -86,7 +119,7 @@ export const workspace = defineNamespace({
     // same sentence-case label for the same underlying value; the create dialog
     // already reuses projectSettings.create.* for the rest of its fields.
     "workspace.createDialog.targetChipsHint":
-      "Type a language and press Enter to add it. The first is the primary target; extras become additional lanes.",
+      "The first language is the project's primary target; each one you add below becomes its own lane.",
 
     // -- UsernameTypeahead --
     "workspace.typeahead.usernameModeTooltip": "Invite an existing Aquilla user",
@@ -139,6 +172,10 @@ export const workspace = defineNamespace({
     "workspace.metrics.weeklyTrendHeading": "Weekly trend",
     "workspace.metrics.filteredTo": "— filtered to {user}",
     "workspace.metrics.noUserData": "No data for this user yet.",
+    "workspace.metrics.byFileHeading": "By file",
+    "workspace.metrics.byFileHint": "(one row per imported file — a book each, for scripture)",
+    "workspace.metrics.fileColumn": "File",
+    "workspace.metrics.acceptedAsIsColumn": "Kept as-is",
     "workspace.metrics.byReviewerHeading": "By reviewer",
     "workspace.metrics.byReviewerHint": "(click a row to filter the trend above)",
     "workspace.metrics.disclosure":
@@ -164,6 +201,11 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.oncePerBrowser": "You'll only see this prompt once per browser.",
     "workspace.aiConsent.enableAllTooltip": "Also pre-download the local AI models so they're ready next time",
     "workspace.aiConsent.enableAllButton": "Enable all local models",
+    "workspace.aiConsent.justThisButton": "Just {model}",
+    "workspace.aiConsent.sizeNote":
+      "One-time download of about {size} MB — it stays on this device.",
+    "workspace.aiConsent.learnMore": "Learn more",
+    "workspace.aiConsent.genericModelName": "AI model",
 
     // -- AiModelDownloadChip --
     "workspace.aiDownloadChip.readyToUse": "ready to use",
@@ -171,8 +213,19 @@ export const workspace = defineNamespace({
 
     // -- AiSetupDialog --
     "workspace.aiSetup.title": "Set up AI",
-    "workspace.aiSetup.description": "Choose a provider to enable translation suggestions.",
+    "workspace.aiSetup.description":
+      "Choose once how this project drafts. You can change it later in settings.",
     "workspace.aiSetup.fullSettingsLink": "Full settings →",
+    "workspace.aiSetup.frontierDescriptionSignedIn":
+      "Aquilla's hosted model with your {username} login. Billed as Aquilla usage.",
+    "workspace.aiSetup.projectKeyLabel": "This project's API key",
+    "workspace.aiSetup.projectKeyDescription":
+      "Your OpenRouter or compatible key for this project on this device. Not shared with teammates, and not used on other projects.",
+    "workspace.aiSetup.overrideDescription":
+      "Use the endpoint already saved in Preferences ({endpoint}). Default for this browser; this project's API key beats it.",
+    "workspace.aiSetup.overrideMissingError": "No personal override is saved in Preferences.",
+    "workspace.aiSetup.overrideNeedsKey":
+      "That override still needs an API key. Add it in Preferences, or choose this project's API key.",
 
     // -- ApiKeyField --
     "workspace.apiKeyField.saveAcrossProjects": "Save across my projects (this browser)",
@@ -215,6 +268,9 @@ export const workspace = defineNamespace({
 
     // -- ErrorBoundary --
     "workspace.errorBoundary.reload": "Reload",
+    // AQU-1405. Painted over the page for the moment between a stale-chunk
+    // failure and the automatic reload that recovers from it.
+    "workspace.updateNotice.reloading": "Updating {app}…",
 
     // -- GenerateOverwriteDialog --
     "workspace.generateOverwrite.dontAskAgain": "Don't ask again when replacing a translation",
@@ -251,6 +307,21 @@ export const workspace = defineNamespace({
     "workspace.alignment.rejectAriaLabel":
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
+    "workspace.alignment.contributorRequired":
+      "Contributor+ required to confirm or reject alignments",
+
+    // -- Original-language (Macula Greek/Hebrew) interlinear, AQU-462 --
+    "workspace.alignment.originalHeading": "Original language",
+    "workspace.alignment.originalSub": "— the Greek/Hebrew words behind this verse",
+    "workspace.alignment.originalHelpTooltip":
+      "Every word of the original-language source, with its dictionary form, Strong's number and " +
+      "morphology. Where the model can place a word, its rendering in your translation is shown " +
+      "beside it. Words matched through the dictionary form are marked — treat those as a hint.",
+    "workspace.alignment.originalNoMatch": "no confident match",
+    "workspace.alignment.originalViaLemma": "via lemma",
+    "workspace.alignment.originalViaLemmaTooltip":
+      "Matched through the dictionary form {lemma} rather than the form used in this verse, so it " +
+      "is a weaker guess than a direct match.",
 
     // -- OfflineBanner --
     "workspace.offlineBanner.message": "You're offline — changes are queued and will sync when you reconnect.",
@@ -264,6 +335,8 @@ export const workspace = defineNamespace({
 
     // -- ProjectAssignedToMe --
     "workspace.assignedToMe.heading": "My assignments",
+    "workspace.handedOut.heading": "Handed out by you",
+    "workspace.handedOut.assignee": "To {username}",
     "workspace.assignedToMe.jumpToTooltip": "Jump to {scope}",
     "workspace.assignedToMe.jumpToWithNoteTooltip": "Jump to {scope}: {note}",
     "workspace.assignedToMe.cellsProgress": plural(
@@ -322,6 +395,8 @@ export const workspace = defineNamespace({
 
     // -- chat/ChatMarkdown --
     "workspace.chatMarkdown.copyCode": "Copy code",
+    "workspace.chatMarkdown.image": "[image]",
+    "workspace.chatMarkdown.imageAlt": "[image: {alt}]",
 
     // -- onboarding/steps/OrgStep --
     "workspace.orgStep.emailsPlaceholder": "alex@example.com, sam@example.com",
@@ -382,6 +457,8 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
     // AQU-646 stage 5: the other corner of the same chip.
     "workspace.targetAudioLane.playClip": "Play this clip",
+    "workspace.targetAudioLane.takeValidated": "This take is validated",
+    "workspace.targetAudioLane.takeValidatedByYou": "You have validated this take",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -395,6 +472,10 @@ export const workspace = defineNamespace({
 
     // -- voice/CastGutterVoice --
     "workspace.castGutterVoice.applyToAllLines": "Apply to all «{name}» lines",
+    "workspace.castGutterVoice.applyToAllLinesCount": plural({
+      one: "Apply to the {count} «{name}» line",
+      other: "Apply to all {count} «{name}» lines",
+    }),
 
     // -- hooks/useOpenWorkspace --
     "workspace.openWorkspace.openingProject": "Opening project",
@@ -404,6 +485,27 @@ export const workspace = defineNamespace({
     "workspace.fileSort.lastUpdated": "Last updated",
     "workspace.fileSort.canonical": "Canonical order",
     "workspace.fileSort.alphabetical": "Alphabetical",
+
+    // -- AQU-1392: volume-analysis report (AnalysisReportDialog) --
+    "workspace.analysis.action": "Analyze word counts",
+    "workspace.analysis.title": "Analysis — {label}",
+    "workspace.analysis.starting": "Reading source text…",
+    "workspace.analysis.progress": "Analyzing file {done} of {total}…",
+    "workspace.analysis.col.band": "Match band",
+    "workspace.analysis.col.segments": "Segments",
+    "workspace.analysis.col.words": "Words",
+    "workspace.analysis.col.pct": "% of words",
+    "workspace.analysis.col.rate": "Rate",
+    "workspace.analysis.col.weighted": "Weighted words",
+    "workspace.analysis.totalSegments": "Segments",
+    "workspace.analysis.totalWords": "Total words",
+    "workspace.analysis.weightedWords": "Weighted words",
+    "workspace.analysis.saving": "Saving",
+    "workspace.analysis.exportCsv": "Export CSV",
+    "workspace.analysis.unpopulatedNote":
+      "Translation-memory, in-context-exact and machine-translation bands read zero because nothing fills them yet — they are listed so the rate card stays complete.",
+    "workspace.analysis.ratesNote": "Rates are the defaults and are not editable yet.",
+    "workspace.analysis.skipped": "Source text could not be read for: {names}. Those files are not in the totals.",
   },
   context: {
     _context: {
@@ -435,6 +537,60 @@ export const workspace = defineNamespace({
         placeholders: {
           count: "How many queued changes were rejected.",
         },
+      },
+      "workspace.offline.conflictToast": {
+        description:
+          "Title of the toast shown in the Tauri desktop app when one or more " +
+          "translations queued while offline lost to a newer edit from someone " +
+          "else on reconnect (AD-2 head CAS). Paired with a 'Dismiss' action " +
+          "(workspace.offline.conflictDismiss) that clears the whole batch at " +
+          "once. Full sentence with a period. States the cause, not blame.",
+        placeholders: {
+          count: "How many translations couldn't sync.",
+        },
+      },
+      "workspace.offline.leaderStalledToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when the " +
+          "on-device storage stops saving edits (its background worker died). " +
+          "Paired with a 'Restart app' action (workspace.offline.leaderStalledRestart). " +
+          "Two full sentences with periods. Plain language — no 'worker', 'store' " +
+          "or 'sync' jargon.",
+      },
+      "workspace.offline.leaderStalledRestart": {
+        description:
+          "Action button on the 'changes aren't being saved' toast; quits and " +
+          "relaunches the desktop app. Short imperative.",
+      },
+      "workspace.offline.projectUnavailableToast": {
+        description:
+          "Title of a persistent toast in the Tauri desktop app when the server " +
+          "stops letting this device sync a project it downloaded for offline " +
+          "use. Full sentence with a period. Plain language — no 'token' or " +
+          "'403' jargon.",
+        placeholders: {
+          name: "The project's name, shown in quotation marks.",
+        },
+      },
+      "workspace.offline.projectUnavailableHint": {
+        description:
+          "Body of the 'no longer available' toast when nothing is waiting to be " +
+          "sent. Lists the likely causes without blame and reassures that the " +
+          "local copy is still readable. Two full sentences with periods.",
+      },
+      "workspace.offline.projectUnavailableQueued": {
+        description:
+          "Body of the 'no longer available' toast when edits made on this " +
+          "device are still waiting to be sent. Warns they can't be delivered and " +
+          "that removing the offline copy would lose them. Two full sentences.",
+        placeholders: {
+          count: "How many unsent changes are on this device.",
+        },
+      },
+      "workspace.offline.projectUnavailableRemove": {
+        description:
+          "Action button on the 'no longer available' toast; deletes this " +
+          "project's copy from the device. Short imperative.",
       },
       "workspace.projectCard.deletedBy": {
         description:
@@ -635,20 +791,20 @@ export const workspace = defineNamespace({
 
       "workspace.typeahead.usernameModeTooltip": {
         description:
-          "Tooltip on the '@user' mode-toggle chip in UsernameTypeahead " +
+          "Tooltip on the '@user' mode tab in UsernameTypeahead " +
           "(member-invite inputs across the app), explaining what username mode does.",
         screenshot: "assign-modal",
       },
       "workspace.typeahead.usernameModeLabel": {
         description:
-          "Visible label of the username-mode toggle chip, an '@' sigil plus " +
-          "'user' — kept compact (10px text) to sit beside its email sibling.",
+          "Visible label of the username-mode tab, an '@' sigil plus 'user' — " +
+          "kept short so the two-tab mode switch stays compact beside the input.",
         maxLength: 10,
         screenshot: "assign-modal",
       },
       "workspace.typeahead.emailModeTooltip": {
         description:
-          "Tooltip on the email-mode toggle chip, explaining that picking it " +
+          "Tooltip on the email-mode tab, explaining that picking it " +
           "invites someone by email who may not have an account yet.",
         screenshot: "assign-modal",
       },
@@ -876,6 +1032,29 @@ export const workspace = defineNamespace({
           "Shown instead of the weekly chart when the selected reviewer has no " +
           "weeks with data (edge case after filtering).",
       },
+      "workspace.metrics.byFileHeading": {
+        description: "Heading over the per-file breakdown table of AI post-edit effort.",
+      },
+      "workspace.metrics.byFileHint": {
+        description:
+          "Small parenthetical note after workspace.metrics.byFileHeading, saying " +
+          "the rows are the project's imported files, and that for a scripture " +
+          "project one file is one book — so a reader looking for a per-book " +
+          "breakdown knows this is it.",
+      },
+      "workspace.metrics.fileColumn": {
+        description:
+          "Column header naming the file each row of the per-file table covers. " +
+          "One word; it sits over file names in a narrow column.",
+        maxLength: 14,
+      },
+      "workspace.metrics.acceptedAsIsColumn": {
+        description:
+          "Column header for the count of AI drafts in that file which a reviewer " +
+          "approved without editing. Short — it sits over numbers in a narrow " +
+          "column. 'As-is' means unchanged.",
+        maxLength: 16,
+      },
       "workspace.metrics.byReviewerHeading": {
         description: "Heading over the by-reviewer breakdown table.",
       },
@@ -931,6 +1110,42 @@ export const workspace = defineNamespace({
           "model at once, instead of just the one the current feature needs.",
         screenshot: "confirm-dialog",
       },
+      "workspace.aiConsent.justThisButton": {
+        description:
+          "Secondary action on the first-run local-model download prompt: " +
+          "consent to and download only the model named in {model}, not every " +
+          "local model. {model} is the short product name (Whisper, MMS) and " +
+          "stays untranslated.",
+        placeholders: {
+          model: "Short product name of the model being asked about (Whisper or MMS).",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.sizeNote": {
+        description:
+          "Sentence in the compact consent-prompt body stating the one-time " +
+          "download size and that the model stays on this device. Follows the " +
+          "model-specific short explanation. {size} is a whole number of megabytes.",
+        placeholders: {
+          size: "Approximate one-time download size in megabytes, e.g. 140.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.learnMore": {
+        description:
+          "Inline disclosure control on the local-model download prompt. " +
+          "Expands (and collapses) a fuller explanation in place — not a " +
+          "link out and not a second dialog. The expanded state is exposed " +
+          "via aria-expanded; the label does not change.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiConsent.genericModelName": {
+        description:
+          "Fallback display name interpolated into workspace.aiConsent." +
+          "downloadTitle when the pending model is unknown (dialog closing). " +
+          "Generic noun phrase, not a product name.",
+        screenshot: "confirm-dialog",
+      },
 
       "workspace.aiDownloadChip.readyToUse": {
         description:
@@ -953,7 +1168,10 @@ export const workspace = defineNamespace({
         screenshot: "confirm-dialog",
       },
       "workspace.aiSetup.description": {
-        description: "Subtitle under workspace.aiSetup.title, explaining what setting up a provider enables.",
+        description:
+          "Subtitle of the one-time Set up AI chooser. They pick Frontier, a " +
+          "project API key, or a personal override; the dialog does not return " +
+          "after that choice.",
         screenshot: "confirm-dialog",
       },
       "workspace.aiSetup.fullSettingsLink": {
@@ -963,6 +1181,45 @@ export const workspace = defineNamespace({
           "Keep the trailing arrow glyph (→) or your language's equivalent " +
           "'go to' convention.",
         screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.frontierDescriptionSignedIn": {
+        description:
+          "Body of the Frontier option when the user is signed in. Names the " +
+          "account and that hosted drafts bill as Aquilla usage, not a BYOK key.",
+        placeholders: {
+          username: "Signed-in account username.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.projectKeyLabel": {
+        description:
+          "Title of the per-project bring-your-own-key option. Contrast with " +
+          "the personal override (Preferences, all projects) and Frontier " +
+          "(hosted). Short, no period.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.projectKeyDescription": {
+        description:
+          "Body of the project API-key option. The key is the user's, but it " +
+          "is stored on this project on this device — not a teammate-synced " +
+          "setting and not the device-wide personal override.",
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.overrideDescription": {
+        description:
+          "Body of the personal-override option, naming the saved endpoint " +
+          "and that it is the browser default until this project has its own key.",
+        placeholders: {
+          endpoint: "The OpenAI-compatible base URL already saved in Preferences.",
+        },
+        screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.overrideMissingError": {
+        description: "Error if Continue is pressed on override but none is stored.",
+      },
+      "workspace.aiSetup.overrideNeedsKey": {
+        description:
+          "Error when the saved personal override is a hosted endpoint with no key.",
       },
 
       "workspace.apiKeyField.saveAcrossProjects": {
@@ -1110,6 +1367,16 @@ export const workspace = defineNamespace({
           "that reloads the page.",
       },
 
+      "workspace.updateNotice.reloading": {
+        description:
+          "Full-screen status message shown for the moment between a stale " +
+          "code-chunk load failure (a new version was deployed while this tab " +
+          "was open) and the automatic reload that recovers from it.",
+        placeholders: {
+          app: "The product name for the current brand (e.g. 'Aquilla'), never translated.",
+        },
+      },
+
       "workspace.generateOverwrite.dontAskAgain": {
         description:
           "Checkbox label in the confirm dialog shown before an AI draft " +
@@ -1213,6 +1480,54 @@ export const workspace = defineNamespace({
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
       },
+      "workspace.alignment.contributorRequired": {
+        description:
+          "AQU-1408. Tooltip and accessible name on the disabled confirm/reject " +
+          "buttons for a member below the contributor rung, who may read the " +
+          "alignment but not teach it. Mirror editor.bt.contributorRequired; keep " +
+          "the 'or above' sense of the trailing plus.",
+      },
+      "workspace.alignment.originalHeading": {
+        description:
+          "Heading of the section listing the original-language (biblical Hebrew or " +
+          "Greek) words of the verse being translated, above the statistical " +
+          "alignment links. 'Original language' means the language the scripture " +
+          "was written in, not the project's source text.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalSub": {
+        description:
+          "Muted continuation of workspace.alignment.originalHeading, on the same " +
+          "line. The leading dash joins it to the heading; do not start with a " +
+          "capital. 'Greek/Hebrew' names the two biblical languages.",
+      },
+      "workspace.alignment.originalHelpTooltip": {
+        description:
+          "Tooltip on the help icon beside that heading. 'Dictionary form' is the " +
+          "lemma — the headword an inflected form is listed under; \"Strong's " +
+          "number\" is a standard scripture-word index and stays as-is.",
+      },
+      "workspace.alignment.originalNoMatch": {
+        description:
+          "Shown in place of a target word when the model cannot say which part of " +
+          "the translation renders this original-language word. Lowercase, muted; " +
+          "it is a status, not a heading.",
+        maxLength: 24,
+      },
+      "workspace.alignment.originalViaLemma": {
+        description:
+          "Small badge on a row whose target word was found through the word's " +
+          "dictionary form (lemma) rather than the exact form in this verse — a " +
+          "weaker match. Lowercase, very short.",
+        maxLength: 14,
+      },
+      "workspace.alignment.originalViaLemmaTooltip": {
+        description:
+          "Tooltip on that badge, explaining why the match is weaker.",
+        placeholders: {
+          lemma: "The dictionary form of the original-language word — not translated.",
+        },
+      },
 
       "workspace.offlineBanner.message": {
         description:
@@ -1221,6 +1536,18 @@ export const workspace = defineNamespace({
           "sync automatically once they reconnect. Clears itself; no dismiss control.",
       },
 
+      "workspace.handedOut.heading": {
+        description:
+          "Collapsible section heading in the workspace sidebar, shown to a language " +
+          "coordinator, listing the open work assignments they gave to other people in " +
+          "this project. Each row has a button to remove the assignment.",
+        screenshot: "workspace-nav",
+      },
+      "workspace.handedOut.assignee": {
+        description:
+          "Second line of a row in the 'Handed out by you' list: who the assignment was given to.",
+        placeholders: { username: "The assignee's username — not translated." },
+      },
       "workspace.assignedToMe.heading": {
         description:
           "Collapsible section heading in the workspace sidebar listing the " +
@@ -1410,6 +1737,23 @@ export const workspace = defineNamespace({
         description:
           "Tooltip and accessible name for the small copy button that " +
           "appears on hover over a fenced code block in an assistant chat message.",
+      },
+
+      "workspace.chatMarkdown.image": {
+        description:
+          "Muted stand-in text shown where an assistant chat message contains an image " +
+          "without a description. Remote images are never loaded, so this replaces the " +
+          "picture. Keep the square brackets.",
+      },
+
+      "workspace.chatMarkdown.imageAlt": {
+        description:
+          "Muted stand-in text shown where an assistant chat message contains an image, " +
+          "followed by the image's description. Remote images are never loaded, so this " +
+          "replaces the picture. Keep the square brackets.",
+        placeholders: {
+          alt: "The image's description (alt text) written by the AI assistant, in whatever language it used. Not translated.",
+        },
       },
 
       "workspace.orgStep.emailsPlaceholder": {
@@ -1616,6 +1960,22 @@ export const workspace = defineNamespace({
           "timeline draws it, without moving the playhead or starting the " +
           "rest of the timeline.",
       },
+      "workspace.targetAudioLane.takeValidated": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip whose "
+          + "recording has reached the number of validators the project asks "
+          + "for. Read-only — the vote itself is cast in the editor, the "
+          + "recorder or the Recording tab, which have room for it.",
+        maxLength: 30,
+      },
+      "workspace.targetAudioLane.takeValidatedByYou": {
+        description:
+          "Tooltip on the small tick in the corner of a timeline clip that YOU "
+          + "have validated, on a project that asks for more validators than "
+          + "just you. A single tick rather than a double one, matching the "
+          + "editor's margin: your part is done, the line is not.",
+        maxLength: 30,
+      },
       "workspace.targetAudioLane.recordAudio": {
         description:
           "Tooltip/accessible name for the small record-button affordance on " +
@@ -1664,6 +2024,15 @@ export const workspace = defineNamespace({
           "quoting around it.",
         placeholders: { name: "The diarized/VTT speaker (character) name." },
       },
+      "workspace.castGutterVoice.applyToAllLinesCount": {
+        description:
+          "The same checkbox label, saying how many lines in the file share the " +
+          "character and would all change (Sam, 2026-09-28). Off by default.",
+        placeholders: {
+          name: "The diarized/VTT speaker (character) name.",
+          count: "How many lines share that name; it also selects the plural form.",
+        },
+      },
 
       "workspace.openWorkspace.openingProject": {
         description:
@@ -1684,6 +2053,67 @@ export const workspace = defineNamespace({
       },
       "workspace.fileSort.alphabetical": {
         description: "Sort-mode dropdown option: plain A-Z name order.",
+      },
+
+      "workspace.analysis.action": {
+        description:
+          "Menu item / button that opens the volume-analysis report for a file " +
+          "or a project. 'Analyze' here is the translation-industry sense — " +
+          "count how much new vs. repeated work a document holds — not a " +
+          "quality check.",
+      },
+      "workspace.analysis.title": {
+        description:
+          "Heading of the analysis dialog. {label} is the file or project the " +
+          "report covers.",
+        placeholders: { label: "Name of the file or project being analyzed." },
+      },
+      "workspace.analysis.progress": {
+        description:
+          "Status line while the report walks a project's files. Both numbers " +
+          "are file counts, not percentages.",
+        placeholders: {
+          done: "How many files have been analyzed so far.",
+          total: "How many files the report covers in total.",
+        },
+      },
+      "workspace.analysis.col.band": {
+        description:
+          "Column header: the match band a segment fell into (New, Repetitions, " +
+          "Internal fuzzy 75–99%, and the not-yet-filled TM/ICE/MT bands). " +
+          "'Band' is the TMS term for a tier of match quality.",
+        maxLength: 20,
+      },
+      "workspace.analysis.col.pct": {
+        description:
+          "Column header: this band's share of the report's total word count, " +
+          "shown as a percentage.",
+        maxLength: 14,
+      },
+      "workspace.analysis.col.rate": {
+        description:
+          "Column header: the percentage of a word that this band is charged " +
+          "at — a New word counts 100%, a repeated word 30%.",
+        maxLength: 12,
+      },
+      "workspace.analysis.col.weighted": {
+        description:
+          "Column header: words after the band rate is applied — the 'payable' " +
+          "count a project manager quotes from.",
+        maxLength: 18,
+      },
+      "workspace.analysis.saving": {
+        description:
+          "Label for the percentage by which weighting reduced the raw word " +
+          "count (a TMS 'saving on word count'). Shown next to a percentage.",
+        maxLength: 14,
+      },
+      "workspace.analysis.skipped": {
+        description:
+          "Warning under the report when one or more files could not be read, " +
+          "so their words are missing from the totals. {names} is a " +
+          "comma-separated list of file names.",
+        placeholders: { names: "Comma-separated names of the files that could not be read." },
       },
     },
   },

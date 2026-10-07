@@ -60,6 +60,16 @@ describe("InlineAiError", () => {
     expect(screen.queryByRole("button", { name: /show error details/i })).not.toBeInTheDocument()
   })
 
+  it("shows OpenRouter — not Gemini — on the red line for a hosted key miss (AQU-1158)", () => {
+    const raw = 'Completion failed: 500 {"error":"OPENROUTER_API_KEY is not configured"}'
+    render(<InlineAiError message={raw} />)
+
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("OpenRouter API key required")
+    expect(alert).not.toHaveTextContent(/gemini/i)
+    expect(screen.queryByText(/^Completion failed: 500/)).not.toBeInTheDocument()
+  })
+
   it("omits role=alert when an ancestor already announces the failure", () => {
     render(<InlineAiError message={OPENROUTER_413} announce={false} />)
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()

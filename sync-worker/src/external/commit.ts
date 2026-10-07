@@ -9,21 +9,45 @@
 // Idempotent: a committed changeset returns its stored receipt without
 // re-applying. Ask-mode confirmations are consumed exactly once.
 
-import { errorResponse, toErrorResponse } from './errors'
+import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
+import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import {
   cellKey,
+  isStructureCommandKind,
   laneCellKey,
+  commandsContainAssignmentEvents,
   requiredRoleForCommand,
+  type CreateOrgCommand,
   type CreateProjectCommand,
   type EmitEventsCommand,
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type ProjectLifecycleCommand,
+  type RegenerateBriefSummaryCommand,
+  type SetBriefCommand,
   type SetTranslationCommand,
+  type StructureCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import {
+  commitMembership,
+  isMembershipCommand,
+  type MembershipCommand,
+} from './commands-membership'
+import { commitProjectLifecycle, isProjectLifecycleCommand } from './commands-project-lifecycle'
+import { commitSetBrief } from './commands-set-brief'
+import { commitRegenerateBriefSummary } from './commands-regenerate-brief'
+import { commitProjectSetup } from './commit-project-setup'
+import type { ProjectSetupCommand } from './commands-project-setup'
+import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
+import { commitOrgMember } from './org-members-engine'
+import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
 import { commitEmitEvents } from './emit-events-engine'
+import { commitCellFields } from './cell-fields-engine'
+import { isCellFieldCommand, type CellFieldCommand } from './commands-cell-fields'
+import { commitStructure } from './structure-engine'
 import {
   buildProvenance,
   receiptOnlyGates,
@@ -36,28 +60,36 @@ import { resolveCellStates } from './preconditions'
 import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
+import { linkMediaTelemetry, reviewTelemetryAllowed, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
 import { loadChangeset } from './store'
-import { assertCredentialScope, mintInternalSyncToken } from './token-bridge'
+import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
+import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
+import { artifactBindingConflictColumn, laneIdResolveSql } from '../events/lane-id-sql'
 import { ROLE } from '../events/role-policy'
+import { resolveAssignmentAuthority } from '../events/assignment-authority'
 import type { RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
   ChangesetWarning,
   ExternalEnv,
+  PlannedEventIds,
   ProvenanceChannel,
   ReceiptOnlyReceipt,
   StoredChangeset,
 } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import {
   createProjectShared,
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
+import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
 /** Provenance channel for a PAT commit request. MCP-originated commits arrive
@@ -67,11 +99,6 @@ import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/sh
  *  never header-derived: only the session routes pass it, as a code parameter. */
 function readChannel(request: Request): ProvenanceChannel {
   return request.headers.get('x-aquilla-channel') === 'mcp' ? 'mcp' : 'rest'
-}
-
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
 }
 
 /** Who is committing, under which ownership rule, on which channel (AQU-926).
@@ -101,7 +128,7 @@ export async function handleCommit(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "")
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
   const identifier = `credential:${cred.credentialId}`
@@ -138,6 +165,17 @@ export async function commitChangesetCore(
   const db = env.AQUILLA_PG
   const { cred, channel } = caller
 
+  // AQU-1242: a read-only credential cannot apply a plan. Unreachable in the
+  // normal course — prepare refused the staging too — but a changeset can also
+  // be committed by a DIFFERENT caller than the one that staged it (the
+  // session/delegated-approval path), so the access ceiling is asserted against
+  // whoever is committing, not only against whoever staged.
+  try {
+    assertCredentialMayWrite(cred, 'commit a changeset')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
 
@@ -155,6 +193,27 @@ export async function commitChangesetCore(
   } else {
     const denied = await changesetAuthorityDenied(db, cs, cred)
     if (denied) return denied
+  }
+
+  // AQU-1529: enforce the live OAuth ceiling before returning receipts or
+  // claiming a staged plan. Pre-creation plans use their command's org scope.
+  if (cred.orgIds !== undefined) {
+    try {
+      for (const command of cs.commands) {
+        if (command.kind === 'CreateOrg') {
+          throw new ExternalError('scope_denied', 'organization grant cannot create another organization')
+        }
+        if (command.kind === 'CreateProject' || isOrgMemberCommand(command)) {
+          if (!credentialAllowsOrganization(cred, String(command.orgId))) {
+            throw new ExternalError('scope_denied', 'organization is outside the credential scope')
+          }
+        } else {
+          await assertCredentialScope(db, cred, projectId)
+        }
+      }
+    } catch (err) {
+      return toErrorResponse(err)
+    }
   }
 
   // ── Status gate ──────────────────────────────────────────────────────────
@@ -197,6 +256,13 @@ export async function commitChangesetCore(
   if (createProjectCmd) {
     return commitCreateProject(db, cred, cs, createProjectCmd, channel)
   }
+  // CreateOrg (AQU-1221): receipt-only like CreateProject, and likewise gated
+  // on the credential's scope rather than any project role — the changeset's
+  // project id is a filing placeholder that never resolves to a row.
+  const createOrgCmd = cs.commands.find((c): c is CreateOrgCommand => c.kind === 'CreateOrg')
+  if (createOrgCmd) {
+    return commitCreateOrg(db, cred, cs, createOrgCmd, channel)
+  }
   const updateSettingsCmd = cs.commands.find(
     (c): c is UpdateProjectSettingsCommand => c.kind === 'UpdateProjectSettings',
   )
@@ -211,6 +277,61 @@ export async function commitChangesetCore(
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
   }
+  // AQU-1185 membership: receipt-only, all-or-nothing, and its module re-runs
+  // the MAINTAINER floor plus the grant/target caps against the LIVE role graph
+  // before it writes a single row.
+  const membershipCmds = cs.commands.filter((c): c is MembershipCommand =>
+    isMembershipCommand(c),
+  )
+  if (membershipCmds.length > 0) {
+    return commitMembership(db, env, cred, cs, membershipCmds, channel, ctx)
+  }
+  // AQU-1182 project lifecycle: receipt-only like the above, with archived-
+  // tolerant role resolution (the generic precheck below denies every archived
+  // project, which would make UnarchiveProject uncommittable) and its own
+  // per-kind UI floor. Its module re-runs the full guard sequence.
+  const lifecycleCmd = cs.commands.find(
+    (c): c is ProjectLifecycleCommand => isProjectLifecycleCommand(c),
+  )
+  if (lifecycleCmd) {
+    return commitProjectLifecycle(db, env, cred, cs, lifecycleCmd, channel, ctx)
+  }
+  // AQU-1227 SetBrief: receipt-only — merges its patch into the live brief and
+  // writes it back as the translationBrief settings key.
+  const setBriefCmd = cs.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
+  if (setBriefCmd) {
+    return commitSetBrief(db, env, cred, cs, setBriefCmd, channel)
+  }
+  // AQU-1282 RegenerateBriefSummary: receipt-only — renders the L1 through
+  // auth-worker and writes it into the same translationBrief key.
+  const regenBriefCmd = cs.commands.find(
+    (c): c is RegenerateBriefSummaryCommand => c.kind === 'RegenerateBriefSummary',
+  )
+  if (regenBriefCmd) {
+    return commitRegenerateBriefSummary(db, env, cred, cs, regenBriefCmd, channel)
+  }
+  // AQU-1294 ProjectSetup: the composite plan. Its module re-runs the live
+  // authorization, consumes the approval once, and walks the step ledger —
+  // persisting each step's status so a retry resumes rather than re-applies.
+  const projectSetupCmd = cs.commands.find(
+    (c): c is ProjectSetupCommand => c.kind === 'ProjectSetup',
+  )
+  if (projectSetupCmd) {
+    return commitProjectSetup(request, env, db, cred, cs, projectSetupCmd, channel, ctx)
+  }
+  // AQU-1235 org membership: receipt-only with an ORG-level gate, so like
+  // CreateProject it must run before the project-role precheck below.
+  const orgMemberCmd = cs.commands.find((c): c is OrgMemberCommand => isOrgMemberCommand(c))
+  if (orgMemberCmd) {
+    return commitOrgMember(db, cred, cs, orgMemberCmd, channel)
+  }
+
+  // AQU-1228 Living Memory writes: receipt-only, with their own floors and the
+  // human-edited guard — the module re-runs the full guard sequence.
+  const memoryCmd = cs.commands.find(isMemoryCommand)
+  if (memoryCmd) {
+    return commitMemoryCommand(db, cred, cs, memoryCmd, channel)
+  }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────
   // Resolve the caller's CURRENT role and require the floor of the command kinds
@@ -218,7 +339,12 @@ export async function commitChangesetCore(
   // backstop, but resolving here first means a member removed after prepare is
   // denied cleanly (permission_denied) instead of half-applying at the perimeter.
   // Runs for a crash-retry too — a member removed mid-commit is still stopped.
-  const requiredRole = Math.max(...cs.commands.map(requiredRoleForCommand))
+  const assignmentMinRole = commandsContainAssignmentEvents(cs.commands)
+    ? (await resolveAssignmentAuthority(db, projectId)).minRole
+    : undefined
+  const requiredRole = Math.max(
+    ...cs.commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
+  )
   const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to commit this changeset')
@@ -349,6 +475,20 @@ export async function commitChangesetCore(
       .run()
   }
 
+  // ── Cell-structure commands take their own compile/commit path (AQU-1234) ─
+  // The shared gates above handled expiry, the ask confirmation, and the flip;
+  // the engine re-checks its OWN pins (the chain heads it will use as parent
+  // ids) rather than the shared precondition list — see structure-engine.ts.
+  const structure = cs.commands.find(
+    (c): c is StructureCommand => isStructureCommandKind(c.kind),
+  )
+  if (structure) {
+    return commitStructure(
+      request, env, db, cred, cs, structure, confirmationId, channel,
+      cs.status === 'staged', ctx,
+    )
+  }
+
   // ── PlanImport takes its own compile/commit path ──────────────────────────
   const planImport = cs.commands.find(
     (c): c is PlanImportCommand => c.kind === 'PlanImport',
@@ -379,6 +519,19 @@ export async function commitChangesetCore(
     )
   }
 
+  // ── AQU-1183 cell-field commands take their own compile/commit path ───────
+  // The shared gates above already re-checked expiry, the ask confirmation, and
+  // drift over the stored preconditions — which for this family pin the SOURCE
+  // chain head every source-side write chains on. The engine adds the existence
+  // re-checks and the compile.
+  const cellFields: CellFieldCommand[] = cs.commands.filter(isCellFieldCommand)
+  if (cellFields.length > 0) {
+    return commitCellFields(
+      request, env, db, cred, cs, cellFields, confirmationId, channel,
+      cs.status === 'staged', ctx,
+    )
+  }
+
   // ── Compile commands → target.cell.commit events, grouped by file ─────────
   // Past the PlanImport branch every remaining command is a SetTranslation.
   const commandByCell = new Map<string, SetTranslationCommand>()
@@ -395,12 +548,18 @@ export async function commitChangesetCore(
   const plannedSet = new Map(
     (cs.plannedIds?.setTranslation ?? []).map((p) => [laneCellKey(p.fileId, p.cellId, p.laneId), p.eventId]),
   )
+  // AQU-1532: a changeset staged before prepare canonicalized lane ids can
+  // still name the primary language; stamp it as the default lane.
+  const targetLanguage = [...commandByCell.values()].some((c) => c.laneId)
+    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    : null
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
   const clientTs = Date.now()
   for (const pre of cs.preconditions) {
-    const cmd = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
-    if (!cmd) continue
+    const stored = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
+    if (!stored) continue
+    const cmd = withCanonicalLaneId(stored, targetLanguage)
     const ev: RawEvent<'target.cell.commit'> = {
       id: plannedSet.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId)) ?? uuidv7(),
       schemaVersion: 1,
@@ -416,6 +575,11 @@ export async function commitChangesetCore(
         // AQU-538: stamp the lane so the projection lands the commit on its
         // own (cell, target_lang) row and chain slot.
         ...(cmd.laneId ? { targetLang: cmd.laneId } : {}),
+        // AQU-1186: a DraftCells expansion carries the copilot's provenance,
+        // so the projection sets ai_drafted = 1 and the cell reads back as a
+        // pending AI draft — identical to an in-app draft. Only the server
+        // sets this (validateCommands drops a caller-supplied aiDraft).
+        ...(cmd.aiDraft ? { ai_suggestion: true as const, ai_draft: cmd.aiDraft } : {}),
         sourceEventId: pre.sourceEventId,
       },
       clientTs,
@@ -454,12 +618,15 @@ export async function commitChangesetCore(
   }
 
   // If nothing applied but the perimeter rejected events, surface the reason.
+  // AQU-1571: each refusal names the file and line it was about, the same way
+  // the receipt warnings below do when only some events are refused.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -470,9 +637,7 @@ export async function commitChangesetCore(
 
   // ── Receipt ───────────────────────────────────────────────────────────────
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, where))
   for (const eid of [...staleFromPerimeter, ...staleSource]) {
     warnings.push({ code: 'stale_pin', fileId: '', cellId: '', message: `event ${eid} landed stale` })
   }
@@ -506,24 +671,59 @@ export async function commitChangesetCore(
 const PLAN_IMPORT_CHUNK = 100
 
 /**
+ * AQU-1120: the `file_source_blobs.format` the export route switches on, derived
+ * from the caller's declared `fileType`. A format the shared registry doesn't
+ * know maps to `custom-original`, which the export route serves as verbatim
+ * bytes — an honest round trip is better than claiming a serializer we lack.
+ */
+function sourceBlobFormat(fileType: string): string {
+  const normalized = fileType.trim().toLowerCase().replace(/^\./, '')
+  return normalized in SOURCE_ARTIFACT_FORMATS ? normalized : 'custom-original'
+}
+
+/** Outcome of one PlanImport apply (AQU-1294). `error` short-circuits before
+ *  anything could be applied (no receipt yet); otherwise `receipt` is always
+ *  present and `ok` says whether every event landed. The caller owns the
+ *  terminal changeset row write — a ProjectSetup plan has more steps to run
+ *  after an import succeeds, so the apply must not close the changeset. */
+export interface ApplyPlanImportOutcome {
+  ok: boolean
+  fileId: string
+  receipt: ChangesetReceipt | null
+  rejected: { id: string; status: number; reason: string }[]
+  error: Response | null
+}
+
+/**
  * Compile a PlanImport into one file.create + N genesis source.cell.create
  * events (chained by anchorCellId, mirroring the SPA import + bulk /import
  * semantics), route them through the SAME /events perimeter Wave 1 uses (source.*
  * requires PROJECT_LEAD (500) — a contributor credential is 403'd there), keep
- * the file soft-hidden while its chunks are being applied, and stamp
- * provenance on applied events, link the artifact, and write the receipt.
+ * the file soft-hidden while its chunks are being applied, stamp provenance on
+ * applied events, and link the artifact.
+ *
+ * Writes NO terminal changeset row — see ApplyPlanImportOutcome. `commitPlanImport`
+ * wraps it for the sole-command PlanImport changeset; `commit-project-setup.ts`
+ * calls it once per import step.
  */
-async function commitPlanImport(
+export async function applyPlanImport(
   request: Request,
   env: ExternalEnv,
   db: AquillaDb,
   cred: ApiCredentialContext,
   cs: StoredChangeset,
   cmd: PlanImportCommand,
+  opts: {
+    /** The prepare-time id ledger for THIS import (a composite plan holds one
+     *  per import step, so it cannot be read off cs.plannedIds.planImport). */
+    planned?: PlannedEventIds['planImport']
+    /** Warnings the receipt starts from (the plan's own summary warnings). */
+    baseWarnings?: readonly ChangesetWarning[]
+  },
   confirmationId: string | null,
   channel: ProvenanceChannel,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
-): Promise<Response> {
+): Promise<ApplyPlanImportOutcome> {
   const projectId = cs.projectId
   const clientTs = Date.now()
 
@@ -532,7 +732,7 @@ async function commitPlanImport(
   // /events idempotency layer (INSERT OR IGNORE on event id) dedupes them — no
   // duplicate file, no duplicate source cells. Fall back to minting for
   // changesets staged before the planned-id ledger existed (backward compat).
-  const plannedImport = cs.plannedIds?.planImport
+  const plannedImport = opts.planned
   const fileId = plannedImport?.fileId ?? uuidv7()
   const compiled = compilePlanImport(cmd)
 
@@ -550,6 +750,12 @@ async function commitPlanImport(
       kind: cmd.fileType.toLowerCase() === 'tmx' ? 'translation-memory' : cmd.fileType,
       ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
       ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+      // AQU-1471: stamped ONLY when the command named one. The project-level
+      // default is resolved on every read (db/shared/text-direction.ts), so
+      // copying it onto the row here would silently turn a project default into
+      // 49 per-file overrides and freeze them against a later language change.
+      ...(cmd.sourceTextDirection !== undefined ? { sourceTextDirection: cmd.sourceTextDirection } : {}),
+      ...(cmd.targetTextDirection !== undefined ? { targetTextDirection: cmd.targetTextDirection } : {}),
       importManifest: compiled.fileSummary,
     },
     clientTs,
@@ -617,11 +823,17 @@ async function commitPlanImport(
   // Explicit target variants reuse the same source unit and name their lane.
   // The source event id is both the first target-chain parent and the staleness
   // pin, matching browser bilingual imports.
+  // AQU-1532: a variant naming the primary language writes the default lane.
+  const namesALane = compiled.units.some((unit) => (unit.cell.variants ?? []).some((v) => v.laneId))
+  const targetLanguage = namesALane
+    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    : null
   const targetEvents: RawEvent<'target.cell.commit'>[] = []
   compiled.units.forEach((unit, cellIndex) => {
     const sourceEvent = cellEvents[cellIndex]
     const planned = plannedImport?.cells[cellIndex]
-    for (const [variantIndex, variant] of (unit.cell.variants ?? []).entries()) {
+    for (const [variantIndex, stored] of (unit.cell.variants ?? []).entries()) {
+      const variant = { ...stored, laneId: canonicalLaneId(stored.laneId, targetLanguage) }
       targetEvents.push({
         id: planned?.variantEventIds?.[variantIndex] ?? uuidv7(),
         schemaVersion: 1,
@@ -652,7 +864,7 @@ async function commitPlanImport(
   try {
     token = await mintInternalSyncToken(env, db, cred, projectId, fileId)
   } catch (err) {
-    return toErrorResponse(err)
+    return { ok: false, fileId, receipt: null, rejected: [], error: toErrorResponse(err) }
   }
 
   const acceptedIds = new Set<string>()
@@ -665,7 +877,12 @@ async function commitPlanImport(
       body: JSON.stringify({ events: chunk }),
     })
     const res = await handleEventsWriteRequest(req, env, ctx)
-    if (!res) return errorResponse('job_failed', 'events perimeter did not respond')
+    if (!res) {
+      return {
+        ok: false, fileId, receipt: null, rejected,
+        error: errorResponse('job_failed', 'events perimeter did not respond'),
+      }
+    }
     const out = (await res.json()) as EventsWriteResponse
     for (const a of out.accepted) acceptedIds.add(a.id)
     for (const r of out.rejected) rejected.push(r)
@@ -685,11 +902,14 @@ async function commitPlanImport(
   // credential is 403'd by the perimeter since source.* needs PROJECT_LEAD 500).
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
-    return errorResponse(
-      anyForbidden ? 'permission_denied' : 'job_failed',
-      'no events were applied',
-      { rejected },
-    )
+    return {
+      ok: false, fileId, receipt: null, rejected,
+      error: errorResponse(
+        anyForbidden ? 'permission_denied' : 'job_failed',
+        'no events were applied',
+        { rejected: locateRejections(rejected, locateEvents(allEvents)) },
+      ),
+    }
   }
 
   // Link the uploaded artifact while the file is still hidden. A binding
@@ -700,13 +920,50 @@ async function commitPlanImport(
       .prepare(`UPDATE artifacts SET file_id = ? WHERE id::text = ? AND project_id = ?`)
       .bind(fileId, cmd.artifactId, projectId)
       .run()
+
+    // AQU-1120: browser import writes the `file_source_blobs` side-car (see
+    // events/source-artifact-persistence.ts) alongside the artifact rows; the
+    // Agent API used to write the artifact + binding only. The export route
+    // resolves original bytes through the side-car, so an agent-imported file
+    // 404'd on export ("no source blob recorded for this file"). Point the
+    // side-car at the artifact's existing R2 object — no byte copy, and the
+    // export route already resolves an r2_key-only row for every format.
+    const artifactObject = await db
+      .prepare(`SELECT r2_key, size_bytes FROM artifacts WHERE id::text = ? AND project_id = ?`)
+      .bind(cmd.artifactId, projectId)
+      .first<{ r2_key: string | null; size_bytes: number | string | null }>()
+    if (artifactObject?.r2_key) {
+      await db
+        .prepare(
+          `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+           VALUES (?, ?, ?, NULL, ?, ?, ?)
+           ON CONFLICT (file_id) DO UPDATE SET
+             project_id = EXCLUDED.project_id,
+             format     = EXCLUDED.format,
+             raw_source = NULL,
+             r2_key     = EXCLUDED.r2_key,
+             size_bytes = EXCLUDED.size_bytes,
+             created_at = EXCLUDED.created_at`,
+        )
+        .bind(
+          fileId,
+          projectId,
+          sourceBlobFormat(cmd.fileType),
+          artifactObject.r2_key,
+          artifactObject.size_bytes === null ? null : Number(artifactObject.size_bytes),
+          clientTs,
+        )
+        .run()
+    }
+
+    const conflictColumn = await artifactBindingConflictColumn(db)
     await db
       .prepare(
         `INSERT INTO artifact_bindings (
            id, project_id, artifact_id, file_id, binding_role, target_lang,
-           member_path, profile_id, profile_version, fidelity, manifest, recipe
-         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb)
-         ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+           member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
+         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
+         ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
          DO UPDATE SET
            profile_id = excluded.profile_id,
            profile_version = excluded.profile_version,
@@ -726,6 +983,8 @@ async function commitPlanImport(
         cmd.manifest?.fidelity ?? compiled.fileSummary.fidelity,
         JSON.stringify(compiled.fileSummary),
         cmd.manifest?.recipe ? JSON.stringify(cmd.manifest.recipe) : null,
+        // AQU-1240 slice 8: source-side binding -> the project's source lane.
+        projectId,
       )
       .run()
   }
@@ -738,7 +997,12 @@ async function commitPlanImport(
       body: JSON.stringify({ events: [revealEvent] }),
     })
     const revealResponse = await handleEventsWriteRequest(revealRequest, env, ctx)
-    if (!revealResponse) return errorResponse('job_failed', 'events perimeter did not respond')
+    if (!revealResponse) {
+      return {
+        ok: false, fileId, receipt: null, rejected,
+        error: errorResponse('job_failed', 'events perimeter did not respond'),
+      }
+    }
     const revealResult = (await revealResponse.json()) as EventsWriteResponse
     for (const accepted of revealResult.accepted) acceptedIds.add(accepted.id)
     for (const rejectedEvent of revealResult.rejected) rejected.push(rejectedEvent)
@@ -756,10 +1020,8 @@ async function commitPlanImport(
       .run()
   }
 
-  const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  const warnings: ChangesetWarning[] = [...(opts.baseWarnings ?? [])]
+  warnings.push(...rejectedWarnings(rejected, locateEvents(allEvents)))
 
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
@@ -770,10 +1032,44 @@ async function commitPlanImport(
     fileId,
   }
 
-  // Only expose a terminal committed receipt after every event is accepted.
-  // On a partial result the row stays `committing`; a retry re-posts the same
-  // prepare-time ids and converges through event idempotency.
-  if (rejected.length > 0) {
+  return { ok: rejected.length === 0, fileId, receipt, rejected, error: null }
+}
+
+/**
+ * The sole-command PlanImport changeset: apply the import, then own the
+ * terminal changeset row write.
+ *
+ * Only exposes a terminal committed receipt after every event is accepted. On
+ * a partial result the row stays `committing`; a retry re-posts the same
+ * prepare-time ids and converges through event idempotency.
+ */
+async function commitPlanImport(
+  request: Request,
+  env: ExternalEnv,
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmd: PlanImportCommand,
+  confirmationId: string | null,
+  channel: ProvenanceChannel,
+  ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+): Promise<Response> {
+  const outcome = await applyPlanImport(
+    request,
+    env,
+    db,
+    cred,
+    cs,
+    cmd,
+    { ...(cs.plannedIds?.planImport ? { planned: cs.plannedIds.planImport } : {}), baseWarnings: cs.summary.warnings },
+    confirmationId,
+    channel,
+    ctx,
+  )
+  if (outcome.error) return outcome.error
+  const receipt = outcome.receipt as ChangesetReceipt
+
+  if (!outcome.ok) {
     await db
       .prepare(`UPDATE changesets SET receipt = ?::text::jsonb WHERE id = ? AND status = 'committing'`)
       .bind(JSON.stringify(receipt), cs.id)
@@ -840,7 +1136,7 @@ async function commitCreateProject(
     return errorResponse('scope_denied', 'a project-scoped credential cannot create projects')
   }
   const targetOrgStr = orgId == null ? null : String(orgId)
-  if (cred.orgId != null && cred.orgId !== targetOrgStr) {
+  if (!credentialAllowsOrganization(cred, targetOrgStr)) {
     return errorResponse('scope_denied', 'credential org scope does not match the target org')
   }
   if (orgId != null) {
@@ -861,6 +1157,17 @@ async function commitCreateProject(
     orgId,
     createdBy: cred.userId,
     writeCreatorMembership: true,
+    // AQU-1223: the language pair rides the create instead of being dropped.
+    // Sent only when the command carried one, so a bare name+orgId create still
+    // writes no settings row at all.
+    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
+      ? {
+          settingsSeed: {
+            ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
+            ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+          },
+        }
+      : {}),
   })
 
   if (!inserted) {
@@ -906,6 +1213,67 @@ async function commitCreateProject(
 }
 
 /**
+ * Commit a CreateOrg (AQU-1221, receipt-only). Re-checks the credential scope
+ * live, runs the shared gates (commit-gates.ts), then applies the row write via
+ * createOrgShared — which writes the `organizations` row and the creator's
+ * owner-level (700) `org_members` row in one atomic statement, and touches no
+ * billing/entitlement table (a new org is plan=none by absence).
+ *
+ * Crash-retry: `organizations.id` is a generated identity column, so the plan
+ * carries no pinned id to make the insert idempotent. Instead a retry (a
+ * changeset already in `committing`) first looks for the org THIS commit
+ * created before it died — same creator, same planned name, created within the
+ * changeset's own lifetime — and absorbs it rather than minting a second
+ * tenant. A first attempt never consults that lookup, so two deliberate
+ * same-name creations still produce two orgs.
+ */
+async function commitCreateOrg(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmd: CreateOrgCommand,
+  channel: ProvenanceChannel,
+): Promise<Response> {
+  const wasStaged = cs.status === 'staged'
+
+  // Live scope re-check (D8 live-role pattern): a credential re-scoped between
+  // prepare and commit must not slip a tenant through on the stale check.
+  if (cred.projectId != null) {
+    return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
+  }
+  if (cred.orgId != null || cred.orgIds !== undefined) {
+    return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
+  }
+
+  const gate = await receiptOnlyGates(db, cs)
+  if (gate instanceof Response) return gate
+  const confirmationId = gate.confirmationId
+
+  let orgId: number
+  const priorAttempt = wasStaged
+    ? null
+    : await findRecentOrgByCreator(db, cred.userId, cmd.name, cs.createdAt)
+  if (priorAttempt) {
+    orgId = priorAttempt.orgId
+  } else {
+    const created = await createOrgShared(db, { name: cmd.name, createdBy: cred.userId })
+    orgId = created.orgId
+  }
+
+  const receipt: ReceiptOnlyReceipt = {
+    credentialId: cred.credentialId,
+    channel,
+    changesetId: cs.id,
+    command: 'CreateOrg',
+    appliedAt: new Date().toISOString(),
+    orgId,
+  }
+  await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
+
+  return Response.json({ receipt })
+}
+
+/**
  * Compile a LinkMedia changeset into cell.audio.attach + cell.audio.select
  * events (Agent API v1.1 §3), routed through the SAME /events perimeter as
  * SetTranslation (cell.audio.* requires CONTRIBUTOR — an observer credential is
@@ -936,15 +1304,21 @@ async function commitLinkMedia(
 
   // Prepare-time attach/select ids (§4), keyed by (fileId, cellId, artifactId).
   // Fall back to minting for changesets staged before the linkMedia ledger.
+  // Unambiguous separator via String.fromCharCode: a NUL character can't
+  // appear in a fileId, cellId, or artifactId, unlike a delimiter drawn
+  // from their own alphabet.
+  const KEY_SEP = String.fromCharCode(0)
   const plannedByKey = new Map(
     (cs.plannedIds?.linkMedia ?? []).map((p) => [
-      `${cellKey(p.fileId, p.cellId)}\u0000${p.artifactId}`,
+      `${cellKey(p.fileId, p.cellId)}${KEY_SEP}${p.artifactId}`,
       p,
     ]),
   )
 
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
+  // AQU-1572: which cell each attach event lands on, for the telemetry below.
+  const attaches: { eventId: string; fileId: string; cellId: string }[] = []
 
   for (const cmd of cmds) {
     // Re-check the artifact: still present, still audio, same project.
@@ -996,7 +1370,7 @@ async function commitLinkMedia(
       httpMetadata: artifact.content_type ? { contentType: artifact.content_type } : undefined,
     })
 
-    const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)}\u0000${cmd.artifactId}`)
+    const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)}${KEY_SEP}${cmd.artifactId}`)
     const attachId = planned?.attachEventId ?? uuidv7()
     const selectId = planned?.selectEventId ?? uuidv7()
     const url = `frontier-audio://${artifact.audio_id}`
@@ -1033,6 +1407,7 @@ async function commitLinkMedia(
     // attach must precede select in the batch so the projection sees the row
     // before the select re-affirms it.
     allEventIds.push(attachId, selectId)
+    attaches.push({ eventId: attachId, fileId: cmd.fileId, cellId: cmd.cellId })
     const list = eventsByFile.get(cmd.fileId)
     if (list) list.push(attachEvent, selectEvent)
     else eventsByFile.set(cmd.fileId, [attachEvent, selectEvent])
@@ -1062,12 +1437,13 @@ async function commitLinkMedia(
 
   // Nothing applied but events were rejected — surface the reason (an observer
   // credential is 403'd by the perimeter since cell.audio.* needs CONTRIBUTOR).
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -1083,9 +1459,7 @@ async function commitLinkMedia(
   }
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, where))
 
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
@@ -1103,6 +1477,23 @@ async function commitLinkMedia(
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
+
+  // AQU-1572: one `audio attached` per line whose attach landed. After the
+  // terminal write, and before the partial-failure reply: a partly rejected
+  // changeset is still committed, and its accepted attaches are real. A
+  // session commit reports only with the person's analytics switch on.
+  if (reviewTelemetryAllowed(request, channel)) {
+    sendReviewTelemetry(
+      env,
+      ctx,
+      cred.username,
+      linkMediaTelemetry(
+        projectId,
+        attaches.filter((a) => acceptedIds.has(a.eventId)),
+        telemetrySourceFor(channel),
+      ),
+    )
+  }
 
   if (rejected.length > 0) {
     return errorResponse('job_failed', 'link-media partially failed — some events were rejected', {

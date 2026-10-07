@@ -4,8 +4,17 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ThemeModeProvider } from "@/branding/ThemeMode"
+import { FontSizeProvider, FONT_SIZE_STORAGE_KEY } from "@/branding/FontSize"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { Preferences, PreferencesDialog } from "./Preferences"
+
+// AQU-1277: OrgProvider loads the project directory via
+// fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
+// it reached production identity for real while the tests stayed green.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+}))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
@@ -26,6 +35,7 @@ afterEach(() => {
   vi.clearAllMocks()
   window.localStorage.clear()
   document.documentElement.classList.remove("dark")
+  document.documentElement.style.removeProperty("font-size")
 })
 
 function renderAt(path: string) {
@@ -33,12 +43,14 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <I18nProvider>
         <ThemeModeProvider>
-          <OrgProvider>
-            <Routes>
-              <Route path="/preferences" element={<Preferences />} />
-              <Route path="/preferences/:section" element={<Preferences />} />
-            </Routes>
-          </OrgProvider>
+          <FontSizeProvider>
+            <OrgProvider>
+              <Routes>
+                <Route path="/preferences" element={<Preferences />} />
+                <Route path="/preferences/:section" element={<Preferences />} />
+              </Routes>
+            </OrgProvider>
+          </FontSizeProvider>
         </ThemeModeProvider>
       </I18nProvider>
     </MemoryRouter>,
@@ -51,6 +63,7 @@ describe("Preferences", () => {
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByText("General")).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "App font size" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "UI language" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Share usage data" })).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Appearance/ })).not.toBeInTheDocument()
@@ -142,6 +155,37 @@ describe("Preferences", () => {
     await userEvent.click(trigger)
     expect(await screen.findByRole("option", { name: /မြန်မာ/ })).toBeInTheDocument()
   })
+
+  it("shows Default app font size for a fresh user and scales the root immediately", async () => {
+    renderAt("/preferences")
+    const trigger = screen.getByRole("combobox", { name: "App font size" })
+    expect(trigger).toHaveTextContent("Default")
+    expect(document.documentElement.style.fontSize).toBe("")
+
+    await userEvent.click(trigger)
+    await userEvent.click(await screen.findByRole("option", { name: "Large" }))
+    expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("large")
+    expect(document.documentElement.style.fontSize).toBe("18px")
+
+    await userEvent.click(screen.getByRole("combobox", { name: "App font size" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Default" }))
+    expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("default")
+    expect(document.documentElement.style.fontSize).toBe("")
+  })
+
+  it("applies Small and Extra Large root sizes from the General card", async () => {
+    renderAt("/preferences")
+    const trigger = screen.getByRole("combobox", { name: "App font size" })
+
+    await userEvent.click(trigger)
+    await userEvent.click(await screen.findByRole("option", { name: "Small" }))
+    expect(document.documentElement.style.fontSize).toBe("14px")
+
+    await userEvent.click(screen.getByRole("combobox", { name: "App font size" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Extra Large" }))
+    expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("extra-large")
+    expect(document.documentElement.style.fontSize).toBe("20px")
+  })
 })
 
 describe("PreferencesDialog", () => {
@@ -166,13 +210,15 @@ describe("PreferencesDialog", () => {
       >
         <I18nProvider>
           <ThemeModeProvider>
-            <OrgProvider>
-              <Routes>
-                <Route path="/project/:id/editor" element={<div data-testid="editor-background" />} />
-                <Route path="/preferences" element={<PreferencesDialog />} />
-                <Route path="/preferences/:section" element={<PreferencesDialog />} />
-              </Routes>
-            </OrgProvider>
+            <FontSizeProvider>
+              <OrgProvider>
+                <Routes>
+                  <Route path="/project/:id/editor" element={<div data-testid="editor-background" />} />
+                  <Route path="/preferences" element={<PreferencesDialog />} />
+                  <Route path="/preferences/:section" element={<PreferencesDialog />} />
+                </Routes>
+              </OrgProvider>
+            </FontSizeProvider>
           </ThemeModeProvider>
         </I18nProvider>
       </MemoryRouter>,
@@ -182,6 +228,7 @@ describe("PreferencesDialog", () => {
     expect(dialog).toBeInTheDocument()
     expect(screen.getByRole("heading", { level: 1, name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "App font size" })).toHaveTextContent("Default")
 
     await userEvent.click(screen.getByRole("button", { name: /close/i }))
     expect(screen.getByTestId("editor-background")).toBeInTheDocument()

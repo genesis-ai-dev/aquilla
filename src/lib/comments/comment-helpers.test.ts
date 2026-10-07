@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { extractMentions, renderCommentHtml, isThreadStale } from "./comment-helpers"
+import {
+  extractMentions,
+  renderCommentHtml,
+  isThreadStale,
+  stripAgentCommentMarker,
+  AGENT_COMMENT_LABEL_SUFFIX,
+} from "./comment-helpers"
 
 describe("extractMentions", () => {
   it("finds @username mentions", () => {
@@ -89,5 +95,19 @@ describe("isThreadStale", () => {
     expect(isThreadStale(undefined, "La lumière")).toBe(false)
     // Even against an empty current translation.
     expect(isThreadStale(null, "")).toBe(false)
+  })
+})
+
+describe("stripAgentCommentMarker (AQU-1233)", () => {
+  it("drops the via-agent marker so a filter entry reads as the person", () => {
+    expect(stripAgentCommentMarker(`alice${AGENT_COMMENT_LABEL_SUFFIX}`)).toBe("alice")
+  })
+
+  it("leaves a human label untouched", () => {
+    expect(stripAgentCommentMarker("alice")).toBe("alice")
+  })
+
+  it("only strips the marker at the end, not a name that merely contains it", () => {
+    expect(stripAgentCommentMarker("alice (via agent) jr")).toBe("alice (via agent) jr")
   })
 })

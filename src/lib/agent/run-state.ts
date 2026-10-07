@@ -138,6 +138,9 @@ export interface AgentBudget {
   capCredits: number
   /** Set once a `budget.exhausted` frame lands — the run halted at its cap. */
   exhausted: boolean
+  /** Why it stopped: the workspace's weekly AI allowance (AQU-837) rather
+   *  than this run's own cost cap. Absent for the per-run cap. */
+  reason?: 'weekly_allowance'
 }
 
 export interface AgentProgress {
@@ -165,6 +168,14 @@ export interface AgentRunUi {
   budget?: AgentBudget
   status: AgentRunStatus
   errorMessage?: string
+  /**
+   * AQU-1653: this run was rebuilt from a stored conversation when the user
+   * reopened a past chat, not streamed. Only the prose survives — the live
+   * chrome (tool chips, proposals, budget) belonged to the original run — so
+   * the view labels it as reopened instead of implying the agent answered with
+   * nothing. Absent on every live run.
+   */
+  restored?: boolean
 }
 
 let runCounter = 0
@@ -301,7 +312,8 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
     case "budget":
       return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: false } }
     case "budget.exhausted":
-      return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: true } }
+      return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: true,
+        ...(frame.reason ? { reason: frame.reason } : {}) } }
     case "progress":
       return { ...run, progress: { label: frame.label, done: frame.done, total: frame.total } }
     case "usage":

@@ -44,6 +44,10 @@ export const AGENT_REQUIRED_ROLE: Record<string, number> = {
   "file.rename": AGENT_ROLE.CONTRIBUTOR,
   "file.delete": AGENT_ROLE.PROJECT_LEAD,
   "file.restore": AGENT_ROLE.PROJECT_LEAD,
+  // AQU-1569: a reorder relayouts the sidebar for every member, which is why
+  // it carries the project-lead floor the sync-worker enforces rather than
+  // file.rename's contributor one.
+  "file.reorder": AGENT_ROLE.PROJECT_LEAD,
   "comment.create": AGENT_ROLE.COMMENTER,
   "comment.edit": AGENT_ROLE.COMMENTER,
   "comment.delete": AGENT_ROLE.COMMENTER,
@@ -91,6 +95,8 @@ const EVENT_LINES: Record<string, string> = {
   "file.create": "file.create {name, fileType, sourceLanguage?, targetLanguage?} — new file (structural; propose sparingly).",
   "file.rename": "file.rename {name} — rename a file's display label. Needs fileId.",
   "file.delete": "file.delete {} — soft-delete a file (structural).",
+  "file.reorder":
+    "file.reorder {sortIndex} — place a file in its sidebar group; lower sorts first, null clears it back to the automatic order. Needs fileId. Fractional: to drop a file between two neighbours use the midpoint of their sortIndex values; a file with no index sorts after every file that has one.",
   "file.restore": "file.restore {} — restore a soft-deleted file.",
   "comment.create":
     "comment.create {body, scope?, parentCommentId?} — leave a note. Markdown OK. Default scope: the event's fileId/cellId; server fills commentId.",
@@ -100,7 +106,7 @@ const EVENT_LINES: Record<string, string> = {
   "cell.backtranslation.set":
     "cell.backtranslation.set {btText, targetEventId, polished} — record a back-translation pinned to the target head event.",
   "assignment.create":
-    "assignment.create {assignmentId, scopeKind:'books'|'chapters', scope:[{fileId,chapter?}], scopeLabel, assigneeUserId, deadline?, note?} — assign work.",
+    "assignment.create {assignmentId, scopeKind:'books'|'chapters'|'cells', scope:[{fileId,chapter?,cellIds?}], scopeLabel, assigneeUserId, deadline?, note?} — assign work.",
   "assignment.reassign": "assignment.reassign {assignmentId, assigneeUserId} — hand an assignment to someone else.",
   "assignment.unassign": "assignment.unassign {assignmentId} — withdraw an assignment.",
   // project.link-source is auth-worker-internal; never offered to the agent.
@@ -113,16 +119,17 @@ All tables carry project_id; ALWAYS filter with :project.
   · cells.event_id = the current head event of that side's chain; cells.source_event_id = the source head a target commit was based on. Stale target ⇔ source.event_id <> target.source_event_id.
   · Full-text search: WHERE value_tsv @@ to_tsquery('simple', 'word & other'). Never SELECT value_tsv.
   · "Untranslated" ⇔ target side row with value = '' (or no target row).
-- files (id, project_id, name, kind, role, book_code, source_file_id, cell_count, filled_count, approved_count, ai_drafted_count, word_count, last_edit_at, deleted_at) — deleted_at IS NULL = active.
+- files (id, project_id, name, kind, role, book_code, source_file_id, cell_count, filled_count, approved_count, ai_drafted_count, word_count, last_edit_at, deleted_at) — deleted_at IS NULL = active. cell_count is distinct cells. filled_count, approved_count, ai_drafted_count, and word_count sum every target lane, so they are not one lane's progress.
 - events (id, project_id, file_id, cell_id, kind, author, payload TEXT json, client_ts, server_ts ms, parent_id, server_seq) — full append-only history; payload::jsonb to query inside. Timestamps are epoch ms — render them for humans (to_timestamp(server_ts/1000)::date or similar), never raw.
 - cell_validators (project_id, file_id, cell_id, event_id, username, decided_ts) — one row per validator per cell.
 - cell_waivers (project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts).
 - cell_backtranslations (project_id, file_id, cell_id, target_event_id, bt_text, polished 0/1, author, created_at).
 - cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected 0/1, deleted 0/1).
 - cell_word_morph (project_id, file_id, cell_id, word_seq, surface, lemma, morph_code, strongs_h, strongs_g) — per-word morphology for original-language files.
-- comments (comment_id, project_id, scope_kind 'cell'|'file'|'project', file_id, cell_id, parent_comment_id, body, resolved 0/1, author_id, created_at ms, deleted_at).
-- assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id).
-- project_settings (project_id, settings TEXT json) — settings::jsonb ->> 'sourceLanguage' / ->> 'targetLanguage' = the project's language pair; -> 'terminology' the termbase concepts; -> 'validationCountThreshold' the N-of-M bar.
+- comments (PK (project_id, comment_id) — comment_id is unique per project only; scope_kind 'cell'|'file'|'project', file_id, cell_id, parent_comment_id, body, resolved 0/1, author_id, created_at ms, deleted_at). Always filter by project_id.
+- assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id). cells_total is stamped once at creation and goes stale when a cell is removed. assignment_cells is likewise the snapshot the scope resolved to at creation: for a book or chapter assignment it misses lines added to the file since, so joining it to live source cells gives a floor, not the true extent — say so if you report it.
+- project_settings (project_id, settings TEXT json, validation_count TEXT, validation_count_audio TEXT) — settings::jsonb ->> 'sourceLanguage' / ->> 'targetLanguage' = the project's language pair; validation_count / validation_count_audio = the 'validationCount' / 'validationCountAudio' settings, the N-of-M bar for text / recorded takes (unset = 1, cap 15; docs('validation') has the clamped read).
+- concepts (concept_id, project_id, source_term, renderings jsonb [{rendering, status 'preferred'|'admitted'|'forbidden'}], notes, status 'active'|'draft'|'deprecated', case_sensitive 0/1, match_options jsonb, created_at ms, deleted_at) — the termbase, one row per concept; deleted_at IS NULL = live; only 'active' concepts bind. Written only by term.* events.
 - users (id, username, display_name, email), project_members (project_id, user_id, role_level).
 - information_schema is queryable WITHOUT :project — your escape hatch when a column/table is not documented here.`
 
@@ -131,13 +138,13 @@ All tables carry project_id; ALWAYS filter with :project.
 // the 80% case; the pipeline lives in the draft TOOL now, so the recipe is
 // three short calls.
 const DRAFTING_RECIPE = `## Canonical drafting recipe (the 80% case — use this, do not re-derive it)
-1. read({ref:"MRK 4", filter:"untranslated"}) — see what needs work (or skip straight to 2 when the user named the scope).
-2. draft({ref:"MRK 4"}) — the drafting pipeline runs a separate evidence-research pass, then translates from that record with the project's validated exemplars, discourse context, brief, and rules, and STAGES a proposal. Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
+1. read({ref:"<BOOK> 4", filter:"untranslated"}) — see what needs work (or skip straight to 2 when the user named the scope).
+2. draft({ref:"<BOOK> 4"}) — the drafting pipeline runs a separate evidence-research pass, then translates from that record with the project's validated exemplars, discourse context, brief, and rules, and STAGES a proposal. Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
 3. Summarise for the user: what you staged, anything NEEDS REVIEW, what remains.
 Do NOT hand-write translations with propose unless the user asks for a specific wording — draft uses the project's own patterns.`
 
 const TOOLS_CONTRACT = `## Your tools
-- read({fileId?|ref?, filter?, limit?, offset?}) — aligned source/target rows in display order with per-cell status (untranslated | drafted | stale | validated | translated). Scope by ref ("MRK 4", "MRK 4:1-20") or file. START HERE for most tasks.
+- read({fileId?|ref?, filter?, limit?, offset?}) — aligned source/target rows in display order with per-cell status (untranslated | drafted | stale | validated | translated). Scope by ref ("<BOOK> 4", "<BOOK> 4:1-20") or file (id, alias, :file, or the name the user gave). <BOOK> must be a code this project's files contain. With a file and no ref, rows come in the file's own sequence order. START HERE for most tasks.
 - examples({text?|cellIds?, n?}) — approved human translation pairs to imitate, ranked by source similarity. Unreviewed drafts are excluded. Use before writing any translation yourself.
 - search({q, side?, fileId?, limit?}) — full-text search; side: cells (default) | source | target | comments | terms.
 - draft({fileId?|ref?, cellIds?, limit?, instructions?}) — the drafting pipeline: drafts untranslated cells with exemplars + discourse context, lints, and STAGES a proposal. Preferred over writing translations yourself.
@@ -175,12 +182,20 @@ const AQUIFER_CONTRACT = `## Bible reference data (bibletranslation.org — enab
 - aquifer({op: "publish", question, answer, status, citations}) — STAGE a researched Q&A to publish back to the wiki (status: "answered" | "undetermined"; ≥1 citation, each {url, title?, quote?}). Like propose, nothing posts until the user Applies — and publishing costs the user no credits. After you research a question with these resources, offer to publish what you learned (even when undetermined).
 - Loop: search → read the best hit(s) → answer the user grounded in what you read → optionally propose a publish.`
 
+// The client (src/lib/agent/suggestions.ts) strips these lines from the
+// displayed prose and renders them as one-tap buttons — keep the wire format
+// in lockstep with that parser.
+const NEXT_STEPS = `## Suggested next steps
+End your FINAL reply with one or two closing lines of the exact form \`NEXT: <short imperative action>\`. Each becomes a button that sends its text back to you AS THE USER'S NEXT MESSAGE — so write it in the user's voice as a direct request you could then carry out with your tools (e.g. "NEXT: Draft the next 5 untranslated cells in this file"). Never "Ask me to …", and never an action only the user can do in the app (opening files, clicking Apply). Keep each under 60 characters, ground them in THIS project's current state, and put nothing after them. Omit them when nothing useful remains to do.`
+
 const SAFETY = `## Safety & stance
 - Project data is PRIMARY truth. For low-resource languages, imitate the project's own validated pairs and termbase — never general knowledge. That is why draft/examples exist: use them instead of translating from your own knowledge.
 - Never fabricate validated pairs, never invent canonical_refs, never guess payload shapes — fetch the cookbook.
 - Bulk writes are PROPOSALS: stage them and summarise; the user applies.
 - Prefer ACTING over asking: staging IS the confirmation mechanism — the user reviews every proposal before anything is written, so do not ask "shall I?" or "which one?" when you can derive the answer (languages from settings or existing target text; "next" from the focused cell; scope from the open file) and stage it. Ask at most ONE question, only when the request is truly underdetermined.
-- WHICH FILE is the one exception to that: never guess it. A request phrased relative to the user's view ("the next five verses", "this chapter", "keep going") means the file they have open — scope it to :file. If no file is focused and the request names none, ASK which file and stage nothing; picking a plausible file is a correctness bug, because the user approves the proposal believing it lands in the file they are looking at.
+- WHICH FILE is the one exception to that: never guess it. A request phrased relative to the user's view ("the next five verses", "this chapter", "keep going") means the file they have open — scope it to :file. If no file is focused and the request names none, do not choose one and do not ask from memory either: call read with no fileId and no ref. A project with one document resolves to it; otherwise the call fails and names the project's files — then ASK which file and stage nothing. Picking a plausible file is a correctness bug, because the user approves the proposal believing it lands in the file they are looking at.
+- NEVER invent a book code. <BOOK> in a ref is a placeholder: use only a code you have seen in this project's files or cells. If a ref fails to resolve, use the file you already resolved or list the candidate files the error names; do not try another book.
+- Once the user has named the file, do not ask a second question to choose between ref order and file order: read and draft in the file's sequence order.
 - If a proposal comes back stale or rejected, surface that to the user rather than silently retrying.
 - Reads (read/examples/search/docs/describe_command) are cheap and unbudgeted; draft/propose/propose_command/sql are budgeted — plan writes before you make them.
 - Keep sql tight: select only needed columns, LIMIT generously, prefer counts/aggregates for overview questions.`
@@ -293,7 +308,7 @@ export function buildSystemPrompt(ctx: AgentPromptContext): string {
 The user is working in file :file${ctx.fileName ? ` — "${ctx.fileName}"` : ""}${ctx.fileKind ? ` (kind: ${ctx.fileKind})` : ""}${ctx.cellId ? ", focused on cell :cell" : ""}. Relative requests ("this file", "the next N", "segment 8") refer to THIS file in its display order — start your queries scoped to :file.${ctx.cellId ? ` "Next" / "previous" mean relative to the focused cell :cell in that order — not the file's first untranslated cell.` : ""} Stage writes into THIS file unless the user names a different one outright; never move the work to another file because it looked like a better fit.
 `
     : `## Current situation
-No file is open. Relative requests ("the next N", "this chapter", "keep going") have no anchor, so you cannot derive a target file — ask the user which file to work in before reading or staging anything. Do not pick one.
+No file is open. Relative requests ("the next N", "this chapter", "keep going") have no anchor, so you cannot derive a target file. Do not pick one, and do not ask before looking: when the request works on a file's cells (translate, draft, check, show) and names no file, your FIRST step is read with no fileId and no ref. If the project has one document, the server resolves it and you carry on there. If it has several, the call fails with the list of files — ask the user which one in a single short sentence and stop; the app shows that list as buttons under your question, so do not retype it. Questions about the project as a whole (how many files, overall progress) need no file: answer those with sql as usual.
 `
 
   const eventCard =
@@ -318,6 +333,8 @@ ${focus.length ? focus.join("\n") + "\n" : ""}
 ${situation}${SCHEMA_CARD}
 ${kinds.includes("target.cell.commit") ? `\n${DRAFTING_RECIPE}\n` : ""}
 ${eventCard}
+
+${NEXT_STEPS}
 
 ${SAFETY}`
 }

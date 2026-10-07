@@ -11,8 +11,13 @@
 // fallback voice's face made "nobody chose this" look like a weak choice).
 // A VTT import with speakers writes castAssignments, so imported cues
 // correctly read as explicit.
+//
+// The Audio view opens the SAME picker from a field under each line's waveform
+// (`variant="field"`, Sam, 2026-09-28): a gutter of circles beside every row
+// unbalanced that page, and in narration nearly every circle is the Narrator.
 
 import { useState } from "react"
+import { ChevronsUpDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -33,17 +38,29 @@ export interface CastGutterVoiceProps {
   editable: boolean
   voices: Voice[]
   onPick(voiceId: string, opts?: { applyToSpeaker?: boolean }): void
+  showLanguageBadge?: boolean
   /** Take the character off this line without replacing it (Matt's QA,
    *  2026-08-21). Offered only while the line carries one — an unassign row
    *  on an already-empty line is noise. Honours the same apply-to-speaker
    *  checkbox the picker does (Sam, same day): the footer promises "all
    *  «name» lines" and must mean it for BOTH actions. */
   onClear?(opts?: { applyToSpeaker?: boolean }): void
+  /** How many lines share this line's cast name — asked when the picker
+   *  opens, so the apply-to-all box can say what it would change. */
+  countSpeakerLines?(): number
+  /** "circle" (default): the 32px circle in the Media view's gutter. "field":
+   *  a field naming the voice, under a line's waveform in the Audio view. */
+  variant?: "circle" | "field"
 }
 
-export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear }: CastGutterVoiceProps) {
+export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, variant = "circle" }: CastGutterVoiceProps) {
   const t = useT()
-  const [open, setOpen] = useState(false)
+  const [open, setOpenState] = useState(false)
+  const [speakerLines, setSpeakerLines] = useState<number | null>(null)
+  const setOpen = (next: boolean) => {
+    if (next) setSpeakerLines(countSpeakerLines ? countSpeakerLines() : null)
+    setOpenState(next)
+  }
   const [applyToSpeaker, setApplyToSpeaker] = useState(false)
   // Hover text leads with the CHARACTER (Sam 2026-08-07) — the voice is the
   // detail, the name is the answer to "who is this circle?".
@@ -52,41 +69,67 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
       ? t("audio.castGutter.namedTooltip", { castName, voiceName: voice.name })
       : voice.name
     : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
+  const field = variant === "field"
+  const avatarPx = field ? 20 : 32
   const trigger = (
-    <span className={cn("grid place-items-center rounded-md")}>
+    <span className={cn("grid place-items-center rounded-md", field && "shrink-0")}>
       {/* Nothing is drawn for a line nobody cast — no face, no colour, no
           initial. The empty dashed ring IS the state; a faded orb read as a
           weak assignment rather than as none. */}
-      {explicit ? <VoiceAvatar voice={voice} size={32} /> : <NoCharacterAvatar size={32} />}
+      {explicit ? <VoiceAvatar voice={voice} size={avatarPx} /> : <NoCharacterAvatar size={avatarPx} />}
     </span>
   )
+  // The field names the voice beside its mark; nobody cast reads as the
+  // default voice, muted.
+  const fieldLabel = (
+    <span className={cn("min-w-0 truncate", !explicit && "text-muted-foreground")}>
+      {explicit ? voice.name : t("audio.castGutter.defaultVoiceLabel", { voiceName: voice.name })}
+    </span>
+  )
+  const tooltipSide = field ? "top" : "right"
   if (!editable) {
     return (
-      <AppTooltip content={tooltip} side="right">
-        <span data-testid="gutter-voice" data-explicit={String(explicit)} aria-label={tooltip}>
+      <AppTooltip content={tooltip} side={tooltipSide}>
+        <span
+          data-testid={field ? "voice-field" : "gutter-voice"}
+          data-explicit={String(explicit)}
+          aria-label={tooltip}
+          className={cn(field && "flex h-7 min-w-0 items-center gap-1.5 px-1 text-xs text-muted-foreground")}
+        >
           {trigger}
+          {field && fieldLabel}
         </span>
       </AppTooltip>
     )
   }
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <AppTooltip content={tooltip} side="right">
+      <AppTooltip content={tooltip} side={tooltipSide}>
         <PopoverTrigger
           render={
             <button
               type="button"
-              data-testid="gutter-voice"
+              data-testid={field ? "voice-field" : "gutter-voice"}
               data-explicit={String(explicit)}
               aria-label={t("audio.castGutter.chooseCharacterAriaLabel", { tooltip })}
-              className="rounded-md opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
+              className={
+                field
+                  ? "flex h-7 w-56 min-w-0 max-w-full items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent/50"
+                  : "rounded-md opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
+              }
             />
           }
         >
           {trigger}
+          {field && (
+            <>
+              {fieldLabel}
+              <ChevronsUpDown className="ms-auto size-3 shrink-0 text-muted-foreground" />
+            </>
+          )}
         </PopoverTrigger>
       </AppTooltip>
-      <PopoverContent align="start" side="right" className="w-60 p-2">
+      <PopoverContent align="start" side={field ? "bottom" : "right"} className="w-60 p-2">
         {/* The way OUT of a casting, above the ways in. Shown only while the
             line carries a character (an explicit voice, or a lingering name
             behind an NC ring — that name still groups the exports, so it must
@@ -109,6 +152,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
         <VoicePickerContent
           voices={voices}
           activeId={explicit ? voice.id : undefined}
+          showLanguageBadge={showLanguageBadge}
           onPick={(voiceId) => {
             onPick(voiceId, { applyToSpeaker })
             setOpen(false)
@@ -122,7 +166,9 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                   checked={applyToSpeaker}
                   onChange={(e) => setApplyToSpeaker(e.target.checked)}
                 />
-                {t("workspace.castGutterVoice.applyToAllLines", { name: castName ?? "" })}
+                {speakerLines != null
+                  ? t("workspace.castGutterVoice.applyToAllLinesCount", { name: castName ?? "", count: speakerLines })
+                  : t("workspace.castGutterVoice.applyToAllLines", { name: castName ?? "" })}
               </label>
             ) : undefined
           }

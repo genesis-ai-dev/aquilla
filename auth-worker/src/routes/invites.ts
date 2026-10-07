@@ -22,6 +22,8 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
+import { projectElevationDenial } from "../services/elevation-gate"
+import { auditMembershipChange } from "../services/admin-audit"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
@@ -39,6 +41,7 @@ import {
   MAX_INVITE_SCOPE_LANES,
   MAX_LANE_VALUE_LENGTH,
   parseScopeLanes,
+  resolveInviteLaneScopes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
 
@@ -114,6 +117,8 @@ invites.post(
           403,
         )
       }
+      const unelevated = await projectElevationDenial(c, resolved)
+      if (unelevated) return unelevated
     }
 
     const token = crypto.randomUUID().replace(/-/g, "")
@@ -121,7 +126,20 @@ invites.post(
       body.expiresAt ?? new Date(Date.now() + DEFAULT_INVITE_TTL_MS).toISOString()
 
     // AQU-528: same lane scopes on every row sharing the token; null = unscoped.
-    const scopeLanesJson = serializeScopeLanes(body.scopeLanes)
+    // AQU-1607: stored as lane ids, resolved against every project the token
+    // covers — accept picks out the ones belonging to the project joined.
+    const laneScopes = await resolveInviteLaneScopes(c.env, projectIds, body.scopeLanes ?? [])
+    if (!laneScopes.ok) {
+      return c.json(
+        {
+          error: "scopeLanes must each name one lane of these projects",
+          ...(laneScopes.ambiguous.length > 0 ? { ambiguous: laneScopes.ambiguous } : {}),
+          ...(laneScopes.unmatched.length > 0 ? { unmatched: laneScopes.unmatched } : {}),
+        },
+        400,
+      )
+    }
+    const scopeLanesJson = serializeScopeLanes(laneScopes.laneIds)
 
     for (const pid of projectIds) {
       try {
@@ -136,6 +154,12 @@ invites.post(
         console.error(`[invites/multi] insert failed for ${pid}:`, err)
         return c.json({ error: "Failed to create multi-project invite" }, 500)
       }
+      await auditMembershipChange(c.env, user, {
+        action: "project.invite.create",
+        where: { scope: "project", projectId: pid },
+        roleBefore: null,
+        roleAfter: grantedRole,
+      })
     }
 
     return c.json({
@@ -464,8 +488,11 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
         continue
       }
 
+      // [Pen test 2026-10-06] Re-accept never raises a (possibly demoted) role.
       const finalRole = existing
-        ? Math.max(existing.role_level, invite.role_level)
+        ? invite.used_at
+          ? existing.role_level
+          : Math.max(existing.role_level, invite.role_level)
         : invite.role_level
 
       if (existing) {

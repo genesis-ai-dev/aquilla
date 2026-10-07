@@ -92,6 +92,93 @@ describe("RuleEditor toggles", () => {
   })
 })
 
+// AQU-195: the editor must never present a rule it cannot save. Both cases
+// below used to look authorable — the sentence read fine, the fields accepted
+// input — and then failed (or silently persisted junk) on Save.
+describe("RuleEditor unsaveable-draft guards (AQU-195)", () => {
+  function fillNameAndPattern(pattern = "bad") {
+    fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "R" } })
+    fireEvent.change(screen.getByLabelText("Pattern"), { target: { value: pattern } })
+  }
+
+  it("disables the source side for Forbidden and Required, and explains why", () => {
+    renderEditor()
+
+    const sourceBtn = screen.getByRole("button", { name: /^Source$/i })
+    expect(sourceBtn).toBeDisabled()
+    expect(screen.getByRole("button", { name: /^Target$/i })).toBeEnabled()
+    expect(screen.getByText(/constrain the target/i)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /^Required$/i }))
+    expect(screen.getByRole("button", { name: /^Source$/i })).toBeDisabled()
+  })
+
+  it("snaps a source-side draft back to the target when the mode stops supporting it", () => {
+    const onSave = vi.fn()
+    // A `source-target-match` rule decodes to side "source" — the one way the
+    // editor legitimately starts there. Switching it to Forbidden used to strand
+    // the draft on an inexpressible source/mode pair.
+    const matchRule = {
+      id: "r1", name: "R", description: "", severity: "minor" as const,
+      source: "user" as const, scope: "project" as const,
+      check: { type: "source-target-match" as const, pattern: "bad" },
+      enabled: true, createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    render(<RuleEditor initialRule={matchRule} cells={[]} onSave={onSave} onCancel={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /^Forbidden$/i }))
+    expect(screen.getByRole("button", { name: /^Target$/i })).toHaveClass(/bg-primary/)
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ check: { type: "target-forbids", targetPattern: "bad" } }),
+    )
+  })
+
+  it("blocks save on an invalid autofix pattern and says so before a sample is typed", () => {
+    const onSave = vi.fn()
+    render(<RuleEditor cells={[]} onSave={onSave} onCancel={vi.fn()} />)
+
+    fillNameAndPattern()
+    fireEvent.click(screen.getByText(/Add autofix \(optional\)/i))
+    fireEvent.change(screen.getByLabelText("Find pattern"), { target: { value: "(unclosed" } })
+
+    expect(screen.getByText(/Invalid autofix pattern/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Create rule" }))
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it("blocks save on invalid autofix flags", () => {
+    const onSave = vi.fn()
+    render(<RuleEditor cells={[]} onSave={onSave} onCancel={vi.fn()} />)
+
+    fillNameAndPattern()
+    fireEvent.click(screen.getByText(/Add autofix \(optional\)/i))
+    fireEvent.change(screen.getByLabelText("Find pattern"), { target: { value: "a" } })
+    fireEvent.change(screen.getByLabelText("Flags"), { target: { value: "gg" } })
+
+    fireEvent.click(screen.getByRole("button", { name: "Create rule" }))
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it("still saves a valid autofix", () => {
+    const onSave = vi.fn()
+    render(<RuleEditor cells={[]} onSave={onSave} onCancel={vi.fn()} />)
+
+    fillNameAndPattern()
+    fireEvent.click(screen.getByText(/Add autofix \(optional\)/i))
+    fireEvent.change(screen.getByLabelText("Find pattern"), { target: { value: "bad" } })
+    fireEvent.change(screen.getByLabelText("Replace with"), { target: { value: "good" } })
+
+    fireEvent.click(screen.getByRole("button", { name: "Create rule" }))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        autofix: { kind: "regex-replace", pattern: "bad", replacement: "good", flags: "gi" },
+      }),
+    )
+  })
+})
+
 // AQU-609: lane scoping in the editor. WHY: the saved `scope`/`lane` decide
 // which lanes a rule constrains — a wrong payload here means a French-only
 // rule silently lints every lane (or an org rule degrades to project scope on
@@ -136,6 +223,27 @@ describe("RuleEditor lane scope (AQU-609)", () => {
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ scope: "lane", lane: "fr" }),
     )
+  })
+
+  // AQU-1509: the scope must be readable right beside Save, so a rule is
+  // never saved into the wrong lane unnoticed.
+  it("states what the rule will apply to beside Save, tracking the lane choice", async () => {
+    const user = userEvent.setup()
+    render(
+      <RuleEditor
+        cells={[]}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+        lanes={["fr"]}
+        laneLabels={{ fr: "French" }}
+        defaultLaneLabel="Spanish (base)"
+      />,
+    )
+    const summary = screen.getByTestId("rule-editor-lane-summary")
+    expect(summary).toHaveTextContent("This rule will apply in every lane.")
+    await user.click(screen.getByRole("combobox", { name: "Applies to" }))
+    await user.click(await screen.findByRole("option", { name: "French" }))
+    expect(summary).toHaveTextContent("This rule will apply only in French. Other lanes ignore it.")
   })
 
   it("clears the lane pin when switching a lane rule back to All lanes", async () => {

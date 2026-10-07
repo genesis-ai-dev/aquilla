@@ -22,6 +22,7 @@
 
 import { v4 as uuid } from "uuid"
 import type { TranslatableString } from "./types"
+import { sanitizeParseDetail } from "./parse-error-detail"
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -373,7 +374,10 @@ export function parseXliff(xmlText: string): TranslatableString[] {
   // Check for parse errors (the browser wraps them in a <parsererror> element)
   const parseError = doc.querySelector("parsererror")
   if (parseError) {
-    throw new Error(`XLIFF parse error: ${parseError.textContent?.slice(0, 200)}`)
+    // OPS-30: see tmx.ts — no document text in a message that becomes telemetry.
+    throw new Error(
+      `XLIFF parse error: ${sanitizeParseDetail(parseError.textContent ?? "malformed XML").slice(0, 200)}`,
+    )
   }
 
   const root = doc.documentElement

@@ -9,6 +9,7 @@ import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
 import { UserError } from "@/lib/errors/user-error"
+import { throwIfElevationRequired } from "@/lib/frontier/elevation"
 
 export interface CloudFileSummary {
   id: string
@@ -26,6 +27,9 @@ export interface CloudFileSummary {
   hasScriptureContent?: boolean
   /** Sidebar folder. Absent when the file is ungrouped. */
   corpusMarker?: string | null
+  /** AQU-1569: hand-placed position within the sidebar group; absent/null when
+   *  nobody has reordered that group. */
+  sortIndex?: number | null
   sourceLanguage?: string | null
   targetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
@@ -55,6 +59,15 @@ export interface CloudProjectSummary {
   /** AQU-822: the org's effective termbase-edit floor. Returned by the
    *  single-project endpoint; absent on the list endpoint / older servers. */
   termbaseEditMinRole?: number | null
+  /** AQU-1086: the org's effective language-edit floor. Returned by the
+   *  single-project endpoint; absent on the list endpoint / older servers. */
+  languageEditMinRole?: number | null
+  /** AQU-1002: the org's effective comment floors — the minimum role to open a
+   *  thread, and to resolve/reopen a thread someone else opened. Returned by
+   *  the single-project endpoint; absent on the list endpoint / older servers,
+   *  where callers fall back to the pre-AQU-1002 defaults. */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
@@ -92,6 +105,11 @@ export interface CloudProjectSummary {
   sourceLinkConsumes?: "source" | "target" | null
   sourceLinkGate?: "head" | "validated" | null
   sourceLinkCursor?: number | null
+  /** AQU-1559: which of the upstream's files the link follows (null = all of
+   *  them, now and later) and how many files the upstream holds. Single-project
+   *  endpoint only, like the rest of this family. */
+  sourceLinkFileIds?: string[] | null
+  sourceLinkUpstreamFileCount?: number | null
   role: {
     level: number
     name: string
@@ -113,11 +131,13 @@ export interface CloudProjectSummary {
  */
 export async function createCloudProject(
   jwt: string,
-  project: { id: string; name: string; orgId?: number },
+  project: { id: string; name: string; orgId?: number; teamIds?: number[] },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<void> {
   const body: Record<string, unknown> = { id: project.id, name: project.name }
   if (project.orgId != null) body.orgId = project.orgId
+  // AQU-1352 P2: create into teams (server attaches each one).
+  if (project.orgId != null && project.teamIds?.length) body.teamIds = project.teamIds
   const res = await fetch(`${apiUrl}/api/v2/projects`, {
     method: "POST",
     headers: {
@@ -126,6 +146,8 @@ export async function createCloudProject(
     },
     body: JSON.stringify(body),
   })
+  // AQU-1540: a platform admin creating into an org they don't belong to needs the code.
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const body = await res.text().catch(() => "")
     throw new UserError(res.status, body, "project")
@@ -181,6 +203,53 @@ export async function fetchAccessibleProjectsResult(
     // Network error — server unreachable.
     return { ok: false, reason: "unreachable" }
   }
+}
+
+/** First page size for project tables and pickers (matches auth-worker default). */
+export const PROJECT_DIRECTORY_PAGE_SIZE = 40
+
+export interface ProjectDirectoryPage {
+  projects: CloudProjectSummary[]
+  nextCursor: string | null
+}
+
+/**
+ * Paged GET /api/v2/projects. Pass `limit` so the catalog loads a page at a
+ * time instead of dumping every accessible (or, for platform admins, every)
+ * project into the client.
+ */
+export async function listProjectsPage(
+  jwt: string,
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    orgId?: number
+    minRole?: number
+    archived?: boolean
+    signal?: AbortSignal
+  } = {},
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<ProjectDirectoryPage> {
+  const params = new URLSearchParams()
+  const q = opts.q?.trim()
+  if (q) params.set("q", q)
+  params.set("limit", String(opts.limit ?? PROJECT_DIRECTORY_PAGE_SIZE))
+  if (opts.cursor) params.set("cursor", opts.cursor)
+  if (opts.orgId != null) params.set("orgId", String(opts.orgId))
+  if (opts.minRole != null) params.set("minRole", String(opts.minRole))
+  if (opts.archived) params.set("archived", "true")
+  const res = await fetch(`${apiUrl}/api/v2/projects?${params}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${jwt}` },
+    signal: opts.signal,
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new UserError(res.status, body, "project")
+  }
+  const body = (await res.json()) as { projects?: CloudProjectSummary[]; nextCursor?: string | null }
+  return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
 }
 
 /**
@@ -387,6 +456,12 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.bookCode ? { bookCode: f.bookCode } : {}),
       ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(f.corpusMarker?.trim() ? { corpusMarker: f.corpusMarker.trim() } : {}),
+      // Shape-checked rather than truthiness-checked, twice over: 0 is an
+      // ordinary position (a renumber stamps it on the first file), and this is
+      // raw JSON off the wire, so a NaN would otherwise reach the comparator.
+      ...(typeof f.sortIndex === "number" && Number.isFinite(f.sortIndex)
+        ? { sortIndex: f.sortIndex }
+        : {}),
       ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
       ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
@@ -428,11 +503,30 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   if (summary.termbaseEditMinRole !== undefined) {
     record.termbaseEditMinRole = summary.termbaseEditMinRole
   }
+  // AQU-1086: same for the org's language-edit floor.
+  if (summary.languageEditMinRole !== undefined) {
+    record.languageEditMinRole = summary.languageEditMinRole
+  }
+  // AQU-1002: same treatment for the comment floors — absent leaves them
+  // undefined, which the comment surfaces read as the stock defaults.
+  if (summary.commentCreateMinRole !== undefined) {
+    record.commentCreateMinRole = summary.commentCreateMinRole
+  }
+  if (summary.commentResolveMinRole !== undefined) {
+    record.commentResolveMinRole = summary.commentResolveMinRole
+  }
   // AQU-476/478: propagate link mode/consumes/gate/cursor when present.
   if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode
   if (summary.sourceLinkConsumes !== undefined) record.sourceLinkConsumes = summary.sourceLinkConsumes
   if (summary.sourceLinkGate !== undefined) record.sourceLinkGate = summary.sourceLinkGate
   if (summary.sourceLinkCursor !== undefined) record.sourceLinkCursor = summary.sourceLinkCursor
+  // AQU-1559: same treatment for the link's file selection — absent (older
+  // server, or the list endpoint) leaves it undefined, which the Source link
+  // card reads as "follows the whole project", the pre-slice behaviour.
+  if (summary.sourceLinkFileIds !== undefined) record.sourceLinkFileIds = summary.sourceLinkFileIds
+  if (summary.sourceLinkUpstreamFileCount !== undefined) {
+    record.sourceLinkUpstreamFileCount = summary.sourceLinkUpstreamFileCount
+  }
   return record
 }
 

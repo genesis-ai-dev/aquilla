@@ -4,7 +4,9 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["node"],
+    /* vite/client: e2e helpers import src/ parsers that read import.meta.env
+     * (AQU-1060 helloao → resource-proxy). */
+    "types": ["node", "vite/client"],
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -26,5 +28,9 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["e2e/**/*.ts"]
+  "include": ["e2e/**/*.ts"],
+  // e2e/tauri/** is a separate WebdriverIO/Mocha project (browser/expect/describe/it come from
+  // @wdio/globals + @wdio/mocha-framework, not this Playwright/Node project's ambient types) —
+  // see e2e/tauri/tsconfig.json. It's release-gated (tauri-release.yml), not part of `tsc -b`.
+  "exclude": ["e2e/tauri/**"]
 }

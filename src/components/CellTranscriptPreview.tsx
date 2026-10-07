@@ -11,6 +11,9 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
+
+export type TranscriptPreviewState = "stale" | "match" | "differs"
 
 interface Props {
   timings: WordTiming[] | undefined
@@ -33,9 +36,26 @@ function transcriptOf(timings: WordTiming[]): string {
   return timings.map((t) => t.word).join(" ")
 }
 
-function looselyEquals(a: string, b: string): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").trim().replace(/\s+/g, " ")
-  return norm(a) === norm(b)
+
+/**
+ * What the preview should say about this recording versus the cell.
+ *
+ * "Stale" is only when the cell lost the tail of the text these offsets were
+ * aligned to (a shortened cell, same words up to the cut). A correction of
+ * the transcript rewrites the heard words; if that string is longer than the
+ * text already inserted in the cell, the last offset runs past the cell even
+ * though nobody shortened it. That is a wording difference — offer to adopt
+ * what was heard, don't ask for another transcription.
+ */
+export function classifyTranscriptPreview(
+  timings: WordTiming[],
+  cellText: string,
+  alignedToCellText: boolean,
+): TranscriptPreviewState {
+  // The same verdict labels every take in the Recording tab
+  // (transcript-verdict.ts), so the two cannot disagree.
+  const verdict = transcriptVerdict({ timings, cellText, alignedToCellText })
+  return verdict.kind === "stale" ? "stale" : verdict.kind === "match" ? "match" : "differs"
 }
 
 export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function CellTranscriptPreview({
@@ -47,18 +67,11 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
   const [editValue, setEditValue] = useState("")
   if (!timings || timings.length === 0) return null
 
-  const matches = looselyEquals(transcript, cellText)
   const cellHasText = cellText.trim().length > 0
-  // Stale = a timing references a char offset past the current cell text. The
-  // cell was edited (probably shortened) after transcription, so the karaoke
-  // decoration would either no-op or paint the wrong word. Re-transcribe.
-  const lastTiming = timings[timings.length - 1]
-  const isStale = alignedToCellText && lastTiming.end > cellText.length
-
   // Stale needs a fix (amber). Match is a quiet, hands-off reassurance
   // (emerald). Differs is neutral — the transcript is the point, so let it
   // breathe and offer to adopt it.
-  const state: "stale" | "match" | "differs" = isStale ? "stale" : matches ? "match" : "differs"
+  const state = classifyTranscriptPreview(timings, cellText, alignedToCellText)
 
   const surface = {
     stale: "bg-amber-500/[0.07]",

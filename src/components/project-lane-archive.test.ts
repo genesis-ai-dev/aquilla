@@ -9,10 +9,20 @@ import {
 
 describe("project-lane-archive", () => {
   describe("isLaneArchived", () => {
-    it("is false for the default lane and when nothing is archived", () => {
+    it("is false when the set does not list the lane, or lists nothing", () => {
       expect(isLaneArchived("", ["fr-CA"])).toBe(false)
       expect(isLaneArchived("fr-CA", undefined)).toBe(false)
       expect(isLaneArchived("fr-CA", [])).toBe(false)
+      expect(isLaneArchived("", undefined)).toBe(false)
+      expect(isLaneArchived("", [])).toBe(false)
+    })
+
+    // AQU-1600: the former default lane archives like any other, and the
+    // workspace derives this set from the lane ROWS, where its tag is ''.
+    it("reports the former default lane archived when the row set lists its empty tag", () => {
+      expect(isLaneArchived("", [""])).toBe(true)
+      expect(isLaneArchived("", ["", "fr-CA"])).toBe(true)
+      expect(isLaneArchived("fr-BE", ["", "fr-CA"])).toBe(false)
     })
 
     it("matches archived tags case-insensitively", () => {

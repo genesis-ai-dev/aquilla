@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
+import { Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
@@ -59,6 +59,8 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { takeBadgeState } from "@/components/cell/audio-validation-state"
+import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
 
 export interface TargetAudioItem {
   cell: CellData
@@ -128,6 +130,18 @@ export interface TargetAudioLaneProps {
   /** AQU-646: what the waveform loader needs to fetch take bytes. All three
    *  absent = no waveforms, which is what this lane's own tests get. */
   projectId?: string | null
+  /**
+   * The project's required number of audio validators, for the chip's tick.
+   *
+   * REQUIRED, deliberately. It was optional with a default of 1, and both of
+   * TimelineEditor's lane sites simply never passed it — so every clip in the
+   * product measured itself against a threshold of one and wore a "fully
+   * validated" tick after a single vote, on projects asking for two. A default
+   * is exactly what let that go unnoticed: the lane looked like it was doing
+   * the comparison, and it was, against the wrong number. Now the compiler
+   * asks every caller.
+   */
+  validationRequirementAudio: number
   fileId?: string | null
   session?: FrontierSession | null
   /** Test/story seam: supplied peaks bypass the loader entirely, so a test can
@@ -190,6 +204,8 @@ function TargetAudioChip({
   onRetimeTarget,
   onTrimTarget,
   onOpenRecording,
+  validationRequirementAudio = 1,
+  currentUsername = "",
   peaks,
   preview,
 }: {
@@ -237,6 +253,12 @@ function TargetAudioChip({
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   onOpenRecording?(cellId: string): void
+  /** AQU-490: how many validators the project asks for on a recording. */
+  validationRequirementAudio?: number
+  /** Who is looking. Blank is safe — `takeState` never reads a blank name as
+   *  a validator, so an absent session degrades to "not mine", never to a
+   *  false single check. */
+  currentUsername?: string
 }) {
   const t = useT()
   const { cell } = chip.item
@@ -251,6 +273,14 @@ function TargetAudioChip({
    */
   const [previewing, setPreviewing] = useState(false)
   const previewRef = useRef<ClipPreviewHandle | null>(null)
+  /**
+   * Fetching the clip before it can sound (2026-09-30). On a slow connection
+   * that took 14.6s with the button still saying "Play this clip" — nothing on
+   * screen said anything had happened. It shows a spinner now, and a second
+   * press gives up the wait.
+   */
+  const [priming, setPriming] = useState(false)
+  const primingRef = useRef<{ cancelled: boolean } | null>(null)
   useEffect(() => () => { previewRef.current?.stop() }, [])
   /** The mini-playhead's DOM node — positioned imperatively per frame, so the
    *  60Hz ride never re-renders the chip. */
@@ -269,6 +299,26 @@ function TargetAudioChip({
   // AQU-924: saved on this device, and its attach event will NOT reach the
   // server without user action (quarantined / out of retries).
   const syncFailed = Boolean(cell.attachments?.[chip.item.audioId]?.syncFailed)
+  // AQU-490: validated at a GLANCE, and deliberately not a control.
+  //
+  // This is a 16px hover corner with play and record already in it; a popover
+  // and a vote would not fit and would fight the chip's own drag gestures.
+  // The timeline's job here is to show which takes are signed off while you
+  // scrub past them — the vote itself lives on the four surfaces that have
+  // room for it. The source clip is excluded, so an imported film's own
+  // soundtrack never wears a tick.
+  const chipTake = cell.attachments?.[chip.item.audioId]
+  // AQU-490, corrected 2026-09-22: the SAME state machine the gutter reduces
+  // through, not a boolean. A boolean could only ever mean "done", so a chip
+  // wore a double check the moment ONE person had signed it off — which, at a
+  // threshold of two, told the second person their work was finished before
+  // they had started. Depth instead: your own vote below the threshold is a
+  // single check, a met threshold is a double one, and somebody ELSE's lone
+  // vote is nothing at all. (The gutter draws that last case as a filled mic;
+  // the chip has no idle affordance to fill, so it stays bare.)
+  const chipValidationState = chipTake
+    ? takeBadgeState(chipTake, currentUsername, validationRequirementAudio)
+    : null
 
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
@@ -591,6 +641,13 @@ function TargetAudioChip({
       setPreviewing(false)
       return
     }
+    // A press while the clip is still arriving gives up waiting for it.
+    if (primingRef.current) {
+      primingRef.current.cancelled = true
+      primingRef.current = null
+      setPriming(false)
+      return
+    }
     if (!preview) return
     // ASK FIRST, AND SAY SO WHEN THE ANSWER IS NO (2026-08-28). This used to
     // play straight into whatever happened: a clip nobody has measured that is
@@ -598,7 +655,19 @@ function TargetAudioChip({
     // button made no sound and offered no reason. The device is already
     // resumed by the pointerdown handler, which runs inside the gesture, so
     // awaiting here costs nothing a browser cares about.
-    const ready = await preview.prime()
+    const attempt = { cancelled: false }
+    primingRef.current = attempt
+    setPriming(true)
+    let ready: Awaited<ReturnType<typeof preview.prime>>
+    try {
+      ready = await preview.prime()
+    } finally {
+      if (primingRef.current === attempt) {
+        primingRef.current = null
+        setPriming(false)
+      }
+    }
+    if (attempt.cancelled) return
     if (ready !== "ready") {
       toast.add({
         type: "info",
@@ -954,8 +1023,9 @@ function TargetAudioChip({
         <span
           role="button"
           tabIndex={0}
-          title={previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
-          aria-label={previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          aria-busy={priming || undefined}
           data-testid={`tl-target-${cell.id}-play`}
           onPointerDown={(e) => { e.stopPropagation(); preview.prime() }}
           onClick={(e) => { e.stopPropagation(); togglePreview() }}
@@ -966,9 +1036,11 @@ function TargetAudioChip({
               togglePreview()
             }
           }}
-          className="absolute left-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
+          className={chipCornerButtonClass("left")}
         >
-          {previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
+          {priming
+            ? <Spinner className="h-2.5 w-2.5" />
+            : previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
         </span>
       )}
       {showRecordButton && onOpenRecording && (
@@ -991,9 +1063,25 @@ function TargetAudioChip({
               onOpenRecording(cell.id)
             }
           }}
-          className="absolute right-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
+          className={chipCornerButtonClass("right")}
         >
           <Mic className="h-2.5 w-2.5" />
+        </span>
+      )}
+      {(chipValidationState === "self" || chipValidationState === "full") && (
+        <span
+          data-testid={`tl-target-${cell.id}-validated`}
+          title={chipValidationState === "full"
+            ? t("workspace.targetAudioLane.takeValidated")
+            : t("workspace.targetAudioLane.takeValidatedByYou")}
+          aria-label={chipValidationState === "full"
+            ? t("workspace.targetAudioLane.takeValidated")
+            : t("workspace.targetAudioLane.takeValidatedByYou")}
+          className={CHIP_VALIDATED_BADGE_CLASS}
+        >
+          {chipValidationState === "full"
+            ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
+            : <Check className="h-2.5 w-2.5" strokeWidth={3} />}
         </span>
       )}
       {/* The preview's mini-playhead (2026-08-27, Sam): white, non-interactive,
@@ -1006,7 +1094,7 @@ function TargetAudioChip({
           aria-hidden
           ref={playlineRef}
           data-testid={`tl-target-${cell.id}-playline`}
-          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-px bg-white opacity-0 shadow-[0_0_2px_rgba(0,0,0,0.5)]"
+          className={CHIP_PLAYLINE_CLASS}
         />
       )}
       {/* SUB-48: the cut edge of a chip drawn short — the audio really does
@@ -1072,6 +1160,7 @@ export function TargetAudioLane({
   onRetimeTarget,
   onTrimTarget,
   onOpenRecording,
+  validationRequirementAudio,
   emptyCells,
   emptySpans,
   onAddLineAndRecord,
@@ -1362,6 +1451,8 @@ export function TargetAudioLane({
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             onOpenRecording={onOpenRecording}
+            validationRequirementAudio={validationRequirementAudio}
+            currentUsername={session?.username ?? ""}
             peaks={peaksFor.get(chip.item.audioId)}
             preview={makePreview(chip.item.cell, chip.item.audioId, chip.geom.durationSec)}
           />

@@ -34,6 +34,36 @@ export interface ContextReadiness {
   blockingGaps: number
   /** True when nothing important is missing. */
   ready: boolean
+  /** Prerequisites that are actually enforced — see `computeStartBlockers`.
+   *  Empty on a project autopilot may start on. */
+  startBlockers: StartBlockerId[]
+}
+
+/** The two prerequisites autopilot cannot substitute a guess for. */
+export type StartBlockerId = "languages" | "brief"
+
+/**
+ * The one part of readiness that IS a gate (AQU-827).
+ *
+ * Everything else above is advisory: a run with no terminology or no approved
+ * examples still produces something a reviewer can judge. These two are
+ * different in kind. Without both languages the run has no direction to
+ * translate in and infers one from whatever text already exists; without any
+ * brief at all it has no statement of audience, register, or literalness, so
+ * every sentence is steered by nothing. Output in that state is not a weak
+ * draft, it is an unsteerable one — so the start is blocked and the missing
+ * pieces are named, rather than spending a run to discover it.
+ *
+ * Deliberately a floor, not the `ready` bar: ONE answered brief field (or a
+ * generated L1 summary) clears it. This gate says "someone has told autopilot
+ * what this is for", and the readiness checklist keeps asking for the rest.
+ */
+export function computeStartBlockers(context: ProjectContext): StartBlockerId[] {
+  const blockers: StartBlockerId[] = []
+  if (!context.sourceLanguage?.trim() || !context.targetLanguage?.trim()) blockers.push("languages")
+  const answered = Object.values(context.briefParameters).filter((v) => v && v.trim()).length
+  if (answered === 0 && !context.projectBriefL1?.trim()) blockers.push("brief")
+  return blockers
 }
 
 /** Validated pairs below this and the performer is imitating almost nothing —
@@ -133,5 +163,10 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
     (i) => i.level === "missing" && ["terminology", "brief", "examples"].includes(i.id),
   ).length
 
-  return { items, blockingGaps, ready: blockingGaps === 0 }
+  return {
+    items,
+    blockingGaps,
+    ready: blockingGaps === 0,
+    startBlockers: computeStartBlockers(context),
+  }
 }

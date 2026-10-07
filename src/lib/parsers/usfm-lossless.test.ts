@@ -285,6 +285,76 @@ describe("serializeUsfmLossless", () => {
   })
 })
 
+// AQU-865: Gretchen (Biblica Global Publishing) reported a native export writing
+// only the LAST number of a verse range — "\v 1-3" coming back as "\v 3". Codex
+// rebuilds the marker line and had that bug; Aquilla's export never does, because
+// the `\v` token is copied out of the client's own bytes and only the TEXT span
+// between markers is substituted. These tests pin that property, so a future
+// "improvement" that starts composing marker lines from a parsed verse number
+// cannot reintroduce the collapse unnoticed. Mirrored in
+// sync-worker/src/__tests__/usfm-lossless.test.ts — the export runs there.
+describe("serializeUsfmLossless — verse-range labels (AQU-865)", () => {
+  const RANGE_BOOK = `\\id GEN
+\\c 1
+\\p
+\\v 1-3 En el principio creó Dios los cielos y la tierra.
+\\v 4a Y vio Dios que la luz era buena,
+\\v 4b y separó la luz de las tinieblas.
+\\v 5 Y llamó Dios a la luz Día.`
+
+  /** Every verse token the file actually carries, in document order. */
+  const verseTokens = (usfm: string): string[] =>
+    [...usfm.matchAll(/\\v (\S+)/g)].map((m) => m[1])
+
+  it("keeps the full range on the marker when the range verse is translated", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, { "GEN 1:1-3": "In the beginning God created." })
+    expect(out).toContain("\\v 1-3 In the beginning God created.")
+    // The reported defect: the range collapsed to its last (or first) member.
+    expect(verseTokens(out)).toEqual(["1-3", "4a", "4b", "5"])
+  })
+
+  it("keeps a suffixed verse token intact too", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, { "GEN 1:4a": "And God saw the light was good," })
+    expect(out).toContain("\\v 4a And God saw the light was good,")
+    expect(out).toContain("\\v 4b y separó la luz de las tinieblas.")
+    expect(verseTokens(out)).toEqual(["1-3", "4a", "4b", "5"])
+  })
+
+  it("re-parses to the SAME refs — no range is renumbered or expanded", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, {
+      "GEN 1:1-3": "In the beginning God created.",
+      "GEN 1:5": "And God called the light Day.",
+    })
+    expect(parseUsfmLossless(out).verses.map((v) => v.ref)).toEqual([
+      "GEN 1:1-3",
+      "GEN 1:4a",
+      "GEN 1:4b",
+      "GEN 1:5",
+    ])
+  })
+
+  it("leaves an untranslated range verse byte-identical", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    expect(serializeUsfmLossless(doc, { "GEN 1:5": "Day." })).toContain(
+      "\\v 1-3 En el principio creó Dios los cielos y la tierra.",
+    )
+    expect(serializeUsfmLossless(doc)).toBe(RANGE_BOOK)
+  })
+
+  it("removes a range verse whole — marker and range together", () => {
+    const doc = parseUsfmLossless(RANGE_BOOK)
+    const out = serializeUsfmLossless(doc, undefined, { remove: new Set(["GEN 1:1-3"]) })
+    // Neither the words nor a bare/partial marker may survive. A leftover
+    // "\v 1" or "\v 3" here would BE the reported bug, arrived at by deletion.
+    expect(out).not.toContain("En el principio")
+    expect(verseTokens(out)).toEqual(["4a", "4b", "5"])
+    expect(out).toContain("\\v 4a Y vio Dios que la luz era buena,")
+  })
+})
+
 describe("hasIntraVerseMarkers (AQU-276)", () => {
   it("returns false for plain prose verse text", () => {
     expect(hasIntraVerseMarkers("In the beginning God created the heavens and the earth.")).toBe(false)

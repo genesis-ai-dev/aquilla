@@ -26,6 +26,32 @@ This document collects the security findings separately so they can be triaged o
 
 ---
 
+## Remediation status (re-verified 2026-09-03, AQU-299)
+
+The findings below were re-checked against `dev` while working AQU-299. Most were closed
+incidentally by later pen-test passes without this document being updated — the per-finding
+sections that follow still describe the code **as it stood on 2026-06-10**, so read them
+alongside this table rather than as current state.
+
+| ID | Status | Evidence on `dev` |
+|---|---|---|
+| SEC-1 | **Open — human-owned** | Secret provisioning across prod/dev/staging + CI. Not a self-contained code change. |
+| SEC-2 | **Superseded** | `users.password_changed_at` shipped (AQU-632); the remaining per-session revocation + real server-side logout is tracked in AQU-722 (`HITL`). |
+| SEC-3 | **Fixed** | `auth-worker/src/routes/chat.ts` runs the AQU-265 AI guard (model allowlist + per-user/global daily budget) and the `creditGuard`/`recordCredit` ledger. |
+| SEC-4 | **Fixed** | `countRecentEvents`/`recordAuthEvent` throttles now gate login, register, all three password-reset endpoints, access-link redeem, admin, contact and credential mint. |
+| SEC-5 | **Open — human-owned** | Splitting `SYNC_ADMIN_KEY` out of `SYNC_SECRET_KEY` is a rotation/rollout call; explicitly flagged `HITL` on AQU-299. |
+| SEC-6 | **Fixed (SPA worker)** | `worker/security-headers.ts` sets both an enforced and a report-only CSP, covered by `worker/security-headers.test.ts` and `worker/index.test.ts`. Tauri not re-verified in this pass. |
+| SEC-7 | **Fixed** | `hono` is `^4.12.34` (auth-worker, agent-worker) and `^4.13.1` (sync-worker), all ≥ the 4.12.21 fix; `onnxruntime-web` is repinned to stable `1.27.0`. |
+| SEC-8 | **Fixed** | The header comment in `auth-worker/src/routes/dev-seed.ts` now states the correct blast radius and names the old claim as false. |
+| SEC-9 | **Fixed (this pass)** | `POST /api/v2/sync-token` no longer auto-registers an unknown `projectId`; `project_not_found` returns the same 403 as `no_access`. Guarded by "never registers an unknown project, even with a projectName bootstrap" in `auth-worker/src/__tests__/sync-token.test.ts`. Closes OPS-10 in the OPSEC review series. |
+| SEC-10 | **Open — constrained** | scrypt params stay pinned for byte-compatibility with the legacy frontier DB; re-stretching is unblocked only when that constraint is dropped. |
+| SEC-11 | **Fixed** | Both `/register` and `/password-reset/request` return fixed strings and log detail server-side only (`auth-worker/src/routes/auth.ts`). |
+
+Everything still open is a rollout/rotation or legacy-compatibility decision, not a
+self-contained code change.
+
+---
+
 ## Findings
 
 ### SEC-1 — [HIGH] [FACT] Prod, dev, and staging share the same JWT signing secrets

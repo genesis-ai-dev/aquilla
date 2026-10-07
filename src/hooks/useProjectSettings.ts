@@ -5,15 +5,20 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject } from "@/lib/store/project-index"
 import { ROLE } from "@/lib/frontier/roles"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
+import { resolveLanguageEditFloor } from "@/lib/sync/role-policy"
 import {
   fetchProjectSettingsResult,
   patchProjectSettings,
   type PatchResult,
   type ProjectWideSettings,
   type ProjectSettingsResponse,
+  type ProjectLaneView,
+  type ProjectSettingsEditor,
+  settingsEditorName,
 } from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
+import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600).
 // Spec (01-personas-and-roles.md §Role ladder): "Invite / remove members; change
@@ -39,6 +44,133 @@ const TERMINOLOGY_KEY = "terminology"
 export function isTerminologyOnlyPatch(partial: ProjectWideSettings): boolean {
   const keys = Object.keys(partial)
   return keys.length > 0 && keys.every((key) => key === TERMINOLOGY_KEY)
+}
+
+/** AQU-1083: the second key with a floor below maintainer. */
+export const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+
+/**
+ * Is this patch only the structural-cells override?
+ *
+ * Mirrors the terminology carve-out above, and mirrors the server's, which is
+ * the point: this hook refuses a write it believes the server would reject, so
+ * a floor it does not know about shows up as a control that silently does
+ * nothing for exactly the role the feature was written for.
+ */
+export function isCountStructuralOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === COUNT_STRUCTURAL_KEY)
+}
+
+/**
+ * AQU-1086: the project-language keys, gated by the org's configurable
+ * `languageEditMinRole` (default maintainer 600 — today's behaviour) rather
+ * than {@link SETTINGS_EDIT_ROLE_FLOOR}. The default target language and the
+ * extra-lane registry are one scope so the Project Info and Languages cards
+ * can never disagree about who may edit them (AQU-898).
+ *
+ * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
+ * which re-derives the same "only language keys changed" test against the
+ * stored row and remains authoritative.
+ */
+const LANGUAGE_KEYS = new Set(["sourceLanguage", "targetLanguage", "targetLanes", "archivedLanes"])
+
+/** True when a patch changes only project-language keys. */
+export function isLanguageOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => LANGUAGE_KEYS.has(key))
+}
+
+/**
+ * AQU-1246: the second key that does NOT sit behind
+ * {@link SETTINGS_EDIT_ROLE_FLOOR}. A patch that touches only
+ * `autopilotEnabled` — opting this project into (or out of) the experimental
+ * Autopilot surface — is admitted at project_lead(500)+.
+ *
+ * Deliberately a carve-out rather than a floor change: whether your own
+ * project may try an experiment is a lead's call, and admitting this one key
+ * hands a lead nothing else. Everything above it (languages, system prompt,
+ * validation rules, health) keeps the maintainer gate.
+ *
+ * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
+ * which re-derives the same "only this key changed" test against the stored
+ * row and remains authoritative. This client copy exists to stop a
+ * guaranteed-403 write and to keep the AQU-255 rule intact (never apply a
+ * below-floor patch locally).
+ */
+export const AUTOPILOT_EDIT_ROLE_FLOOR = ROLE.PROJECT_LEAD
+
+const AUTOPILOT_KEY = "autopilotEnabled"
+
+/** True when a patch changes the Autopilot opt-in and nothing else. */
+export function isAutopilotOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === AUTOPILOT_KEY)
+}
+
+/**
+ * Copy one settings key across. Generic over the key so both sides of the
+ * assignment are the same `ProjectWideSettings[K]`; a write keyed by the whole
+ * `keyof` union does not typecheck, which is why the call sites below used to
+ * cast the value away.
+ */
+function copySettingsKey<K extends keyof ProjectWideSettings>(
+  target: ProjectWideSettings,
+  source: ProjectWideSettings,
+  key: K,
+): void {
+  target[key] = source[key]
+}
+
+/**
+ * Roll a settings snapshot back to server truth for exactly the keys a
+ * rejected patch tried to write: a key the server stores takes its stored
+ * value back, a key it does not know is dropped, and anything outside the
+ * write attempt is left alone.
+ */
+function rollbackRejectedKeys(
+  prev: ProjectWideSettings,
+  partial: ProjectWideSettings,
+  snapTarget: ProjectWideSettings,
+): ProjectWideSettings {
+  const next = { ...prev }
+  for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
+    if (key in snapTarget) {
+      copySettingsKey(next, snapTarget, key)
+    } else {
+      delete next[key]
+    }
+  }
+  return next
+}
+
+/**
+ * AQU-1408: interlinear alignment seeds — what a member writes by confirming
+ * (✓) or rejecting (✕) a word-alignment suggestion in the BT tab. A patch that
+ * touches only this key is admitted at contributor(400)+.
+ *
+ * This carve-out exists because the panel's confirm/reject buttons are shown to
+ * every project member, so under the flat maintainer floor they were a
+ * silently dead control below 600: the in-memory model moved, the AQU-255
+ * guard (correctly) refused the below-floor local apply, and the seed never
+ * reached the server — the decision was simply gone on reload.
+ *
+ * Contributor matches `cell.backtranslation.set` in the sync perimeter's
+ * role policy, which is the same act at a different grain: saying what the
+ * words of a translation mean.
+ *
+ * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
+ * which re-derives the same "only this key changed" test against the stored
+ * row and remains authoritative.
+ */
+export const ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR = ROLE.CONTRIBUTOR
+
+const ALIGNMENT_SEEDS_KEY = "alignmentSeeds"
+
+/** True when a patch changes the alignment seeds and nothing else. */
+export function isAlignmentSeedsOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === ALIGNMENT_SEEDS_KEY)
 }
 
 /**
@@ -125,13 +257,39 @@ export interface UseProjectSettings {
   /** Server version of the settings row. null = never fetched yet. */
   version: number | null
   /** "When was this last edited and by whom" — null if no server row yet. */
-  updatedBy: { id: number; username: string } | null
+  updatedBy: ProjectSettingsEditor
   updatedAt: string | null
   /** True after the first GET resolves (success OR network failure). */
   hasFetched: boolean
+  /**
+   * AQU-1083: the org default this project inherits when it has no
+   * `countStructuralCells` of its own. Null when the project has no org, or
+   * before the first response that carries it — read it as
+   * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
+   */
+  orgCountStructuralCells: boolean | null
+  /** The org's "Allow bulk validation of AI drafts", carried on the project's
+   *  own settings response so a member outside the org sees it too. Null when
+   *  the project has no org, or before the first response that carries it. */
+  orgAllowBulkValidateAiDrafts: boolean | null
+  /** AQU-1418: the project's lane rows from the last settings response.
+   *  Null before the first response that carries them, and on a server
+   *  that predates lane rows. */
+  lanes: ProjectLaneView[] | null
   isOnline: boolean
   canEdit: boolean
   reasonCannotEdit: CannotEditReason
+  /** AQU-1086: whether the caller may edit the project-language keys
+   *  (`sourceLanguage`, `targetLanguage`, `targetLanes`, `archivedLanes`).
+   *  Same as {@link canEdit} unless the org lowered `languageEditMinRole`
+   *  below MAINTAINER, in which case a project lead gets the language fields
+   *  while the rest of the form stays locked. */
+  canEditLanguages: boolean
+  reasonCannotEditLanguages: CannotEditReason
+  /** The effective language floor used by {@link canEditLanguages} — for the
+   *  lock hint, which must name the role the user actually needs rather than
+   *  a hardcoded "Maintainer" (AQU-427 convention). */
+  languageEditFloor: number
   /** True when the last save returned a 409 conflict. The user's pending edits
    *  were snapped to the server winner; the UI should show a visible notice.
    *  SWARM-TODO: preserve pending form values across a conflict instead of
@@ -144,8 +302,9 @@ export interface UseProjectSettings {
   refresh: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
    *  conflict-snap on 409, returns outcome. Blocked when offline or below
-   *  MAINTAINER (600) — except a terminology-only patch, which is gated by the
-   *  org's `termbaseEditMinRole` floor (AQU-822). Server-forbidden writes are
+   *  MAINTAINER (600) — except a terminology-only patch, gated by the org's
+   *  `termbaseEditMinRole` floor (AQU-822), and an autopilotEnabled-only
+   *  patch, gated by PROJECT_LEAD (AQU-1246). Server-forbidden writes are
    *  surfaced as blocked and the optimistic overlay is rolled back — no silent
    *  local divergence. */
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
@@ -159,6 +318,29 @@ export interface UseProjectSettingsOptions {
    * Omitted ⇒ the PROJECT_LEAD default.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1086: the org's effective language-edit floor for this project
+   * (`ProjectRecord.languageEditMinRole`, resolved server-side). Applies only
+   * to language-only patches; every other key keeps the MAINTAINER floor.
+   * Omitted ⇒ the MAINTAINER default (today's behaviour).
+   */
+  languageEditMinRole?: number | null
+  /**
+   * AQU-1274: role context stamped onto the `project settings hydrated`
+   * PostHog event. A hidden panel is indistinguishable from a broken one in
+   * telemetry unless the event says which role the viewer actually resolved
+   * to and which grant path produced it — diagnosing the Biblica ETT report
+   * took a screenshot hunt for exactly this reason. Optional: callers that
+   * don't have the role context omit it and the properties are absent.
+   */
+  roleTelemetry?: {
+    /** The viewer's `org_members` role level, or null if not an org member. */
+    orgRole: number | null
+    /** The resolved (max-wins) role level on this project. */
+    resolvedRole: number | null
+    /** Which grant path won: override | group | org | creator | platform. */
+    resolvedFrom: string | null
+  }
 }
 
 function settingsValueEqual(a: unknown, b: unknown): boolean {
@@ -211,6 +393,11 @@ function localSettingsFrom(
   if (record.validationCount != null) out.validationCount = record.validationCount
   if (record.validationCountAudio != null)
     out.validationCountAudio = record.validationCountAudio
+  // AQU-1083. `!= null` rather than a truthiness test: `false` is a real
+  // answer here — it is the whole point of the setting — and absent means
+  // "inherit the org", which must stay absent rather than become `false`.
+  if (record.countStructuralCells != null)
+    out.countStructuralCells = record.countStructuralCells
   if (record.validationRoleFloor != null) out.validationRoleFloor = record.validationRoleFloor
   if (record.validationNamedUsers != null) out.validationNamedUsers = record.validationNamedUsers
   if (record.allowSelfValidation != null) out.allowSelfValidation = record.allowSelfValidation
@@ -232,6 +419,7 @@ export function useProjectSettings(
   options?: UseProjectSettingsOptions,
 ): UseProjectSettings {
   const termbaseEditMinRole = options?.termbaseEditMinRole
+  const languageEditMinRole = options?.languageEditMinRole
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const isOnline = useOnline()
@@ -256,7 +444,13 @@ export function useProjectSettings(
     [],
   )
 
-  const mountAtRef = useRef(performance.now())
+  // AQU-1470: count this instance toward the project's open so the hydration
+  // event fires once per open, not once per instance or refetch. Declared
+  // before the fetch effect so the open exists when the first GET resolves.
+  useEffect(() => {
+    if (!projectId) return
+    return retainProjectOpen(projectId)
+  }, [projectId])
 
   // AQU-979: stable per-instance id so this hook can ignore the settings-updated
   // event it broadcast itself (it already holds the authoritative response).
@@ -282,9 +476,24 @@ export function useProjectSettings(
   // the next queued PATCH runs in the same microtask the previous one
   // resolves, well before React commits and runs the effect.
   const serverRef = useRef<ProjectSettingsResponse | null>(null)
+  // AQU-1083: the org default, held apart from the snapshot above because not
+  // every snapshot carries it — the optimistic one built during a patch has no
+  // server response behind it, and a server that predates the field omits it.
+  // Either would otherwise blank the org default for a moment and flip the
+  // project control's meaning while a save was in flight.
+  const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
+  const [orgAllowBulkValidateAiDrafts, setOrgAllowBulkValidateAiDrafts] = useState<boolean | null>(null)
+  const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
     setServer(next)
+    if (next?.orgCountStructuralCells !== undefined) {
+      setOrgCountStructuralCells(next.orgCountStructuralCells)
+    }
+    if (next?.orgAllowBulkValidateAiDrafts !== undefined) {
+      setOrgAllowBulkValidateAiDrafts(next.orgAllowBulkValidateAiDrafts)
+    }
+    if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
   // Keep a ref so refresh's identity is stable across connectivity changes.
@@ -292,6 +501,14 @@ export function useProjectSettings(
   useEffect(() => {
     isOnlineRef.current = isOnline
   }, [isOnline])
+
+  // AQU-1274: read through a ref so role context stamped on the hydration
+  // event never becomes a refresh() dependency — the role resolves on its own
+  // schedule and must not re-trigger the settings fetch (or re-fire the event).
+  const roleTelemetryRef = useRef(options?.roleTelemetry)
+  useEffect(() => {
+    roleTelemetryRef.current = options?.roleTelemetry
+  }, [options?.roleTelemetry])
 
   // React StrictMode invokes the initial hydration effect twice, and settings
   // can also be requested by more than one effect during a fast route change.
@@ -320,11 +537,20 @@ export function useProjectSettings(
       const got = out.value
       writeServer(got)
       setHasFetched(true)
-      if (got) {
+      const withinMs = got ? claimHydrationReport(projectId) : null
+      if (got && withinMs !== null) {
         posthog.capture("project settings hydrated", {
           project_id: projectId,
-          within_ms: Math.round(performance.now() - mountAtRef.current),
+          within_ms: withinMs,
           has_server_row: got.version > 0,
+          // AQU-1274 — see UseProjectSettingsOptions.roleTelemetry.
+          ...(roleTelemetryRef.current
+            ? {
+                org_role: roleTelemetryRef.current.orgRole,
+                resolved_role: roleTelemetryRef.current.resolvedRole,
+                resolved_from: roleTelemetryRef.current.resolvedFrom,
+              }
+            : {}),
         })
       }
       if (got && got.version > 0) {
@@ -358,6 +584,9 @@ export function useProjectSettings(
               : {}),
             ...(got.settings.validationCountAudio != null
               ? { validationCountAudio: got.settings.validationCountAudio }
+              : {}),
+            ...(got.settings.countStructuralCells != null
+              ? { countStructuralCells: got.settings.countStructuralCells }
               : {}),
             ...(got.settings.terminology != null
               ? { terminology: got.settings.terminology }
@@ -483,6 +712,19 @@ export function useProjectSettings(
       ? "offline"
       : "role"
 
+  // AQU-1086: the language keys carry their own (org-configurable) floor, so
+  // the Project Info language fields and the Languages card gate on this
+  // rather than on the hook-wide `canEdit`. Unsynced projects (roleLevel ==
+  // null) keep the existing unrestricted local-edit path — see patch().
+  const languageEditFloor = resolveLanguageEditFloor(languageEditMinRole)
+  const canEditLanguages =
+    isOnline && roleLevel != null && roleLevel >= languageEditFloor
+  const reasonCannotEditLanguages: CannotEditReason = canEditLanguages
+    ? null
+    : !isOnline
+      ? "offline"
+      : "role"
+
   // One-shot migration: push local IDB values to the server when the server
   // row is empty (version 0) and the caller has PROJECT_LEAD+ authority.
   // This handles projects created locally before cloud settings existed.
@@ -505,11 +747,7 @@ export function useProjectSettings(
         patchProjectSettings(jwt, projectId, local, baseVersion),
       )
       if (!aliveRef.current) return
-      const nonEmptyCount = Object.keys(local).filter((k) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key indexing into settings object; TS can't narrow string-keyed access
-        const v = (local as any)[k]
-        return v !== "" && v != null
-      }).length
+      const nonEmptyCount = Object.values(local).filter((v) => v !== "" && v != null).length
       if (out.kind === "ok") {
         writeServer(out.value)
         posthog.capture("project settings migrated", {
@@ -542,11 +780,14 @@ export function useProjectSettings(
     // 5. roleLevel >= that floor → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
     //
-    // AQU-822: the required floor is SETTINGS_EDIT_ROLE_FLOOR (maintainer) for
-    // every patch EXCEPT a terminology-only one, which uses the org's
-    // configured termbaseEditMinRole. Deriving it per-patch (rather than
-    // loosening the hook-wide floor) keeps the AQU-255 guarantee intact for
-    // all the other keys.
+    // AQU-822 / AQU-1086 / AQU-1246 / AQU-1408: the required floor is
+    // SETTINGS_EDIT_ROLE_FLOOR (maintainer) for every patch EXCEPT the
+    // single-scope carve-outs — a terminology-only one (org's configured
+    // termbaseEditMinRole), a countStructuralCells-only one (project_lead), a
+    // language-only one (org's configured languageEditMinRole), an
+    // autopilotEnabled-only one (project_lead), and an alignmentSeeds-only one
+    // (contributor). Deriving it per-patch (rather than loosening the
+    // hook-wide floor) keeps the AQU-255 guarantee intact for all other keys.
 
     if (!projectId || !jwt) return { kind: "error", message: t("workspace.projectSettingsHook.noSessionError") }
 
@@ -568,8 +809,12 @@ export function useProjectSettings(
       return { kind: "blocked", reason: "role" }
     }
 
-    const requiredLevel = isTerminologyOnlyPatch(partial)
-      ? resolveTermbaseEditFloor(termbaseEditMinRole)
+    const requiredLevel =
+      isTerminologyOnlyPatch(partial) ? resolveTermbaseEditFloor(termbaseEditMinRole)
+      : isCountStructuralOnlyPatch(partial) ? ROLE.PROJECT_LEAD
+      : isLanguageOnlyPatch(partial) ? languageEditFloor
+      : isAutopilotOnlyPatch(partial) ? AUTOPILOT_EDIT_ROLE_FLOOR
+      : isAlignmentSeedsOnlyPatch(partial) ? ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR
       : SETTINGS_EDIT_ROLE_FLOOR
     if (roleLevel < requiredLevel) {
       // Synced project below floor — do NOT apply locally; the server will
@@ -661,7 +906,7 @@ export function useProjectSettings(
       setConflict(true)
       posthog.capture("project settings sync conflict", {
         project_id: projectId,
-        conflicting_user: result.latest.updatedBy?.username ?? null,
+        conflicting_user: settingsEditorName(result.latest.updatedBy),
       })
       return { kind: "conflict", latest: result.latest }
     }
@@ -670,21 +915,10 @@ export function useProjectSettings(
       // the optimistic local state we applied above — do not silently retain the
       // rejected value per AQU-255 acceptance criteria.
       void refresh() // revert optimistic overlay by re-fetching truth
-      const snapTarget = serverRef.current?.settings ?? {}
-      setLocal((prev) => {
-        // Remove keys from partial that the server rejected; keep anything
-        // that wasn't part of this write attempt.
-        const next = { ...prev }
-        for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
-          if (key in snapTarget) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment; TS can't narrow the value type for string-keyed writes on a record type
-            next[key] = snapTarget[key] as any
-          } else {
-            delete next[key]
-          }
-        }
-        return next
-      })
+      const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
+      // Remove keys from partial that the server rejected; keep anything
+      // that wasn't part of this write attempt.
+      setLocal((prev) => rollbackRejectedKeys(prev, partial, snapTarget))
       void patchProject(projectId, (existing) => {
         // Roll back IDB keys to server truth for the keys in partial.
         const next = { ...existing }
@@ -708,20 +942,14 @@ export function useProjectSettings(
     // permanently diverge from server truth.
     void refresh()
     setLocal((prev) => {
-      const snapTarget = serverRef.current?.settings ?? {}
-      const next = { ...prev }
-      for (const key of Object.keys(partial) as (keyof ProjectWideSettings)[]) {
-        if (key in snapTarget) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic key assignment during optimistic rollback; TS can't narrow string-keyed writes
-          next[key] = snapTarget[key] as any
-        } else {
-          delete next[key]
-        }
-      }
-      return next
+      // Read inside the updater, not at the call site: `refresh()` above is in
+      // flight, so the snapshot this resolves to is whatever the ref holds when
+      // React runs the update.
+      const snapTarget: ProjectWideSettings = serverRef.current?.settings ?? {}
+      return rollbackRejectedKeys(prev, partial, snapTarget)
     })
     return { kind: "error", message: result.message }
-  }, [projectId, jwt, roleLevel, termbaseEditMinRole, refresh, runSerialized, t])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
 
   return {
     settings,
@@ -729,9 +957,15 @@ export function useProjectSettings(
     updatedBy: server?.updatedBy ?? null,
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
+    orgCountStructuralCells,
+    orgAllowBulkValidateAiDrafts,
+    lanes,
     isOnline,
     canEdit,
     reasonCannotEdit,
+    canEditLanguages,
+    reasonCannotEditLanguages,
+    languageEditFloor,
     conflict,
     dismissConflict,
     refresh,

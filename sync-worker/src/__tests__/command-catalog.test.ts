@@ -22,9 +22,12 @@ import {
   catalogIndexLines,
   describeCommand,
 } from '../../../db/shared/command-catalog'
-import { validateCommands } from '../external/commands'
+import { requiredRoleForCommand, validateCommands, CREATE_PROJECT_FIELDS } from '../external/commands'
+import { structureCommandFloor } from '../external/commands-structure'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
-import { ALLOWED_EMIT_KINDS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
+import { ALLOWED_EMIT_KINDS, MATCH_OPTION_KEYS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
+import { BRIEF_FIELD_MAX_CHARS, BRIEF_NOTES_MAX_CHARS } from '../external/commands-set-brief'
+import { BRIEF_FIELD_IDS } from '../../../db/shared/brief'
 import { ROLE } from '../events/role-policy'
 
 const ROLE_LEVELS = [0, 100, 200, 300, 400, 500, 600, 700, 9999]
@@ -55,10 +58,38 @@ describe('command catalog — invariants', () => {
       SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
       LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a' },
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
+      CreateOrg: { kind: 'CreateOrg', name: 'O' },
       CreateProject: { kind: 'CreateProject', name: 'P' },
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
-      PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'brief', value: 1 }], ifMatchVersion: 0 },
+      PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'] },
+      SetSource: { kind: 'SetSource', fileId: 'f', cellId: 'c', value: 'v' },
+      SetTranscription: { kind: 'SetTranscription', fileId: 'f', cellId: 'c', transcription: 't' },
+      SetTiming: { kind: 'SetTiming', fileId: 'f', cellId: 'c', startMs: 0, endMs: 1 },
+      SetTrackOverride: { kind: 'SetTrackOverride', fileId: 'f', trackId: 'target-audio', patch: { name: 'n' } },
+      InviteMember: { kind: 'InviteMember', projectId: 'p', username: 'ana', role: 400 },
+      SetRole: { kind: 'SetRole', projectId: 'p', username: 'ana', role: 400 },
+      RemoveMember: { kind: 'RemoveMember', projectId: 'p', username: 'ana' },
+      RenameFile: { kind: 'RenameFile', fileId: 'f', name: 'New label' },
+      RenameProject: { kind: 'RenameProject', projectId: 'p', name: 'New name' },
+      ArchiveProject: { kind: 'ArchiveProject', projectId: 'p' },
+      UnarchiveProject: { kind: 'UnarchiveProject', projectId: 'p' },
+      SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
+      RegenerateBriefSummary: { kind: 'RegenerateBriefSummary', projectId: 'p', ifMatchVersion: 0 },
+      ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', settings: { targetLanguage: 'fr' } },
+      AddOrgMember: { kind: 'AddOrgMember', orgId: 1, username: 'u', role: 400 },
+      SetOrgRole: { kind: 'SetOrgRole', orgId: 1, username: 'u', role: 400 },
+      RemoveOrgMember: { kind: 'RemoveOrgMember', orgId: 1, username: 'u' },
+      AddExample: { kind: 'AddExample', slug: 'lord-as-hospod', source: 'the LORD', target: 'Господь' },
+      AddDecision: { kind: 'AddDecision', slug: 'divine-name', decision: 'Render Lord as Господь.' },
+      AddNote: { kind: 'AddNote', fileId: 'f', cellId: 'c', note: 'why this rendering' },
+      RetireExample: { kind: 'RetireExample', slug: 'lord-as-hospod' },
+      InsertCell: { kind: 'InsertCell', fileId: 'f', value: 'v' },
+      DeleteCell: { kind: 'DeleteCell', fileId: 'f', cellId: 'c' },
+      SplitCell: { kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 3, targets: 'blank' },
+      HideCell: { kind: 'HideCell', fileId: 'f', cellId: 'c' },
+      ShowCell: { kind: 'ShowCell', fileId: 'f', cellId: 'c' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]
@@ -74,6 +105,20 @@ describe('command catalog — invariants', () => {
     expect(describeCommand('EmitEvents')?.minRoleLevel).toBe(ROLE.COMMENTER)
     expect(describeCommand('UpdateProjectSettings')?.minRoleLevel).toBe(ROLE.MAINTAINER)
     expect(describeCommand('Bogus')).toBeNull()
+  })
+
+  it('the structure commands publish the floor their engine enforces (AQU-1234)', () => {
+    for (const kind of ['InsertCell', 'DeleteCell', 'SplitCell']) {
+      const entry = describeCommand(kind)
+      expect(entry, `${kind} missing from the catalog`).not.toBeNull()
+      expect(entry!.minRoleLevel).toBe(structureCommandFloor())
+      expect(entry!.tier).toBe('structural')
+    }
+    // The catalog floor IS the prepare/commit floor — one source of truth.
+    expect(structureCommandFloor()).toBe(ROLE.PROJECT_LEAD)
+    expect(
+      requiredRoleForCommand({ kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 1, targets: 'blank' }),
+    ).toBe(describeCommand('SplitCell')!.minRoleLevel)
   })
 
   it('the role-filtered index narrows with level and formats one line per command', () => {
@@ -97,13 +142,66 @@ describe('command catalog — invariants', () => {
     }
     expect(emitDoc).toContain('testimony')
   })
+
+  it('describe_command("SetBrief") documents every brief section id (AQU-1227)', () => {
+    const entry = describeCommand('SetBrief')!
+    expect(entry.minRoleLevel).toBe(ROLE.MAINTAINER)
+    for (const id of BRIEF_FIELD_IDS) {
+      expect(entry.paramsDoc, `SetBrief paramsDoc omits section "${id}"`).toContain(id)
+    }
+    // The caps the validator actually enforces, not prose approximations.
+    expect(entry.paramsDoc).toContain(String(BRIEF_FIELD_MAX_CHARS))
+    expect(entry.paramsDoc).toContain(String(BRIEF_NOTES_MAX_CHARS))
+  })
+
+  it('describe_command("RegenerateBriefSummary") names the floor, the pin, and the failure codes (AQU-1282)', () => {
+    const entry = describeCommand('RegenerateBriefSummary')!
+    expect(entry.minRoleLevel).toBe(ROLE.MAINTAINER)
+    expect(entry.agentReachable).toBe(true)
+    for (const needle of ['ifMatchVersion', 'l1Summary', 'nothing to summarize', 'rate_limited', 'briefSummaryChars']) {
+      expect(entry.paramsDoc).toContain(needle)
+    }
+    // SetBrief's doc no longer claims the L1 is merely "carried over".
+    const setBriefDoc = describeCommand('SetBrief')!.paramsDoc
+    expect(setBriefDoc).toContain('RegenerateBriefSummary')
+    expect(setBriefDoc).not.toContain('carried over, not cleared')
+  })
+
+  it("documents every term match option the validator accepts (AQU-1175)", () => {
+    // Same contract as the CreateProject case below, and the same bug: `match`
+    // was accepted by the event kinds and dropped by the validator, so a
+    // caller had no way to learn the field existed. An option the validator
+    // takes but describe_command never names is that gap reopening.
+    const emitDoc = describeCommand('EmitEvents')!.paramsDoc
+    for (const key of MATCH_OPTION_KEYS) {
+      expect(emitDoc).toContain(key)
+    }
+    // And the two rules that decide whether a staged term does anything: the
+    // option set replaces wholesale, and matching is exact without it.
+    expect(emitDoc).toContain('match')
+    expect(emitDoc).toMatch(/exact/i)
+    expect(emitDoc).toMatch(/wholesale/i)
+  })
+
+  it("documents every field CreateProject actually accepts (AQU-1223)", () => {
+    // describe_command is how an agent learns the shape before it stages. An
+    // accepted field missing from the doc is how the silent-drop bug got its
+    // reach: the caller had no way to know what would survive the create.
+    const createDoc = describeCommand('CreateProject')!.paramsDoc
+    for (const field of CREATE_PROJECT_FIELDS) {
+      if (field === 'kind') continue
+      expect(createDoc).toContain(field)
+    }
+    // …and that the closed set is stated, so the reader knows a typo fails loudly.
+    expect(createDoc).toContain('validation_failed')
+  })
 })
 
 describe('get_capabilities — commands index (§6)', () => {
   it('publishes kind/title/tier/minRoleLevel for every agent-reachable command', async () => {
     const cred = {
       credentialId: 'cred-1', userId: '1', username: 'alice',
-      mode: 'act' as const, orgId: null, projectId: null,
+      mode: 'act' as const, access: 'write' as const, orgId: null, projectId: null,
     }
     const result = await callTool('get_capabilities', {}, { AQUILLA_PG: undefined }, cred, 'tok')
     expect(result).not.toBe(Symbol.for('unknown-tool'))
@@ -123,9 +221,10 @@ describe('get_capabilities — commands index (§6)', () => {
       expect(Object.keys(row).sort()).toEqual(['kind', 'minRoleLevel', 'tier', 'title'])
     }
     expect(payload.commands.note).toContain('describe_command')
-    // The legacy commandKinds field is untouched (frozen external behavior).
+    // The legacy commandKinds field is untouched (frozen external behavior),
+    // now including CreateOrg (AQU-1221).
     expect(payload.commandKinds).toEqual(
-      ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+      ['SetTranslation', 'PlanImport', 'CreateOrg', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     )
   })
 })

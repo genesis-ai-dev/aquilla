@@ -39,6 +39,19 @@ export const ROLE = {
 
 export type RoleLevel = (typeof ROLE)[keyof typeof ROLE]
 
+/**
+ * AQU-435 / AQU-1107: org membership is a project-access path only at
+ * Maintainer+. Mirrors auth-worker's ORG_WIDE_ACCESS_FLOOR. Contributors
+ * reach a project through a direct grant or a team, never through org
+ * membership alone.
+ */
+export const ORG_WIDE_ACCESS_FLOOR = ROLE.MAINTAINER
+
+/** True when this org-level role can see/open every project in the org. */
+export function orgRoleGrantsProjectAccess(level: number | null | undefined): boolean {
+  return level != null && level >= ORG_WIDE_ACCESS_FLOOR
+}
+
 export const ALL_ROLE_LEVELS: readonly RoleLevel[] = [
   ROLE.VIEWER,
   ROLE.COMMENTER,
@@ -78,15 +91,36 @@ export const PROJECT_ROLE_PICKER: readonly RoleLevel[] = [
 
 /**
  * Roles offered in the org Members panel role picker. Commenter (200) and
- * reviewer (300) are absent because org-level grants apply to every project
- * in the org — granting "comment-only across all projects" is a niche we
- * don't surface yet. Set explicitly per-project via SharePanel instead.
+ * reviewer (300) are absent — those are per-project niches (SharePanel).
+ * Org membership below Maintainer does not grant project access (AQU-435 /
+ * AQU-1107); only Maintainer+ is org-wide oversight.
  */
 export const ORG_ROLE_PICKER: readonly RoleLevel[] = [
   ROLE.VIEWER,
   ROLE.CONTRIBUTOR,
   ROLE.PROJECT_LEAD,
   ROLE.MAINTAINER,
+]
+
+/**
+ * AQU-952: roles an org owner may set on an existing member from the Members
+ * table's "Change role" dialog — `ORG_ROLE_PICKER` plus Owner (700).
+ *
+ * Owner is the workspace-handover rung. Without it there was no path to hand a
+ * pre-loaded workspace to a partner: the owner-gated `POST /orgs/:orgId/members`
+ * has always accepted 700, but every client picker topped out at Maintainer, so
+ * the ODB onboarding had to abandon the loaded workspace and rebuild a second
+ * one from scratch.
+ *
+ * It is deliberately NOT in `ORG_ROLE_PICKER` itself, because that list also
+ * drives the add-member and email-invite pickers: the invite endpoint caps the
+ * granted level at 600 (`createOrgInviteBody`) so an org can never be handed
+ * over by a leaked link. Only the change-role dialog — already gated behind a
+ * genuine org owner — offers this rung.
+ */
+export const ORG_ROLE_CHANGE_PICKER: readonly RoleLevel[] = [
+  ...ORG_ROLE_PICKER,
+  ROLE.OWNER,
 ]
 
 /**
@@ -343,6 +377,10 @@ export const PROJECT_ROLE_OPTIONS: readonly RoleOption[] =
 
 export const ORG_ROLE_OPTIONS: readonly RoleOption[] =
   ORG_ROLE_PICKER.map(toOption)
+
+/** AQU-952: change-role dialog only — includes the Owner handover rung. */
+export const ORG_ROLE_CHANGE_OPTIONS: readonly RoleOption[] =
+  ORG_ROLE_CHANGE_PICKER.map(toOption)
 
 export const LINK_ROLE_OPTIONS: readonly RoleOption[] =
   LINK_ROLE_ALLOWED.map(toOption)

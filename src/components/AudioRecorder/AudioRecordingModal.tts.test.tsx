@@ -35,14 +35,19 @@ vi.mock("@/lib/import", () => ({
   probeDurationMsSafe: (...args: unknown[]) => probeSpy(...(args as [])),
 }))
 const injectOptimistic = vi.hoisted(() => vi.fn((..._args: unknown[]) => {}))
+const injectDeselect = vi.hoisted(() => vi.fn((..._args: unknown[]) => {}))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: vi.fn(),
   injectOptimisticAudioAttachment: (...args: unknown[]) => injectOptimistic(...args),
   injectOptimisticAudioRemove: vi.fn(),
+  injectOptimisticAudioDeselect: (...args: unknown[]) => injectDeselect(...args),
 }))
 const emitAttach = vi.fn(async (..._args: unknown[]) => "evt-attach")
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-select")
+const emitDeselect = vi.fn(async (..._args: unknown[]) => "evt-deselect")
 vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioDeselect: (...args: unknown[]) => emitDeselect(...args),
+  emitCellAudioValidate: vi.fn(async () => "evt"),
   emitCellLaneRetime: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
@@ -69,7 +74,23 @@ const transcribeCell = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {})
 vi.mock("@/lib/audio/transcribe", () => ({
   transcribeCell: (...args: unknown[]) => transcribeCell(...args),
 }))
-vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
+vi.mock("@/lib/audio/audio-coordinator", () => ({
+  pushAudioShortcutOverride: () => () => {},
+  setActiveAudio: () => {},
+  clearActiveAudioIf: () => {},
+  claimActiveAudio: () => {},
+  getActiveAudio: () => null,
+}))
+// AQU-1217: the ready screen's selected-take waveform has its own suite
+// (AudioRecordingModal.ready.test.tsx); here it is inert.
+vi.mock("@/hooks/useCellAudio", () => ({
+  useCellAudio: () => ({
+    state: "idle", error: null, isPlaying: false, currentTime: 0, duration: 0,
+    peaks: null, peaksState: "idle",
+    play: async () => {}, pause: () => {}, seek: () => {}, setVolume: () => {},
+    setTrim: () => {}, requestPeaks: async () => {}, ensureBytes: async () => new Uint8Array(),
+  }),
+}))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
@@ -214,6 +235,20 @@ describe("AudioRecordingModal — TTS becomes the sounding take (round 8c)", () 
     expect(emitSelect).toHaveBeenCalledWith(expect.objectContaining({
       audioId: "audio-f1-100-clip.mp3", slot: "recording",
     }))
+  })
+
+  // Sam, 2026-09-28 (Mark 1:3): a line with no imported source clip had
+  // nothing to hand the slot to, so the new voice was saved and never played.
+  it("with no source clip, empties the recording slot so the new voice sounds", async () => {
+    emitDeselect.mockClear()
+    injectDeselect.mockClear()
+    seedEntry({ "audio-c1-200-take.webm": att("audio-c1-200-take.webm") }, "audio-c1-200-take.webm")
+    renderModal(cellWith("bonjour"))
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    await waitFor(() => expect(emitDeselect).toHaveBeenCalledTimes(1))
+    expect(emitDeselect).toHaveBeenCalledWith(expect.objectContaining({ cellId: "c1", slot: "recording" }))
+    expect(injectDeselect).toHaveBeenCalledWith("f1", "c1", "recording", expect.anything())
+    expect(emitSelect).not.toHaveBeenCalled()
   })
 
   it("no displacement when the source clip already holds the slot", async () => {
@@ -377,13 +412,30 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     )
   }
 
+  // Sam, 2026-09-28: the settings are real switches, and what each does is
+  // said on hover, not in a line of its own.
+  it("is a real switch: it toggles once, the row's name toggles it too, and no description line shows", () => {
+    renderTwo()
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    const sw = screen.getByTestId("rec-auto-advance")
+    expect(sw).toHaveAttribute("role", "switch")
+    fireEvent.click(sw)
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(screen.getByText("Move on after saving a recording"))
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    expect(screen.queryByText(/Saved recordings (jump|stay)/)).toBeNull()
+  })
+
   it("defaults to on — saving still moves to the next line", async () => {
     recorderState.value = stopped
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
-    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"), { timeout: 2000 })
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    // By testid, not by name: the settings popover is open at this point, and
+    // AQU-1216 put the word "Saved" into the auto-advance description, so a
+    // /Save/ role query matches that control too.
+    fireEvent.click(screen.getByTestId("rec-save"))
+    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"))
   })
 
   it("turned off, saving stays on the same line for another take", async () => {
@@ -391,9 +443,9 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
     fireEvent.click(screen.getByTestId("rec-auto-advance"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
 
-    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+    fireEvent.click(screen.getByTestId("rec-save"))
     await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the save DID happen
     await new Promise((r) => setTimeout(r, 700)) // well past the 450ms advance window
     expect(onActiveCellChange).not.toHaveBeenCalled()
@@ -409,7 +461,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     resetRecordingAutoAdvanceCacheForTests() // simulate a fresh page load
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
-    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "false")
   })
 })
 
@@ -456,9 +508,9 @@ describe("AudioRecordingModal — a failed generation says so (stage 4c)", () =>
     renderModal(cellWith("bonjour"))
     const line = screen.getByTestId("rec-tts-error")
     // What it IS, then what to do about it. AQU-1001 names the engine: the
-    // default engine's 503 reads as OmniVoice not configured, never as a
+    // default engine's 503 reads as Inworld TTS not configured, never as a
     // missing Gemini key.
-    expect(line).toHaveTextContent(/OmniVoice isn't configured/i)
+    expect(line).toHaveTextContent(/Inworld TTS isn't configured/i)
     expect(line).toHaveTextContent(/will not fix/i)
     // NOT the raw fragment. That is support's text, not the performer's, and it
     // lives in the tooltip.
@@ -617,6 +669,15 @@ describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  // Pressed inside the recorder, where the dialog's own Escape handling sees
+  // it too (2026-09-28). The recorder's key handler owns Escape, so it closes
+  // once, not once for the handler and again for the dialog.
+  it("closes once on Escape pressed inside the recorder", () => {
+    const onClose = renderWithClose()
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   // ── …AND THE ARROWS ARE AN EXIT TOO (2026-08-27) ────────────────────────
   //
   // The guard above was wired to the X, Escape and clicking outside, and
@@ -657,6 +718,30 @@ describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
     fireEvent.keyDown(window, { key: "ArrowRight", altKey: true })
     expect(screen.getByTestId("rec-confirm-close")).toBeInTheDocument()
     expect(onActiveCellChange).not.toHaveBeenCalled()
+  })
+
+  // Sam, 2026-09-28: ⌥← / ⌥→ were dead. The dialog's popup (Base UI 1.7)
+  // stops arrow keys leaving it, and the test above sent its key straight to
+  // the window, around the popup. These press it where focus is.
+  it("steps to the next and previous line on Alt+Arrow pressed inside the recorder", () => {
+    const onActiveCellChange = vi.fn()
+    const { rerender } = render(
+      <AudioRecordingModal
+        open project={project} cells={twoCells()} activeCellId="c1"
+        username="sam" onActiveCellChange={onActiveCellChange} onClose={() => {}}
+      />,
+    )
+    const inside = screen.getByRole("dialog")
+    fireEvent.keyDown(inside, { key: "ArrowRight", altKey: true })
+    expect(onActiveCellChange).toHaveBeenLastCalledWith("c2")
+    rerender(
+      <AudioRecordingModal
+        open project={project} cells={twoCells()} activeCellId="c2"
+        username="sam" onActiveCellChange={onActiveCellChange} onClose={() => {}}
+      />,
+    )
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowLeft", altKey: true })
+    expect(onActiveCellChange).toHaveBeenLastCalledWith("c1")
   })
 
   // Throwing it away goes WHERE THEY ASKED, not merely closing the dialog —

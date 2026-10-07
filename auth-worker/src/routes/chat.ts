@@ -1,3 +1,5 @@
+import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { weeklyUsageActive } from '../lib/billing/usage-mode'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
 // upstream JSON verbatim so codex-web's existing client code keeps working.
@@ -13,18 +15,20 @@
 //   3. Forward to OpenRouter with OPENROUTER_API_KEY.
 //   4. Pass the response through unchanged (streaming or JSON).
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Env, Variables, AuthUser } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
+import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { openRouterExtras } from "../lib/llm-vendor"
+import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   AB_OUTCOMES,
@@ -37,6 +41,21 @@ import {
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+// [Pen test] API security & data exposure (2026-09-03): every spend guard on
+// this route (runAiGuard's daily budget, creditGuard, wordGuard) defaults to
+// log-only in every deployed environment (none of AI_BUDGET_ENFORCE /
+// CREDIT_ENFORCE set true in wrangler.toml) — over-cap requests are logged
+// but never blocked. With open self-registration (throttled only 15/15min
+// per IP), that left this proxy to the shared OPENROUTER_API_KEY with no
+// volumetric control at all: a burst of requests just sails through. This
+// doesn't touch the enforce/budget semantics (a deliberate per-org opt-in
+// product decision) — it adds the missing floor: a per-user sliding-window
+// cap wide enough that no real interactive session (suggest-per-cell, a few
+// dozen cells in a sitting) ever gets close, tight enough to blunt a
+// scripted flood. Same primitive/window as the external Agent API's
+// per-credential throttles (db/shared/rate-limit.ts).
+const CHAT_MAX_PER_USER_PER_WINDOW = 300
 
 /** Mirrors the agent route so local/dev/test can use the same scripted or
  * self-hosted OpenAI-compatible upstream as every other AI surface. The dev
@@ -59,7 +78,7 @@ const chatCompletionRequestSchema = z.object({
   temperature: z.number().optional().default(0.7),
   stream: z.boolean().optional().default(false),
   max_tokens: z.number().optional(),
-  response_format: z.record(z.unknown()).optional(),
+  response_format: z.record(z.string(), z.unknown()).optional(),
   // AQU-414 follow-up: chat invoked from a project-editing context carries the
   // project id so its credit spend counts against that project's org (same
   // attribution as agent.ts). Optional — project-less chat stays at org 0.
@@ -114,6 +133,33 @@ async function resolveChatOrgId(
   }
 }
 
+/**
+ * AQU-617: bookkeeping writes for a streamed reply run after the Response is
+ * returned, so they never sit between the provider's first token and the
+ * user's. The request-scoped shim closes as soon as the Response returns, so
+ * this opens its own connection (same as contextual's selfTickLoop). Ledger
+ * writes were already best-effort; a failure here is logged, never surfaced.
+ */
+function afterResponse(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  work: (db: AquillaDb) => Promise<void>,
+): void {
+  const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
+  const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
+  detach(c, work(db).finally(() => shim?.close()))
+}
+
+/** Keep a best-effort task alive past the response; failures are logged only. */
+function detach(c: Context<{ Bindings: Env; Variables: Variables }>, work: Promise<void>): void {
+  const task = work.catch((err: unknown) => console.error("[chat] post-response write failed", err))
+  // Hono throws on executionCtx without one (vitest); fall back to detached.
+  try {
+    c.executionCtx.waitUntil(task)
+  } catch {
+    void task
+  }
+}
+
 function buildOpenRouterBody(request: ChatRequest, model: string, env: Env): string {
   const messages = request.messages.map((m) => ({
     role: m.role,
@@ -151,8 +197,30 @@ chat.post(
     const ab = isDefaultRequest(request.model) ? pickAbArm(settings, model) : null
     if (ab) model = ab.model
 
+    // Volumetric floor: unlike the guards below, this actually blocks (see
+    // comment at CHAT_MAX_PER_USER_PER_WINDOW).
+    // AQU-617: the org lookup is read-only and never throws, so it runs
+    // alongside the rate-limit and guard round trips instead of after them.
+    const orgIdLookup = resolveChatOrgId(c.env, user, request.projectId)
+    const rateLimitIdentifier = `user:${user.id}`
+    const recentChatCalls = await countRecentRateLimitEvents(
+      c.env.AQUILLA_PG,
+      "chat_completions",
+      rateLimitIdentifier,
+    )
+    if (recentChatCalls >= CHAT_MAX_PER_USER_PER_WINDOW) {
+      return c.json({ error: "rate_limited", message: "Too many chat requests, slow down." }, 429)
+    }
+
     // AI guard: model allowlist + per-user/global daily budget (AQU-265).
-    const guard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
+    // The rate-limit row was always written before the guard ran, pass or
+    // fail, so the two can share a round trip.
+    const [, guard] = await Promise.all([
+      recordRateLimitEvent(c.env.AQUILLA_PG, "chat_completions", rateLimitIdentifier),
+      // Log-only budget counting is a single upsert issued now; the request
+      // shim drains in-flight queries before it closes, so it can ride along.
+      runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env, (work) => detach(c, work(c.env.AQUILLA_PG))),
+    ])
     if (!guard.ok) {
       return c.json(guard.body, guard.status)
     }
@@ -161,20 +229,52 @@ chat.post(
     // project context bills that project's org; project-less chat falls back
     // to org 0 as before. The guard uses the same org so chat respects the
     // org's caps once an admin turns enforcement on (log-only by default).
-    const orgId = await resolveChatOrgId(c.env, user, request.projectId)
-    const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
-    if (!chatCreditCheck.ok) {
-      return c.json(
-        { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
-        429,
-      )
+    const orgId = await orgIdLookup
+    let usage: ChatUsage | undefined
+    const weekly = weeklyUsageActive(c.env, c.req.url)
+    if (weekly === 'unavailable') return c.json({ error: 'usage_rehearsal_unavailable' }, 503)
+    if (weekly === 'on') {
+      // Unlike legacy attribution, enforced usage must never fall back to org 0.
+      if (!request.projectId || orgId <= 0) return c.json({ error: 'forbidden' }, 403)
+      const suppliedId = c.req.header('Idempotency-Key')
+      if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) {
+        return c.json({ error: 'invalid_request_id' }, 400)
+      }
+      usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
     }
-    const chatWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
-    if (!chatWordCheck.ok) {
-      return c.json(wordCapBody(chatWordCheck.reason), 429)
+    // Legacy credit/word guards are retired once the weekly ledger meters this call.
+    if (!usage) {
+      const [chatCreditCheck, chatWordCheck] = await Promise.all([
+        creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm"),
+        wordGuard(c.env.AQUILLA_PG, orgId),
+      ])
+      if (!chatCreditCheck.ok) {
+        return c.json(
+          { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
+          429,
+        )
+      }
+      if (!chatWordCheck.ok) {
+        return c.json(wordCapBody(chatWordCheck.reason), 429)
+      }
     }
     const chatWords = countWords(request.messages.map((m) => m.content).join(" "))
 
+    if (usage) {
+      // Metered requests carry a server-enforced output cap so the bound holds.
+      request.max_tokens = Math.min(request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS, METERED_MAX_OUTPUT_TOKENS)
+      try {
+        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId!,
+          model, promptChars: request.messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: request.max_tokens })
+        if (!created) return c.json({ error: 'usage_request_already_admitted' }, 409)
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Weekly AI allowance exhausted') {
+          return c.json({ error: 'weekly_ai_allowance_exhausted', message: 'This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.' }, 429)
+        }
+        if (error instanceof Error && error.message === 'Model price unavailable') return c.json({ error: 'model_price_unavailable' }, 503)
+        return c.json({ error: 'usage_accounting_unavailable' }, 503)
+      }
+    }
     try {
       const startedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
@@ -184,17 +284,17 @@ chat.post(
           "Content-Type": "application/json",
         },
         body: buildOpenRouterBody(request, model, c.env),
+        ...(usage ? { signal: c.req.raw.signal } : {}),
       })
       const latencyMs = Date.now() - startedAt
 
       // Log the A/B assignment now that we know whether upstream succeeded.
       // Failed requests count against the serving arm's error rate.
-      if (ab) {
-        await recordAbEvent(c.env.AQUILLA_PG, ab, user.id, {
-          error: !upstream.ok,
-          latencyMs,
-        })
+      const logAb = async (db: AquillaDb) => {
+        if (ab) await recordAbEvent(db, ab, user.id, { error: !upstream.ok, latencyMs })
       }
+      const streamed = upstream.ok && request.stream
+      if (!streamed) await logAb(c.env.AQUILLA_PG)
 
       if (!upstream.ok) {
         // [Pen test] API security & data exposure (2026-08-13): the raw
@@ -204,17 +304,24 @@ chat.post(
         // passthrough in this codebase (see import-sandbox.ts) already caps
         // what reaches the client. Bearer key itself was never in the body,
         // but "never was" isn't a reason to keep forwarding it whole.
-        const errorText = (await upstream.text()).slice(0, 500)
+        const detail = await upstream.text()
+        const headers: Record<string, string> = { "Content-Type": "application/json" }
+        // AQU-1241: a rejection the provider decided before any generation
+        // existed cost nothing, so its reservation must be released rather than
+        // left counting against the workspace's allowance. Anything less
+        // certain stays held for reconciliation.
+        if (usage) {
+          headers["X-Billing-Usage-Status"] = providerRejectedPreModel(upstream.status, detail)
+            ? await releaseChatUsage(c.env, usage)
+            : "pending"
+        }
         return new Response(
           JSON.stringify({
             error: "openrouter_error",
             status: upstream.status,
-            message: errorText,
+            message: detail.slice(0, 500),
           }),
-          {
-            status: upstream.status,
-            headers: { "Content-Type": "application/json" },
-          },
+          { status: upstream.status, headers },
         )
       }
 
@@ -222,19 +329,27 @@ chat.post(
         // Streaming: pass body through unchanged. We can't inspect the usage
         // object from a streaming response without buffering it (defeats the
         // point). Record a flat 1¢ fallback estimate so the ledger always has
-        // a row — this is the cheap/low-priority rail.
-        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", 1, 1)
-        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+        // a row — this is the cheap/low-priority rail. Written after the
+        // Response so the first token isn't held behind them (AQU-617).
+        afterResponse(c, async (db) => {
+          await logAb(db)
+          if (!usage) {
+            await recordCredit(db, orgId, user.id, "llm", 1, 1)
+            await recordWords(db, orgId, user.id, "llm", chatWords)
+          }
+        })
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         })
         if (ab) setAbHeaders(streamHeaders, ab)
-        return new Response(upstream.body, { status: 200, headers: streamHeaders })
+        const body = usage && upstream.body ? meterChatStream(upstream.body, c.env, usage) : upstream.body
+        return new Response(body, { status: 200, headers: streamHeaders })
       }
 
       const data = (await upstream.json()) as Record<string, unknown>
+      if (usage) c.header("X-Billing-Usage-Status", await settleChatUsage(c.env, usage, data))
 
       // Non-streaming: extract OpenRouter usage.cost if present.
       // usage.cost is in dollars → × 100 for cents.
@@ -248,8 +363,10 @@ chat.post(
         /* ignore — use the fallback */
       }
       // Record asynchronously (graceful-degrade) — never block the response.
-      await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", costCents, 1)
-      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+      if (!usage) {
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", costCents, 1)
+        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
+      }
 
       if (ab) {
         c.header("X-AB-Request-Id", ab.requestId)

@@ -8,6 +8,7 @@
 // here are plain user words (ui-jargon-guard.test.ts bans spec ids).
 
 import { useEffect, useMemo, useState } from "react"
+import { Link } from "react-router-dom"
 import { AlertTriangle, CheckCircle2, Eye, ListTree, Pause, PencilSparkles, Sparkles, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,7 @@ import {
   attachContextualRun,
   dismissContextualRunSummary,
   getContextualRunState,
+  continueContextualRun,
   requestPauseContextualRun,
   resumeContextualRun,
   startContextualRun,
@@ -27,6 +29,7 @@ import {
 } from "@/lib/contextual/run-store"
 import { useContextualDraftsSummary } from "@/lib/contextual/drafts-store"
 import { installContextualTransport, type ContextualRunRecord } from "@/lib/contextual/transport"
+import { CONVERSATION_PARAM, runThreadId } from "@/lib/agent/team-channel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { ContextualSteering } from "./ContextualSteering"
@@ -107,6 +110,7 @@ function ContextualRunPillScoped({
     phase: null,
     spanLabel: null,
     activeDirections: [],
+    parkReason: null,
     lanes: [],
   }
   const progress = belongsToOpenFile
@@ -118,10 +122,15 @@ function ContextualRunPillScoped({
     drafts.targetLang === activeLane
       ? drafts.pending
       : 0
-  const { available, status, phase, spanLabel, runId, activeDirections, lanes } = visibleState
+  const { available, status, phase, spanLabel, runId, activeDirections, lanes, parkReason } =
+    visibleState
   const parkedRemaining = status === "parked"
     ? Math.max(0, progress.total - progress.done - progress.failed)
     : 0
+  // AQU-1300: parked because it is holding for a human, not because the file is
+  // done. Same status, opposite meaning — so this branch, and only this branch,
+  // offers Continue and Translate everything.
+  const awaitingInput = status === "parked" && parkReason === "awaiting_input"
   const inspectorRun = useMemo<ContextualRunRecord | null>(() => runId ? ({
     runId,
     fileId,
@@ -303,6 +312,60 @@ function ContextualRunPillScoped({
         </Button>
       </AppTooltip>
     ) : null
+  } else if (awaitingInput) {
+    // The trust gate's own state (AQU-1300). It reads as a hand-back rather
+    // than a stall, and carries the two ways forward the run itself offers.
+    announcement = t("autopilot.pill.announcement.waitingForYou")
+    content = (
+      <>
+        <Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="text-muted-foreground">
+          {parkedRemaining > 0
+            ? t("autopilot.pill.waitingWithRemaining", { count: parkedRemaining })
+            : t("autopilot.pill.waitingForYou")}
+        </span>
+        {pendingChip}
+        {canControl && (
+          <>
+            <AppTooltip content={t("autopilot.action.continueHint")}>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-6 px-2 text-xs"
+                onClick={() => void continueContextualRun("batch")}
+              >
+                {t("autopilot.action.continue")}
+              </Button>
+            </AppTooltip>
+            <AppTooltip content={t("autopilot.action.translateEverythingHint")}>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs"
+                onClick={() => void continueContextualRun("all")}
+              >
+                {t("autopilot.action.translateEverything")}
+              </Button>
+            </AppTooltip>
+          </>
+        )}
+      </>
+    )
+    trailing = canControl ? (
+      <AppTooltip content={t("autopilot.pill.stopRun")}>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t("autopilot.pill.stopRun")}
+          onClick={() => void terminateContextualRun()}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </AppTooltip>
+    ) : null
   } else if (status === "parked") {
     announcement = parkedRemaining > 0
       ? t("autopilot.pill.announcement.queued", { count: parkedRemaining })
@@ -443,6 +506,19 @@ function ContextualRunPillScoped({
     </AppTooltip>
   ) : null
 
+  // The run narrates itself in the Team surface; the pill is a readout, not
+  // the transcript. A quiet link is the whole affordance — same conversation
+  // id the dock and a shared link use.
+  const threadLink = runId ? (
+    <Link
+      to={`/project/${encodeURIComponent(projectId)}/agent?${CONVERSATION_PARAM}=${encodeURIComponent(runThreadId(runId))}`}
+      className="shrink-0 text-muted-foreground underline-offset-2 hover:underline"
+      data-testid="contextual-open-thread"
+    >
+      {t("agent.team.openThread")}
+    </Link>
+  ) : null
+
   if (!content && !activityButton) return null
 
   return (
@@ -454,6 +530,7 @@ function ContextualRunPillScoped({
         data-contextual-available={available ? "true" : "false"}
       >
         {content}
+        {threadLink}
         {steer}
         {activityButton}
         {trailing}

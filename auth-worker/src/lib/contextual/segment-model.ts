@@ -175,7 +175,10 @@ export async function segmentWithModel(deps: SegmentModelDeps): Promise<SegmentM
         temperature: 0,
         label: "segment",
       })
-    } catch {
+    } catch (err) {
+      // A usage refusal (AQU-837) is a policy answer, not a flaky model: the
+      // route reports it instead of storing a silently degraded segmentation.
+      if (err instanceof Error && err.message.startsWith("usage_")) throw err
       notes.push(`segmentation call failed at line ${cursor + 1}; kept the surrounding passage whole`)
       break
     }

@@ -1,6 +1,27 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
+import {
+  deadlineStatus,
+  emptyPortfolioAggregate,
+  latestActivityAt,
+  validatedPct,
+  type OrgPortfolioAggregate,
+  type PortfolioAggregate,
+} from "./portfolio-metrics"
+
+export {
+  AOE_GRACE_MS,
+  DEADLINE_SOON_WINDOW_MS,
+  audioPct,
+  deadlineStatus,
+  isDeadlineOverdue,
+  latestActivityAt,
+  portfolioActivityStatus,
+  translatedPct,
+  validatedPct,
+  type DeadlineStatus,
+} from "./portfolio-metrics"
 
 /**
  * AQU-538: per-target-language-lane rollup for a project. `lane: ''` is the
@@ -16,6 +37,14 @@ export interface PortfolioLane {
   filledCells: number
   validatedCells: number
   lastEditAt: number | null
+  /** Display name from the lane row. Absent on older servers. */
+  name?: string | null
+  /** Opaque lane id. Deep links may use this instead of the tag. */
+  laneId?: string | null
+  /** Display order from `lanes.position`. */
+  position?: number
+  /** AQU-1458. Absent on older servers, which means "not archived". */
+  archived?: boolean
 }
 
 export interface PortfolioProject {
@@ -97,12 +126,105 @@ export interface OrgPortfolio {
   projects: PortfolioProject[]
 }
 
-export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
+/**
+ * AQU-1071: an org's rollup plus the enterprise billing band — active target
+ * lanes, counted server-side by the same helper billing uses.
+ */
+export interface OrgPortfolioSummary {
+  projects: PortfolioProject[]
+  /** 0 from a server that predates the field, so a tile reads 0 rather than NaN. */
+  activeLanguageCount: number
+}
+
+export async function getOrgPortfolioSummary(
+  jwt: string,
+  orgId: number,
+): Promise<OrgPortfolioSummary> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/portfolio`, {
     headers: { Authorization: `Bearer ${jwt}` },
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
-  return ((await res.json()) as { projects: PortfolioProject[] }).projects
+  const body = (await res.json()) as {
+    projects?: PortfolioProject[]
+    activeLanguageCount?: number
+  }
+  return {
+    projects: body.projects ?? [],
+    activeLanguageCount: Number.isFinite(body.activeLanguageCount)
+      ? Number(body.activeLanguageCount)
+      : 0,
+  }
+}
+
+export async function getPortfolio(jwt: string, orgId: number): Promise<PortfolioProject[]> {
+  return (await getOrgPortfolioSummary(jwt, orgId)).projects
+}
+
+export const PORTFOLIO_PAGE_SIZE = 40
+
+export interface PortfolioDirectoryPage {
+  projects: PortfolioProject[]
+  nextCursor: string | null
+}
+
+export async function getPortfolioPage(
+  jwt: string,
+  orgId: number,
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    signal?: AbortSignal
+  } = {},
+): Promise<PortfolioDirectoryPage> {
+  const params = new URLSearchParams()
+  const q = opts.q?.trim()
+  if (q) params.set("q", q)
+  params.set("limit", String(opts.limit ?? PORTFOLIO_PAGE_SIZE))
+  if (opts.cursor) params.set("cursor", opts.cursor)
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs/${orgId}/portfolio?${params}`,
+    { headers: { Authorization: `Bearer ${jwt}` }, signal: opts.signal },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "org")
+  const body = (await res.json()) as { projects: PortfolioProject[]; nextCursor?: string | null }
+  return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
+}
+
+export async function getPortfoliosPage(
+  jwt: string,
+  orgIds: number[],
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    signal?: AbortSignal
+  } = {},
+): Promise<{ projects: Array<PortfolioProject & { orgId: number }>; nextCursor: string | null }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) return { projects: [], nextCursor: null }
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    signal: opts.signal,
+    body: JSON.stringify({
+      orgIds: uniqueOrgIds,
+      q: opts.q?.trim() || undefined,
+      limit: opts.limit ?? PORTFOLIO_PAGE_SIZE,
+      cursor: opts.cursor || undefined,
+    }),
+  })
+  if (!res.ok) throw new UserError(res.status, "", "org")
+  const body = (await res.json()) as {
+    portfolios: OrgPortfolio[]
+    nextCursor?: string | null
+  }
+  return {
+    projects: (body.portfolios ?? []).flatMap((portfolio) =>
+      portfolio.projects.map((project) => ({ ...project, orgId: portfolio.orgId })),
+    ),
+    nextCursor: body.nextCursor ?? null,
+  }
 }
 
 export async function getPortfolios(jwt: string, orgIds: number[]): Promise<OrgPortfolio[]> {
@@ -117,14 +239,52 @@ export async function getPortfolios(jwt: string, orgIds: number[]): Promise<OrgP
   return ((await res.json()) as { portfolios: OrgPortfolio[] }).portfolios
 }
 
-/** validated fraction 0..1 (0 when no cells). */
-export function validatedPct(p: PortfolioProject): number {
-  return p.totalCells > 0 ? p.validatedCells / p.totalCells : 0
+export interface PortfolioAggregates extends PortfolioAggregate {
+  orgs: OrgPortfolioAggregate[]
 }
 
-/** translated (has-content) fraction 0..1 (0 when no cells). */
-export function translatedPct(p: PortfolioProject): number {
-  return p.totalCells > 0 ? p.filledCells / p.totalCells : 0
+function readAggregate(body: Partial<PortfolioAggregate> | null | undefined): PortfolioAggregate {
+  const empty = emptyPortfolioAggregate()
+  if (!body) return empty
+  const num = (value: unknown, fallback: number) => {
+    const n = typeof value === "number" ? value : Number(value)
+    return Number.isFinite(n) ? n : fallback
+  }
+  return {
+    projectCount: num(body.projectCount, empty.projectCount),
+    avgTranslatedPct: num(body.avgTranslatedPct, empty.avgTranslatedPct),
+    avgValidatedPct: num(body.avgValidatedPct, empty.avgValidatedPct),
+    avgAudioPct: num(body.avgAudioPct, empty.avgAudioPct),
+    stalledCount: num(body.stalledCount, empty.stalledCount),
+    overdueCount: num(body.overdueCount, empty.overdueCount),
+    attentionCount: num(body.attentionCount, empty.attentionCount),
+  }
+}
+
+/** All-orgs overview totals for these orgs. There is no org-count cap. */
+export async function getPortfolioAggregates(
+  jwt: string,
+  orgIds: number[],
+): Promise<PortfolioAggregates> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) return { ...emptyPortfolioAggregate(), orgs: [] }
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio/summary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ orgIds: uniqueOrgIds }),
+  })
+  if (!res.ok) throw new UserError(res.status, "", "org")
+  const body = (await res.json()) as Partial<PortfolioAggregate> & {
+    orgs?: Array<Partial<OrgPortfolioAggregate> & { orgId?: number }>
+  }
+  return {
+    ...readAggregate(body),
+    orgs: (body.orgs ?? []).flatMap((row) => {
+      const orgId = Number(row.orgId)
+      if (!Number.isInteger(orgId) || orgId <= 0) return []
+      return [{ orgId, ...readAggregate(row) }]
+    }),
+  }
 }
 
 /** translated (has-content) fraction 0..1 for a single lane (0 when no cells). */
@@ -143,24 +303,6 @@ export function laneValidatedPct(lane: PortfolioLane): number {
  */
 export function aiDraftedPct(p: PortfolioProject): number {
   return p.totalCells > 0 ? p.aiDraftedCells / p.totalCells : 0
-}
-
-/**
- * WHY BOTH AUDIO FRACTIONS CLAMP AND THE TEXT ONES DO NOT.
- *
- * The text counts and their denominator come from the same rows, so
- * `filledCells <= totalCells` is structurally true. The audio counts do not:
- * `auth-worker/src/services/org-permissions.ts` builds them in a `cell_audio`
- * CTE keyed on `project_id` ALONE, while `totalCells` is `SUM(files.cell_count)`
- * — the two are never joined. Audio left behind on a tombstoned or re-imported
- * file therefore counts in the numerator and not the denominator, and `StatTile`
- * renders `Math.round(pct * 100)` with no ceiling of its own. Without the clamp
- * that is a tile reading "140%".
- */
-
-/** fraction of cells that have audio, 0..1 (0 when no cells). */
-export function audioPct(p: PortfolioProject): number {
-  return p.totalCells > 0 ? Math.min(1, p.audioCells / p.totalCells) : 0
 }
 
 /**
@@ -194,45 +336,12 @@ export function recordedMinutes(p: PortfolioProject): number {
   return Math.round(p.recordedMs / 60000)
 }
 
-export type DeadlineStatus = "overdue" | "soon" | "ok"
-
-/**
- * Convention: "Anywhere on Earth" (AoE) deadline semantics.
- *
- * A deadline of "YYYY-MM-DD" is NOT overdue until that calendar day has ended
- * everywhere on Earth, including UTC-12 (Baker Island / Howland Island).
- * UTC-12 is 12 hours behind UTC, so end-of-day UTC-12 = next calendar day at
- * 12:00:00 UTC. We add a 1-day + 12-hour grace past the deadline date's UTC
- * midnight:  overdue when now_utc >= deadline_utc_midnight + 36 hours.
- *
- * This ensures:
- *   - A project due TODAY is never "overdue" during that calendar day anywhere.
- *   - A project due YESTERDAY is always "overdue" (more than 36h has passed).
- */
-/** 1 day + 12 hours: the grace that makes a date AoE (see the block above). */
-export const AOE_GRACE_MS = (24 + 12) * 60 * 60 * 1000
-
-/** How far ahead of its AoE end a date counts as "due soon". */
-export const DEADLINE_SOON_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
-
-export function isDeadlineOverdue(deadlineUtcMidnight: number, nowMs: number): boolean {
-  return nowMs >= deadlineUtcMidnight + AOE_GRACE_MS
-}
-
-/** null when no deadline; "overdue" past due; "soon" within 7 days; else "ok". */
-export function deadlineStatus(p: PortfolioProject, now: number): DeadlineStatus | null {
-  if (!p.deadlineAt) return null
-  const t = Date.parse(p.deadlineAt) // "YYYY-MM-DD" → UTC midnight of that date
-  if (Number.isNaN(t)) return null
-  if (isDeadlineOverdue(t, now)) return "overdue"
-  // "soon": within 7 days, measured from AoE end-of-deadline-day to now
-  if (t + AOE_GRACE_MS - now <= DEADLINE_SOON_WINDOW_MS) return "soon"
-  return "ok"
-}
-
 /** Attention score: higher = more attention needed. Overdue ranks above stalled, which ranks above low completion. */
 export function attentionRank(p: PortfolioProject, now: number): number {
-  const ageMs = p.lastEditAt != null ? now - p.lastEditAt : Infinity
+  // AQU-950: same activity signal the Stalled chip reads, so the sort can
+  // never rank a row as idle while the status column says it is not.
+  const activityAt = latestActivityAt(p)
+  const ageMs = activityAt != null ? now - activityAt : Infinity
   const stale = ageMs > 14 * 24 * 60 * 60 * 1000 ? 1 : 0
   const overdue = deadlineStatus(p, now) === "overdue" ? 1 : 0
   // AQU-1097: a project whose own deadline holds but whose units are already

@@ -2,10 +2,12 @@
  * AQU-266: Global error boundary + crash telemetry.
  *
  * Wraps the router output so that any unhandled render throw shows a branded
- * recovery screen rather than a white screen of death. Also registers
- * window.onerror + unhandledrejection handlers that funnel uncaught errors into
- * posthog.captureException (consent-gated via the posthog module which already
- * respects isAnalyticsEnabled() on init and responds to onAnalyticsConsentChange).
+ * recovery screen rather than a white screen of death, and reports the throw
+ * via posthog.captureException (consent-gated via the posthog module which
+ * already respects isAnalyticsEnabled() on init and responds to
+ * onAnalyticsConsentChange). Also registers window error + unhandledrejection
+ * handlers for chunk-reload recovery; uncaught errors reach PostHog through its
+ * own exception autocapture (AQU-1572, see the handlers below).
  *
  * SWARM-TODO(AQU-266): UI-QA — force a render throw (e.g. via a dev-only query
  * param ?__crash=1 or React devtools) and confirm the branded recovery screen
@@ -19,6 +21,8 @@ import { Button } from "@/components/ui/button"
 import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { isChunkLoadError, recoverFromChunkError } from "@/lib/chunk-reload"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 
 // ---------------------------------------------------------------------------
 // Dev-only crash trigger: appending ?__crash=1 to any URL while
@@ -37,77 +41,45 @@ function DevCrashTrigger() {
 }
 
 // ---------------------------------------------------------------------------
-// Chunk-load recovery (RES-3 / audit QW-4): after a redeploy, stale lazy-route
-// chunks 404 ("Failed to fetch dynamically imported module" etc.). One forced
-// reload usually fixes it (the new HTML references the new chunk hashes). The
-// sessionStorage flag guards against a reload loop on a genuinely broken
-// deploy; it is re-armed on the next successful page load so a later deploy
-// mid-session gets its own one-shot reload.
+// Chunk-load recovery (RES-3 / audit QW-4 / AQU-1405): after a redeploy, stale
+// lazy-route chunks 404 ("Failed to fetch dynamically imported module" etc.).
+// One forced reload fixes it — the new HTML references the new chunk hashes.
+// The guard, the "Updating …" notice, and the per-chunk one-shot rule live in
+// src/lib/chunk-reload.ts so the window-level handlers below and the boundary
+// share exactly one implementation.
 // ---------------------------------------------------------------------------
-const CHUNK_LOAD_PATTERNS = [
-  "Failed to fetch dynamically imported module",
-  "Importing a module script failed",
-  "Loading chunk",
-  "ChunkLoadError",
-]
-
-export function isChunkLoadError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return CHUNK_LOAD_PATTERNS.some((p) => msg.includes(p))
-}
-
-export const CHUNK_RELOAD_KEY = "aq:chunk-reload-attempted"
-
-/** True if this error triggered the one-shot reload (caller should bail). */
-function maybeReloadForChunkError(err: unknown): boolean {
-  if (!isChunkLoadError(err)) return false
-  try {
-    if (sessionStorage.getItem(CHUNK_RELOAD_KEY)) return false
-    sessionStorage.setItem(CHUNK_RELOAD_KEY, "1")
-  } catch {
-    return false // sessionStorage unavailable — fall through to the error UI
-  }
-  window.location.reload()
-  return true
-}
 
 // ---------------------------------------------------------------------------
 // Window-level error handlers — registered once when the module first loads.
-// Both forward to posthog.captureException; consent-gating is already baked
-// into posthog.ts (opt_out_capturing_by_default + onAnalyticsConsentChange).
+// They exist for chunk-reload recovery, which must run on every uncaught error.
+//
+// AQU-1572: on the web they no longer report to PostHog. posthog.ts inits with
+// `capture_exceptions: true`, which wraps window.onerror and
+// window.onunhandledrejection itself, so a capture here sent every uncaught
+// error twice.
+//
+// The desktop shell is the exception. posthog-js lazy-loads that autocapture
+// from its CDN as a <script>, and the shell's CSP (`script-src 'self'` in
+// src-tauri/tauri.conf.json) blocks it, so autocapture never starts there and
+// these handlers are the only capture. Consent-gating is baked into posthog.ts
+// either way (opt_out_capturing_by_default + onAnalyticsConsentChange).
 // ---------------------------------------------------------------------------
 if (typeof window !== "undefined") {
   window.addEventListener("error", (event: ErrorEvent) => {
     const err = event.error instanceof Error
       ? event.error
       : new Error(event.message || "Unknown window.onerror")
-    posthog.captureException(err, { properties: { source: "window.onerror" } })
-    maybeReloadForChunkError(err)
+    if (isTauriRuntime()) posthog.captureException(err, { source: "window.onerror" })
+    recoverFromChunkError(err)
   })
 
   window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
     const err = event.reason instanceof Error
       ? event.reason
       : new Error(String(event.reason ?? "Unhandled promise rejection"))
-    posthog.captureException(err, { properties: { source: "unhandledrejection" } })
-    maybeReloadForChunkError(err)
+    if (isTauriRuntime()) posthog.captureException(err, { source: "unhandledrejection" })
+    recoverFromChunkError(err)
   })
-
-  // Re-arm the one-shot chunk reload once a page load has succeeded. Lazy
-  // chunks load on navigation — after `load` — so clearing here cannot re-arm
-  // a tight loop: each reload only re-arms once the page has fully booted.
-  const clearChunkReloadFlag = () => {
-    try {
-      sessionStorage.removeItem(CHUNK_RELOAD_KEY)
-    } catch {
-      // sessionStorage unavailable — nothing to re-arm
-    }
-  }
-  if (document.readyState === "complete") {
-    clearChunkReloadFlag()
-  } else {
-    window.addEventListener("load", clearChunkReloadFlag, { once: true })
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +134,16 @@ interface Props {
    * nested inside bounded chrome (e.g. AppShell's main content card) rather
    * than at the app root. */
   compact?: boolean
+  /**
+   * AQU-849: render a local fallback instead of the full-screen recovery UI.
+   * Used by side panels, where a render throw must stay inside the panel and
+   * must not push the user into a page reload — calling `reset` clears the
+   * boundary so the subtree remounts and refetches in place.
+   */
+  fallback?: (reset: () => void) => ReactNode
+  /** Names this boundary in crash telemetry, so ops can tell which surface
+   * threw (the 2026-08-10 pane crash was reported with no error text). */
+  label?: string
 }
 
 interface State {
@@ -180,23 +162,39 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    // Not a duplicate of PostHog's autocapture (AQU-1572): React 19 reports an
+    // error a boundary caught to console.error, never to window.onerror, and
+    // `capture_exceptions: true` leaves console errors alone — so this is the
+    // only capture of a render throw. The second argument is the event's
+    // property bag itself; wrapping it in `{ properties: … }` filed all three
+    // under one nested `properties` key instead of as event properties.
     posthog.captureException(error, {
-      properties: {
-        source: "react_error_boundary",
-        componentStack: info.componentStack,
-      },
+      source: "react_error_boundary",
+      boundary: this.props.label ?? "root",
+      componentStack: info.componentStack,
     })
     // Stale-chunk render throws get one automatic reload before showing the
-    // "App updated" fallback (see maybeReloadForChunkError above).
-    maybeReloadForChunkError(error)
+    // "App updated" fallback (see @/lib/chunk-reload).
+    recoverFromChunkError(error)
   }
 
   private handleReload = () => {
     window.location.reload()
   }
 
+  /** Clears the boundary so the subtree remounts — the in-place recovery a
+   * panel-level fallback offers instead of a page reload. */
+  private handleReset = () => {
+    this.setState({ hasError: false, isChunkError: false })
+  }
+
   render() {
     if (this.state.hasError) {
+      // A stale-chunk error is only fixable by reloading, so local fallbacks
+      // still defer to the full recovery screen for that one case.
+      if (this.props.fallback && !this.state.isChunkError) {
+        return this.props.fallback(this.handleReset)
+      }
       return (
         <ErrorFallback
           onReload={this.handleReload}

@@ -54,12 +54,8 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
   )
 
   // Alice opens comments drawer and posts.
-  const row = ws.cellRow(0)
-  await row.scrollIntoViewIfNeeded()
-  await row.hover()
-
-  const addCommentBtn = row.locator('button[aria-label="Add comment"]')
-  await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+  // AQU-200: comments live behind the rail's ⋯ overflow.
+  const addCommentBtn = await ws.openRowAction(ws.cellRow(0), "Add comment")
   await addCommentBtn.click()
 
   const drawer = alice.locator("[data-testid='comments-drawer']").first()
@@ -75,11 +71,22 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
 
   // Bob navigates to the comments page for the same project.
   await bob.goto(`/project/${projectId}/comments`)
-  // Bob sees alice's comment. The comments page fetches once on mount with no
-  // live subscription (useComments loads on mount only), while alice's
-  // comment.create drains via the 5s outbox interval — so bob's first fetch can
-  // legitimately race the projection write. Poll through the page's own
-  // Refresh button rather than weakening the cross-user assertion.
+  // Bob sees alice's comment. Bob arrives by a fresh navigation, so his first
+  // fetch is the mount load, while alice's comment.create drains via the 5s
+  // outbox interval — his first fetch can legitimately race the projection
+  // write. Poll through the page's own Refresh button rather than weakening the
+  // cross-user assertion.
+  //
+  // AQU-817: this used to read "no live subscription (useComments loads on
+  // mount only)", which was the defect, not the design. useComments now also
+  // re-reads when the tab regains focus and when the project socket reopens,
+  // because the DO never replays (AD-1) and a frame missed during a socket gap
+  // was otherwise lost to that client until a full page reload. The Refresh
+  // polling below is still the right tool HERE — it pins the cross-user
+  // projection contract without depending on which re-read trigger fires first
+  // — but do not read it as evidence that a reader must act to see a peer's
+  // comment. See src/hooks/useComments.focusRevalidate.test.ts for the
+  // gap-recovery guard.
   const refreshBtn = bob.getByRole("button", { name: "Refresh" })
   await expect(async () => {
     await refreshBtn.click()

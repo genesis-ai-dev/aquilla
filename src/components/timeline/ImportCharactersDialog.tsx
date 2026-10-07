@@ -15,7 +15,7 @@
  * thing to discover after the fact.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -56,8 +56,8 @@ interface Props {
   open: boolean
   /** The file whose lines gain characters — named so it is obvious which. */
   textFileName: string
-  /** That file's cells, for timestamp keying. */
-  cells: readonly KeyableCell[]
+  /** Read current cells only when an open preview needs timestamp keying. */
+  getCells: () => readonly KeyableCell[]
   /** The audio cues, when the file has them. Absent ⇒ only the subtitle sheet
    *  can be imported, because there is nothing for an audio sheet to key to. */
   audioCues?: readonly AlignableCue[]
@@ -97,10 +97,22 @@ interface Picked {
   kind: CharacterSheetKind
 }
 
-export function ImportCharactersDialog({
+export function ImportCharactersDialog(props: Props) {
+  return (
+    <Dialog open={props.open} onOpenChange={(next) => { if (!next) props.onCancel() }}>
+      <DialogContent data-testid="import-characters-dialog">
+        <ImportCharactersContent {...props} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// The dialog portal mounts this content only while visible (including exit).
+// Closed dialogs therefore keep no parsed sheet or assignment work alive.
+function ImportCharactersContent({
   open,
   textFileName,
-  cells,
+  getCells,
   audioCues,
   existingCount,
   existingAudioCount = 0,
@@ -115,6 +127,7 @@ export function ImportCharactersDialog({
   const t = useT()
   const [picked, setPicked] = useState<Picked | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const readGeneration = useRef(0)
   /** Clearing asks twice, in place. It empties hundreds of lines and takes hand
    *  corrections with them, so it does not get to be one click beside Cancel.
    *  Holds WHICH side is being confirmed, since the two are independent. */
@@ -126,6 +139,9 @@ export function ImportCharactersDialog({
       setError(null)
       setClearing(null)
     }
+    // Cancel stale reads on close, even while the exit animation keeps this
+    // component mounted, and on unmount or a rapid reopen.
+    return () => { readGeneration.current++ }
   }, [open])
 
   const anyImported = existingCount > 0 || existingAudioCount > 0
@@ -155,8 +171,8 @@ export function ImportCharactersDialog({
       : (importedParts[0] ?? "")
 
   const sheet = picked?.sheets[picked.sheetIndex]
-  const columns = sheet ? guessCharacterColumns(sheet.rows[0] ?? []) : null
-  const rows = sheet && columns ? readCharacterRows(sheet.rows, columns) : null
+  const columns = useMemo(() => sheet ? guessCharacterColumns(sheet.rows[0] ?? []) : null, [sheet])
+  const rows = useMemo(() => sheet && columns ? readCharacterRows(sheet.rows, columns) : null, [sheet, columns])
 
   // BOTH READINGS, ALWAYS — which is also how the wrong button is caught.
   //
@@ -169,9 +185,12 @@ export function ImportCharactersDialog({
   // Worth catching before the refusal below, which would otherwise report "this
   // sheet matches no line" — true, and useless, when the real answer is that it
   // belongs under the other button.
-  const asSubtitle = rows ? planCharacterAssignments({ rows, cells }) : null
-  const asAudio =
-    rows && audioCues?.length ? planAudioCharacterAssignments({ rows, cues: audioCues }) : null
+  // A new getter identity refreshes the visible preview when cell summaries
+  // change; unrelated counter updates reuse the existing matching results.
+  const asSubtitle = useMemo(() => rows
+    ? planCharacterAssignments({ rows, cells: getCells() }) : null, [rows, getCells])
+  const asAudio = useMemo(() => rows && audioCues?.length
+    ? planAudioCharacterAssignments({ rows, cues: audioCues }) : null, [rows, audioCues])
 
   const fitsSubtitle = asSubtitle ? asSubtitle.assignments.length : 0
   const fitsAudio = asAudio ? asAudio.assignments.length : 0
@@ -188,6 +207,7 @@ export function ImportCharactersDialog({
   const mismatched = active != null && active.unmatchedRows.length > 0
 
   const handleFile = async (file: File, kind: CharacterSheetKind) => {
+    const generation = ++readGeneration.current
     setPicked(null)
     setError(null)
     if (file.size === 0) return setError(t("editor.timeline.importFileEmpty"))
@@ -195,21 +215,24 @@ export function ImportCharactersDialog({
       return setError(t("editor.timeline.importTooLargeSheet", { fileName: file.name }))
     }
     try {
+      const buffer = await file.arrayBuffer()
+      if (readGeneration.current !== generation) return
       const sheets = /\.csv$/i.test(file.name)
-        ? [parseCsvToSheet(decodeImportText(await file.arrayBuffer(), file.name), file.name)]
-        : await parseXlsxToSheets(await file.arrayBuffer())
+        ? [parseCsvToSheet(decodeImportText(buffer, file.name), file.name)]
+        : await parseXlsxToSheets(buffer)
+      if (readGeneration.current !== generation) return
       if (sheets.length === 0 || (sheets[0].rows.length ?? 0) < 2) {
         return setError(t("editor.timeline.charactersNoRows"))
       }
       setPicked({ fileName: file.name, sheets, sheetIndex: 0, kind })
     } catch (cause) {
+      if (readGeneration.current !== generation) return
       setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
-      <DialogContent data-testid="import-characters-dialog">
+    <>
         <DialogHeader>
           {/* Titled for what this is a home for, not only for what it was
               built to do first. It gained two ways to take a sheet back off,
@@ -561,7 +584,6 @@ export function ImportCharactersDialog({
               : t("editor.timeline.charactersAssign")}
           </Button>
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </>
   )
 }

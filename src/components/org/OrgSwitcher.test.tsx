@@ -19,15 +19,27 @@ async function openOrgSwitcher(name: string | RegExp) {
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }),
 }))
+const platformAdmin = vi.hoisted(() => ({ isAdmin: false, loading: false }))
+vi.mock("@/hooks/usePlatformAdmin", () => ({
+  usePlatformAdmin: () => ({
+    isAdmin: platformAdmin.isAdmin,
+    loading: platformAdmin.loading,
+  }),
+}))
 const listMyOrgs = vi.fn()
+const listOrgsPage = vi.fn()
 const createOrg = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: (...a: unknown[]) => listMyOrgs(...a),
+  listOrgsPage: (...a: unknown[]) => listOrgsPage(...a),
   createOrg: (...a: unknown[]) => createOrg(...a),
+  ORG_SWITCHER_PAGE_SIZE: 40,
 }))
 
 const fetchAccessibleProjects = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
   fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
     ok: true as const,
@@ -38,9 +50,12 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 beforeEach(() => {
   localStorage.clear()
   listMyOrgs.mockReset()
+  listOrgsPage.mockReset()
   createOrg.mockReset()
   fetchAccessibleProjects.mockReset()
   fetchAccessibleProjects.mockResolvedValue([])
+  platformAdmin.isAdmin = false
+  platformAdmin.loading = false
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -305,6 +320,29 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(screen.getByText(/no organizations found/i)).toBeInTheDocument())
   })
 
+  // A user's own workspace is where they land and create by default, so it is
+  // pinned above the alphabetical list and tagged so it reads as "home", not
+  // as one more org they happen to own.
+  it("pins the personal workspace first with a Personal tag", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Zed's workspace", role: { level: 700, name: "owner" }, personal: true },
+      { id: 3, name: "Bravo Org", role: { level: 600, name: "maintainer" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    const trigger = await screen.findByRole("combobox", { name: /organization switcher/i })
+    await act(async () => { trigger.click() })
+    await screen.findByLabelText(/find an organization/i)
+
+    const options = screen.getAllByRole("option").map((n) => n.textContent ?? "")
+    const memberRows = options.filter((t) => /Org|workspace/.test(t))
+    expect(memberRows[0]).toContain("Zed's workspace")
+    expect(memberRows[0]).toContain("Personal")
+    expect(memberRows[1]).toContain("Alpha Org")
+    expect(memberRows[1]).not.toContain("Personal")
+    expect(memberRows[2]).toContain("Bravo Org")
+  })
+
   // AQU-759 (regression guard for AQU-473): filtering also narrows guest orgs
   // while each surviving guest row keeps its "Guest" tag.
   it("search filters guest orgs and preserves the Guest tag", async () => {
@@ -482,6 +520,184 @@ describe("OrgSwitcher", () => {
       await waitFor(() => expect(listMyOrgs).toHaveBeenCalled())
       expect(screen.queryByTestId("org-switcher-error")).not.toBeInTheDocument()
       expect(container).toBeEmptyDOMElement()
+    })
+  })
+
+  describe("platform-admin catalog (async combobox)", () => {
+    it("loads the first catalog page on open instead of dumping every org from context", async () => {
+      platformAdmin.isAdmin = true
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      ])
+      listOrgsPage.mockResolvedValue({
+        orgs: [
+          { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+          { id: 9, name: "Foreign Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+        ],
+        nextCursor: "9:Foreign%20Org",
+      })
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+      expect(listOrgsPage).not.toHaveBeenCalled()
+
+      await act(async () => {
+        screen.getByRole("combobox", { name: /acme/i }).click()
+      })
+      await waitFor(() => expect(screen.getByText("Foreign Org")).toBeInTheDocument())
+      expect(listOrgsPage).toHaveBeenCalledWith(
+        "jwt",
+        expect.objectContaining({ q: "", limit: 40 }),
+      )
+      expect(screen.getByTestId("org-switcher-load-more")).toBeInTheDocument()
+    })
+
+    it("searches the catalog as you type", async () => {
+      platformAdmin.isAdmin = true
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      ])
+      listOrgsPage.mockImplementation(async (_jwt: string, opts?: { q?: string }) => {
+        const q = opts?.q?.trim().toLowerCase() ?? ""
+        if (q === "beta") {
+          return {
+            orgs: [{ id: 9, name: "Beta Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true }],
+            nextCursor: null,
+          }
+        }
+        return {
+          orgs: [
+            { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+            { id: 9, name: "Beta Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+          ],
+          nextCursor: null,
+        }
+      })
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+      await act(async () => {
+        screen.getByRole("combobox", { name: /acme/i }).click()
+      })
+      await waitFor(() => expect(screen.getByRole("option", { name: /beta org/i })).toBeInTheDocument())
+
+      const search = await screen.findByRole("combobox", { name: /find an organization/i })
+      fireEvent.change(search, { target: { value: "beta" } })
+      await waitFor(() =>
+        expect(listOrgsPage).toHaveBeenCalledWith(
+          "jwt",
+          expect.objectContaining({ q: "beta" }),
+        ),
+      )
+      await waitFor(() => expect(screen.getByRole("option", { name: /beta org/i })).toBeInTheDocument())
+      expect(screen.queryByRole("option", { name: /acme/i })).not.toBeInTheDocument()
+    })
+
+    it("shows a spinner in the search field while a catalog query is in flight", async () => {
+      platformAdmin.isAdmin = true
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      ])
+      let resolveSearch: ((value: { orgs: unknown[]; nextCursor: null }) => void) | undefined
+      listOrgsPage
+        .mockResolvedValueOnce({
+          orgs: [
+            { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+            { id: 9, name: "Beta Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+          ],
+          nextCursor: null,
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSearch = resolve
+            }),
+        )
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+      await act(async () => {
+        screen.getByRole("combobox", { name: /acme/i }).click()
+      })
+      await waitFor(() => expect(screen.getByRole("option", { name: /beta org/i })).toBeInTheDocument())
+
+      const search = await screen.findByRole("combobox", { name: /find an organization/i })
+      fireEvent.change(search, { target: { value: "beta" } })
+      expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
+      expect(search.closest("[data-slot='input-group']")).toHaveAttribute("aria-busy", "true")
+
+      await waitFor(() =>
+        expect(listOrgsPage).toHaveBeenCalledWith(
+          "jwt",
+          expect.objectContaining({ q: "beta" }),
+        ),
+      )
+      await act(async () => {
+        resolveSearch?.({
+          orgs: [{ id: 9, name: "Beta Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true }],
+          nextCursor: null,
+        })
+      })
+      await waitFor(() =>
+        expect(screen.queryByRole("status", { name: /searching/i })).not.toBeInTheDocument(),
+      )
+    })
+
+    it("keeps a guest-grant org in the Guest section instead of listing it twice as Admin", async () => {
+      platformAdmin.isAdmin = true
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      ])
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "p2", name: "Proj 2", orgId: 9, orgName: "Alice Co", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      listOrgsPage.mockResolvedValue({
+        orgs: [
+          { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+          { id: 9, name: "Alice Co", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+        ],
+        nextCursor: null,
+      })
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+      await act(async () => {
+        screen.getByRole("combobox", { name: /acme/i }).click()
+      })
+      await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
+      expect(screen.getAllByRole("option", { name: /alice co/i })).toHaveLength(1)
+      expect(screen.getByRole("option", { name: /alice co guest/i })).toBeInTheDocument()
+      expect(screen.queryByRole("option", { name: /alice co admin/i })).not.toBeInTheDocument()
+    })
+  })
+
+  // AQU-1113: the switcher used to hardcode an untranslated English
+  // "Workspace" for an org with no name, while the breadcrumb, members page
+  // and projects page all called the same thing "Organization". One entity,
+  // two nouns — and non-English users saw the English word either way.
+  describe("unnamed-organization fallback (AQU-1113)", () => {
+    it("labels a nameless org 'Organization', never 'Workspace'", async () => {
+      listMyOrgs.mockResolvedValue([{ id: 1, name: null, role: { level: 700, name: "owner" } }])
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+      const trigger = await screen.findByRole("combobox", { name: "Organization switcher: Organization" })
+      expect(trigger).toBeInTheDocument()
+      expect(screen.queryByText("Workspace")).not.toBeInTheDocument()
+    })
+
+    it("uses the same fallback noun in the dropdown row as on the trigger", async () => {
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: null, role: { level: 700, name: "owner" } },
+        { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+      ])
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
+      await openOrgSwitcher("Organization switcher: All organizations")
+
+      // Option text is "<mark initials><label><role>", e.g. "OROrganizationOwner".
+      const optionTexts = screen.getAllByRole("option").map((o) => o.textContent ?? "")
+      expect(optionTexts.some((text) => text.includes("Organization") && text.includes("Owner"))).toBe(true)
+      expect(optionTexts.some((text) => text.includes("Workspace"))).toBe(false)
     })
   })
 })

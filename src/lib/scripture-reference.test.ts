@@ -1,10 +1,13 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   cellNumberLabel,
   chapterLabelFromCanonical,
+  formatVerseReference,
   importDisplayLabel,
   parseScriptureReference,
+  parseVerseReference,
   verseLabelFromCanonical,
+  verseRangeLabel,
 } from "./scripture-reference"
 
 describe("scripture references", () => {
@@ -67,6 +70,51 @@ describe("scripture references", () => {
       scriptureNumbering: true,
       rowIndex: 39,
     })).toBe("31")
+  })
+
+  // AQU-1068 review round. Matthew, via Ryder: adding a cell must not renumber
+  // the existing ones. This is the DISPLAY half of that answer (the store half
+  // lives in useActiveCellStore.insertPlan.test.ts): a number is read off the
+  // cell's own reference or its import manifest, never off its position, so a
+  // row inserted anywhere leaves every label around it untouched.
+  it("keeps every imported label unchanged when a cell is inserted among them", () => {
+    const label = (row: { canonicalRef: string | null; displayLabel?: string | null }, rowIndex: number) =>
+      cellNumberLabel({
+        lineNumbersEnabled: true,
+        cellType: "verse",
+        scriptureNumbering: true,
+        rowIndex,
+        ...row,
+      })
+
+    const before = [
+      { canonicalRef: "GEN 1:1" },
+      { canonicalRef: "GEN 1:2" },
+      { canonicalRef: "GEN 1:3" },
+    ]
+    // The same file with a hand-added cell dropped in the middle. It carries
+    // no reference and no import manifest, which is exactly why it takes no
+    // number and steals none.
+    const after = [
+      { canonicalRef: "GEN 1:1" },
+      { canonicalRef: "GEN 1:2" },
+      { canonicalRef: null },
+      { canonicalRef: "GEN 1:3" },
+    ]
+
+    expect(before.map(label)).toEqual(["1", "2", "3"])
+    expect(after.map(label)).toEqual(["1", "2", null, "3"])
+  })
+
+  it("keeps a manifest displayLabel unchanged when a cell is inserted above it", () => {
+    // A DOCX/USFM import owns its own presentation identity, so its label is
+    // position-independent by construction — the row index moves, the label
+    // does not.
+    const cell = { canonicalRef: null, displayLabel: "12" }
+    expect(cellNumberLabel({ lineNumbersEnabled: true, cellType: "text", scriptureNumbering: false, rowIndex: 11, ...cell }))
+      .toBe("12")
+    expect(cellNumberLabel({ lineNumbersEnabled: true, cellType: "text", scriptureNumbering: false, rowIndex: 12, ...cell }))
+      .toBe("12")
   })
 
   it("retains ordinal labels for ordinary non-scripture cells", () => {
@@ -151,5 +199,62 @@ describe("scripture references", () => {
 
     // Front matter/paratext stay unnumbered; content is gap-free from 1.
     expect(labels).toEqual([null, null, null, "1", null, "2"])
+  })
+})
+
+
+describe("navigation verse ranges", () => {
+  it.each([
+    [], [null], ["GEN 1"], ["GEN 1:1"],
+    [null, "heading", "GEN 1:2a", "GEN 1:4-6", null],
+    ["GEN 1:7", "GEN 1:3", "GEN 1:1"],
+    ["GEN 1:1", "GEN 1:1"],
+    ["GEN 1:h:1", "GEN 1:2", "non-verse"],
+  ])("preserves the full-scan result for refs %j", (...refs) => {
+    const labels = refs.map(verseLabelFromCanonical).filter(Boolean)
+    const first = labels[0]
+    const last = labels[labels.length - 1]
+    const expected = first && last ? (first === last ? first : `${first}–${last}`) : null
+    const ids = refs.map((_, index) => String(index))
+    expect(verseRangeLabel(ids, id => refs[Number(id)])).toBe(expected)
+  })
+
+  it("reads only two cells for a large all-verse chapter", () => {
+    const ids = Array.from({ length: 31_215 }, (_, index) => String(index + 1))
+    const read = vi.fn((id: string) => `GEN 1:${id}`)
+    expect(verseRangeLabel(ids, read)).toBe("1–31215")
+    expect(read.mock.calls).toEqual([["1"], ["31215"]])
+    // Read fresh boundaries on every call; no stale text/lane/order cache.
+    expect(verseRangeLabel([...ids].reverse(), read)).toBe("31215–1")
+  })
+})
+
+// A target import's reference column is written by someone else, in whatever
+// spelling their tool or their habit uses (AQU-1375).
+describe("parseVerseReference", () => {
+  it("reads a verse however it is spelled, into the app's own spelling", () => {
+    for (const spelling of ["GEN 1:4", "gen 1:4", "GEN 1.4", "Genesis 1:4", "genesis 1.4", "Genesis1:4", "GEN 01:04"]) {
+      expect(formatVerseReference(parseVerseReference(spelling)!), spelling).toBe("GEN 1:4")
+    }
+  })
+
+  it("reads numbered books, alias names, verse letters and bridges", () => {
+    expect(formatVerseReference(parseVerseReference("1 Samuel 3:2")!)).toBe("1SA 3:2")
+    expect(formatVerseReference(parseVerseReference("1sa 3:2")!)).toBe("1SA 3:2")
+    expect(formatVerseReference(parseVerseReference("Psalm 23:1")!)).toBe("PSA 23:1")
+    expect(formatVerseReference(parseVerseReference("Song of Songs 2:1")!)).toBe("SNG 2:1")
+    expect(formatVerseReference(parseVerseReference("MAT 12:4A")!)).toBe("MAT 12:4a")
+    expect(parseVerseReference("GEN 1:1–2")).toEqual({ bookCode: "GEN", chapter: 1, verse: "1", toVerse: "2" })
+  })
+
+  it("reads nothing that isn't a verse of a known book", () => {
+    for (const value of ["GNE 1:3", "Genesis", "GEN 1", "MAT 1:s1", "GEN 1:h:1", "Row 4", "", null, undefined]) {
+      expect(parseVerseReference(value), String(value)).toBeNull()
+    }
+  })
+
+  it("leaves the strict parser's answers as they were", () => {
+    expect(parseScriptureReference("Genesis 1:4")).toBeNull()
+    expect(parseScriptureReference("GEN 1.4")).toBeNull()
   })
 })

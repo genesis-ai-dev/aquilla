@@ -345,6 +345,24 @@ export const TRACK_DOT_CLASS = "bg-[color:var(--tl-track-hue)]"
 export const TRACK_DASH_CLASS =
   "border-dashed border-[color:var(--tl-track-hue)] hover:bg-[color:var(--tl-track-hover)]"
 
+/**
+ * THE SAME LADDER IN GREY, for a take drawn OFF the timeline (2026-09-25).
+ *
+ * Sam's ruling: the Recording tab, the Audio view card and the recorder draw a
+ * take as the timeline's own chip, but not in its track's colour (that question
+ * is parked). Setting these on a waveform rectangle makes the chip classes
+ * above — body, outline, and the playing split — work unchanged on a neutral
+ * body. Built from the theme's foreground and background so it follows dark
+ * mode with no second set; the strengths mirror the hue ladder's spacing.
+ */
+export const NEUTRAL_TRACK_VARS: Record<string, string> = {
+  "--tl-track-hue": "color-mix(in oklab, var(--foreground) 24%, var(--background))",
+  "--tl-track-hover": "color-mix(in oklab, var(--foreground) 3.5%, var(--background))",
+  "--tl-track-hover-fill": "color-mix(in oklab, var(--foreground) 12%, var(--background))",
+  "--tl-track-gen": "color-mix(in oklab, var(--foreground) 5%, var(--background))",
+  "--tl-track-take": "color-mix(in oklab, var(--foreground) 9%, var(--background))",
+}
+
 /** The chip's identity classes for one clip. */
 export function trackChipClass(kind: "take" | "generated"): string {
   return kind === "take" ? TRACK_CHIP_TAKE_CLASS : TRACK_CHIP_GENERATED_CLASS

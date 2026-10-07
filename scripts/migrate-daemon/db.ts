@@ -15,9 +15,13 @@ export interface ProjectRow {
   gitlab_id: number; aquilla_id: string; name: string; namespace: string
   org_id: number | null; team_id: number | null; owner_user_id: number | null
   last_activity_at: string; head_sha: string | null; applied_sha: string | null
-  content_logic: number; cast_hash: string | null
+  audio_applied_sha: string | null; content_logic: number; cast_hash: string | null
   status: "ok" | "unmapped" | "failed"; last_error: string | null
   project_upserted: 0 | 1; updated_at: number
+}
+export interface RecentJobRow extends JobRow {
+  project_name: string
+  namespace: string
 }
 export const JOB_BACKOFF_MS = [5 * 60e3, 15 * 60e3, 60 * 60e3, 6 * 60 * 60e3, 24 * 60 * 60e3] as const
 const UNFINISHED = `stage NOT IN ('done')`
@@ -26,7 +30,8 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects (
   gitlab_id INTEGER PRIMARY KEY, aquilla_id TEXT NOT NULL, name TEXT NOT NULL, namespace TEXT NOT NULL,
   org_id INTEGER, team_id INTEGER, owner_user_id INTEGER, last_activity_at TEXT NOT NULL,
-  head_sha TEXT, applied_sha TEXT, content_logic INTEGER NOT NULL DEFAULT 0, cast_hash TEXT,
+  head_sha TEXT, applied_sha TEXT, audio_applied_sha TEXT,
+  content_logic INTEGER NOT NULL DEFAULT 0, cast_hash TEXT,
   status TEXT NOT NULL DEFAULT 'ok', last_error TEXT, project_upserted INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS jobs (
@@ -48,6 +53,10 @@ export class DaemonDb {
     this.d = new DatabaseSync(file)
     this.d.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
     this.d.exec(SCHEMA)
+    const columns = this.d.prepare("PRAGMA table_info(projects)").all() as Array<{ name: string }>
+    if (!columns.some((column) => column.name === "audio_applied_sha")) {
+      this.d.exec("ALTER TABLE projects ADD COLUMN audio_applied_sha TEXT")
+    }
   }
   close(): void { this.d.close() }
 
@@ -59,7 +68,7 @@ export class DaemonDb {
         last_activity_at=excluded.last_activity_at, status=excluded.status, updated_at=excluded.updated_at`)
       .run(p.gitlab_id, p.aquilla_id, p.name, p.namespace, p.org_id, p.team_id, p.owner_user_id, p.last_activity_at, p.status ?? "ok", Date.now())
     const patch: Array<[keyof ProjectRow, unknown]> = []
-    for (const k of ["head_sha", "applied_sha", "content_logic", "cast_hash", "last_error", "project_upserted"] as const) {
+    for (const k of ["head_sha", "applied_sha", "audio_applied_sha", "content_logic", "cast_hash", "last_error", "project_upserted"] as const) {
       if (p[k] !== undefined) patch.push([k, p[k]])
     }
     for (const [k, v] of patch) this.d.prepare(`UPDATE projects SET ${k}=? WHERE gitlab_id=?`).run(v as string | number | null, p.gitlab_id)
@@ -72,7 +81,7 @@ export class DaemonDb {
       ? this.d.prepare(`SELECT * FROM projects WHERE status=? ORDER BY gitlab_id`).all(status)
       : this.d.prepare(`SELECT * FROM projects ORDER BY gitlab_id`).all()) as unknown as ProjectRow[]
   }
-  setProjectFields(id: number, patch: Partial<Pick<ProjectRow, "head_sha" | "applied_sha" | "content_logic" | "cast_hash" | "status" | "last_error" | "project_upserted">>): void {
+  setProjectFields(id: number, patch: Partial<Pick<ProjectRow, "head_sha" | "applied_sha" | "audio_applied_sha" | "content_logic" | "cast_hash" | "status" | "last_error" | "project_upserted">>): void {
     for (const [k, v] of Object.entries(patch)) this.d.prepare(`UPDATE projects SET ${k}=?, updated_at=? WHERE gitlab_id=?`).run(v as string | number | null, Date.now(), id)
   }
 
@@ -80,7 +89,7 @@ export class DaemonDb {
     const now = Date.now()
     const open = this.d.prepare(`SELECT * FROM jobs WHERE project_id=? AND kind=? AND ${UNFINISHED} ORDER BY id DESC LIMIT 1`).get(projectId, kind) as JobRow | undefined
     if (open) {
-      if (open.sha !== sha) this.d.prepare(`UPDATE jobs SET sha=?, stage='detected', plan_path=NULL, updated_at=? WHERE id=?`).run(sha, now, open.id)
+      if (open.sha !== sha) this.d.prepare(`UPDATE jobs SET sha=?, stage='detected', attempts=0, next_run_at=0, error=NULL, plan_path=NULL, updated_at=? WHERE id=?`).run(sha, now, open.id)
       return this.getJob(open.id)!
     }
     const r = this.d.prepare(`INSERT INTO jobs (project_id, kind, sha, stage, created_at, updated_at) VALUES (?,?,?,'detected',?,?)`).run(projectId, kind, sha, now, now)
@@ -104,6 +113,22 @@ export class DaemonDb {
   }
   listJobs(stage?: JobStage): JobRow[] {
     return (stage ? this.d.prepare(`SELECT * FROM jobs WHERE stage=? ORDER BY id`).all(stage) : this.d.prepare(`SELECT * FROM jobs ORDER BY id`).all()) as unknown as JobRow[]
+  }
+  hasOpenJobs(projectId: number): boolean {
+    const row = this.d.prepare(`SELECT 1 AS found FROM jobs WHERE project_id=? AND ${UNFINISHED} LIMIT 1`).get(projectId)
+    return Boolean(row)
+  }
+  statusSummary(): {
+    projects: Array<{ status: string; count: number }>
+    jobs: Array<{ kind: JobKind; stage: JobStage; count: number }>
+    recentJobs: RecentJobRow[]
+  } {
+    const projects = this.d.prepare(`SELECT status, COUNT(*) AS count FROM projects GROUP BY status`).all() as Array<{ status: string; count: number }>
+    const jobs = this.d.prepare(`SELECT kind, stage, COUNT(*) AS count FROM jobs GROUP BY kind, stage`).all() as Array<{ kind: JobKind; stage: JobStage; count: number }>
+    const recentJobs = this.d.prepare(`SELECT j.*, p.name AS project_name, p.namespace
+      FROM jobs j JOIN projects p ON p.gitlab_id=j.project_id
+      ORDER BY j.updated_at DESC, j.id DESC LIMIT 12`).all() as unknown as RecentJobRow[]
+    return { projects, jobs, recentJobs }
   }
 
   ledgerHas(projectId: number, eventId: string): boolean {

@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState } from "react"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useConcepts } from "@/hooks/useConcepts"
+import { useSubscribedConcepts } from "@/hooks/useSubscribedConcepts"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useProject } from "@/hooks/useProject"
 import { useProjectCells } from "@/hooks/useProjectCells"
@@ -28,6 +29,8 @@ interface RulesSettingsSectionProps {
   refreshProject?: () => void
   patchSettings?: UseProjectSettings["patch"]
   roleLevel?: number | null
+  activeLane?: string
+  onActiveLaneChange?: (lane: string) => void
 }
 
 export function RulesSettingsSection({
@@ -36,6 +39,8 @@ export function RulesSettingsSection({
   refreshProject,
   patchSettings: parentPatchSettings,
   roleLevel: parentRoleLevel,
+  activeLane,
+  onActiveLaneChange,
 }: RulesSettingsSectionProps) {
   const t = useT()
   const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
@@ -89,27 +94,38 @@ export function RulesSettingsSection({
   //
   // NOTE the ordering: `getToken` is declared ABOVE `useRules` now, where it
   // used to sit below. useConcepts needs it, and useRules needs useConcepts.
-  const { concepts: localConcepts } = useConcepts({
+  // AQU-1340: `error` is read too. Dropping it left this list quietly short of
+  // every terminology rule whenever the concepts read failed — the exact
+  // disagreement with the editor the comment above warns about, with no hint
+  // on screen that anything was missing.
+  const { concepts: localConcepts, error: conceptsError } = useConcepts({
     projectId,
     getToken,
     tokenReady: !!jwt,
   })
+  // AQU-1721: the editor applies the subscribed termbases too, so the rules
+  // evaluated here include them, and a failed read gets the same notice.
+  const { concepts: subscribedConcepts, error: subscribedConceptsError } = useSubscribedConcepts(projectId)
 
   const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
     project ?? null,
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
     orgRules,
-    undefined,
+    subscribedConcepts,
     undefined,
     localConcepts,
   )
 
-  const { files } = useProjectCells({
+  // The corpus must be read in the lane the page is viewing: an omitted lane
+  // selects the legacy default lane, which is empty for a project translated
+  // into a named lane — "Suggest from edits" then mines nothing.
+  const { files, isLoading: cellsLoading, error: cellsError } = useProjectCells({
     projectId,
     projectFiles,
     getToken,
     enabled: Boolean(jwt) && Boolean(project),
+    lane: activeLane ?? "",
   })
 
   const cells = useMemo(() => files.flatMap((file) => file.cells), [files])
@@ -130,28 +146,43 @@ export function RulesSettingsSection({
   }
 
   return (
-    <RulesSurface
-      embedded
-      project={project}
-      projectId={projectId}
-      userRules={userRules}
-      builtinRules={builtinRules}
-      addRule={addRule}
-      updateRule={updateRule}
-      deleteRule={deleteRule}
-      setBuiltinOverride={setBuiltinOverride}
-      infractions={infractions}
-      cells={cells}
-      completionSettings={project.completionSettings}
-      orgRules={orgRules}
-      canEditOrgRules={canEditOrgSettings}
-      patchOrgSettings={patchOrgSettings}
-      orgSettingsVersion={orgSettingsVersion}
-      promotionRequests={promotionRequests}
-      canRequestPromotion={canRequestPromotion}
-      requestPromotion={requestPromotion}
-      editingRuleId={editingRuleId}
-      setEditingRuleId={setEditingRuleId}
-    />
+    <>
+      {(conceptsError || subscribedConceptsError) && (
+        <div
+          role="alert"
+          data-testid="rules-terminology-unavailable"
+          className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+        >
+          {t("rules.terminologyUnavailableNotice")}
+        </div>
+      )}
+      <RulesSurface
+        embedded
+        project={project}
+        projectId={projectId}
+        userRules={userRules}
+        builtinRules={builtinRules}
+        addRule={addRule}
+        updateRule={updateRule}
+        deleteRule={deleteRule}
+        setBuiltinOverride={setBuiltinOverride}
+        infractions={infractions}
+        cells={cells}
+        cellsLoading={cellsLoading}
+        cellsError={cellsError}
+        completionSettings={project.completionSettings}
+        orgRules={orgRules}
+        canEditOrgRules={canEditOrgSettings}
+        patchOrgSettings={patchOrgSettings}
+        orgSettingsVersion={orgSettingsVersion}
+        promotionRequests={promotionRequests}
+        canRequestPromotion={canRequestPromotion}
+        requestPromotion={requestPromotion}
+        editingRuleId={editingRuleId}
+        setEditingRuleId={setEditingRuleId}
+        activeLane={activeLane}
+        onActiveLaneChange={onActiveLaneChange}
+      />
+    </>
   )
 }

@@ -1,8 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
+  createCloudProject,
   fetchAccessibleProjects,
   fetchOrgDeletedFiles,
+  listProjectsPage,
   minimalProjectRecord,
   renameProject,
   resolveCloudProject,
@@ -10,6 +12,7 @@ import {
   type CloudProjectSummary,
 } from "./cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
+import { clearElevationRequired, isElevationRequired } from "@/lib/errors/elevation-required-signal"
 
 const API = "https://api.example.test"
 const originalFetch = global.fetch
@@ -67,6 +70,40 @@ describe("fetchAccessibleProjects", () => {
 
     global.fetch = vi.fn(async () => { throw new Error("offline") }) as unknown as typeof fetch
     expect(await fetchAccessibleProjects("jwt", undefined, API)).toEqual([])
+  })
+})
+
+describe("listProjectsPage", () => {
+  afterEach(() => { global.fetch = originalFetch })
+
+  it("GETs /api/v2/projects with limit, q, cursor, and orgId", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = input instanceof Request ? input.url : String(input)
+      expect(url).toContain(`${API}/api/v2/projects?`)
+      expect(url).toContain("q=mar")
+      expect(url).toContain("limit=40")
+      expect(url).toContain("cursor=a%3AActs")
+      expect(url).toContain("orgId=1")
+      return new Response(
+        JSON.stringify({
+          projects: [{ id: "pb", name: "Mark", role: { level: 700, name: "owner", source: "creator" } }],
+          nextCursor: "pb:Mark",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const page = await listProjectsPage("jwt-user", {
+      q: "mar",
+      limit: 40,
+      cursor: "a:Acts",
+      orgId: 1,
+    }, API)
+    expect(page).toEqual({
+      projects: [{ id: "pb", name: "Mark", role: { level: 700, name: "owner", source: "creator" } }],
+      nextCursor: "pb:Mark",
+    })
   })
 })
 
@@ -427,5 +464,26 @@ describe("fetchOrgDeletedFiles", () => {
   it("returns [] when the request fails", async () => {
     global.fetch = mockFetch(403, { error: "not an org member" }) as unknown as typeof fetch
     await expect(fetchOrgDeletedFiles("jwt", 7, API)).resolves.toEqual([])
+  })
+})
+
+// AQU-1540: create into an org the admin doesn't belong to raises the step-up prompt.
+describe("createCloudProject on an elevation-required 403", () => {
+  afterEach(() => {
+    global.fetch = originalFetch
+    clearElevationRequired()
+  })
+
+  it("throws a UserError and raises the step-up signal", async () => {
+    global.fetch = mockFetch(403, { error: "elevation required to create a project in an org with platform-admin access" }) as unknown as typeof fetch
+    const err = await createCloudProject("jwt", { id: "p", name: "P", orgId: 1 }, API).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(UserError)
+    expect(isElevationRequired()).toBe(true)
+  })
+
+  it("an ordinary 403 still throws without the step-up signal", async () => {
+    global.fetch = mockFetch(403, { error: "org role >= maintainer required" }) as unknown as typeof fetch
+    await expect(createCloudProject("jwt", { id: "p", name: "P", orgId: 1 }, API)).rejects.toBeInstanceOf(UserError)
+    expect(isElevationRequired()).toBe(false)
   })
 })

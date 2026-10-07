@@ -40,7 +40,9 @@ export function VoiceSidebar({
           <VoiceLibraryPanel
             settings={tts.settings}
             onSettingsChange={tts.saveTts}
-            targetLanguage={targetLanguage}
+            targetLanguage={targetLanguage ?? project.targetLanguage}
+            targetLanes={project.targetLanes}
+            archivedLanes={project.archivedLanes}
             projectId={projectId}
             fileId={fileId}
             session={session}

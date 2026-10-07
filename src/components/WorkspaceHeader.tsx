@@ -10,6 +10,13 @@ interface Props {
   extraMenuItems?: OverflowMenuItem[]
   /** When set, renders Import in a button group beside the ⋯ overflow menu. */
   onImport?: () => void
+  /**
+   * AQU-481: why Import is unavailable to this caller (below the `file.create`
+   * PROJECT_LEAD floor), or null when it is allowed. Passed straight through to
+   * `WorkspaceHeaderActions`, which renders the button disabled with this as
+   * its tooltip rather than opening a dialog the server would refuse.
+   */
+  importDisabledReason?: string | null
   /** When set, renders a Settings cog beside the Import group. */
   onSettings?: () => void
   /**
@@ -35,6 +42,7 @@ export function WorkspaceHeader({
   children,
   extraMenuItems,
   onImport,
+  importDisabledReason,
   onSettings,
   overviewHref,
   surfaceLabel,
@@ -59,7 +67,12 @@ export function WorkspaceHeader({
       <div className="flex shrink-0 items-center gap-1">
         {children}
         {onImport ? (
-          <WorkspaceHeaderActions onImport={onImport} onSettings={onSettings} menuItems={items} />
+          <WorkspaceHeaderActions
+            onImport={onImport}
+            importDisabledReason={importDisabledReason}
+            onSettings={onSettings}
+            menuItems={items}
+          />
         ) : items.length > 0 ? (
           <OverflowMenu items={items} />
         ) : null}

@@ -1,7 +1,8 @@
 # CLAUDE.md
 
 Guidance for Claude Code working in this repo. See also **`AGENTS.md`** (testing/E2E rules,
-shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC, FEATURE-STORIES;
+shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC,
+FEATURE-STORIES, PARTNER-INTEGRATIONS;
 SPEC.md covers the separate VS Code Codex extension that uses Aquilla as a backend).
 
 ## Layout — flat single-SPA trunk
@@ -20,6 +21,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 │   │                   #   dcs, codex-editor, brief, credits, entitlements, store, …
 │   ├── hooks/          # read hooks (useCells, useProject, …) + outbox flusher
 │   ├── pages/ components/ context/ branding/
+│   ├── partner-integrations/  # publisher-specific code; see PARTNER INTEGRATIONS below
 │   └── test-setup.ts
 ├── auth-worker/        # identity + agent-API Worker — see Backend below
 ├── sync-worker/        # realtime/sync Worker — see Backend below
@@ -27,9 +29,10 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
-├── infra/modal/        # Modal services: diarization.py, seed_vc.py, omnivoice_app.py
+├── infra/modal/        # Modal services: diarization.py, seed_vc.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
+│                       #   specs/partner-integrations/<partner>/ is partner-owned
 ├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers
 └── vite.config.ts      # drives the SPA + Tauri build; @/ → ./src
 ```
@@ -42,6 +45,26 @@ Worker claims `/`, `/homepage`, `/beta`, `/bible-translation`, `/case-studies/*`
 `/privacy`, `/terms`, sitemap/robots, and `/mkt/*` ahead of this repo's
 `aquilla.app/*` catch-all. This repo builds only `index.html`; marketing deploys do
 not ride the app's QA-gated release cycle. See **`docs/SEO.md`**.
+
+## Partner integrations — a folder you can delete
+
+Publisher-specific code (Biblica's importers today, Martin's Bible-swap code when
+it ports over) lives in **`src/partner-integrations/<partner>/`**, and any folder
+named `partner-integrations` at any depth is partner-owned. Two rules, and AQU-1286
+is where they come from:
+
+1. **Nothing outside such a folder may import from inside one.** Generic code
+   reaches partner code only through `src/lib/partners/registry.ts`, which
+   discovers `register.ts` files with an `import.meta.glob` — a glob that matches
+   nothing is an empty object, so the seam survives the folders being deleted. Do
+   not replace it with a static import list.
+2. **Deleting the folders must leave the app compiling, building and running**,
+   with that partner's import options simply absent. `npx tsx
+   scripts/make-public-copy.ts` produces the open-source copy by filtering them
+   out, and fails if a partner copyright notice survives anywhere else.
+
+Full convention, how to register one, and the known string-level gaps:
+**`docs/PARTNER-INTEGRATIONS.md`**.
 
 ## Commands
 
@@ -99,10 +122,14 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   durable DO state), comments (+ email notifications via CF Email Service), `/audio/*`,
   diarization, voice-convert, and the external **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
-  discovery — see `docs/AGENT-API.md`). PR previews do **not** get an isolated per-PR
-  sync-worker/auth-worker fork — non-draft PRs deploy to the single shared, route-free
-  `aquilla-web-preview` Worker (`wrangler.toml` `[env.preview]`) and point at the shared
-  `development` API backend; see `docs/DEPLOYMENT-ENVIRONMENTS.md`.
+  discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and
+  auth-worker preview (`aquilla-sync-preview` / `aquilla-auth-preview`, deployed by
+  `scripts/cloudflare-stack-preview.mjs` alongside `aquilla-web-preview`, sharing development
+  Hyperdrive/R2). **But a preview sync-worker cannot call a preview auth-worker** — that
+  subrequest 404s, so anything crossing the sync→auth seam (`AUTH_WORKER_URL`: DraftCells,
+  brief-summary render, Monday push) is NOT exercisable on a preview. See
+  "Preview limitations" in `docs/DEPLOYMENT-ENVIRONMENTS.md` before trusting a preview QA
+  result for those paths.
 - **`agent-worker/`** — Worker `aquilla-agent-sandbox`: container-backed Durable Object for
   sandboxed agent code execution (see `docs/AGENT-SANDBOX.md`). Server-side only — auth-worker
   calls it via `AGENT_SANDBOX_URL` + shared `AGENT_SANDBOX_KEY`; no zone routes. Reads
@@ -152,7 +179,7 @@ repository commands; unnamed profiles use local-only Worker names. See
   (sync-worker `external/*`) with PAT credentials scoped org/project.
 - **Other major subsystems:** comments (`src/lib/sync/comments-read.ts`, `useComments`),
   search (`src/lib/search/` dual-index + replace), DCS linked-project sync (`src/lib/dcs/`,
-  Gitea catalog + delta import), audio/TTS stack (`src/lib/audio/`, Modal + Gemini/Kokoro),
+  Gitea catalog + delta import), audio/TTS stack (`src/lib/audio/`, Modal + Gemini/Inworld),
   export (`src/lib/export/`), rules/health/completion (`src/lib/rules|health|completion/`),
   local prefs (`src/lib/store/`, localStorage-backed).
 - **React Compiler gotcha:** the compiler memoizes away version-only dependencies; when

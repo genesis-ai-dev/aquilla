@@ -40,6 +40,7 @@ import {
   type AquiferSearchResult,
   type AquiferPageResponse,
 } from "@/lib/aquifer/client"
+import { passagePathFromRef } from "@/lib/aquifer/passage-resources"
 
 export type SearchDockMode = "search" | "replace" | "bible"
 
@@ -332,15 +333,6 @@ export function SearchDockPanel({
  *  renderer swaps with no other change. */
 function looksLikeMarkdown(text: string): boolean {
   return /(^|\n)#{1,6}\s/.test(text) || /\*\*/.test(text) || /(^|\n)[-*]\s/.test(text)
-}
-
-/** Map a canonicalRef ("RUT 1:8") to the aquifer passage path
- *  "/en/passages/RUT/1/8/". Returns null when the ref isn't book ch:vs. */
-function passagePathFromRef(canonicalRef: string): string | null {
-  const m = /^([A-Z0-9]{2,4})\s+(\d+):(\d+)/.exec(canonicalRef.trim())
-  if (!m) return null
-  const [, book, chapter, verse] = m
-  return `/en/passages/${book}/${chapter}/${verse}/`
 }
 
 function KindChip({ kind }: { kind: AquiferSearchResult["kind"] }) {

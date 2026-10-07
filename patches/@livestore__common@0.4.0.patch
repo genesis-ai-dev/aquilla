@@ -1,0 +1,50 @@
+diff --git a/dist/leader-thread/make-leader-thread-layer.js b/dist/leader-thread/make-leader-thread-layer.js
+index ef367175e1eef1cce225c307cf811744c8b3dd1c..78e4fcdff5ebb6176241b75b8b9a57fba7c9e48b 100644
+--- a/dist/leader-thread/make-leader-thread-layer.js
++++ b/dist/leader-thread/make-leader-thread-layer.js
+@@ -19,7 +19,20 @@ export const makeLeaderThreadLayer = ({ schema, storeId, clientId, syncPayloadSc
+     }
+     const dbEventlogMissing = !hasEventlogTables(dbEventlog);
+     // Either happens on initial boot or if schema changes
+-    const dbStateMissing = !hasStateTables(dbState);
++    let dbStateMissing = !hasStateTables(dbState);
++    // [aquilla patch] The state db and the eventlog are separate files written one after the
++    // other, so a crash or reload between the two writes leaves them out of step. Nothing else
++    // checks this, and a client session that boots from the state db's head then pushes onto a
++    // parent the leader has never seen, which hangs forever. Rebuild state from the eventlog.
++    if (dbStateMissing === false && dbEventlogMissing === false) {
++        const stateHead = getStateHeadFromDb(dbState);
++        const eventlogHead = Eventlog.getClientHeadFromDb(dbEventlog);
++        if (EventSequenceNumber.Client.compare(stateHead, eventlogHead) !== 0) {
++            yield* Effect.logWarning(`[@livestore/common:leader-thread] State db head ${formatSeqNum(stateHead)} differs from eventlog head ${formatSeqNum(eventlogHead)}; rebuilding the state db from the eventlog`);
++            dropAllTables(dbState);
++            dbStateMissing = true;
++        }
++    }
+     yield* Eventlog.initEventlogDb(dbEventlog);
+     const syncBackend = syncOptions?.backend === undefined
+         ? undefined
+@@ -121,6 +134,23 @@ const hasStateTables = (db) => {
+     const stateTables = new Set(SystemTables.stateSystemTables.map((_) => _.sqliteDef.name));
+     return isSubsetOf(stateTables, tableNames);
+ };
++// [aquilla patch] helpers for the state/eventlog head check above. The session changeset table
++// always keeps a row for the current head (see `trimChangesetRows` in LeaderSyncProcessor.js),
++// and the client session's fast-path boot reads its leader head from it the same way.
++const getStateHeadFromDb = (db) => {
++    const res = db.select(sql `select seqNumGlobal, seqNumClient, seqNumRebaseGeneration from ${SystemTables.SESSION_CHANGESET_META_TABLE} order by seqNumGlobal DESC, seqNumClient DESC limit 1`)[0];
++    return res !== undefined
++        ? { global: res.seqNumGlobal, client: res.seqNumClient, rebaseGeneration: res.seqNumRebaseGeneration }
++        : EventSequenceNumber.Client.ROOT;
++};
++const formatSeqNum = (seqNum) => `e${seqNum.global}.${seqNum.client}${seqNum.rebaseGeneration > 0 ? `r${seqNum.rebaseGeneration}` : ''}`;
++const dropAllTables = (db) => {
++    db.execute(sql `PRAGMA foreign_keys = OFF`);
++    const tableNames = db.select(sql `select name from sqlite_master where type = 'table' and name not like 'sqlite_%'`).map((_) => _.name);
++    for (const name of tableNames) {
++        db.execute(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`);
++    }
++};
+ const isSubsetOf = (a, b) => {
+     for (const item of a) {
+         if (b.has(item) === false) {

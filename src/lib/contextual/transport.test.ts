@@ -25,7 +25,10 @@ import {
   installContextualTransport,
   realContextualTransport,
   resetContextualTransportForTesting,
+  requestReactCheck,
   sendContextualSteering,
+  startFileContextualRun,
+  continueFileContextualRun,
   startProjectContextualRun,
 } from "./transport"
 import {
@@ -97,6 +100,7 @@ describe("fetchContextualDrafts", () => {
       runId: "older-owning-run",
       cellId: "cell-1",
       text: "Review me",
+      review: { findings: [], triage: null, severity: 0 },
     }])
     expect(lastRequest().url).toContain("/contextual/drafts?fileId=file%201&status=proposed")
   })
@@ -118,7 +122,21 @@ describe("fetchContextualDrafts", () => {
       cellId: "cell-1",
       text: "Review me",
       spanLabel: "LUK 1:1–1:8",
+      review: { findings: [], triage: null, severity: 0 },
     }])
+  })
+
+  it("carries the pipeline's stored findings and triage to the review surface", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ drafts: [{
+      id: "draft-1", runId: "run-1", cellId: "cell-1", text: "Review me",
+      verdicts: { unsupported: "flag", _triage: "human", _severity: "3", _decidedBy: "model" },
+    }] }))
+    const [draft] = await fetchContextualDrafts(PROJECT_ID, FILE_ID)
+    expect(draft.review).toEqual({
+      findings: [{ code: "unsupported", kind: "unsupported", detail: null }],
+      triage: "human",
+      severity: 3,
+    })
   })
 })
 
@@ -215,6 +233,70 @@ describe("start + run commands", () => {
   })
 })
 
+describe("next-passage runs on the AQU-1300 trust gate", () => {
+  it("starts with no budget flag, so the server drafts one passage and parks", async () => {
+    // Sending translateEverything (or any budget) here would turn "the next
+    // passage" into the whole file.
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await startFileContextualRun(PROJECT_ID, FILE_ID, "fr")
+    expect(JSON.parse(lastRequest().init.body as string)).toEqual({ fileId: FILE_ID, targetLang: "fr" })
+  })
+
+  it("continues a waiting run by id with the one-batch command, not continue-all", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({}))
+    // A run known only from the Team list — never started or snapshotted here.
+    await continueFileContextualRun(PROJECT_ID, RUN.runId)
+    expect(lastRequest().url).toMatch(/\/continue$/)
+  })
+})
+
+describe("requestReactCheck", () => {
+  it("POSTs the project's react-check route and normalizes what came back", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        reactions: [{ fileId: FILE_ID, runId: RUN.runId }, { fileId: "no-run" }],
+        skipped: [{ fileId: "file-2", reason: "cooldown" }],
+      }),
+    )
+    const result = await requestReactCheck(PROJECT_ID)
+    const { url, init } = lastRequest()
+    expect(url).toContain("/api/v2/projects/proj%2F1/contextual/react-check")
+    expect(init.method).toBe("POST")
+    // A half-formed row is dropped rather than rendered as a reaction with no
+    // thread to open.
+    expect(result).toEqual({
+      reactions: [{ fileId: FILE_ID, runId: RUN.runId }],
+      skipped: [{ fileId: "file-2", reason: "cooldown" }],
+    })
+  })
+
+  it("remembers the started run's project, so its thread can be commanded", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ reactions: [{ fileId: FILE_ID, runId: RUN.runId }], skipped: [] }),
+    )
+    await requestReactCheck(PROJECT_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await realContextualTransport.pause(RUN.runId)
+    expect(lastRequest().url).toContain("/projects/proj%2F1/contextual/runs/")
+  })
+
+  it("reports null on a server that predates the route instead of throwing", async () => {
+    // The mode control turns this into a disabled button with a reason —
+    // an older backend must not make the whole dial look broken.
+    for (const status of [404, 501]) {
+      fetchMock.mockResolvedValueOnce(jsonResponse({}, status))
+      await expect(requestReactCheck(PROJECT_ID)).resolves.toBeNull()
+    }
+  })
+
+  it("still throws on a real failure, which is not the same as 'not deployed'", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { message: "nope" } }, 403))
+    const err = await requestReactCheck(PROJECT_ID).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ContextualApiError)
+    expect((err as ContextualApiError).status).toBe(403)
+  })
+})
+
 describe("steering", () => {
   it("POSTs the project-scoped steering route with kind/body/runId", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
@@ -228,6 +310,32 @@ describe("steering", () => {
       kind: "direction",
       body: "Prefer shorter sentences",
       runId: RUN.runId,
+    })
+  })
+
+  it("reports a plain direction as a direction", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ steering: { id: "s1" } }, 201))
+    const result = await sendContextualSteering(RUN.runId, "Prefer shorter sentences")
+    expect(result).toMatchObject({ intent: "direction", applied: false })
+  })
+
+  it("surfaces the server's run-command verdict (AQU-1299)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ command: "stop", applied: true }))
+    const result = await sendContextualSteering(RUN.runId, "stop")
+    expect(result).toMatchObject({ intent: "stop", applied: true })
+  })
+
+  it("reports an unapplied command without treating it as a failure", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ command: "pause", applied: false }))
+    await expect(sendContextualSteering(RUN.runId, "hold on")).resolves.toMatchObject({
+      intent: "pause",
+      applied: false,
     })
   })
 })
@@ -300,6 +408,29 @@ describe("project Autopilot observability", () => {
       deferred: { count: 1, reason: "batch_limit" },
       truncated: true,
     })
+  })
+
+  // AQU-935. The lane is what makes a project-wide start mean one language
+  // rather than "whatever the default is". `''` must stay OFF the wire so a
+  // single-language project's request is byte-identical to the pre-lane one.
+  it("carries a chosen target lane into the project-wide start, and omits the default", async () => {
+    const startBody = {
+      scope: "project",
+      scopeGroup: "scope-1",
+      started: [{ runId: RUN.runId, fileId: FILE_ID }],
+      skipped: [],
+      totalCandidates: 1,
+      deferred: { count: 0, reason: null },
+      truncated: false,
+    }
+    fetchMock.mockResolvedValueOnce(jsonResponse(startBody, 201))
+    await startProjectContextualRun(PROJECT_ID, "th")
+    expect(JSON.parse(lastRequest().init.body as string))
+      .toEqual({ scope: "project", targetLang: "th" })
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(startBody, 201))
+    await startProjectContextualRun(PROJECT_ID, "")
+    expect(JSON.parse(lastRequest().init.body as string)).toEqual({ scope: "project" })
   })
 
   it("lists and normalizes durable run history", async () => {

@@ -14,9 +14,19 @@
 import { en, type Catalog } from "./en"
 import { th } from "./th"
 import { my } from "./my"
-import { mfa } from "./mfa"
+import { ms } from "./ms"
+import { id } from "./id"
 import { ar } from "./ar"
 import { zh_Hans } from "./zh-Hans"
 import { zh_Hant } from "./zh-Hant"
+import { fr } from "./fr"
+import { ru } from "./ru"
 
-export const CATALOGS: Record<string, Catalog> = { en, th, my, mfa, ar, "zh-Hans": zh_Hans, "zh-Hant": zh_Hant }
+export const CATALOGS: Record<string, Catalog> = { en, th, my, ms, id, ar, "zh-Hans": zh_Hans, "zh-Hant": zh_Hant, ru, fr }
+
+/** Reject locale-only keys before publishing an invalid catalog. */
+export function unknownCatalogKeys(catalogs: Record<string, Record<string, unknown>> = CATALOGS): string[] {
+  const english = new Set(Object.keys(en))
+  return Object.entries(catalogs).flatMap(([locale, catalog]) =>
+    Object.keys(catalog).filter(key => !english.has(key)).map(key => `${locale}: ${key}`))
+}

@@ -10,6 +10,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ChevronDownIcon, XIcon, CheckIcon, SearchIcon } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const Combobox = ComboboxPrimitive.Root
 
@@ -38,7 +40,13 @@ function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
   return (
     <ComboboxPrimitive.Clear
       data-slot="combobox-clear"
-      render={<InputGroupButton variant="ghost" size="icon-xs" />}
+      render={
+        <InputGroupButton
+          variant="ghost"
+          size="icon-xs"
+          className="bg-transparent text-muted-foreground shadow-none hover:bg-accent/40 hover:text-foreground aria-expanded:bg-transparent aria-pressed:bg-transparent data-popup-open:bg-transparent dark:bg-transparent dark:hover:bg-accent/40 dark:aria-expanded:bg-transparent dark:aria-pressed:bg-transparent dark:data-popup-open:bg-transparent"
+        />
+      }
       className={cn(className)}
       {...props}
     >
@@ -54,6 +62,7 @@ function ComboboxInput({
   showTrigger = true,
   showClear = false,
   showSearchIcon = false,
+  loading = false,
   // Pickers/filters — not contact or credential entry. Default off so
   // Chrome/Safari don't inject saved contacts into member/org search.
   autoComplete = "off",
@@ -62,9 +71,11 @@ function ComboboxInput({
   showTrigger?: boolean
   showClear?: boolean
   showSearchIcon?: boolean
+  loading?: boolean
 }) {
+  const t = useT()
   return (
-    <InputGroup className={cn("w-auto", className)}>
+    <InputGroup className={cn("w-auto", className)} aria-busy={loading || undefined}>
       {showSearchIcon && (
         <InputGroupAddon align="inline-start">
           <SearchIcon className="size-4 text-muted-foreground" />
@@ -76,6 +87,9 @@ function ComboboxInput({
         autoComplete={autoComplete}
       />
       <InputGroupAddon align="inline-end">
+        {loading && (
+          <Spinner className="size-4" aria-label={t("common.searching")} />
+        )}
         {showTrigger && (
           <InputGroupButton
             size="icon-xs"
@@ -116,10 +130,18 @@ function ComboboxContent({
         anchor={anchor}
         className="isolate z-50"
       >
+        {/* The popup insets its own search box with `m-1` and is
+            `overflow-hidden`, so it must NOT also force the box to
+            `w-full`: 100% of the content box plus a 4px inline-start
+            margin pushes the box's inline-end border and rounded corners
+            outside the popup, where they get clipped (AQU-1530). Leaving
+            width to ComboboxInput's own `w-auto` makes the margin box fit,
+            so the box is evenly inset on both sides, grows with the popup,
+            and works the same in RTL. */}
         <ComboboxPrimitive.Popup
           data-slot="combobox-content"
           data-chips={!!anchor}
-          className={cn("group/combobox-content relative max-h-(--available-height) w-max min-w-0 max-w-(--available-width) origin-(--transform-origin) overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 *:data-[slot=input-group]:m-1 *:data-[slot=input-group]:mb-0 *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:w-full *:data-[slot=input-group]:min-w-0 *:data-[slot=input-group]:border-input/30 *:data-[slot=input-group]:bg-input/30 *:data-[slot=input-group]:shadow-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+          className={cn("group/combobox-content relative max-h-(--available-height) w-max min-w-0 max-w-(--available-width) origin-(--transform-origin) overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 *:data-[slot=input-group]:m-1 *:data-[slot=input-group]:mb-0 *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:min-w-0 *:data-[slot=input-group]:border-input/30 *:data-[slot=input-group]:bg-input/30 *:data-[slot=input-group]:shadow-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
           {...props}
         />
       </ComboboxPrimitive.Positioner>

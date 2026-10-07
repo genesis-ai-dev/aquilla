@@ -55,13 +55,18 @@ describe("handleCorsPreflight", () => {
     const res = handleCorsPreflight(
       req("OPTIONS", "/api/v1/projects/p1/files/f1/source", {
         "Access-Control-Request-Method": "PUT",
-        "Access-Control-Request-Headers": "authorization,x-source-format,x-source-size,x-source-sha256,x-artifact-id,x-artifact-name,x-artifact-binding-role,x-artifact-member-path,x-artifact-profile-id,x-artifact-profile-version,x-artifact-fidelity,x-update-source-sidecar",
+        "Access-Control-Request-Headers": "authorization,x-source-format,x-source-size,x-source-sha256,x-artifact-id,x-artifact-name,x-artifact-binding-role,x-artifact-target-lang,x-artifact-member-path,x-artifact-profile-id,x-artifact-profile-version,x-artifact-fidelity,x-update-source-sidecar",
       }),
     )
     expect(res?.status).toBe(204)
     const allowed = res!.headers.get("Access-Control-Allow-Headers")!.toLowerCase()
     for (const header of [
       "x-source-format", "x-source-size", "x-source-sha256", "x-artifact-id", "x-artifact-name", "x-artifact-binding-role",
+      // AQU-1631: this one was missing from both the allowlist and this list,
+      // which is how the gap survived — the test claimed "every" header while
+      // enumerating all but one. A target import into any non-default lane
+      // sends it and died at the preflight.
+      "x-artifact-target-lang",
       "x-artifact-member-path", "x-artifact-profile-id", "x-artifact-profile-version",
       "x-artifact-fidelity", "x-update-source-sidecar",
     ]) expect(allowed).toContain(header)
@@ -119,5 +124,22 @@ describe("withCors", () => {
     const original = new Response("ok", { status: 200 })
     const wrapped = withCors(original, r)
     expect(wrapped.headers.get("Access-Control-Allow-Origin")).toBeNull()
+  })
+})
+
+describe("MCP clients in a browser", () => {
+  it("can preflight the MCP endpoint with Mcp-Protocol-Version and read the 401 challenge", () => {
+    const preflight = handleCorsPreflight(req("OPTIONS", "/api/v1/external/mcp"))
+    expect(preflight?.headers.get("Access-Control-Allow-Headers")).toContain("Mcp-Protocol-Version")
+    const challenged = withCors(
+      new Response(null, { status: 401, headers: { "WWW-Authenticate": 'Bearer resource_metadata="x"' } }),
+      req("POST", "/api/v1/external/mcp"),
+    )
+    expect(challenged.headers.get("WWW-Authenticate")).toBe('Bearer resource_metadata="x"')
+    expect(challenged.headers.get("Access-Control-Expose-Headers")).toContain("WWW-Authenticate")
+  })
+
+  it("can fetch the OAuth protected-resource metadata cross-origin", () => {
+    expect(isBrowserCorsPath("/.well-known/oauth-protected-resource/api/v1/external/mcp")).toBe(true)
   })
 })

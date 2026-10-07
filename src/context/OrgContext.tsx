@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useLocation } from "react-router-dom"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
+import { getOrg } from "@/lib/frontier/get-org"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { isJwtExpired } from "@/lib/frontier/auth"
@@ -87,6 +88,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [accessibleProjectsLoading, setAccessibleProjectsLoading] = useState(true)
   const [accessibleProjectsError, setAccessibleProjectsError] = useState<string | null>(null)
   const [resolvedProjectsJwt, setResolvedProjectsJwt] = useState<string | null>(null)
+  const [hydratedOrg, setHydratedOrg] = useState<OrgSummary | null>(null)
   const orgRequestRef = useRef(0)
   const projectsRequestRef = useRef(0)
   // Route changes update org scope in the dedicated effect below; they must
@@ -267,6 +269,38 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     return Array.from(seen.values())
   }, [accessibleProjects, orgs])
 
+  // When the URL names an org that is not a membership (platform-admin
+  // catalog), hydrate its summary so the switcher trigger can show the name
+  // without pulling the whole tenancy into `orgs`. Wait for the project
+  // directory so a guest org is not probed as a catalog row.
+  useEffect(() => {
+    if (!jwt || isLoading || accessibleProjectsLoading) return
+    if (activeOrgId == null) {
+      setHydratedOrg(null)
+      return
+    }
+    if (orgs.some((o) => o.id === activeOrgId)) {
+      setHydratedOrg(null)
+      return
+    }
+    if (guestOrgs.some((o) => o.id === activeOrgId)) {
+      setHydratedOrg(null)
+      return
+    }
+    let cancelled = false
+    void getOrg(jwt, activeOrgId).then(
+      (org) => {
+        if (!cancelled) setHydratedOrg(org)
+      },
+      () => {
+        if (!cancelled) setHydratedOrg(null)
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [jwt, isLoading, accessibleProjectsLoading, activeOrgId, orgs, guestOrgs])
+
   // Path is authoritative on `/orgs/...`. localStorage only resumes `/`.
   useEffect(() => {
     const parsed = parseOrgPath(location.pathname)
@@ -291,7 +325,8 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     if (typeof parsed?.orgKey === "number") {
       const known =
         orgs.some((o) => o.id === parsed.orgKey) ||
-        guestOrgs.some((o) => o.id === parsed.orgKey)
+        guestOrgs.some((o) => o.id === parsed.orgKey) ||
+        hydratedOrg?.id === parsed.orgKey
       // Still loading membership — don't clobber storage yet.
       if (isLoading) return
       if (!known) return
@@ -304,7 +339,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     // which is a default, not a choice — persisting it would keep a user
     // scoped to their original org after they join a second one.
     if (activeOrgId == null) localStorage.setItem(ORG_STORAGE_KEY, ALL_ORGS_PARAM)
-  }, [activeOrgId, guestOrgs, isLoading, location.pathname, orgs])
+  }, [activeOrgId, guestOrgs, hydratedOrg, isLoading, location.pathname, orgs])
 
   const setActiveOrg = useCallback((id: number) => {
     setActiveOrgId(id)
@@ -334,7 +369,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     ? activeOrgId
     : null
   const isAllOrgs = visibleOrgs.length > 1 && visibleActiveOrgId == null
-  const activeOrg = visibleActiveOrgId == null ? null : resolvedMemberOrg
+  const activeOrg = visibleActiveOrgId == null ? null : resolvedMemberOrg ?? hydratedOrg
   // AQU-790: only a guest org when the active id is not one of the caller's
   // memberships — a membership always wins (never misrepresent role).
   const activeGuestOrg =

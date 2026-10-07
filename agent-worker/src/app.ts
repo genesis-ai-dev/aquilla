@@ -2,13 +2,32 @@ import { Hono } from "hono"
 import type { Context } from "hono"
 import { ApiError, envelope, type ErrorCode } from "./errors"
 import { resolveWorkspacePath } from "./paths"
-import { execCode } from "./exec"
+import { execCode, MAX_TIMEOUT_MS } from "./exec"
 import { decodeBase64, encodeBase64 } from "./base64"
+import { shipLog, shipErrorResponse } from "./posthog-logs"
 import type { ResolveSandbox, SandboxLike } from "./sandbox"
 import type { Env } from "./types"
 
 /** Uploads via /files are capped at 25MB decoded (contract §1). */
 export const FILE_PUT_MAX_BYTES = 25 * 1024 * 1024
+
+// AQU-1021 / AQU-1005: requests slower than this are logged even when they
+// SUCCEED — only-4xx/5xx logging left saturation invisible until it collapsed.
+// A [slow-request] line — in `pnpm dev` output or PostHog Logs — is a defect to
+// investigate, not noise. Matches auth-worker / sync-worker.
+export const SLOW_REQUEST_MS = 5_000
+
+/**
+ * `/exec` is the one route where a multi-second request is the *contract*, not
+ * a defect: callers get `DEFAULT_TIMEOUT_MS` (60s) and may ask for up to
+ * `MAX_TIMEOUT_MS` (300s). Holding it to the 5s bar would warn on every normal
+ * agent run and train devs to ignore the line — which is exactly the signal
+ * AQU-1005 was protecting. So exec only warns when it outlives its own hard
+ * ceiling, which means the timeout race in `execCode` failed to fire.
+ */
+export function slowThresholdFor(path: string): number {
+  return path.endsWith("/exec") ? MAX_TIMEOUT_MS : SLOW_REQUEST_MS
+}
 
 export interface AppDeps {
   /** Injectable so tests can supply a fake sandbox (no Docker in CI). */
@@ -17,6 +36,19 @@ export interface AppDeps {
 
 function jsonError(c: Context, code: ErrorCode, message: string): Response {
   return c.json(envelope(code, message), statusFor(code))
+}
+
+/**
+ * Hono throws on `c.executionCtx` when there is none (vitest calls `app.fetch`
+ * without a ctx), so resolve it defensively and fall back to un-awaited
+ * fire-and-forget. Telemetry must never take down a request.
+ */
+function runInBackground(c: Context<{ Bindings: Env }>, task: Promise<void>): void {
+  try {
+    c.executionCtx.waitUntil(task)
+  } catch {
+    void task
+  }
 }
 
 function statusFor(code: ErrorCode): 400 | 401 | 404 | 413 | 500 {
@@ -62,6 +94,48 @@ async function tokenMatches(token: string, expected: string): Promise<boolean> {
 
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>()
+
+  // Observability (AQU-1021): slow requests, 4xx/5xx responses and unhandled
+  // throws go to the worker log + PostHog Logs (fire-and-forget; no-op when
+  // POSTHOG_KEY is unset — see posthog-logs.ts). Registered FIRST so it wraps
+  // every route including /health and the bearer-auth rejections below; Hono
+  // runs matched handlers in registration order, so a route declared earlier
+  // would return before this middleware ever ran.
+  app.use("*", async (c, next) => {
+    const startedAt = Date.now()
+    try {
+      await next()
+    } catch (err) {
+      runInBackground(
+        c,
+        shipLog(c.env, "aquilla-agent-sandbox", "error", `unhandled: ${c.req.method} ${c.req.path}`, {
+          "http.method": c.req.method,
+          "http.path": c.req.path,
+          "http.duration_ms": Date.now() - startedAt,
+          "error.message": err instanceof Error ? err.message : String(err),
+        }),
+      )
+      throw err
+    }
+    const durationMs = Date.now() - startedAt
+    if (durationMs >= slowThresholdFor(c.req.path)) {
+      console.warn(
+        `[slow-request] ${c.req.method} ${c.req.path} took ${durationMs}ms (status ${c.res.status})`,
+      )
+      runInBackground(
+        c,
+        shipLog(c.env, "aquilla-agent-sandbox", "warn", `slow: ${c.req.method} ${c.req.path} (${durationMs}ms)`, {
+          "http.method": c.req.method,
+          "http.path": c.req.path,
+          "http.status": c.res.status,
+          "http.duration_ms": durationMs,
+        }),
+      )
+    }
+    if (c.res.status >= 400) {
+      runInBackground(c, shipErrorResponse(c.env, "aquilla-agent-sandbox", c.req.raw, c.res))
+    }
+  })
 
   // Health check — no auth (contract §1).
   app.get("/health", (c) => c.json({ ok: true }))

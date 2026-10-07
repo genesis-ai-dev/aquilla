@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest"
 import { getCookbook, COOKBOOK_TOPICS } from "../lib/agent/docs"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
 import { describeCommand } from "../../../db/shared/command-catalog"
+import { AGENT_SKILLS } from "../../../db/shared/agent-skills"
 
 const PLAYBOOKS = [
   "playbooks/project-bootstrap",
@@ -59,7 +60,7 @@ describe("onboarding playbooks", () => {
 
   it("bootstrap sequences import → settings → termbase → brief → routing", () => {
     const text = getCookbook("playbooks/project-bootstrap").text
-    const order = ["PlanImport", "targetLanes", "terminology", "translationBrief", "assignment.create"]
+    const order = ["PlanImport", "targetLanes", "term.create", "translationBrief", "assignment.create"]
     let cursor = -1
     for (const marker of order) {
       const at = text.indexOf(marker)
@@ -70,6 +71,19 @@ describe("onboarding playbooks", () => {
     expect(text).toContain("ifMatchVersion")
     expect(text).toContain("sole")
     expect(text).toContain("readiness has no blocking gaps")
+  })
+
+  it("seeds the termbase with term.* events, never the retired settings key", () => {
+    // Since 2026-09-04 the termbase is the `concepts` projection of term.*
+    // events. A PatchSettings op on 'terminology' writes the retired blob,
+    // which the editor ignores as soon as the project has any concept, so the
+    // seeded terms would silently vanish.
+    for (const topic of PLAYBOOKS) {
+      expect(getCookbook(topic).text, topic).not.toMatch(/key:\s*'terminology'/)
+    }
+    for (const topic of ["playbooks/project-bootstrap", "playbooks/first-cycle"]) {
+      expect(getCookbook(topic).text, topic).toContain("term.create")
+    }
   })
 
   it("qa-sweep filters drafted work and keeps testimony out of bulk", () => {
@@ -104,5 +118,36 @@ describe("onboarding playbooks", () => {
     const card = buildSystemPrompt({ projectId: "p1", username: "alice", roleLevel: 700 })
     for (const topic of PLAYBOOKS) expect(card, topic).not.toContain(topic)
     expect(card).not.toContain("playbooks/")
+  })
+})
+
+// AQU-1294 §2.3: the same skill bodies the Agent API serves (REST /skills,
+// MCP get_skill) are docs topics here, so an in-app agent and an external one
+// follow ONE playbook for partner project setup.
+describe("agent skills as docs topics", () => {
+  it("registers every shared skill under skills/<name>, serving the identical body", () => {
+    expect(AGENT_SKILLS.length).toBeGreaterThan(0)
+    for (const skill of AGENT_SKILLS) {
+      const topic = `skills/${skill.name}`
+      expect(COOKBOOK_TOPICS).toContain(topic)
+      const { ok, text } = getCookbook(topic)
+      expect(ok, topic).toBe(true)
+      expect(text, topic).toBe(skill.body)
+      expect(text.startsWith("# Skill:"), topic).toBe(true)
+      expect(text, topic).toContain("THE HUMAN GATE")
+      expect(text.toLowerCase(), topic).toMatch(/stage[sd]?\b[\s\S]*applie[sd]/i)
+    }
+  })
+
+  it("project-setup names the four never-guess fields and refuses markup", () => {
+    const text = getCookbook("skills/project-setup").text
+    for (const f of ["sourceLanguage", "targetLanguage", "sourceTexts", "keyTerms"]) expect(text).toContain(f)
+    expect(text).toContain("REFUSE")
+    expect(text).toContain("parser problem")
+  })
+
+  it("stays out of the always-resident prompt (L2 only)", () => {
+    const card = buildSystemPrompt({ projectId: "p1", username: "alice", roleLevel: 700 })
+    expect(card).not.toContain("skills/")
   })
 })

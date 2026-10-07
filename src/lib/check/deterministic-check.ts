@@ -16,6 +16,18 @@
  *     cells whose target lacks ALL approved (preferred/admitted) renderings.
  *     Findings are grouped by concept so they read
  *     "Χριστός: 14 of 18 occurrences use 'Kristo', 4 use something else."
+ *     The scan itself lives in `term-consistency-scan.ts` (re-exported below)
+ *     so the Agent API's term-consistency read runs the same code — AQU-1231.
+ *
+ *  3. Capitalization (AQU-1734) — mixed capitalization inside a word
+ *     (`tHe`), and headings that open with a lowercase letter. Corpus-scoped
+ *     on purpose: `tHe` and `kiSwahili` are structurally identical, so only
+ *     recurrence across the scoped cells tells a typo from the project's own
+ *     spelling. `learnCaseExceptions` derives those exceptions here and the
+ *     result reports them, so a reviewer can see what was let through. The
+ *     per-cell half of the same check (lowercase after sentence-final
+ *     punctuation or a paragraph/heading marker) needs no corpus and rides
+ *     the rule pass as the `capitalization` built-in instead.
  *
  * Glosser drift is deferred (stretch goal in the spec): the bt-glosser builds
  * its alignment model from validated pairs at run time and a deterministic
@@ -26,28 +38,38 @@
 
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { effectiveSourceText } from "@/lib/cell-text"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
-import { buildTermRegex } from "@/lib/terminology/match"
-import type { Concept } from "@/lib/terminology/types"
+import { semanticSourceText } from "@/lib/semantic-source-text"
+import {
+  findMixedCaseWords,
+  hasCasedLetters,
+  learnCaseExceptions,
+  type CaseExceptionProposal,
+} from "@/lib/qa/capitalization"
+import { buildConceptRegex, buildTermRegex } from "@/lib/terminology/match"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
+import type { CheckableCell, TermConsistencyFinding } from "@/lib/check/term-consistency-scan"
+
+// `TermConsistencyFinding` (and friends) live in the alias-free leaf module so
+// sync-worker can import them too (AQU-1231). Re-exported here because this
+// module has always been their public home for in-app callers. The scan
+// FUNCTION itself is NOT re-exported from there: AQU-1271's source-form
+// matcher (`buildConceptRegex`, below) reaches `@/lib/terminology/types` for
+// `Concept`/`TermMatchingSettings`, which is not alias-free-reachable, so the
+// in-app scan is defined locally here rather than in the sync-worker-shared
+// module. `term-consistency-scan.ts`'s own `scanTermConsistency` (plain
+// `buildTermRegex` source matching, no termMatching settings) remains the one
+// the external Agent API uses.
+export type {
+  CheckableCell,
+  CheckableConcept,
+  RenderingUsage,
+  TermConsistencyFinding,
+} from "@/lib/check/term-consistency-scan"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/** Minimal cell shape the scans need — keeps the scan testable without
- *  constructing full CellData fixtures. */
-export interface CheckableCell {
-  id: string
-  /** Human-facing reference ("MAT 1:1"); falls back to id in the UI. */
-  cellLabel?: string
-  original: string
-  translated: string
-  status: CellData["status"]
-  // SUB-28: media sections match against their transcript, not the filename.
-  medium?: import("@/lib/sync/cells-read-types").SegmentMedium | null
-  transcription?: string
-}
 
 /** One rule with every cell that breaks it (grouped for card rendering). */
 export interface RuleFindingGroup {
@@ -55,27 +77,13 @@ export interface RuleFindingGroup {
   infractions: RuleInfraction[]
 }
 
-/** How many flagged-scope cells used one approved rendering. */
-export interface RenderingUsage {
-  rendering: string
-  /** Cells (by id) whose target contains this rendering. */
-  cellIds: string[]
-}
-
-/** Per-concept consistency result over the scoped cells. */
-export interface TermConsistencyFinding {
-  conceptId: string
-  sourceTerm: string
-  /** Approved renderings (preferred + admitted), for evidence display. */
-  approvedRenderings: string[]
-  /** Translated cells whose SOURCE matches the concept's source form. */
-  totalOccurrences: number
-  /** Occurrences whose target contains at least one approved rendering. */
-  consistentCount: number
-  /** Usage per approved rendering (a cell may count toward several). */
-  renderingUsage: RenderingUsage[]
-  /** Occurrences whose target contains NONE of the approved renderings. */
-  flaggedCells: { cellId: string; cellLabel?: string }[]
+/** One capitalization finding, grouped so a form is reported once, not per cell. */
+export interface CapitalizationFinding {
+  /** `mixed-case` groups by word form; `lowercase-heading-start` by nothing. */
+  code: "mixed-case" | "lowercase-heading-start"
+  /** The offending word form for `mixed-case` — raw content, never translated. */
+  form: string
+  cells: { cellId: string; cellLabel?: string }[]
 }
 
 export interface CheckRunResult {
@@ -88,7 +96,11 @@ export interface CheckRunResult {
   checkedTermCount: number
   ruleFindings: RuleFindingGroup[]
   termFindings: TermConsistencyFinding[]
-  /** Total issue count: infraction rows + flagged term cells. */
+  /** AQU-1734: corpus-scoped capitalization findings (see `scanCapitalization`). */
+  capitalizationFindings: CapitalizationFinding[]
+  /** Forms the capitalization scan learned to allow, for a reviewer to confirm. */
+  caseExceptions: CaseExceptionProposal[]
+  /** Total issue count: infraction rows + flagged term cells + capitalization cells. */
   totalFindingCount: number
 }
 
@@ -111,12 +123,15 @@ export interface CheckRunResult {
 export function scanTermConsistency(
   cells: readonly CheckableCell[],
   concepts: readonly Concept[],
+  termMatching?: TermMatchingSettings,
 ): TermConsistencyFinding[] {
   const findings: TermConsistencyFinding[] = []
 
   for (const concept of concepts) {
     if (concept.status !== "active") continue
-    const sourceRe = buildTermRegex(concept.sourceTerm)
+    // AQU-1271: source side through the concept matcher so the check agrees
+    // with the rule engine, the chips and the glossary counts.
+    const sourceRe = buildConceptRegex(concept, termMatching)
     if (!sourceRe) continue
 
     const approved = concept.renderings.filter(
@@ -136,7 +151,11 @@ export function scanTermConsistency(
 
     for (const cell of cells) {
       if (cell.status === "empty" || !cell.translated.trim()) continue
-      if (!sourceRe.test(effectiveSourceText(cell))) continue
+      // `semanticSourceText`, not `effectiveSourceText`: a `CheckableCell` types
+      // `medium` as a plain string (the sync-worker row shape), which the SPA's
+      // `SegmentMedium`-typed entry point rejects. Same rule either way — this
+      // is the call the shared scan in term-consistency-scan.ts makes.
+      if (!sourceRe.test(semanticSourceText(cell))) continue
       totalOccurrences++
 
       let matchedAny = false
@@ -168,6 +187,70 @@ export function scanTermConsistency(
   }
 
   return findings
+}
+
+// ---------------------------------------------------------------------------
+// Capitalization scan (pure, synchronous — AQU-1734)
+// ---------------------------------------------------------------------------
+
+/** Cells whose `type` says the text is a section heading rather than body. */
+const HEADING_TYPES = new Set(["heading"])
+
+export interface CapitalizationScanResult {
+  findings: CapitalizationFinding[]
+  exceptions: CaseExceptionProposal[]
+}
+
+/**
+ * Corpus-scoped capitalization scan over the checked cells.
+ *
+ * Exceptions are learned from the cells themselves — a form recurring across
+ * the scope, or a lowercase-prefix family (`kiSwahili` / `kiNgozi`), is the
+ * project's own spelling and is reported as an exception instead of being
+ * flagged in every cell that uses it. Forms the SOURCE already writes that way
+ * are excepted outright, and caseless-script cells never produce findings.
+ */
+export function scanCapitalization(
+  cells: readonly { id: string; cellLabel?: string; translated: string; original: string; status: string; type?: string }[],
+): CapitalizationScanResult {
+  const translated = cells.filter((c) => c.status !== "empty" && c.translated.trim().length > 0)
+  if (translated.length === 0) return { findings: [], exceptions: [] }
+
+  const { exceptions, proposals } = learnCaseExceptions(
+    translated.map((c) => c.translated),
+    translated.map((c) => c.original),
+  )
+
+  const byForm = new Map<string, CapitalizationFinding["cells"]>()
+  const headingCells: CapitalizationFinding["cells"] = []
+
+  for (const cell of translated) {
+    for (const span of findMixedCaseWords(cell.translated, exceptions)) {
+      const list = byForm.get(span.matchedText)
+      if (list) {
+        if (!list.some((c) => c.cellId === cell.id)) list.push({ cellId: cell.id, cellLabel: cell.cellLabel })
+      } else {
+        byForm.set(span.matchedText, [{ cellId: cell.id, cellLabel: cell.cellLabel }])
+      }
+    }
+    // A heading is its own cell, so "a lowercase letter at the start of a
+    // section heading" is only decidable here, where the cell's type is known
+    // — a body cell may legitimately continue the previous verse's sentence.
+    if (cell.type && HEADING_TYPES.has(cell.type) && hasCasedLetters(cell.translated)) {
+      const first = /\p{L}/u.exec(cell.translated)?.[0]
+      if (first && first === first.toLowerCase() && first !== first.toUpperCase()) {
+        headingCells.push({ cellId: cell.id, cellLabel: cell.cellLabel })
+      }
+    }
+  }
+
+  const findings: CapitalizationFinding[] = [...byForm.entries()]
+    .map(([form, cs]): CapitalizationFinding => ({ code: "mixed-case", form, cells: cs }))
+    .sort((a, b) => b.cells.length - a.cells.length || a.form.localeCompare(b.form))
+  if (headingCells.length > 0) {
+    findings.push({ code: "lowercase-heading-start", form: "", cells: headingCells })
+  }
+  return { findings, exceptions: proposals }
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +292,8 @@ export interface CheckRunInput {
   rules: readonly TranslationRule[]
   /** Project term base; only `active` concepts are scanned. */
   concepts: readonly Concept[]
+  /** Project-level source matching defaults (AQU-1271). */
+  termMatching?: TermMatchingSettings
 }
 
 const CHUNK_SIZE = 100
@@ -241,12 +326,19 @@ export async function runDeterministicCheck(
   // Term pass (regex over short strings; one pass is cheap, but yield first
   // so the rule pass's last chunk paints).
   await nextTick()
-  const termFindings = scanTermConsistency(input.cells, activeConcepts)
+  const termFindings = scanTermConsistency(input.cells, activeConcepts, input.termMatching)
+
+  // Capitalization pass (AQU-1734): two passes over the same short strings —
+  // one to learn exceptions, one to flag what is left.
+  await nextTick()
+  const capitalization = scanCapitalization(input.cells)
 
   const flaggedTermCells = termFindings.reduce(
     (n, f) => n + f.flaggedCells.length,
     0,
   )
+
+  const capitalizationCells = capitalization.findings.reduce((n, f) => n + f.cells.length, 0)
 
   return {
     ranAt: new Date().toISOString(),
@@ -256,6 +348,8 @@ export async function runDeterministicCheck(
     checkedTermCount: activeConcepts.length,
     ruleFindings: groupInfractionsByRule(infractions, enabledRules),
     termFindings,
-    totalFindingCount: infractions.length + flaggedTermCells,
+    capitalizationFindings: capitalization.findings,
+    caseExceptions: capitalization.exceptions,
+    totalFindingCount: infractions.length + flaggedTermCells + capitalizationCells,
   }
 }

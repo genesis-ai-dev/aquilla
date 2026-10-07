@@ -21,6 +21,15 @@ import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
  * Explicitly NOT here: target.cell.commit (use SetTranslation), source.cell.*,
  * cell.audio.* (use LinkMedia), reorders/retimes/mirrors, file.timing.set,
  * file.create (use PlanImport).
+ *
+ * AQU-1179 added the `term.*` block — the whole of the "term, rule and memory"
+ * widening the ticket asks for, because term.* is the only one of the three
+ * that HAS event kinds: rules and Living Memory are not on the event log
+ * (rules live in the settings blob behind PatchSettings; memory lives behind
+ * auth-worker's agent-memory API), so there is nothing for an allowlist to
+ * name. They join this list when — and only when — they are event-sourced.
+ * No source-edit, cell-structure, membership or project-lifecycle kind was
+ * added: those stay off the generic door until a human puts them on it.
  */
 export const ALLOWED_EMIT_KINDS: readonly string[] = [
   'comment.create',
@@ -39,6 +48,13 @@ export const ALLOWED_EMIT_KINDS: readonly string[] = [
   'assignment.create',
   'assignment.reassign',
   'assignment.unassign',
+  // Terminology concepts (AQU-1179). Project-scoped: no fileId/cellId on the
+  // envelope — the engine routes them under the project sentinel.
+  'term.create',
+  'term.update',
+  'term.delete',
+  'term.approve',
+  'term.reject',
 ] as const
 
 const ALLOWED_SET = new Set(ALLOWED_EMIT_KINDS)
@@ -50,9 +66,71 @@ export const TESTIMONY_EMIT_KINDS: ReadonlySet<string> = new Set([
   'cell.unvalidate',
 ])
 
+/** Terminology kinds — project-scoped (no fileId/cellId on the envelope). */
+export const TERM_EMIT_KINDS: ReadonlySet<string> = new Set([
+  'term.create',
+  'term.update',
+  'term.delete',
+  'term.approve',
+  'term.reject',
+])
+
 /** Hard cap on events per EmitEvents changeset — one human-reviewable plan,
  *  well under the /events perimeter's own per-request ceiling. */
 export const EMIT_EVENTS_MAX_EVENTS = 200
+
+/**
+ * Plain-language effect line for one staged kind (AQU-1179).
+ *
+ * The approval page renders THIS, not the raw event kind: the person clicking
+ * "approve" is a translation manager, not a developer, and `cell.backtranslation.set × 12`
+ * is not a sentence they can consent to. One phrasing per kind, count-aware,
+ * written as the effect on the project ("Add 3 comments"), never as the
+ * mechanism. Unknown kinds fall back to the raw kind so a newly allowlisted
+ * kind that forgets its phrasing degrades to today's output rather than an
+ * empty line.
+ */
+export function emitKindEffectLabel(
+  kind: string,
+  count: number,
+  /** AQU-1426: one representative payload from the group. Only consulted by
+   *  kinds whose sentence depends on the payload — `source.cell.visibility.set`
+   *  carries BOTH hide and show, and "N cells changed visibility" is not a thing
+   *  a translation manager can consent to. Prepare refuses a plan that mixes the
+   *  two directions, so one sample speaks for the whole group. */
+  sample?: Record<string, unknown>,
+): string {
+  const n = count
+  const s = (one: string, many: string) => (n === 1 ? `${one}` : `${n} ${many}`)
+  switch (kind) {
+    case 'comment.create': return `Add ${s('a comment', 'comments')}`
+    case 'comment.edit': return `Edit ${s('a comment', 'comments')}`
+    case 'comment.delete': return `Delete ${s('a comment', 'comments')}`
+    case 'comment.resolve': return `Resolve or reopen ${s('a comment thread', 'comment threads')}`
+    case 'cell.waive': return `Waive a quality rule on ${s('a line', 'lines')}`
+    case 'cell.unwaive': return `Restore a waived quality rule on ${s('a line', 'lines')}`
+    case 'cell.validate': return `Mark ${s('a translation', 'translations')} as validated — recorded under your name`
+    case 'cell.unvalidate': return `Remove validation from ${s('a translation', 'translations')}`
+    case 'cell.backtranslation.set': return `Save a back-translation for ${s('a line', 'lines')}`
+    case 'target.cell.repin': return `Clear the "source changed" flag on ${s('a line', 'lines')}`
+    case 'source.cell.visibility.set':
+      return sample?.hidden === false
+        ? `Bring ${s('a hidden line', 'hidden lines')} back into the file`
+        : `Hide ${s('a line', 'lines')} from translators and from every export`
+    case 'file.rename': return `Rename ${s('a file', 'files')}`
+    case 'file.delete': return `Move ${s('a file', 'files')} to the trash`
+    case 'file.restore': return `Restore ${s('a file', 'files')} from the trash`
+    case 'assignment.create': return `Assign work to ${s('a team member', 'team members')}`
+    case 'assignment.reassign': return `Reassign ${s('an assignment', 'assignments')} to someone else`
+    case 'assignment.unassign': return `Remove ${s('an assignment', 'assignments')}`
+    case 'term.create': return `Add ${s('a glossary term', 'glossary terms')}`
+    case 'term.update': return `Edit ${s('a glossary term', 'glossary terms')}`
+    case 'term.delete': return `Delete ${s('a glossary term', 'glossary terms')}`
+    case 'term.approve': return `Approve ${s('a glossary term', 'glossary terms')} — enforced for everyone on the project`
+    case 'term.reject': return `Reject ${s('a suggested glossary term', 'suggested glossary terms')}`
+    default: return `${kind} × ${n}`
+  }
+}
 
 /** One normalized plan event. `payload` holds only the caller-suppliable
  *  fields for its kind — server-resolved pins (editEventId, targetEventId,
@@ -71,23 +149,40 @@ export interface EmitEventsCommand {
   events: EmitEventInput[]
 }
 
-/** Changeset floor = max REQUIRED_ROLE over the batch's event kinds
- *  (role-policy is the single source of truth; dynamic bumps — foreign
- *  unvalidate → MAINTAINER, foreign comment mutation → FOREIGN_COMMENT_ROLE
- *  — are prepare-time checks). */
-export function emitEventsFloor(cmd: EmitEventsCommand): number {
+/** Changeset floor = max authority over the batch's event kinds. Static kinds
+ *  use REQUIRED_ROLE; assignment kinds use the caller-supplied org floor.
+ *  Other dynamic bumps — foreign unvalidate → MAINTAINER, foreign comment
+ *  mutation → FOREIGN_COMMENT_ROLE — are prepare-time checks. */
+export function emitEventsFloor(
+  cmd: EmitEventsCommand,
+  assignmentMinRole: number = ROLE.PROJECT_LEAD,
+): number {
   let floor = 0
   for (const e of cmd.events) {
-    // Sam, 2026-08-21: source.cell.create/delete/reorder dropped to
-    // CONTRIBUTOR in the static table so the app's `allowLineCreation`
-    // setting can admit contributors — with authorize.ts enforcing the
-    // conditional part per event. THIS surface never runs those per-event
-    // checks, so it keeps the old PROJECT_LEAD floor: an integration adding,
-    // deleting or re-anchoring source rows is a re-import-shaped act, not
-    // the timeline affordance.
+    // AQU-1068: source.cell.create/delete/reorder sit at COMMENTER in the
+    // static table, and PROJECT_LEAD is put back here because an integration
+    // adding, deleting or re-anchoring source rows is a re-import-shaped act.
+    //
+    // THIS LINE IS LOAD-BEARING, not a fail-fast convenience. It used to be one
+    // of two floors: the project's `cellEditingFloor` was also checked per
+    // event in authorize.ts. Since 2026-09-09 that tier is a product rule
+    // enforced at the button and NOT at the perimeter, and the external surface
+    // never consulted it anyway (it is exempt by `src === 'external'`). So this
+    // hard-coded PROJECT_LEAD is now the ONLY thing holding an integration
+    // above COMMENTER for these three kinds. A test pins it. Do not soften it
+    // to REQUIRED_ROLE without replacing it with something else.
+    //
+    // What still applies at commit is the maintainer requirement on removing an
+    // IMPORTED cell — except that the external exemption skips that too, which
+    // is a documented gap rather than an accident: it is the behaviour this
+    // surface had before AQU-1068. See authorize.ts.
     const kindFloor =
       e.kind === 'source.cell.create' || e.kind === 'source.cell.delete' || e.kind === 'source.cell.reorder'
         ? ROLE.PROJECT_LEAD
+        : e.kind === 'assignment.create' ||
+            e.kind === 'assignment.reassign' ||
+            e.kind === 'assignment.unassign'
+          ? assignmentMinRole
         : (REQUIRED_ROLE[e.kind as keyof typeof REQUIRED_ROLE] ?? 0)
     floor = Math.max(floor, kindFloor)
   }
@@ -135,6 +230,10 @@ const LANE_KINDS = new Set([
  *  caller-supplied value would either be silently ignored or fork the plan
  *  from what commit re-checks — reject with a teaching message instead. */
 const SERVER_RESOLVED_FIELDS: Record<string, string[]> = {
+  // AQU-1233: viaAgent is stamped at compile — a caller supplying it (either to
+  // forge the marker on a human's behalf or to suppress it on its own comment)
+  // gets a validation error rather than a silent drop.
+  'comment.create': ['viaAgent'],
   'cell.validate': ['editEventId'],
   'cell.unvalidate': ['editEventId'],
   'cell.backtranslation.set': ['targetEventId'],
@@ -197,6 +296,16 @@ export function validateEmitEventsCommand(
       issues.push({ index, message: `${where}: ${kind} requires fileId` })
       return null
     }
+    // Terminology is project-level: a fileId/cellId on the envelope would be
+    // silently discarded when the engine routes the event under the project
+    // sentinel, so reject it rather than accept a plan that reads as scoped.
+    if (TERM_EMIT_KINDS.has(kind) && (rawEvent.fileId !== undefined || rawEvent.cellId !== undefined)) {
+      issues.push({
+        index,
+        message: `${where}: ${kind} is project-level — omit fileId and cellId (the concept id rides the payload)`,
+      })
+      return null
+    }
     // comment.create's scope derives from the envelope (cell / file / project);
     // a cellId without its fileId would silently demote to a project comment.
     if (kind === 'comment.create' && rawEvent.cellId !== undefined && rawEvent.fileId === undefined) {
@@ -230,6 +339,136 @@ export function validateEmitEventsCommand(
     })
   }
   return { kind: 'EmitEvents', events }
+}
+
+/** Mirrors TermRenderingPayload in events/types.ts (redeclared locally so this
+ *  static module keeps its dependency-light shape). */
+interface TermRendering {
+  rendering: string
+  status: 'preferred' | 'admitted' | 'forbidden'
+}
+
+const RENDERING_STATUSES: ReadonlySet<string> = new Set(['preferred', 'admitted', 'forbidden'])
+
+/** Mirrors TermMatchOptionsPayload in events/types.ts (redeclared locally for
+ *  the same reason TermRendering is). */
+interface TermMatchOptions {
+  foldMarks?: boolean
+  affixes?: boolean
+  forms?: string[]
+  excludedForms?: string[]
+}
+
+/** Cap on `forms` / `excludedForms` per concept. Each entry becomes an
+ *  alternate in the compiled terminology regex, so an unbounded list is a
+ *  pathological pattern on every keystroke in the editor — the cap is a
+ *  performance floor, not a modelling opinion. */
+const MAX_TERM_FORMS = 100
+
+/**
+ * A concept's matching options — the inflection-variant surface (AQU-1175).
+ *
+ * WHY THIS VALIDATOR EXISTS AT ALL: the event kinds, the projection column
+ * (`concepts.match_options`) and the in-app Terminology UI have carried
+ * `match` since AQU-1006, but the EmitEvents validators never named the key,
+ * so it was silently DROPPED off every term written through the Agent API. A
+ * caller could send `match: { forms: [...] }`, get a 200 and an applied
+ * changeset, and end up with a concept matching exactly one surface form.
+ *
+ * That is not a cosmetic gap. Exact-match on "Боже Слово" flags every
+ * inflected form of it, so for Ukrainian — and most inflected languages —
+ * terminology through this API was unusable without variants. Dropping an
+ * unknown key is the right default in general; dropping THIS one produced a
+ * term that looked configured and was not.
+ *
+ * Replaced wholesale when present (like `renderings`, and for the same reason:
+ * no per-item identity to merge on), left untouched when absent. `match: {}` is
+ * therefore a meaningful request on term.update — it CLEARS every option back
+ * to defaults — and is accepted as one.
+ *
+ * Unknown keys are REJECTED here, unlike the payload validators around it,
+ * which whitelist and let extras fall away. Being lax is what caused this bug:
+ * a caller who writes `{ form: ["..."] }` for `forms` would otherwise filter
+ * down to `{}`, i.e. silently clear the options they were trying to set, and
+ * get a 200 for it. Inside the one field whose whole history is "silently
+ * dropped", a typo has to be an error.
+ */
+export const MATCH_OPTION_KEYS = ['foldMarks', 'affixes', 'forms', 'excludedForms'] as const
+
+function validateMatchOptions(
+  value: unknown,
+  bad: (message: string) => null,
+): TermMatchOptions | null {
+  if (!isPlainObject(value)) {
+    bad('match must be an object when present')
+    return null
+  }
+  for (const key of Object.keys(value)) {
+    if (!(MATCH_OPTION_KEYS as readonly string[]).includes(key)) {
+      bad(
+        `match.${key} is not a match option — expected one of ` +
+          `${MATCH_OPTION_KEYS.join(', ')}`,
+      )
+      return null
+    }
+  }
+  const out: TermMatchOptions = {}
+  for (const key of ['foldMarks', 'affixes'] as const) {
+    if (value[key] === undefined) continue
+    if (typeof value[key] !== 'boolean') {
+      bad(`match.${key} must be a boolean when present`)
+      return null
+    }
+    out[key] = value[key] as boolean
+  }
+  for (const key of ['forms', 'excludedForms'] as const) {
+    if (value[key] === undefined) continue
+    const raw = value[key]
+    if (!Array.isArray(raw)) {
+      bad(`match.${key} must be an array of strings when present`)
+      return null
+    }
+    if (raw.length > MAX_TERM_FORMS) {
+      bad(`match.${key} must hold at most ${MAX_TERM_FORMS} entries`)
+      return null
+    }
+    const forms: string[] = []
+    for (const [i, form] of raw.entries()) {
+      if (!isNonEmptyString(form)) {
+        bad(`match.${key}[${i}] must be a non-empty string`)
+        return null
+      }
+      forms.push(form)
+    }
+    out[key] = forms
+  }
+  // `{}` falls through deliberately: on term.update it is "clear every option".
+  return out
+}
+
+/** A concept's rendering list — replaced wholesale by create/update, so it must
+ *  be fully valid or the whole event is rejected. */
+function validateRenderings(
+  value: unknown,
+  bad: (message: string) => null,
+): TermRendering[] | null {
+  if (!Array.isArray(value)) {
+    bad('renderings must be an array')
+    return null
+  }
+  const out: TermRendering[] = []
+  for (const [i, raw] of value.entries()) {
+    if (!isPlainObject(raw) || !isNonEmptyString(raw.rendering)) {
+      bad(`renderings[${i}].rendering must be a non-empty string`)
+      return null
+    }
+    if (typeof raw.status !== 'string' || !RENDERING_STATUSES.has(raw.status)) {
+      bad(`renderings[${i}].status must be 'preferred', 'admitted' or 'forbidden'`)
+      return null
+    }
+    out.push({ rendering: raw.rendering, status: raw.status as TermRendering['status'] })
+  }
+  return out
 }
 
 /** Per-kind payload whitelist + type checks. Returns the normalized payload or
@@ -316,9 +555,11 @@ function validatePayload(
       if (p.assignmentId !== undefined && !isNonEmptyString(p.assignmentId)) {
         return bad('assignmentId must be a non-empty string when present')
       }
-      if (p.scopeKind !== 'books' && p.scopeKind !== 'chapters') return bad("scopeKind must be 'books' or 'chapters'")
+      if (p.scopeKind !== 'books' && p.scopeKind !== 'chapters' && p.scopeKind !== 'cells') {
+        return bad("scopeKind must be 'books', 'chapters' or 'cells'")
+      }
       if (!Array.isArray(p.scope) || p.scope.length === 0) return bad('scope must be a non-empty array')
-      const scope: { fileId: string; chapter?: string }[] = []
+      const scope: { fileId: string; chapter?: string; cellIds?: string[] }[] = []
       for (const [entryIndex, rawEntry] of p.scope.entries()) {
         if (!isPlainObject(rawEntry) || !isNonEmptyString(rawEntry.fileId)) {
           return bad(`scope[${entryIndex}].fileId must be a non-empty string`)
@@ -326,9 +567,29 @@ function validatePayload(
         if (rawEntry.chapter !== undefined && !isNonEmptyString(rawEntry.chapter)) {
           return bad(`scope[${entryIndex}].chapter must be a non-empty string when present`)
         }
+        // AQU-1628: 'cells' means exactly these source lines. An empty or
+        // absent list is rejected rather than widened to the whole file —
+        // silently assigning everything is the bug this scope exists to fix.
+        let cellIds: string[] | undefined
+        if (rawEntry.cellIds !== undefined) {
+          if (!Array.isArray(rawEntry.cellIds) || rawEntry.cellIds.length === 0) {
+            return bad(`scope[${entryIndex}].cellIds must be a non-empty array of cell ids when present`)
+          }
+          if (!rawEntry.cellIds.every((id) => isNonEmptyString(id))) {
+            return bad(`scope[${entryIndex}].cellIds must contain only non-empty strings`)
+          }
+          cellIds = rawEntry.cellIds as string[]
+        }
+        if (p.scopeKind === 'cells' && cellIds === undefined) {
+          return bad(`scope[${entryIndex}].cellIds is required for scopeKind 'cells'`)
+        }
+        if (p.scopeKind !== 'cells' && cellIds !== undefined) {
+          return bad(`scope[${entryIndex}].cellIds is only valid for scopeKind 'cells'`)
+        }
         scope.push({
           fileId: rawEntry.fileId,
           ...(rawEntry.chapter !== undefined ? { chapter: rawEntry.chapter as string } : {}),
+          ...(cellIds !== undefined ? { cellIds } : {}),
         })
       }
       if (!isNonEmptyString(p.scopeLabel)) return bad('scopeLabel must be a non-empty string')
@@ -361,6 +622,85 @@ function validatePayload(
     case 'assignment.unassign': {
       if (!isNonEmptyString(p.assignmentId)) return bad('assignmentId must be a non-empty string')
       return { assignmentId: p.assignmentId }
+    }
+    case 'term.create': {
+      if (p.conceptId !== undefined && !isNonEmptyString(p.conceptId)) {
+        return bad('conceptId must be a non-empty string when present')
+      }
+      if (!isNonEmptyString(p.sourceTerm)) return bad('sourceTerm must be a non-empty string')
+      const renderings = validateRenderings(p.renderings, bad)
+      if (renderings === null) return null
+      // Status is REQUIRED on create (unlike the app's own default) so an
+      // integration can never fall into 'active' by omission: proposing a term
+      // and enforcing one for every translator are different acts and the
+      // caller has to say which it meant. 'deprecated' is a review outcome,
+      // not a birth state — term.reject produces it.
+      if (p.status !== 'draft' && p.status !== 'active') return bad("status must be 'draft' or 'active'")
+      if (p.notes !== undefined && typeof p.notes !== 'string') return bad('notes must be a string when present')
+      if (p.caseSensitive !== undefined && typeof p.caseSensitive !== 'boolean') {
+        return bad('caseSensitive must be a boolean when present')
+      }
+      let match: TermMatchOptions | undefined
+      if (p.match !== undefined) {
+        const parsed = validateMatchOptions(p.match, bad)
+        if (parsed === null) return null
+        match = parsed
+      }
+      return {
+        ...(p.conceptId !== undefined ? { conceptId: p.conceptId } : {}),
+        sourceTerm: p.sourceTerm,
+        renderings,
+        status: p.status,
+        ...(p.notes !== undefined ? { notes: p.notes } : {}),
+        ...(p.caseSensitive !== undefined ? { caseSensitive: p.caseSensitive } : {}),
+        ...(match !== undefined ? { match } : {}),
+      }
+    }
+    case 'term.update': {
+      if (!isNonEmptyString(p.conceptId)) return bad('conceptId must be a non-empty string')
+      if (p.sourceTerm !== undefined && !isNonEmptyString(p.sourceTerm)) {
+        return bad('sourceTerm must be a non-empty string when present')
+      }
+      let renderings: TermRendering[] | undefined
+      if (p.renderings !== undefined) {
+        const parsed = validateRenderings(p.renderings, bad)
+        if (parsed === null) return null
+        renderings = parsed
+      }
+      if (p.notes !== undefined && typeof p.notes !== 'string') return bad('notes must be a string when present')
+      if (p.caseSensitive !== undefined && typeof p.caseSensitive !== 'boolean') {
+        return bad('caseSensitive must be a boolean when present')
+      }
+      // `status` is deliberately absent: the review transitions are their own
+      // kinds (term.approve / term.reject) so the audit trail distinguishes
+      // "edited" from "approved". A status here would launder one into the other.
+      if (p.status !== undefined) {
+        return bad('status is not patchable — use term.approve or term.reject')
+      }
+      let match: TermMatchOptions | undefined
+      if (p.match !== undefined) {
+        const parsed = validateMatchOptions(p.match, bad)
+        if (parsed === null) return null
+        match = parsed
+      }
+      const patch: Record<string, unknown> = { conceptId: p.conceptId }
+      if (p.sourceTerm !== undefined) patch.sourceTerm = p.sourceTerm
+      if (renderings !== undefined) patch.renderings = renderings
+      if (p.notes !== undefined) patch.notes = p.notes
+      if (p.caseSensitive !== undefined) patch.caseSensitive = p.caseSensitive
+      if (match !== undefined) patch.match = match
+      if (Object.keys(patch).length === 1) return bad('must patch at least one field')
+      return patch
+    }
+    case 'term.delete':
+    case 'term.approve': {
+      if (!isNonEmptyString(p.conceptId)) return bad('conceptId must be a non-empty string')
+      return { conceptId: p.conceptId }
+    }
+    case 'term.reject': {
+      if (!isNonEmptyString(p.conceptId)) return bad('conceptId must be a non-empty string')
+      if (p.mode !== 'delete' && p.mode !== 'deprecate') return bad("mode must be 'delete' or 'deprecate'")
+      return { conceptId: p.conceptId, mode: p.mode }
     }
     default:
       // Unreachable — kind was checked against ALLOWED_SET.

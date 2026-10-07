@@ -15,6 +15,8 @@ describe("deriveNavTitle", () => {
     expect(deriveNavTitle("/orgs/7/settings/identity")).toBe("Identity")
     expect(deriveNavTitle("/orgs/7/settings/security")).toBe("Security")
     expect(deriveNavTitle("/orgs/7/settings/export")).toBe("Security")
+    // AQU-1131 — org rules are their own Settings section, not "Settings".
+    expect(deriveNavTitle("/orgs/7/settings/rules")).toBe("Rules")
     expect(deriveNavTitle("/orgs/7/teams")).toBe("Teams")
     expect(deriveNavTitle("/orgs/7/members")).toBe("Members")
     expect(deriveNavTitle("/orgs/7/members/matrix")).toBe("Members matrix")

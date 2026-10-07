@@ -32,12 +32,17 @@ import {
   findProposedCellsFromOtherRuns,
   appendContextualRunEvent,
   type ContextualRun,
+  type ContextualRunEvent,
+  type ContextualParkReason,
   type ContextualRunStatus,
   type ContextualSpanReason,
   type SpanCursor,
   type StoredSpanSeed,
 } from "../../../../db/shared/contextual-runs"
-import { raiseDecisionOnce } from "../../../../db/shared/contextual-decisions"
+import {
+  raiseDecisionOnce,
+  findOpenDecisionForRun,
+} from "../../../../db/shared/contextual-decisions"
 import {
   proposeSceneBrief,
   listSceneBriefs,
@@ -46,16 +51,20 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
+import { triageVerdicts, type TriageCall } from "./triage"
 import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
+import type { PaidCallAdmit } from "../billing/agent-usage"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
 import { lintSpanDraft } from "./lint-node"
 import { runSpan, EXAMPLES_TARGET } from "./pipeline"
 import type { ExamplePair } from "./draft"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
+import { reflectAtPark } from "./reflect"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
+import { ingestRunActivity } from "../team-ingest"
 import { formatSpanRange } from "../../../../shared/span-label"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
@@ -138,6 +147,23 @@ export interface LlmCallUsage {
   tokensPerSecond?: number
 }
 
+/** One model call's full content, for the step inspector's trace view. Fired
+ *  once per call (after retries settle), success or failure. Unlike
+ *  LlmCallUsage this carries the prompt and the reply, so it must only reach
+ *  stores the project already trusts with that text (lib/contextual/traces.ts). */
+export interface LlmCallTrace extends LlmCallUsage {
+  system: string
+  user: string
+  /** The model's reply; null when the call failed. */
+  output: string | null
+  /** Machine error code ("provider_http_error status=429"); null on success.
+   *  Never the provider's error body — see the note in makeLlmCall. */
+  error: string | null
+  /** OpenRouter generation id, for looking the call up on the provider side. */
+  generationId?: string
+  attempts: number
+}
+
 /** Bounded-concurrency gate. `limit <= 0` disables it entirely (no queueing,
  *  no bookkeeping) so the OpenRouter path behaves exactly as before. */
 function makeGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
@@ -170,9 +196,16 @@ export function makeLlmCall(cfg: {
   models: ContextualModels
   signal?: AbortSignal
   onUsage?: (u: LlmCallUsage) => void
+  /** Same contract as onUsage (never throws, fires once per call), but with
+   *  the prompt and reply attached. */
+  onTrace?: (t: LlmCallTrace) => void
   /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
    *  0/undefined = uncapped (the OpenRouter default). */
   maxInFlight?: number
+  /** AQU-837 weekly-allowance admission: reserve before the request, settle
+   *  the reported cost after. A refusal throws `usage_<reason>` before any
+   *  attempt; a failed call holds its reservation for reconciliation. */
+  admit?: PaidCallAdmit
 }): LlmCall {
   // Span concurrency is not request concurrency: one span fans its verifier
   // panel out three-wide, so N spans burst to ~3N requests. Against an upstream
@@ -203,6 +236,29 @@ export function makeLlmCall(cfg: {
       }
     }
     const failed = { promptTokens: 0, completionTokens: 0, costCents: 0, ok: false }
+    let attempts = 0
+    const trace = (
+      u: Omit<LlmCallUsage, "label" | "spanId" | "tier" | "model" | "latencyMs">,
+      result: { output: string | null; error: string | null; generationId?: string },
+    ): void => {
+      if (!cfg.onTrace) return
+      try {
+        cfg.onTrace({
+          ...u,
+          ...result,
+          label: req.label ?? "",
+          spanId: req.spanId ?? "",
+          tier: req.tier as Tier,
+          model,
+          latencyMs: Date.now() - startedAt,
+          system: req.system,
+          user: req.user,
+          attempts,
+        })
+      } catch {
+        /* tracing must never break the run it is recording */
+      }
+    }
 
     // Capacity rejections are NOT model failures. A busy upstream (OpenRouter
     // rate limit, or a self-hosted server whose slots are all occupied) answers
@@ -224,6 +280,7 @@ export function makeLlmCall(cfg: {
     const MAX_ATTEMPTS = 5
 
     interface UpstreamBody {
+      id?: string
       choices?: { message?: { content?: string | null } }[]
       usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
       timings?: { predicted_per_second?: number }
@@ -232,9 +289,16 @@ export function makeLlmCall(cfg: {
       | { ok: true; body: UpstreamBody }
       | { ok: false; status: number; code: "http_error" | "invalid_response" }
 
+    let admission: Awaited<ReturnType<PaidCallAdmit>> | undefined
+    if (cfg.admit) {
+      admission = await cfg.admit({ model, promptChars: req.system.length + req.user.length, maxOutputTokens: req.maxTokens })
+      if (!admission.ok) throw new Error(`usage_${admission.reason}`)
+    }
+    const hold = async () => { if (admission?.ok) await admission.hold(undefined) }
     let body!: UpstreamBody
     for (let attempt = 1; ; attempt++) {
       startedAt = Date.now()
+      attempts = attempt
       let outcome: Attempt
       try {
         // The gate holds a slot only for the round-trip, never across the
@@ -268,7 +332,10 @@ export function makeLlmCall(cfg: {
         })
       } catch {
         report(failed)
-        throw new Error(cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error")
+        const code = cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error"
+        trace(failed, { output: null, error: code })
+        await hold()
+        throw new Error(code)
       }
       if (outcome.ok) {
         body = outcome.body
@@ -285,6 +352,8 @@ export function makeLlmCall(cfg: {
         const code = outcome.code === "invalid_response"
           ? "provider_invalid_response"
           : "provider_http_error"
+        trace(failed, { output: null, error: `${code} status=${outcome.status}` })
+        await hold()
         throw new Error(`${code} status=${outcome.status}`)
       }
       // Exponential backoff with jitter — without the jitter every rejected
@@ -292,15 +361,19 @@ export function makeLlmCall(cfg: {
       const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 8000) * (0.5 + Math.random())
       await new Promise((r) => setTimeout(r, backoffMs))
     }
+    if (admission?.ok) await admission.settle({ id: body.id, usage: body.usage })
     const tps = body.timings?.predicted_per_second
-    report({
+    const usage = {
       promptTokens: body.usage?.prompt_tokens ?? 0,
       completionTokens: body.usage?.completion_tokens ?? 0,
       costCents: (body.usage?.cost ?? 0) * 100,
       ok: body.usage !== undefined,
       ...(typeof tps === "number" ? { tokensPerSecond: tps } : {}),
-    })
-    return body.choices?.[0]?.message?.content ?? ""
+    }
+    report(usage)
+    const output = body.choices?.[0]?.message?.content ?? ""
+    trace(usage, { output, error: null, ...(body.id ? { generationId: body.id } : {}) })
+    return output
   }
 }
 
@@ -315,6 +388,11 @@ export interface ContextualRunStateFrame {
   done: number
   total: number
   failed?: number
+  /** Why a `parked` run stopped (AQU-1300). Carried on the LIVE frame, not
+   *  left to the next poll: parking is the moment the UI has to switch from
+   *  "drafting" to "waiting for you", and a frame that says only `parked`
+   *  cannot tell that apart from "finished". Omitted on every other status. */
+  parkReason?: ContextualParkReason
 }
 
 export interface ContextualSceneFrame {
@@ -382,6 +460,18 @@ export interface ContextualDraftsFrame {
   truncated?: boolean
 }
 
+/** A park's reflection staged memory proposals for review (AQU-1302). ONE
+ *  frame per reflection, carrying only the count — the notes themselves are
+ *  reviewable rows in the Memory tab, and `failed` marks a reflection whose
+ *  model call did not come back, so a run that quietly stopped learning is
+ *  visible in its own activity rather than only in worker logs. */
+export interface ContextualMemoriesFrame {
+  type: "contextual.memories"
+  runId: string
+  count: number
+  failed?: boolean
+}
+
 export type ContextualProgressFrame =
   | ContextualRunStateFrame
   | ContextualSceneFrame
@@ -389,6 +479,7 @@ export type ContextualProgressFrame =
   | ContextualSpanStartFrame
   | ContextualPhaseFrame
   | ContextualDraftsFrame
+  | ContextualMemoriesFrame
 
 /** Frame-size guards: a draft burst must not turn one span into a megabyte of
  *  WebSocket traffic. Beyond these the client refetches the authoritative list. */
@@ -405,20 +496,38 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
     done: run.doneSpans,
     total: run.totalSpans,
     failed: run.failedSpans,
+    ...(run.status === "parked" && run.parkReason ? { parkReason: run.parkReason } : {}),
   }
 }
 
 /** Persist one live progress frame as a bounded product-activity fact. The
  * draft frame intentionally loses draft ids/text here: only count + cell ids
- * cross the durable telemetry boundary. */
+ * cross the durable telemetry boundary.
+ *
+ * This is the single server-side path that records narrative activity, so it
+ * is also where the shared team channel is fed (lib/team-ingest.ts). The
+ * write-through is best-effort by construction — `ingestRunActivity` never
+ * throws — so a channel outage cannot stop a run. */
 export async function persistContextualProgressFrame(
   db: AquillaDb,
   scope: { projectId: string; fileId: string },
   frame: ContextualProgressFrame,
 ): Promise<void> {
+  const event = await appendProgressFrameEvent(db, scope, frame)
+  if (event) await ingestRunActivity(db, event)
+}
+
+/** Every frame kind maps to exactly one durable event today. The `undefined`
+ *  tail is for a frame kind added later and not yet mapped: it records
+ *  nothing and feeds nothing, rather than half-writing. */
+async function appendProgressFrameEvent(
+  db: AquillaDb,
+  scope: { projectId: string; fileId: string },
+  frame: ContextualProgressFrame,
+): Promise<ContextualRunEvent | undefined> {
   switch (frame.type) {
     case "contextual.run.state":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -426,9 +535,8 @@ export async function persistContextualProgressFrame(
         status: frame.status,
         details: { done: frame.done, total: frame.total, failed: frame.failed ?? 0 },
       })
-      return
     case "contextual.span.start":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -437,9 +545,8 @@ export async function persistContextualProgressFrame(
         spanLabel: frame.spanLabel,
         status: "started",
       })
-      return
     case "contextual.phase":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -448,9 +555,8 @@ export async function persistContextualProgressFrame(
         spanLabel: frame.spanLabel,
         phase: frame.phase,
       })
-      return
     case "contextual.scene":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -463,9 +569,8 @@ export async function persistContextualProgressFrame(
           ambiguityCount: frame.ambiguityCount,
         },
       })
-      return
     case "contextual.drafts":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -479,9 +584,17 @@ export async function persistContextualProgressFrame(
           truncated: frame.truncated === true,
         },
       })
-      return
+    case "contextual.memories":
+      return appendContextualRunEvent(db, {
+        runId: frame.runId,
+        projectId: scope.projectId,
+        fileId: scope.fileId,
+        kind: "memories_proposed",
+        status: frame.failed === true ? "failed" : "complete",
+        details: { count: frame.count },
+      })
     case "contextual.span":
-      await appendContextualRunEvent(db, {
+      return appendContextualRunEvent(db, {
         runId: frame.runId,
         projectId: scope.projectId,
         fileId: scope.fileId,
@@ -778,6 +891,8 @@ export interface TickDeps {
   /** Spans to drive concurrently this wave. Defaults to `waveSize()` over the
    *  remaining spans; pass 1 to force the original strictly-serial behaviour. */
   concurrency?: number
+  /** Per-cell QA triage at staging (triage.ts). Omitted → fixed rules. */
+  triage?: TriageCall
 }
 
 export interface TickResult {
@@ -901,6 +1016,7 @@ async function processSpan(
       // the concepts get scoped to this span's source text inside runSpan.
       briefParameters: shared.ctx.briefParameters,
       ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
+      ...(shared.ctx.termMatching ? { termMatching: shared.ctx.termMatching } : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
@@ -959,7 +1075,8 @@ async function processSpan(
         })
         return proposed.brief.id
       },
-      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts),
+      lint: async (draft) =>
+        lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts, shared.ctx.termMatching),
       stage: async (draft) => {
         // Anti-clobber, checked as late as possible: a human may have typed
         // into one of these cells while the span was running. `pairs` is a
@@ -977,6 +1094,19 @@ async function processSpan(
         if (fresh.length === 0) {
           return { proposalId: "", spanId: draft.spanId, stagedCellIds: [], verdicts: {} }
         }
+        // Finding codes + a "needs a human?" call per flagged cell, stored on
+        // the draft for the PR view. Never blocks staging (triage.ts).
+        const pairById = new Map(shared.pairs.map((p) => [p.cellId, p]))
+        const verdictsByCell = await triageVerdicts(
+          fresh.map((c) => ({
+            cellId: c.cellId,
+            ref: pairById.get(c.cellId)?.canonicalRef ?? null,
+            source: pairById.get(c.cellId)?.source ?? "",
+            text: c.text,
+            findings: c.findings ?? [],
+          })),
+          deps.triage ?? (async (input) => ({ answers: input.fallback(), decidedBy: "heuristic", model: null, usage: null })),
+        )
         const staged = await insertDrafts(db, {
           runId: run.id,
           projectId: run.projectId,
@@ -985,6 +1115,7 @@ async function processSpan(
           drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
+            verdicts: verdictsByCell.get(c.cellId) ?? {},
             provenance: {
               spanId: draft.spanId,
               spanLabel: label,
@@ -1088,6 +1219,43 @@ async function processSpan(
 }
 
 /**
+ * Reflect once on a run that just parked, and record the result on the run's
+ * own activity (AQU-1302).
+ *
+ * Called AFTER the park transition and its state frame: the person watching
+ * sees "waiting for you" immediately and the reflection call happens behind
+ * that, so a slow model never delays the hand-back. Every failure is swallowed
+ * — a run that parked correctly must not be rewritten as a failed one because
+ * a bonus model call timed out — but it is swallowed LOUDLY, as a
+ * `memories_proposed`/failed activity line, so a run that quietly stopped
+ * learning is visible where the rest of its work is.
+ *
+ * Durable activity only, deliberately: unlike a draft, a proposal is reviewed
+ * in the Memory tab rather than in the live editor, so there is nothing for a
+ * live frame to update mid-park.
+ */
+async function reflectOnParkedRun(deps: TickDeps, run: ContextualRun): Promise<void> {
+  const record = async (count: number, failed: boolean): Promise<void> => {
+    try {
+      await persistContextualProgressFrame(
+        deps.db,
+        { projectId: run.projectId, fileId: run.fileId },
+        { type: "contextual.memories", runId: run.id, count, ...(failed ? { failed } : {}) },
+      )
+    } catch (err) {
+      console.warn(`[contextual] reflection activity append failed for run ${run.id}:`, err)
+    }
+  }
+  try {
+    const staged = await reflectAtPark({ db: deps.db, run, llm: deps.llm })
+    if (staged > 0) await record(staged, false)
+  } catch (err) {
+    console.warn(`[contextual] park reflection failed for run ${run.id}:`, err)
+    await record(0, true)
+  }
+}
+
+/**
  * Process ONE WAVE of the run — up to `concurrency` spans driven at the same
  * time — then return whether the caller's loop should continue.
  *
@@ -1175,8 +1343,44 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     // A run that produced nothing at all still fails, so Play can start fresh.
     const t = run.failedSpans > 0 && run.doneSpans === 0
       ? await failRun(db, runId, run.lastError ?? "One or more passages need attention.")
-      : await parkRun(db, runId)
+      : await parkRun(db, runId, "work_exhausted")
     if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
+    return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
+  }
+
+  // ── Trust gate (AQU-1300) ────────────────────────────────────────────────
+  // There IS more work past this point, so both checks below park with
+  // `awaiting_input` — "waiting for you", never "all done".
+  //
+  // Honoured at the span edge, alongside pause/terminate, and before any model
+  // call: the whole value of a budget is that spending stops BEFORE the spend.
+  //
+  // An unanswered question wins over remaining allowance. Drafting on past it
+  // buries the question under work built on the assumption it was answered one
+  // particular way, which is worse than not drafting at all.
+  const openDecision = await findOpenDecisionForRun(db, {
+    projectId: run.projectId,
+    runId: run.id,
+  })
+  if (openDecision) {
+    const t = await parkRun(db, runId, "awaiting_input")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
+    return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
+  }
+  // `null` is unlimited (explicit "translate everything", and every run created
+  // before this shipped). Only a real, spent budget parks.
+  if (run.spanAllowance !== null && run.spanAllowance <= 0) {
+    const t = await parkRun(db, runId, "awaiting_input")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
     return { continueRun: false, status: t.status === "ok" ? t.run.status : run.status }
   }
 
@@ -1212,7 +1416,13 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     },
   }
 
-  const remaining = cursor.seeds.length - cursor.nextIndex
+  // The allowance caps the WAVE, not just the loop: a run with one span of
+  // budget must draft one passage, not a wave of six and then notice. This is
+  // the only place wave width and budget meet, and the budget always wins.
+  const unspent = cursor.seeds.length - cursor.nextIndex
+  const remaining = run.spanAllowance === null
+    ? unspent
+    : Math.min(unspent, run.spanAllowance)
   const width = Math.max(1, Math.min(deps.concurrency ?? waveSize(remaining), remaining))
   const wave = cursor.seeds.slice(cursor.nextIndex, cursor.nextIndex + width)
 
@@ -1267,6 +1477,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     callsUsed: reports.reduce((n, r) => n + r.callsUsed, 0),
     lastError,
     steeringCursor: new Date().toISOString(),
+    // Debit only the spans that actually ran. A blocked span produced a
+    // question rather than a passage, and the cursor rewinds it to the front of
+    // the tail — charging for it would make the user pay twice for one passage.
+    spansProcessed: completedWaveSeeds.length,
   })
 
   const lastReport = reports[reports.length - 1]
@@ -1318,8 +1532,23 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     // that staged nothing still fails so retry can start a new run.
     const t = fresh.failedSpans > 0 && fresh.doneSpans === 0
       ? await failRun(db, runId, fresh.lastError ?? "One or more passages need attention.")
-      : await parkRun(db, runId)
+      : await parkRun(db, runId, "work_exhausted")
     if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
+    return result(false, t.status === "ok" ? t.run.status : fresh.status)
+  }
+  // Allowance spent with work still queued: park here rather than leaving the
+  // driver to loop once more and discover it. Same outcome, but the parked
+  // frame reaches the UI now instead of after another round-trip — and the run
+  // never reports `continueRun: true` when it has already decided to stop.
+  if (fresh?.status === "running" && fresh.spanAllowance !== null && fresh.spanAllowance <= 0) {
+    const t = await parkRun(db, runId, "awaiting_input")
+    if (t.status === "ok") await notify(runStateFrame(t.run))
+    if (t.status === "ok" && t.run.status === "parked") {
+      await reflectOnParkedRun(deps, t.run)
+    }
     return result(false, t.status === "ok" ? t.run.status : fresh.status)
   }
   const more = fresh !== null && fresh.status === "running"

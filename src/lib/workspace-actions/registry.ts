@@ -1,9 +1,10 @@
-import { Plus, Sparkles, Download, CheckSquare, Upload, Mic, Wand2 } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2 } from "lucide-react"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { canPerform } from "@/lib/sync/role-policy"
+import { batchValidateConfirmDescription } from "@/lib/review/batch-validate-summary"
 
 // AQU-365: viewers (and any role below the action's server floor) must not
 // see these buttons at all — clicking them either persists a write server
@@ -47,7 +48,21 @@ export function getDefaultAction(
 export const workspaceActions: WorkspaceAction[] = [
   {
     id: "import-new", labelKey: "nav.workspaceActions.import", icon: Plus, group: "primary",
-    isAvailable: () => true,
+    // AQU-481: source import emits `file.create` + N `source.cell.create`, and
+    // `file.create` sits at PROJECT_LEAD (500) server-side — so a viewer's
+    // import is always refused. This action was the one primary entry left
+    // ungated (`() => true`), which is why the full type-picker dialog opened
+    // for a read-only role with every importer clickable. The header button is
+    // rendered outside this registry, so it carries its own disabled+tooltip
+    // affordance (WorkspaceHeaderActions) rather than vanishing; `isAvailable`
+    // is what makes the click itself refuse. Fails OPEN on an unknown role, so
+    // local/legacy projects with no syncRole are unaffected.
+    //
+    // AQU-1365: the same dialog now also brings in a translation of a file
+    // already in the project, which only commits target cells
+    // (`target.cell.commit`, CONTRIBUTOR 400). So the action opens from
+    // Contributor up; the dialog greys out New source text below Project lead.
+    isAvailable: (c) => roleAllows(c, "file.create") || roleAllows(c, "target.cell.commit"),
     isDefault: (c) => c.activeFileId == null,
     run: (_c, args) => args.openImport(),
   },
@@ -111,24 +126,68 @@ export const workspaceActions: WorkspaceAction[] = [
     },
     requiresConfirmation: {
       titleKey: "nav.workspaceActions.batchValidate.title",
-      description: (c, t) => {
+      // AQU-1507: this body used to be built from file progress —
+      // `total - validated` — which counts untranslated cells, untouched AI
+      // drafts, cells this reader had already signed off and cells outside
+      // their assignment, none of which the run touches. It promised "83 cells
+      // are currently unvalidated" on a file where the run validated zero.
+      // The count now comes from the very summary the run consumes
+      // (`ctx.batchValidateSummary`), so the two cannot drift: change the
+      // eligibility predicate and this number follows.
+      description: (c, t, joinList) => {
         if (!c.activeFileId) return ""
-        const p = c.fileProgress.get(c.activeFileId)
-        const unvalidated = p ? p.total - p.validated : 0
+        const summary = c.batchValidateSummary?.()
+        if (!summary) return t("editor.batchValidate.noTarget")
         // AQU-586: a project may cap how many eligible cells one batch-validate
-        // processes. 0/undefined keeps the "all eligible" behavior.
-        const cap = c.project.completionSettings?.validationBatchSize
-        const capNote =
-          typeof cap === "number" && cap > 0
-            ? t("nav.workspaceActions.batchValidate.capNote", { cap })
-            : ""
-        return t("nav.workspaceActions.batchValidate.description", { unvalidated }) + capNote
+        // processes. 0/undefined keeps the "all eligible" behavior. The cap is
+        // already applied inside the summary; it is passed again so the note
+        // explaining "run again to continue" survives a run it did not trim.
+        return batchValidateConfirmDescription(
+          summary, t, joinList, c.project.completionSettings?.validationBatchSize,
+        )
       },
-      // Same imperative as the selection-toolbar Validate button — reuse it
-      // rather than mint a duplicate "Validate" string in this namespace.
-      confirmLabelKey: "editor.selection.validate",
+      // Same imperative as the selection toolbar's button — reuse it rather
+      // than mint a duplicate string in this namespace. It names its half now
+      // ("Validate text"), which is what this dialog is about. The bare
+      // "Validate" key stays for the agent card, whose per-row button is not
+      // text-specific and whose accessible name already carries the reference.
+      confirmLabelKey: "editor.selection.validateText",
+      // Same summary as the body: a run that would validate nothing (no
+      // permission, nothing here, nothing eligible) cannot be confirmed. The
+      // walk on 10-02 ticked the box, pressed "Validate text" and got only the
+      // body's sentence back as an error toast.
+      canConfirm: (c) => {
+        if (!c.activeFileId) return false
+        const summary = c.batchValidateSummary?.()
+        return !!summary && summary.validatable.length > 0
+      },
     },
     run: (_c, args) => args.runBatchValidate(),
+  },
+  {
+    // AQU-490. BESIDE the text action, never merged into it: Sam's ruling is
+    // that combining them would be "really dumb" — signing off a translation
+    // says nothing about whether anyone has listened to its recording.
+    id: "batch-validate-audio",
+    labelKey: "nav.workspaceActions.batchValidateAudio.label",
+    icon: Mic,
+    group: "primary",
+    // Only where there is audio to validate at all, so a text-only project
+    // never grows a menu item it can do nothing with.
+    isAvailable: (c) =>
+      c.activeFileId != null
+      && roleAllows(c, "cell.audio.validate")
+      && (c.audioCounts?.validatableTakes ?? 0) > 0,
+    requiresConfirmation: {
+      titleKey: "nav.workspaceActions.batchValidateAudio.title",
+      description: (c, t) => {
+        if (!c.activeFileId) return ""
+        const takes = c.audioCounts?.validatableTakes ?? 0
+        return t("nav.workspaceActions.batchValidateAudio.description", { takes })
+      },
+      confirmLabelKey: "nav.workspaceActions.batchValidateAudio.label",
+    },
+    run: (_c, args) => args.runBatchValidateAudio(),
   },
   {
     id: "export", labelKey: "nav.workspaceActions.export", icon: Download, group: "primary",
@@ -142,14 +201,6 @@ export const workspaceActions: WorkspaceAction[] = [
       return !!p && p.total > 0 && p.validated === p.total
     },
     run: (_c, args) => args.runExport(),
-  },
-  {
-    // AQU-503: the label must carry the word "target" so PMs looking for the
-    // "Target Import" option can find it — this file-scoped importer populates
-    // the open file's TARGET column, distinct from the primary "Import" (source).
-    id: "import-into-file", labelKey: "nav.workspaceActions.importIntoFile", icon: Upload, group: "secondary",
-    isAvailable: (c) => c.activeFileId != null,
-    run: (_c, args) => args.runImportIntoFile(),
   },
   {
     id: "transcribe-all", labelKey: "nav.workspaceActions.transcribeAll.label", icon: Mic, group: "secondary",

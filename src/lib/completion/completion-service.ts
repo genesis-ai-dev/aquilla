@@ -2,68 +2,46 @@ import type { CompletionSettings, CompletionProvider, TranslationRule } from "@/
 import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
-import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import { getUserProviderOverride, type UserProviderOverride } from "@/lib/store/user-provider-override"
+import { shouldUseLocalLlm, completeWithLocalLlm } from "@/lib/offline/local-llm-client"
 import { t } from "@/lib/i18n/standalone"
+import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
+// AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
+// API's effective-prompt preview (sync-worker) can call the SAME builders
+// instead of re-deriving them server-side. This module keeps everything that
+// needs the browser (Vite env, storage-backed keys, i18n, fetch) and re-exports
+// the core so existing importers are unaffected.
+import {
+  buildBriefBlock,
+  buildPrompt,
+  buildRulesBlock,
+  buildStyleRulesBlock,
+  DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_SYSTEM_PROMPT,
+  precedingContextLabel,
+  retainTranslationPairs,
+  selectApprovedExamples,
+  type ChatMessage,
+  type PrecedingContextEntry,
+  type ValidatedPair,
+} from "./prompt-build"
+
+export {
+  buildBriefBlock,
+  buildPrompt,
+  buildRulesBlock,
+  buildStyleRulesBlock,
+  DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_SYSTEM_PROMPT,
+  precedingContextLabel,
+  retainTranslationPairs,
+  selectApprovedExamples,
+}
+export type { ChatMessage, PrecedingContextEntry, PromptRule, ValidatedPair } from "./prompt-build"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
 // ---------------------------------------------------------------------------
-
-/**
- * A validated source→target pair surfaced from the project's cell store.
- * Used as few-shot examples that capture this team's terminology decisions.
- */
-export interface ValidatedPair {
-  cellId?: string
-  source: string
-  target: string
-}
-
-/**
- * Research-backed default for Luna: keep the global approved-example pool
- * small enough to stay focused, while leaving room for local discourse
- * context. This is a TOTAL prompt budget, not a per-retriever allowance.
- */
-export const DEFAULT_APPROVED_EXAMPLE_COUNT = 10
-
-function normalizedExampleSource(source: string): string {
-  return source.trim().replace(/\s+/g, " ").toLowerCase()
-}
-
-/**
- * Merge canonical retrieval with the local approved-cell fallback into one
- * bounded prompt pool. Retrieved examples win; local cells only fill unused
- * slots. Examples already present in the live request or immediate discourse
- * window are excluded, and source text is preserved in full.
- */
-export function selectApprovedExamples(
-  retrieved: ValidatedPair[],
-  fallback: ValidatedPair[],
-  limit: number,
-  excludedContext: { source: string }[] = [],
-): ValidatedPair[] {
-  if (limit <= 0) return []
-
-  const excludedSources = new Set(
-    excludedContext.map((context) => normalizedExampleSource(context.source)).filter(Boolean),
-  )
-  const seenSources = new Set<string>()
-  const seenCellIds = new Set<string>()
-  const selected: ValidatedPair[] = []
-
-  for (const example of [...retrieved, ...fallback]) {
-    if (selected.length >= limit) break
-    const sourceKey = normalizedExampleSource(example.source)
-    if (!sourceKey || !example.target.trim() || excludedSources.has(sourceKey)) continue
-    if (seenSources.has(sourceKey) || (example.cellId && seenCellIds.has(example.cellId))) continue
-
-    selected.push(example)
-    seenSources.add(sourceKey)
-    if (example.cellId) seenCellIds.add(example.cellId)
-  }
-
-  return selected
-}
 
 /**
  * Extract validated source→target pairs from a snapshot of the project's
@@ -117,63 +95,6 @@ export function collectValidatedPairs(
   }))
 }
 
-/**
- * Render active project rules as a concise terminology/guidance block that
- * can be injected into a system prompt. Only `source-requires-target` rules
- * are rendered as explicit "if you see X → use Y" guidance; other check
- * types become a simple "avoid: X" instruction. Disabled rules are skipped.
- *
- * Returns an empty string when there are no active, injectable rules.
- */
-export function buildRulesBlock(rules: TranslationRule[]): string {
-  const active = rules.filter((r) => r.enabled)
-  if (!active.length) return ""
-
-  const lines: string[] = []
-  for (const rule of active) {
-    const { check } = rule
-    if (check.type === "source-requires-target") {
-      lines.push(`- When the source contains "${check.sourcePattern}", the translation must include "${check.targetPattern}".`)
-    } else if (check.type === "target-forbids") {
-      lines.push(`- Do NOT use "${check.targetPattern}" in the translation.`)
-    } else if (check.type === "source-target-match") {
-      lines.push(`- The pattern "${check.pattern}" must appear in the translation when present in the source.`)
-    }
-    // builtin checks are algorithmic; no useful prompt injection
-  }
-
-  if (!lines.length) return ""
-  return "Project terminology and style rules (MUST follow):\n" + lines.join("\n")
-}
-
-/**
- * Render the brief's L1 summary as a labeled block for the system prompt.
- * Empty/blank input → "" (caller skips injection). The brief states the
- * project's purpose, audience, register, and constraints; it sits ABOVE the
- * mechanical rules block so the model reads intent before specifics.
- */
-export function buildBriefBlock(summary: string | undefined | null): string {
-  const s = (summary ?? "").trim()
-  if (!s) return ""
-  return "Translation brief (the project's purpose and standards — follow it):\n" + s
-}
-
-export const DEFAULT_SYSTEM_PROMPT =
-  "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
-  "The translation examples the user provides are your PRIMARY source of truth. Treat every observable convention in them as binding: reproduce the project's wording, spelling, tone, register, punctuation, formatting, and style rather than substituting defaults associated with the {targetLanguage} label. This may be an ultra-low-resource language, so follow the project's own evidence above general knowledge.\n\n" +
-  "Always translate from {sourceLanguage} to {targetLanguage}, relying strictly on the reference data and context provided. The language may be an ultra-low-resource language, so it is critical to follow the patterns and style of the provided reference data closely.\n\n" +
-  "To produce the translation, follow these steps:\n" +
-  "1. Analyze the provided reference data to understand the translation patterns and style.\n" +
-  "2. Complete the translation of the given source line or passage.\n" +
-  "3. Ensure your translation is consistent with the existing partial translation and surrounding context.\n" +
-  "4. Pay careful attention to the provided reference data — match its terminology, register, and conventions as closely as possible.\n" +
-  "5. Translate only into {targetLanguage}.\n" +
-  "6. When unsure, err on the side of literalness and stay consistent with the examples.\n" +
-  "7. Preserve the line breaks and any inline formatting present in the source.\n\n" +
-  "Output rules (strictly enforced):\n" +
-  "- Output ONLY the {targetLanguage} translation of the final source line — nothing else.\n" +
-  "- No commentary, explanations, labels, headers, markdown, language names, or restated source text. Just the translated text."
-
 export const DEFAULT_COMPLETION_MAX_TOKENS = 16384
 
 // Former defaults (512 pre-2026-07-29, then 4096). Saving any project setting
@@ -205,7 +126,30 @@ const CHAT_BASE_OVERRIDE =
   ((import.meta.env.VITE_CHAT_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
 export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || CHAT_BASE_FALLBACK || "https://api.aquilla.app/chat"}/api/v1/chat/completions`
 
-interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
+/** Direct OpenRouter base used when hosted Frontier has no server key and the
+ *  user has supplied their own (BYOK). Browser → OpenRouter; no Aquilla bill. */
+export const OPENROUTER_BYOK_ENDPOINT = "https://openrouter.ai/api/v1"
+
+export function isHostedOpenRouterUnconfigured(status: number, body: string): boolean {
+  if (status !== 500 && status !== 503) return false
+  const lowered = body.toLowerCase()
+  return (
+    lowered.includes("openrouter_api_key is not configured") ||
+    lowered.includes("openrouter_not_configured")
+  )
+}
+
+function isFrontierChatProxy(endpoint: string): boolean {
+  const ep = endpoint.trim()
+  if (!ep || ep === FRONTIER_CHAT_URL) return true
+  return /aquilla\.app\/chat/i.test(ep)
+}
+
+function byokEndpointForFrontierFallback(settings: CompletionSettings): string {
+  const ep = (settings.endpoint ?? "").trim()
+  if (!ep || isFrontierChatProxy(ep)) return OPENROUTER_BYOK_ENDPOINT
+  return ep
+}
 
 /**
  * The project id of the project currently being edited, derived from the SPA
@@ -239,85 +183,159 @@ export function resolveProvider(settings: CompletionSettings): CompletionProvide
   return (settings.endpoint ?? "").trim() ? "custom" : "frontier"
 }
 
-export function buildPrompt(options: {
-  sourceLanguage: string; targetLanguage: string; systemPrompt: string
-  sourceText: string; examples: { source: string; target: string }[]
-  /** Active project rules — injected as a "must follow" block in the system prompt. */
-  rules?: TranslationRule[]
-  /** Pre-filtered validated pairs from the project — prepended to examples. */
-  validatedPairs?: ValidatedPair[]
-  /** How to render few-shot examples. Default "source-and-target". */
-  exampleFormat?: "source-and-target" | "target-only"
-  /** The project brief's L1 summary — injected before the rules block. */
-  briefSummary?: string
-  /** Committed target of the immediately preceding cells (document order) — the
-   *  discourse window. Rendered last (closest to the live source) because it is
-   *  real continuity, not a retrieved example. Left-context is the TARGET, not the
-   *  source: it is what gives connectives and participant reference real flow. (D4) */
-  precedingContext?: { source: string; target: string }[]
-  /** Extra task instruction appended to the system prompt after the rules
-   *  block. Must be placeholder-free — it is appended AFTER the
-   *  {sourceLanguage}/{targetLanguage} substitution. Used by the footnote
-   *  output contract (buildFootnoteInstruction); instructions must live here,
-   *  never inside `sourceText`, where they contradict the base prompt's
-   *  "translate the final source line only" rule. */
-  systemAddendum?: string
-  /** Labelled context block rendered in the user message after
-   *  precedingContext and immediately BEFORE the final `Source:` line — never
-   *  inside it. Used for the source-footnote listing. */
-  preSourceBlock?: string
-}): ChatMessage[] {
-  let sys = options.systemPrompt
-    .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
-    .replace(/\{targetLanguage\}/g, options.targetLanguage)
+/** Hosted OpenAI-compatible APIs that refuse unauthenticated chat. Local /
+ *  self-hosted endpoints do not need a key. */
+export function customProviderNeedsKey(endpoint: string): boolean {
+  const e = endpoint.trim().toLowerCase()
+  if (!e) return false
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(e)) return false
+  return /openrouter\.ai|openai\.com|groq\.com|together\.xyz|mistral\.ai|deepseek\.com/.test(e)
+}
 
-  const briefBlock = buildBriefBlock(options.briefSummary)
-  if (briefBlock) sys = sys + "\n\n" + briefBlock
+/** True when this project has its own custom endpoint (BYOK / self-hosted). */
+export function projectUsesOwnProvider(settings: CompletionSettings): boolean {
+  if (resolveProvider(settings) !== "custom") return false
+  const endpoint = (settings.endpoint ?? "").trim()
+  return Boolean(endpoint) && endpoint !== FRONTIER_CHAT_URL
+}
 
-  // Inject rules block after the base system prompt so it is always visible.
-  if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules)
-    if (block) sys = sys + "\n\n" + block
+/**
+ * Drafting target for a request.
+ *
+ * More specific wins: this project's custom provider beats the device-wide
+ * personal override. The override is only the default for projects still on
+ * Frontier (no project key of their own).
+ */
+export function resolveEffectiveCompletionSettings(
+  settings: CompletionSettings,
+  override?: UserProviderOverride | null,
+): CompletionSettings {
+  if (projectUsesOwnProvider(settings) || !override?.endpoint?.trim()) return settings
+  return {
+    ...settings,
+    provider: "custom",
+    endpoint: override.endpoint,
+    model: override.model || settings.model,
+    apiKey: override.apiKey,
   }
+}
 
-  if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
+/**
+ * Settings for a project that has never customized anything: the Frontier
+ * platform provider with the default system prompt and no custom endpoint.
+ *
+ * This is THE definition — `FALLBACK_COMPLETION_SETTINGS` in
+ * `@/hooks/useCompletion` is an alias of it. Every LLM call site applies the
+ * same precedence: the project's own `completionSettings` else this. A project
+ * record without `completionSettings` has therefore not opted out of AI, it has
+ * simply never been customized (AQU-1671).
+ */
+export const DEFAULT_COMPLETION_SETTINGS: CompletionSettings = {
+  provider: "frontier",
+  endpoint: "",
+  model: "",
+  maxTokens: DEFAULT_COMPLETION_MAX_TOKENS,
+  temperature: 0.3,
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  llmHealthPenalty: 0.1,
+  top_k: DEFAULT_APPROVED_EXAMPLE_COUNT,
+  contextSize: "medium",
+  useOnlyValidatedExamples: true,
+  main_chat_language: "",
+  fewShotExampleFormat: "source-and-target",
+}
 
-  const targetOnly = options.exampleFormat === "target-only"
+/** Why no provider resolved, for a message that names where to fix it. */
+export type CompletionTargetGap = "endpoint" | "apiKey"
 
-  // Validated pairs lead the few-shot examples; search-retrieved examples follow.
-  // Drop incomplete pairs (empty source or target): the branching-search corpus
-  // keeps source-only cells (COALESCE(t.value,'') in loadCorpus) so in-progress
-  // projects still retrieve neighbors, but an example with an empty target
-  // teaches the model nothing and leaks a blank "Translation:" into the prompt.
-  // Mirrors the reference impl (codex-editor shared.ts fetchFewShotExamples).
-  // In target-only mode we still require a non-empty target; source is omitted.
-  const allExamples = [...(options.validatedPairs ?? []), ...options.examples]
-    .filter((ex) => (targetOnly ? ex.target.trim() : ex.source.trim() && ex.target.trim()))
+export interface CompletionTarget {
+  /** The settings to hand an LLM call. Never undefined — uncustomized
+   *  projects resolve to {@link DEFAULT_COMPLETION_SETTINGS}. */
+  settings: CompletionSettings
+  /** False only when a provider genuinely does not resolve. */
+  configured: boolean
+  /** What the user must still supply when `configured` is false. */
+  gap: CompletionTargetGap | null
+  /** Which settings the resolved provider came from, so a "fix it here"
+   *  message points at the screen that actually owns it: the project's AI
+   *  settings, or the user's device-local personal override. */
+  source: "project" | "personal-override"
+}
 
-  // In target-only mode, append a note so the model understands what the
-  // examples represent (reference translations, not source→target alignments).
-  if (targetOnly) {
-    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
+/**
+ * Resolve the provider for a call site whose project may never have touched AI
+ * settings, and say whether one genuinely resolves.
+ *
+ * AQU-1671: the brief pane gated generation on `completionSettings` being
+ * *present* and reported "no AI provider configured" whenever it was not. That
+ * reads the wrong config source twice over — the object records whether the
+ * project was customized, not whether a provider is reachable, and it arrives
+ * asynchronously with the project record. So a fresh project on the platform
+ * default failed permanently, and any project failed intermittently when the
+ * user acted before the record hydrated. The platform default always resolves;
+ * the only genuinely unconfigured case is a project that opted into a custom
+ * provider and left it incomplete.
+ *
+ * Unlike {@link isCompletionConfigured} this does not require a session JWT:
+ * the platform provider is configured by the platform, not the user, so a
+ * still-hydrating session must not present as "nothing is configured". A
+ * genuinely absent credential surfaces as a failed request, which is the
+ * honest error.
+ */
+export function resolveCompletionTarget(
+  settings: CompletionSettings | undefined,
+  override?: UserProviderOverride | null,
+): CompletionTarget {
+  const base = settings ?? DEFAULT_COMPLETION_SETTINGS
+  const resolved = resolveEffectiveCompletionSettings(base, override)
+  // The override only wins for a project without its own provider, so
+  // "resolved differs from base" is exactly "the override supplied it".
+  const source = resolved === base ? "project" : "personal-override"
+  const ok = (gap: CompletionTargetGap | null): CompletionTarget => ({
+    settings: resolved,
+    configured: gap === null,
+    gap,
+    source,
+  })
+  if (resolveProvider(resolved) === "frontier") return ok(null)
+  const endpoint = (resolved.endpoint ?? "").trim()
+  if (!endpoint) return ok("endpoint")
+  if (customProviderNeedsKey(endpoint) && !resolveApiKey("completion", resolved.apiKey)) {
+    return ok("apiKey")
   }
+  return ok(null)
+}
 
-  let user = ""
-  if (targetOnly) {
-    for (const ex of allExamples) user += `Target: ${ex.target}\n\n`
-  } else {
-    for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
+/**
+ * Whether the sparkle / draft path may run. A personal override or a saved
+ * Custom endpoint is enough — do not also require a model (connecting to
+ * OpenRouter lists models; picking one is optional until the request fires)
+ * and never send the user back to the Set up AI modal.
+ */
+export function isCompletionConfigured(
+  settings: CompletionSettings,
+  sessionJwt: string | null | undefined,
+  override?: UserProviderOverride | null,
+): boolean {
+  const resolved = resolveEffectiveCompletionSettings(settings, override)
+  const provider = resolveProvider(resolved)
+  if (provider === "frontier") return Boolean(sessionJwt)
+  const endpoint = (resolved.endpoint ?? "").trim()
+  if (!endpoint) return false
+  if (customProviderNeedsKey(endpoint)) {
+    return Boolean(resolveApiKey("completion", resolved.apiKey))
   }
-  // Immediately-preceding committed context (discourse window): render after the
-  // few-shot examples and just before the live source so it sits closest to what
-  // the model is about to translate. Skip blank pairs. (D4)
-  for (const ctx of options.precedingContext ?? []) {
-    if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
-    }
-  }
-  if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
-  user += `Source: ${options.sourceText}\nTranslation:`
+  return true
+}
 
-  return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
+/**
+ * The sparkle Set up AI dialog is a one-time chooser (Frontier / project key /
+ * personal override). After they pick, this is false for that project.
+ * A personal override does not skip the prompt — it is only the default
+ * selection when the chooser opens.
+ */
+export function shouldPromptAiSetup(aiProviderChosen: boolean | undefined): boolean {
+  return aiProviderChosen !== true
 }
 
 // A segmented prompt preserves passage context (pronoun antecedents, tense
@@ -342,6 +360,9 @@ export function buildBatchPrompt(options: {
   examples: PassageExample[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions in force across the batch (AQU-934) — the union
+   *  of what applies to its cells, since the batch shares one system prompt. */
+  styleInstructions?: string[]
   /** Pre-filtered validated pairs from the project — prepended as a passage example. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
@@ -350,8 +371,9 @@ export function buildBatchPrompt(options: {
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
-  /** Approved bilingual pairs immediately preceding the first live cell. */
-  precedingContext?: { source: string; target: string }[]
+  /** Bilingual pairs immediately preceding the first live cell. Approved
+   *  targets, plus (AQU-1386) this run's own earlier drafts marked `draft`. */
+  precedingContext?: PrecedingContextEntry[]
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -363,6 +385,8 @@ export function buildBatchPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) baseSys = baseSys + "\n\n" + block
   }
+  const batchStyleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (batchStyleBlock) baseSys = baseSys + "\n\n" + batchStyleBlock
   if (options.systemAddendum) baseSys = baseSys + "\n\n" + options.systemAddendum
   if (targetOnly) {
     baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
@@ -373,7 +397,7 @@ export function buildBatchPrompt(options: {
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
 
   const renderSide = (rows: { source: string; target: string }[], side: "source" | "target") =>
-    rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
+    rows.map((r, i) => `<v${i + 1}>${stripTrailingBareMarkers(side === "source" ? r.source : r.target)}</v${i + 1}>`).join("\n")
 
   let user = ""
   // Validated pairs from the project's living memory come first — they are
@@ -404,10 +428,10 @@ export function buildBatchPrompt(options: {
   // single-cell and paragraph recipes.
   for (const ctx of options.precedingContext ?? []) {
     if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+      user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
     }
   }
-  const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")
+  const liveSource = options.cells.map((c, i) => `<v${i + 1}>${stripTrailingBareMarkers(c.source)}</v${i + 1}>`).join("\n")
   user += `Source:\n${liveSource}\n\nTranslation:\n`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
@@ -456,6 +480,8 @@ export function buildParagraphPrompt(options: {
   validatedPairs?: ValidatedPair[]
   /** Active project rules injected into the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions in force across the paragraph group (AQU-934). */
+  styleInstructions?: string[]
   /** Project brief L1 summary. */
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
@@ -466,7 +492,7 @@ export function buildParagraphPrompt(options: {
   // gives real discourse flow — connectives and participant reference that follow what was
   // actually said in the target language. Falls back to source before anything is committed. (D4)
   /** Preceding committed target context (discourse window left side). */
-  precedingContext?: { source: string; target: string }[]
+  precedingContext?: PrecedingContextEntry[]
   /** Following source context (discourse window right side) — source only, no committed target. */
   followingSource?: { source: string }[]
 }): ChatMessage[] {
@@ -487,6 +513,8 @@ export function buildParagraphPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+  const paragraphStyleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (paragraphStyleBlock) sys = sys + "\n\n" + paragraphStyleBlock
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   if (targetOnly) {
@@ -515,16 +543,16 @@ export function buildParagraphPrompt(options: {
     )
     if (pairs.length) {
       if (targetOnly) {
-        user += pairs.map((p) => `Target: ${p.target}`).join("\n\n") + "\n\n"
+        user += pairs.map((p) => `Target: ${stripTrailingBareMarkers(p.target)}`).join("\n\n") + "\n\n"
       } else {
-        user += pairs.map((p) => `Source: ${p.source}\nTranslation: ${p.target}`).join("\n\n") + "\n\n"
+        user += pairs.map((p) => `Source: ${stripTrailingBareMarkers(p.source)}\nTranslation: ${stripTrailingBareMarkers(p.target)}`).join("\n\n") + "\n\n"
       }
     }
   }
 
   // Retrieved passage examples.
   const renderSide = (rows: { source: string; target: string }[], side: "source" | "target") =>
-    rows.map((r, i) => `<v${i + 1}>${side === "source" ? r.source : r.target}</v${i + 1}>`).join("\n")
+    rows.map((r, i) => `<v${i + 1}>${stripTrailingBareMarkers(side === "source" ? r.source : r.target)}</v${i + 1}>`).join("\n")
 
   for (const ex of options.examples) {
     const cells = ex.cells.filter((c) => c.source.trim() && c.target.trim())
@@ -543,12 +571,12 @@ export function buildParagraphPrompt(options: {
   if (options.precedingContext?.length) {
     for (const ctx of options.precedingContext) {
       if (ctx.source.trim() && ctx.target.trim()) {
-        user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
+        user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
       } else if (ctx.source.trim()) {
         // D4 source-fallback: no committed target yet — surface the preceding
         // source as discourse context WITHOUT a Source/Translation pair the model
         // could mimic by echoing a blank "translation".
-        user += `Preceding (source, not yet translated): ${ctx.source}\n\n`
+        user += `Preceding (source, not yet translated): ${stripTrailingBareMarkers(ctx.source)}\n\n`
       }
     }
   }
@@ -560,7 +588,7 @@ export function buildParagraphPrompt(options: {
       // Encode as a context block so the model sees what comes next without
       // being asked to translate it (it will translate the live paragraph).
       user += `Following context (source only — do not translate this block):\n`
-      user += followingSrc.map((f) => f.source).join("\n") + "\n\n"
+      user += followingSrc.map((f) => stripTrailingBareMarkers(f.source)).join("\n") + "\n\n"
     }
   }
 
@@ -574,8 +602,8 @@ export function buildParagraphPrompt(options: {
   // excludes it, so it's discarded as `extra` (D11) — unchanged.
   const liveSource = options.cells
     .map((c) => (c.lockedTarget !== undefined
-      ? `${c.source} [already translated — do not output: ${c.lockedTarget}]`
-      : `<c id="${c.cellId}">${c.source}</c>`))
+      ? `${stripTrailingBareMarkers(c.source)} [already translated — do not output: ${c.lockedTarget}]`
+      : `<c id="${c.cellId}">${stripTrailingBareMarkers(c.source)}</c>`))
     .join("\n")
   user += `Source paragraph:\n${liveSource}\n\nTranslation paragraph:\n`
 
@@ -638,19 +666,20 @@ export interface CompleteOptions {
 }
 
 export async function complete(options: CompleteOptions): Promise<string> {
-  // Personal per-device override (set in user Settings) takes precedence over
-  // the project's completionSettings. This is the "advanced" path: the user
-  // wants their own endpoint/key for everything they translate on this device.
-  const override = getUserProviderOverride()
-  const effectiveSettings: CompletionSettings = override
-    ? {
-        ...options.settings,
-        provider: "custom",
-        endpoint: override.endpoint,
-        model: override.model || options.settings.model,
-        apiKey: override.apiKey,
-      }
-    : options.settings
+  // Offline in the Tauri desktop app: route straight to the local LLM proxy
+  // regardless of the configured provider — there is no reachable Frontier or
+  // custom endpoint to fall back to. No streaming, no AB assignment, no
+  // per-project spend attribution; none of that applies to a local model.
+  if (await shouldUseLocalLlm()) {
+    const text = await completeWithLocalLlm(options.messages, { signal: options.signal })
+    options.onChunk?.(text)
+    return stripTrailingBareMarkers(text)
+  }
+
+  const effectiveSettings = resolveEffectiveCompletionSettings(
+    options.settings,
+    getUserProviderOverride(),
+  )
   const provider = resolveProvider(effectiveSettings)
   const { url, headers } = await buildRequestTarget(provider, effectiveSettings, options.session)
 
@@ -690,6 +719,24 @@ export async function complete(options: CompleteOptions): Promise<string> {
       if (provider === "frontier" && res.status === 402) {
         throw new Error(t("rules.completion.frontierLimitReached", { detail: text || t("rules.completion.outOfCredits") }))
       }
+      // AQU-1158: hosted drafting has no OPENROUTER_API_KEY (typical on
+      // api.dev). If the user pasted their own completion key, talk to
+      // OpenRouter from the browser — that request never hits our chat
+      // proxy, so it is not billed as Aquilla usage.
+      if (provider === "frontier" && isHostedOpenRouterUnconfigured(res.status, text)) {
+        const byokKey = resolveApiKey("completion", effectiveSettings.apiKey)
+        if (byokKey) {
+          return complete({
+            ...options,
+            settings: {
+              ...effectiveSettings,
+              provider: "custom",
+              endpoint: byokEndpointForFrontierFallback(effectiveSettings),
+              apiKey: byokKey,
+            },
+          })
+        }
+      }
       throw new Error(t("rules.completion.completionFailed", { status: res.status, text }))
     }
 
@@ -711,7 +758,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
     }
 
     const data = await res.json()
-    return data.choices[0]?.message?.content?.trim() || ""
+    return stripTrailingBareMarkers(data.choices[0]?.message?.content?.trim() || "")
   } catch (error) {
     if (request.didTimeout()) {
       throw new Error(t("rules.completion.requestTimedOut"))
@@ -818,10 +865,10 @@ async function consumeStream(
     while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
       const line = buffer.slice(0, newlineIdx).replace(/\r$/, "")
       buffer = buffer.slice(newlineIdx + 1)
-      if (processLine(line) === "done") return full.trim()
+      if (processLine(line) === "done") return stripTrailingBareMarkers(full.trim())
     }
   }
-  return full.trim()
+  return stripTrailingBareMarkers(full.trim())
 }
 
 async function buildRequestTarget(

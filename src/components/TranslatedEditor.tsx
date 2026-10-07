@@ -23,17 +23,25 @@ import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
-import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
+import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code, Sparkles } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
+import { createSmartEditDecorationExtension, smartEditPluginKey, smartEditRange } from "@/lib/richtext/smart-edit-decoration-plugin"
+import { suggestionId } from "@/lib/smart-edits/store"
+import type { SmartEditSuggestion } from "@/lib/smart-edits/client"
+import { SmartEditPopover } from "@/components/SmartEditPopover"
+import { IntelligentProgress } from "@/components/IntelligentProgress"
+import type { AskLlmResult } from "@/hooks/useSmartEdits"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
+import { createSmartQuotesExtension } from "@/lib/richtext/smart-quotes"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
+import { resolveEditorClickTarget } from "@/lib/richtext/editor-click-target"
 import {
   IDML_SLOT_NODE_NAME,
   editableIdmlRangesIn,
@@ -69,7 +77,7 @@ import {
 } from "@/lib/richtext/editor-content"
 import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import type { TargetPresenceSelection } from "@/lib/sync/presence-store"
@@ -107,6 +115,24 @@ function placeDomCaretAtProseMirrorPosition(view: EditorView, position: number):
   range.collapse(true)
   selection.removeAllRanges()
   selection.addRange(range)
+}
+
+/**
+ * A one-paragraph ProseMirror document holding `text` verbatim (AQU-1393).
+ *
+ * `setContent` parses a bare string as HTML, so a stored target containing "<"
+ * or "&" would arrive as markup instead of the characters the translator saved.
+ * Handing it a doc node with an explicit text node keeps it literal. Empty text
+ * yields an empty paragraph — a text node may not hold an empty string.
+ */
+function plainTextDocument(text: string): Record<string, unknown> {
+  return {
+    type: "doc",
+    content: [{
+      type: "paragraph",
+      ...(text ? { content: [{ type: "text", text }] } : {}),
+    }],
+  }
 }
 
 function presenceWords(text: string): string[] {
@@ -169,6 +195,13 @@ export interface TranslatedEditorCommit {
   value: string
   /** HTML form of editor content (only the allowed inline marks survive). */
   valueHtml: string
+  /**
+   * Set on the one commit an exact-match Insert produces (AQU-1393), and on no
+   * other. That text is another cell's translation dropped in whole — not
+   * wording the translator has reviewed for THIS cell — so a host that
+   * validates human edits on commit must leave this one unvalidated.
+   */
+  tmInsert?: true
 }
 
 export interface FootnoteInsertionAnchor {
@@ -302,6 +335,15 @@ function deleteIdmlSelection(
 export interface TranslatedEditorHandle {
   getFootnoteInsertionAnchor: () => FootnoteInsertionAnchor | null
   insertFootnoteMarker: (marker: string, anchor?: FootnoteInsertionAnchor | null, anchorText?: string) => boolean
+  /**
+   * Replace the whole target with plain text and commit it through the editor's
+   * normal snapshot path — the write a translator could have typed themselves,
+   * not a privileged one. Used by the Examples panel's exact-match Insert
+   * (AQU-1393). Returns false, writing nothing, when the editor is read-only or
+   * the cell is IDML: an IDML target is a structured slot document, and pouring
+   * flat text over it would drop the protected anchors the export depends on.
+   */
+  replacePlainText: (text: string) => boolean
 }
 
 interface PendingFootnoteDelete {
@@ -339,6 +381,13 @@ interface TranslatedEditorProps {
    * drains the buffer into the document so the first character(s) are never lost.
    */
   pendingInputRef?: MutableRefObject<string>
+  /**
+   * AQU-1393: text to REPLACE the target with once this editor focuses, drained
+   * like `pendingInputRef` above. The Examples panel's exact-match Insert sets
+   * it when the row's editor is not mounted yet, so one click both opens the
+   * cell and fills it. Ignored for IDML cells (see `replacePlainText`).
+   */
+  pendingReplaceRef?: MutableRefObject<string | null>
   onFocus?: () => void
   onBlur?: () => void
   onSelectionChange?: (selection: TargetPresenceSelection | null) => void
@@ -349,6 +398,8 @@ interface TranslatedEditorProps {
   textDirection?: TextDirection
   directionMode?: DirectionMode
   lang?: string
+  /** Curly quotes as you type, in `lang`'s style. Read when the editor mounts. */
+  smartQuotes?: boolean
   /** Remote lock holder — when present, the editor is read-only. */
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
@@ -368,6 +419,13 @@ interface TranslatedEditorProps {
    * violations off the live buffer and surface the inline blot as-you-type.
    */
   onLiveTextChange?: (text: string) => void
+  /** Smart edits for this cell (flag `smartEdits`). Offsets are into the
+   *  committed plain text; see smart-edit-decoration-plugin.ts. */
+  smartEdits?: SmartEditSuggestion[]
+  onSmartEditFeedback?: (s: SmartEditSuggestion, action: "accept" | "dismiss") => void
+  /** Opt-in LLM tier (flag `smartEditsLlm`): offered only while the cell has
+   *  no smart edits of its own. Spends credits, so it always waits for a click. */
+  onAskLlmEdits?: () => Promise<AskLlmResult>
   audioTimings?: WordTiming[]
   /** Audio playback time in seconds. Drives the karaoke decoration. */
   audioCurrentTime?: number
@@ -394,6 +452,12 @@ interface TranslatedEditorProps {
    * Highlight clicks expose `data-source-term` for AQU-204 (TermLookupPopover).
    */
   terminologyConcepts?: Concept[]
+  /**
+   * AQU-1271: project-level source-matching defaults (mark folding, affix
+   * inventory). Chips resolve each concept's match options against this, so a
+   * highlight covers exactly the surface forms the rule engine enforces.
+   */
+  termMatching?: TermMatchingSettings
   /**
    * AQU-204: Called when the user clicks a managed-term highlight in the editor.
    * Receives the sourceTerm string and the highlight DOM element as an anchor.
@@ -431,6 +495,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   aiDrafted = false,
   onCommit,
   pendingInputRef,
+  pendingReplaceRef,
   onFocus,
   onBlur,
   onSelectionChange,
@@ -441,6 +506,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   textDirection = "ltr",
   directionMode = "ltr",
   lang,
+  smartQuotes = false,
   heldByLabel,
   infractions,
   ruleSeverity,
@@ -448,6 +514,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onRuleClick,
   onRuleHover,
   onLiveTextChange,
+  smartEdits,
+  onSmartEditFeedback,
+  onAskLlmEdits,
   audioTimings,
   audioCurrentTime,
   onSeekToTime,
@@ -455,6 +524,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onDiscardLocal,
   onNavigateCell,
   terminologyConcepts,
+  termMatching,
   onTermChipClick,
   footnoteNumberOffset = 0,
   showFootnoteTooltips = true,
@@ -501,6 +571,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     waivedRuleIds: waivedRuleIds ?? new Set<string>(),
   })
 
+  const latestSmartEditsRef = useRef<readonly SmartEditSuggestion[]>(smartEdits ?? [])
+  const [openSmartEdit, setOpenSmartEdit] = useState<{ suggestion: SmartEditSuggestion; anchor: HTMLElement } | null>(null)
+  // LLM ask: `pending` drives the two-stage loader; the result is held until
+  // the loader has played through, then revealed (IntelligentProgress).
+  const [llmAsk, setLlmAsk] = useState<{ pending: boolean } | null>(null)
+  const llmResultRef = useRef<AskLlmResult | null>(null)
+  const [llmNote, setLlmNote] = useState<string | null>(null)
+
   const latestKaraokeStateRef = useRef<KaraokePluginState>({
     timings: audioTimings,
     activeIdx: -1,
@@ -508,6 +586,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   })
 
   const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
+  const latestTermMatchingRef = useRef<TermMatchingSettings | undefined>(termMatching)
 
   const preparedIdmlContent = useMemo(
     () => idmlConfiguration
@@ -563,6 +642,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const presenceDraftDeferredRef = useRef(false)
   const lastTypingEndedAtBoundaryRef = useRef(false)
   const lastCommittedRef = useRef<string>(initialPlain)
+  // Formatting-only edits (bold, underline, a link) leave the plain text
+  // identical, so a text-only dirty check drops them on blur and the user
+  // watches their formatting vanish. Track the serialized HTML alongside the
+  // text and commit when EITHER moved.
+  const lastCommittedHtmlRef = useRef<string | null>(null)
   // Latest typed-but-not-yet-committed snapshot. Held so the unmount cleanup
   // can flush it (navigate-away / reload during the idle window must not drop
   // the edit into the void — the commit has to reach the outbox to survive).
@@ -590,6 +674,16 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     setIdmlError(message)
     onIdmlValidationErrorRef.current?.(message)
   }, [])
+
+  /**
+   * The editor's own serialized HTML, by the same serializer a commit uses —
+   * but WITHOUT validation or error reporting, so seeding the committed
+   * baseline can never surface a diagnostic on mount.
+   */
+  const canonicalHtml = useCallback((editorInstance: TiptapEditor): string | null => {
+    if (!idmlContext) return editorInstance.getHTML()
+    return serializeIdmlEditorDocument(editorInstance.state.doc)
+  }, [idmlContext])
 
   const snapshotEditor = useCallback((editorInstance: TiptapEditor): TranslatedEditorCommit | null => {
     if (!idmlContext) return { value: editorInstance.getText(), valueHtml: editorInstance.getHTML() }
@@ -719,9 +813,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         () => showFootnoteTooltipsRef.current,
       ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
+      createSmartEditDecorationExtension(() => latestSmartEditsRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
+      ...(smartQuotes ? [createSmartQuotesExtension(lang)] : []),
       ...(terminologyConcepts !== undefined
-        ? [createTerminologyChipExtension(() => latestTerminologyConceptsRef.current)]
+        ? [createTerminologyChipExtension(
+            () => latestTerminologyConceptsRef.current,
+            () => latestTermMatchingRef.current,
+          )]
         : []),
       ...(idmlContext
         ? idmlEditorExtensions({
@@ -749,9 +848,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // background tints competing with the recessed fill.
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
+          // AQU-1101: `break-words` on the editable surface too. ProseMirror's
+          // own `word-wrap: break-word` does not survive `prose`'s reset here,
+          // and without it the active cell re-widens its grid track the moment
+          // an unbreakable token is typed or pasted into it — the read surface
+          // and the editing surface have to agree or the row jumps on focus.
           compactHeight
-            ? "prose prose-sm max-w-none px-1 py-0 leading-snug focus:outline-none"
-            : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
+            ? "prose prose-sm max-w-none min-w-0 break-words px-1 py-0 leading-snug focus:outline-none"
+            : "prose prose-sm max-w-none h-full min-h-[40px] min-w-0 break-words px-1 py-0.5 leading-relaxed focus:outline-none",
           idmlContext && "whitespace-pre-wrap",
           "rounded-lg transition-colors",
           className
@@ -1198,8 +1302,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       pendingCommitRef.current = snapshot
       idleTimerRef.current = setTimeout(() => {
         pendingCommitRef.current = null
-        if (text === lastCommittedRef.current) return
+        if (text === lastCommittedRef.current && html === lastCommittedHtmlRef.current) return
         lastCommittedRef.current = text
+        lastCommittedHtmlRef.current = html
         onCommitRef.current({ value: text, valueHtml: html })
       }, COMMIT_IDLE_MS)
       // AQU-664: publish the live buffer on a much shorter debounce so the
@@ -1243,6 +1348,18 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         if (position !== null) editor.commands.setTextSelection(position)
       }
       onFocus?.()
+      // AQU-1393: a TM insert requested while this editor was still unmounted
+      // replaces the whole target, so it drains BEFORE the buffered keystrokes
+      // below — otherwise the replace would wipe keys the user had already
+      // typed into the activation window.
+      const pendingReplace = pendingReplaceRef?.current
+      if (pendingReplaceRef && pendingReplace != null) {
+        pendingReplaceRef.current = null
+        if (!idmlContext) {
+          editor.commands.setContent(plainTextDocument(pendingReplace))
+          commitEditorSnapshot.current("tm-insert")
+        }
+      }
       // AQU-746: drain any keystrokes the parent row buffered while this editor
       // was mounting/focusing (a fast typist after a click). The caret is now
       // placed — IDML at its protected slot position above, plain at end via the
@@ -1307,8 +1424,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         aiDraftedRef.current &&
         initialPlainRef.current !== lastHydratedPlainRef.current &&
         text !== initialPlainRef.current
-      if (!hasUnabsorbedDraft && text !== lastCommittedRef.current) {
+      const changed =
+        text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current
+      if (!hasUnabsorbedDraft && changed) {
         lastCommittedRef.current = text
+        lastCommittedHtmlRef.current = html
         onCommitRef.current({ value: text, valueHtml: html })
       }
       onBlur?.()
@@ -1338,7 +1458,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     }
   }, [])
 
-  commitEditorSnapshot.current = () => {
+  commitEditorSnapshot.current = (reason) => {
     if (!editor) return
     if (idleTimerRef.current !== null) {
       clearTimeout(idleTimerRef.current)
@@ -1348,9 +1468,16 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     pendingCommitRef.current = null
     if (!snapshot) return
     const { value: text, valueHtml: html } = snapshot
-    if (text !== lastCommittedRef.current) {
+    if (text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current) {
       lastCommittedRef.current = text
-      onCommitRef.current({ value: text, valueHtml: html })
+      lastCommittedHtmlRef.current = html
+      // AQU-1393: the host tells an Insert apart from typing by this flag alone
+      // — both arrive through this one commit path.
+      onCommitRef.current(
+        reason === "tm-insert"
+          ? { value: text, valueHtml: html, tmInsert: true }
+          : { value: text, valueHtml: html },
+      )
     }
   }
 
@@ -1438,7 +1565,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       commitEditorSnapshot.current("footnote")
       return true
     },
-  }), [editor, isReadOnly, t])
+    replacePlainText(text) {
+      if (!editor || isReadOnly || idmlContext) return false
+      editor.commands.setContent(plainTextDocument(text))
+      commitEditorSnapshot.current("tm-insert")
+      return true
+    },
+  }), [editor, idmlContext, isReadOnly, t])
 
   // The committed baseline is the editor's OWN canonical text, never the raw
   // stored value. Stored values can be HTML-escaped or otherwise differ from
@@ -1451,6 +1584,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => {
     if (!editor) return
     lastCommittedRef.current = editor.getText()
+    lastCommittedHtmlRef.current = canonicalHtml(editor)
     lastHydratedPlainRef.current = initialPlain
     lastHydratedContentRef.current = initialContent
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1495,7 +1629,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     pendingCommitRef.current = null
     if (wasFocused) editor.commands.focus("end")
     lastCommittedRef.current = editor.getText()
-  }, [editor, initialContent, initialPlain, aiDrafted, idmlContext])
+    lastCommittedHtmlRef.current = canonicalHtml(editor)
+  }, [editor, initialContent, initialPlain, aiDrafted, idmlContext, canonicalHtml])
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
@@ -1545,6 +1680,53 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [editor, infractions, ruleSeverity, waivedRuleIds])
 
   useEffect(() => {
+    latestSmartEditsRef.current = smartEdits ?? []
+    if (editor) editor.view.dispatch(editor.state.tr.setMeta(smartEditPluginKey, "rebuild"))
+  }, [editor, smartEdits])
+
+  const startLlmAsk = useCallback(async () => {
+    if (!onAskLlmEdits) return
+    setLlmNote(null)
+    llmResultRef.current = null
+    setLlmAsk({ pending: true })
+    llmResultRef.current = await onAskLlmEdits()
+    setLlmAsk({ pending: false })
+  }, [onAskLlmEdits])
+
+  const settleLlmAsk = useCallback(() => {
+    const result = llmResultRef.current
+    setLlmAsk(null)
+    if (result?.ok && result.count > 0) {
+      result.reveal()
+      return
+    }
+    setLlmNote(
+      result?.ok
+        ? t("smartEdits.noLlmEdits")
+        : result?.reason === "allowance"
+          ? t("smartEdits.allowanceReached")
+          : t("smartEdits.llmFailed"),
+    )
+  }, [t])
+
+  useEffect(() => {
+    if (!llmNote) return
+    const timer = window.setTimeout(() => setLlmNote(null), 3500)
+    return () => window.clearTimeout(timer)
+  }, [llmNote])
+
+  const acceptSmartEdit = useCallback((s: SmartEditSuggestion) => {
+    setOpenSmartEdit(null)
+    if (!editor) return
+    const range = smartEditRange(editor.state.doc, s)
+    if (!range) return
+    // Plain text through the normal transaction path, so the edit commits on
+    // idle like typing would — the commit is the translator's own.
+    editor.view.dispatch(editor.state.tr.insertText(s.new, range.from, range.to))
+    onSmartEditFeedback?.(s, "accept")
+  }, [editor, onSmartEditFeedback])
+
+  useEffect(() => {
     latestKaraokeStateRef.current = {
       ...latestKaraokeStateRef.current,
       timings: audioTimings,
@@ -1557,10 +1739,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   useEffect(() => {
     latestTerminologyConceptsRef.current = terminologyConcepts ?? []
+    latestTermMatchingRef.current = termMatching
     if (editor && terminologyConcepts !== undefined) {
       editor.view.dispatch(editor.state.tr.setMeta(terminologyChipPluginKey, "rebuild"))
     }
-  }, [editor, terminologyConcepts])
+  }, [editor, terminologyConcepts, termMatching])
 
   useEffect(() => {
     if (!editor) return
@@ -1577,24 +1760,42 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     editor.view.dispatch(editor.state.tr.setMeta(karaokePluginKey, "rebuild"))
   }, [editor, audioTimings, audioCurrentTime])
 
-  // Flush the pending idle commit on unmount so a programmatic navigate-away
-  // (file/tab switch, route change) doesn't drop work still inside the 1.2s
-  // idle window. The commit lands in the outbox (AD-3) and reconciles from
-  // there; without this it was silently discarded.
-  useEffect(() => {
-    return () => {
-      if (idleTimerRef.current !== null) {
-        clearTimeout(idleTimerRef.current)
-        idleTimerRef.current = null
-      }
-      const pending = pendingCommitRef.current
-      pendingCommitRef.current = null
-      if (pending && pending.value !== lastCommittedRef.current) {
-        lastCommittedRef.current = pending.value
-        onCommitRef.current(pending)
-      }
+  // Flush the pending idle commit so work still inside the 1.2s idle window
+  // isn't dropped. The commit lands in the outbox (AD-3) and reconciles from
+  // there; without this it was silently discarded. Runs on unmount (file/tab
+  // switch, route change) and — AQU-1334 — when the document is hidden or
+  // about to unload (tab close, reload, navigation off the SPA), which never
+  // unmounts anything. Idempotent: a flush clears the snapshot, so a later
+  // trigger finds nothing to commit.
+  const flushPendingCommit = useCallback(() => {
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    const pending = pendingCommitRef.current
+    pendingCommitRef.current = null
+    if (
+      pending
+      && (pending.value !== lastCommittedRef.current
+        || pending.valueHtml !== lastCommittedHtmlRef.current)
+    ) {
+      lastCommittedRef.current = pending.value
+      lastCommittedHtmlRef.current = pending.valueHtml
+      onCommitRef.current(pending)
     }
   }, [])
+  useEffect(() => flushPendingCommit, [flushPendingCommit])
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushPendingCommit()
+    }
+    window.addEventListener("pagehide", flushPendingCommit)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      window.removeEventListener("pagehide", flushPendingCommit)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [flushPendingCommit])
 
   if (!editor) {
     return (
@@ -1731,28 +1932,22 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         className={cn(compactHeight ? "" : "h-full")}
         onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
-          const target = e.target as HTMLElement
-          // A violation owns the term text when both decorations overlap.
-          // This preserves the blot-to-toast path after removing the tiny,
-          // separate terminology glyph.
-          if (onRuleClick) {
-            const blot = target.closest("[data-rule-id]")
-            if (blot) {
-              onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
-              return
-            }
+          // AQU-205: a violation owns the term text when both decorations
+          // overlap, so a flagged managed term opens the infraction detail
+          // (which carries the term's guidance) rather than the read-only
+          // lookup popover. AQU-204: an unflagged managed-term highlight opens
+          // TermLookupPopover. Precedence lives in `resolveEditorClickTarget`.
+          const hit = resolveEditorClickTarget(e.target as HTMLElement, {
+            rule: Boolean(onRuleClick),
+            smartEdit: Boolean(smartEdits?.length),
+            term: Boolean(onTermChipClick),
+          })
+          if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element)
+          else if (hit?.kind === "smartEdit") {
+            const suggestion = smartEdits?.find((s) => suggestionId(s) === hit.id)
+            if (suggestion) setOpenSmartEdit({ suggestion, anchor: hit.element })
           }
-          // AQU-204: managed-term highlight click → open TermLookupPopover.
-          if (onTermChipClick) {
-            const termHighlight = target.closest(".term-chip-host[data-source-term]")
-            if (termHighlight) {
-              const term = termHighlight.getAttribute("data-source-term")
-              if (term) {
-                onTermChipClick(term, termHighlight as HTMLElement)
-                return
-              }
-            }
-          }
+          else if (hit?.kind === "term") onTermChipClick?.(hit.term, hit.element)
         }}
       >
         <EditorContent
@@ -1765,6 +1960,41 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           className={cn(compactHeight ? "" : "h-full [&>.ProseMirror]:h-full")}
         />
       </div>
+      {onAskLlmEdits && !llmAsk && !llmNote && !smartEdits?.length && (
+        <button
+          type="button"
+          // Keep focus in the editor: a blur here would close the cell.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => { void startLlmAsk() }}
+          className="absolute bottom-1 right-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-violet-700 opacity-70 transition-opacity hover:bg-violet-500/10 hover:opacity-100 dark:text-violet-300"
+          data-testid="smart-edit-ask-ai"
+        >
+          <Sparkles className="size-3" aria-hidden />
+          {t("smartEdits.askAi")}
+        </button>
+      )}
+      {llmAsk && (
+        <div className="pointer-events-none absolute inset-x-1 bottom-0.5">
+          <IntelligentProgress pending={llmAsk.pending} label={t("smartEdits.askingAi")} onSettled={settleLlmAsk} />
+        </div>
+      )}
+      {llmNote && (
+        <div role="status" className="absolute bottom-1 right-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+          {llmNote}
+        </div>
+      )}
+      {openSmartEdit && (
+        <SmartEditPopover
+          suggestion={openSmartEdit.suggestion}
+          anchor={openSmartEdit.anchor}
+          onAccept={() => acceptSmartEdit(openSmartEdit.suggestion)}
+          onDismiss={() => {
+            onSmartEditFeedback?.(openSmartEdit.suggestion, "dismiss")
+            setOpenSmartEdit(null)
+          }}
+          onClose={() => setOpenSmartEdit(null)}
+        />
+      )}
     </div>
   )
 })

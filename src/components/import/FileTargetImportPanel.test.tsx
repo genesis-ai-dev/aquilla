@@ -17,16 +17,26 @@
  */
 
 import React from "react"
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { render, screen, act, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 
 // ── Mock the heavy outbox call ────────────────────────────────────────────────
 vi.mock("@/lib/import", () => ({
   applyEBibleTargetImport: vi.fn(),
 }))
+// ScrollArea (in the spreadsheet column mapping) uses @base-ui/react, which
+// calls getAnimations() — not in jsdom. Replace it with a passthrough div.
+vi.mock("@/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div className={className}>{children}</div>
+  ),
+}))
 
-import { FileTargetImportPanel } from "./FileTargetImportPanel"
+import { FileTargetImportPanel, type FileTargetPanelBack } from "./FileTargetImportPanel"
 import { applyEBibleTargetImport } from "@/lib/import"
+import { CATALOGS } from "@/lib/i18n/messages"
+import { translate } from "@/lib/i18n/translate"
+import { formatCount } from "@/lib/i18n/format"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -224,6 +234,38 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     expect(rollback.every((p) => p.value === "")).toBe(true)
   })
 
+  // AQU-1142: a translated WebVTT delivered by a subtitling partner must
+  // populate the open file's target column. Cues match cells positionally
+  // (cue N → cell N) because VTT-sourced cells don't carry canonical refs,
+  // and the review screen labels rows by timecode rather than an internal id.
+  it("AQU-1142: routes a .vtt drop into the review step, matched positionally, with timecode labels", async () => {
+    const VTT_FIXTURE = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "First cue translated",
+      "",
+      "00:00:05.000 --> 00:00:08.000",
+      "Second&nbsp;cue translated",
+    ].join("\n")
+    renderPanel()
+    await selectFile(makeFile(VTT_FIXTURE, "episode.vtt"))
+    // Went straight to review — not the "unsupported file type" error path.
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    // Positional matching triggers the order-match warning — worded for cues
+    // on a file whose lines have no timings (AQU-1375).
+    expect(screen.getByText(
+      "The open file's lines have no timings, so cues were matched in order. Check each cue's source text.",
+    )).toBeInTheDocument()
+    // Rows are labelled by the cue's timecode, never by an internal UUID.
+    expect(screen.getByText(/00:00:01\.000\s*-->\s*00:00:04\.000/)).toBeInTheDocument()
+    expect(screen.getByText(/00:00:05\.000\s*-->\s*00:00:08\.000/)).toBeInTheDocument()
+    // &nbsp; must be decoded before it can reach a target cell.
+    expect(screen.getByText("Second cue translated")).toBeInTheDocument()
+    expect(screen.queryByText(/&nbsp;/)).not.toBeInTheDocument()
+  })
+
   // WHY: while a slow enqueue is in flight the Import button must be disabled so
   // a second click can't re-optimistic-patch and re-enqueue the same cells.
   it("disables the Import button while an enqueue is in flight (no double-submit)", async () => {
@@ -248,5 +290,940 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
       resolveImport({ committedCount: 2, skippedCount: 0 })
       await new Promise((r) => setTimeout(r, 0))
     })
+  })
+})
+
+// ── AQU-1144: subtitle (.srt / .sbv) target import ───────────────────────────
+//
+// WHY: dubbing vendors deliver SRT/SBV, not spreadsheets. The panel must route
+// those extensions through the cue parsers, land on the review screen with the
+// cue's TIMECODE as the row label (cue cells have opaque uuid group ids, so a
+// UUID would be the only alternative), and match positionally — which means the
+// order-match warning has to be visible before anything commits.
+
+describe("FileTargetImportPanel — subtitle target import (AQU-1144)", () => {
+  const SRT_FIXTURE = [
+    "1",
+    "00:00:01,000 --> 00:00:04,000",
+    "First cue translation",
+    "",
+    "2",
+    "00:00:05,500 --> 00:00:08,250",
+    "Second cue translation",
+    "",
+  ].join("\n")
+
+  const SBV_FIXTURE = [
+    "0:00:01.000,0:00:04.000",
+    "First cue translation",
+    "",
+    "0:00:05.500,0:00:08.250",
+    "Second cue translation",
+    "",
+  ].join("\n")
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+  })
+
+  it("reaches the review step for a .srt file, labelled by cue timecode", async () => {
+    renderPanel()
+    await selectFile(makeFile(SRT_FIXTURE, "episode-101-tpi.srt"))
+
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    expect(screen.getByText("00:00:01,000 --> 00:00:04,000")).toBeInTheDocument()
+    expect(screen.getByText("00:00:05,500 --> 00:00:08,250")).toBeInTheDocument()
+    // Positional matching is lossy if the cue count drifts, so the user must be
+    // warned to eyeball alignment before importing.
+    expect(screen.getByText(/The open file's lines have no timings, so cues were matched in order/)).toBeInTheDocument()
+  })
+
+  it("reaches the review step for a .sbv file, labelled by cue timecode", async () => {
+    renderPanel()
+    await selectFile(makeFile(SBV_FIXTURE, "episode-101-tpi.sbv"))
+
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    expect(screen.getByText("0:00:01.000,0:00:04.000")).toBeInTheDocument()
+  })
+
+  it("never shows the SRT numeric cue counters as incoming translations", async () => {
+    renderPanel()
+    await selectFile(makeFile(SRT_FIXTURE, "episode-101-tpi.srt"))
+    await screen.findByText(/review matches/i)
+
+    expect(screen.getByText("First cue translation")).toBeInTheDocument()
+    expect(screen.getByText("Second cue translation")).toBeInTheDocument()
+    // The "1"/"2" counter lines are structural, not text to translate.
+    expect(screen.queryByText("1")).not.toBeInTheDocument()
+    expect(screen.queryByText("2")).not.toBeInTheDocument()
+  })
+
+  it("tags the uploaded source artifact with the subtitle format, not csv", async () => {
+    renderPanel()
+    await selectFile(makeFile(SRT_FIXTURE, "episode-101-tpi.srt"))
+    await screen.findByText(/review matches/i)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /import 2/i }))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    const opts = vi.mocked(applyEBibleTargetImport).mock.calls[0][2] as {
+      sourceArtifact: { format: string; name: string }
+    }
+    expect(opts.sourceArtifact.format).toBe("srt")
+  })
+
+  it("reports a subtitle file with no cues instead of an empty review screen", async () => {
+    renderPanel()
+    await selectFile(makeFile("this file has no cues at all\n", "broken.srt"))
+
+    expect(await screen.findByText(/no subtitle cues found/i)).toBeInTheDocument()
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+  })
+
+  it("still rejects a genuinely unsupported extension", async () => {
+    renderPanel()
+    await selectFile(makeFile("whatever", "notes.rtf"))
+
+    expect(await screen.findByText(/unsupported file type/i)).toBeInTheDocument()
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+  })
+})
+
+describe("FileTargetImportPanel — a review screen that says what happened (AQU-1360)", () => {
+  const tc = (ms: number) => {
+    const h = Math.floor(ms / 3_600_000), m = Math.floor(ms / 60_000) % 60, s = Math.floor(ms / 1000) % 60
+    const pad = (n: number, w = 2) => String(n).padStart(w, "0")
+    return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms % 1000, 3)}`
+  }
+  const line = (n: number, startMs: number, endMs: number, translated = "") => ({
+    cellId: `line-${n}`,
+    fileId: "file-1",
+    canonicalRef: null,
+    sourceEventId: `se-${n}`,
+    targetEventId: undefined,
+    translated,
+    original: `SOURCE ${n}`,
+    startMs,
+    endMs,
+    cueRef: `${tc(startMs)} --> ${tc(endMs)}`,
+  })
+  /** An irregular grid, like a real subtitle file (lengths 0.8-3s, gaps
+   *  0.08-1.5s). A regular or periodic grid lets a file shifted by a whole
+   *  number of lines fit almost as well as the true shift, and the shift
+   *  search rightly refuses to choose — which a test would read as a bug. */
+  const irregularLines = (count: number, seed = 7) => {
+    let s = seed
+    const rand = () => {
+      s = (s * 1103515245 + 12345) % 2147483648
+      return s / 2147483648
+    }
+    let t = 5000
+    return Array.from({ length: count }, (_, i) => {
+      const dur = 800 + Math.round(rand() * 2200)
+      const l = line(i + 1, t, t + dur)
+      t += dur + 80 + Math.round(rand() * 1420)
+      return l
+    })
+  }
+  const vtt = (cues: [number, number, string][]) =>
+    ["WEBVTT", "", ...cues.flatMap(([a, b, text]) => [`${tc(a)} --> ${tc(b)}`, text, ""])].join("\n")
+  const checkboxFor = (text: string) =>
+    screen.getByText(text).closest("label")!.querySelector("input") as HTMLInputElement
+  const rowOf = (text: string) => screen.getByText(text).closest<HTMLElement>("[data-review-cell]")!
+  /** Open a collapsible list under the counts; its entries are built only while open. */
+  const openList = (title: RegExp) => {
+    const details = screen.getByText(title).closest("details")!
+    act(() => {
+      details.open = true
+      fireEvent(details, new Event("toggle"))
+    })
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 0, skippedCount: 0 })
+  })
+
+  const four = [line(1, 10000, 10800), line(2, 20000, 20800), line(3, 30000, 30800), line(4, 40000, 40800)]
+
+  it("names the cues that found no line, with the reason, and the lines left without a translation — in amber", async () => {
+    renderPanel({ cells: four })
+    await selectFile(makeFile(vtt([
+      [10000, 10800, "TARGET 1"],
+      [30000, 28000, "TARGET 3 backwards"],
+      [100000, 100800, "TARGET far away"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    // A subtitle file's rows are cues, in the counts as in the list (AQU-1375).
+    expect(screen.getByText("1 unmatched cue")).toHaveClass("text-amber-600")
+    expect(screen.getByText("1 broken timecode")).toHaveClass("text-amber-600")
+    expect(screen.getByText("3 cells not covered")).toHaveClass("text-amber-600")
+    // The lists, with a reason per cue and each uncovered line by name —
+    // built only once opened.
+    expect(screen.queryByText("TARGET 3 backwards")).not.toBeInTheDocument()
+    openList(/Cues that didn't find a line/)
+    openList(/Lines left without a translation/)
+    expect(screen.getByText("Timecode ends before it starts")).toBeInTheDocument()
+    expect(screen.getByText("No line within reach")).toBeInTheDocument()
+    expect(screen.getByText("TARGET 3 backwards")).toBeInTheDocument()
+    for (const name of ["SOURCE 2", "SOURCE 3", "SOURCE 4"]) expect(screen.getByText(name)).toBeInTheDocument()
+  })
+
+  it("leaves contested and already-there rows unticked, ticks a paired same-timing pair, and won't tick an already-there row", async () => {
+    renderPanel({
+      cells: [
+        line(1, 10000, 10400),
+        line(2, 10500, 10900),
+        line(3, 20000, 21500),
+        line(4, 20000, 21500),
+        line(5, 30000, 30800, "same words"),
+      ],
+    })
+    await selectFile(makeFile(vtt([
+      [10500, 10900, "swap one"],
+      [10500, 10900, "swap two"],
+      [20000, 21500, "PETER"],
+      [20000, 21500, "ANDREW"],
+      [30000, 30800, "same words"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    for (const text of ["swap one", "swap two", "same words"]) {
+      expect(checkboxFor(text).checked).toBe(false)
+    }
+    // Both same-timing cues found a line: a heads-up, not a decision.
+    expect(checkboxFor("PETER").checked).toBe(true)
+    expect(checkboxFor("ANDREW").checked).toBe(true)
+    expect(checkboxFor("same words").disabled).toBe(true)
+    // Rows that fought over one line carry a "Contested" toggle; shared-timing rows get their own pill.
+    expect(within(rowOf("swap one")).getByRole("button", { name: /Contested/ })).toHaveAttribute("aria-expanded", "false")
+    expect(within(rowOf("swap two")).getByRole("button", { name: /Contested/ })).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getAllByText("Same timing")).toHaveLength(2)
+    expect(rowOf("PETER")).toHaveTextContent("Same timing")
+    expect(screen.getByText("Already there")).toBeInTheDocument()
+    // No sentence explains them: the "To check" switch and the pills do.
+    expect(screen.queryByText(/competed with another cue/)).toBeNull()
+    expect(screen.queryByText(/exactly the same timing/)).toBeNull()
+    expect(screen.getByRole("tab", { name: "To check 4" })).toBeInTheDocument()
+    // "Select all" never ticks a row whose text is already there.
+    fireEvent.click(screen.getByText(/select all/i))
+    expect(checkboxFor("same words").checked).toBe(false)
+    expect(checkboxFor("PETER").checked).toBe(true)
+  })
+
+  describe("\"Contested\" opens the row to compare, and swap, the cues that fit its line", () => {
+    const contestLines = [
+      line(1, 10000, 10400), line(2, 10500, 10900), line(3, 20000, 20400),
+      line(4, 30000, 32000), line(5, 32500, 33500),
+    ]
+    const contestFile = vtt([
+      [10450, 10850, "swap one"],
+      [10500, 10900, "swap two"],
+      [20000, 20400, "third"],
+      [30000, 31000, "half one"],
+      [31000, 32000, "half two"],
+      [32500, 33500, "next"],
+    ])
+    const toggle = (text: string) => within(rowOf(text)).getByRole("button", { name: /Contested/ })
+    /** The opened comparison under a row: each rival's text and where it is now. */
+    const rivalsUnder = (text: string) =>
+      [...rowOf(text).querySelectorAll("[data-rival]")].map((el) => el.textContent)
+    const onLine = (n: number) => [...document.querySelectorAll("[data-review-cell]")]
+      .find((el) => el.getAttribute("data-review-cell") === `line-${n}`)!
+    const cueOn = (n: number) => onLine(n).querySelector("p.text-xs")!.textContent
+    const tickOn = (n: number) => (onLine(n).querySelector("input[type=checkbox]") as HTMLInputElement).checked
+
+    it("starts closed, and opens to show the other cue and where it is now", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.queryByText("Also fits this line")).toBeNull()
+      expect(within(rowOf("third")).queryByRole("button")).toBeNull()
+
+      fireEvent.click(toggle("swap one"))
+      expect(toggle("swap one")).toHaveAttribute("aria-expanded", "true")
+      expect(rivalsUnder("swap one")).toEqual([expect.stringMatching(/swap two.*Now on: SOURCE 2/)])
+      fireEvent.click(toggle("half one"))
+      expect(rivalsUnder("half one")).toEqual([expect.stringMatching(/half two.*Not placed/)])
+      // Opening a row never ticks it.
+      expect(checkboxFor("swap one").checked).toBe(false)
+      fireEvent.click(toggle("swap one"))
+      expect(rivalsUnder("swap one")).toEqual([])
+    })
+
+    it("swaps two rows' lines, keeps every other tick, and can swap back", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      fireEvent.click(checkboxFor("next")) // untick one unrelated row
+      expect([cueOn(1), cueOn(2)]).toEqual(["swap one", "swap two"])
+
+      fireEvent.click(toggle("swap one"))
+      fireEvent.click(within(rowOf("swap one")).getByRole("button", { name: "Swap" }))
+      expect([cueOn(1), cueOn(2)]).toEqual(["swap two", "swap one"])
+      // Still one contest, still open on line 1, now offering the other cue.
+      expect(toggle("swap two")).toHaveAttribute("aria-expanded", "true")
+      expect(rivalsUnder("swap two")).toEqual([expect.stringMatching(/swap one.*Now on: SOURCE 2/)])
+      // Ticks: the unrelated rows keep theirs; the swapped lines stay unticked.
+      expect(tickOn(3)).toBe(true) // "third"
+      expect(tickOn(5)).toBe(false) // "next", unticked by hand before the swap
+      expect(tickOn(1)).toBe(false)
+      expect(tickOn(2)).toBe(false)
+
+      fireEvent.click(within(rowOf("swap two")).getByRole("button", { name: "Swap" }))
+      expect([cueOn(1), cueOn(2)]).toEqual(["swap one", "swap two"])
+    })
+
+    it("swaps the half that lost its line onto it, and the other half goes to the unmatched list", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(cueOn(4)).toBe("half one")
+
+      fireEvent.click(toggle("half one"))
+      fireEvent.click(within(rowOf("half one")).getByRole("button", { name: "Swap" }))
+      expect(cueOn(4)).toBe("half two")
+      expect(rivalsUnder("half two")).toEqual([expect.stringMatching(/half one.*Not placed/)])
+      openList(/Cues that didn't find a line/)
+      const lost = screen.getByText("half one", { selector: "li p" }).closest("li")!
+      expect(lost).toHaveTextContent("Lost its line to another cue")
+      // The unmatched list is plain text now: nothing to click there.
+      expect(within(lost).queryByRole("button")).toBeNull()
+    })
+
+    it("keeps a swap when the shift tickbox is toggled", async () => {
+      const lines = irregularLines(30)
+      // Line 10 split in two, and the whole file 2s late.
+      const l10 = lines[9]
+      const mid = Math.round((l10.startMs + l10.endMs) / 2)
+      const cues: [number, number, string][] = lines.flatMap((c, i): [number, number, string][] => i === 9
+        ? [[c.startMs + 2000, mid + 2000, "ten a"], [mid + 2000, c.endMs + 2000, "ten b"]]
+        : [[c.startMs + 2000, c.endMs + 2000, `TARGET ${i + 1}`]])
+      renderPanel({ cells: lines })
+      await selectFile(makeFile(vtt(cues), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      const before = cueOn(10)
+      const other = before === "ten a" ? "ten b" : "ten a"
+      fireEvent.click(toggle(before))
+      fireEvent.click(within(rowOf(before)).getByRole("button", { name: "Swap" }))
+      expect(cueOn(10)).toBe(other)
+
+      const box = () => screen.getByLabelText(/Shift timings/)
+      fireEvent.click(box())
+      await waitFor(() => expect(box()).toBeEnabled())
+      expect(cueOn(10)).toBe(other)
+      fireEvent.click(box())
+      await waitFor(() => expect(box()).toBeEnabled())
+      expect(box()).toBeChecked()
+      expect(cueOn(10)).toBe(other)
+    })
+
+    it("\"To check\" shows only the rows that need a decision, and Select all acts on those", async () => {
+      renderPanel({ cells: contestLines })
+      await selectFile(makeFile(contestFile, "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      const shownRows = () => [...document.querySelectorAll("[data-review-cell]")].map((el) => el.getAttribute("data-review-cell"))
+      expect(screen.getByRole("tab", { name: "All 5" })).toHaveAttribute("aria-selected", "true")
+      fireEvent.click(checkboxFor("next")) // untick an unrelated row first
+
+      fireEvent.click(screen.getByRole("tab", { name: "To check 3" }))
+      expect(shownRows()).toEqual(["line-1", "line-2", "line-4"])
+      // A swap inside the filter keeps the rows in view.
+      fireEvent.click(toggle("half one"))
+      fireEvent.click(within(rowOf("half one")).getByRole("button", { name: "Swap" }))
+      expect(shownRows()).toEqual(["line-1", "line-2", "line-4"])
+      // Select all ticks only what's shown; the hidden rows keep their own ticks.
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }))
+      expect([tickOn(1), tickOn(2), tickOn(4)]).toEqual([true, true, true])
+      fireEvent.click(screen.getByRole("tab", { name: "All 5" }))
+      expect(shownRows()).toEqual(["line-1", "line-2", "line-3", "line-4", "line-5"])
+      expect(tickOn(3)).toBe(true) // "third", untouched
+      expect(tickOn(5)).toBe(false) // "next", unticked by hand, untouched
+    })
+
+    it("offers every other cue when three fit one line", async () => {
+      renderPanel({ cells: [line(1, 30000, 33000), line(2, 40000, 41000)] })
+      await selectFile(makeFile(vtt([
+        [30000, 31000, "part one"],
+        [31000, 32000, "part two"],
+        [32000, 33000, "part three"],
+        [40000, 41000, "after"],
+      ]), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      fireEvent.click(toggle("part one"))
+      expect(rivalsUnder("part one")).toEqual([
+        expect.stringMatching(/part two.*Not placed/),
+        expect.stringMatching(/part three.*Not placed/),
+      ])
+      const swapThird = within(rowOf("part one")).getAllByRole("button", { name: "Swap" })[1]
+      fireEvent.click(swapThird)
+      expect(cueOn(1)).toBe("part three")
+      expect(rivalsUnder("part three")).toEqual([
+        expect.stringMatching(/part one.*Not placed/),
+        expect.stringMatching(/part two.*Not placed/),
+      ])
+    })
+  })
+
+  it("gives a same-timing pair a Swap that trades their lines and keeps their ticks", async () => {
+    const lines = [line(1, 10000, 10800), line(2, 20000, 21500), line(3, 20000, 21500), line(4, 30000, 30800)]
+    renderPanel({ cells: lines })
+    await selectFile(makeFile(vtt([
+      [10000, 10800, "TARGET 1"], [20000, 21500, "ANDREW"], [20000, 21500, "PETER"], [30000, 30800, "TARGET 4"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    const cueOn = (n: number) => document.querySelector(`[data-review-cell="line-${n}"] p.text-xs`)!.textContent
+    expect([cueOn(2), cueOn(3)]).toEqual(["ANDREW", "PETER"])
+    expect(screen.getByRole("tab", { name: "To check 2" })).toBeInTheDocument()
+    // No opening needed: the button sits beside the pill.
+    expect(within(rowOf("ANDREW")).queryByRole("button", { name: /Contested/ })).toBeNull()
+    fireEvent.click(within(rowOf("ANDREW")).getByRole("button", { name: "Swap" }))
+    expect([cueOn(2), cueOn(3)]).toEqual(["PETER", "ANDREW"])
+    expect(checkboxFor("PETER").checked).toBe(true)
+    expect(checkboxFor("ANDREW").checked).toBe(true)
+    // Still a same-timing pair, still swappable back.
+    fireEvent.click(within(rowOf("ANDREW")).getByRole("button", { name: "Swap" }))
+    expect([cueOn(2), cueOn(3)]).toEqual(["ANDREW", "PETER"])
+  })
+
+  it("leaves a same-timing row unticked when its partner found no line, and offers no Swap", async () => {
+    // Both cues run 2s but the one line is 0.6s: one gets it, the other nothing.
+    renderPanel({ cells: [line(1, 1000, 1600), line(2, 10000, 10800)] })
+    await selectFile(makeFile(vtt([[1000, 3000, "first"], [1000, 3000, "second"], [10000, 10800, "later"]]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(rowOf("first")).toHaveTextContent("Same timing")
+    expect(checkboxFor("first").checked).toBe(false)
+    expect(within(rowOf("first")).queryByRole("button", { name: "Swap" })).toBeNull()
+    expect(checkboxFor("later").checked).toBe(true)
+  })
+
+  it("counts conflicts as \"To check\" but not rows already there, and has no switch when nothing needs checking", async () => {
+    const lines = [line(1, 10000, 10800, "old words"), line(2, 20000, 20800, "same words"), line(3, 30000, 30800), line(4, 40000, 40800)]
+    renderPanel({ cells: lines })
+    await selectFile(makeFile(vtt([
+      [10000, 10800, "new words"], [20000, 20800, "same words"], [30000, 30800, "three"], [40000, 40800, "four"],
+    ]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("tab", { name: "To check 1" }))
+    expect([...document.querySelectorAll("[data-review-cell]")].map((el) => el.getAttribute("data-review-cell"))).toEqual(["line-1"])
+
+    // Every row needing a decision still shows the switch — it is the signal.
+    cleanup()
+    renderPanel({ cells: [line(1, 10000, 10800, "old one"), line(2, 20000, 20800, "old two")] })
+    await selectFile(makeFile(vtt([[10000, 10800, "new one"], [20000, 20800, "new two"]]), "episode.vtt"))
+    expect(await screen.findByRole("tab", { name: "To check 2" })).toBeInTheDocument()
+
+    cleanup()
+    renderPanel({ cells: four })
+    await selectFile(makeFile(vtt([[10000, 10800, "TARGET 1"], [20000, 20800, "TARGET 2"]]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.queryByRole("tab")).toBeNull()
+  })
+
+  it("marks a shifted cue's row \"Timing differs\" and shows the line's own timecode, on that row only", async () => {
+    renderPanel({ cells: four })
+    await selectFile(makeFile(vtt([[10300, 11100, "TARGET 1 late"], [20000, 20800, "TARGET 2"]]), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    // Line 1's own timecode appears because the cue is 300ms off; line 2's doesn't.
+    expect(screen.getByText(/00:00:10\.000 --> 00:00:10\.800/)).toBeInTheDocument()
+    expect(screen.queryByText(/00:00:20\.000 --> 00:00:20\.800 /)).not.toBeInTheDocument()
+    expect(rowOf("TARGET 1 late")).toHaveTextContent("Timing differs")
+    expect(rowOf("TARGET 2")).not.toHaveTextContent("Timing differs")
+    expect(screen.getAllByText("Timing differs")).toHaveLength(1)
+    // A timing difference alone isn't something to decide: no "To check" switch.
+    expect(screen.queryByRole("tab")).toBeNull()
+    // The standing note it replaced is gone.
+    expect(screen.queryByText(/keep this file's timings/)).not.toBeInTheDocument()
+  })
+
+  it("counts the cues that never became rows", async () => {
+    renderPanel({ cells: four })
+    await selectFile(makeFile(
+      ["WEBVTT", "", `${tc(10000)} --> ${tc(10800)}`, "TARGET 1", "", `${tc(20000)} --> ${tc(20800)}`, "", ""].join("\n"),
+      "episode.vtt",
+    ))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText("1 cue skipped (empty or unreadable)")).toHaveClass("text-amber-600")
+  })
+
+  describe("a whole-file shift, offered as a tickbox", () => {
+    // An irregular grid, like a real subtitle file: a regular one can't tell
+    // the true shift from the one-line-over shift, and is rightly refused.
+    const episodeLines = irregularLines(30)
+    const shifted = (by: number) =>
+      vtt(episodeLines.map((c, i) => [c.startMs + by, c.endMs + by, `TARGET ${i + 1}`]))
+    const onOwnLine = () =>
+      screen.getAllByText(/^TARGET \d+$/).filter((el) => {
+        // Cues that found no line sit in the unmatched list, not in a row.
+        const row = el.closest("label")
+        return row !== null && new RegExp(`SOURCE ${el.textContent!.split(" ")[1]}(?!\\d)`).test(row.textContent!)
+      }).length
+    const looseFitWarning = translate(CATALOGS.en, "importExport.review.looseFitWarning")
+
+    it("applies the shift, ticked, and says how far and how much it helped", async () => {
+      renderPanel({ cells: episodeLines })
+      await selectFile(makeFile(shifted(2000), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      const box = screen.getByLabelText(/^Shift timings 2 seconds earlier \(lines up \d+ more\)$/)
+      expect(box).toBeChecked()
+      expect(onOwnLine()).toBe(30)
+      expect(screen.queryByText(looseFitWarning)).not.toBeInTheDocument()
+    })
+
+    it("unticked, pairs the file as delivered, and ticked again, shifts it back", async () => {
+      renderPanel({ cells: episodeLines })
+      await selectFile(makeFile(shifted(2000), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      const box = () => screen.getByLabelText(/Shift timings/)
+      fireEvent.click(box())
+      // The box flips at once and the list turns to placeholders while it re-matches.
+      expect(box()).not.toBeChecked()
+      expect(box()).toBeDisabled()
+      expect(screen.getByRole("status")).toHaveTextContent("Matching lines…")
+      await waitFor(() => expect(box()).toBeEnabled())
+      expect(box()).not.toBeChecked()
+      expect(onOwnLine()).toBeLessThan(10)
+      expect(screen.getByText(looseFitWarning)).toBeInTheDocument()
+      fireEvent.click(box())
+      await waitFor(() => expect(box()).toBeEnabled())
+      expect(box()).toBeChecked()
+      expect(onOwnLine()).toBe(30)
+    })
+
+    it("reads a broadcast hour as a timecode, and a shift the other way as later", async () => {
+      renderPanel({ cells: episodeLines })
+      await selectFile(makeFile(shifted(3_600_000), "episode.vtt"))
+      expect(await screen.findByLabelText(/^Shift timings 1:00:00 earlier \(lines up \d+ more\)$/)).toBeChecked()
+      cleanup()
+      renderPanel({ cells: episodeLines.map((c) => ({ ...c, startMs: c.startMs + 5000, endMs: c.endMs + 5000 })) })
+      await selectFile(makeFile(shifted(0), "episode.vtt"))
+      expect(await screen.findByLabelText(/^Shift timings 5 seconds later \(lines up \d+ more\)$/)).toBeChecked()
+    })
+
+    it("offers nothing on a file that already lines up", async () => {
+      renderPanel({ cells: episodeLines })
+      await selectFile(makeFile(shifted(0), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.queryByLabelText(/Shift timings/)).not.toBeInTheDocument()
+    })
+  })
+
+  describe("while it works", () => {
+    // Hold the browser's next frame, so the in-between state can be looked at
+    // before the matching runs.
+    let frames: FrameRequestCallback[] = []
+    beforeEach(() => {
+      frames = []
+      vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.push(cb); return frames.length })
+    })
+    afterEach(() => vi.unstubAllGlobals())
+    const releaseFrame = async () => {
+      await act(async () => {
+        frames.splice(0).forEach((cb) => cb(0))
+        await new Promise((r) => setTimeout(r, 0))
+      })
+    }
+
+    it("shows pulsing placeholder rows under \"Matching lines…\" until the review is ready", async () => {
+      renderPanel({ cells: four })
+      await selectFile(makeFile(vtt([[10000, 10800, "TARGET 1"]]), "episode.vtt"))
+      expect(screen.getByRole("status")).toHaveTextContent("Matching lines…")
+      expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(5)
+      expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+      await releaseFrame()
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(document.querySelector('[data-slot="skeleton"]')).toBeNull()
+    })
+
+    it("drops a match that finishes after the user went back", async () => {
+      let back: FileTargetPanelBack | null = null
+      renderPanel({ cells: four, onBackChange: (b) => { back = b } })
+      await selectFile(makeFile(vtt([[10000, 10800, "TARGET 1"]]), "episode.vtt"))
+      expect(screen.getByRole("status")).toHaveTextContent("Matching lines…")
+      act(() => back!.onBack())
+      await releaseFrame()
+      expect(screen.getByText(/drop a file here/i)).toBeInTheDocument()
+      expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+    })
+  })
+
+  it("draws only the rows on screen for a long file, and every row for a short one", async () => {
+    const many = Array.from({ length: 400 }, (_, i) => line(i + 1, 5000 + i * 3000, 6000 + i * 3000))
+    renderPanel({ cells: many })
+    await selectFile(makeFile(vtt(many.map((c, i) => [c.startMs, c.endMs, `TARGET ${i + 1}`])), "episode.vtt"))
+    expect(await screen.findByText("400 matched")).toBeInTheDocument()
+    const drawn = document.querySelectorAll("label input[type=checkbox]").length
+    expect(drawn).toBeGreaterThan(0)
+    expect(drawn).toBeLessThan(60)
+    expect(screen.getByText("TARGET 1")).toBeInTheDocument()
+    expect(screen.queryByText("TARGET 400")).not.toBeInTheDocument()
+  })
+
+  it("explains a frame-rate correction", async () => {
+    const PAL = 25 / (24000 / 1001)
+    const cells = Array.from({ length: 30 }, (_, i) =>
+      line(i + 1, 5000 + i * 2500, 6200 + i * 2500 + (i % 3) * 300))
+    renderPanel({ cells })
+    await selectFile(makeFile(
+      vtt(cells.map((c, i) => [Math.round(c.startMs / PAL), Math.round(c.endMs / PAL), `TARGET ${i + 1}`])),
+      "episode.vtt",
+    ))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/^Frame rate adjusted \(lines up \d+ more\)$/)).toBeInTheDocument()
+    expect(screen.getByText("30 matched")).toBeInTheDocument()
+  })
+})
+
+describe("FileTargetImportPanel — untimed imports say why a row found no line (AQU-1375)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 0, skippedCount: 0 })
+  })
+
+  const openList = (title: RegExp) => {
+    const details = screen.getByText(title).closest("details")!
+    act(() => {
+      details.open = true
+      fireEvent(details, new Event("toggle"))
+    })
+  }
+  const entryOf = (text: string) => screen.getByText(text).closest("li")!
+
+  it("lists a USFM file's unmatched verses as verses, each with its reason", async () => {
+    renderPanel()
+    await selectFile(makeFile("\\id GEN\n\\c 1\n\\v 1 One\n\\v 1 One again\n\\v 7 Seven\n"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    // The count above names them as the list does.
+    expect(screen.getByText("2 unmatched verses")).toHaveClass("text-amber-600")
+    openList(/Verses that didn't find a line/)
+    expect(within(entryOf("One again")).getByText("This reference appears twice")).toBeInTheDocument()
+    expect(within(entryOf("Seven")).getByText("No line has this reference")).toBeInTheDocument()
+  })
+
+  it("names the verses of a bridge the file keeps apart", async () => {
+    renderPanel()
+    await selectFile(makeFile("\\id GEN\n\\c 1\n\\v 1-2 Both verses\n"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    openList(/Verses that didn't find a line/)
+    expect(
+      within(entryOf("Both verses")).getByText("Covers verses 1–2, which are separate lines here"),
+    ).toBeInTheDocument()
+  })
+
+  it("names both sides when the file is for another book", async () => {
+    renderPanel()
+    await selectFile(makeFile("\\id EXO\n\\c 1\n\\v 1 Uno\n\\v 2 Dos\n", "exodus.usfm"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText("This file is for Exodus 1; the open file is Genesis 1.")).toHaveClass("text-amber-600")
+  })
+
+  // AQU-1365: the import stays on the file the person chose (it never moves
+  // by itself), so going to the right one is offered, not done.
+  it("offers the file that holds the other book, when exactly one does", async () => {
+    const onUseFile = vi.fn()
+    const fileForBook = vi.fn((book: string) => (book === "EXO" ? { id: "file-exo", name: "Exodus" } : undefined))
+    renderPanel({ fileForBook, onUseFile })
+    await selectFile(makeFile("\\id EXO\n\\c 1\n\\v 1 Uno\n\\v 2 Dos\n", "exodus.usfm"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(fileForBook).toHaveBeenCalledWith("EXO")
+    const note = screen.getByText(/This file is for Exodus 1/)
+    expect(note).toHaveTextContent("This file is for Exodus 1; the open file is Genesis 1. Import into Exodus instead")
+    fireEvent.click(within(note).getByRole("button", { name: "Import into Exodus instead" }))
+    expect(onUseFile).toHaveBeenCalledWith("file-exo")
+  })
+
+  it("offers no other file when none or several hold the book", async () => {
+    const fileForBook = vi.fn(() => undefined)
+    renderPanel({ fileForBook, onUseFile: vi.fn() })
+    await selectFile(makeFile("\\id EXO\n\\c 1\n\\v 1 Uno\n\\v 2 Dos\n", "exodus.usfm"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/This file is for Exodus 1/)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /instead/ })).not.toBeInTheDocument()
+  })
+
+  it("says nothing of the kind for the right file — a clean import reviews exactly as before", async () => {
+    renderPanel()
+    await selectFile(makeFile(USFM_FIXTURE))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    for (const note of [/This file is for/, /Matched in order/, /in this file:/, /Paired with lines/, /didn't find a line/]) {
+      expect(screen.queryByText(note)).not.toBeInTheDocument()
+    }
+    expect(screen.queryByText("Source differs")).not.toBeInTheDocument()
+  })
+
+  it("says a spreadsheet was matched in order, and when its row count differs from the file's", async () => {
+    renderPanel()
+    await selectFile(makeFile("target\nUno\nDos\nTres\n", "genesis.csv"))
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText("Matched in order, not by reference or timing. Check each row's source text.")).toBeInTheDocument()
+    expect(screen.getByText(
+      "Rows in this file: 3. Lines in the open file: 2. If a row was added or left out, every row after it is on the wrong line.",
+    )).toHaveClass("text-amber-600")
+  })
+
+  it("counts cues, not rows, for a subtitle file — and says nothing when the counts agree", async () => {
+    renderPanel()
+    await selectFile(makeFile("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nUno\n\n00:00:03.000 --> 00:00:04.000\nDos\n", "ep.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.queryByText(/in this file:/)).not.toBeInTheDocument()
+
+    cleanup()
+    renderPanel({ cells: BASE_CELLS.slice(0, 1) })
+    await selectFile(makeFile("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nUno\n\n00:00:03.000 --> 00:00:04.000\nDos\n", "ep.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/^Cues in this file: 2\. Lines in the open file: 1\./)).toBeInTheDocument()
+  })
+
+  describe("a spreadsheet with a source column pairs rows by it", () => {
+    const mapAndReview = async (csv: string) => {
+      renderPanel()
+      await selectFile(makeFile(csv, "genesis.csv"))
+      fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    }
+    const rowOf = (text: string) => screen.getByText(text).closest<HTMLElement>("[data-review-cell]")!
+    const checkboxIn = (row: HTMLElement) => row.querySelector("input[type=checkbox]") as HTMLInputElement
+
+    it("keeps every row on its own line past a stray title row, and lists the title as not in the file", async () => {
+      await mapAndReview("source,target\nGenesis draft,Génesis\nIn the beginning,Uno\nAnd the earth was formless,Dos\n")
+      expect(screen.getByText("Paired with lines by source text. Rows whose source doesn't match their line are left unticked.")).toBeInTheDocument()
+      expect(screen.getByText("2 matched")).toBeInTheDocument()
+      expect(screen.getByText("1 unmatched row")).toBeInTheDocument()
+      expect(screen.queryByText(/Matched in order/)).not.toBeInTheDocument()
+      expect(rowOf("Uno")).toHaveAttribute("data-review-cell", "cell-gen-1-1")
+      expect(rowOf("Dos")).toHaveAttribute("data-review-cell", "cell-gen-1-2")
+      expect(checkboxIn(rowOf("Uno")).checked).toBe(true)
+      openList(/Rows that didn't find a line/)
+      expect(within(entryOf("Génesis")).getByText("No line has this source text")).toBeInTheDocument()
+    })
+
+    it("flags, shows and unticks a row whose source doesn't match its line", async () => {
+      await mapAndReview("source,target\nIn the beginning,Uno\nSomething else entirely,Dos\n")
+      const row = rowOf("Dos")
+      expect(within(row).getByText("Source differs")).toBeInTheDocument()
+      expect(within(row).getByText("Source in this row: Something else entirely")).toBeInTheDocument()
+      expect(checkboxIn(row).checked).toBe(false)
+      expect(screen.getByRole("tab", { name: /To check 1/ })).toBeInTheDocument()
+      // The counts agree with the Import button: the unticked row is to check,
+      // not matched.
+      expect(screen.getByText("1 matched")).toBeInTheDocument()
+      expect(screen.getByText("1 to check")).toHaveClass("text-amber-600")
+      expect(screen.getByRole("button", { name: "Import 1 cell" })).toBeInTheDocument()
+    })
+
+    it("assumes no source column unless one is headed as source", async () => {
+      await mapAndReview("text,translation\nIn the beginning,Uno\nAnd the earth was formless,Dos\n")
+      expect(screen.getByText(/Matched in order/)).toBeInTheDocument()
+    })
+  })
+
+  describe("a spreadsheet with start and end columns matches by timing", () => {
+    const timedLine = (n: number, startMs: number, endMs: number) => ({
+      cellId: `line-${n}`,
+      fileId: "file-1",
+      canonicalRef: null,
+      sourceEventId: `se-${n}`,
+      targetEventId: undefined,
+      translated: "",
+      original: `SOURCE ${n}`,
+      startMs,
+      endMs,
+    })
+    const lines = [timedLine(1, 1000, 2000), timedLine(2, 3000, 4000), timedLine(3, 5000, 6000)]
+
+    it("pairs by time — an extra row in the middle displaces nothing — labelled by timecode", async () => {
+      renderPanel({ cells: lines })
+      await selectFile(makeFile(
+        "id,start,end,translation\n1,00:00:01.000,00:00:02.000,Uno\n2,00:00:02.300,00:00:02.700,Extra\n" +
+          "3,00:00:03.000,00:00:04.000,Dos\n4,00:00:05.000,00:00:06.000,Tres\n",
+        "episode.csv",
+      ))
+      fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.queryByText(/matched in order/i)).not.toBeInTheDocument()
+      expect(screen.getByText("Dos").closest("[data-review-cell]")).toHaveAttribute("data-review-cell", "line-2")
+      expect(screen.getByText("Tres").closest("[data-review-cell]")).toHaveAttribute("data-review-cell", "line-3")
+      // The "id" column was taken as the label, which the timing match shows.
+      expect(within(screen.getByText("Uno").closest<HTMLElement>("[data-review-cell]")!).getByText("1")).toBeInTheDocument()
+      expect(screen.getByText("1 unmatched row")).toBeInTheDocument()
+    })
+
+    it("on a file whose lines have no timings, says its rows were matched in order", async () => {
+      renderPanel({ cells: [{ ...lines[0], startMs: undefined, endMs: undefined }, { ...lines[1], startMs: undefined, endMs: undefined }] })
+      await selectFile(makeFile("start,end,translation\n00:00:01.000,00:00:02.000,Uno\n00:00:03.000,00:00:04.000,Dos\n", "ep.csv"))
+      fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.getByText(
+        "The open file's lines have no timings, so rows were matched in order. Check each row's source text.",
+      )).toBeInTheDocument()
+    })
+
+    it("still matches a verse sheet's references on a file of untimed verses", async () => {
+      renderPanel()
+      await selectFile(makeFile("ref,start,end,target\nGEN 1:2,00:00:09.000,00:00:12.000,Dos\n", "audio-timing.csv"))
+      fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.getByText("Dos").closest("[data-review-cell]")).toHaveAttribute("data-review-cell", "cell-gen-1-2")
+    })
+  })
+
+  it("names a matched row by its line's reference, with the file's spelling beside it, and an unmatched one as typed", async () => {
+    renderPanel()
+    await selectFile(makeFile("ref,target\ngen 1:1,Uno\nGEN 1:2,Dos\nGNE 1:3,Tres\n", "genesis.csv"))
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    const rowOf = (text: string) => screen.getByText(text).closest<HTMLElement>("[data-review-cell]")!
+    expect(within(rowOf("Uno")).getByText("GEN 1:1")).toBeInTheDocument()
+    expect(within(rowOf("Uno")).getByText("as written: gen 1:1")).toBeInTheDocument()
+    expect(within(rowOf("Dos")).getByText("GEN 1:2")).toBeInTheDocument()
+    expect(within(rowOf("Dos")).queryByText(/as written/)).not.toBeInTheDocument()
+    openList(/Rows that didn't find a line/)
+    expect(within(entryOf("Tres")).getByText("GNE 1:3")).toBeInTheDocument()
+  })
+
+  it("lists a spreadsheet's unmatched rows as rows", async () => {
+    renderPanel()
+    await selectFile(makeFile("ref,target\nGEN 1:1,Uno\n,Sin referencia\n", "genesis.csv"))
+    fireEvent.click(await screen.findByRole("button", { name: "Map columns" }))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    openList(/Rows that didn't find a line/)
+    expect(within(entryOf("Sin referencia")).getByText("No reference")).toBeInTheDocument()
+    expect(within(entryOf("Sin referencia")).getByText("Row 2")).toBeInTheDocument()
+  })
+})
+
+// AQU-1375: the review's figures take the catalogue's plural forms — French
+// read "1 correspondances" — and a row with no label of its own is named in
+// the reader's language, not a hard-coded English "Row N".
+describe("FileTargetImportPanel — review figures and labels in other languages", () => {
+  const fr = (key: Parameters<typeof translate>[1], vars: Record<string, string>) => translate(CATALOGS.fr, key, vars, "fr")
+
+  it("says one match in the singular in French", () => {
+    expect(fr("importExport.review.matchedCount", { count: formatCount(1, "fr") })).toBe("1 correspondance")
+    expect(fr("importExport.review.matchedCount", { count: formatCount(4, "fr") })).toBe("4 correspondances")
+    expect(fr("importExport.review.unmatchedVerseCount", { count: formatCount(2, "fr") })).toBe("2 versets non appariés")
+  })
+
+  it("names an unlabelled row or cue by its place", () => {
+    expect(fr("importExport.review.rowNumber", { number: "3" })).toBe("Ligne 3")
+    expect(fr("importExport.review.cueNumber", { number: "3" })).toBe("Réplique 3")
+  })
+})
+
+describe("FileTargetImportPanel — the back arrow", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+  })
+
+  /** The panel reports the arrow to its host; keep the latest report. */
+  function renderWithBack() {
+    let back: FileTargetPanelBack | null = null
+    const onBackChange = vi.fn((b: FileTargetPanelBack | null) => { back = b })
+    renderPanel({ onBackChange })
+    return { current: () => back, onBackChange }
+  }
+
+  it("has no arrow on the file picker, and leads from the review back to it", async () => {
+    const back = renderWithBack()
+    expect(back.onBackChange).toHaveBeenCalledWith(null)
+    await selectFile(makeFile(USFM_FIXTURE))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(back.current()).toMatchObject({ label: "Back to file selection", disabled: false })
+
+    act(() => back.current()!.onBack())
+    expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/drop a file here/i)).toBeInTheDocument()
+    expect(back.current()).toBeNull()
+
+    // A second file goes straight to its own review.
+    await selectFile(makeFile(USFM_FIXTURE.replace("First verse", "Revised verse")))
+    expect(await screen.findByText("Revised verse translation")).toBeInTheDocument()
+  })
+
+  it("leads a spreadsheet's review back to its column mapping, and the mapping back to the file picker", async () => {
+    const back = renderWithBack()
+    await selectFile(makeFile("ref,target\nGEN 1:1,Uno\nGEN 1:2,Dos\n", "genesis.csv"))
+    expect(await screen.findByRole("button", { name: "Map columns" })).toBeInTheDocument()
+    expect(back.current()).toMatchObject({ label: "Back to file selection" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Map columns" }))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(back.current()).toMatchObject({ label: "Back to column mapping" })
+
+    act(() => back.current()!.onBack())
+    expect(screen.getByRole("button", { name: "Map columns" })).toBeInTheDocument()
+    act(() => back.current()!.onBack())
+    expect(screen.getByText(/drop a file here/i)).toBeInTheDocument()
+    expect(back.current()).toBeNull()
+  })
+
+  it("is disabled while an import is being applied", async () => {
+    vi.mocked(applyEBibleTargetImport).mockReturnValue(new Promise(() => {}))
+    const back = renderWithBack()
+    await selectFile(makeFile(USFM_FIXTURE))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /import 2 cells/i }))
+    })
+    expect(back.current()).toMatchObject({ disabled: true })
+  })
+})
+
+// AQU-1365: hosted by the Import dialog's "A translation" path, which has
+// already chosen the file. WHY: the person dropped it once; a second drop step
+// would read as the import having lost it, and Back must return to the
+// dialog's own file choice rather than to a drop zone they never saw.
+describe("FileTargetImportPanel — a file chosen by the host (AQU-1365)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(applyEBibleTargetImport).mockResolvedValue({ committedCount: 2, skippedCount: 0 })
+  })
+
+  it("reads the host's file once, without showing its own drop step", async () => {
+    const file = makeFile(USFM_FIXTURE)
+    const arrayBuffer = vi.spyOn(file, "arrayBuffer")
+    renderPanel({ initialFile: file })
+    expect(screen.queryByText(/drop a file here/i)).not.toBeInTheDocument()
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+  })
+
+  it("goes back to the host's file choice from the review", async () => {
+    let back: FileTargetPanelBack | null = null
+    const onBackToFileChoice = vi.fn()
+    renderPanel({
+      initialFile: makeFile(USFM_FIXTURE),
+      onBackToFileChoice,
+      onBackChange: (b) => { back = b },
+    })
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    act(() => back!.onBack())
+    expect(onBackToFileChoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("goes back from a spreadsheet's column mapping to the host's file choice", async () => {
+    let back: FileTargetPanelBack | null = null
+    const onBackToFileChoice = vi.fn()
+    renderPanel({
+      initialFile: makeFile("ref,target\nGEN 1:1,Uno\nGEN 1:2,Dos\n", "genesis.csv"),
+      onBackToFileChoice,
+      onBackChange: (b) => { back = b },
+    })
+    expect(await screen.findByRole("button", { name: "Map columns" })).toBeInTheDocument()
+    act(() => back!.onBack())
+    expect(onBackToFileChoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows its own drop step with the reason when the host's file can't be read", async () => {
+    renderPanel({ initialFile: makeFile("\\id GEN\n\\c 1\n", "empty.usfm") })
+    expect(await screen.findByText(/drop a file here/i)).toBeInTheDocument()
+    expect(screen.getByText(/no verses/i)).toBeInTheDocument()
   })
 })

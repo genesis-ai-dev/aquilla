@@ -6,22 +6,28 @@
 // own project-context scoping loaded from SharePanel, which doesn't fit the
 // matrix's "any project, any member" shape).
 //
-// Deliberately minimal: unlike MembersPanel's editor (checkbox list against
-// a project's known lane/file registry), this one edits the member's scopes
-// as a freeform chip list — remove any existing lane/file scope, or type a
-// new lane code to add one. The matrix has no cheap way to know a given
-// project's lane registry without an extra per-cell settings fetch, and
-// freeform editing over the scopes actually on the member is the simplest
-// correct thing that doesn't require that plumbing.
+// Lanes are a checkbox list of the project's own languages, loaded with the
+// member's scopes when the editor opens (one settings fetch per open, not per
+// cell). The free-text lane code it used to take had two failures (AQU-581
+// review): the default lane's code is the empty string, so nobody could be
+// limited to a project's MAIN language — the only language most projects have
+// — and a typo silently left a lane coordinator with no lanes at all. The
+// free-text input survives only as a fallback when the settings can't load.
+// File scopes stay chips: they are rare and set elsewhere.
 
 import { useState } from "react"
 import type { ReactNode } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneRowLabel } from "@/lib/lanes/lane-language"
+import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
 export interface MemberLaneScopeEditorProps {
@@ -32,8 +38,38 @@ export interface MemberLaneScopeEditorProps {
   /** Rendered as the popover's clickable trigger (e.g. the chip row). */
   trigger: ReactNode
   /** Called with the freshly-saved scopes so the caller's chip cache can be
-   * updated in place without a full matrix refetch. */
-  onSaved: (scopes: MemberScope[]) => void
+   * updated in place without a full matrix refetch. AQU-1607: the lane names
+   * ride along, because a lane just granted is not in any cache the caller
+   * built before the save, and a chip would print its id. */
+  onSaved: (scopes: MemberScope[], laneNames: Record<string, string>) => void
+}
+
+/** A lane row's display string: its name, else its tag, else "main language".
+ *  AQU-1586: the name is read through `laneRowLabel`, so a row that names
+ *  nothing shows the language it records before its tag — a tag can be the
+ *  opaque lane id. */
+function laneOptionLabel(lane: ProjectLaneView, mainLanguageLabel: string): string {
+  const label = laneRowLabel(lane)
+  if (label) return label
+  const tag = (lane.legacyTag ?? "").trim()
+  return tag !== "" ? tag : mainLanguageLabel
+}
+
+/**
+ * AQU-1607: stored lane scopes as lane ids. A value that already is one is
+ * kept; a legacy tag naming exactly one lane becomes that lane's id; one
+ * naming none or two is left alone so it still shows (and can be unticked).
+ */
+function normalizeLaneScopes(
+  scopes: readonly MemberScope[],
+  lanes: readonly ProjectLaneView[],
+): MemberScope[] {
+  if (lanes.length === 0) return [...scopes]
+  return scopes.map((scope) => {
+    if (scope.kind !== "lane") return scope
+    const resolved = resolveLaneScopeValue(scope.value, lanes)
+    return resolved.ok ? { kind: "lane", value: resolved.laneId } : scope
+  })
 }
 
 /** Freeform lane/file scope editor. Fetches the member's current scopes
@@ -52,6 +88,9 @@ export function MemberLaneScopeEditor({
   const [draft, setDraft] = useState<MemberScope[]>([])
   const [loading, setLoading] = useState(false)
   const [newLane, setNewLane] = useState("")
+  // The project's languages: `""` is the main language. Null until loaded, or
+  // when the settings couldn't be read (the free-text fallback then shows).
+  const [laneOptions, setLaneOptions] = useState<Array<{ value: string; label: string }> | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -61,10 +100,44 @@ export function MemberLaneScopeEditor({
     setError(null)
     setNewLane("")
     setLoading(true)
-    void fetchMemberScopes(jwt, projectId, userId).then((scopes) => {
-      setDraft(scopes ?? [])
-      setLoading(false)
-    })
+    void Promise.all([fetchMemberScopes(jwt, projectId, userId), fetchProjectSettings(jwt, projectId)]).then(
+      ([scopes, settings]) => {
+        // AQU-1607: a lane scope is a lane id, so the checkboxes are the
+        // project's lane ROWS — two lanes of one language are two boxes. A
+        // scope still holding a legacy tag is resolved to its lane id as it
+        // loads, so it shows ticked against the right lane and saves as an
+        // id. A server predating lane rows keeps the old tag list.
+        const rows = (settings?.lanes ?? []).filter(
+          (lane) => lane.role === "target" && !lane.archivedAt,
+        )
+        setDraft(normalizeLaneScopes(scopes ?? [], rows))
+        setLaneOptions(
+          rows.length > 0
+            ? rows.map((lane) => ({
+                value: lane.id,
+                label: laneOptionLabel(lane, t("org.memberLaneScopeEditor.mainLanguageFallback")),
+              }))
+            : settings
+              ? [
+                  {
+                    value: "",
+                    label: settings.settings.targetLanguage || t("org.memberLaneScopeEditor.mainLanguageFallback"),
+                  },
+                  ...extraRegistryLanes(settings.settings.targetLanes, settings.settings.targetLanguage).map((lane) => ({ value: lane, label: lane })),
+                ]
+              : null,
+        )
+        setLoading(false)
+      },
+    )
+  }
+
+  function toggleLane(value: string) {
+    setDraft((prev) =>
+      prev.some((s) => s.kind === "lane" && s.value === value)
+        ? prev.filter((s) => !(s.kind === "lane" && s.value === value))
+        : [...prev, { kind: "lane", value }],
+    )
   }
 
   function removeScope(target: MemberScope) {
@@ -87,7 +160,7 @@ export function MemberLaneScopeEditor({
     setError(null)
     try {
       const saved = await putMemberScopes(jwt, projectId, userId, draft)
-      onSaved(saved)
+      onSaved(saved.scopes, saved.laneNames)
       setOpen(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -122,13 +195,40 @@ export function MemberLaneScopeEditor({
           </div>
         ) : (
           <>
+            {draft.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                {t("org.memberLaneScopeEditor.unscopedFullAccess")}
+              </p>
+            )}
+            {laneOptions && (
+              <fieldset className="space-y-1">
+                <legend className="text-[11px] text-muted-foreground">
+                  {t("org.memberLaneScopeEditor.languagesLegend")}
+                </legend>
+                {[
+                  ...laneOptions,
+                  // A lane scope naming no language in this project (an old
+                  // typo, or a lane since removed): shown so it can be unticked.
+                  ...draft
+                    .filter((s) => s.kind === "lane" && !laneOptions.some((o) => o.value === s.value))
+                    .map((s) => ({
+                      value: s.value,
+                      label: t("org.memberLaneScopeEditor.unknownLane", { lane: s.value }),
+                    })),
+                ].map((lane) => (
+                  <label key={lane.value || "__main__"} className="flex items-center gap-1.5">
+                    <Checkbox
+                      checked={draft.some((s) => s.kind === "lane" && s.value === lane.value)}
+                      onCheckedChange={() => toggleLane(lane.value)}
+                      aria-label={t("org.membersPanel.laneCheckboxAriaLabel", { lane: lane.label })}
+                    />
+                    <span>{lane.label}</span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
             <div className="flex flex-wrap gap-1">
-              {draft.length === 0 && (
-                <span className="text-[11px] text-muted-foreground">
-                  {t("org.memberLaneScopeEditor.unscopedFullAccess")}
-                </span>
-              )}
-              {draft.map((s) => (
+              {draft.filter((s) => !laneOptions || s.kind === "file").map((s) => (
                 <span
                   key={`${s.kind}:${s.value}`}
                   className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px]"
@@ -144,23 +244,25 @@ export function MemberLaneScopeEditor({
                 </span>
               ))}
             </div>
-            <div className="flex items-center gap-1">
-              <Input
-                value={newLane}
-                onChange={(e) => setNewLane(e.target.value)}
-                placeholder={t("org.memberLaneScopeEditor.laneCodePlaceholder")}
-                aria-label={t("org.memberLaneScopeEditor.newLaneCodeAriaLabel")}
-                className="h-7 text-[11px]"
-              />
-              <Button
-                variant="outline"
-                className="h-7 px-2 text-[11px]"
-                onClick={addLane}
-                disabled={!newLane.trim()}
-              >
-                {t("common.add")}
-              </Button>
-            </div>
+            {!laneOptions && (
+              <div className="flex items-center gap-1">
+                <Input
+                  value={newLane}
+                  onChange={(e) => setNewLane(e.target.value)}
+                  placeholder={t("org.memberLaneScopeEditor.laneCodePlaceholder")}
+                  aria-label={t("org.memberLaneScopeEditor.newLaneCodeAriaLabel")}
+                  className="h-7 text-[11px]"
+                />
+                <Button
+                  variant="outline"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={addLane}
+                  disabled={!newLane.trim()}
+                >
+                  {t("common.add")}
+                </Button>
+              </div>
+            )}
             <Button className="w-full" onClick={handleSave} disabled={saving}>
               {saving && <Spinner className="me-1.5 size-3.5" />}
               {t("org.memberLaneScopeEditor.saveScopesButton")}

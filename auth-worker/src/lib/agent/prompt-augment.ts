@@ -8,12 +8,13 @@
 //   3. new-tool guidance — sandbox / import / memory tools
 //   4. conversation-language rule — never confuse it with translation target
 
-import type { MemoryContext } from "../../../../db/shared/agent-memory"
-
-/** Max approved-memory entries to render in the index (adversarial-panel
- *  mem-m1). The index is ordered most-recently-updated first; the rest are
- *  reachable via read_memory. */
-const MEMORY_INDEX_RENDER_CAP = 50
+import {
+  MEMORY_INDEX_RENDER_CAP,
+  type MemoryContext,
+} from "../../../../db/shared/agent-memory"
+// MEMORY_INDEX_RENDER_CAP (the index render cap, adversarial-panel mem-m1) is
+// shared rather than local: the Agent API's memory read model reports what
+// retrieval would inject and has to render the same slice (AQU-1229).
 
 export interface AugmentArgs {
   memory: MemoryContext

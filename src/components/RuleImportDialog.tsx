@@ -7,7 +7,7 @@
  */
 
 import { useState, useRef, useCallback } from "react"
-import { Upload } from "lucide-react"
+import { AlertTriangle, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -23,6 +23,7 @@ import { RuleImportReview } from "./RuleImportReview"
 import {
   checkInputSize,
   extractRulesFromDocument,
+  MAX_INPUT_BYTES,
   type ExtractionProgress,
 } from "@/lib/rules/rule-extractor"
 import { addLlmCall } from "@/lib/usage/record-usage"
@@ -44,7 +45,10 @@ const ACCEPTED_BINARY_MIME = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]
 
-const MAX_TEXT_BYTES = 200 * 1024 // 200 KB (existing limit for text)
+// The drop-zone cap and the extractor's own cap are the same limit seen from
+// two sides (file bytes vs. UTF-8 text bytes). Derive it from the extractor so
+// the two can't drift and let an over-cap document through to an LLM call.
+const MAX_TEXT_BYTES = MAX_INPUT_BYTES
 
 const FALLBACK_SETTINGS: CompletionSettings = {
   provider: "frontier",
@@ -73,6 +77,9 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<ExtractionProgress | null>(null)
   const [drafts, setDrafts] = useState<RuleSuggestion[]>([])
+  // AQU-1254: pass-1 chunks whose answer was cut off by the output cap. Non-zero
+  // means rules the document does contain never made it out of extraction.
+  const [truncatedChunks, setTruncatedChunks] = useState(0)
   const [committing, setCommitting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -100,7 +107,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     setProgress({ phase: "extracting", candidateCount: 0, structuredCount: 0 })
 
     try {
-      const results = await extractRulesFromDocument(
+      const { rules, truncatedChunks: truncated } = await extractRulesFromDocument(
         text,
         effectiveSettings,
         session,
@@ -113,13 +120,22 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
         },
       )
 
-      if (results.length === 0) {
-        setError(t("rules.importDialog.noRulesFound"))
+      setTruncatedChunks(truncated)
+
+      if (rules.length === 0) {
+        // AQU-1254: "no rules found" is a claim about the document. Only make it
+        // when extraction actually ran to completion — otherwise the user is told
+        // their style guide is empty when in fact the answer was cut off.
+        setError(
+          truncated > 0
+            ? t("rules.importDialog.extractionIncomplete")
+            : t("rules.importDialog.noRulesFound"),
+        )
         setStage("idle")
         return
       }
 
-      setDrafts(results)
+      setDrafts(rules)
       setStage("review")
     } catch (err) {
       setError(err instanceof Error ? err.message : t("rules.importDialog.extractionFailed"))
@@ -207,12 +223,12 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     if (file) handleFileAccepted(file)
   }
 
-  async function handleCommit(acceptedIndices: number[]) {
+  // AQU-198: the review screen hands back the accepted drafts *as edited*, so a
+  // name the user retyped there is the one that gets saved.
+  async function handleCommit(acceptedDrafts: RuleSuggestion[]) {
     setCommitting(true)
     try {
-      for (const i of acceptedIndices) {
-        const draft = drafts[i]
-        if (!draft) continue
+      for (const draft of acceptedDrafts) {
         await onAdd({
           name: draft.name,
           description: draft.description,
@@ -235,6 +251,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     setError(null)
     setProgress(null)
     setDrafts([])
+    setTruncatedChunks(0)
   }
 
   function handleOpenChange(next: boolean) {
@@ -369,12 +386,23 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
         )}
 
         {stage === "review" && (
-          <RuleImportReview
-            drafts={drafts}
-            onCommit={handleCommit}
-            onBack={() => setStage("idle")}
-            committing={committing}
-          />
+          <>
+            {/* AQU-1254: these drafts are what survived a cut-off answer, not the
+                whole document. Say so here — the review screen otherwise reads as
+                the complete set. */}
+            {truncatedChunks > 0 && (
+              <p className="flex items-start gap-2 text-sm text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                {t("rules.importDialog.extractionPartial")}
+              </p>
+            )}
+            <RuleImportReview
+              drafts={drafts}
+              onCommit={handleCommit}
+              onBack={() => setStage("idle")}
+              committing={committing}
+            />
+          </>
         )}
       </DialogContent>
     </Dialog>

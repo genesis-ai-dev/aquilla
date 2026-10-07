@@ -18,6 +18,7 @@ import { JoinOrgPage } from "@/components/JoinOrgPage"
 import { VerifyEmailPage } from "@/components/VerifyEmailPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { ResetPassword } from "@/pages/ResetPassword"
+import { BillingSelection } from "@/pages/BillingSelection"
 import { Login } from "@/pages/Login"
 import { PrivacyPolicy } from "@/pages/PrivacyPolicy"
 import { NotFound } from "@/pages/NotFound"
@@ -28,6 +29,14 @@ import { Preferences, PreferencesDialog } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
+import { OfflineStoreProvider } from "@/context/OfflineStoreContext"
+import { OfflineSyncManagerMount } from "@/components/OfflineSyncManagerMount"
+import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
+import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
+import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
+import { ConflictToast } from "@/components/ConflictToast"
+import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
+import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -37,6 +46,7 @@ import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
+import { AdminElevationPrompt } from "@/components/admin/AdminElevationPrompt"
 import { ExpiredSessionGate } from "@/components/ExpiredSessionGate"
 import { useAccounts } from "@/hooks/useAccounts"
 import {
@@ -55,10 +65,15 @@ import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
+import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
+import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
   import("@/components/ProjectWorkspace").then((m) => ({ default: m.ProjectWorkspace })),
+)
+const OrgDataEgress = lazy(() =>
+  import("@/pages/OrgDataEgress").then((m) => ({ default: m.OrgDataEgress })),
 )
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
@@ -66,10 +81,13 @@ const ProjectSettings = lazy(() =>
 const ProjectSettingsDialog = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettingsDialog })),
 )
-// AQU-254: CommentsPage / LivingMemoryPage / TerminologyPage are now rendered
+// AQU-254: CommentsPage / LivingMemoryPage / the glossary editor are now rendered
 // inside ProjectWorkspace shell (lazy-imported there). The routes below all
 // point to ProjectWorkspace; the shell detects the path suffix and swaps only
 // the main content area. These top-level lazy imports are intentionally removed.
+const OrgAccessPage = lazy(() =>
+  import("@/pages/OrgAccessPage").then((m) => ({ default: m.OrgAccessPage })),
+)
 const MembersPage = lazy(() =>
   import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
 )
@@ -82,6 +100,9 @@ const OrgSettingsIdentity = lazy(() =>
 const OrgSettingsSecurity = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsSecurity })),
 )
+const OrgSettingsProjectDefaults = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsProjectDefaults })),
+)
 const OrgSettingsBilling = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsBilling })),
 )
@@ -91,10 +112,21 @@ const OrgSettingsProviders = lazy(() =>
 const OrgSettingsMonday = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
 )
+const OrgSettingsRules = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRules })),
+)
 const OrgSettingsKnowledge = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsKnowledge })),
 )
 // Monday OAuth landing — Monday's registered redirect URI is this SPA route.
+const ConnectAgent = lazy(() =>
+  import("@/pages/ConnectAgent").then((m) => ({ default: m.ConnectAgent })),
+)
+// OAuth consent for MCP hosts (ChatGPT plugin, Claude, Codex) — the identity
+// worker's /oauth/authorize redirects here.
+const OAuthConsent = lazy(() =>
+  import("@/pages/OAuthConsent").then((m) => ({ default: m.OAuthConsent })),
+)
 const MondayOAuthCallback = lazy(() =>
   import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
 )
@@ -117,6 +149,11 @@ const DebugView = lazy(() =>
 // the workspace shell (mirrors JoinPage's standalone-page precedent).
 const ApproveChangeset = lazy(() =>
   import("@/pages/ApproveChangeset/ApproveChangeset").then((m) => ({ default: m.ApproveChangeset })),
+)
+// AQU-841 — the project-scoped queue of everything an agent staged here, so
+// reviewing external-agent work stops meaning one approval URL per changeset.
+const ProjectApprovals = lazy(() =>
+  import("@/pages/ProjectApprovals/ProjectApprovals").then((m) => ({ default: m.ProjectApprovals })),
 )
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
@@ -265,36 +302,47 @@ export default function App() {
     // Single app-wide tooltip delay group: once one tooltip opens, adjacent
     // ones open instantly (Base UI grouping). `delay` only exists on the
     // Provider, so this is the one knob for hover timing across the app.
-    <TooltipProvider delay={600}>
-      <SyncingProvider>
-        <PrivateModeBanner />
-        {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
-        <SessionExpiredBanner />
-        {/* AQU-885: a stored JWT that's already expired at boot goes straight to
-            re-auth instead of rendering a shell that silently empties out. */}
-        <ExpiredSessionGate />
-        <SyncFreezeOverlay />
-        <OrgProvider>
-          <OutboxProvider>
-            {/* AQU-243: ProductTourProvider mounts once here; the tour portal
-                renders into document.body so it is route-agnostic. The context
-                value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
-            <ProductTourProvider>
-              <NavHistoryProvider>
-                <AppRoutes />
-              </NavHistoryProvider>
-            </ProductTourProvider>
-          </OutboxProvider>
-        </OrgProvider>
-        <AiModelConsentDialog />
-        <AiModelDownloadChip />
-        <AudioBulkProgressBanner />
-        <GlobalAudioShortcuts />
-        <VersionBadge />
-        <UpdateBanner />
-        <Toaster />
-      </SyncingProvider>
-    </TooltipProvider>
+    <OfflineStoreProvider>
+      <OfflineSyncManagerMount />
+      <UnsyncedOfflineWorkGuard />
+      <OfflineShutdownGuard />
+      <LocalLlmConfigMount />
+      <TooltipProvider delay={600}>
+        <SyncingProvider>
+          <PrivateModeBanner />
+          <ConflictToast />
+          <OfflineLeaderWatchdog />
+          <OfflineProjectAccessWatch />
+          {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
+          <SessionExpiredBanner />
+          {/* AQU-1322: admin step-up dialog; renders nothing until a 403 "elevation required" lands. */}
+          <AdminElevationPrompt />
+          {/* AQU-885: a stored JWT that's already expired at boot goes straight to
+              re-auth instead of rendering a shell that silently empties out. */}
+          <ExpiredSessionGate />
+          <SyncFreezeOverlay />
+          <OrgProvider>
+            <OutboxProvider>
+              {/* AQU-243: ProductTourProvider mounts once here; the tour portal
+                  renders into document.body so it is route-agnostic. The context
+                  value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
+              <ProductTourProvider>
+                <NavHistoryProvider>
+                  <AppRoutes />
+                </NavHistoryProvider>
+              </ProductTourProvider>
+            </OutboxProvider>
+          </OrgProvider>
+          <AiModelConsentDialog />
+          <AiModelDownloadChip />
+          <AudioBulkProgressBanner />
+          <GlobalAudioShortcuts />
+          <VersionBadge />
+          <UpdateBanner />
+          <Toaster />
+        </SyncingProvider>
+      </TooltipProvider>
+    </OfflineStoreProvider>
   )
 }
 
@@ -314,6 +362,8 @@ function AppRoutes() {
         <Route path="/" element={<AppEntry />} />
         {/* The workspace entry. `/` is marketing at the edge, so this is the
             URL that opens the app — marketing "Open app" CTAs point here. */}
+        <Route path="/connect-agent" element={<LazyRoute><ConnectAgent /></LazyRoute>} />
+        <Route path="/oauth/consent" element={<LazyRoute><OAuthConsent /></LazyRoute>} />
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
@@ -330,6 +380,7 @@ function AppRoutes() {
         <Route path="/onboarding" element={<OnboardingWizard />} />
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
+        <Route path="/billing/select" element={<BillingSelection />} />
         {/* AQU-270: account recovery — eagerly loaded (public, no auth required) */}
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
@@ -352,6 +403,7 @@ function AppRoutes() {
           <Route path="assigned" element={<AssignedToMe />} />
           <Route path="archived" element={<ArchivedProjects />} />
           <Route path="archived/files" element={<ArchivedProjects />} />
+          <Route path="egress" element={<OrgLazyRoute><OrgDataEgress /></OrgLazyRoute>} />
           <Route path="teams" element={<OrgLazyRoute><TeamsList /></OrgLazyRoute>} />
           <Route path="teams/:groupId" element={<OrgLazyRoute><TeamDetail /></OrgLazyRoute>} />
           <Route path="teams/:groupId/settings" element={<OrgLazyRoute><TeamSettingsIndex /></OrgLazyRoute>} />
@@ -361,34 +413,43 @@ function AppRoutes() {
           />
           <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
+          <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
           <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />
+          <Route path="settings/project-defaults" element={<OrgLazyRoute><OrgSettingsProjectDefaults /></OrgLazyRoute>} />
           <Route path="settings/billing" element={<OrgLazyRoute><OrgSettingsBilling /></OrgLazyRoute>} />
           <Route path="settings/export" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/roster" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/assignment" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/terminology" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/providers" element={<OrgLazyRoute><OrgSettingsProviders /></OrgLazyRoute>} />
+          {/* AQU-1131: org rules are a top-level Settings section, not a
+              project's Living Memory pane. */}
+          <Route path="settings/rules" element={<OrgLazyRoute><OrgSettingsRules /></OrgLazyRoute>} />
           <Route path="settings/knowledge" element={<OrgLazyRoute><OrgSettingsKnowledge /></OrgLazyRoute>} />
           <Route path="settings/monday" element={<OrgLazyRoute><OrgSettingsMonday /></OrgLazyRoute>} />
         </Route>
 
         {/* Project routes stay flat (not nested under /orgs).
             Default work surface is explicit: /project/:id/editor[/file/:fileId].
-            Bare /project/:id and /project/:id/file/:fileId are intentionally dead. */}
-        <Route path="/project/:id/editor" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
+            Bare /project/:id redirects to the overview (AQU-1535);
+            /project/:id/file/:fileId is still intentionally dead. */}
+        <Route path="/project/:id" element={<RedirectToProjectOverview />} />
+        <Route path="/project/:id/editor" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
         <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
         {/* Rules now live on Living Memory's "Translation quality" pane. */}
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
-        <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/memory/:section" element={<ProjectWorkspace />} />
+        {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
+        <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
+        <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/voice" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/terminology" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/comments" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/memory" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
+        <Route path="/project/:id/memory/:section" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
 
         {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
             path is registered with Monday, so it cannot carry an org segment. */}

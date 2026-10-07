@@ -146,8 +146,9 @@ export async function handleBulkMorphImportRequest(
       await db.batch(stmts.slice(i, i + BATCH_LIMIT))
     }
   } catch (err) {
+    console.error("[import-morph] DB batch failed:", err)
     return withCors(
-      Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 }),
+      Response.json({ error: "DB batch failed" }, { status: 500 }),
       request,
     )
   }

@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "aquilla": {
+      "url": "https://api.aquilla.app/sync/api/v1/external/mcp"
+    }
+  }
+}

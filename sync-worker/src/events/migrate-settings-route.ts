@@ -13,6 +13,7 @@
 // posts the merged result, so a re-run converges.
 
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { ensureProjectLanes } from '../../../db/shared/lanes'
 
 const PATH = '/migrate/settings'
 
@@ -87,8 +88,10 @@ export async function handleMigrateSettingsRequest(
     )
       .bind(body.projectId, json)
       .run()
+    await ensureProjectLanes(env.AQUILLA_PG, body.projectId, { settings: body.settings })
   } catch (err) {
-    return Response.json({ error: `settings upsert failed: ${String(err)}` }, { status: 500 })
+    console.error("[migrate-settings] upsert failed:", err)
+    return Response.json({ error: "settings upsert failed" }, { status: 500 })
   }
   return Response.json({ ok: true, bytes: json.length })
 }

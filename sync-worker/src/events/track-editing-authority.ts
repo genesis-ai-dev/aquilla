@@ -2,21 +2,22 @@
 //
 // `allowTrackEditing` (project settings; the write route is maintainer-gated)
 // decides whether a project's timelines may be restructured at all — tracks
-// added and deleted, grouped into folders, recoloured. It is the sibling of
-// line-creation-authority.ts and timing-authority.ts, and it fails safe to OFF
-// for the same reason the first one does: the affordance is the liability the
-// setting exists to contain.
+// added and deleted, grouped into folders. It is the sibling of
+// timing-authority.ts, and it fails safe to OFF because the affordance is the
+// liability the setting exists to contain.
 //
-// BUT IT IS A DIFFERENT SHAPE FROM BOTH, AND THE DIFFERENCE IS THE POINT.
-// `allowLineCreation` is a conditional floor RAISE: `source.cell.create` was
-// lowered to CONTRIBUTOR in the static table, and authorize puts PROJECT_LEAD
-// back when the setting is off. There is no such move available here.
-// `file.track.set` is ALREADY floored at MAINTAINER (role-policy.ts), so there
-// is no lower floor to raise from — this setting answers *whether*, not *who*.
+// IT IS NOW THE ONLY PROJECT SETTING OF ITS KIND STILL ENFORCED HERE, and the
+// contrast worth knowing is with the cell-editing tier. That one was checked
+// at this perimeter too until 2026-09-09, when it became a product rule
+// enforced at the button instead — enforcing it server-side silently refused
+// three re-import-class flows that emit cell events through the user's own
+// outbox (see authorize.ts). Nothing analogous applies here: `file.track.set`
+// has no import path, no re-import flow emits it, and it is ALREADY floored at
+// MAINTAINER in role-policy.ts, so this setting answers *whether*, not *who*.
 // The consequence, stated plainly because it looks like a bug otherwise: with
 // the setting off, a gated write is refused to an OWNER. Two gates means two
 // gates. Do not add a `role < X` term to the check in authorize.ts to make it
-// resemble its neighbours; both of them carry one and neither reason applies.
+// resemble the timing carve-out; that one raises a floor, and this does not.
 //
 // AND THE GATING IS PER FIELD, BECAUSE ONE EVENT KIND CARRIES EVERY OPERATION.
 // `file.track.set` is how a reorder, a rename, a creation, a deletion, a folder
@@ -24,22 +25,28 @@
 // way to keep drag-to-reorder and rename working — which they must, since both
 // already ship and a new setting defaulting to off must not take an existing
 // capability away from every project that has one.
+//
+// RECOLOURING JOINED THEM (Sam, 2026-09-26). The Audio view now draws a file's
+// takes in its dub track's colour and offers the picker there, on Bible
+// projects that will never turn track editing on. A colour changes how a track
+// LOOKS, not what the timeline holds — the same standing as a rename — so it is
+// maintainer work with the setting off too.
 
 /**
  * Does this patch REQUIRE the setting, or is it ordinary maintainer work?
  *
  * Exported and pure so the rule can be tested without minting a JWT or faking
- * a database — the seam line-creation-authority.ts never got, and the reason
- * its own test has to stand up a whole fake DB to assert a policy decision.
+ * a database — a seam worth copying whenever a policy decision is worth
+ * asserting on its own.
  *
  * Three clauses, and the first is NOT a special case of the second:
  *
  *   1. `patch === null` is gated, ALWAYS.
- *   2. A patch naming any key outside {name, order} is gated.
+ *   2. A patch naming any key outside {name, order, color} is gated.
  *   3. Everything else is ungated.
  *
  * Clause 1 has to be written out because the tempting one-liner — "ungated iff
- * the keys are a subset of {name, order}" — is wrong in the PERMISSIVE
+ * the keys are a subset of {name, order, color}" — is wrong in the PERMISSIVE
  * direction: null has no keys, so it is vacuously a subset and a delete would
  * sail straight through the gate that exists to stop it.
  *
@@ -47,7 +54,7 @@
  * innocently as "reset this row to its defaults". The projection implements it
  * as `meta #- ARRAY['trackOverrides', <id>]` — it deletes the whole entry — so
  * resetting the target-audio row also clears its colour, its group and its
- * rename in one write. Three of those four are gated fields.
+ * rename in one write — and a group is a gated field.
  *
  * Unknown keys are gated rather than ignored, which is the safe direction: the
  * handler rejects them a moment later anyway (its PATCH_KEYS allow-list), so
@@ -115,7 +122,7 @@ export function trackPatchRequiresExisting(trackId: string, patch: unknown): boo
   return !DEFAULT_TRACK_IDS.has(trackId)
 }
 
-const UNGATED_PATCH_KEYS = new Set(['name', 'order'])
+const UNGATED_PATCH_KEYS = new Set(['name', 'order', 'color'])
 
 export function isGatedTrackPatch(payload: unknown): boolean {
   if (typeof payload !== 'object' || payload === null) return true

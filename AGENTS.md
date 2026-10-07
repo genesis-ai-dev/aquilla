@@ -6,12 +6,37 @@ Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Cop
 
 **`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see AQU-213 / AQU-219).
 
+Cloudflare PR previews use `pnpm build:workers-build`: `tsc -b && vite build`
+plus environment/artifact checks. They run no tests, lint, or secret scans.
+QA tests the published preview; its green check proves compilation only.
+
+### What actually gates a pull request (AQU-1350)
+
+Do not read a green PR as "CI ran". Only two things run automatically on a PR:
+
+| Surface | Trigger | What it proves |
+| --- | --- | --- |
+| `Workers Builds: aquilla-web-preview` | every PR | compilation and the preview deploy, nothing else |
+| `Jev smart testing` (comment, marker `<!-- aquilla-smart-tests -->`) | every PR, from the external Hetzner runner | advisory journey coverage; posts no check |
+| `.github/workflows/ci.yml` | **`workflow_dispatch` only — intentionally dormant** | lint, typecheck, unit, worker, build, migrations |
+| `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |
+
+`ci.yml` is deliberately trigger-less (AQU-564: Workers Builds owns automatic PR
+compilation), so its jobs are **not** a merge gate and its last automatic run is
+historical. The local pre-push hook plus `pnpm lint` / `npx tsc -b --noEmit` /
+`pnpm test` are what actually cover lint, types, and units — run them yourself.
+
+`Jev smart testing` is advisory and posts no required check, so a dead harness
+cannot fail a PR. When its comment says **HARNESS UNAVAILABLE**, the run says
+nothing about your changes — it is a runner problem, not a finding against the
+PR, and it means that PR merged with zero journey coverage.
+
 ## Testing — non-negotiable
 
 Keep test coverage synchronized with behavior without running the entire suite after every coding step:
 
 1. **During implementation, run the directly affected tests.** Run the nearest unit/integration/worker tests and the specific smoke spec(s) covering the changed journey. Use `npx tsx scripts/e2e-up.ts -- <spec>` for targeted smoke coverage. Do not rerun the complete smoke suite after every prompt or incremental edit.
-2. **Use the proportional E2E gates.** During implementation, run the directly affected specs. The pre-push hook runs `pnpm test:e2e:affected`, which derives a small browser suite from the commits being pushed. The complete `npm run test:e2e:smoke` suite remains the merge/deploy/release gate; do not substitute the affected suite at that boundary.
+2. **Use the proportional E2E gates.** During implementation, run the directly affected specs. The pre-push hook runs `pnpm scan:secrets`, then `pnpm test:e2e:affected`, which derives a small browser suite from the commits being pushed. The complete `npm run test:e2e:smoke` suite remains the merge/deploy/release gate; do not substitute the affected suite at that boundary.
 3. **Smoke is for cross-layer product lies only.** A change gets a new `*.smoke.spec.ts` only when all of these are true: (a) a user can lose data, access, or a committed artifact if it breaks; (b) the assertion crosses at least two of SPA, auth-worker, sync-worker, Postgres, R2, or a second browser context; (c) no existing smoke journey already covers that contract — extend that file instead. Otherwise cover the change with Vitest/RTL (`src/**/*.test.tsx`) or a worker unit test. Do not add a Playwright smoke for toggles, dialogs, empty states, keyboard chrome, or single-component UI.
 4. **If your change touches a journey in `e2e/JOURNEYS.md`, extend that spec (or its RTL counterpart).** New cross-layer journeys get a new JOURNEYS row and a new smoke file. UI-only journeys get RTL coverage and a short “covered in RTL” note — not a new smoke file.
 5. **Changed behavior means changed tests at the right level.** If a feature, UI flow, label, role, selector, route, validation rule, or loading state changes, update the matching RTL test or smoke/page object in the same change. A stale test is a product bug. Prefer deleting a redundant smoke after RTL exists over parking it as non-smoke.
@@ -27,7 +52,7 @@ Keep test coverage synchronized with behavior without running the entire suite a
 15. **Machine speed must not decide correctness in any suite.** Unit, integration, worker, and E2E tests must wait for observable completion rather than elapsed time, and a slow result must never be skipped or treated as optional. Timeouts are stall watchdogs: keep them generous enough for supported slower machines, fail with useful diagnostics when they expire, and do not shorten them merely to speed up feedback. Resource-heavy suites must cap concurrency with settings supported by the installed runner version so they cannot exhaust a smaller machine.
 16. **Record the test-impact analysis before completion.** In the final work summary, name the changed contract or journey, its producers and consumers, the regression test added or updated, and the targeted commands actually run. If no test changed, state why existing coverage exercises the exact changed path; proximity alone is not evidence. When adding a new product area, update `scripts/lib/e2e-impact.ts` so its sentinel is selected even before an exact journey spec changes.
 
-Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/JOURNEYS.md`. Shipping a persistence/collab/access/import contract change with a knowingly stale smoke is incomplete work. UI chrome belongs in Vitest/RTL. Pre-push runs `pnpm test:e2e:affected` (not full smoke); full smoke is the merge/deploy/release gate. Test creation and targeted execution are not optional.
+Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/JOURNEYS.md`. Shipping a persistence/collab/access/import contract change with a knowingly stale smoke is incomplete work. UI chrome belongs in Vitest/RTL. Pre-push runs `pnpm scan:secrets` then `pnpm test:e2e:affected` (not full smoke); full smoke is the merge/deploy/release gate. Test creation and targeted execution are not optional.
 
 ## Conventions
 
@@ -41,7 +66,10 @@ Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/J
 
 - Snapshots (under redesign) — see Plan 2.
 - Cross-browser. Chromium only for v1.
-- Tauri shell — see Plan 3 for the separate `tauri-driver` suite.
+- Tauri shell — native-surface smoke suite at `e2e/tauri/smoke.spec.ts` (WebdriverIO +
+  `@wdio/tauri-service` embedded provider, not Playwright/tauri-driver — see
+  `docs/superpowers/plans/2026-04-30-e2e-framework-and-smoke.md` "Plan 3" for why). Release-gate
+  only (`tauri-release.yml`), not a push gate.
 
 ## Project-level conventions
 
@@ -81,14 +109,27 @@ For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpe
 
 ## Slow-request logs — treat them as failures
 
-Both workers log any request that takes **≥ 5s**, even when it succeeds — as a
-`[slow-request]` console line locally and a `slow: <METHOD> <path>` warn in
-PostHog Logs in production (AQU-1005: only-error logging hid DB saturation for
-90 minutes because the SPA aborts at 15s and an aborted request produces no
-server-side error). **Dev flow rule:** a `[slow-request]` line in `pnpm dev` /
-e2e worker output is a defect to investigate before shipping, not noise — find
-the query behind it (Neon `pg_stat_statements` or an `EXPLAIN ANALYZE`) rather
-than raising the threshold.
+`auth-worker`, `sync-worker` and `agent-worker` each log any request that takes
+**≥ 5s**, even when it succeeds — as a `[slow-request]` console line locally and
+a `slow: <METHOD> <path>` warn in PostHog Logs in production (AQU-1005:
+only-error logging hid DB saturation for 90 minutes because the SPA aborts at
+15s and an aborted request produces no server-side error). **Dev flow rule:** a
+`[slow-request]` line in `pnpm dev` / e2e worker output is a defect to
+investigate before shipping, not noise — find the query behind it (Neon
+`pg_stat_statements` or an `EXPLAIN ANALYZE`) rather than raising the threshold.
+
+**The one exception is `agent-worker`'s `POST /sessions/:id/exec`** (AQU-1021): a
+multi-second run there is the contract, not a defect — callers get a 60s default
+budget and may request up to `MAX_TIMEOUT_MS` (300s). Holding it to the 5s bar
+would warn on every normal agent run and train devs to ignore the line, which is
+the signal AQU-1005 exists to protect. So `/exec` warns only when it outlives
+that 300s hard ceiling, which means the timeout race in `exec.ts` failed to fire.
+Every other agent-worker route — including `/health` and bearer-auth rejections
+— is on the shared 5s bar.
+
+Slow requests already **route into PostHog** (OTLP log records, severity `warn`,
+carrying `http.path` / `http.status` / `http.duration_ms`), so alerting is a
+PostHog-side saved-query/alert on `slow:` records rather than more worker code.
 
 ## Issue workflow (Linear — Aquilla team)
 
@@ -132,22 +173,33 @@ So every issue carries a spec question:
 Whether an agent may pick an issue up is read straight off the **status** — there are no
 `ready-for-agent`/`ready-for-human` labels; status carries it:
 
-- **`Triage` = the human queue, and the only birthplace of new issues.** Anything that needs
-  a human *first* — an architectural or design decision, a review, external access, or
+- **`Triage` = the human queue, and the default birthplace of new issues.** Anything that
+  needs a human *first* — an architectural or design decision, a review, external access, or
   hands-on human implementation — plus any un-vetted incoming issue. Linear's Triage status
   sits *outside* the Backlog→Todo→… flow (an issue in Triage has no normal workflow status —
   that is the point). **Agents never pick up a Triage issue.** **Every newly created issue —
-  from `/issue debug|improve`, `to-issues`, `/swarm` decomposition, scheduled routines, or any
-  other automation — is created in `Triage`, never in `Todo`.** `/triage` moves an issue out
-  of `Triage` only once it is either genuinely agent-ready (→ `Todo`) or explicitly a human's
-  to implement.
+  from `/issue debug|improve`, `/swarm` decomposition, scheduled routines, or any other
+  automation — is created in `Triage`, never in `Todo`.** The one exception is `to-issues`:
+  it classifies each slice itself, filing **HITL** slices in `Triage` and **AFK** slices
+  (acceptance criteria present, no human call outstanding) straight into `Todo`. `/triage`
+  moves an issue out of `Triage` only once it is either genuinely agent-ready (→ `Todo`) or
+  explicitly a human's to implement.
 - **`Todo` = agent-ready (AFK).** Fully specified, acceptance criteria present, no human
   decision outstanding. This is the **only** queue `/issue next` and `/swarm` draw from — and
-  issues enter it **only by human promotion** (via `/triage` or an explicit human instruction),
-  never at creation. `Backlog` is agent-ready-but-deferred — promote it to `Todo` to enqueue it.
+  issues enter it **only by human promotion** (via `/triage` or an explicit human instruction)
+  or as a `to-issues` **AFK** slice; no other automation creates issues in `Todo`. `Backlog`
+  is agent-ready-but-deferred — promote it to `Todo` to enqueue it.
 
 Category is orthogonal: tag every issue **`Bug`**, **`Feature`**, or **`Improvement`** (the
 `/triage` category role).
+
+Placement is orthogonal too. Every issue carries exactly one label from the team's **`Area`**
+label group (`Editor`, `Importing`, `Dashboard`, … — `list_issue_labels` for the live list)
+and lives in one of two kinds of project. Work that V1 ships *with* goes in that area's
+**`<Area> V1`** project (all under the **Road to V1** initiative); maintenance and general
+fixes that V1 ships *without* go in **`Prototype Debugging`**. Agents default new issues to
+`Prototype Debugging`; promoting one into a V1 project is a human call. The `Todo` queue is
+read team-wide, across both kinds of project.
 
 **Every new issue is created from one of the Aquilla team's issue templates** — pass
 `template` to `save_issue`: **`Bug Report`** for bugs, **`Feature Request`** for new
@@ -157,9 +209,10 @@ infra). The template applies the matching category label itself (`Task` carries
 pre-filled body wholesale, so author the body using the template's exact section headings
 with real content — never leave placeholder text, and never invent your own top-level
 structure (extra sections go *after* the template's). ⚠️ All three templates embed status
-`Todo`: always pass `state: Triage` explicitly on create (an explicit `state` overrides the
-template's — verified 2026-08-28) and **check the create response actually says `Triage`**;
-if it came back `Todo`, immediately re-save it. **Agent-created issues are also left
+`Todo`: always pass `state` explicitly on create — `Triage`, or `Todo` only for a
+`to-issues` AFK slice (an explicit `state` overrides the template's — verified 2026-08-28)
+— and **check the create response shows the status you intended**; if an issue meant for
+`Triage` came back `Todo`, immediately re-save it. **Agent-created issues are also left
 unassigned** — the team auto-assigns new issues on a rotation, which wins at create time
 even if you pass no assignee; when the create response shows an assignee, immediately
 re-save with `assignee: null` (the response omitting the assignee field confirms it's
@@ -169,9 +222,9 @@ Status pipeline:
 
 | Status | Meaning | Who/when |
 | --- | --- | --- |
-| **Triage** | Human queue — needs review/decision, or not yet vetted. **All new issues are created here; HITL work lives here.** | agents NEVER pick up from here |
+| **Triage** | Human queue — needs review/decision, or not yet vetted. **New issues are created here (except `to-issues` AFK slices); HITL work lives here.** | agents NEVER pick up from here |
 | **Backlog** | Captured & agent-ready, but deferred | promote to `Todo` to release it |
-| **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria. Entered only by human promotion, never at creation | the ONLY queue `/issue next` & `/swarm` pull from |
+| **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria. Entered by human promotion, or at creation only as a `to-issues` AFK slice | the ONLY queue `/issue next` & `/swarm` pull from |
 | **Dispatched** | Dev/AI has **begun work** on the task | set when you pick the issue up |
 | **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed |
 | **Dev Verification Needed** | Fix deployed to the **dev branch**, awaiting dev-team validation | set after deploying to dev |
@@ -207,9 +260,19 @@ out, so a branch named for AQU-A ends up holding AQU-B commits **and** a junk dr
 uncommitted changes spanning five concerns. That destroys the QA PR→ticket mapping and
 makes the work impossible to review or revert cleanly.
 
-- **Each ticket gets its own git worktree off live `origin/main`**, on the Linear-suggested
-  branch (`ryder/aqu-###-…`). Never share the main checkout between tickets. Use
-  `git worktree add` (see `using-git-worktrees`); the main checkout is frequently dirty.
+- **Each ticket gets its own git worktree off live `origin/dev`** (PRs target `dev`), on the Linear-suggested
+  branch (`ryder/aqu-###-…`). Never share the main checkout between tickets; it is
+  frequently dirty. Create it with `pnpm worktree:new <branch> [dir]`
+  (`--base <ref>` overrides the start point, for example `--base origin/main` for a hotfix).
+  The default directory is a sibling named for the ticket (`../aquilla-aqu-1234`).
+- **Bare `git worktree add` plus a symlinked `node_modules` is not enough.**
+  `core.hooksPath` is the relative `.husky/_`, which husky writes and git ignores, so a
+  worktree that never ran `pnpm install` has no pre-commit, no prepare-commit-msg, and
+  no pre-push — a push finishes with nothing tested. A `node_modules` symlink at the
+  root, `sync-worker/`, or `auth-worker/` borrowed from another checkout tests that
+  checkout's versions, and Vite will not serve files from outside the worktree, so e2e
+  cannot load wa-sqlite. The Playwright chromium build for this lockfile may be missing
+  too. `pnpm worktree:new` does the frozen installs and `pnpm exec playwright install chromium`.
 - **Start clean.** Before picking up a ticket, the working tree should be clean (or your
   changes stashed). Don't start AQU-B on top of AQU-A's uncommitted spillover.
 - **Don't cross-commit.** A commit's `AQU-###` must match the branch's ticket. The

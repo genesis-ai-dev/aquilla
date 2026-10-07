@@ -25,6 +25,8 @@ export interface CloneVoiceModalHostProps {
   fileId?: string | null
   session: FrontierSession | null
   targetLanguage?: string
+  targetLanes?: string[]
+  archivedLanes?: string[]
   cells: CellData[]
   /** Project role level; same maintainer floor as VoiceLibraryPanel. */
   roleLevel?: number | null
@@ -39,6 +41,8 @@ export function CloneVoiceModalHost({
   fileId,
   session,
   targetLanguage,
+  targetLanes,
+  archivedLanes,
   cells,
   roleLevel,
 }: CloneVoiceModalHostProps) {
@@ -57,6 +61,8 @@ export function CloneVoiceModalHost({
       voice={null}
       provider={resolveTtsProvider(tts.settings)}
       targetLanguage={targetLanguage}
+      targetLanes={targetLanes}
+      archivedLanes={archivedLanes}
       isDefault={false}
       paletteIndex={tts.voices.length}
       projectId={projectId}

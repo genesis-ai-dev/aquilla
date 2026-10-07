@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useSectionProgress, useSectionProgressState } from './useSectionProgress'
 
@@ -10,6 +10,29 @@ vi.mock('@/lib/progress/file-progress-resource', () => ({
 }))
 
 describe('useSectionProgress', () => {
+  // These spies are module-level, and every "did not revalidate" assertion
+  // below is only meaningful against a clean slate.
+  beforeEach(() => invalidate.mockClear())
+
+  it('never rounds a chapter with outstanding cells up to 100% (AQU-1493)', () => {
+    // 199 of 200 is 99.5%. The sidebar's "complete" colour reads >= 100, so a
+    // rounded 100 also painted the chapter finished.
+    resource.mockReturnValue({
+      progress: {
+        fileId: 'file-1', revision: 7, validationCount: 1,
+        file: { totalCount: 200, filledCount: 199, validatedCount: 199, validationLevels: [199] },
+        sections: [{ key: 'PSA 119', totalCount: 200, filledCount: 199, validatedCount: 199, validationLevels: [199] }],
+      },
+      loading: false,
+      error: false,
+      retry: vi.fn(),
+    })
+    const { result } = renderHook(() => useSectionProgress('project-1', 'file-1', 1, vi.fn(async () => 'token')))
+    expect(result.current).toEqual([expect.objectContaining({
+      textCompleted: 99, textValidated: 99, textValidationLevels: [99],
+    })])
+  })
+
   it('maps compact server counts to sidebar percentages without loading cells', () => {
     resource.mockReturnValue({
       progress: {
@@ -58,5 +81,38 @@ describe('useSectionProgress', () => {
     expect(invalidate).not.toHaveBeenCalled()
     rerender({ count: 2 })
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1'))
+  })
+
+  it('revalidates when the structural-cell policy changes (AQU-1083)', async () => {
+    // The cached snapshot holds numbers the SERVER already resolved the policy
+    // against, and nothing in it says which policy that was. Without this the
+    // chapter tiles keep painting the answer the org just changed away from.
+    resource.mockReturnValue({ progress: null, loading: true, error: false, retry: vi.fn() })
+    const getToken = async () => 'token'
+    const { rerender } = renderHook(
+      ({ countStructural }) =>
+        useSectionProgressState('project-1', 'file-1', 1, getToken, countStructural),
+      { initialProps: { countStructural: true } },
+    )
+    expect(invalidate).not.toHaveBeenCalled()
+    rerender({ countStructural: false })
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1'))
+  })
+
+  it('does not revalidate on a re-render that changes neither policy', async () => {
+    // Guards the ref bookkeeping: the two policies share one ref now, and
+    // reading either one wrong would refetch the whole sidebar every render.
+    resource.mockReturnValue({ progress: null, loading: true, error: false, retry: vi.fn() })
+    const getToken = async () => 'token'
+    const { rerender } = renderHook(
+      ({ label }) => {
+        void label
+        return useSectionProgressState('project-1', 'file-1', 2, getToken, false)
+      },
+      { initialProps: { label: 'a' } },
+    )
+    rerender({ label: 'b' })
+    rerender({ label: 'c' })
+    expect(invalidate).not.toHaveBeenCalled()
   })
 })

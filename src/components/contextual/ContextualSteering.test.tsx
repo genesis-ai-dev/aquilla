@@ -32,11 +32,20 @@ const { sendMock, MockApiError, MockAuthError } = vi.hoisted(() => {
     }
   }
   return {
-    sendMock: vi.fn<(runId: string, text: string) => Promise<void>>(),
+    sendMock: vi.fn<(runId: string, text: string) => Promise<SteeringResult>>(),
     MockApiError,
     MockAuthError,
   }
 })
+
+/** Mirrors `ContextualSteeringResult` without importing the mocked module. */
+interface SteeringResult {
+  intent: "direction" | "pause" | "stop"
+  applied: boolean
+  run: null
+}
+
+const DIRECTION_RESULT: SteeringResult = { intent: "direction", applied: false, run: null }
 
 vi.mock("@/lib/contextual/transport", () => ({
   sendContextualSteering: sendMock,
@@ -71,6 +80,7 @@ function makeTransport(overrides: Partial<ContextualTransport> = {}): Contextual
     pause: vi.fn(async () => {}),
     resume: vi.fn(async () => {}),
     terminate: vi.fn(async () => {}),
+    continueRun: vi.fn(async () => {}),
     ...overrides,
   }
 }
@@ -97,6 +107,7 @@ beforeEach(async () => {
   cleanup()
   resetContextualRunStore()
   sendMock.mockReset()
+  sendMock.mockResolvedValue(DIRECTION_RESULT)
   setContextualTransport(makeTransport())
   await attachContextualRun("p1", "file-1")
   applyRemoteFrame({
@@ -134,7 +145,7 @@ describe("ContextualSteering", () => {
         })),
       }),
     )
-    sendMock.mockResolvedValue(undefined)
+    sendMock.mockResolvedValue(DIRECTION_RESULT)
     render(<Harness />)
     openPopover()
 
@@ -187,7 +198,12 @@ describe("ContextualSteering", () => {
 
   it("does not reattach or mutate a different run after a delayed send resolves", async () => {
     let finishSend: (() => void) | undefined
-    sendMock.mockImplementation(() => new Promise<void>((resolve) => { finishSend = resolve }))
+    sendMock.mockImplementation(
+      () =>
+        new Promise<SteeringResult>((resolve) => {
+          finishSend = () => resolve(DIRECTION_RESULT)
+        }),
+    )
     render(<Harness />)
     openPopover()
 
@@ -241,5 +257,88 @@ describe("ContextualSteering", () => {
     ])
     // v1 has no per-chip dismissal — chips are plain text, not buttons.
     for (const chip of chips) expect(chip.querySelector("button")).toBeNull()
+  })
+})
+
+// AQU-1299: "stop"/"pause" typed here controls the run. The classifier runs
+// client-side only to label the button and to keep a command from ever being
+// shown as a queued direction — the server's answer is what gets reported.
+describe("ContextualSteering run commands", () => {
+  it("labels the send button for a stop-shaped message and never queues a chip", async () => {
+    render(<Harness />)
+    openPopover()
+
+    fireEvent.change(screen.getByLabelText("Direction for the agent"), {
+      target: { value: "stop" },
+    })
+    sendMock.mockResolvedValue({ intent: "stop", applied: true, run: null })
+    const send = screen.getByRole("button", { name: "Stop the run" })
+    fireEvent.click(send)
+
+    await waitFor(() => expect(sendMock).toHaveBeenCalledWith(RUN, "stop"))
+    expect(await screen.findByTestId("contextual-steering-command-result")).toHaveTextContent(
+      "Autopilot stopped.",
+    )
+    expect(screen.queryByTestId("contextual-steering-chip")).not.toBeInTheDocument()
+  })
+
+  it("labels a pause-shaped message and reports the pause request", async () => {
+    render(<Harness />)
+    openPopover()
+
+    fireEvent.change(screen.getByLabelText("Direction for the agent"), {
+      target: { value: "hold on" },
+    })
+    sendMock.mockResolvedValue({ intent: "pause", applied: true, run: null })
+    fireEvent.click(screen.getByRole("button", { name: "Pause the run" }))
+
+    await waitFor(() => expect(sendMock).toHaveBeenCalledWith(RUN, "hold on"))
+    expect(await screen.findByTestId("contextual-steering-command-result")).toHaveTextContent(
+      "Pause requested.",
+    )
+  })
+
+  it("says nothing changed when the run was not working", async () => {
+    render(<Harness />)
+    openPopover()
+
+    fireEvent.change(screen.getByLabelText("Direction for the agent"), {
+      target: { value: "stop" },
+    })
+    sendMock.mockResolvedValue({ intent: "stop", applied: false, run: null })
+    fireEvent.click(screen.getByRole("button", { name: "Stop the run" }))
+
+    expect(await screen.findByTestId("contextual-steering-command-result")).toHaveTextContent(
+      "Autopilot wasn’t working, so nothing changed.",
+    )
+    expect(screen.queryByTestId("contextual-steering-chip")).not.toBeInTheDocument()
+  })
+
+  it("keeps an instruction that merely contains “stop” as a direction", async () => {
+    setContextualTransport(
+      makeTransport({
+        fetchSnapshot: vi.fn(async () => ({
+          available: true,
+          run: runSnapshot(["stop using contractions in narration"]),
+        })),
+      }),
+    )
+    render(<Harness />)
+    openPopover()
+
+    fireEvent.change(screen.getByLabelText("Direction for the agent"), {
+      target: { value: "stop using contractions in narration" },
+    })
+    // Still the plain Send button: this is steering, not a command.
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("contextual-steering-chip")).toHaveTextContent(
+        "stop using contractions in narration",
+      ),
+    )
+    expect(
+      screen.queryByTestId("contextual-steering-command-result"),
+    ).not.toBeInTheDocument()
   })
 })

@@ -6,7 +6,9 @@
 //   2. asAdmin() causes SET LOCAL app.user_id = '' — verified the same way.
 //   3. Bare db (no withUser / asAdmin) does NOT set app.user_id.
 //   4. app_user_can_access_project() returns TRUE for each of the four access
-//      paths (direct / group / org / creator) and FALSE for foreign/no-access.
+//      paths (direct / group / org-at-Maintainer+ / creator) and FALSE for
+//      foreign/no-access. AQU-1107: a sub-maintainer org_members row is NOT
+//      a grant path.
 //   5. withUser() visibility: rows for an accessible project are returned;
 //      rows for a foreign project are invisible (0 rows) — this tests the
 //      SQL function indirectly through a query that reads project_id-scoped data.
@@ -37,10 +39,24 @@ const RLS_MIGRATION = readFileSync(
   ),
   "utf8",
 )
+const ORG_WIDE_FLOOR_MIGRATION = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../db/postgres/migrations/0083_org_wide_access_floor.sql",
+  ),
+  "utf8",
+)
 const CONTEXTUAL_ACTIVITY_MIGRATION = readFileSync(
   path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "../../../db/postgres/migrations/0074_contextual_run_events.sql",
+  ),
+  "utf8",
+)
+const CONTEXTUAL_TRACES_RLS_MIGRATION = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../db/postgres/migrations/0136_contextual_run_traces_rls.sql",
   ),
   "utf8",
 )
@@ -52,7 +68,9 @@ beforeAll(async () => {
   // is not enforced by PGlite but the SQL function is available.
   try {
     await pg.exec(RLS_MIGRATION)
+    await pg.exec(ORG_WIDE_FLOOR_MIGRATION)
     await pg.exec(CONTEXTUAL_ACTIVITY_MIGRATION)
+    await pg.exec(CONTEXTUAL_TRACES_RLS_MIGRATION)
   } catch (e) {
     // If PGlite rejects a specific clause (e.g. FORCE ROW LEVEL SECURITY or
     // policy syntax), log the error and continue — we still get function tests.
@@ -279,6 +297,86 @@ describe("contextual activity RLS migration", () => {
       await pg.exec("RESET ROLE; RESET app.user_id; RESET app.project_id;")
     }
   })
+
+  it("opts contextual_run_traces into exact-project RLS with read, append and prune grants only", async () => {
+    const relation = await pg.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(
+      `SELECT relrowsecurity, relforcerowsecurity
+         FROM pg_class WHERE oid = 'contextual_run_traces'::regclass`,
+    )
+    expect(relation.rows[0]).toEqual({ relrowsecurity: true, relforcerowsecurity: true })
+
+    const policies = await pg.query<{ cmd: string; roles: string; expression: string }>(
+      `SELECT cmd, roles::text AS roles, COALESCE(qual, with_check, '') AS expression
+         FROM pg_policies
+        WHERE tablename = 'contextual_run_traces'
+        ORDER BY cmd`,
+    )
+    expect(policies.rows.map((policy) => policy.cmd)).toEqual(["DELETE", "INSERT", "SELECT"])
+    expect(policies.rows.every((policy) => policy.roles === "{app_runtime}")).toBe(true)
+    expect(policies.rows.every((policy) =>
+      policy.expression.includes("app_contextual_project_scope(project_id)")))
+      .toBe(true)
+
+    // Rows are never rewritten: no UPDATE privilege reaches the runtime role.
+    const grants = await pg.query<{ privilege_type: string }>(
+      `SELECT privilege_type FROM information_schema.role_table_grants
+        WHERE grantee = 'app_runtime' AND table_name = 'contextual_run_traces'
+        ORDER BY privilege_type`,
+    )
+    expect(grants.rows.map((grant) => grant.privilege_type)).toEqual(["DELETE", "INSERT", "SELECT"])
+  })
+
+  it("contains app_runtime trace reads, writes and deletes to the scoped project while preserving the bare recorder and retention sweep", async () => {
+    const userId = 8_267_402
+    const projectOne = "trace-rls-project-one"
+    const projectTwo = "trace-rls-project-two"
+    const insertTrace = `INSERT INTO contextual_run_traces
+        (run_id, project_id, tier, model, system_prompt, user_prompt)
+      VALUES ($1, $2, 'draft', 'test-model', 'system', 'user')`
+    const tracedProjects = async () =>
+      (await pg.query<{ project_id: string }>(
+        `SELECT project_id FROM contextual_run_traces ORDER BY project_id, id`,
+      )).rows.map((row) => row.project_id)
+
+    await seedUser(userId, "trace-rls-member")
+    await seedProject(projectOne, userId)
+    await seedProject(projectTwo, userId)
+    await seedDirectMember(projectOne, userId)
+    await seedDirectMember(projectTwo, userId)
+    await pg.query(insertTrace, ["run-one", projectOne])
+    await pg.query(insertTrace, ["run-two", projectTwo])
+
+    try {
+      await pg.exec(
+        `SET ROLE app_runtime;
+         SET app.user_id = '${userId}';
+         SET app.project_id = '${projectOne}';`,
+      )
+
+      // Membership in projectTwo is deliberate, as above: the exact project
+      // GUC, not membership alone, is what keeps its prompts out of reach.
+      expect(await tracedProjects()).toEqual([projectOne])
+      await expect(pg.query(insertTrace, ["run-two", projectTwo])).rejects.toThrow(/row-level security/i)
+      await expect(pg.query(`UPDATE contextual_run_traces SET output = 'rewritten'`))
+        .rejects.toThrow(/permission denied/i)
+      const scopedDelete = await pg.query(`DELETE FROM contextual_run_traces`)
+      expect(scopedDelete.affectedRows).toBe(1)
+
+      // The recorder, the traces route and the retention sweep all use the
+      // identity-less runtime handle; both GUCs empty must keep working.
+      await pg.exec("RESET app.user_id; RESET app.project_id;")
+      expect(await tracedProjects()).toEqual([projectTwo])
+      // Also exercises the bigserial sequence grant.
+      await pg.query(insertTrace, ["run-one", projectOne])
+      expect(await tracedProjects()).toEqual([projectOne, projectTwo])
+      const sweep = await pg.query(
+        `DELETE FROM contextual_run_traces WHERE created_at < now() + make_interval(days => 1)`,
+      )
+      expect(sweep.affectedRows).toBe(2)
+    } finally {
+      await pg.exec("RESET ROLE; RESET app.user_id; RESET app.project_id;")
+    }
+  })
 })
 
 // Helper: build a PgExecutor-backed PostgresDb from the shared PGlite.
@@ -442,7 +540,7 @@ describe("app_user_can_access_project() SQL function", () => {
     expect(r?.ok).toBe(true)
   })
 
-  it("Path 3 — org-wide grant (org_members, project has org_id) → TRUE", async () => {
+  it("Path 3 — org-wide grant is Maintainer+ only (AQU-435 / AQU-1107)", async () => {
     await seedUser(103, "org-member-user")
     await seedUser(203, "org-project-creator")
     await pg.query(
@@ -454,11 +552,18 @@ describe("app_user_can_access_project() SQL function", () => {
     await seedProject("proj-org", 203, 202) // project in org 202
 
     const db = makeShim().withUser(103)
-    const r = await db
+    const reviewer = await db
       .prepare("SELECT app_user_can_access_project($1) AS ok")
       .bind("proj-org")
       .first<{ ok: boolean }>()
-    expect(r?.ok).toBe(true)
+    expect(reviewer?.ok).toBe(false)
+
+    await pg.query("UPDATE org_members SET role_level = 600 WHERE org_id = 202 AND user_id = 103")
+    const maintainer = await db
+      .prepare("SELECT app_user_can_access_project($1) AS ok")
+      .bind("proj-org")
+      .first<{ ok: boolean }>()
+    expect(maintainer?.ok).toBe(true)
   })
 
   it("Path 4 — creator fallback (projects.created_by = user_id) → TRUE", async () => {

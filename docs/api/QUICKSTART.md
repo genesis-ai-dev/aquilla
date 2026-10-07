@@ -63,6 +63,12 @@ curl -s -H "$AUTH" $SYNC_HOST/api/v1/external/projects/proj_abc/files
 curl -s -H "$AUTH" $SYNC_HOST/api/v1/external/projects/proj_abc/files/FILE_ID/cells
 curl -s -H "$AUTH" "$SYNC_HOST/api/v1/external/projects/proj_abc/search?q=covenant"
 
+# 3b. Translation memory: how were lines like this one rendered before?
+#     (lexical similarity — shared words, not shared meaning)
+curl -s -H "$AUTH" "$SYNC_HOST/api/v1/external/projects/proj_abc/similar?cellId=CELL_ID"
+# → { "data": [{ "cellId": "...", "fileId": "...", "sourceValue": "...",
+#                "targetValue": "...", "targetLang": "", "score": 0.86 }], "nextCursor": null }
+
 # 4. PREPARE a write (stages a plan — applies nothing)
 curl -s -H "$AUTH" -H "Content-Type: application/json" \
   -X POST $SYNC_HOST/api/v1/external/projects/proj_abc/changesets \

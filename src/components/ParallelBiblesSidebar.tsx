@@ -6,23 +6,33 @@
 // is designed for), fetches fire only while the panel is open, chapter
 // responses are promise-cached in the helloao client (scrolling within a
 // chapter costs zero requests), and chapter changes are debounced so fast
-// scrolling doesn't burst-fetch every chapter passed over.
+// scrolling doesn't burst-fetch every chapter passed over. The neighbouring
+// chapters are warmed after the visible one lands (AQU-843) — steady-state
+// reading therefore pays the same one request per chapter it always did, just
+// early enough that the panel is populated on arrival.
 //
 // Pinned versions persist in localStorage per user (not project settings) —
 // helps are a personal reading aid, not project data.
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
+  adjacentChapters,
   fetchHelloaoChapter,
   fetchHelloaoTranslations,
   flattenHelloaoContent,
+  HelloaoChapterNotFoundError,
+  prefetchHelloaoChapter,
   type HelloaoTranslation,
 } from "@/lib/parsers/helloao"
+import { referencePrefetchAllowed } from "@/lib/net/prefetch-policy"
 import { cn } from "@/lib/utils"
 import { BookMarked, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/empty"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import { ErrorBoundary } from "./ErrorBoundary"
+import { ResourcePaneCrash, ResourcePaneError } from "./ResourcePaneError"
 import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -101,7 +111,21 @@ interface VersionVerses {
   error?: string
 }
 
-export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }: ParallelBiblesSidebarProps) {
+/** A render throw inside the pane stays inside the pane (AQU-849) — without
+ *  this the nearest boundary is AppShell's, which takes the whole workspace
+ *  down until the translator reloads the page. */
+export function ParallelBiblesSidebar(props: ParallelBiblesSidebarProps) {
+  return (
+    <ErrorBoundary
+      label="parallel-bibles-sidebar"
+      fallback={(reset) => <ResourcePaneCrash onRetry={reset} />}
+    >
+      <ParallelBiblesSidebarBody {...props} />
+    </ErrorBoundary>
+  )
+}
+
+function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: ParallelBiblesSidebarProps) {
   const t = useT()
   const [pinned, setPinned] = useState<string[]>(() => readPinnedVersions())
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -110,6 +134,10 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
   const [query, setQuery] = useState("")
   // (version id, book, chapter) → loaded verses, rebuilt as the chapter changes
   const [chapterData, setChapterData] = useState<Map<string, VersionVerses>>(new Map())
+  // Bumped by the inline Retry buttons. A lookup that failed while the reader
+  // stays on one verse has nothing else to re-trigger its effect, which is why
+  // a dead pane used to need a page reload (AQU-849).
+  const [retryNonce, setRetryNonce] = useState(0)
 
   // Hold the last parseable ref so headings / unrefed rows don't blank the panel.
   const lastParsedRef = useRef<{ book: string; chapter: number; verse: number | null } | null>(null)
@@ -129,6 +157,8 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
 
   // Load the translations list lazily: when the picker opens, or when the
   // panel is open with pinned versions (so cards show names, not raw ids).
+  // `translationsErr` guards against a retry loop (setting it re-runs this
+  // effect); clearing it from Retry is what re-arms the fetch.
   const needTranslations = pickerOpen || (open && pinned.length > 0)
   useEffect(() => {
     if (!needTranslations || translations || translationsErr) return
@@ -153,10 +183,10 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
     const chapter = Number(chapterStr)
     let cancelled = false
 
-    for (const versionId of pinned) {
+    const loads = pinned.map((versionId) =>
       fetchHelloaoChapter(versionId, book, chapter)
         .then((res) => {
-          if (cancelled) return
+          if (cancelled) return null
           const verses = new Map<number, string>()
           for (const node of res.chapter.content) {
             if (node.type === "verse") {
@@ -168,23 +198,45 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
             next.set(`${versionId}/${book}/${chapter}`, { verses })
             return next
           })
+          return res
         })
         .catch((err) => {
-          if (cancelled) return
+          if (cancelled) return null
+          // A version that simply doesn't carry this chapter is an absence, not
+          // a failure: it lands as an empty chapter and renders "no text".
+          const missing = err instanceof HelloaoChapterNotFoundError
           setChapterData((prev) => {
             const next = new Map(prev)
             next.set(`${versionId}/${book}/${chapter}`, {
               verses: new Map(),
-              error: err instanceof Error ? err.message : String(err),
+              error: missing ? undefined : err instanceof Error ? err.message : String(err),
             })
             return next
           })
-        })
-    }
+          return null
+        }),
+    )
+
+    // AQU-843: once the visible chapter has landed for every pinned version,
+    // warm the chapters either side so crossing a chapter boundary mid-scroll
+    // reads from cache instead of leaving the panel blank on arrival. Ordered
+    // after the visible fetches on purpose — on a weak link a preload must
+    // never compete with the text the translator is waiting on. The book's
+    // chapter count comes off the response we just got, so the warm never
+    // spends a request on a chapter past the end of the book.
+    void Promise.all(loads).then((results) => {
+      if (cancelled || !referencePrefetchAllowed()) return
+      const numberOfChapters = results.find((res) => res !== null)?.book.numberOfChapters
+      if (!numberOfChapters) return
+      for (const target of adjacentChapters(chapter, numberOfChapters)) {
+        for (const versionId of pinned) prefetchHelloaoChapter(versionId, book, target)
+      }
+    })
+
     return () => {
       cancelled = true
     }
-  }, [open, debouncedChapterKey, pinned])
+  }, [open, debouncedChapterKey, pinned, retryNonce])
 
   function pinVersion(id: string) {
     setPinned((prev) => {
@@ -288,9 +340,12 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
         {!tracked ? (
-          <p className="p-4 text-xs text-muted-foreground">
-            {t("editor.bibles.scrollHint")}
-          </p>
+          <EmptyState
+            variant="inline"
+            icon={BookMarked}
+            title={t("editor.bibles.noReferences")}
+            description={t("editor.bibles.noReferencesDescription")}
+          />
         ) : pinned.length === 0 && !pickerOpen ? (
           <p className="p-4 text-xs text-muted-foreground">
             {t("editor.bibles.noVersions")}
@@ -320,7 +375,21 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
                     </Button>
                   </div>
                   {data?.error ? (
-                    <p className="mt-1 text-xs text-destructive">{data.error}</p>
+                    <ResourcePaneError
+                      className="mt-1"
+                      message={data.error}
+                      // Drop the latched failure first, so the retry shows the
+                      // spinner rather than the error it is clearing.
+                      onRetry={() => {
+                        setChapterData((prev) => {
+                          const next = new Map(prev)
+                          next.delete(`${versionId}/${tracked.book}/${tracked.chapter}`)
+                          return next
+                        })
+                        setRetryNonce((n) => n + 1)
+                      }}
+                      retryLabel={t("editor.bibles.retryVersion", { version: versionId })}
+                    />
                   ) : !data ? (
                     <div className="mt-1 flex items-center text-muted-foreground" aria-label={t("common.loading")}>
                       <Spinner className="size-3.5" />
@@ -358,7 +427,15 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
               />
             </InputGroup>
             {translationsErr ? (
-              <p className="mt-2 text-xs text-destructive">{t("editor.bibles.failedToLoad", { error: translationsErr })}</p>
+              <ResourcePaneError
+                className="mt-2"
+                message={t("editor.bibles.failedToLoad", { error: translationsErr })}
+                onRetry={() => {
+                  setTranslationsErr(null)
+                  setRetryNonce((n) => n + 1)
+                }}
+                retryLabel={t("editor.bibles.retryVersions")}
+              />
             ) : !translations ? (
               <p className="mt-2 text-xs text-muted-foreground">{t("editor.bibles.loadingVersions")}</p>
             ) : (

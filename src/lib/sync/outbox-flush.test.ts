@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { flushOutboxBatch, subscribeStaleSiblings, subscribeAppliedEvents } from "./outbox-flush"
+import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents } from "./outbox-flush"
 import { createFlushAppliedTracker } from "./flush-applied"
 import { createLiveApplier } from "./live-apply"
 import { CellStore } from "@/hooks/useActiveCellStore"
@@ -28,6 +28,7 @@ import {
   peekPendingOutboxBatch,
   resetOutboxConnectionForTests,
   setActiveOutboxOwner,
+  OUTBOX_MAX_ATTEMPTS,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
@@ -65,6 +66,7 @@ function jsonResponse(body: object, status = 200): Response {
 }
 
 import type { TokenMintResult } from "./outbox-flush"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const TOKEN_FN = async (): Promise<TokenMintResult> => ({ token: "tok", status: 200 })
 const NULL_TOKEN_FN = async (): Promise<TokenMintResult> => ({ token: null, status: null })
@@ -127,7 +129,7 @@ describe("flushOutboxBatch", () => {
       getTokenForFile: mint,
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     setActiveOutboxOwner("bob")
     resolveMint({ token: "alice-token", status: 200 })
 
@@ -180,7 +182,7 @@ describe("flushOutboxBatch", () => {
       },
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     currentJwt = "alice-jwt-2"
     resolveMint({ token: "token-from-jwt-1", status: 200 })
 
@@ -397,6 +399,66 @@ describe("flushOutboxBatch", () => {
     // burn its retry budget or wedge the queue.
     const pending = await peekPendingOutboxBatch(10)
     expect(pending.map((r) => r.id).sort()).toEqual(["e2"])
+  })
+
+  // -- AQU-1068: a 403 has to REACH the caller, not just be quarantined --
+
+  it("AQU-1068: calls onForbidden for a 403, with the kind read back off the batch", async () => {
+    // The cell-structure gate answers 403 and NOTHING ELSE, while `onRejected`
+    // documents itself as deliberately skipping that class. An optimistic
+    // insert or removal carries a freshness floor, so no correcting fetch can
+    // undo it — without this callback the caller can never learn to roll back,
+    // and the row stays wrong until the tab is closed.
+    //
+    // The reason string below is the live one. It was the tier's refusal until
+    // 2026-09-09; the tier is no longer checked at the perimeter, so the 403
+    // this path actually sees is the maintainer rule on removing an imported
+    // cell (sync-worker authorize.ts).
+    // The kind is what the caller reads back to decide whether to roll back,
+    // so it has to survive the round trip. `makeEvent` is typed to the commit
+    // kind; the cast keeps this leg honest without widening the helper.
+    await enqueueOutboxEvent({
+      ...makeEvent("e1", "f1"),
+      kind: "source.cell.create",
+    } as unknown as Parameters<typeof enqueueOutboxEvent>[0])
+    const onForbidden = vi.fn()
+    const onRejected = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "removing an imported cell requires maintainer" }],
+      }),
+    )
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+      onRejected,
+    })
+
+    expect(onForbidden).toHaveBeenCalledTimes(1)
+    expect(onForbidden.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        id: "e1",
+        kind: "source.cell.create",
+        status: 403,
+        reason: "removing an imported cell requires maintainer",
+      }),
+    ])
+    // The existing callback still does NOT see it — that contract is unchanged.
+    expect(onRejected).not.toHaveBeenCalled()
+  })
+
+  it("AQU-1068: leaves onForbidden alone when nothing was forbidden", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const onForbidden = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }))
+    await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+    expect(onForbidden).not.toHaveBeenCalled()
   })
 
   // -- AQU-633: a 403-refused event is quarantined with its reason preserved --
@@ -1144,5 +1206,247 @@ describe("flushOutboxBatch", () => {
     expect(rows[0].attempts).toBe(0) // no budget burn
     expect(rows[0].lastError).toMatchObject({ status: 0, reason: "request timed out" })
     expect(rows[0].status).toBe("pending")
+  })
+
+  // ── AQU-1368: pre-AQU-927 events poisoned with fractional ms ─────────────
+
+  it("AQU-1368: a STORED event with durationMs 2403.5 is rounded on the way out and flushes clean", async () => {
+    // The partner's exact row (lin184, minted 2026-08-15, three days before
+    // AQU-927's emit guard shipped). It cannot be fixed at emit time — it is
+    // already in IndexedDB — so the flush boundary has to repair it.
+    await enqueueOutboxEvent(
+      makeEvent("poison", "f1", {
+        kind: "cell.audio.attach",
+        payload: { audioId: "a1", durationMs: 2403.5 },
+      } as unknown as Partial<CqrsRawEvent<"target.cell.commit">>),
+    )
+
+    let posted: CqrsRawEvent[] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      posted = JSON.parse(init.body as string).events
+      // The server only accepts it BECAUSE the value arrived integral — this
+      // is the whole point of the fix, so the mock refuses a fractional one
+      // exactly as Postgres does.
+      const bad = posted.find((e) => !Number.isInteger(
+        (e.payload as { durationMs?: number }).durationMs,
+      ))
+      if (bad) {
+        return jsonResponse({
+          accepted: [],
+          rejected: [{
+            id: bad.id,
+            status: 500,
+            reason: 'DB batch failed: PostgresError: invalid input syntax for type bigint: "2403.5"',
+          }],
+        })
+      }
+      return jsonResponse({ accepted: posted.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect((posted[0].payload as { durationMs: number }).durationMs).toBe(2404)
+    expect(result.accepted).toBe(1)
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("AQU-1368: an unfixable head is posted ALONE on its next attempt, so valid events behind it are not dragged down", async () => {
+    // A poison event the sanitizer cannot rescue (not a millisecond field at
+    // all), plus a fresh valid audio event queued behind it. The /events
+    // INSERT is atomic, so batching them together means the valid one dies
+    // with the poison on every flush — the five-week outage in AQU-1368.
+    await enqueueOutboxEvent(makeEvent("poison", "f1"))
+    await enqueueOutboxEvent(makeEvent("valid", "f1"))
+
+    const bodies: CqrsRawEvent[][] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const events: CqrsRawEvent[] = JSON.parse(init.body as string).events
+      bodies.push(events)
+      // Postgres refuses the whole batch when any member is bad.
+      if (events.some((e) => e.id === "poison")) {
+        return jsonResponse({
+          accepted: [],
+          rejected: events.map((e) => ({
+            id: e.id,
+            status: 500,
+            reason: "DB batch failed: PostgresError: invalid input syntax for type bigint",
+          })),
+        })
+      }
+      return jsonResponse({ accepted: events.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const deps = {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    }
+
+    // Round 1 batches both, and both are refused together.
+    await flushOutboxBatch(deps)
+    expect(bodies[0].map((e) => e.id)).toEqual(["poison", "valid"])
+
+    // Round 2: the head has a burnt attempt, so it goes out on its own.
+    await flushOutboxBatch(deps)
+    expect(bodies[1].map((e) => e.id)).toEqual(["poison"])
+
+    // Keep flushing: the poison burns its own budget to the cap, flips to
+    // `failed`, stops being peeked — and the valid event finally lands.
+    for (let i = 0; i < OUTBOX_MAX_ATTEMPTS + 1; i++) await flushOutboxBatch(deps)
+
+    expect(bodies.some((b) => b.length === 1 && b[0].id === "valid")).toBe(true)
+    const rows = await peekOutboxBatch(10)
+    expect(rows.find((r) => r.id === "valid")).toBeUndefined()
+    expect(rows.find((r) => r.id === "poison")?.status).toBe("failed")
+  })
+
+  it("AQU-1368: a transient failure does NOT trigger single-event isolation (no throughput regression)", async () => {
+    // Offline/5xx/timeouts go through stampOutboxError and never burn the
+    // attempt budget, so a normal blip must leave full batching intact.
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+
+    const bodies: CqrsRawEvent[][] = []
+    let firstCall = true
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string).events)
+      if (firstCall) {
+        firstCall = false
+        return new Response("Internal Server Error", { status: 500 })
+      }
+      const events: CqrsRawEvent[] = JSON.parse(init.body as string).events
+      return jsonResponse({ accepted: events.map((e) => ({ id: e.id })), rejected: [] })
+    })
+
+    const deps = {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    }
+    await flushOutboxBatch(deps)
+    await flushOutboxBatch(deps)
+
+    expect(bodies[1].map((e) => e.id)).toEqual(["e1", "e2"])
+    expect(await outboxPendingCount()).toBe(0)
+  })
+})
+
+describe("flushOutboxUntilSettled (AQU-579)", () => {
+  beforeEach(async () => {
+    _eventSeq = 0
+    await resetIdb()
+  })
+
+  it("keeps flushing until the watched events leave the queue when an older file wins the first batch", async () => {
+    // The user's earlier edits to f1 are still queued when an AI completion
+    // enqueues its drafts against f2. groupOldestFileFirst sends f1 first, so
+    // a single flush would never post the drafts.
+    // Ids encode enqueue order: the outbox is read from the enqueuedAt
+    // index, and same-millisecond rows fall back to primary-key order.
+    await enqueueOutboxEvent(makeEvent("e1-old", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2-draft", "f2"))
+    await enqueueOutboxEvent(makeEvent("e3-draft", "f2"))
+
+    const posted: string[][] = []
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { events: Array<{ id: string }> }
+      const ids = body.events.map((e) => e.id)
+      posted.push(ids)
+      return jsonResponse({ accepted: ids.map((id) => ({ id })), rejected: [] })
+    })
+
+    const result = await flushOutboxUntilSettled(["e2-draft", "e3-draft"], {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(posted).toEqual([["e1-old"], ["e2-draft", "e3-draft"]])
+    expect(result.settled).toBe(true)
+    expect(result).toMatchObject({ posted: 3, accepted: 3, networkError: false })
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("surfaces a dead-lettered draft to the CALLER's onStaleSiblings even when an older file went first", async () => {
+    // Regression guard for the reported data loss: the stale verdict used to
+    // land after the caller had already reported success, so only the
+    // tab-wide listener saw it — which drops the optimistic draft with no
+    // rebase-and-retry, erasing the translation once the progress bar ended.
+    await enqueueOutboxEvent(makeEvent("e1-old", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2-draft", "f2"))
+
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { events: Array<{ id: string }> }
+      const ids = body.events.map((e) => e.id)
+      return jsonResponse({
+        accepted: ids.map((id) => ({ id })),
+        rejected: [],
+        stale: ids.includes("e2-draft") ? [{ id: "e2-draft", fileId: "f2", cellId: "cell-1" }] : [],
+      })
+    })
+
+    const seen: string[] = []
+    const result = await flushOutboxUntilSettled(["e2-draft"], {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onStaleSiblings: (entries) => { for (const e of entries) seen.push(e.id) },
+    })
+
+    expect(seen).toEqual(["e2-draft"])
+    expect(result.settled).toBe(true)
+    expect(result.staleSiblingCount).toBe(1)
+  })
+
+  it("stops after one round and reports settled:false when the transport is down", async () => {
+    await enqueueOutboxEvent(makeEvent("e1-old", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2-draft", "f2"))
+
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("offline"))
+    const result = await flushOutboxUntilSettled(["e2-draft"], {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ networkError: true, settled: false })
+    // No data loss: both rows stay queued for the background flusher.
+    expect(await outboxPendingCount()).toBe(2)
+  })
+
+  it("gives up after maxRounds instead of spinning on a queue it cannot drain", async () => {
+    await enqueueOutboxEvent(makeEvent("e1-old", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2-draft", "f2"))
+
+    // 401 keeps f1's row pending and retryable, so the head group never
+    // advances — without the cap this would loop forever.
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { events: Array<{ id: string }> }
+      return jsonResponse({
+        accepted: [],
+        rejected: body.events.map((e) => ({ id: e.id, status: 401, reason: "token expired" })),
+      })
+    })
+
+    const result = await flushOutboxUntilSettled(["e2-draft"], {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    }, { maxRounds: 3 })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(result.settled).toBe(false)
+    expect(await outboxPendingCount()).toBe(2)
+  })
+
+  it("is a no-op that posts nothing when there are no watched events", async () => {
+    await enqueueOutboxEvent(makeEvent("e1-old", "f1"))
+    const fetchMock = vi.fn()
+
+    const result = await flushOutboxUntilSettled([], {
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ posted: 0, settled: true })
   })
 })

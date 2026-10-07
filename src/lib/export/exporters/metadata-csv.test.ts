@@ -130,4 +130,15 @@ describe("exportMetadataCsv", () => {
     expect(rows[2]?.startsWith("GEN 1:2,")).toBe(true)
     expect(rows[3]?.startsWith("GEN 1:3,")).toBe(true)
   })
+
+  it("neutralizes a leading formula character in cell_ref and voice (CSV injection)", async () => {
+    const settings: ProjectTtsSettings = {
+      voices: [{ id: "v-evil", name: '=HYPERLINK("http://evil.example","x")' }],
+    }
+    const cell = makeCell({ id: "c8", group: "@SUM(A1:A9)", ttsSettings: { voiceId: "v-evil" } })
+    const text = await toText(exportMetadataCsv([cell], settings))
+    const [, dataRow] = text.split("\r\n")
+    expect(dataRow?.startsWith("'@SUM(A1:A9),")).toBe(true)
+    expect(dataRow).toContain('\'=HYPERLINK(""http://evil.example"",""x"")')
+  })
 })

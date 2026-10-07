@@ -179,7 +179,7 @@ describe("what the matcher found but would not pair", () => {
 
   it("offers a weak-wording match as a different group", () => {
     renderDrawer(review({ weakCandidates: [{ ...row, similarity: 0.3 }], actionable: 1 }))
-    expect(screen.getByText(/Overlapping, words barely agree/)).toBeInTheDocument()
+    expect(screen.getByText(/Overlapping, few words match/)).toBeInTheDocument()
   })
 
   it("counts them in the size of the job", () => {
@@ -253,4 +253,18 @@ describe("the drawer's own state", () => {
     fireEvent.click(screen.getByLabelText("Close"))
     expect(onClose).toHaveBeenCalledOnce()
   })
+})
+
+it("resolves only displayed text rows through an indexed reader", () => {
+  const get = vi.fn((id: string) => textById.get(id))
+  renderDrawer(review({ confident: [confidentRow], actionable: 1 }), { textById: { get } })
+  expect(within(screen.getByTestId("cue-link-candidate-c1")).getAllByText(/No\./)).toHaveLength(2)
+  expect(get).toHaveBeenCalled()
+  expect(get.mock.calls.every(([id]) => id === "s1")).toBe(true)
+})
+
+it("does not resolve text cells when no review rows are displayed", () => {
+  const get = vi.fn((id: string) => textById.get(id))
+  renderDrawer(review(), { textById: { get } })
+  expect(get).not.toHaveBeenCalled()
 })

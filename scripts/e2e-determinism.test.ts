@@ -33,7 +33,7 @@ describe("E2E determinism guardrails", () => {
     const scripts = packageJson.scripts ?? {}
 
     expect(scripts["test:e2e:guard"]).toBe(
-      "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts",
+      "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts scripts/lib/e2e-lock.test.ts scripts/lib/worktree-install-guard.test.ts",
     )
 
     for (const scriptName of [
@@ -43,11 +43,23 @@ describe("E2E determinism guardrails", () => {
       "test:e2e:shard",
       "test:e2e:ui",
       "test:e2e:debug",
+      "test:e2e:production:timing",
     ]) {
       expect(scripts[scriptName], `${scriptName} must run the policy guard`).toMatch(
         /^pnpm run test:e2e:guard && /,
       )
     }
+  })
+
+  it("keeps the production timing probe out of every local E2E run", () => {
+    // AQU-1024: e2e/specs/production drives a DEPLOYED environment with real
+    // credentials and commits a real event. Dropping this exclusion would make
+    // `pnpm test:e2e` fire it against production from a developer's laptop.
+    const source = readFileSync(
+      path.join(REPO_ROOT, "e2e/config/playwright.config.web.ts"),
+      "utf8",
+    )
+    expect(source).toMatch(/testIgnore:\s*\[\s*"\*\*\/production\/\*\*"/)
   })
 
   it("keeps UI waits tied to observable state", () => {
@@ -75,9 +87,31 @@ describe("E2E determinism guardrails", () => {
       ) {
         violations.push(`${relative}: bypasses Workspace.waitForEditor readiness contract`)
       }
+      // AQU-1312: a screenshot/trace/video written to an absolute path only
+      // exists on the OS it was typed on. `/private/tmp` is macOS-only, so the
+      // sink threw ENOENT on Linux and the spec died before its first
+      // assertion — a red smoke gate that said nothing about the app. Artifacts
+      // belong in Playwright's own output directory, which the web config
+      // already fills on failure (`screenshot: "only-on-failure"`), so reach for
+      // `testInfo.outputPath()` or drop the line rather than naming a directory.
+      for (const match of source.matchAll(/\bpath:\s*(["'`])((?:\/|[A-Za-z]:\\)[^"'`]*)\1/g)) {
+        violations.push(`${relative}: absolute artifact path ${match[2]}`)
+      }
     }
 
     expect(violations).toEqual([])
+  })
+})
+
+describe("workspace import readiness", () => {
+  it("does not treat immediate visibility probes as timed waits", () => {
+    const source = readFileSync(
+      path.join(REPO_ROOT, "e2e/helpers/page-objects/Workspace.ts"),
+      "utf8",
+    )
+    // Playwright ignores isVisible's timeout. A cold lazy-loaded import
+    // dialog must use a web-first assertion, not an immediate snapshot.
+    expect(source).not.toMatch(/\.isVisible\(\s*\{\s*timeout:/)
   })
 })
 

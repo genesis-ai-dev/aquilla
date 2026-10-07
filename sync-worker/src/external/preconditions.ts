@@ -39,6 +39,20 @@ export interface CellState {
   sourceExists: boolean
   /** True when ANY lane has a target row for this cell (lane-independent). */
   targetExists: boolean
+  /** AQU-1184: the requested lane's target head is an UNREVIEWED machine draft
+   *  (`cells.ai_drafted = 1`, AQU-292). A human target commit or a validation
+   *  clears the marker, so this is true only while nobody has reviewed the
+   *  text. The Agent API refuses to stage a validation over it — see
+   *  prepareEmitEvents. Null when no target row exists in the lane. */
+  targetAiDrafted: boolean | null
+  /** Current target text in the requested lane — the text an approver is being
+   *  asked to endorse (AQU-1184 guardrail 2). Null when no target row. */
+  targetValue: string | null
+  /** AQU-1426: whether the cell is currently PARKED ("Hide cell", AQU-1422).
+   *  Read off the shared SOURCE row, because that is the only row that carries
+   *  the flag — hiding is per cell, not per lane. Null when no source row
+   *  exists (there is no cell to have a visibility). */
+  sourceHidden: boolean | null
 }
 
 /** Resolve current source + lane-qualified target head event ids for the given
@@ -71,13 +85,22 @@ export async function resolveCellStates(
 
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, side, target_lang, event_id FROM cells
+      `SELECT file_id, cell_id, side, target_lang, event_id, ai_drafted, value, hidden_at FROM cells
        WHERE project_id = ?
          AND side IN ('source', 'target')
          AND (file_id, cell_id) IN (${placeholders})`,
     )
     .bind(projectId, ...binds)
-    .all<{ file_id: string; cell_id: string; side: string; target_lang: string | null; event_id: string }>()
+    .all<{
+      file_id: string
+      cell_id: string
+      side: string
+      target_lang: string | null
+      event_id: string
+      ai_drafted: number | null
+      value: string | null
+      hidden_at?: number | null
+    }>()
 
   for (const c of list) {
     for (const lane of c.lanes) {
@@ -86,6 +109,9 @@ export async function resolveCellStates(
         sourceEventId: null,
         sourceExists: false,
         targetExists: false,
+        targetAiDrafted: null,
+        targetValue: null,
+        sourceHidden: null,
       })
     }
   }
@@ -97,10 +123,18 @@ export async function resolveCellStates(
       if (!s) continue
       if (r.side === 'target') {
         s.targetExists = true
-        if ((r.target_lang ?? '') === lane) s.targetHeadEventId = r.event_id
+        if ((r.target_lang ?? '') === lane) {
+          s.targetHeadEventId = r.event_id
+          s.targetAiDrafted = Number(r.ai_drafted ?? 0) === 1
+          s.targetValue = r.value ?? null
+        }
       } else {
         s.sourceEventId = r.event_id
         s.sourceExists = true
+        // AQU-1426: resolved from the source row only — a target row created
+        // AFTER a hide carries no flag of its own (AQU-1422), so reading it
+        // from either side would report a parked cell as visible.
+        s.sourceHidden = r.hidden_at != null
       }
     }
   }

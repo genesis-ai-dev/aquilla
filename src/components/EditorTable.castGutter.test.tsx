@@ -205,12 +205,14 @@ describe("EditorTable — character gutter", () => {
   it("the gutter track widens only when the gutter is on", async () => {
     const { unmount } = renderTable()
     await screen.findByText("Mary's line")
-    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[132px_1fr_1fr]")
+    // AQU-1101: only the GUTTER track changes width here — the two text tracks
+    // are `minmax(0,1fr)` in both shapes so content can never widen them.
+    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]")
     unmount()
     renderTable({ castGutter: false })
     await screen.findByText("Mary's line")
     expect(screen.queryAllByTestId("gutter-voice")).toHaveLength(0)
-    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[84px_1fr_1fr]")
+    expect(rowEl("cell-cast").querySelector("[data-grid-row]")!.className).toContain("grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
   })
 
   it("picking a character reaches the context's PURE assignment handler with the cell", async () => {

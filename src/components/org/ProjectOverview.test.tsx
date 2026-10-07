@@ -1,11 +1,23 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { fmtDeadlineDate } from "@/lib/format-date"
+
+// Keep the overview suite's project-member reads local.
+vi.mock("@/lib/frontier/members", async (importActual) => ({
+  ...await importActual<typeof import("@/lib/frontier/members")>(),
+  fetchProjectRoster: vi.fn(async () => ({ kind: "ok", members: [] })),
+}))
+
+const mondayLink = vi.fn(async (..._args: unknown[]) => ({ linked: false, orgConnected: false }))
+vi.mock("@/lib/monday/api", () => ({
+  fetchMondayLink: (...args: unknown[]) => mondayLink(...args),
+  fetchMondayBoardStructure: vi.fn(),
+}))
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (importActual) => {
@@ -31,11 +43,58 @@ const useProject = vi.fn()
 const refresh = vi.fn()
 vi.mock("@/hooks/useProject", () => ({ useProject: (...a: unknown[]) => useProject(...a) }))
 
+// AQU-1277: the PM picker calls useProjectMembers, which fetches
+// /api/v2/projects/:id/members. Unmocked that reached production identity for
+// real. The overview Members card (AQU-1171) mounts the same hook via
+// MembersSection once expanded; an empty roster is enough to prove the
+// surface is present without hitting identity.
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: () => ({
+    members: [],
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+    refresh: vi.fn(async () => {}),
+    add: vi.fn(async () => null),
+    addMany: vi.fn(async () => []),
+    remove: vi.fn(async () => {}),
+    changeRole: vi.fn(async () => null),
+  }),
+}))
+
 const archiveProjectRemote = vi.fn()
 const unarchiveProjectRemote = vi.fn()
 vi.mock("@/lib/sync/archive", () => ({
   archiveProjectRemote: (...a: unknown[]) => archiveProjectRemote(...a),
   unarchiveProjectRemote: (...a: unknown[]) => unarchiveProjectRemote(...a),
+}))
+
+// Project Download UI (Phase 5) — off (browser SPA behavior) by default;
+// the "ProjectOverview offline" describe block below flips these on.
+let tauriRuntime = false
+vi.mock("@/lib/offline/is-tauri", () => ({
+  isTauriRuntime: () => tauriRuntime,
+}))
+const fakeOfflineStore = { id: "fake-offline-store" }
+let offlineStoreValue: { store: unknown; loading: boolean; error: Error | null } = {
+  store: null,
+  loading: false,
+  error: null,
+}
+vi.mock("@/context/OfflineStoreContext", () => ({
+  useOfflineStore: () => offlineStoreValue,
+}))
+const downloadProjectOffline = vi.fn()
+const removeOfflineProject = vi.fn((..._a: unknown[]) => ({ ok: true }))
+const getOfflineQueueDepth = vi.fn((..._a: unknown[]) => 0)
+let offlineProjectStatus: { projectId: string; status: string } | null = null
+let downloadProgressValue: { filesDone: number; filesTotal: number } | null = null
+vi.mock("@/lib/offline/download", () => ({
+  downloadProjectOffline: (...a: unknown[]) => downloadProjectOffline(...a),
+  removeOfflineProject: (...a: unknown[]) => removeOfflineProject(...a),
+  getOfflineQueueDepth: (...a: unknown[]) => getOfflineQueueDepth(...a),
+  useOfflineProjectStatus: () => offlineProjectStatus,
+  useDownloadProgress: () => downloadProgressValue,
 }))
 
 type PortfolioProject = import("@/lib/frontier/portfolio").PortfolioProject
@@ -84,7 +143,7 @@ vi.mock("@/components/StaffLanePopover", () => ({
 }))
 vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(async () => []),
-  putMemberScopes: vi.fn(async () => []),
+  putMemberScopes: vi.fn(async () => ({ scopes: [], laneNames: {} })),
 }))
 const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
 const setProjectDeadline = vi.fn(async (_jwt: string, _projectId: string, _deadline: string | null): Promise<void> => {})
@@ -129,6 +188,10 @@ vi.mock("@/lib/sync/sync-token", () => ({
 const fetchProjectFiles = vi.fn()
 vi.mock("@/lib/sync/cells-read", () => ({
   fetchProjectFiles: (...a: unknown[]) => fetchProjectFiles(...a),
+  // download.ts (Phase 5, imported transitively by ProjectOverview.tsx) reads
+  // this export at module scope for its default deps — never actually
+  // invoked by these tests, which don't exercise the offline download flow.
+  streamFileCells: vi.fn(),
 }))
 const fetchProjectPlan = vi.fn()
 const setPlanUnit = vi.fn()
@@ -175,14 +238,27 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   orgProviderKeys: {},
   canExport: true,
   exportMinRole: null,
+  canEgress: false,
+  egressMinRole: 700,
   canViewRoster: true,
   rosterViewMinRole: 600,
   canViewMemberProgress: true,
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  allowScopedLaneAssignment: false,
+  countStructuralCells: true,
+  autoPropagateRepetitions: true,
+  allowBulkValidateAiDrafts: false,
+  countStructuralOverrides: 0,
+  resetCountStructuralOverrides: vi.fn(),
+  // AQU-1037: assignment authority defaults to project_lead.
+  assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  languageEditMinRole: 600,
+  commentCreateMinRole: 200,
+  commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -239,6 +315,7 @@ function renderOverview() {
 }
 
 beforeEach(async () => {
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: false })
   localStorage.clear()
   _deadlineStatusResult = null
   // Some AQU-474 tests override this to simulate a user with no orgs;
@@ -257,6 +334,12 @@ beforeEach(async () => {
   // whether a test sees units depends on which test ran before it.
   fetchSyncToken.mockResolvedValue({ token: "tok" })
   canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
+  tauriRuntime = false
+  offlineStoreValue = { store: null, loading: false, error: null }
+  offlineProjectStatus = null
+  downloadProgressValue = null
+  removeOfflineProject.mockReturnValue({ ok: true })
+  getOfflineQueueDepth.mockReturnValue(0)
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -435,12 +518,36 @@ describe("ProjectOverview Autopilot discovery flag", () => {
     expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
   })
 
-  it("shows the overview surface under the default-on discovery flag", async () => {
+  it("hides the overview surface when the project has never opted in", async () => {
+    // AQU-1103 regression guard, at the surface the bug was reported on: a PM's
+    // project overview. This is the production shape — no `experimentalFlags`
+    // on the record at all — which used to fall through to a default-on
+    // registry entry and render an Autopilot panel reporting "Needs attention"
+    // on a project nobody had enrolled.
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
     getPortfolio.mockResolvedValue([])
     useProject.mockReturnValue({
       project: projectRecord({ level: 700 }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    await screen.findByRole("heading", { level: 1, name: "John" })
+    expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
+  })
+
+  it("shows the overview surface once the project has opted in", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: true },
+      }),
       status: "ready",
       refresh,
     })
@@ -455,7 +562,10 @@ describe("ProjectOverview Autopilot discovery flag", () => {
     fetchProjectFiles.mockResolvedValue([])
     getPortfolio.mockResolvedValue([])
     useProject.mockReturnValue({
-      project: projectRecord({ level: 700 }),
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: true },
+      }),
       roleLevel: ROLE.VIEWER,
       status: "ready",
       refresh,
@@ -727,6 +837,68 @@ describe("ProjectOverview archive/restore", () => {
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
     expect(screen.queryByRole("menuitem", { name: "Download deliverable" })).not.toBeInTheDocument()
+  })
+})
+
+describe("ProjectOverview offline (Tauri desktop, Phase 5)", () => {
+  beforeEach(() => {
+    tauriRuntime = true
+    offlineStoreValue = { store: fakeOfflineStore, loading: false, error: null }
+  })
+
+  it("shows Make available offline even for a viewer with no other overflow permissions", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 100 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    const item = await screen.findByRole("menuitem", { name: "Make available offline" })
+    fireEvent.click(item)
+
+    await waitFor(() => expect(downloadProjectOffline).toHaveBeenCalledWith(fakeOfflineStore, "p1", "jwt"))
+  })
+
+  it("shows the offline badge and Remove offline copy once ready", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "ready" }
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    expect(await screen.findByText("Available offline")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    const item = await screen.findByRole("menuitem", { name: "Remove offline copy" })
+    fireEvent.click(item)
+
+    expect(removeOfflineProject).toHaveBeenCalledWith(fakeOfflineStore, "p1")
+  })
+
+  it("shows a downloading badge with file progress while a download is in flight", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "downloading" }
+    downloadProgressValue = { filesDone: 1, filesTotal: 4 }
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    expect(await screen.findByText("Downloading… (1/4 files)")).toBeInTheDocument()
+  })
+
+  it("blocks Remove offline copy and surfaces an error when writes are still queued", async () => {
+    offlineProjectStatus = { projectId: "p1", status: "ready" }
+    getOfflineQueueDepth.mockReturnValue(2)
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove offline copy" }))
+
+    expect(removeOfflineProject).not.toHaveBeenCalled()
+    expect(await screen.findByText(/haven't synced to the server/)).toBeInTheDocument()
+  })
+
+  it("does not show offline actions outside Tauri", async () => {
+    tauriRuntime = false
+    useProject.mockReturnValue({ project: projectRecord({ level: 100 }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
   })
 })
 
@@ -1064,13 +1236,17 @@ describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
 
 // ── AQU-486: per-section visibility chrome ──────────────────────────────────
 
-describe("ProjectOverview roster lives in project settings", () => {
-  // WHY: the overview used to embed MembersTab (add / change-role / revoke)
-  // under a visibility-gated card. That roster is now only in Project
-  // Settings → Team members. Overview still has the Team *progress* card
-  // (assignments + activity); it must not re-host the membership roster.
+describe("ProjectOverview Members card (AQU-1171)", () => {
+  // WHY: managers need the settings roster (add / change-role / revoke) one
+  // click from the overview, without the card making the page long. It starts
+  // collapsed on every mount, sits directly under the Team card, and keeps
+  // the original gates: manager, not archived, and the roster-visibility floor.
 
-  it("does not render the members roster card", async () => {
+  function teamCard(): HTMLElement {
+    return screen.getByTestId("overview-team-card")
+  }
+
+  it("starts collapsed under the Team card and reveals the settings roster when opened", async () => {
     useOrgSettingsMock.mockReturnValue({
       ...defaultOrgSettingsMock(),
       rosterViewMinRole: 600,
@@ -1079,10 +1255,172 @@ describe("ProjectOverview roster lives in project settings", () => {
     useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
     renderOverview()
 
+    const card = await screen.findByTestId("overview-members-card")
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(teamCard().nextElementSibling).toBe(card)
+    expect(within(card).getByRole("heading", { name: "Members" })).toBeInTheDocument()
+    expect(within(card).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add a member" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-members-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add a member" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-members-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add a member" })).not.toBeInTheDocument()
+  })
+
+  it("starts collapsed again after a fresh mount, with no saved open state", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    const view = renderOverview()
+
+    fireEvent.click(await screen.findByTestId("overview-members-toggle"))
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+
+    view.unmount()
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+  })
+
+  it("hides the Team card as well when the roster floor is owner-only", async () => {
+    // The Team card lists the same people. Leaving it open for a maintainer,
+    // under "Only maintainers & owners can see this", is the roster floor
+    // appearing not to stick.
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.OWNER,
+      canViewRoster: false,
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER }), status: "ready", refresh })
+    renderOverview()
+
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
-    expect(screen.queryByText("Current members")).not.toBeInTheDocument()
-    expect(screen.getByTestId("overview-project-settings")).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+    expect(screen.queryByText(/maintainers & owners/i)).not.toBeInTheDocument()
+  })
+
+  it("hides the card entirely when the roster floor is above the caller's role", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 700,
+      canViewRoster: false,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Members" })).not.toBeInTheDocument()
+  })
+
+  it("hides the card from a caller who cannot manage the project", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.VIEWER,
+      canViewRoster: true,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.CONTRIBUTOR }), status: "ready", refresh })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+  })
+
+  it("hides the card on an archived project", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, deletedAt: "2026-08-01T00:00:00.000Z" }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+  })
+
+  it("lets an org manager change the roster floor from the collapsed header", async () => {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: 600,
+      canViewRoster: true,
+      patch,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    expect(card).toHaveAttribute("data-expanded", "false")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    expect(screen.queryByTestId("settings-members-section")).not.toBeInTheDocument()
+
+    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
+    fireEvent.click(trigger)
+    const option = await screen.findByRole("option", { name: /everyone with access/i })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ rosterViewMinRole: ROLE.VIEWER }))
+    expect(card).toHaveAttribute("data-expanded", "false")
+  })
+
+  it("lets an org owner change the roster floor from the all-organizations view", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.OWNER, name: "owner" } },
+      { id: 2, name: "Other", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.OWNER))
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.tagName).toBe("BUTTON")
+    expect(badge.querySelector("svg.lucide-chevron-down")).toBeInTheDocument()
+  })
+
+  it("does not offer the floor picker to a project owner who is not an org owner", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.MAINTAINER))
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+  })
+
+  it("does not offer the floor picker to a caller who cannot edit it", async () => {
+    canEditRosterProgressFloorMock.mockReturnValue(false)
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-members-card")
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+    expect(within(badge).queryByRole("button")).not.toBeInTheDocument()
   })
 })
 
@@ -1157,6 +1495,261 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
     expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+    // AQU-1172: the collapse affordance must not leak a header-only Team card
+    // to a below-floor viewer.
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+  })
+})
+
+// ── AQU-1172: Team card expand/collapse ─────────────────────────────────────
+
+describe("ProjectOverview Team card collapse (AQU-1172)", () => {
+  // WHY: managers can tuck the assignments surface away without leaving the
+  // overview. Unlike Members (AQU-1171), Team starts expanded so first load
+  // is the working surface plus a chevron — collapse is per-page-load only.
+
+  async function withWorkload() {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([
+      { userId: 1, username: "alice", openAssignments: 2, cellsTotal: 10, cellsDone: 4 },
+    ])
+  }
+
+  afterEach(async () => {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([])
+  })
+
+  it("starts expanded and hides the body when the header is clicked", async () => {
+    await withWorkload()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("overview-team-toggle")).toHaveAttribute("aria-expanded", "true")
+    expect(within(card).getByRole("heading", { name: "Team" })).toBeInTheDocument()
+    expect(within(card).getByTestId("section-visibility-badge")).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "false")
+    expect(screen.getByTestId("overview-team-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(within(card).getByRole("heading", { name: "Team" })).toBeInTheDocument()
+    expect(within(card).getByTestId("section-visibility-badge")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+    expect(screen.queryByText("alice")).not.toBeInTheDocument()
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+  })
+
+  it("hides the Team card from a maintainer when the roster floor is owner-only", async () => {
+    // The progress floor can still say maintainer. Leaving the card open
+    // under "Only maintainers & owners can see this" is the roster choice
+    // appearing not to stick.
+    await withWorkload()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.OWNER,
+      canViewRoster: false,
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByText(/maintainers & owners/i)).not.toBeInTheDocument()
+    expect(screen.queryByText("alice")).not.toBeInTheDocument()
+  })
+
+  it("keeps the Team badge on owners after the roster floor is raised", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.OWNER,
+      canViewRoster: true,
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(within(card).getByTestId("section-visibility-badge")).toHaveTextContent(/only owners can see this/i)
+    expect(within(card).getByTestId("section-visibility-badge")).not.toHaveTextContent(/maintainers & owners/i)
+  })
+
+  it("lets an org owner change the Team floor and withholds the picker from a project owner who is not an org owner", async () => {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.OWNER, name: "owner" } },
+      { id: 2, name: "Other", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.OWNER, orgId: 1 }),
+      status: "ready",
+      refresh,
+    })
+    const ownerView = renderOverview()
+
+    const ownerCard = await screen.findByTestId("overview-team-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.OWNER))
+    const ownerBadge = within(ownerCard).getByTestId("section-visibility-badge")
+    expect(ownerBadge.tagName).toBe("BUTTON")
+    expect(ownerBadge.querySelector("svg.lucide-chevron-down")).toBeInTheDocument()
+    ownerView.unmount()
+
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: ROLE.MAINTAINER, name: "maintainer" } },
+    ])
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    await waitFor(() => expect(canEditRosterProgressFloorMock).toHaveBeenCalledWith(ROLE.MAINTAINER))
+    const badge = within(card).getByTestId("section-visibility-badge")
+    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+  })
+
+  it("persists an owner-only Team floor from the header", async () => {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: ROLE.MAINTAINER,
+      rosterViewMinRole: ROLE.MAINTAINER,
+      patch,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
+    fireEvent.click(trigger)
+    const option = await screen.findByRole("option", { name: /owners only/i })
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
+  })
+
+  it("starts expanded again after a fresh mount, with no saved collapsed state", async () => {
+    await withWorkload()
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    const view = renderOverview()
+
+    fireEvent.click(await screen.findByTestId("overview-team-toggle"))
+    expect(screen.getByTestId("overview-team-card")).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+
+    view.unmount()
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(card).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByTestId("overview-members-card")).toHaveAttribute("data-expanded", "false")
+  })
+
+  it("keeps Team and Members collapse independent", async () => {
+    await withWorkload()
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const team = await screen.findByTestId("overview-team-card")
+    const members = await screen.findByTestId("overview-members-card")
+    expect(team.nextElementSibling).toBe(members)
+    expect(team).toHaveAttribute("data-expanded", "true")
+    expect(members).toHaveAttribute("data-expanded", "false")
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "false")
+    expect(members).toHaveAttribute("data-expanded", "false")
+    expect(team.nextElementSibling).toBe(members)
+
+    fireEvent.click(screen.getByTestId("overview-members-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "false")
+    expect(members).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(team).toHaveAttribute("data-expanded", "true")
+    expect(members).toHaveAttribute("data-expanded", "true")
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.getByTestId("settings-members-section")).toBeInTheDocument()
+  })
+
+  it("restores teammate activity after a collapse/expand cycle", async () => {
+    await withWorkload()
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    fetchMemberActivity.mockResolvedValue({
+      recentEvents: [
+        { id: "e1", kind: "target.cell.commit", fileId: "f1", cellId: "c1", clientTs: 1, serverTs: 1700000000000, serverSeq: 2 },
+      ],
+      fileRollup: [
+        { fileId: "f1", fileName: "Genesis", cellsTouched: 12, wordCount: 340, lastActivityAt: 1700000000000 },
+      ],
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "View activity for alice" }))
+    expect(await screen.findByTestId("member-activity-panel")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-team-toggle"))
+    const panel = await screen.findByTestId("member-activity-panel")
+    expect(within(panel).getByText("Genesis")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "View activity for alice" }))
+    expect(screen.queryByTestId("member-activity-panel")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "View activity for alice" }))
+    expect(await screen.findByTestId("member-activity-panel")).toBeInTheDocument()
   })
 })
 
@@ -1224,6 +1817,48 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(defaultRow).toHaveTextContent("50%")
     expect(esRow).toHaveTextContent("20%")
     expect(esRow).toHaveTextContent("8%")
+  })
+
+  it("AQU-1458: tucks archived lanes into a collapsed group and keeps a one-active-lane project visible", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      lanes: [
+        { lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW },
+        { lane: "sw", name: "Swahili", totalCells: 100, filledCells: 20, validatedCells: 8, lastEditAt: NOW, archived: true, position: 1 },
+        { lane: "fr", name: "French", totalCells: 100, filledCells: 10, validatedCells: 4, lastEditAt: NOW, archived: true, position: 2 },
+      ],
+    })])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    expect(within(table).getByTestId("overview-lane-row-default")).toBeInTheDocument()
+    expect(within(table).queryByTestId("overview-lane-row-sw")).not.toBeInTheDocument()
+    expect(within(table).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
+
+    const toggle = within(table).getByTestId("overview-lane-archived-toggle")
+    expect(toggle).toHaveTextContent("Archived (2)")
+    expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    const sw = within(table).getByTestId("overview-lane-archived-row-sw")
+    const fr = within(table).getByTestId("overview-lane-archived-row-fr")
+    expect(sw).toHaveTextContent("Swahili")
+    expect(sw).toHaveTextContent("Archived")
+    expect(sw).toHaveTextContent("20%")
+    expect(sw.compareDocumentPosition(fr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(sw).queryByTestId("overview-lane-actions-sw")).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
+  })
+
+  it("does not render an archived group when every lane is active", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+    const table = await screen.findByTestId("overview-lane-table")
+    expect(within(table).queryByTestId("overview-lane-archived-toggle")).not.toBeInTheDocument()
   })
 
   it("does not render the lane table (or tabs) for a single-lane project", async () => {
@@ -1399,6 +2034,8 @@ describe("plan board on the overview", () => {
     expect(inspector).toBeInTheDocument()
     // Not inside a dialog: the page stays interactive behind it.
     expect(inspector.closest('[role="dialog"]')).toBeNull()
+    expect(within(inspector).getByRole("link", { name: /in editor$/ }))
+      .toHaveAttribute("href", "/project/p1/editor/file/f1")
   })
 
   it("withholds the planning controls from someone below maintainer", async () => {
@@ -1432,5 +2069,249 @@ describe("plan board on the overview", () => {
     }])
     renderOverview()
     expect(await screen.findByTestId("plan-empty")).toBeInTheDocument()
+  })
+
+  it("reads every count again when the project's settings change, without a reload (AQU-1493)", async () => {
+    // Settings open as a modal OVER this page, so closing them is no remount.
+    // Leaving headings out turned Ruth's chapter tiles complete but left the
+    // row on 94% and an open chapter card listing blank headings.
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([])
+    const ruth = (counts: Record<string, number>) => planUnit({
+      fileId: "f1", fileName: "Ruth", sectionKey: "RUT", ...counts,
+    })
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1,
+      units: [ruth({ totalCount: 93, filledCount: 87, validatedCount: 87 })],
+    })
+    getFileProgress.mockResolvedValue({
+      fileId: "f1", revision: 1, validationCount: 1,
+      file: { key: "", totalCount: 93, filledCount: 87, validatedCount: 87 },
+      sections: [{ key: "RUT 1", totalCount: 25, filledCount: 22, validatedCount: 22 }],
+    })
+    getFileSectionProgress.mockResolvedValue({
+      verses: [
+        { cellId: "h1", ref: "", filled: false, validated: false, structural: true },
+        { cellId: "v1", ref: "RUT 1:1", filled: true, validated: true },
+      ],
+    })
+    renderOverview()
+
+    const row = await screen.findByTestId("plan-row-f1-RUT")
+    await waitFor(() => expect(row).toHaveTextContent("94%"))
+    fireEvent.click(row)
+    fireEvent.click(await screen.findByTestId("plan-tile-RUT 1"))
+    await waitFor(() => expect(screen.getByTestId("plan-verse-chip-h1")).toBeInTheDocument())
+    const planReads = fetchProjectPlan.mock.calls.length
+    const progressReads = getFileProgress.mock.calls.length
+
+    // "Leave them out": the server now answers without the headings.
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1,
+      units: [ruth({ totalCount: 85, filledCount: 85, validatedCount: 85 })],
+    })
+    getFileProgress.mockResolvedValue({
+      fileId: "f1", revision: 1, validationCount: 1,
+      file: { key: "", totalCount: 85, filledCount: 85, validatedCount: 85 },
+      sections: [{ key: "RUT 1", totalCount: 22, filledCount: 22, validatedCount: 22 }],
+    })
+    getFileSectionProgress.mockResolvedValue({
+      verses: [{ cellId: "v1", ref: "RUT 1:1", filled: true, validated: true }],
+    })
+    // What the settings modal broadcasts once its write lands.
+    act(() => {
+      window.dispatchEvent(new CustomEvent("aquilla:project-settings-updated", {
+        detail: { projectId: "p1", version: 2, origin: "settings-modal" },
+      }))
+    })
+
+    await waitFor(() => expect(fetchProjectPlan.mock.calls.length).toBeGreaterThan(planReads))
+    await waitFor(() => expect(screen.getByTestId("plan-row-f1-RUT")).toHaveTextContent("100%"))
+    expect(screen.getByTestId("plan-row-f1-RUT")).toHaveTextContent("85 cells")
+    // The side panel's tiles and the chapter card still open beneath them.
+    expect(getFileProgress.mock.calls.length).toBeGreaterThan(progressReads)
+    await waitFor(() => expect(screen.queryByTestId("plan-verse-chip-h1")).toBeNull())
+    expect(screen.getByTestId("plan-chapter-detail")).toBeInTheDocument()
+  })
+
+  it("ignores a settings change to another project", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    renderOverview()
+    await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(fetchProjectPlan).toHaveBeenCalled())
+    const planReads = fetchProjectPlan.mock.calls.length
+    act(() => {
+      window.dispatchEvent(new CustomEvent("aquilla:project-settings-updated", {
+        detail: { projectId: "someone-else" },
+      }))
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(fetchProjectPlan.mock.calls.length).toBe(planReads)
+  })
+})
+
+it("AQU-1208: the overview exposes Monday setup for a connected project", async () => {
+  useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: true })
+  renderOverview()
+  expect(await screen.findByRole("link", { name: "Link a board" })).toHaveAttribute("href", "/project/p1/settings/integrations")
+  expect(mondayLink).toHaveBeenCalledWith("jwt", "p1")
+})
+
+it("AQU-1208: the overview hides the Monday card below maintainer", () => {
+  useProject.mockReturnValue({ project: projectRecord({ level: 500 }), status: "ready", refresh })
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: true })
+  renderOverview()
+  expect(screen.queryByLabelText("Monday.com")).toBeNull()
+  expect(mondayLink).not.toHaveBeenCalled()
+})
+
+// AQU-656: original-blob downloads. The files card they used to hang off was
+// replaced by the plan (AQU-1092); the gallery is now a compact assets card
+// that lists only files with a stored original.
+describe("imported originals on the overview (AQU-656)", () => {
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [],
+    })
+  })
+
+  function fileWith(
+    fileId: string,
+    name: string,
+    hasOriginalSource = false,
+  ): import("@/lib/sync/cells-read").FileSummary {
+    return {
+      fileId, projectId: "p1", name, fileType: "usfm",
+      sourceLanguage: null, targetLanguage: null,
+      cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100,
+      lastEditAt: null, hasOriginalSource,
+    }
+  }
+
+  function useFiles(files: import("@/lib/sync/cells-read").FileSummary[]) {
+    fetchProjectFiles.mockResolvedValue(files)
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 400,
+        name: "My Project",
+        files: files.map((f) => ({
+          id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount,
+        })),
+      }),
+      status: "ready",
+      refresh,
+    })
+  }
+
+  it("shows Download all originals and per-file download when a blob exists", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([
+      fileWith("f1", "Genesis.usfm", true),
+      fileWith("f2", "Notes.md"),
+    ])
+
+    renderOverview()
+
+    expect(await screen.findByTestId("imported-originals")).toBeInTheDocument()
+    expect(screen.getByTestId("download-originals-zip")).toHaveTextContent("Download all originals")
+    const original = screen.getByTestId("download-original-file")
+    expect(original.tagName).toBe("BUTTON")
+    expect(original).toHaveAttribute("aria-label", "Download original Genesis.usfm")
+    expect(screen.queryByRole("button", { name: "Download original Notes.md" })).not.toBeInTheDocument()
+    expect(screen.getByText("Genesis.usfm")).toBeInTheDocument()
+    expect(screen.queryByText("Notes.md")).not.toBeInTheDocument()
+  })
+
+  it("hides original-download controls when no file has a stored original", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+
+    await screen.findByTestId("plan-board")
+    expect(screen.queryByTestId("imported-originals")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
+  })
+
+  it("hides original-download controls when the caller is below the org's export floor", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: false })
+    useFiles([fileWith("f1", "Genesis.usfm", true)])
+
+    renderOverview()
+
+    await screen.findByTestId("plan-board")
+    expect(screen.queryByTestId("imported-originals")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
+  })
+
+  const manyOriginals = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      fileWith(`f${i + 1}`, `Book${String(i + 1).padStart(2, "0")}.usfm`, true),
+    )
+
+  it("caps the list at five rows and reveals the rest a batch at a time or all at once", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(12))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).getByText("Book05.usfm")).toBeInTheDocument()
+    expect(within(card).queryByText("Book06.usfm")).not.toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show 5 more" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show all (12)" })).toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show 5 more" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(10)
+    expect(within(card).getByText("Book10.usfm")).toBeInTheDocument()
+    // Only two rows are left hidden, so another batch would equal "Show all".
+    expect(within(card).queryByRole("button", { name: "Show 5 more" })).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show all (12)" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(12)
+    expect(within(card).getByText("Book12.usfm")).toBeInTheDocument()
+    expect(within(card).queryByRole("button", { name: "Show all (12)" })).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show fewer" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).queryByText("Book06.usfm")).not.toBeInTheDocument()
+  })
+
+  it("expands everything at once from the first page", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(23))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show all (23)" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(23)
+    expect(within(card).queryByRole("button", { name: "Show 5 more" })).not.toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show fewer" })).toBeInTheDocument()
+  })
+
+  it("shows no paging controls when five or fewer files have an original", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(5))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).queryByTestId("imported-originals-show-more")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("imported-originals-show-all")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("imported-originals-show-fewer")).not.toBeInTheDocument()
   })
 })

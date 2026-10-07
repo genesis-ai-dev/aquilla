@@ -309,6 +309,105 @@ function lineBoundaries(text: string): number[] {
 export type IdmlDeleteDirection = "backward" | "forward"
 export type IdmlDeleteGranularity = "character" | "word" | "line"
 
+interface IdmlParagraphChild {
+  node: ProseMirrorNode
+  /** First text position inside the child (meaningful for slots). */
+  contentStart: number
+}
+
+/** The paragraph's inline children — slots and protected tokens — in order. */
+function idmlParagraphChildren(doc: ProseMirrorNode): IdmlParagraphChild[] {
+  if (doc.childCount !== 1) return []
+  const paragraph = doc.child(0)
+  if (paragraph.type.name !== IDML_PARAGRAPH_NODE_NAME) return []
+  const children: IdmlParagraphChild[] = []
+  let position = 1
+  for (let index = 0; index < paragraph.childCount; index += 1) {
+    const node = paragraph.child(index)
+    children.push({ node, contentStart: position + 1 })
+    position += node.nodeSize
+  }
+  return children
+}
+
+/** The range one keypress removes inside a single slot, or null at its edge. */
+function slotDeletionRange(
+  slotStart: number,
+  text: string,
+  offset: number,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): IdmlRange | null {
+  const position = slotStart + offset
+  if (granularity === "word") {
+    const boundary = wordDeletionBoundary(text, offset, direction)
+    if (boundary === null) return null
+    return direction === "backward"
+      ? { from: slotStart + boundary, to: position }
+      : { from: position, to: slotStart + boundary }
+  }
+  const boundaries = granularity === "line"
+    ? lineBoundaries(text)
+    : segmentBoundaries(text, "grapheme")
+  if (direction === "backward") {
+    const previous = boundaries.filter((boundary) => boundary < offset).pop()
+    if (previous === undefined) return null
+    return { from: slotStart + previous, to: position }
+  }
+  const next = boundaries.find((boundary) => boundary > offset)
+  if (next === undefined) return null
+  return { from: position, to: slotStart + next }
+}
+
+/**
+ * AQU-1174: the character on the far side of a slot boundary.
+ *
+ * A style run one character long — the "source serif" apostrophe glue Biblica's
+ * English InDesign templates set inside possessives — renders as its own
+ * one-character span. Clicking just after it puts the caret at the *start* of
+ * the following slot, where the deletion above finds nothing before the caret
+ * and Backspace did nothing at all: the character looked locked. Deletion
+ * therefore steps into the adjacent editable slot, exactly as the caret would
+ * cross a style boundary in any other editor.
+ *
+ * Emptying a slot is legal (that is how an untranslated slot already looks), so
+ * this never touches the protected anchor sequence. Empty slots on the way are
+ * transparent, and the walk stops at a protected token — those are structure,
+ * not text, and are never deletable.
+ */
+function adjacentSlotDeletionRange(
+  doc: ProseMirrorNode,
+  slotStart: number,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): IdmlRange | null {
+  const children = idmlParagraphChildren(doc)
+  const origin = children.findIndex((child) => (
+    child.node.type.name === IDML_SLOT_NODE_NAME && child.contentStart === slotStart
+  ))
+  if (origin < 0) return null
+  const step = direction === "backward" ? -1 : 1
+  for (let index = origin + step; index >= 0 && index < children.length; index += step) {
+    const child = children[index]
+    if (
+      !child
+      || child.node.type.name !== IDML_SLOT_NODE_NAME
+      || child.node.attrs.editable !== true
+    ) return null
+    const text = slotPlainText(child.node)
+    if (text.length === 0) continue
+    const range = slotDeletionRange(
+      child.contentStart,
+      text,
+      direction === "backward" ? text.length : 0,
+      direction,
+      granularity,
+    )
+    if (range) return range
+  }
+  return null
+}
+
 /**
  * AQU-740: the range a Backspace/Delete press should remove, expressed in
  * ProseMirror positions and confined to one editable slot.
@@ -333,26 +432,14 @@ export function idmlDeletionRange(
   const position = selection.from
   const slot = editableSlotAt(doc, position)
   if (!slot) return null
-  const text = slotPlainText(slot.node)
-  const offset = position - slot.start
-  if (granularity === "word") {
-    const boundary = wordDeletionBoundary(text, offset, direction)
-    if (boundary === null) return null
-    return direction === "backward"
-      ? { from: slot.start + boundary, to: position }
-      : { from: position, to: slot.start + boundary }
-  }
-  const boundaries = granularity === "line"
-    ? lineBoundaries(text)
-    : segmentBoundaries(text, "grapheme")
-  if (direction === "backward") {
-    const previous = boundaries.filter((boundary) => boundary < offset).pop()
-    if (previous === undefined) return null
-    return { from: slot.start + previous, to: position }
-  }
-  const next = boundaries.find((boundary) => boundary > offset)
-  if (next === undefined) return null
-  return { from: position, to: slot.start + next }
+  const within = slotDeletionRange(
+    slot.start,
+    slotPlainText(slot.node),
+    position - slot.start,
+    direction,
+    granularity,
+  )
+  return within ?? adjacentSlotDeletionRange(doc, slot.start, direction, granularity)
 }
 
 export function isEditableIdmlSelection(selection: {

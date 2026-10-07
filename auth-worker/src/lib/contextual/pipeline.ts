@@ -20,9 +20,11 @@ import {
   type Concept,
   type TranslationBriefParameters,
 } from "./project-context"
+import type { TermMatchingSettings } from "../../../../src/lib/terminology/model"
 import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
 import { summarizeConstrual, renderConstrualL2 } from "./summarize"
 import { tallyVotes } from "./quorum"
+import { cellFindings } from "./findings"
 import { verifySpan } from "./verify"
 import type { LintRule } from "../agent/lint"
 import {
@@ -66,6 +68,8 @@ export interface RunSpanDeps {
   briefParameters?: TranslationBriefParameters
   /** Active key-term concepts for the project (scoped to the span in here). */
   concepts?: Concept[]
+  /** The project's affix inventory, so terms are found as the editor finds them. */
+  termMatching?: TermMatchingSettings
   steeringDirections?: string[]
   rules?: LintRule[]
   sourceLanguage?: string
@@ -251,7 +255,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     deps.examples.filter((e) => e.validated).length / EXAMPLES_TARGET,
     1,
   )
-  const accepted: { cellId: string; text: string }[] = []
+  const accepted: { cellId: string; text: string; findings: string[] }[] = []
   const ambiguityCount = briefDraft.ambiguityRegister.length
   let attemptPairs = work
   let carriedConstraints: { cellId: string; constraints: string[] }[] = []
@@ -261,7 +265,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   // the prompt buries the eight entries that matter for this passage. Computed
   // once from the span's source text, before the redraft loop.
   const spanTerms = deps.concepts
-    ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source))
+    ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source), deps.termMatching)
     : []
 
   // The evidence the draft prompt carries, as the support check will see it.
@@ -359,7 +363,18 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     const tally = tallyVotes(verified.votes, drafted.draft)
     const textById = new Map(drafted.draft.cells.map((c) => [c.cellId, c.text]))
     for (const cellId of tally.accepted) {
-      accepted.push({ cellId, text: textById.get(cellId) ?? "" })
+      accepted.push({
+        cellId,
+        text: textById.get(cellId) ?? "",
+        // What the reviewer should know about a cell that passed: kept as
+        // codes so the PR view can show them (they used to be discarded).
+        findings: cellFindings(cellId, {
+          votes: verified.votes,
+          flags,
+          ...(supportSignal ? { support: supportSignal } : {}),
+          redrafted: attempt === 2,
+        }),
+      })
     }
 
     if (tally.rejected.length === 0 || attempt === 2) {

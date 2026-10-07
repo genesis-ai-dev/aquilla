@@ -12,6 +12,11 @@ export interface BranchingSearchResult {
   /** Fraction of the FULL original query's unique words present in this cell's
    *  bag-of-words. [0, 1]. */
   queryCoverage: number
+  /** File holding the hit's source cell (AQU-1393) — what the Examples panel
+   *  names as the match's origin. Optional: a response cached before the
+   *  field existed omits it, and for a linked target it is the upstream
+   *  project's file, which this project's inventory does not contain. */
+  fileId?: string
 }
 
 export interface BranchingSearchResponse {

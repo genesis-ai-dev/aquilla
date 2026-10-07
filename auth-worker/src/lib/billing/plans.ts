@@ -92,31 +92,6 @@ export function periodAllowanceCredits(args: {
   return included + Math.max(0, Math.floor(args.addonPacks)) * addon + extra
 }
 
-export interface TargetLaneProject {
-  targetLanguage?: string | null
-  targetLanes?: readonly string[] | null
-  archivedLanes?: readonly string[] | null
-}
-
-function normalizeLaneTag(raw: string | null | undefined): string {
-  return (raw ?? "").trim().toLowerCase()
-}
-
-export function countDistinctTargetLanes(projects: readonly TargetLaneProject[]): number {
-  const tags = new Set<string>()
-  for (const project of projects) {
-    const archived = new Set((project.archivedLanes ?? []).map(normalizeLaneTag).filter(Boolean))
-    const primary = normalizeLaneTag(project.targetLanguage)
-    if (primary) tags.add(primary)
-    for (const lane of project.targetLanes ?? []) {
-      const tag = normalizeLaneTag(lane)
-      if (!tag || archived.has(tag)) continue
-      tags.add(tag)
-    }
-  }
-  return tags.size
-}
-
 export function fieldAllowanceWords(
   addonPacks: number,
   includedWords: number = FIELD_PLAN.includedWords,
@@ -169,6 +144,7 @@ export function periodAllowanceWords(args: {
 }
 
 export interface FieldPlanSettings {
+  freeWeeklyAllowance?: number
   priceCents?: number
   includedWords?: number
   addonWords?: number
@@ -185,6 +161,7 @@ export interface FieldPlanSettings {
 }
 
 export interface ResolvedFieldPlan {
+  freeWeeklyAllowance: number
   name: string
   intervalDays: number
   priceCents: number
@@ -230,6 +207,7 @@ export function resolveFieldPlan(
       ? Math.max(0, Math.floor(stored.enterpriseCreditsPerLanguagePerYear))
       : TIER_CREDITS.enterprise.creditsPerLanguagePerYear
   return {
+    freeWeeklyAllowance: stored?.freeWeeklyAllowance ?? 25,
     name: FIELD_PLAN.name,
     intervalDays: stored?.intervalDays ?? FIELD_PLAN.intervalDays,
     priceCents: stored?.priceCents ?? FIELD_PLAN.priceCents,

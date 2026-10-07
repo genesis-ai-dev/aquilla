@@ -19,6 +19,26 @@ export function isThreadStale(
   return createdForTranslated !== currentTranslated
 }
 
+/**
+ * AQU-1233: suffix the projection appends to a comment's display label when the
+ * comment was posted through the Agent API rather than typed by its author.
+ * KEEP IN SYNC with sync-worker/src/events/comment-authorship.ts.
+ */
+export const AGENT_COMMENT_LABEL_SUFFIX = " (via agent)"
+
+/**
+ * The person behind a comment label, without the agent marker.
+ *
+ * Comment rows are shown per-comment, where the marker is the point. The author
+ * FILTER is per-person: one entry per authorId, so it must read as the person's
+ * name whichever of their comments happened to be seen last.
+ */
+export function stripAgentCommentMarker(label: string): string {
+  return label.endsWith(AGENT_COMMENT_LABEL_SUFFIX)
+    ? label.slice(0, -AGENT_COMMENT_LABEL_SUFFIX.length)
+    : label
+}
+
 export function extractMentions(text: string): string[] {
   const mentions = new Set<string>()
   const re = /(?:^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g

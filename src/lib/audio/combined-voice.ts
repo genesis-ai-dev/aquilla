@@ -19,7 +19,7 @@
 
 import { synthesizeForCell, setTtsStatus, ttsStatusKey } from "./tts"
 import { resolveCastVoice } from "./voices"
-import { resolveTtsProvider } from "./tts-providers"
+import { resolveTtsProvider, isServerTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
@@ -30,12 +30,14 @@ import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { synthesizeCellTts } from "@/lib/sync/tts"
+import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
+import { inworldLanguageForRequest } from "./inworld-languages"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
-/** Keep the joined request a single, sane TTS call. */
+/** Keep the joined request a single, sane TTS call (Inworld sync cap is 2000 chars). */
 export const MAX_COMBINED_CELLS = 12
 export const MAX_COMBINED_CHARS = 2000
 
@@ -50,6 +52,10 @@ export interface CombinedVoiceArgs {
   settings?: ProjectTtsSettings
   session: FrontierSession | null
   username: string
+  /** AQU-1462/1591: the lane this generation performs. Stamped on every attach,
+   *  so the shared clip belongs to that lane rather than to the default one.
+   *  Omitted for the default lane, which is what an absent tag resolves to. */
+  targetLang?: string
   onProgress?: (msg: string) => void
 }
 
@@ -86,12 +92,13 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   let truncated = false
   for (const c of ordered) {
     const t = c.translated.trim()
-    if (chosen.length >= MAX_COMBINED_CELLS || (chosen.length > 0 && chars + t.length > MAX_COMBINED_CHARS)) {
+    const nextLen = chars + t.length + (chosen.length > 0 ? SEPARATOR.length : 0)
+    if (chosen.length >= MAX_COMBINED_CELLS || (chosen.length > 0 && nextLen > MAX_COMBINED_CHARS)) {
       truncated = true
       break
     }
     chosen.push(c)
-    chars += t.length
+    chars = nextLen
   }
   if (chosen.length < 2) throw new Error("Selected lines are too long to voice together")
 
@@ -108,22 +115,25 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
     let audioId: string
     let ext: string
     let url: string
-    // Server-side branches (omnivoice, clone) return WAV; the client-synth
+    // Server-side branches (Inworld, clone) return WAV; the client-synth
     // branch overrides when it compresses.
     let combinedMime = "audio/wav"
 
-    if (provider === "omnivoice") {
-      // Server-side: one OmniVoice call for the whole joined clip; the worker
+    if (isServerTtsProvider(provider)) {
+      // Server-side: one Inworld call for the whole joined clip; the worker
       // stores it (native clone when a reference is set) and returns its id.
       onProgress?.("Synthesizing combined clip…")
+      const language = inworldLanguageForRequest(voice, project.targetLanguage)
       const result = await synthesizeCellTts(
         {
           projectId: project.id,
           fileId,
           cellId: chosen[0].id,
           text: joined,
-          ...(project.targetLanguage ? { language: project.targetLanguage } : {}),
+          ...(language ? { language } : {}),
+          ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
           ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+          ...inworldSynthFieldsFromVoice(voice),
         },
         getSyncToken,
       )
@@ -216,6 +226,14 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         mimeType: combinedMime,
         voiceId: voice.id,
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        // AQU-1591: a generated voice is a performance of ONE language, so it
+        // belongs to the lane it was generated in. Without the tag it landed in
+        // the default lane and was heard there instead.
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+        // AQU-1572: one event per cell the clip was attached to, matching the
+        // per-cell shape of every other audio event.
+        audioOrigin: "generate",
+        surface: "voice-together",
         author: username,
       })
     }

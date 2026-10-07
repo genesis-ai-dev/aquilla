@@ -40,7 +40,12 @@ import {
   useVideoSoundingCellId,
 } from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
+import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
+import { youTubeVideoId } from "@/lib/video/youtube"
+import { YouTubePicture } from "./YouTubePicture"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
+import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { VideoAudioPicker } from "./VideoAudioPicker"
 import { videoSyncAction } from "./video-sync"
@@ -89,6 +94,8 @@ const VIDEO_READY_TIMEOUT_MS = 4000
 
 export interface MediaVideoPaneProps {
   src: string
+  projectId?: string
+  session?: FrontierSession | null
   /** The file the picture belongs to — the key the mute preference is stored
    *  under. Required rather than optional on purpose: an absent id would seed
    *  nothing and mute nothing, silently, and the compiler catching a caller
@@ -97,8 +104,16 @@ export interface MediaVideoPaneProps {
   cells: CellData[]
   /** A nonce-keyed seek from the timeline. Applied unconditionally, because the
    *  queue drops seeks in several ordinary cases (no session, scrubbing into
-   *  the trailing pad, a gap no section owns) and the picture must still move. */
-  seekSec?: { sec: number; nonce: number } | null
+   *  the trailing pad, a gap no section owns) and the picture must still move.
+   *
+   *  AQU-1117: `play` rides ALONG WITH the seek rather than arriving as a
+   *  separate command, and that is the whole point. "Play from this cue" has to
+   *  start at the cue, not at wherever the film happened to be paused — and the
+   *  seek does not land for two commits after the press. A play issued from the
+   *  press site would sound the old position first and jump afterwards. Carried
+   *  here, the start goes through `requestPlayWhenReady`, which already waits
+   *  on `seeked`/`canplay`, so the first frame heard is the cue's. */
+  seekSec?: { sec: number; nonce: number; play?: boolean } | null
   /** A nonce-keyed play/pause from the timeline (Space). Deliberately a TOGGLE
    *  rather than a desired state: the picture keeps its native controls in the
    *  standalone arrangement, so anything stateful would drift out of step with
@@ -137,7 +152,9 @@ export interface MediaVideoPaneProps {
 }
 
 export function MediaVideoPane({
-  src,
+  src: storedSrc,
+  projectId,
+  session,
   fileId,
   cells,
   seekSec,
@@ -169,6 +186,9 @@ export function MediaVideoPane({
   /** Bumped by "Try again", and by the stall ladder's last rung, so the element
    *  is rebuilt against the same URL. */
   const [loadAttempt, setLoadAttempt] = useState(0)
+  const src = useMediaPictureUrl({
+    src: storedSrc, projectId, fileId, session, retryKey: loadAttempt,
+  }) ?? ""
   /**
    * The player. These films are HLS playlists rather than files, which only
    * Safari can open on its own — so without this the picture, and the
@@ -190,7 +210,8 @@ export function MediaVideoPane({
   useEffect(() => {
     setAudioLanguage(readFilmAudioLanguage(src))
   }, [src])
-  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt, audioLanguage })
+  const youTube = useMemo(() => youTubeVideoId(src) != null, [src])
+  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt, audioLanguage, enabled: !youTube })
   const pipeline = stream.pipeline
   const chooseAudioLanguage = useCallback(
     (lang: string) => {
@@ -638,6 +659,12 @@ export function MediaVideoPane({
   // An explicit seek from the timeline. Applied whatever the queue thinks.
   const seekNonce = seekSec?.nonce
   const seekTarget = seekSec?.sec
+  /** AQU-1117: whether THIS seek also asked the picture to start. Read through
+   *  a ref because the effect below is keyed on the nonce alone (re-running it
+   *  on a changed flag would replay a stale seek); the render that carries a
+   *  new nonce also carries the flag that belongs to it. */
+  const seekWantsPlayRef = useRef(false)
+  seekWantsPlayRef.current = seekSec?.play === true
   /** A target held back because the element was still seeking. */
   const pendingScrubSeekRef = useRef<number | null>(null)
   /** The one place `currentTime` is written for a requested seek, so the
@@ -699,10 +726,53 @@ export function MediaVideoPane({
       // Still say where we are GOING, or the head sits on the old frame's
       // position for as long as the pipeline takes.
       publishPositionRef.current(sec)
-      return
+    } else {
+      applySeekRef.current(decided.seekSec)
     }
-    applySeekRef.current(decided.seekSec)
+
+    // AQU-1117: "Play from this cue" — this seek asked for the film as well as
+    // the frame. Issued AFTER the seek above so `requestPlayWhenReady` sees an
+    // element that is either already at the cue or still seeking to it; either
+    // way the first frame it starts on is the cue's, which is what separates
+    // this from a play command sent from the press site.
+    //
+    // Deliberately NOT a toggle. Pressing the button on a second cue while the
+    // film runs must jump and keep running, and a toggle would stop it.
+    // Standalone only (a slaved picture is the queue's to command), and never
+    // while the recorder holds the floor — `suspended`'s own watchdog would
+    // pause it back within 250ms, which is 250ms of the film in the take.
+    if (!seekWantsPlayRef.current || slaved || suspended) return
+    wantPlayRef.current = true
+    stallRef.current = IDLE_STALL_STATE
+    requestPlayWhenReady(video)
+    // The NONCE is the command: re-running on `slaved`, `suspended` or the
+    // stable play helper would replay a seek the user made long ago.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekNonce, seekTarget])
+
+  // THE FILM TAKES THE FLOOR WHEN IT STARTS (2026-09-30), in the standalone
+  // arrangement, where it is the transport: a take playing on a waveform or a
+  // chip's preview stops, and the next thing to start stops the film. The play
+  // queue has done this since 09-29; the film did not, so a take went on
+  // sounding under it (found in the throttled browser pass). A SLAVED picture
+  // never claims — the queue it follows already holds the floor, and a claim
+  // here would pause that queue and, through it, the picture itself.
+  // `pause` goes through the registered controller, so a claim stops the film
+  // exactly as the bar's pause does (intent, stall ladder, readiness wait).
+  const registeredControllerRef = useRef<VideoController | null>(null)
+  const [filmAudio] = useState<ActiveAudioController>(() => ({
+    isPlaying: () => {
+      const video = videoRef.current
+      return Boolean(video && !video.paused)
+    },
+    play: async () => { registeredControllerRef.current?.play() },
+    pause: () => { registeredControllerRef.current?.pause() },
+  }))
+  useEffect(() => {
+    // Slaved, or gone: never the floor-holder.
+    if (slaved) clearActiveAudioIf(filmAudio)
+    return () => clearActiveAudioIf(filmAudio)
+  }, [slaved, filmAudio])
 
   // Round 5: the playback bar has to DRIVE the picture it reports, so the pane
   // registers a controller reading the element live. Registered only in the
@@ -753,7 +823,11 @@ export function MediaVideoPane({
       },
     }
     setVideoController(controller)
-    return () => clearVideoControllerIf(controller)
+    registeredControllerRef.current = controller
+    return () => {
+      clearVideoControllerIf(controller)
+      if (registeredControllerRef.current === controller) registeredControllerRef.current = null
+    }
   }, [slaved, requestPlayWhenReady, cancelPendingPlay])
 
   // Space from the timeline. Only in the STANDALONE arrangement: when the queue
@@ -957,6 +1031,7 @@ export function MediaVideoPane({
     )
   }
 
+  const Picture = youTube ? YouTubePicture : "video"
   return (
     <div
       data-testid="tl-video-pane"
@@ -985,7 +1060,7 @@ export function MediaVideoPane({
         className={cn("relative", picture ? "" : "aspect-video w-full")}
         style={picture ? { width: `${picture.width}px`, height: `${picture.height}px` } : undefined}
       >
-        <video
+        <Picture
           ref={videoRef}
           // The pipeline is part of the identity: switching players has to
           // start from a clean element, never one holding the other's buffer.
@@ -993,7 +1068,7 @@ export function MediaVideoPane({
           // NO `src` WHERE THE STREAMING PLAYER IS DRIVING. It attaches its own
           // buffered source to the element, and an address sitting in `src`
           // beside it is a second source for the same picture.
-          src={pipeline === "hls" ? undefined : src}
+          src={pipeline === "hls" ? undefined : src || undefined}
           data-testid="video-pane-media"
           data-video-pipeline={pipeline}
           aria-label={t("editor.timeline.videoPaneLinked")}
@@ -1042,7 +1117,7 @@ export function MediaVideoPane({
             setFailed(true)
             // Whatever length we had is no longer trustworthy — a track sized
             // to a video that will not load is worse than one sized to the cues.
-            onVideoDuration?.(src, null)
+            onVideoDuration?.(storedSrc, null)
           }}
           onLoadedMetadata={(e) => {
             setMediaEpoch((n) => n + 1)
@@ -1050,7 +1125,7 @@ export function MediaVideoPane({
             // rather than the assumed 16:9.
             const real = intrinsicAspect(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
             if (real != null) setAspect(real)
-            onVideoDuration?.(src, e.currentTarget.duration)
+            onVideoDuration?.(storedSrc, e.currentTarget.duration)
             // A reload or a rebuild left the picture at the start of the film.
             // Put it back where the stall caught it, and start it again if that
             // is still what the transport wants — otherwise recovering from a
@@ -1069,7 +1144,7 @@ export function MediaVideoPane({
           }}
           onDurationChange={(e) => {
             setMediaEpoch((n) => n + 1)
-            onVideoDuration?.(src, e.currentTarget.duration)
+            onVideoDuration?.(storedSrc, e.currentTarget.duration)
           }}
           onTimeUpdate={
             slaved
@@ -1102,11 +1177,12 @@ export function MediaVideoPane({
                   // click-to-start overlay permanently, however well the
                   // picture played afterwards.
                   playFailuresRef.current = 0
+                  claimActiveAudio(filmAudio)
                   onVideoPlaying?.(true)
                 }
           }
-          onPause={slaved ? undefined : () => onVideoPlaying?.(false)}
-          onEnded={slaved ? undefined : () => onVideoPlaying?.(false)}
+          onPause={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
+          onEnded={slaved ? undefined : () => { clearActiveAudioIf(filmAudio); onVideoPlaying?.(false) }}
         />
         {/* Anchored to the PICTURE, not the black field: the exported video
              has no bars, so this is where the line really lives — and it can

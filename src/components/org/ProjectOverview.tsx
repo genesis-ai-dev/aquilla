@@ -1,6 +1,7 @@
+import { ProjectMondayCard } from "./ProjectMondayCard"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, ChevronDown, ChevronRight } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -25,28 +26,77 @@ import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
+import { LinkSeedFailedBanner } from "@/components/LinkSeedFailedNotice"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
+import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/file-original-download"
 import { AssignWork } from "./AssignWork"
+import { MembersSection } from "@/components/ProjectSettings/MembersSection"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isAutopilotVisible } from "@/lib/features/flags"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import {
+  downloadProjectOffline,
+  removeOfflineProject,
+  getOfflineQueueDepth,
+  useDownloadProgress,
+  useOfflineProjectStatus,
+} from "@/lib/offline/download"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
+import { laneChipLabel } from "./project-lanes"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
+import { PlanAssignments, type PlanAssignTarget } from "./plan/PlanAssignments"
+import {
+  assignmentsShowAudio, frontMatterShortUnits, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
+} from "./plan/plan-derive"
+import {
+  numberedBookCodes,
+  planSectionLabel,
+} from "@/lib/plan/plan-section"
 import { RightSidebarPanel } from "@/components/RightSidebarPanel"
 import { useIsLgUp } from "@/components/AppShell"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { planHasAudio } from "@/lib/plan/plan-status"
+import { mergeUnitAssignees } from "@/lib/plan/plan-assignees"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
-import { planUnitId, planUnitLabel, type PlanUnit } from "@/lib/plan/plan-status"
+import {
+  audioFileIds,
+  textFileIds,
+  planUnitIsNearlyComplete,
+  planUnitId,
+  planUnitLabel,
+  planOpenKind,
+  planUnitShortfall,
+  type PlanOpenKind,
+  type PlanUnit,
+} from "@/lib/plan/plan-status"
+import { type PlanSection } from "@/hooks/usePlanUnitSections"
+import {
+  getFileProgress,
+  getPlanFirstOpenCell,
+  prefetchFileProgress,
+} from "@/lib/progress/file-progress-resource"
+import { editorCellHref } from "@/components/project-workspace-lane-deeplink"
 import { planRowsToCsv, planCsvFilename } from "@/lib/progress/plan-csv"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
-import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
+import {
+  getProjectAssignments,
+  getProjectUnitAssignees,
+  getUnitAssignments,
+  type UnitAssignee,
+  type AssigneeWorkload,
+  type UnitAssignment,
+} from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
+import { canOpenAssignUi } from "@/lib/sync/role-policy"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -96,6 +146,14 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
+import { AnalysisReportDialog } from "@/components/analysis/AnalysisReportDialog"
+import { buildSourceLoader } from "@/lib/analysis/load-file-sources"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import {
+  PROJECT_SETTINGS_UPDATED_EVENT,
+  type ProjectSettingsUpdatedDetail,
+} from "@/hooks/useProjectSettings"
+import { progressPercent, progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 
 function ProjectOverviewSkeleton() {
@@ -227,7 +285,7 @@ function StatTile({ label, pct, colorClass, tooltip }: {
 }) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${Math.round(pct * 100)}%`}</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${progressPercentOfFraction(pct)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
@@ -240,6 +298,11 @@ function StatTile({ label, pct, colorClass, tooltip }: {
 
 const LANE_TAB_ALL = "__all__"
 const LANE_TAB_DEFAULT = "__default__"
+/**
+ * AQU-656: rows the imported-originals card shows before "Show more" /
+ * "Show all" kick in. Also the batch size each "Show more" reveals.
+ */
+const ORIGINALS_PAGE_SIZE = 5
 
 function laneTagToTab(tag: string | null): string {
   if (tag === null) return LANE_TAB_ALL
@@ -262,7 +325,7 @@ function StatBar({ label, value, total, fillClass, suffix }: {
   fillClass: string
   suffix?: string
 }) {
-  const pct = total > 0 ? Math.round((value / total) * 100) : 0
+  const pct = progressPercent(value, total)
   return (
     <div className="flex items-center gap-3">
       <span className="w-20 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
@@ -293,6 +356,28 @@ function StatBar({ label, value, total, fillClass, suffix }: {
 
 
 
+// ── AQU-1278: the plan's two background reads ────────────────────────────────
+
+/** Stable empty maps, so an untouched state never re-renders a consumer. */
+const NO_FILE_SECTIONS: ReadonlyMap<string, PlanSection[]> = new Map()
+const NO_UNIT_ASSIGNMENTS: ReadonlyMap<string, UnitAssignment[]> = new Map()
+const NO_ASSIGNMENTS: readonly UnitAssignment[] = []
+
+/**
+ * Cache key for one unit's assignments, WITH THE LANE IN IT.
+ *
+ * The per-unit read measures translated/validated in the lane it was asked
+ * for, so the same unit's row means different numbers on the Spanish tab and
+ * the French one. Keying by unit alone would hand the inspector the previous
+ * lane's counts for the frame between the tab switch and the new response —
+ * the one frame a manager is most likely to be reading. Keying by both means a
+ * lane switch simply misses, and a miss renders nothing rather than a lie.
+ */
+function unitAssignmentsKey(unitId: string, lane: string): string {
+  return `${unitId}\u0000${lane}`
+}
+
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectOverview() {
@@ -306,14 +391,35 @@ export function ProjectOverview() {
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
   const { project, status, refresh, pm, roleLevel } = useProject(id)
   useNavHistoryTitle(project?.name)
+  // AQU-1586: the target lane ROWS — the only place a lane's language is
+  // recorded. A lane's `legacy_tag` is its event key and can be the opaque
+  // lane id, so nothing on this page may label a lane with it.
+  const targetLaneRows = useMemo(
+    () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
+    [project?.lanes],
+  )
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   // AQU-507: candidate PMs = the project's effective members. Only fetched for
   // maintainer+ (the only role that can assign a PM); viewers never trigger the
   // roster read.
+  // AQU-1392: project-scope volume-analysis report. `jwtRef` keeps the token
+  // fetcher's identity stable across session refreshes, so opening the dialog
+  // doesn't restart its run when the JWT is renewed mid-walk.
+  const [analysisOpen, setAnalysisOpen] = useState(false)
+  const jwtRef = useRef(jwt)
+  jwtRef.current = jwt
+  const analysisFiles = useMemo(
+    () => (project?.files ?? []).map((f) => ({ fileId: f.id, name: f.name })),
+    [project?.files],
+  )
+  const analysisLoadSources = useMemo(
+    () => buildSourceLoader(id, buildFileScopedTokenFetcher(() => jwtRef.current, id)),
+    [id],
+  )
   const canManagePm = (project?.syncRole?.level ?? 0) >= 600
   const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
-  const { activeOrgId, refreshAccessibleProjects } = useActiveOrg()
+  const { activeOrgId, activeOrg, orgs, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
   // the page a shared-projects row links to. Recording it here clears the
@@ -336,6 +442,45 @@ export function ProjectOverview() {
     () => new Map(files.map((f) => [f.fileId, f.name])),
     [files],
   )
+  /**
+   * AQU-935: the lanes a project-wide Autopilot run may be started on —
+   * `['', ...registered non-archived lanes]`, the `EditorTable`/`ProjectWorkspace`
+   * contract. The REGISTRY is the source, not `audio.lanes`: a language nobody
+   * has drafted yet has no portfolio row, and that is precisely the lane a PM
+   * opens this card to start.
+   *
+   * Archived lanes are dropped because the server refuses to start on one
+   * (`isRegisteredTargetLane`), and offering a choice that fails on click is
+   * worse than not offering it.
+   */
+  const autopilotLanes = useMemo(() => {
+    const archived = new Set(
+      (project?.archivedLanes ?? []).map((lane) => lane.trim().toLowerCase()).filter(Boolean),
+    )
+    return [
+      "",
+      ...extraRegistryLanes(project?.targetLanes, project?.targetLanguage).filter(
+        (lane) => !archived.has(lane.trim().toLowerCase()),
+      ),
+    ]
+  }, [project?.targetLanes, project?.targetLanguage, project?.archivedLanes])
+  // AQU-1586: names for the lanes offered above — the autopilot chooser used
+  // to print each non-default lane's tag, which is the opaque lane id whenever
+  // a sibling already holds the language string.
+  const autopilotLaneLabels = useMemo(() => laneLabelsByTag(targetLaneRows), [targetLaneRows])
+  // AQU-656: originals live on `file_source_blobs`, not the plan. The files
+  // card this used to hang off was replaced by PlanBoard (AQU-1092), so the
+  // PM download gallery is this compact list — only files that have a blob.
+  const originalFiles = useMemo(
+    () => files.filter((f) => f.hasOriginalSource),
+    [files],
+  )
+  // The originals list starts capped at ORIGINALS_PAGE_SIZE rows; "Show more"
+  // grows it one page at a time, "Show all" expands it outright, and "Show
+  // fewer" collapses it back to the first page.
+  const [originalsShown, setOriginalsShown] = useState(ORIGINALS_PAGE_SIZE)
+  const visibleOriginals = originalFiles.slice(0, originalsShown)
+  const hiddenOriginalsCount = originalFiles.length - visibleOriginals.length
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   // AQU-507: PM assignment dialog. `pmSelection` holds the picker value (a
@@ -382,6 +527,13 @@ export function ProjectOverview() {
   // permission-composition question), or (b) a project-scoped "list authors
   // who have ever committed an event" endpoint independent of both floors.
   const [selectedMemberUsername, setSelectedMemberUsername] = useState<string | null>(null)
+  // AQU-1172: the Team card starts expanded on every mount. Collapse is
+  // opt-in convenience for this page load only — a reload always restores
+  // the assignments surface. Sibling of membersOpen (AQU-1171), independent.
+  const [teamOpen, setTeamOpen] = useState(true)
+  // AQU-1171: the Members card starts collapsed on every mount. The open
+  // state lives only in this render — a reload always returns to the header.
+  const [membersOpen, setMembersOpen] = useState(false)
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -403,12 +555,30 @@ export function ProjectOverview() {
   // come from AQU-485's org settings; `projectRoleLevel` (not orgRoleLevel)
   // is what gates viewing here per useOrgSettings' AD-12 max-wins contract —
   // a project-only invitee's project.syncRole can exceed their (absent) org
-  // role. Editing the floor is still an org-role (owner-only) action, so
-  // canEditVisibility below intentionally reads the org role, not the
-  // project role.
+  // role. Editing the floor is an org-owner action. Passing the project role
+  // into useOrgSettings made a project owner who is only an org maintainer
+  // look allowed to save; the server 403'd and the badge snapped back to
+  // "only maintainers & owners".
+  // The role has to come from membership in the org whose settings we patch.
+  // `activeOrg` is null on All organizations, which is the normal view when
+  // someone belongs to more than one org — the badge then rendered as a
+  // static label, so an owner who had raised the floor could not lower it.
   const projectRoleLevel = project?.syncRole?.level ?? null
-  const orgSettings = useOrgSettings(portfolioOrgId, projectRoleLevel, projectRoleLevel)
-  const canEditVisibility = canEditRosterProgressFloor(projectRoleLevel)
+  const orgRoleLevel =
+    (portfolioOrgId != null
+      ? orgs.find((org) => org.id === portfolioOrgId)?.role.level
+      : undefined)
+    ?? (activeOrg?.id === portfolioOrgId ? activeOrg.role.level : null)
+    ?? null
+  const orgSettings = useOrgSettings(portfolioOrgId, orgRoleLevel, projectRoleLevel)
+  const canEditVisibility = canEditRosterProgressFloor(orgRoleLevel)
+  // Names on the Team card are the roster. A progress floor of maintainer
+  // must not keep that card (and its "maintainers & owners" badge) open after
+  // the roster floor was raised to owner-only.
+  const teamNamesFloor = Math.max(
+    orgSettings.memberProgressViewMinRole,
+    orgSettings.rosterViewMinRole,
+  )
 
   const loadRow = useCallback(async () => {
     if (!jwt || portfolioOrgId == null) return
@@ -462,6 +632,9 @@ export function ProjectOverview() {
 
   // Per-file rollups
   const firstFileId = project?.files[0]?.id ?? null
+  // AQU-1570: re-read when the project's file SET changes, not only its first
+  // file — files a source link brings in usually land after the existing ones.
+  const fileSetKey = project?.files.map((f) => f.id).join("\u0000") ?? ""
   useEffect(() => {
     if (!jwt || !id || !firstFileId) { setFiles([]); return }
     let cancelled = false
@@ -470,7 +643,7 @@ export function ProjectOverview() {
       .then((rows) => { if (!cancelled) setFiles(rows) })
       .catch(() => { if (!cancelled) setFiles([]) })
     return () => { cancelled = true }
-  }, [jwt, id, firstFileId, project?.name])
+  }, [jwt, id, firstFileId, fileSetKey, project?.name])
 
   // AQU-498: token minter for MemberActivityPanel — same project-scoped
   // sync-token mint used for the per-file rollups above (verifyTokenForProject
@@ -494,11 +667,65 @@ export function ProjectOverview() {
   // the summary and Due soon in its row because two clocks disagreed.
   const [selectedPlanUnitId, setSelectedPlanUnitId] = useState<string | null>(null)
   const [planCsvCopied, setPlanCsvCopied] = useState(false)
+  /**
+   * The lane every plan read is measured in. "All" (null) and the default-lane
+   * tab both mean the default lane server-side, exactly as the progress reads
+   * resolve them — see the lane-tab note above.
+   */
+  const planLane = selectedLaneTag ?? ""
+  /**
+   * ONE token for the whole plan, not one per read.
+   *
+   * AQU-1278 gave this page four more readers — the inspector's chapter
+   * breakdown, the board's short-chapter sweep, the chapter detail behind the
+   * "go to the first outstanding cell" link, and the assignment panel — on top
+   * of the plan read itself, and the inspector remounts on every unit a manager
+   * clicks. The old closure POSTed /sync-token on every single call, so walking
+   * ten books minted ten tokens before a single bar was drawn.
+   *
+   * THE JWT IS PART OF THE CACHE KEY, and so is the project/file scope. A
+   * sync-token is minted for one identity and one project: the sync-worker
+   * authors events from the TOKEN's identity, so serving account A's token
+   * after a switch to account B would attribute B's work to A (AQU-616), and a
+   * token minted for another project is simply refused. Neither an account
+   * switch nor a route change remounts this component, so nothing else would
+   * catch either.
+   *
+   * SWARM-TODO(AQU-1278): `makeSyncTokenFetcher` (lib/sync/sync-token) is this
+   * exact cache, already written and already tested, and this should be one
+   * call to it. It cannot be adopted from here yet: ProjectOverview.test.tsx
+   * mocks "@/lib/sync/sync-token" with `fetchSyncToken` alone, so importing a
+   * second name from that module fails 55 tests in a file this lane does not
+   * own. Swap it in — deleting everything below — as soon as that mock carries
+   * the name.
+   */
+  const planTokenCache = useRef<{ scope: string; token: string; expiresAtMs: number } | null>(null)
   const getPlanToken = useMemo(() => {
     if (!id || !jwt) return null
-    return async () => {
-      const token = await fetchSyncToken(jwt, id, firstFileId ?? id, { projectName: project?.name })
-      return token.token
+    const tokenFileId = firstFileId ?? id
+    const scope = `${jwt}\u0000${id}\u0000${tokenFileId}`
+    return async (): Promise<string | null> => {
+      const now = Date.now()
+      const cached = planTokenCache.current
+      // Re-mint inside the last 30s of the token's life, so a read never
+      // starts with a credential that expires mid-flight.
+      if (cached && cached.scope === scope && cached.expiresAtMs > now + 30_000) return cached.token
+      try {
+        const minted = await fetchSyncToken(jwt, id, tokenFileId, { projectName: project?.name })
+        planTokenCache.current = {
+          scope,
+          token: minted.token,
+          // Seconds on the wire. A response without a usable `expiresIn` must
+          // not cache forever OR read as already expired: one minute, then
+          // re-mint.
+          expiresAtMs: now + (Number.isFinite(minted.expiresIn) ? minted.expiresIn * 1000 : 60_000),
+        }
+        return minted.token
+      } catch {
+        // Null, not a throw: every reader here is typed for "no token" and
+        // renders its own unreadable state. See useFileProgressResource.
+        return null
+      }
     }
   }, [id, jwt, firstFileId, project?.name])
   const {
@@ -506,7 +733,7 @@ export function ProjectOverview() {
     patchUnit: patchPlanUnit,
     status: planStatus,
     refresh: refreshPlan,
-  } = useProjectPlan({ projectId: id ?? null, lane: selectedLaneTag ?? "", getToken: getPlanToken })
+  } = useProjectPlan({ projectId: id ?? null, lane: planLane, getToken: getPlanToken })
   /**
    * The rows the board is actually drawing, in drawn order. The board owns the
    * filter, the arrangement and the folds that decide this, so the inspector's
@@ -521,6 +748,382 @@ export function ProjectOverview() {
     [planUnits, selectedPlanUnitId],
   )
   const planShowAudio = useMemo(() => planHasAudio(planUnits), [planUnits])
+  /**
+   * Which FILES carry recordings. Audio expectation is judged per file, never
+   * per project (`planShowAudio` above answers the different question "does
+   * this project track audio at all") — a project holding one dubbed episode
+   * beside sixty-five text books would otherwise owe a recording for every
+   * verse in the Bible. See `audioFileIds`.
+   */
+  const planAudioFiles = useMemo(() => audioFileIds(planUnits), [planUnits])
+  /**
+   * AQU-955: the mirror set — which FILES carry text work. An audio-only file
+   * (recordings present, no target text anywhere in this lane) is charged no
+   * text shortfall, so an ETEN audio-only project's books finally roll up on
+   * the medium they are actually being produced in instead of reading 0%
+   * forever against text nobody will ever write. See `textFileIds`.
+   */
+  const planTextFiles = useMemo(() => textFileIds(planUnits), [planUnits])
+
+  // ── AQU-1278: the two background reads the board and inspector cannot make ──
+  //
+  // Both live here rather than in the components that draw them, and for the
+  // same reason: the board draws up to sixty-six rows and the inspector
+  // remounts on every click, so any fetch either of them owned would multiply
+  // by the number of rows or by the number of units a manager walks through.
+
+  /** Every file's section rows, keyed by file id. The chapter grain of the plan. */
+  const [planFileSections, setPlanFileSections] =
+    useState<ReadonlyMap<string, PlanSection[]>>(NO_FILE_SECTIONS)
+  /** One unit's assignments, keyed by `unitAssignmentsKey` (unit + lane). */
+  const [planUnitAssignments, setPlanUnitAssignments] =
+    useState<ReadonlyMap<string, UnitAssignment[]>>(NO_UNIT_ASSIGNMENTS)
+  /** Bumped after an assign, to re-read a list nothing pushes to (AD-3). */
+  const [planAssignmentsNonce, setPlanAssignmentsNonce] = useState(0)
+  /**
+   * Bumped when this project's settings change, so every count on the plan is
+   * read again.
+   *
+   * Project settings open as a modal OVER this page, so closing them is not a
+   * remount and nothing here re-reads on its own. Several settings move the
+   * numbers without a single cell changing: "Count headings as translatable
+   * content" adds or removes every heading from every total, and the
+   * validation thresholds move every validated count. Before this, only the
+   * reads that happened to run again afterwards were right — the side panel's
+   * chapter tiles, fetched fresh whenever a row is clicked — while the rows,
+   * the panel's own totals and an open chapter card kept the old policy until
+   * a reload (AQU-1493). So it is one signal for all of them.
+   */
+  const [planDataVersion, setPlanDataVersion] = useState(0)
+  useEffect(() => {
+    if (!id || typeof window === "undefined") return
+    const onSettingsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectSettingsUpdatedDetail>).detail
+      if (detail?.projectId !== id) return
+      refreshPlan()
+      setPlanDataVersion((n) => n + 1)
+      // Assignment counts leave headings out by the same policy.
+      setPlanAssignmentsNonce((n) => n + 1)
+      void loadRow()
+      void loadWorkload()
+    }
+    window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
+    return () => window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
+  }, [id, refreshPlan, loadRow, loadWorkload])
+
+  /**
+   * The files whose sections the board actually needs, as ONE string.
+   *
+   * ONLY the files that own a NEARLY-COMPLETE unit. Chapter grain exists on the
+   * board for exactly one line — "chapters 12 and 40" under a row's shortfall —
+   * and that line only renders on a nearly-complete row. Reading every file in
+   * the project would have a fifty-document project fetching fifty files'
+   * sections on arrival to draw nothing at all, before anyone had scrolled to
+   * the plan. On the whole-Bible case that motivated this, the set is one file
+   * either way. The inspector's own chapter read is separate and fires on
+   * selection.
+   *
+   * The dependency below is this key rather than the unit list, and that is
+   * load-bearing: `planUnits` is re-minted by every plan read, including the
+   * one that follows a manager setting a single target date — which cannot
+   * move a chapter and must not re-read every file's sections. The ids are
+   * rebuilt from the key inside the effect so the dependency is honest rather
+   * than silenced with a lint suppression.
+   */
+  const planFileKey = useMemo(
+    () => Array.from(new Set([
+      ...planUnits
+        .filter((u) => planUnitIsNearlyComplete(u, tableNow, planAudioFiles, planTextFiles))
+        .map((u) => u.fileId),
+      // AQU-1278: plus whichever file the OPEN unit belongs to, nearly complete
+      // or not. The inspector's "N chapters are not assigned" counts the unit's
+      // chapters against what its assignments cover, and without its sections
+      // loaded that line never appears on a book in mid-flight — which is the
+      // book a manager is most likely to be staffing. It reads through the same
+      // freshness-gated resource the inspector's own hook uses, so a unit
+      // already on screen costs no extra request.
+      ...(selectedPlanUnit ? [selectedPlanUnit.fileId] : []),
+    ])).sort().join("\u0000"),
+    [planUnits, tableNow, planAudioFiles, selectedPlanUnit],
+  )
+
+  useEffect(() => {
+    if (!id || !getPlanToken || planFileKey === "") return
+    const fileIds = planFileKey.split("\u0000")
+    let cancelled = false
+    void (async () => {
+      // PREFETCH FIRST, and never a bare getFileProgress per file.
+      // `prefetchFileProgress` is queued at two in flight and skipped outright
+      // for a file already read in the last thirty seconds; `getFileProgress`
+      // has no freshness check and mints a sync token on every call, so calling
+      // it across sixty-six files would be sixty-six token POSTs and sixty-six
+      // uncapped parallel GETs — which is exactly the pile the prefetch queue
+      // exists to prevent.
+      try {
+        for (const fileId of fileIds) {
+          prefetchFileProgress(id, fileId, () => getPlanToken(), planLane)
+        }
+      } catch {
+        // Warming the queue is best-effort. If the queue itself refuses the
+        // work the reads below still run — uncapped, but they run — and a
+        // rejected fire-and-forget effect must never surface as an unhandled
+        // rejection in a PM's console.
+      }
+      // Then read the results back one at a time. This JOINS the queue rather
+      // than racing it: `loadResource` hands back the in-flight promise for a
+      // file the queue has already begun, and a file still waiting its turn
+      // joins this request when the queue reaches it. Either way each file is
+      // fetched once, and the await keeps the fan-out to one extra request.
+      for (const fileId of fileIds) {
+        try {
+          const body = await getFileProgress(id, fileId, () => getPlanToken(), planLane)
+          if (cancelled) return
+          // AQU-1278: labelled through the shared classifier, over the whole
+          // file's keys — a bare book code is chapter 1 for a one-chapter book
+          // and front matter beside real chapters, and only the other keys say
+          // which. The grid upstairs reaches the same answer the same way.
+          const numbered = numberedBookCodes(body.sections.map((s) => s.key))
+          const rows: PlanSection[] = body.sections.map((section) => ({
+            key: section.key,
+            label: planSectionLabel(section.key, numbered),
+            totalCount: section.totalCount,
+            filledCount: section.filledCount,
+            validatedCount: section.validatedCount,
+            // Optional on the wire — an older worker simply does not know.
+            // Absent reads as none, which is right for a bar that draws at zero.
+            audioCount: section.audioCount ?? 0,
+            audioValidatedCount: section.audioValidatedCount ?? 0,
+          }))
+          setPlanFileSections((prev) => new Map(prev).set(fileId, rows))
+        } catch {
+          // One unreadable file draws no chapter line. It must not take the
+          // other sixty-five down with it, so the loop keeps going.
+        }
+      }
+    })()
+    return () => { cancelled = true }
+    // `planDataVersion`: a settings change moves every section's counts
+    // without changing which files are read.
+  }, [id, getPlanToken, planLane, planFileKey, planDataVersion])
+
+  // The row's "chapters 3, 9, 41" — judged in `plan-derive.ts`, where a test
+  // can hold it still; this memo only caches it against the three inputs.
+  const planShortChaptersByUnit = useMemo(
+    () => shortChaptersByUnit(planUnits, planFileSections, planAudioFiles, planTextFiles),
+    [planUnits, planFileSections, planAudioFiles, planTextFiles],
+  )
+  // AQU-1493: …and which of them are short in the book's front matter too, so
+  // the row names it rather than only chapters.
+  const planFrontMatterShortUnits = useMemo(
+    () => frontMatterShortUnits(planUnits, planFileSections, planAudioFiles, planTextFiles),
+    [planUnits, planFileSections, planAudioFiles, planTextFiles],
+  )
+
+  // AQU-1278, round 6: who is on EVERY unit, read once per project and again
+  // after each assignment made from the inspector (the nonce). Null until it
+  // lands and null when the org's member-progress floor refuses it, which is
+  // the difference between "not yet" and "not for you" — both draw no chips.
+  const [projectAssignees, setProjectAssignees] = useState<UnitAssignee[] | null>(null)
+  useEffect(() => {
+    if (!jwt || !id) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await getProjectUnitAssignees(jwt, id)
+        if (!cancelled) setProjectAssignees(rows)
+      } catch {
+        if (!cancelled) setProjectAssignees(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [jwt, id, planAssignmentsNonce])
+
+  const selectedUnitFileId = selectedPlanUnit?.fileId ?? null
+  const selectedUnitSectionKey = selectedPlanUnit?.sectionKey ?? null
+
+  useEffect(() => {
+    if (!jwt || !id || selectedUnitFileId == null || selectedUnitSectionKey == null) return
+    // Through `planUnitId`, never a hand-rolled "file:section" — the board
+    // reads this map by that function's output, and two spellings of one id is
+    // a map that silently never hits.
+    const cacheKey = unitAssignmentsKey(
+      planUnitId({ fileId: selectedUnitFileId, sectionKey: selectedUnitSectionKey }),
+      planLane,
+    )
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await getUnitAssignments(
+          jwt, id, selectedUnitFileId, selectedUnitSectionKey, planLane,
+        )
+        if (!cancelled) setPlanUnitAssignments((prev) => new Map(prev).set(cacheKey, rows))
+      } catch {
+        // Below the org's member-progress floor (403), or offline. Either way
+        // the section renders nothing; a half-read list of assignees would say
+        // "only these two people are on this book", which is a false claim.
+        if (!cancelled) {
+          setPlanUnitAssignments((prev) => {
+            if (!prev.has(cacheKey)) return prev
+            const next = new Map(prev)
+            next.delete(cacheKey)
+            return next
+          })
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [jwt, id, selectedUnitFileId, selectedUnitSectionKey, planLane, planAssignmentsNonce])
+
+  /**
+   * Who is on each row, for the avatar chips.
+   *
+   * AQU-1278, round 6: read ONCE for the whole project, so every row has its
+   * people from the first paint. Until this read existed the board could only
+   * learn a unit's assignees from the per-unit read the inspector fires, and a
+   * row showed its chips the moment its inspector had been opened once and
+   * nothing before that (Sam, 2026-09-16). The per-unit read still overlays
+   * where it has been made — it is the fresher of the two after an assignment
+   * lands — and until the project-wide read arrives (or where the org's floor
+   * refuses it) the map holds only what the inspector has learned, exactly as
+   * before. `mergeUnitAssignees` owns the rule and is tested on its own.
+   */
+  const assigneesByUnit = useMemo(
+    () => mergeUnitAssignees(planUnits, projectAssignees, (unitId) =>
+      planUnitAssignments.get(unitAssignmentsKey(unitId, planLane))
+        ?.map((row) => ({ userId: row.assigneeUserId, username: row.username })),
+    ),
+    [planUnits, projectAssignees, planUnitAssignments, planLane],
+  )
+
+  /**
+   * The selected unit's own assignments, AS THREE STATES, not two.
+   *
+   * `undefined` means the question has not been answered — the read is still
+   * in flight, or it failed, or the org's floor refused it. An empty array
+   * means it was answered and nobody is assigned. Collapsing the two is what
+   * made the panel tell a manager that every chapter of a fully staffed book
+   * was unassigned whenever the request 5xx'd. The board already draws this
+   * distinction (`mergeUnitAssignees`); the inspector now draws it too.
+   */
+  const selectedUnitAssignmentRows = useMemo(() => {
+    if (!selectedPlanUnit) return undefined
+    return planUnitAssignments.get(unitAssignmentsKey(planUnitId(selectedPlanUnit), planLane))
+  }, [selectedPlanUnit, planUnitAssignments, planLane])
+  /** The same, flattened for the panel, which renders nothing either way. */
+  const selectedUnitAssignments = selectedUnitAssignmentRows ?? NO_ASSIGNMENTS
+
+  // How many of the selected unit's chapters nobody holds — the judgment,
+  // its three-state assignment answer included, lives in `plan-derive.ts`.
+  /**
+   * The selected unit's own section keys.
+   *
+   * Shared by the unassigned count below and the assignment panel, which needs
+   * the WHOLE unit's keys to tell a book's front matter ("GEN" beside "GEN 1",
+   * "GEN 2" …) from a one-chapter book, where the same bare code IS chapter 1.
+   * A row judging from its own assignment's keys alone read front matter as
+   * chapter 1 and named a chapter the person was not assigned to.
+   */
+  const selectedUnitSectionKeys = useMemo(() => {
+    if (!selectedPlanUnit) return undefined
+    return unitSectionKeys(selectedPlanUnit, planFileSections.get(selectedPlanUnit.fileId))
+  }, [selectedPlanUnit, planFileSections])
+
+  const selectedUnassignedChapters = useMemo(() => {
+    if (!selectedPlanUnit) return undefined
+    return unassignedChapterCount(
+      selectedPlanUnit,
+      planFileSections.get(selectedPlanUnit.fileId),
+      selectedUnitAssignmentRows,
+    )
+  }, [selectedPlanUnit, selectedUnitAssignmentRows, planFileSections])
+
+  /**
+   * Open the editor at a unit's first outstanding cell.
+   *
+   * ONE REQUEST, answered by the server (`readFirstOpenCell`). This used to
+   * walk the unit's chapters client-side and read one chapter's verses, which
+   * worked for Scripture and for nothing else — a document has no chapters to
+   * walk and a subtitle file's sections are time buckets, so on both the link
+   * opened the file and stopped. Audio could never be asked at all. Now the
+   * server orders the unit's cells the way the editor does and answers for
+   * every queue, cue sheets included.
+   *
+   * THE LANE IS ALWAYS PASSED, including as the empty default. An ABSENT lane
+   * param means "no deep-link intent, leave the editor in whatever language it
+   * was last in" (see `resolveDeepLinkLane`), so a link built from a surface
+   * that is itself lane-scoped must always say which lane, or the reader lands
+   * on the right cell in someone else's language.
+   *
+   * Nothing resolvable — a read that fails, a queue with nothing in it — still
+   * opens the FILE. A link that silently does nothing is worse than one that
+   * lands nearby.
+   */
+  const openPlanShortfall = useCallback(
+    async (unit: PlanUnit, kind?: PlanOpenKind) => {
+      if (!id || !getPlanToken) return
+      const hasAudio = planAudioFiles.has(unit.fileId)
+      const hasText = planTextFiles.has(unit.fileId)
+      const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio, hasText))
+      let cellId: string | null = null
+      if (wanted) {
+        try {
+          cellId = await getPlanFirstOpenCell(
+            id, unit.fileId, unit.sectionKey, wanted, () => getPlanToken(), planLane,
+          )
+        } catch {
+          cellId = null
+        }
+      }
+      // `flash` only rides with a cell: a scroll with no marker looks, from the
+      // reader's chair, exactly like a link that did nothing.
+      openWorkspace(editorCellHref(id, unit.fileId, cellId, planLane, cellId != null))
+    },
+    [id, getPlanToken, planLane, planAudioFiles, openWorkspace],
+  )
+
+  /**
+   * Open the editor on a unit — the inspector's title link (Sam, 2026-09-17).
+   *
+   * A whole-file unit is the file, opened at its top. A BOOK inside a
+   * Scripture file is that book's FIRST CELL: the editor deep-links to a cell
+   * and nothing else, so a file-level link would drop the reader at Genesis 1
+   * whichever book they clicked, and Sam ruled that intolerable. The server
+   * answers `first` in the same document order the queues use; nothing
+   * resolvable (an older worker, a failed read, a book with no cells) still
+   * opens the file, as `openPlanShortfall` does. The flash rides with the
+   * cell, as it does on every cell link: the editor scrolls the row into the
+   * middle of the screen, under the previous book's last verses, and without
+   * a marker "open Ruth" looks like it opened Philemon.
+   */
+  // Identity-stable for the memoized rows — an inline arrow at the call site
+  // would re-render all of them on every overview render. The `void` keeps a
+  // rejected navigation out of the unhandled-rejection channel, as the old
+  // inline wrapper did.
+  const handleOpenShortfall = useCallback(
+    (unit: PlanUnit) => { void openPlanShortfall(unit) },
+    [openPlanShortfall],
+  )
+
+  const openPlanUnit = useCallback(
+    async (unit: PlanUnit) => {
+      if (!id) return
+      let cellId: string | null = null
+      if (unit.sectionKey && getPlanToken) {
+        try {
+          cellId = await getPlanFirstOpenCell(
+            id, unit.fileId, unit.sectionKey, "first", () => getPlanToken(), planLane,
+          )
+        } catch {
+          cellId = null
+        }
+      }
+      openWorkspace(editorCellHref(id, unit.fileId, cellId, planLane, cellId != null))
+    },
+    [id, getPlanToken, planLane, openWorkspace],
+  )
+
   // AQU-1094/1095: setting a date and marking a unit done are maintainer work,
   // the same floor the project deadline uses. Read the FRESH role from
   // useProject, not the cached syncRole snapshot.
@@ -540,25 +1143,23 @@ export function ProjectOverview() {
   // The lane whose numbers the inspector is showing, named the way the lane
   // tabs name it — so nobody reads a French percentage as a Spanish one.
   // Labeled exactly as the lane tabs label it: the project's target language
-  // for the default lane, the lane tag itself for any other. Derived here
-  // rather than read off `selectedLane`, which is declared further down.
-  const planLanguageLabel = selectedLaneTag || project?.targetLanguage || null
-  const planInspector = selectedPlanUnit ? (
-    <PlanInspector
-      key={planUnitId(selectedPlanUnit)}
-      unit={selectedPlanUnit}
-      now={tableNow}
-      canPlan={canPlan}
-      showAudio={planShowAudio}
-      projectId={id ?? null}
-      getToken={getPlanToken}
-      lane={selectedLaneTag ?? ""}
-      languageLabel={planLanguageLabel}
-      onPatch={patchPlanUnit}
-      onClose={() => setSelectedPlanUnitId(null)}
-      onStep={stepPlanUnit}
-    />
-  ) : null
+  // for the default lane, the lane row's own name for any other (AQU-1586 —
+  // never the tag, which can be the lane id). Derived here rather than read
+  // off `selectedLane`, which is declared further down.
+  const planLanguageLabel = selectedLaneTag
+    ? laneLabelForTag(selectedLaneTag, targetLaneRows)
+    : project?.targetLanguage || null
+  /**
+   * How many target languages this project carries: its declared extra lanes
+   * plus the default one, which is a real language and always exists (AQU-728).
+   * Counted from the project record rather than from the portfolio's `lanes`,
+   * which only lists lanes that already have progress in them — a lane added
+   * this morning has none, and the inspector's "audio is shared by every
+   * language" note is exactly as true on the day a second lane is created.
+   * The primary language is the default lane even when it also sits in
+   * targetLanes (AQU-1473).
+   */
+  const planLaneCount = extraRegistryLanes(project?.targetLanes, project?.targetLanguage).length + 1
   // Selecting a unit that a refetch removed (a file deleted elsewhere) would
   // leave the inspector pointing at nothing.
   useEffect(() => {
@@ -581,11 +1182,112 @@ export function ProjectOverview() {
     )
   }, [planCsv, project?.name])
 
-  const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
-  const canAssign = (project?.syncRole?.level ?? 0) >= 500
+  const canAssign = canOpenAssignUi(
+    project?.syncRole?.level ?? null,
+    orgSettings.allowSelfAssignment,
+    orgSettings.assignmentMinRole,
+  )
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
+
+  /**
+   * AQU-1278: the inspector's Assign affordance. Same authority the Team card's
+   * Assign panel asks for (`canOpenAssignUi` over the org's assignmentMinRole,
+   * with AQU-496's self-assign carve-out), and never on an archived project —
+   * nothing about an archive should invite new work into it.
+   */
+  const planAssignTarget: PlanAssignTarget | undefined = useMemo(() => {
+    if (!canAssign || isArchived || !jwt || !id || selectedUnitFileId == null) return undefined
+    return {
+      projectId: id,
+      activeFileId: selectedUnitFileId,
+      files: (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
+      targetLanes: extraRegistryLanes(project?.targetLanes, project?.targetLanguage),
+      jwt,
+      author: session?.username ?? "",
+      roleLevel: project?.syncRole?.level ?? 0,
+      allowSelfAssignment: orgSettings.allowSelfAssignment,
+      assignmentMinRole: orgSettings.assignmentMinRole,
+      // AssignModal resolves the caller from `author` against the roster it
+      // fetches, which is the only identity this page actually has — the
+      // overview never reads the caller's numeric user id.
+      callerUserId: null,
+      onAssigned: () => {
+        setPlanAssignmentsNonce((n) => n + 1)
+        void handleAssigned()
+      },
+    }
+  }, [
+    canAssign, isArchived, jwt, id, selectedUnitFileId, project?.files, project?.targetLanes,
+    project?.targetLanguage, project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
+    orgSettings.assignmentMinRole, handleAssigned,
+  ])
+
+  const planInspector = selectedPlanUnit ? (
+    <PlanInspector
+      key={planUnitId(selectedPlanUnit)}
+      unit={selectedPlanUnit}
+      now={tableNow}
+      canPlan={canPlan}
+      showAudio={planShowAudio}
+      projectId={id ?? null}
+      getToken={getPlanToken}
+      lane={planLane}
+      dataVersion={planDataVersion}
+      languageLabel={planLanguageLabel}
+      laneCount={planLaneCount}
+      // The SAME set the board judges by. Audio expectation is a fact about a
+      // file, so a text-only book inside a dubbed file must read the same way
+      // in this panel as it does in the row that opened it — without this the
+      // two sit six inches apart disagreeing about one unit.
+      audioFiles={planAudioFiles}
+      // AQU-955: and the same text set, for the same reason — the panel and
+      // the row must agree about whether this file has text work at all.
+      textFiles={planTextFiles}
+      assignments={
+        <PlanAssignments
+          assignments={selectedUnitAssignments}
+          now={tableNow}
+          lane={planLane}
+          defaultLaneLabel={project?.targetLanguage ?? ""}
+          unassignedChapters={selectedUnassignedChapters}
+          unitSectionKeys={selectedUnitSectionKeys}
+          // Per FILE, not per project: a person assigned text in a book whose
+          // file carries no recordings is not short a single take, and the
+          // audio bar on their row would be a column of zeroes saying they are.
+          //
+          // AQU-1278: and never on a unit that records against a CUE SHEET. An
+          // assignment holds subtitle cells; the takes live on a different
+          // file's cells, so an assignee's recorded count on a dubbing project
+          // is structurally zero however much of the episode they have dubbed.
+          // Sam ruled this a real gap and a later ticket — **TODO: assignment-
+          // level audio on dubbing projects** — and text-only until then.
+          showAudio={assignmentsShowAudio(selectedPlanUnit, planAudioFiles)}
+          minRole={orgSettings.memberProgressViewMinRole}
+          viewerRoleLevel={projectRoleLevel}
+          ready={orgSettings.hasFetched}
+          assign={planAssignTarget}
+        />
+      }
+      onPatch={patchPlanUnit}
+      onClose={() => setSelectedPlanUnitId(null)}
+      onStep={stepPlanUnit}
+      onGoToFirstOpen={(kind) => { void openPlanShortfall(selectedPlanUnit, kind) }}
+      // AQU-1278: a verse chip in the chapter card. Unlike the link above it
+      // this needs no search — the chapter detail already told the inspector
+      // which cell — so it is a straight navigation, with the lane pinned and
+      // the flash on, exactly as `openPlanShortfall` ends.
+      onOpenCell={(cellId) => {
+        if (!id) return
+        openWorkspace(editorCellHref(id, selectedPlanUnit.fileId, cellId, planLane, true))
+      }}
+      // AQU-1278: the title opens the unit itself — the file, or a book's
+      // first cell — for the reader who wants the editor rather than the
+      // first gap in it (Sam, 2026-09-17). See `openPlanUnit`.
+      onOpenUnit={() => { void openPlanUnit(selectedPlanUnit) }}
+    />
+  ) : null
 
   const { isFrozen, toggle: toggleLifecycle, busy: lifecycleBusy } = useProjectLifecycle(
     id,
@@ -615,16 +1317,50 @@ export function ProjectOverview() {
   // Translated/Validated tiles + bars read that lane, and the cross-language
   // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
   const projectLanes: PortfolioLane[] = audio?.lanes ?? []
-  const showLaneTabs = projectLanes.length > 1
+  // AQU-1458: an archived lane is not another active language. The progress
+  // tabs stay hidden for a single active lane, and the Languages section
+  // still renders when an archived lane needs a place to live.
+  const activeProjectLanes = projectLanes.filter((lane) => lane.archived !== true)
+  const archivedProjectLanes = projectLanes.filter((lane) => lane.archived === true)
+  const showLaneTabs = activeProjectLanes.length > 1
+  const showLanguages = showLaneTabs || archivedProjectLanes.length > 0
+  // AQU-1586: label a lane by its ROW's name, not its tag — a tag is the event
+  // key and can be the opaque lane id, which read as gibberish on a PM's tabs.
   const laneTabOptions = [
     { label: t("org.orgHome.statusFilter.all"), value: LANE_TAB_ALL },
-    ...projectLanes.map((l) => ({
-      label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
+    ...activeProjectLanes.map((l) => ({
+      label: laneChipLabel(
+        l.lane,
+        project?.targetLanguage ?? "",
+        t("org.projectOverview.laneDefaultFallback"),
+        l.name,
+      ),
       value: l.lane === "" ? LANE_TAB_DEFAULT : l.lane,
     })),
   ]
   const activeLane: PortfolioLane | null =
-    selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+    selectedLaneTag != null ? activeProjectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+  /**
+   * AQU-1278: the same lanes the tabs above offer, MINUS "All", for the plan
+   * board's own picker. The plan is one language's answer — "All" has no
+   * meaning for a shortfall or a link into the editor — and `planLane` has
+   * always resolved a null (All) selection to the default lane anyway. The
+   * picker shows the lane actually being counted, and choosing one sets the
+   * page's single lane selection, so the Progress card above agrees with it.
+   */
+  const planLaneOptions = useMemo(
+    () => projectLanes.filter((l) => l.archived !== true).map((l) => ({
+      tag: l.lane,
+      // AQU-1586: the row's name, never the tag (which can be the lane id).
+      label: laneChipLabel(
+        l.lane,
+        project?.targetLanguage ?? "",
+        t("org.projectOverview.laneDefaultFallback"),
+        l.name,
+      ),
+    })),
+    [projectLanes, project?.targetLanguage, t],
+  )
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
   const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
@@ -726,6 +1462,39 @@ export function ProjectOverview() {
     }
   }
 
+  // Project Download UI (Phase 5) — Tauri desktop only. `offlineStore` is
+  // null outside Tauri (see OfflineStoreContext.tsx), so every handler below
+  // is a no-op in the plain browser SPA.
+  const { store: offlineStore } = useOfflineStore()
+  const offlineStatus = useOfflineProjectStatus(offlineStore, id || null)
+  const downloadProgress = useDownloadProgress(id)
+
+  async function handleMakeAvailableOffline() {
+    if (!offlineStore || !jwt || !id) return
+    setError(null)
+    try {
+      await downloadProjectOffline(offlineStore, id, jwt)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  function handleRemoveOfflineCopy() {
+    if (!offlineStore || !id) return
+    setError(null)
+    const queueDepth = getOfflineQueueDepth(offlineStore, id)
+    if (queueDepth > 0) {
+      setError(t("org.projectOverview.offlineRemoveBlocked", { count: queueDepth }))
+      return
+    }
+    const result = removeOfflineProject(offlineStore, id)
+    if (!result.ok && result.reason === "queue-not-empty") {
+      // Lost a race with a write that queued between the check above and the
+      // removal itself — same message, fresh count.
+      setError(t("org.projectOverview.offlineRemoveBlocked", { count: result.queueDepth }))
+    }
+  }
+
   // Language pair label, e.g. "Greek → Bambara". Arrow is wrapped so it
   // visually mirrors under RTL instead of pointing away from the target.
   const languagePair =
@@ -803,6 +1572,14 @@ export function ProjectOverview() {
               busy={lifecycleBusy}
             />
           )}
+          {/* AQU-1544: this is where Create New Project → Linked target lands.
+              When the new project's first mirror sync failed the dialog has
+              parked that, and this says so with a retry instead of presenting
+              an unexplained empty project. Self-gated; renders nothing
+              otherwise. */}
+          {status === "ready" && project && (
+            <LinkSeedFailedBanner projectId={project.id} onSynced={refresh} />
+          )}
           <div className="p-6">
             {status !== "ready" ? (
               nonReadyContent
@@ -816,6 +1593,23 @@ export function ProjectOverview() {
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
+                      {isTauriRuntime() && offlineStatus?.status === "ready" && (
+                        <Badge variant="secondary" className="shrink-0" data-testid="offline-ready-badge">
+                          <HardDriveDownload className="size-3" aria-hidden />
+                          {t("org.projectOverview.offlineReadyBadge")}
+                        </Badge>
+                      )}
+                      {isTauriRuntime() && offlineStatus?.status === "downloading" && (
+                        <Badge variant="outline" className="shrink-0" data-testid="offline-downloading-badge">
+                          <Spinner className="size-3" />
+                          {downloadProgress
+                            ? t("org.projectOverview.offlineDownloadingProgress", {
+                                done: downloadProgress.filesDone,
+                                total: downloadProgress.filesTotal,
+                              })
+                            : t("org.projectOverview.offlineDownloading")}
+                        </Badge>
+                      )}
                       {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
                       {!isArchived && isFrozen && (
                         <Badge
@@ -860,13 +1654,13 @@ export function ProjectOverview() {
                         <Settings className="h-4 w-4" />
                       </Link>
                     )}
-                    {isOwner && isArchived && (
+                    {canManage && isArchived && (
                       <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
                         {t("common.restore")}
                       </Button>
                     )}
-                    {/* Archive + Download + Lifecycle moved into overflow menu */}
-                    {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
+                    {/* Archive + Download + Lifecycle + Offline moved into overflow menu */}
+                    {(canManage || canToggleLifecycle || isTauriRuntime()) && !isArchived && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -903,7 +1697,26 @@ export function ProjectOverview() {
                               {isFrozen ? t("org.projectOverview.markAsActive") : t("org.projectOverview.markAsInactive")}
                             </DropdownMenuItem>
                           )}
-                          {isOwner && (
+                          {isTauriRuntime() && offlineStatus?.status !== "ready" && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                void handleMakeAvailableOffline()
+                              }}
+                              disabled={!jwt || offlineStatus?.status === "downloading"}
+                            >
+                              <CloudDownload className="size-4" />
+                              {offlineStatus?.status === "downloading"
+                                ? t("org.projectOverview.offlineDownloading")
+                                : t("org.projectOverview.makeAvailableOffline")}
+                            </DropdownMenuItem>
+                          )}
+                          {isTauriRuntime() && offlineStatus?.status === "ready" && (
+                            <DropdownMenuItem onClick={handleRemoveOfflineCopy}>
+                              <CloudOff className="size-4" />
+                              {t("org.projectOverview.removeOfflineCopy")}
+                            </DropdownMenuItem>
+                          )}
+                          {canManage && (
                             <DropdownMenuItem
                               onClick={() => setArchiveConfirmOpen(true)}
                               disabled={busy}
@@ -1118,8 +1931,8 @@ export function ProjectOverview() {
                   title={t("org.projectOverview.archiveDialogTitle")}
                   description={
                     project?.name
-                      ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects.`
-                      : "Archive this project? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects."
+                      ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects.`
+                      : "Archive this project? It will be hidden from the active projects list. Data is kept and maintainers can restore it anytime from Archived projects."
                   }
                   confirmLabel="Archive"
                   checkboxLabel="I understand this project will be hidden from the active list."
@@ -1131,6 +1944,10 @@ export function ProjectOverview() {
 
                 {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
               </div>
+
+              {project?.syncRole && (
+                <ProjectMondayCard projectId={id} jwt={jwt} roleLevel={project.syncRole.level} />
+              )}
 
               {/* ── Progress card ── */}
               {/* AQU-486: progress has no configurable floor today — everyone
@@ -1251,7 +2068,7 @@ export function ProjectOverview() {
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
                               t("org.projectOverview.audioValidatedTooltip"),
                               t("org.projectOverview.audioValidatedOfRecorded", {
-                                percent: Math.round(audioValidatedOfRecordedPct(audio) * 100),
+                                percent: progressPercentOfFraction(audioValidatedOfRecordedPct(audio)),
                               }),
                             ].join(" ")}
                           />
@@ -1312,24 +2129,25 @@ export function ProjectOverview() {
                     <p className="mt-3 text-xs text-muted-foreground">
                       {t("org.projectOverview.audioRecordedSummary", {
                         minutes: recordedMinutes(audio),
-                        percent: bidiIsolate(`${Math.round(audioPct(audio) * 100)}%`),
+                        percent: bidiIsolate(`${progressPercentOfFraction(audioPct(audio))}%`),
                       })}
                     </p>
                   )}
                 </div>
               )}
 
-              {/* ── Languages / lane table (AQU-538 §3.3) ── */}
-              {/* Rendered only when the project has more than one target
-                  language lane — N=1 projects are byte-identical to before. */}
-              {showLaneTabs && audio && (
+              {/* ── Languages / lane table (AQU-538 §3.3, AQU-1458) ── */}
+              {/* Hidden for a single active lane with nothing archived.
+                  An archived lane keeps the section visible so it can be found. */}
+              {showLanguages && audio && (
                 <OverviewLaneTable
                   projectId={id}
                   orgId={portfolioOrgId}
                   jwt={jwt}
-                  lanes={projectLanes}
+                  lanes={activeProjectLanes}
+                  archivedLanes={archivedProjectLanes}
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
-                  extraLanes={project?.targetLanes ?? []}
+                  extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
                   files={project?.files ?? []}
                   roleLevel={project?.syncRole?.level ?? 0}
                   author={session?.username ?? ""}
@@ -1345,12 +2163,15 @@ export function ProjectOverview() {
                   only place that answers "what is drafting, and how much is
                   waiting on my team". Renders nothing when the backend isn't
                   deployed for this environment. */}
-              {project && isFlagEnabled(project, "contextualTranslation") && (
+              {project && isAutopilotVisible(project) && (
                 <ProjectAutopilotPanel
                   key={id}
                   projectId={id}
                   fileNames={autopilotFileNames}
                   canStart={(roleLevel ?? 0) >= ROLE.CONTRIBUTOR}
+                  lanes={autopilotLanes}
+                  defaultLaneLabel={project?.targetLanguage ?? ""}
+                  laneLabels={autopilotLaneLabels}
                 />
               )}
 
@@ -1384,6 +2205,18 @@ export function ProjectOverview() {
                 orderRef={planOrderRef}
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
+                shortChaptersByUnit={planShortChaptersByUnit}
+                frontMatterShortUnits={planFrontMatterShortUnits}
+                assigneesByUnit={assigneesByUnit}
+                onOpenShortfall={handleOpenShortfall}
+                laneLabel={showLaneTabs ? planLanguageLabel : null}
+                lanes={planLaneOptions}
+                lane={planLane}
+                // Wrapped, not passed straight to the setter: the menu calls
+                // its handler with (value, eventDetails), and a setState that
+                // is handed a second argument today is one refactor away from
+                // being handed something it would read as an updater.
+                onLaneChange={(next) => setSelectedLaneTag(next)}
                 emptyAction={
                   <Button
                     size="sm"
@@ -1395,125 +2228,355 @@ export function ProjectOverview() {
                   </Button>
                 }
                 actions={
-                  orgSettings.canExport && planUnits.length > 0 ? (
-                    <ButtonGroup>
+                  <>
+                    {/* AQU-1392: the volume-analysis report over every file in
+                        the project — "how much new work is in here?", the
+                        question the plan board's status roll-up cannot answer. */}
+                    {analysisFiles.length > 0 && (
                       <Button
                         variant="outline"
                         size="sm"
-                        data-testid="plan-csv-copy"
-                        onClick={handleCopyPlanCsv}
+                        data-testid="project-analyze"
+                        onClick={() => setAnalysisOpen(true)}
                       >
-                        {planCsvCopied
-                          ? t("common.copied")
-                          : t("org.projectOverview.copyCsv")}
+                        {t("workspace.analysis.action")}
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="plan-csv-download"
-                        onClick={handleDownloadPlanCsv}
-                      >
-                        {t("org.projectOverview.downloadCsv")}
-                      </Button>
-                    </ButtonGroup>
-                  ) : null
+                    )}
+                    {orgSettings.canExport && planUnits.length > 0 ? (
+                      <ButtonGroup>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="plan-csv-copy"
+                          onClick={handleCopyPlanCsv}
+                        >
+                          {planCsvCopied
+                            ? t("common.copied")
+                            : t("org.projectOverview.copyCsv")}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          data-testid="plan-csv-download"
+                          onClick={handleDownloadPlanCsv}
+                        >
+                          {t("org.projectOverview.downloadCsv")}
+                        </Button>
+                      </ButtonGroup>
+                    ) : null}
+                  </>
                 }
               />
+              {project && (
+                <AnalysisReportDialog
+                  open={analysisOpen}
+                  onClose={() => setAnalysisOpen(false)}
+                  scope="project"
+                  label={project.name}
+                  files={analysisFiles}
+                  loadSources={analysisLoadSources}
+                />
+              )}
+
+              {/* AQU-656: original imported blobs. Hidden when the org export
+                  floor forbids it, and when no file has a stored original —
+                  Codex-migrated / pre-sidecar files are AQU-991, not a
+                  storage-audit empty state here. */}
+              {orgSettings.canExport && originalFiles.length > 0 && jwt && (
+                <div className="rounded-lg border bg-card p-5" data-testid="imported-originals">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold text-muted-foreground">
+                      {t("org.projectOverview.importedOriginalsHeading")}
+                    </h2>
+                    <AppTooltip content={t("org.projectOverview.downloadOriginalsTooltip")}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-testid="download-originals-zip"
+                        onClick={() => {
+                          const fileId = project?.files[0]?.id ?? originalFiles[0]?.fileId
+                          if (!fileId) return
+                          void downloadImportedOriginalsZip({
+                            projectId: id,
+                            projectName: project?.name ?? "project",
+                            jwt,
+                            fileId,
+                          })
+                        }}
+                      >
+                        {t("org.projectOverview.downloadOriginals")}
+                      </Button>
+                    </AppTooltip>
+                  </div>
+                  <ul
+                    id="imported-originals-list"
+                    className="space-y-1"
+                    aria-label={t("org.projectOverview.importedOriginalsListAria")}
+                  >
+                    {visibleOriginals.map((f) => (
+                      <li key={f.fileId} className="flex items-center gap-3 text-sm">
+                        <span className="min-w-0 flex-1 font-medium">
+                          <ExpandableName name={f.name} />
+                        </span>
+                        <AppTooltip content={t("fileDetails.downloadOriginal")}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0"
+                            aria-label={t("org.projectOverview.downloadOriginalAria", { fileName: f.name })}
+                            data-testid="download-original-file"
+                            onClick={() => {
+                              void downloadImportedOriginal({
+                                projectId: id,
+                                file: { id: f.fileId, name: f.name, type: f.fileType },
+                                getToken: async (fileId) => {
+                                  const tok = await fetchSyncToken(jwt, id, fileId, {
+                                    projectName: project?.name,
+                                  })
+                                  return tok.token
+                                },
+                              })
+                            }}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                        </AppTooltip>
+                      </li>
+                    ))}
+                  </ul>
+                  {originalFiles.length > ORIGINALS_PAGE_SIZE && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                      {/* "Show more" only earns its place while a full batch is
+                          still hidden — once fewer than a page remains it would
+                          do exactly what "Show all" does. */}
+                      {hiddenOriginalsCount > ORIGINALS_PAGE_SIZE && (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          data-testid="imported-originals-show-more"
+                          onClick={() => setOriginalsShown((n) => n + ORIGINALS_PAGE_SIZE)}
+                        >
+                          {t("org.projectOverview.importedOriginalsShowMore", {
+                            count: ORIGINALS_PAGE_SIZE,
+                          })}
+                        </button>
+                      )}
+                      {hiddenOriginalsCount > 0 ? (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          aria-expanded={false}
+                          data-testid="imported-originals-show-all"
+                          onClick={() => setOriginalsShown(originalFiles.length)}
+                        >
+                          {t("org.projectOverview.importedOriginalsShowAll", {
+                            count: originalFiles.length,
+                          })}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          aria-expanded={true}
+                          data-testid="imported-originals-show-fewer"
+                          onClick={() => setOriginalsShown(ORIGINALS_PAGE_SIZE)}
+                        >
+                          {t("org.projectOverview.showFewer")}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Team / Assignments card ── */}
               {/* AQU-486: per-assignee progress is gated by the AQU-485
                   memberProgressViewMinRole floor (same "who sees each
                   person's productivity" policy WorkloadRollup/UsageRollup use
                   on the org overview) — a lower-role account must not see
-                  this card exist at all, not an empty/placeholder version. */}
+                  this card exist at all, not an empty/placeholder version.
+                  Names on the rows are also the roster, so an owner-only
+                  roster floor raises this gate with them (AQU-1172). */}
               <SectionVisibilityGate
-                minRole={orgSettings.memberProgressViewMinRole}
+                minRole={teamNamesFloor}
                 viewerRoleLevel={projectRoleLevel}
                 ready={orgSettings.hasFetched}
               >
-                <div className={cn("relative rounded-lg border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold text-muted-foreground">{t("editor.navTitle.team")}</h2>
+                <div
+                  className={cn(
+                    "relative rounded-lg border bg-card px-5",
+                    teamOpen ? "py-5" : "py-3",
+                    sectionTintClass(teamNamesFloor),
+                  )}
+                  data-testid="overview-team-card"
+                  data-expanded={teamOpen ? "true" : "false"}
+                >
+                  <div className={cn("flex items-center justify-between gap-2", teamOpen && "mb-3")}>
+                    {/* Heading wraps the button: a button may only contain
+                        phrasing content, and an h2 inside it is invalid.
+                        Same header treatment as the Members card (AQU-1171). */}
+                    <h2 className="contents">
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                        aria-expanded={teamOpen}
+                        aria-controls="overview-team-panel"
+                        data-testid="overview-team-toggle"
+                        onClick={() => setTeamOpen((open) => !open)}
+                      >
+                        {teamOpen
+                          ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+                          : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
+                        {t("editor.navTitle.team")}
+                      </button>
+                    </h2>
                     <SectionVisibilityBadge
-                      minRole={orgSettings.memberProgressViewMinRole}
+                      minRole={teamNamesFloor}
                       canEdit={canEditVisibility}
                       onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
                       description={t("org.projectOverview.teamVisibilityDescription")}
                     />
                   </div>
-                  {workload.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {workload.map((w) => {
-                        const donePct = w.cellsTotal > 0 ? Math.round((w.cellsDone / w.cellsTotal) * 100) : 0
-                        const isSelected = w.username != null && w.username === selectedMemberUsername
-                        return (
-                          <li key={w.userId} className="flex items-center gap-3 text-sm">
-                            {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
-                            <AppTooltip content={w.username ?? String(w.userId)}>
-                              <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
-                                <InitialsAvatar
-                                  name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })}
-                                  size="sm"
-                                  className="shrink-0"
-                                />
-                                <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
-                              </span>
-                            </AppTooltip>
-                            <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                              <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
-                            </span>
-                            <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
-                              {t("org.projectOverview.openAssignmentsStat", {
-                                count: w.openAssignments,
-                                percent: bidiIsolate(`${donePct}%`),
-                              })}
-                            </span>
-                            {/* AQU-498: select a teammate to see their recent actions +
-                                files-worked-on rollup. Sits inside this SAME
-                                memberProgressViewMinRole gate, so no separate
-                                permission plumbing is needed here. */}
-                            {w.username != null && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
-                                aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
-                                aria-pressed={isSelected}
-                                onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
-                              >
-                                {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
-                              </Button>
-                            )}
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )}
+                  {teamOpen && (
+                    <div id="overview-team-panel">
+                      {workload.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {workload.map((w) => {
+                            const donePct = progressPercent(w.cellsDone, w.cellsTotal)
+                            const isSelected = w.username != null && w.username === selectedMemberUsername
+                            return (
+                              <li key={w.userId} className="flex items-center gap-3 text-sm">
+                                {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
+                                <AppTooltip content={w.username ?? String(w.userId)}>
+                                  <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
+                                    <InitialsAvatar
+                                      name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })}
+                                      size="sm"
+                                      className="shrink-0"
+                                    />
+                                    <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
+                                  </span>
+                                </AppTooltip>
+                                <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                  <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                                </span>
+                                <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
+                                  {t("org.projectOverview.openAssignmentsStat", {
+                                    count: w.openAssignments,
+                                    percent: bidiIsolate(`${donePct}%`),
+                                  })}
+                                </span>
+                                {/* AQU-498: select a teammate to see their recent actions +
+                                    files-worked-on rollup. Sits inside this SAME
+                                    memberProgressViewMinRole gate, so no separate
+                                    permission plumbing is needed here. */}
+                                {w.username != null && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
+                                    aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
+                                    aria-pressed={isSelected}
+                                    onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
+                                  >
+                                    {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
+                                  </Button>
+                                )}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
 
-                  {selectedMemberUsername && (
-                    <MemberActivityPanel
-                      projectId={id}
-                      username={selectedMemberUsername}
-                      getToken={getMemberActivityToken}
-                      onClose={() => setSelectedMemberUsername(null)}
-                    />
-                  )}
+                      {selectedMemberUsername && (
+                        <MemberActivityPanel
+                          projectId={id}
+                          username={selectedMemberUsername}
+                          getToken={getMemberActivityToken}
+                          onClose={() => setSelectedMemberUsername(null)}
+                        />
+                      )}
 
-                  {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
-                    <div className="mt-3 pt-3 border-t">
-                      <AssignWork
-                        projectId={id}
-                        files={project?.files ?? []}
-                        jwt={jwt ?? ""}
-                        author={session?.username ?? ""}
-                        onAssigned={handleAssigned}
-                      />
+                      {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
+                        <div className="mt-3 pt-3 border-t">
+                          <AssignWork
+                            projectId={id}
+                            files={project?.files ?? []}
+                            jwt={jwt ?? ""}
+                            author={session?.username ?? ""}
+                            targetLang={selectedLaneTag ?? ""}
+                            roleLevel={project?.syncRole?.level ?? 0}
+                            allowSelfAssignment={orgSettings.allowSelfAssignment}
+                            assignmentMinRole={orgSettings.assignmentMinRole}
+                            onAssigned={handleAssigned}
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               </SectionVisibilityGate>
+
+              {/* ── Members card (AQU-1171) — same add / change-role / revoke
+                  surface as Project Settings → Team members. Collapsed on
+                  every load so the overview stays as compact as the header
+                  row. AQU-486: rosterViewMinRole hides the shell entirely
+                  for a below-floor caller. Managers only, and never on an
+                  archived project. */}
+              {canManage && !isArchived && (
+                <SectionVisibilityGate
+                  minRole={orgSettings.rosterViewMinRole}
+                  viewerRoleLevel={projectRoleLevel}
+                  ready={orgSettings.hasFetched}
+                >
+                  <div
+                    className={cn(
+                      "relative rounded-lg border bg-card px-5",
+                      membersOpen ? "py-5" : "py-3",
+                      sectionTintClass(orgSettings.rosterViewMinRole),
+                    )}
+                    data-testid="overview-members-card"
+                    data-expanded={membersOpen ? "true" : "false"}
+                  >
+                    <div className={cn("flex items-center justify-between gap-2", membersOpen && "mb-3")}>
+                      {/* Heading wraps the button: a button may only contain
+                          phrasing content, and an h2 inside it is invalid. */}
+                      <h2 className="contents">
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          aria-expanded={membersOpen}
+                          aria-controls="overview-members-panel"
+                          data-testid="overview-members-toggle"
+                          onClick={() => setMembersOpen((open) => !open)}
+                        >
+                          {membersOpen
+                            ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+                            : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
+                          {t("editor.navTitle.members")}
+                        </button>
+                      </h2>
+                      <SectionVisibilityBadge
+                        minRole={orgSettings.rosterViewMinRole}
+                        canEdit={canEditVisibility}
+                        onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
+                        description={t("org.projectOverview.membersVisibilityDescription")}
+                      />
+                    </div>
+                    {membersOpen && (
+                      <div id="overview-members-panel">
+                        <MembersSection projectId={id} />
+                      </div>
+                    )}
+                  </div>
+                </SectionVisibilityGate>
+              )}
             </div>
           )}
           </div>

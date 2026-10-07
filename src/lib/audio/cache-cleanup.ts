@@ -3,9 +3,14 @@
 // published when sensitive bytes could not be removed.
 
 import { __resetAudioCacheMemo } from "./bytes-cache"
+import { purgeEgressExportCache } from "@/lib/egress/export-cache"
 import { markOpfsUnavailable } from "@/lib/storage/opfs-availability"
 
 export async function purgeAudioCachesOnSignOut(options: { strict?: boolean } = {}): Promise<void> {
+  // The egress export cache is IndexedDB-backed (zips of everything the user
+  // could read) — purge it BEFORE the OPFS guard so it clears even where OPFS
+  // is unavailable. Strict callers must know when these bytes survive.
+  await purgeEgressExportCache({ strict: options.strict === true })
   if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) {
     __resetAudioCacheMemo()
     return

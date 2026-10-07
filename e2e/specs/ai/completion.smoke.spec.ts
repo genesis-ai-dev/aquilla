@@ -31,6 +31,13 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   await alice.reload()
   await ws.waitForEditor()
 
+  const setup = await ws.openAiSetupFromFirstCell()
+  await expect(setup.getByRole("button", { name: /Personal override/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await ws.confirmAiSetup()
+
   await ws.clickSparkleOnFirstCell()
 
   // Mock LLM's default response is "Traducción de prueba".

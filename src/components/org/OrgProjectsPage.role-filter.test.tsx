@@ -34,7 +34,9 @@ vi.mock("@/lib/frontier/orgs", () => ({
 }))
 
 const fetchAccessibleProjects = vi.fn()
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
     ok: true as const,
     projects: await fetchAccessibleProjects(...a),
@@ -45,7 +47,24 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 const getPortfolio = vi.fn()
 vi.mock("@/lib/frontier/portfolio", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/frontier/portfolio")>()
-  return { ...actual, getPortfolio: (...a: unknown[]) => getPortfolio(...a) }
+  return {
+    ...actual,
+    getPortfolio: (...a: unknown[]) => getPortfolio(...a),
+    // AQU-1071: useOrgPortfolio reads the org rollup through the summary now
+    // (rollup + active-language count in one response), so the double lives here.
+    getOrgPortfolioSummary: async (...a: unknown[]) => ({
+      projects: await getPortfolio(...a),
+      activeLanguageCount: 0,
+    }),
+    getPortfolioPage: async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
+      const projects = (await getPortfolio()) as Array<{ name: string }>
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? projects.filter((p) => p.name.toLowerCase().includes(q)) : projects,
+        nextCursor: null,
+      }
+    },
+  }
 })
 
 const now = Date.now()
@@ -203,7 +222,7 @@ describe("org Projects Role filter (AQU-1042)", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /search projects/i }), {
       target: { value: "psal" },
     })
-    expect(rowNames()).toEqual(["Psalms"])
+    await waitFor(() => expect(rowNames()).toEqual(["Psalms"]))
   })
 
   it("shows the table's empty state, not a blank table, when nothing matches", async () => {

@@ -195,6 +195,7 @@ export function handleCellEvent(
 
   return {
     stmts,
+    eventInsertStmtIndex: 0,
     eventFrame,
     dirtyTables: projectionTablesFor(projectionTouches),
     chainSlot: chainGate,

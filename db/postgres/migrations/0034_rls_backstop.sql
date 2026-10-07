@@ -146,7 +146,9 @@ AS $$
          WHERE gpg.project_id = p_project_id AND gm.user_id = uid.id
       )
       OR
-      -- Path 3: org-wide membership (when project has an org)
+      -- Path 3: org-wide oversight (when project has an org) — Maintainer+ only
+      -- after migration 0083 (AQU-435 / AQU-1107). 0034 originally granted
+      -- any org_members row; do not copy that older predicate.
       EXISTS (
         SELECT 1 FROM projects pr
           JOIN org_members om ON om.org_id = pr.org_id

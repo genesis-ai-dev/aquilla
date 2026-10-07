@@ -71,11 +71,53 @@ export const requirePlatformAdmin = async (
 }
 
 /**
- * Step-up "sudo" gate. Requires a currently-valid elevated session (granted by
- * POST /api/v2/admin/elevation/verify, see routes/admin.ts) before reaching the
- * console's data/config routes. Mounted AFTER the bootstrap routes (/me,
- * /elevation/request, /elevation/verify) so those stay reachable to establish
- * elevation.
+ * Whether the current request carries an active step-up elevation (granted by
+ * POST /api/v2/admin/elevation/verify, see routes/admin.ts) — or elevation
+ * isn't required in this environment at all (see adminElevationRequired), in
+ * which case every platform admin counts as elevated.
+ *
+ * Extracted from requireAdminElevation so a handler outside `/admin/*` can
+ * ask the same question imperatively — e.g. a governance WRITE reached only
+ * via the platform-admin fallback (not genuine membership) on an org-scoped
+ * route. Those routes stay open (no elevation) for a genuine owner; this is
+ * for the platform-admin-only branch.
+ *
+ * [Pen test] Auth & session mgmt (2026-09-21, OPS-35): the elevated session is
+ * bound to the CREDENTIAL that established it (`session_key`), not merely to
+ * the account. It used to be keyed on `user_id` alone, which defeated this
+ * gate against the one attacker it names: the brute-force comment on
+ * /elevation/verify describes "a caller already holding a valid (e.g. stolen)
+ * non-elevated admin JWT", and under an account-wide grant that caller became
+ * elevated the moment the *real* operator elevated on their own machine — for
+ * the whole ELEVATION_SESSION_HOURS window, without ever seeing the emailed
+ * code. Matching on the session key means the code has to be redeemed by the
+ * same token that then uses the console.
+ *
+ * The binding lives HERE rather than in requireAdminElevation so that every
+ * caller inherits it — the imperative callers above reach the same
+ * platform-admin power by a different route, and an account-scoped check there
+ * would re-open OPS-35 on exactly the paths that skip the middleware.
+ */
+export const hasActiveElevation = async (c: Context<AuthHonoEnv>): Promise<boolean> => {
+  if (!adminElevationRequired(c.env)) return true
+  const user = c.get("user")
+  const row = await c.env.AQUILLA_PG.prepare(
+    `SELECT 1 AS ok FROM admin_elevations
+      WHERE user_id = ? AND session_key = ? AND elevated_until > now()`,
+  )
+    .bind(user.id, c.get("sessionKey"))
+    .first<{ ok: number }>()
+  return row != null
+}
+
+/**
+ * Step-up "sudo" gate. Requires a currently-valid elevated session before
+ * reaching the console's data/config routes. Mounted AFTER the bootstrap
+ * routes (/me, /elevation/request, /elevation/verify) so those stay reachable
+ * to establish elevation.
+ *
+ * The session binding that makes this gate meaningful (OPS-35) lives in
+ * {@link hasActiveElevation}, which this delegates to.
  *
  * No-op when elevation isn't required (see adminElevationRequired) — so local/dev
  * and the existing admin-route tests are unaffected.
@@ -84,17 +126,7 @@ export const requireAdminElevation = async (
   c: Context<AuthHonoEnv>,
   next: Next,
 ): Promise<Response | void> => {
-  if (!adminElevationRequired(c.env)) {
-    await next()
-    return
-  }
-  const user = c.get("user")
-  const row = await c.env.AQUILLA_PG.prepare(
-    `SELECT 1 AS ok FROM admin_elevations WHERE user_id = ? AND elevated_until > now()`,
-  )
-    .bind(user.id)
-    .first<{ ok: number }>()
-  if (!row) {
+  if (!(await hasActiveElevation(c))) {
     return c.json({ error: "elevation required" }, 403)
   }
   await next()

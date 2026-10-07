@@ -6,7 +6,7 @@ import { workersBuildMetadata } from "./assert-workers-build-env.mjs"
 const SUPPORTED_SURFACES = new Set(WORKER_SURFACES)
 
 /**
- * Workers Builds owns validation and route-free versions, never live traffic.
+ * Workers Builds owns compile-only previews, never live traffic.
  * Main is verified with production bindings; every other branch is isolated
  * behind the development profile. Promotion remains an explicit operator act.
  */

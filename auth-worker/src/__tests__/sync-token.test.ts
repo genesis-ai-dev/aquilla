@@ -81,7 +81,11 @@ describe("POST /api/v2/sync-token", () => {
     })
   })
 
-  it("auto-registers an unknown project when projectName is supplied", async () => {
+  // AQU-299 / SEC-9 regression guard: minting a sync token must never create a
+  // project. This route used to auto-register an unknown projectId whenever a
+  // `projectName` was supplied and hand the caller OWNER, so anyone who learned
+  // the UUID of a never-registered project could claim it.
+  it("never registers an unknown project, even with a projectName bootstrap", async () => {
     await seedUser(42, "alice")
     const res = await app.request(
       "/api/v2/sync-token",
@@ -96,16 +100,11 @@ describe("POST /api/v2/sync-token", () => {
       },
       env,
     )
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(403)
     const project = await env.AQUILLA_PG.prepare(
-      "SELECT id, name, created_by FROM projects WHERE id = 'proj-new'",
-    ).first<{ id: string; name: string; created_by: number }>()
-    expect(project).not.toBeNull()
-    expect(project).toMatchObject({
-      id: "proj-new",
-      name: "New Project",
-      created_by: 42,
-    })
+      "SELECT id FROM projects WHERE id = 'proj-new'",
+    ).first<{ id: string }>()
+    expect(project).toBeNull()
   })
 
   it("rejects unknown projects without a bootstrap payload with 403", async () => {

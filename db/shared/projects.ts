@@ -15,7 +15,13 @@
 // Takes the bare `AquillaDb` handle (db/shim/postgres.ts) so it is callable from
 // either worker — the same handle both inject as `env.AQUILLA_PG`.
 
-import type { AquillaDb } from "../shim/postgres"
+import type { AquillaDb, AquillaStatement } from "../shim/postgres"
+import {
+  ensureProjectLaneStmts,
+  listProjectLanes,
+  retryingLaneIdCollision,
+  type ProjectLaneRecord,
+} from "./lanes"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Create project
@@ -42,7 +48,27 @@ export interface CreateProjectInput {
    * this row rather than a live resolver, passes true.
    */
   writeCreatorMembership?: boolean
+  /**
+   * AQU-1223: seed `settings.sourceLanguage` / `settings.targetLanguage` at
+   * creation, atomically with the project row.
+   *
+   * This is the same end state the UI's create flow reaches by calling
+   * `patchProjectSettings(..., version 0)` immediately after the create — the
+   * seeded row lands at **version 1**, so a client that reads the version back
+   * and patches on top of it behaves identically either way. Omit both (the
+   * auth-worker route does) and no settings row is written at all, leaving the
+   * lazy first-write path in `updateProjectSettingsShared` exactly as it was.
+   *
+   * Only the language pair is seedable here. Every other settings key needs the
+   * version guard and per-key role floors that PatchSettings owns, which a
+   * create — writing before any project role exists to resolve — cannot honor.
+   */
+  settingsSeed?: { sourceLanguage?: string; targetLanguage?: string }
 }
+
+/** Version a seeded settings row lands at, matching the UI's create-then-patch
+ *  (`patchProjectSettings(..., 0)` → version 1). */
+const SEEDED_SETTINGS_VERSION = 1
 
 /**
  * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and,
@@ -57,30 +83,81 @@ export async function createProjectShared(
   db: AquillaDb,
   input: CreateProjectInput,
 ): Promise<{ inserted: boolean }> {
-  const projectStmt = db
-    .prepare(
-      `INSERT INTO projects (id, name, org_id, created_by)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(id) DO NOTHING`,
-    )
-    .bind(input.projectId, input.name, input.orgId, input.createdBy)
-
-  if (input.writeCreatorMembership) {
-    // Atomic with the project insert so a caller relying on the membership row
-    // for its role never observes a project without its creator's grant.
-    const membershipStmt = db
+  const seed = seededSettings(input.settingsSeed)
+  // Lane ids are minted inside the attempt. A uq_lanes_id collision rolls the
+  // whole batch back, so repeating it does not insert the project twice.
+  return retryingLaneIdCollision(async () => {
+    const projectStmt = db
       .prepare(
-        `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
-         VALUES (?, ?, 700, ?)
-         ON CONFLICT(project_id, user_id) DO NOTHING`,
+        `INSERT INTO projects (id, name, org_id, created_by)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
       )
-      .bind(input.projectId, input.createdBy, input.createdBy)
-    const [projectResult] = await db.batch([projectStmt, membershipStmt])
-    return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
-  }
+      .bind(input.projectId, input.name, input.orgId, input.createdBy)
 
-  const result = await projectStmt.run()
-  return { inserted: (result.meta?.changes ?? 0) > 0 }
+    // The project insert stays FIRST in the batch — `inserted` is read off index 0.
+    const stmts: AquillaStatement[] = [projectStmt]
+
+    if (input.writeCreatorMembership) {
+      // Atomic with the project insert so a caller relying on the membership row
+      // for its role never observes a project without its creator's grant.
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
+             VALUES (?, ?, 700, ?)
+             ON CONFLICT(project_id, user_id) DO NOTHING`,
+          )
+          .bind(input.projectId, input.createdBy, input.createdBy),
+      )
+    }
+
+    if (seed != null) {
+      // Same batch as the project insert: a create that reported the languages
+      // back to its caller must never leave a project without them (AQU-1223).
+      // DO NOTHING on conflict so an idempotent retry — or a settings row that
+      // somehow already exists for this id — never rolls a live blob backwards.
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO project_settings (project_id, settings, version, updated_by)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(project_id) DO NOTHING`,
+          )
+          .bind(input.projectId, JSON.stringify(seed), SEEDED_SETTINGS_VERSION, input.createdBy),
+      )
+    }
+
+    // AQU-1240 slice 6: every new project gets a source lane + a default target
+    // lane in the same batch as the project row, so the first cell write can
+    // resolve lane_id. Languages from settingsSeed name the rows; otherwise they
+    // land as placeholders and a later settings PATCH promotes the names.
+    stmts.push(
+      ...ensureProjectLaneStmts(db, input.projectId, { settings: seed }),
+    )
+
+    if (stmts.length > 1) {
+      const [projectResult] = await db.batch(stmts)
+      return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
+    }
+
+    const result = await projectStmt.run()
+    return { inserted: (result.meta?.changes ?? 0) > 0 }
+  })
+}
+
+/** Build the seeded settings blob, or null when there is nothing to seed.
+ *  Absent keys stay absent — a caller that sends neither language gets no
+ *  settings row at all, which is the pre-AQU-1223 behavior for every caller. */
+function seededSettings(
+  seed: CreateProjectInput["settingsSeed"],
+): Record<string, unknown> | null {
+  if (seed == null) return null
+  const settings: Record<string, unknown> = {}
+  if (seed.sourceLanguage !== undefined) settings.sourceLanguage = seed.sourceLanguage
+  if (seed.targetLanguage !== undefined) settings.targetLanguage = seed.targetLanguage
+  if (Object.keys(settings).length === 0) return null
+  return normalizeSettings(settings)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -103,6 +180,8 @@ export interface ProjectSettingsResponse {
   version: number
   updatedAt: string | null
   updatedBy: number | null
+  /** Lane rows for this project. Absent on older writers that only return the settings blob. */
+  lanes?: ProjectLaneRecord[]
 }
 
 export function normalizeSettings(
@@ -123,12 +202,25 @@ export function normalizeSettings(
   if (next.validationCount != null) {
     next.validationCount = validationThreshold(next)
   }
+  // AQU-490: the audio threshold gets the same treatment, and needs it more.
+  // It has been a writable settings key since AQU-508 with nothing clamping
+  // it, so a hand-written or old client value reaches the blob verbatim — and
+  // the histogram it is compared against only has buckets up to 15, so an
+  // unclamped 999 would make every recording permanently unvalidated with no
+  // way to see why.
+  if (next.validationCountAudio != null) {
+    next.validationCountAudio = clampThreshold(next.validationCountAudio)
+  }
   return next
 }
 
-function validationThreshold(settings: Record<string, unknown>): number {
-  const value = Math.floor(Number(settings.validationCount))
+function clampThreshold(raw: unknown): number {
+  const value = Math.floor(Number(raw))
   return Number.isFinite(value) ? Math.min(15, Math.max(1, value)) : 1
+}
+
+function validationThreshold(settings: Record<string, unknown>): number {
+  return clampThreshold(settings.validationCount)
 }
 
 function validationProjectionStmts(
@@ -213,7 +305,11 @@ export async function loadProjectSettings(
     .bind(projectId)
     .first<ProjectSettingsRow>()
 
-  if (row) return rowToResponse(row)
+  if (row) {
+    const response = rowToResponse(row)
+    response.lanes = await listProjectLanes(db, projectId)
+    return response
+  }
 
   // No row yet — treat as empty defaults at version 0. We don't auto-create
   // the row on read; first write does the upsert.
@@ -223,6 +319,7 @@ export async function loadProjectSettings(
     version: 0,
     updatedAt: null,
     updatedBy: null,
+    lanes: await listProjectLanes(db, projectId),
   }
 }
 
@@ -317,6 +414,19 @@ export async function updateProjectSettingsShared(
   const oldThreshold = validationThreshold(current.settings)
   const newThreshold = validationThreshold(normalizedSettings)
   const thresholdChanged = oldThreshold !== newThreshold
+  // Lane ids are minted inside the attempt. The settings write is in the same
+  // transaction, so a uq_lanes_id collision rolls the version change back too.
+  // The existing lane rows stop a stale targetLanes entry minting a lane (AQU-1585).
+  const batchWithLanes = (head: AquillaStatement[]) =>
+    retryingLaneIdCollision(() =>
+      db.batch([
+        ...head,
+        ...ensureProjectLaneStmts(db, input.projectId, {
+          settings: normalizedSettings,
+          existingLanes: current.lanes ?? [],
+        }),
+      ]),
+    )
 
   // No existing row yet — INSERT. Otherwise UPDATE with a version guard so a
   // racing writer can't sneak past us.
@@ -334,7 +444,7 @@ export async function updateProjectSettingsShared(
           db, input.projectId, newThreshold, newVersion, newSettingsJson,
         ))
       }
-      await db.batch(stmts)
+      await batchWithLanes(stmts)
     } catch (err) {
       // Race: another request inserted between our load and insert. Re-read and
       // return conflict only if another writer actually won. A projection /
@@ -372,7 +482,7 @@ export async function updateProjectSettingsShared(
     // returns `conflict` (0-row guard below); only real failures are `error`.
     let result: Awaited<ReturnType<typeof db.batch>>[number]
     try {
-      ;[result] = await db.batch(stmts)
+      ;[result] = await batchWithLanes(stmts)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error("project_settings update failed:", err)

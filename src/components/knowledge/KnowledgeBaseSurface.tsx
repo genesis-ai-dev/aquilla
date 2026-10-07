@@ -57,6 +57,8 @@ import {
   getKnowledgeDocument,
   getKnowledgeDocumentContent,
   getKnowledgeDocumentOriginal,
+  isKnowledgeIndexStalled,
+  KnowledgeBaseApiError,
   listKnowledgeDocuments,
   reindexKnowledgeDocument,
   uploadKnowledgeDocument,
@@ -89,11 +91,18 @@ function formatBytes(bytes: number, locale: string): string {
   return `${formatNumber(bytes / (1024 * 1024), locale, { maximumFractionDigits: 1 })} MB`
 }
 
-function statusVariant(status: KnowledgeDocument["indexStatus"]) {
-  if (status === "failed") return "destructive" as const
+/** A stalled doc reads as a failure, because that is what it is — the job that
+ *  owned it is gone (AQU-1376). */
+function statusVariant(status: KnowledgeDocument["indexStatus"], stalled: boolean) {
+  if (status === "failed" || stalled) return "destructive" as const
   if (status === "pending") return "outline" as const
   return "secondary" as const
 }
+
+/** How often the open list re-checks whether a pending doc has gone stale. The
+ *  badge has to be able to flip without a reload — the stall itself produces no
+ *  event to listen for. */
+const STALE_RECHECK_MS = 30_000
 
 export function KnowledgeBaseSurface({
   scope,
@@ -144,6 +153,19 @@ export function KnowledgeBaseSurface({
     void load()
   }, [load])
 
+  // Only tick while something is actually pending; an all-settled list has
+  // nothing to re-evaluate.
+  const hasPendingDoc = useMemo(() => docs.some((doc) => doc.indexStatus === "pending"), [docs])
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!hasPendingDoc) return
+    // No synchronous first tick: a `now` left over from an earlier render is only
+    // ever too *old*, which can delay the stalled badge by one interval but can
+    // never flag a live job early — the direction to err in.
+    const timer = window.setInterval(() => setNow(Date.now()), STALE_RECHECK_MS)
+    return () => window.clearInterval(timer)
+  }, [hasPendingDoc])
+
   const visibleDocs = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase(locale)
     if (!needle) return docs
@@ -157,8 +179,18 @@ export function KnowledgeBaseSurface({
       const doc = await uploadKnowledgeDocument(stableScope, jwt, file)
       setDocs((current) => [doc, ...current.filter((item) => item.id !== doc.id)])
       toast.add({ type: "success", title: t("knowledgeBase.uploadSuccess", { name: file.name }) })
-    } catch {
-      toast.add({ type: "error", priority: "high", title: t("knowledgeBase.uploadError", { name: file.name }) })
+    } catch (err) {
+      // AQU-1499: show the server's reason when it sent one. "Try again" is
+      // actively misleading for a rejection that no retry can clear (a .docx
+      // whose word/document.xml is too bloated to read) — the reason names the
+      // fix, so the uploader is not left guessing.
+      const reason = err instanceof KnowledgeBaseApiError ? err.serverMessage : undefined
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: t("knowledgeBase.uploadError", { name: file.name }),
+        ...(reason ? { description: reason } : {}),
+      })
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""
@@ -200,8 +232,13 @@ export function KnowledgeBaseSurface({
     setReindexingId(doc.id)
     try {
       await reindexKnowledgeDocument(stableScope, jwt, doc.id)
+      // The server restarts updated_at along with the status (AQU-1376); mirror
+      // that here or a retried doc would still read as stalled and keep
+      // offering the button that just fired.
       setDocs((current) => current.map((item) =>
-        item.id === doc.id ? { ...item, indexStatus: "pending" } : item,
+        item.id === doc.id
+          ? { ...item, indexStatus: "pending", updatedAt: new Date().toISOString() }
+          : item,
       ))
       toast.add({ type: "success", title: t("knowledgeBase.reindexing") })
     } catch {
@@ -340,6 +377,7 @@ export function KnowledgeBaseSurface({
             {visibleDocs.map((doc) => {
               const inherited = scopeKind === "project" && doc.scope === "org"
               const manageable = canManage && !inherited
+              const stalled = isKnowledgeIndexStalled(doc, now)
               return (
                 <Card key={doc.id} size="sm">
                   <CardHeader>
@@ -353,8 +391,10 @@ export function KnowledgeBaseSurface({
                     <CardAction>
                       <div className="flex items-center gap-2">
                         {inherited ? <Badge variant="outline">{t("common.org")}</Badge> : null}
-                        <Badge variant={statusVariant(doc.indexStatus)}>
-                          {t(`knowledgeBase.status.${doc.indexStatus}`)}
+                        <Badge variant={statusVariant(doc.indexStatus, stalled)}>
+                          {stalled
+                            ? t("knowledgeBase.status.stalled")
+                            : t(`knowledgeBase.status.${doc.indexStatus}`)}
                         </Badge>
                       </div>
                     </CardAction>
@@ -374,7 +414,7 @@ export function KnowledgeBaseSurface({
                       <ExternalLink data-icon="inline-start" />
                       {t("knowledgeBase.openOriginal")}
                     </Button>
-                    {manageable && doc.indexStatus === "failed" ? (
+                    {manageable && (doc.indexStatus === "failed" || stalled) ? (
                       <Button variant="ghost" size="sm" onClick={() => void handleReindex(doc)} disabled={reindexingId === doc.id}>
                         {reindexingId === doc.id
                           ? <Spinner data-icon="inline-start" />

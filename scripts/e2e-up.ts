@@ -13,6 +13,8 @@ import {
 } from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
 import { shouldWriteTestEnvFile } from "./lib/e2e-run-mode"
+import { acquireE2eSlotLock, type E2eSlotLock } from "./lib/e2e-lock"
+import { refuseBorrowedNodeModules, refuseMissingPlaywrightChromium } from "./lib/worktree-install-guard"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
@@ -22,6 +24,9 @@ const REPO_ROOT = path.resolve(__dirname, "..")
 // wrangler state, build dir, and Playwright --shard slice. Unset (or N=1) keeps
 // the original single-stack behavior byte-for-byte. K is the 0-based offset used
 // to fan out ports/names. See scripts/e2e-shard.ts for the parallel runner.
+// E2E_LOCK=off skips the per-slot lock (emergency only — concurrent runs will
+// kill each other's workers and drop that slot's database again).
+// E2E_LOCK_WAIT_SECONDS bounds the wait for the holder (default 1800).
 const SHARD_MATCH = /^(\d+)\/(\d+)$/.exec(process.env.E2E_SHARD ?? "")
 const SHARD_INDEX = SHARD_MATCH ? parseInt(SHARD_MATCH[1], 10) : 1
 const SHARD_TOTAL = SHARD_MATCH ? parseInt(SHARD_MATCH[2], 10) : 1
@@ -94,6 +99,10 @@ const COMMAND_TIMEOUT_MS = 10 * 60_000
 const cleanup: Array<() => Promise<void>> = []
 const logFiles: Record<string, string> = {}
 
+let slotLock: E2eSlotLock | undefined
+// Set only after the slot lock is held (or E2E_LOCK=off). freePort before
+// that kills the run this process is waiting on.
+let portsOwned = false
 let shuttingDown = false
 async function shutdown(code = 0): Promise<never> {
   if (shuttingDown) {
@@ -102,20 +111,28 @@ async function shutdown(code = 0): Promise<never> {
   }
   shuttingDown = true
   console.log(`\n${TAG}[e2e-up] shutting down…`)
-  // Iterate a copy so the array isn't mutated.
-  for (const fn of [...cleanup].reverse()) {
-    try { await fn() } catch (e) { console.error(e) }
-  }
-  // Reap workerd/vite orphans that survived SIGTERM so the next run (and a
-  // still-running `pnpm dev`) does not inherit our listeners.
-  for (const port of MANAGED_PORTS) {
-    await freePort(port)
+  if (portsOwned) {
+    // Iterate a copy so the array isn't mutated.
+    for (const fn of [...cleanup].reverse()) {
+      try { await fn() } catch (e) { console.error(e) }
+    }
+    // Reap workerd/vite orphans that survived SIGTERM so the next run (and a
+    // still-running `pnpm dev`) does not inherit our listeners.
+    for (const port of MANAGED_PORTS) {
+      await freePort(port)
+    }
   }
   process.exit(code)
 }
 
 process.on("SIGINT", () => { void shutdown(130) })
 process.on("SIGTERM", () => { void shutdown(143) })
+// process.exit (schema reset, sentinel mismatch, a second signal) still emits
+// exit. Releasing here, after shutdown's freePort, keeps the slot until our
+// listeners are gone and covers exits that never reach shutdown.
+process.on("exit", () => {
+  try { slotLock?.release() } catch (error) { console.error(error) }
+})
 
 async function waitForUrl(url: string, timeoutMs: number): Promise<void> {
   const start = Date.now()
@@ -453,6 +470,9 @@ function resetE2ePostgres(): string {
 }
 
 async function main(): Promise<void> {
+  refuseBorrowedNodeModules(REPO_ROOT)
+  refuseMissingPlaywrightChromium()
+
   if (!existsSync(AUTH_WORKER_DIR)) {
     console.error(`${TAG}[e2e-up] auth-worker not found at ${AUTH_WORKER_DIR}`)
     process.exit(1)
@@ -464,6 +484,16 @@ async function main(): Promise<void> {
   if (SHARDED) {
     console.log(`${TAG}[e2e-up] isolated stack: identity :${IDENTITY_PORT} · sync :${SYNC_WORKER_PORT} · vite :${VITE_PORT} · db ${E2E_PG_DB}`)
   }
+
+  // Held across freePort, the database reset, and shutdown's reap. Slot K is
+  // the same number the ports and database use, so e2e-shard's children do
+  // not contend with each other. The parent does not take a lock.
+  slotLock = await acquireE2eSlotLock({
+    slot: K,
+    cwd: REPO_ROOT,
+    command: process.argv.join(" "),
+  })
+  portsOwned = true
 
   // The per-shard backend URLs the browser app must be built against, and the
   // node-side helpers (seed.ts, auth.ts) read. Mock LLM URL is filled in once
@@ -565,9 +595,12 @@ async function main(): Promise<void> {
     // ADMIN_REQUIRE_ELEVATION here keep the step-up off so the console opens.
     // OPENROUTER_* point the agent/chat loops at the scripted mock above.
     // SYNC_WORKER_URL/ENVIRONMENT let identity reach the isolated sync worker.
+    // MCP_OAUTH_PINNED_CLIENTS: chatgpt.com 403s workerd's fetch of its client
+    // metadata document (AQU-1641), so the OAuth consent spec uses this copy.
     extraArgs: [
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
+      "--var", `BASE_URL:http://127.0.0.1:${VITE_PORT}`,
       "--var", "ADMIN_REQUIRE_ELEVATION:false",
       "--var", "ADMIN_EMAILS:alice@example.test",
       "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${OPENROUTER_MOCK_PORT}/api/v1`,
@@ -581,6 +614,11 @@ async function main(): Promise<void> {
       "--var", "GITLAB_ADMIN_TOKEN:e2e-gitlab-admin",
       "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_WORKER_PORT}`,
       "--var", "ENVIRONMENT:development",
+      "--var", `MCP_OAUTH_PINNED_CLIENTS:${JSON.stringify([{
+        client_id: "https://chatgpt.com/oauth/client.json",
+        client_name: "ChatGPT",
+        redirect_uris: ["https://chatgpt.com/connector_platform_oauth_redirect"],
+      }])}`,
     ],
     logFile: openLogFile(logFiles.identity),
     streamToParent: VERBOSE,
@@ -672,6 +710,18 @@ async function main(): Promise<void> {
   console.log(`${TAG}[boot ✓] all services up, handing off to Playwright`)
   console.log("")
 
+  // Disposable app container: the trusted harness runs in another container.
+  // Only synthetic stack configuration crosses this boundary, never secrets.
+  if (process.env.E2E_SERVE_ONLY === "1") {
+    writeFileSync("/tmp/aquilla-stack-ready.json", JSON.stringify({
+      ...browserEnv,
+      E2E_BASE_URL: `http://127.0.0.1:${VITE_PORT}`,
+      E2E_DATABASE_URL: E2E_PG_URL,
+    }))
+    await new Promise(() => {})
+    return
+  }
+
   // 8. Hand off to Playwright. Forward extra CLI args after `--`.
   // The default config combines Playwright's line/GitHub reporter with the
   // heartbeat reporter. A caller may still override it explicitly.
@@ -731,5 +781,6 @@ async function main(): Promise<void> {
 
 main().catch((e) => {
   console.error(`${TAG}[e2e-up] fatal:`, e)
-  void shutdown(1)
+  if (portsOwned) void shutdown(1)
+  else process.exit(1)
 })

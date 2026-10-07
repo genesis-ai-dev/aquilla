@@ -7,6 +7,7 @@ import { OrgOverview } from "./OrgOverview"
 import { OrgProjectsPage } from "./OrgProjectsPage"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
+import { summarizePortfoliosByOrg } from "@/lib/frontier/portfolio-metrics"
 
 function projectsRollupStat() {
   // Overview (and all-orgs) rollup tiles sit outside the nav. The label lives
@@ -48,6 +49,11 @@ vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
 vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
 vi.mock("@/hooks/usePlatformAdmin", () => ({ usePlatformAdmin: () => ({ isAdmin: false, loading: false }) }))
 
+// AQU-1071: the org's active-language count, as the mocked portfolio summary
+// reports it. The mock factory below repeats the literal rather than reading this
+// const: the factory runs at import time, before module-level initialization.
+const ORG_ACTIVE_LANGUAGES = 7
+
 // Mock portfolio fetch; keep real metrics helpers. Project list data is built
 // inside the factory so vi.hoist does not race with outer constants.
 vi.mock("@/lib/frontier/portfolio", async (importActual) => {
@@ -85,13 +91,47 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
       targetLanguage: null,
     },
   ]
+  const getPortfolio = vi.fn(async () => projects)
+  const getPortfolios = vi.fn(async () => [{ orgId: 1, projects }])
   return {
     ...actual,
-    getPortfolio: vi.fn(async () => projects),
-    // AQU-883: the all-orgs dashboard fans out through getPortfolios; tests
-    // that exercise that scope override this (default matches the member
-    // overview fixture so overview assertions stay hermetic).
-    getPortfolios: vi.fn(async () => [{ orgId: 1, projects }]),
+    getPortfolio,
+    getPortfolios,
+    // AQU-1071: the org rollup and the org's active-language count arrive in one
+    // response, and useOrgPortfolio reads both through this call.
+    getOrgPortfolioSummary: vi.fn(async () => ({
+      projects: await getPortfolio(),
+      activeLanguageCount: 7, // keep in step with ORG_ACTIVE_LANGUAGES
+    })),
+    getPortfolioAggregates: vi.fn(async () => ({
+      projectCount: 0,
+      avgTranslatedPct: 0,
+      avgValidatedPct: 0,
+      avgAudioPct: 0,
+      stalledCount: 0,
+      overdueCount: 0,
+      attentionCount: 0,
+      orgs: [],
+    })),
+    getPortfolioPage: vi.fn(async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
+      const list = await getPortfolio()
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+        nextCursor: null,
+      }
+    }),
+    getPortfoliosPage: vi.fn(async (_jwt: string, _orgIds: number[], opts?: { q?: string }) => {
+      const portfolios = await getPortfolios()
+      const list = portfolios.flatMap(({ orgId, projects: rows }) =>
+        rows.map((project) => ({ ...project, orgId })),
+      )
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+        nextCursor: null,
+      }
+    }),
   }
 })
 
@@ -138,14 +178,27 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   orgProviderKeys: {},
   canExport: true,
   exportMinRole: null,
+  canEgress: false,
+  egressMinRole: 700,
   canViewRoster: true,
   rosterViewMinRole: 600,
   canViewMemberProgress: true,
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  allowScopedLaneAssignment: false,
+  countStructuralCells: true,
+  autoPropagateRepetitions: true,
+  allowBulkValidateAiDrafts: false,
+  countStructuralOverrides: 0,
+  resetCountStructuralOverrides: vi.fn(),
+  // AQU-1037: assignment authority defaults to project_lead.
+  assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  languageEditMinRole: 600,
+  commentCreateMinRole: 200,
+  commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -167,7 +220,8 @@ beforeEach(async () => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   const { getWorkload } = await import("@/lib/sync/assignments")
   vi.mocked(getWorkload).mockResolvedValue([])
-  const { getPortfolio } = await import("@/lib/frontier/portfolio")
+  const { getPortfolio, getOrgPortfolioSummary, getPortfolioPage, getPortfolios, getPortfoliosPage, getPortfolioAggregates } =
+    await import("@/lib/frontier/portfolio")
   vi.mocked(getPortfolio).mockImplementation(async () => {
     const now = Date.now()
     return [
@@ -202,6 +256,39 @@ beforeEach(async () => {
         targetLanguage: null,
       },
     ]
+  })
+  vi.mocked(getPortfolios).mockImplementation(async () => [{ orgId: 1, projects: await getPortfolio("jwt", 1) }])
+  vi.mocked(getPortfolioAggregates).mockImplementation(async () => {
+    const projects = await getPortfolio("jwt", 1)
+    const summary = summarizePortfoliosByOrg(
+      projects.map((project) => ({ ...project, orgId: 1 })),
+      [1],
+      Date.now(),
+    )
+    return { ...summary.totals, orgs: summary.orgs }
+  })
+  vi.mocked(getOrgPortfolioSummary).mockImplementation(async () => ({
+    projects: await getPortfolio("jwt", 1),
+    activeLanguageCount: ORG_ACTIVE_LANGUAGES,
+  }))
+  vi.mocked(getPortfolioPage).mockImplementation(async (_jwt, _orgId, opts) => {
+    const list = await getPortfolio("jwt", 1)
+    const q = opts?.q?.trim().toLowerCase() ?? ""
+    return {
+      projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+      nextCursor: null,
+    }
+  })
+  vi.mocked(getPortfoliosPage).mockImplementation(async (_jwt, orgIds, opts) => {
+    const portfolios = await getPortfolios("jwt", orgIds)
+    const list = portfolios.flatMap(({ orgId, projects: rows }) =>
+      rows.map((project) => ({ ...project, orgId })),
+    )
+    const q = opts?.q?.trim().toLowerCase() ?? ""
+    return {
+      projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+      nextCursor: null,
+    }
   })
   // Reset to the default (no invites); the pending-invites test overrides this.
   // restoreAllMocks does not reset vi.fn implementations, so without this a
@@ -407,11 +494,16 @@ describe("ProjectTable", () => {
 
 describe("OrgOverview / OrgProjects", () => {
   it("never paints a false-empty projects page while the current portfolio is unresolved", async () => {
-    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    const { getPortfolio, getPortfolioPage } = await import("@/lib/frontier/portfolio")
     let resolvePortfolio!: (projects: PortfolioProject[]) => void
-    vi.mocked(getPortfolio).mockImplementation(
-      () => new Promise((resolve) => { resolvePortfolio = resolve }),
-    )
+    const pending = new Promise<PortfolioProject[]>((resolve) => {
+      resolvePortfolio = resolve
+    })
+    vi.mocked(getPortfolio).mockImplementation(() => pending)
+    vi.mocked(getPortfolioPage).mockImplementation(async () => ({
+      projects: await pending,
+      nextCursor: null,
+    }))
 
     const container = document.createElement("div")
     document.body.appendChild(container)
@@ -448,6 +540,7 @@ describe("OrgOverview / OrgProjects", () => {
 
       // Keep subsequent refetches empty so the empty-state isn't replaced by default mock data.
       vi.mocked(getPortfolio).mockResolvedValue([])
+      vi.mocked(getPortfolioPage).mockResolvedValue({ projects: [], nextCursor: null })
       await act(async () => { resolvePortfolio([]) })
       await waitFor(() =>
         expect(screen.queryByRole("status", { name: "Loading projects" })).not.toBeInTheDocument(),
@@ -505,18 +598,18 @@ describe("OrgOverview / OrgProjects", () => {
         { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
       ])
 
-      const { getPortfolios } = await import("@/lib/frontier/portfolio")
-      const portfolioCallsBeforeRetry = vi.mocked(getPortfolios).mock.calls.length
+      const { getPortfolioAggregates } = await import("@/lib/frontier/portfolio")
+      const summaryCallsBeforeRetry = vi.mocked(getPortfolioAggregates).mock.calls.length
 
       fireEvent.click(within(card).getByRole("button", { name: /retry/i }))
 
       // Same mount: the dashboard replaces the error card.
       await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
       expect(screen.queryByTestId("org-load-error")).not.toBeInTheDocument()
-      // Retry re-issues the dependent portfolio fetch too, not just the orgs —
-      // the failure state resolves to real data rather than an empty dashboard.
+      // Retry re-issues the overview summary too, not just the orgs — the
+      // failure state resolves to real totals rather than an empty dashboard.
       await waitFor(() =>
-        expect(vi.mocked(getPortfolios).mock.calls.length).toBeGreaterThan(portfolioCallsBeforeRetry),
+        expect(vi.mocked(getPortfolioAggregates).mock.calls.length).toBeGreaterThan(summaryCallsBeforeRetry),
       )
     })
 
@@ -550,6 +643,14 @@ describe("OrgOverview / OrgProjects", () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.getByText("New Testament")).toBeInTheDocument()
+  })
+
+  it("exposes project names as native links on the overview", async () => {
+    renderMemberOverview()
+    expect(await screen.findByRole("link", { name: "Legacy Translation" }))
+      .toHaveAttribute("href", "/projects/stalled-1")
+    expect(screen.getByRole("link", { name: "New Testament" }))
+      .toHaveAttribute("href", "/projects/fresh-1")
   })
 
   // AQU-326: an invite addressed to the user's email must be discoverable
@@ -586,6 +687,13 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
+  it("keeps the overview projects scrollbar inside the card", async () => {
+    renderMemberOverview()
+    const table = await screen.findByTestId("org-overview-projects-table")
+    expect(table).toHaveClass("mx-0")
+    expect(table).not.toHaveClass("-mx-2")
+  })
+
   it("shows the project count in the rollup strip", async () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
@@ -593,6 +701,18 @@ describe("OrgOverview / OrgProjects", () => {
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
     expect(projectsStat).toHaveClass("flex-row-reverse")
     expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
+  })
+
+  // AQU-1071: the enterprise billing band is how many active target lanes this
+  // org has. The tile shows the server-side count.
+  it("shows the org's active-lane count in the rollup strip", async () => {
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    const label = screen.getAllByText("Active lanes").find((el) => !el.closest("nav"))!
+    const tile = label.parentElement?.parentElement
+    if (!tile) throw new Error("lanes tile root not found")
+    expect(within(tile).getByText(String(ORG_ACTIVE_LANGUAGES))).toBeInTheDocument()
+    expect(within(tile).getByText("Target lanes")).toBeInTheDocument()
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {
@@ -615,7 +735,7 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByRole("button", { name: /view projects/i })).not.toBeInTheDocument()
   })
 
-  it("shows the ten most recently updated projects first and expands the rest inline", async () => {
+  it("shows every project in a continuous list, with no show-more pager", async () => {
     const { getPortfolio } = await import("@/lib/frontier/portfolio")
     const now = Date.now()
     vi.mocked(getPortfolio).mockResolvedValue(
@@ -641,21 +761,10 @@ describe("OrgOverview / OrgProjects", () => {
     const table = await screen.findByTestId("org-overview-projects-table")
     expect(within(table).getByText("Project 01")).toBeInTheDocument()
     expect(within(table).getByText("Project 10")).toBeInTheDocument()
-    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
-
-    const showAll = within(table).getByRole("button", { name: "Show 2 more" })
-    expect(showAll).toHaveAttribute("aria-expanded", "false")
-    expect(showAll.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
-    fireEvent.click(showAll)
-
     expect(within(table).getByText("Project 11")).toBeInTheDocument()
     expect(within(table).getByText("Project 12")).toBeInTheDocument()
-    const showFewer = within(table).getByRole("button", { name: "Show fewer" })
-    expect(showFewer).toHaveAttribute("aria-expanded", "true")
-    expect(showFewer.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
-
-    fireEvent.click(showFewer)
-    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
+    expect(within(table).queryByRole("button", { name: /show \d+ more/i })).not.toBeInTheDocument()
+    expect(within(table).queryByRole("button", { name: /show fewer/i })).not.toBeInTheDocument()
   })
 
   it("shows the audio rollup card and per-project audio % on the projects table", async () => {
@@ -708,7 +817,9 @@ describe("OrgOverview / OrgProjects", () => {
       target: { value: "testament" },
     })
 
-    expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    })
     expect(screen.getByText("New Testament")).toBeInTheDocument()
   })
 
@@ -947,8 +1058,25 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
   ) {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
-    const { getPortfolios } = await import("@/lib/frontier/portfolio")
+    const { getPortfolioAggregates, getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
     vi.mocked(getPortfolios).mockResolvedValue(portfolios as never)
+    vi.mocked(getPortfolioAggregates).mockImplementation(async () => {
+      const rows = (portfolios as Array<{ orgId: number; projects: PortfolioProject[] }>).flatMap(
+        ({ orgId, projects: list }) => list.map((project) => ({ ...project, orgId })),
+      )
+      const summary = summarizePortfoliosByOrg(
+        rows,
+        portfolios.map((portfolio) => portfolio.orgId),
+        Date.now(),
+      )
+      return { ...summary.totals, orgs: summary.orgs }
+    })
+    vi.mocked(getPortfoliosPage).mockImplementation(async () => {
+      const list = (portfolios as Array<{ orgId: number; projects: Array<{ name: string }> }>).flatMap(
+        ({ orgId, projects: rows }) => rows.map((project) => ({ ...project, orgId })),
+      )
+      return { projects: list, nextCursor: null } as never
+    })
     return render(
       <MemoryRouter initialEntries={["/orgs/all"]}>
         <OrgProvider><OrgHome /></OrgProvider>
@@ -1043,6 +1171,10 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     const avgTile = screen.getByText("Avg translated").parentElement?.parentElement
     expect(avgTile).toBeTruthy()
     expect(within(avgTile!).getByText("10%")).toBeInTheDocument()
+    const { getPortfolioAggregates, getPortfolios } = await import("@/lib/frontier/portfolio")
+    expect(vi.mocked(getPortfolioAggregates)).toHaveBeenCalled()
+    // The project table is paged. Overview totals must not download every row.
+    expect(vi.mocked(getPortfolios)).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByTestId("shared-filter-chip"))
     await waitFor(() => {

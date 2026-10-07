@@ -10,8 +10,9 @@
  */
 
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { RenderingStatus, TermMatchOptions, TermRendering } from "./model"
 
-export type RenderingStatus = "preferred" | "admitted" | "forbidden"
+export type { RenderingStatus, TermMatchOptions, TermMatchingSettings, TermRendering } from "./model"
 
 /**
  * `MessageKey` for a rendering status's display label — resolve with
@@ -41,11 +42,6 @@ export function renderingStatusLabelKey(status: RenderingStatus): MessageKey {
   }
 }
 
-export interface TermRendering {
-  rendering: string
-  status: RenderingStatus
-}
-
 export interface Concept {
   id: string
   /** Headword / lemma. Normalized exact match is case-insensitive. */
@@ -61,6 +57,14 @@ export interface Concept {
    * default case-insensitive match used everywhere else in the term pipeline.
    */
   caseSensitive?: boolean
+  /** Matching options; see TermMatchOptions. Absent = all defaults. */
+  match?: TermMatchOptions
+  /**
+   * Set only on a concept read from a termbase this project subscribes to
+   * (useSubscribedConcepts, AQU-1721): the id of the project that owns it.
+   * Such a concept is read-only here, so no surface may offer to edit it.
+   */
+  termbaseProjectId?: string
 }
 
 /** Payload from the editor "Add to terminology" popover. */
@@ -80,4 +84,5 @@ export interface ConceptDraft {
    * what the client ASKS for.
    */
   approve?: boolean
+  match?: TermMatchOptions
 }

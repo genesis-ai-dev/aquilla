@@ -35,23 +35,29 @@ import { AdminPeopleSection } from "@/components/admin/AdminPeopleSection"
 import { AdminProjectsSection } from "@/components/admin/AdminProjectsSection"
 import { AdminActivityTimeline } from "@/components/admin/AdminActivityTimeline"
 import { AdminPlatformSection } from "@/components/admin/AdminPlatformSection"
+import { AdminRetentionSection } from "@/components/admin/AdminRetentionSection"
+import { AdminMigrationSection } from "@/components/admin/AdminMigrationSection"
 import { AdminElevationGate } from "@/components/admin/AdminElevationGate"
+import { AdminInvitesSection } from "@/components/admin/AdminInvitesSection"
 
-type Tab = "overview" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform"
+type Tab = "overview" | "retention" | "migration" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform" | "invites"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
+  { key: "retention", label: "Retention" },
+  { key: "migration", label: "Migration" },
   { key: "tenants", label: "Tenants" },
   { key: "teams", label: "Teams" },
   { key: "people", label: "People" },
   { key: "projects", label: "Projects" },
   { key: "activity", label: "Activity" },
   { key: "platform", label: "Platform" },
+  { key: "invites", label: "Invites & links" },
 ]
 
 /**
  * Site-wide admin console (/admin). Cross-tenant: read-only oversight
- * (Overview, Tenants, Teams, People, Projects, Activity) plus the editable
- * Platform tab (AI settings, compute credits, Field Plan billing). Gated by
+ * (Overview, Retention, Tenants, Teams, People, Projects, Activity) plus the editable
+ * Platform tab (AI settings, AI credits, Field Plan billing). Gated by
  * `useAdminElevation` — UX only; every /api/v2/admin/* call is enforced
  * server-side against the ADMIN_EMAILS allowlist behind the step-up elevation
  * gate. A non-admin who forces the route is redirected to their org overview.
@@ -69,6 +75,7 @@ export function AdminConsole() {
   const { setActiveOrg } = useActiveOrg()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>("overview")
+  const [selectedInvitesOrgId, setSelectedInvitesOrgId] = useState<number | null>(null)
 
   const [overview, setOverview] = useState<AdminOverview | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
@@ -88,6 +95,14 @@ export function AdminConsole() {
     (orgId: number) => {
       setActiveOrg(orgId)
       navigate(orgHomePath(orgId))
+    },
+    [setActiveOrg, navigate],
+  )
+
+  const openOrgPath = useCallback(
+    (orgId: number, subpath: string) => {
+      setActiveOrg(orgId)
+      navigate(orgPath(orgId, subpath))
     },
     [setActiveOrg, navigate],
   )
@@ -194,8 +209,20 @@ export function AdminConsole() {
             )}
           </TabsContent>
 
+          <TabsContent value="retention">{jwt && <AdminRetentionSection jwt={jwt} />}</TabsContent>
+          <TabsContent value="migration">{jwt && <AdminMigrationSection jwt={jwt} />}</TabsContent>
+
           <TabsContent value="tenants">
-            <AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={openOrg} />
+            <AdminTenantsSection
+              orgs={orgs}
+              teams={teams}
+              onOpenOrg={openOrg}
+              onOpenOrgPath={openOrgPath}
+              onOpenInvites={(orgId) => {
+                setSelectedInvitesOrgId(orgId)
+                setTab("invites")
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="teams">
@@ -217,6 +244,18 @@ export function AdminConsole() {
           </TabsContent>
 
           <TabsContent value="platform">{jwt && <AdminPlatformSection jwt={jwt} />}</TabsContent>
+
+          <TabsContent value="invites">
+            {jwt && (
+              <AdminInvitesSection
+                jwt={jwt}
+                orgs={orgs}
+                projects={projects}
+                users={users}
+                initialOrgId={selectedInvitesOrgId ?? undefined}
+              />
+            )}
+          </TabsContent>
         </div>
       </Tabs>
     )

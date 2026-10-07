@@ -5,6 +5,7 @@ import { FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Section } from "@/components/ui/page"
 import { Switch } from "@/components/ui/switch"
+import { AdminSectionSkeleton } from "./shared"
 import {
   Select,
   SelectContent,
@@ -140,14 +141,10 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
     }
   }, [data, jwt, modelList, userLimit, globalLimit, enforce, abEnabled, abChallenger, abTrafficPct, refresh])
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="h-56 animate-pulse rounded-lg border bg-card" />
-        <div className="h-40 animate-pulse rounded-lg border bg-card" />
-      </div>
-    )
-  }
+  // AQU-942: `save` re-fetches through `refresh` to pick up the new version, so
+  // gating on `loading` alone replaced the whole settings form with skeletons
+  // on every save. Only a load that has resolved nothing shows the placeholder.
+  if (loading && !data) return <AdminSectionSkeleton label="Loading platform settings" blocks={2} />
   if (error && !data) return <p className="text-sm text-destructive">{error}</p>
   if (!data) return <p className="text-sm text-muted-foreground">No settings available.</p>
 

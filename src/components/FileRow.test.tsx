@@ -50,6 +50,22 @@ function nameLabel(container: HTMLElement): HTMLElement {
 }
 
 describe("FileRow — AQU-341 truncation consistency", () => {
+  it("offers a focusable named file control and keyboard row activation", () => {
+    const onSelect = vi.fn()
+    const { container, getByRole } = renderRow({ onSelect })
+    expect(getByRole("button", { name: LONG_NAME }).tabIndex).toBe(0)
+    const row = container.querySelector('[data-showcase="sidebar.file"]')!
+    fireEvent.keyDown(row, { key: "Enter" })
+    fireEvent.keyDown(row, { key: " " })
+    expect(onSelect).toHaveBeenCalledTimes(2)
+    fireEvent.keyDown(getByRole("button", { name: "File actions" }), { key: "Enter" })
+    expect(onSelect).toHaveBeenCalledTimes(2)
+  })
+
+  it("names the rename field after the file it edits", () => {
+    const { getByRole } = renderRow({ editing: true })
+    expect(getByRole("textbox", { name: LONG_NAME })).toHaveValue(LONG_NAME)
+  })
   it("offers section expansion for Scripture-shaped non-USFM imports", () => {
     const { getByRole } = renderRow({ file: makeFile({ type: "csv", hasScriptureContent: true }) })
     expect(getByRole("button", { name: "Expand" })).toBeInTheDocument()
@@ -93,6 +109,13 @@ describe("FileRow — AQU-341 truncation consistency", () => {
     const { container } = renderRow({ progress: { translated: 8, validated: 5, total: 10 } })
     const slot = container.querySelector('[data-testid="file-row-progress-slot"]')
     expect(slot).toHaveAttribute("aria-label", "80% translated, 50% validated")
+  })
+
+  it("never reads 100% while a cell is outstanding (AQU-1493)", () => {
+    // Genesis-sized: six short is 99.5%, which plain rounding called 100%.
+    const { container } = renderRow({ progress: { translated: 1194, validated: 1200, total: 1200 } })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')
+    expect(slot).toHaveAttribute("aria-label", "99% translated, 100% validated")
   })
 
   it("exposes the full (untruncated) name so the user can recover it", () => {
@@ -149,5 +172,51 @@ describe("FileRow — file actions menu", () => {
     fireEvent.click(getByRole("menuitem", { name: /assign work/i }))
     expect(onAssignWork).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-894 regression guard: a file the reader isn't assigned to recedes, but
+// stays fully usable. The point of the ticket is "make mine obvious" — not to
+// invent an access rule the server doesn't enforce.
+describe("FileRow — AQU-894 unassigned de-emphasis", () => {
+  function row(container: HTMLElement): HTMLElement {
+    return container.querySelector('[data-showcase="sidebar.file"]') as HTMLElement
+  }
+
+  it("leaves the row untouched by default", () => {
+    const { container } = renderRow()
+    expect(row(container).dataset.unassigned).toBeUndefined()
+    expect(row(container).className).not.toContain("opacity-55")
+  })
+
+  it("dims a row that is not the reader's", () => {
+    const { container } = renderRow({ unassigned: true })
+    expect(row(container).dataset.unassigned).toBe("true")
+    expect(row(container).className).toContain("opacity-55")
+    // Recovers on hover/focus, so a dimmed row never feels unreachable.
+    expect(row(container).className).toContain("hover:opacity-100")
+  })
+
+  it("does not dim the row the reader is currently in", () => {
+    const { container } = renderRow({ unassigned: true, active: true })
+    expect(row(container).className).not.toContain("opacity-55")
+  })
+
+  it("keeps the dimmed row selectable, so the dimming is never a lock", () => {
+    const onSelect = vi.fn()
+    const { container, getByRole } = renderRow({ unassigned: true, onSelect })
+    fireEvent.click(getByRole("button", { name: LONG_NAME }))
+    fireEvent.keyDown(row(container), { key: "Enter" })
+    expect(onSelect).toHaveBeenCalledTimes(2)
+  })
+
+  it("says WHY the row is dim, and that it can still be opened", () => {
+    // Dimming carries nothing to a screen reader, so the row states it in text
+    // — and states the second half too, or it is heard as a locked file.
+    const { container } = renderRow({ unassigned: true })
+    const note = container.querySelector(".sr-only")
+    expect(note?.textContent).toContain("Not assigned to you")
+    expect(note?.textContent).toContain("still open it")
+    expect(renderRow().container.querySelector(".sr-only")).toBeNull()
   })
 })

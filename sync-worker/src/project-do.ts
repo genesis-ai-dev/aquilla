@@ -28,11 +28,13 @@ import {
   applyPresenceUpdate,
   parseProjectDoClientMessage,
   PresenceDraftThrottle,
+  presenceFrameOwnerConnId,
   presenceSnapshot,
   PROJECT_DO_DEFAULT_LEASE_MS,
   resolveConnId,
   stripPresenceDraft,
   sweepExpiredLeases,
+  sweepOrphanedPresence,
   unpackBroadcastBody,
   type LockState,
   type PresenceState,
@@ -40,8 +42,9 @@ import {
 } from "./project-do-handlers"
 import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
-import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
+import { LINK_SYNC_INVOCATION_BUDGET_MS, mirrorSync, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
+import { createRerunSingleFlight } from "./lib/rerun-single-flight"
 import { serviceBearerMatches } from "./lib/service-auth"
 
 const LEASE_SWEEP_INTERVAL_MS = 5_000
@@ -138,7 +141,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private locks = new Map<string, LockState>()
   private sweepTimer: ReturnType<typeof setInterval> | null = null
   /** Per-user rate limit for `presence.draft` frames (in-memory, like all DO state). */
-  private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcastToAll(frame))
+  private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcast(frame))
   /**
    * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
@@ -147,22 +150,42 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private removedUsers = new Map<number, number>()
   /**
    * AQU-476: single-flight for the mirror sync. One DO instance == one
-   * project, so a single in-flight promise field serializes concurrent
-   * /__link-sync callers (push accelerator + lazy pull racing) — the second
-   * caller awaits the SAME run instead of starting an overlapping fold. This
-   * is what the design spec's "serialized single-flight per downstream
-   * through the ProjectSync DO" means concretely.
+   * project, so concurrent /__link-sync callers (push accelerator + lazy pull
+   * racing) never start overlapping folds — the design spec's "serialized
+   * single-flight per downstream through the ProjectSync DO".
+   *
+   * AQU-1545: a caller that arrives mid-sync is answered by the NEXT run, not
+   * the running one. Joining the running fold handed it a read of the upstream
+   * from BEFORE the change it was told about (a push frame for a commit that
+   * landed mid-sync), and nothing asked again, so a burst of upstream hides
+   * left an open downstream short of the last few until a reload. See
+   * lib/rerun-single-flight.ts.
    */
-  private linkSyncInFlight: Promise<MirrorSyncResult> | null = null
+  private readonly linkSync = createRerunSingleFlight((projectId: string) => this.runLinkSync(projectId))
   /** Monday push nudge throttle (in-memory; eviction resets it, which is fine —
    *  identity's cron reconciliation covers gaps). */
   private lastMondayNotifyAt = 0
+
+  private async runLinkSync(projectId: string): Promise<MirrorSyncResult> {
+    // Test seam takes priority; otherwise build a short-lived PG connection
+    // from HYPERDRIVE (this DO instance's own env, not the request-scoped
+    // synthesized AQUILLA_PG the worker's top-level fetch uses).
+    const db = this.env.AQUILLA_PG ?? makePostgres(this.env.HYPERDRIVE!.connectionString)
+    try {
+      // AQU-1563: one invocation does a bounded slice of a large sync and
+      // reports `more`; the /link/sync route calls again until the link is
+      // caught up, so neither CPU time nor memory here grows with the upstream.
+      return await mirrorSync(db as AquillaDb, projectId, { budgetMs: LINK_SYNC_INVOCATION_BUDGET_MS })
+    } finally {
+      if (!this.env.AQUILLA_PG) void (db as { close(): Promise<void> }).close?.()
+    }
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
 
     // AQU-476: mirror sync trigger, single-flighted per DO instance (see
-    // linkSyncInFlight above). Internal-only, same bearer-secret gate as
+    // linkSync above). Internal-only, same bearer-secret gate as
     // /__broadcast. `?project=` is required (the DO doesn't trust
     // `idFromName`'s internal id string as the project id) — same query-
     // param convention as /connect, so the caller (link-sync-route.ts)
@@ -178,8 +201,9 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // then fire two overlapping
     //   curl -X POST https://<sync>/api/v1/projects/B/link/sync
     // calls (e.g. via `xargs -P2`) and confirm via server logs / a DB read
-    // that only one fold ran (the second awaited the first's in-flight
-    // promise) and B's cells match A's head afterward.
+    // that the folds ran one after the other, never overlapping (the second
+    // waits for the first, then runs once more — AQU-1545), and B's cells
+    // match A's head afterward.
     if (request.method === "POST" && url.pathname === "/__link-sync") {
       if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
@@ -188,24 +212,15 @@ export class ProjectSync extends DurableObject<DOEnv> {
       if (!projectId) {
         return new Response("missing project query param", { status: 400 })
       }
-      // Test seam takes priority; otherwise build a short-lived PG connection
-      // from HYPERDRIVE (this DO instance's own env, not the request-scoped
-      // synthesized AQUILLA_PG the worker's top-level fetch uses).
-      const db = this.env.AQUILLA_PG ?? (this.env.HYPERDRIVE && makePostgres(this.env.HYPERDRIVE.connectionString))
-      if (!db) {
+      if (!this.env.AQUILLA_PG && !this.env.HYPERDRIVE) {
         return new Response("HYPERDRIVE binding not configured", { status: 500 })
       }
-      if (!this.linkSyncInFlight) {
-        this.linkSyncInFlight = mirrorSync(db as AquillaDb, projectId).finally(() => {
-          this.linkSyncInFlight = null
-          if (!this.env.AQUILLA_PG) void (db as { close(): Promise<void> }).close?.()
-        })
-      }
       try {
-        const result = await this.linkSyncInFlight
+        const result = await this.linkSync(projectId)
         return Response.json(result)
       } catch (err) {
-        return new Response(`mirror sync failed: ${String(err)}`, { status: 500 })
+        console.error("[project-do] mirror sync failed:", err)
+        return new Response("mirror sync failed", { status: 500 })
       }
     }
 
@@ -382,7 +397,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // Snapshot of current roster (drafts stripped) so the new client sees
     // existing peers; everyone else learns about the newcomer via a diff.
     this.sendTo(server, presenceSnapshot(this.presence))
-    this.broadcastToAll({ t: "presence.diff", user: stripPresenceDraft(joined) })
+    this.broadcast({ t: "presence.diff", user: stripPresenceDraft(joined) })
 
     server.addEventListener("message", (ev) => {
       const raw = typeof ev.data === "string" ? ev.data : ""
@@ -404,9 +419,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
   }
 
-  private broadcastToAll(msg: ProjectDoServerMessage): void {
+  private broadcastToAll(msg: ProjectDoServerMessage, exceptConnId?: string): void {
     const payload = JSON.stringify(msg)
-    for (const ws of this.connections.keys()) {
+    for (const [ws, conn] of this.connections) {
+      if (exceptConnId !== undefined && conn.connId === exceptConnId) continue
       try {
         ws.send(payload)
       } catch {
@@ -415,11 +431,29 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
   }
 
+  /**
+   * AQU-1162: broadcast, but never echo a presence frame back to the socket it
+   * describes. A typing client publishes presence roughly every 650ms and
+   * moves the cursor every ~120ms; each echo costs that same client a socket
+   * frame, a parse, a presence-store apply and a `ProjectWorkspace` shell pass
+   * — for a row every consumer then filters out as its own (`isSelfRow` in the
+   * presence store, the `currentUsername` check in `applyPresenceFrame`).
+   * Non-presence frames (locks, content, project events) are unaffected: the
+   * originator does act on those.
+   */
+  private broadcast(msg: ProjectDoServerMessage): void {
+    this.broadcastToAll(msg, presenceFrameOwnerConnId(msg))
+  }
+
   // ── Inbound handling ───────────────────────────────────────────────────
 
   private handleClientMessage(conn: ConnectionState, raw: string): void {
     const msg = parseProjectDoClientMessage(raw)
     if (!msg) return
+    if (msg.t === "ping") {
+      this.sendTo(conn.ws, msg.ts === undefined ? { t: "pong" } : { t: "pong", ts: msg.ts })
+      return
+    }
     const now = Date.now()
     if (msg.t === "focus.claim") {
       // [Pen test 2026-08-10] a read-only role (viewer/commenter/reviewer)
@@ -431,7 +465,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       const result = applyFocusClaim(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       this.presence = result.presence
-      for (const m of result.emit) this.broadcastToAll(m)
+      for (const m of result.emit) this.broadcast(m)
       for (const m of result.emitTo) this.sendTo(conn.ws, m)
       return
     }
@@ -445,7 +479,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       const result = applyFocusRelease(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       this.presence = result.presence
-      for (const m of result.emit) this.broadcastToAll(m)
+      for (const m of result.emit) this.broadcast(m)
       return
     }
     if (msg.t === "presence.update") {
@@ -453,7 +487,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       this.presence = result.presence
       for (const m of result.emit) {
         if (m.t === "presence.draft") this.draftThrottle.push(m)
-        else this.broadcastToAll(m)
+        else this.broadcast(m)
       }
       return
     }
@@ -493,7 +527,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     this.locks = result.locks
     this.presence = result.presence
     this.draftThrottle.clear(conn.connId)
-    for (const m of result.emit) this.broadcastToAll(m)
+    for (const m of result.emit) this.broadcast(m)
     if (this.connections.size === 0) this.stopLeaseSweep()
   }
 
@@ -501,12 +535,34 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (this.sweepTimer !== null) return
     this.sweepTimer = setInterval(() => {
       const now = Date.now()
+      // AQU-1374: drop rows for sockets that died without firing close/error
+      // BEFORE the lease sweep, so it doesn't emit presence.diff frames for
+      // rows that are about to disappear anyway.
+      this.reapOrphanedPresence()
       const result = sweepExpiredLeases(this.locks, this.presence, now)
       this.locks = result.locks
       this.presence = result.presence
-      for (const m of result.emit) this.broadcastToAll(m)
+      for (const m of result.emit) this.broadcast(m)
       this.sweepExpiredConnections(now)
     }, LEASE_SWEEP_INTERVAL_MS)
+  }
+
+  /**
+   * AQU-1374: a presence row outliving its socket makes one person show up as
+   * several "viewing" peers. Named apart from the imported
+   * sweepOrphanedPresence it delegates to, which documents why the live-socket
+   * set is the right reconciliation key.
+   */
+  private reapOrphanedPresence(): void {
+    const liveConnIds = new Set<string>()
+    for (const state of this.connections.values()) liveConnIds.add(state.connId)
+    const result = sweepOrphanedPresence(this.presence, liveConnIds)
+    if (result.emit.length === 0) return
+    this.presence = result.presence
+    for (const m of result.emit) {
+      if (m.t === "presence.left") this.draftThrottle.clear(m.connId)
+      this.broadcastToAll(m)
+    }
   }
 
   /**

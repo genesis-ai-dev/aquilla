@@ -98,6 +98,11 @@ describe("TimelineLane", () => {
 
   // AQU-646 round 8: a card may not cross its neighbours. The bounds come from
   // the WHOLE lane, which is the part that is easy to get wrong.
+  //
+  // AQU-1068 item 5 (Sam, 2026-09-09) narrowed "cross". Overlap is allowed in
+  // full now — it is a real thing a subtitle says, and the timed exporters
+  // already sort by start time — so the walls are the neighbours' STARTS and
+  // the END is unbounded. What is kept is the file's ORDER.
   describe("boundNeighbours", () => {
     const dragCard = (id: string, dxPx: number) => {
       const el = screen.getByTestId(`tl-card-${id}`)
@@ -128,13 +133,16 @@ describe("TimelineLane", () => {
       )
       expect(screen.queryByTestId("tl-card-next")).not.toBeInTheDocument()
       dragCard("b", 400) // +10s, way past it
-      expect(onRetime).toHaveBeenCalledWith("b", 6.5, 8.5)
+      // Stops with its START on `next`'s start, not against its near edge —
+      // the two now overlap for the whole of `b`'s length, which is allowed.
+      expect(onRetime).toHaveBeenCalledWith("b", 8.5, 10.5)
     })
 
-    it("the floor is the highest end before it, not the previous card's end", () => {
-      // `cells` is sorted by START, so with overlapping cues a long early cue
-      // can reach past a shorter one that starts later. Taking the immediate
-      // predecessor's end would let `target` slide back inside `long`.
+    it("the floor is the previous card's START — sliding inside a long cue is fine", () => {
+      // `cells` is sorted by START. `long` runs 0-10 and `short` 2-3, so a
+      // card dragged back lands inside `long`, which is exactly the overlap
+      // that used to be forbidden. What still holds is order: `target` may not
+      // begin before `short`, the card in front of it.
       const onRetime = vi.fn()
       render(
         <TimelineLane
@@ -152,7 +160,35 @@ describe("TimelineLane", () => {
         />,
       )
       dragCard("target", -400) // −10s
-      expect(onRetime).toHaveBeenCalledWith("target", 10, 11)
+      expect(onRetime).toHaveBeenCalledWith("target", 2, 3)
+    })
+
+    it("the END may run as far past the next card as it likes", () => {
+      // The end never decides order, so nothing bounds it. A cue that runs
+      // through several later ones is a legitimate subtitle.
+      const onRetime = vi.fn()
+      render(
+        <TimelineLane
+          cells={[cell("a", 0, 2), cell("b", 4, 6), cell("c", 8, 10)]}
+          variant="subtitle"
+          pxPerSec={40}
+          viewStartSec={0}
+          viewEndSec={40}
+          selectedId={null}
+          editable
+          retimable
+          boundNeighbours
+          onSelect={() => {}}
+          onRetime={onRetime}
+        />,
+      )
+      // The right resize grip — the lane's own helper finds grips by cursor,
+      // and the right one is the second.
+      const grip = screen.getByTestId("tl-card-a").querySelectorAll(".cursor-ew-resize")[1]
+      fireEvent.pointerDown(grip, { clientX: 500, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 900 }) // +10s
+      fireEvent.pointerUp(window, { clientX: 900 })
+      expect(onRetime).toHaveBeenCalledWith("a", 0, 12)
     })
 
     it("left off, cards are free — SUB-36's mirror must stay that way", () => {

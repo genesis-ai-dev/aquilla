@@ -5,6 +5,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { MembersPage } from "./MembersPage"
 
+// AQU-1277: OrgProvider loads the project directory via
+// fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
+// it reached production identity for real while the tests stayed green.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "jwt", username: "anna", createdAt: "x" },
@@ -32,6 +40,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     memberProgressViewMinRole: 600,
     allowSelfAssignment: false,
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     patch: vi.fn(async () => ({ kind: "ok" as const })),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -78,6 +87,7 @@ vi.mock("@/hooks/useOrg", async (importOriginal) => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -95,6 +105,17 @@ vi.mock("@/hooks/useOrgInvites", () => ({
     refresh: vi.fn(async () => {}),
     revoke: vi.fn(async () => false),
   })),
+}))
+
+// AQU-1277: the Matrix tab loads the org-wide roster via fetchOrgMembersMatrix
+// (GET /api/v2/orgs/:id/members-matrix). Unmocked it hit production identity.
+// These tests assert on tab chrome, not matrix cells, and the project list is
+// already mocked empty, so an empty map is the faithful stand-in.
+vi.mock("@/lib/frontier/members", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/frontier/members")>()),
+  fetchOrgMembersMatrix: vi.fn(
+    async () => new Map<string, import("@/lib/frontier/members").ProjectMember[]>(),
+  ),
 }))
 
 vi.mock("@/hooks/useAccessibleProjects", () => ({
@@ -159,6 +180,7 @@ describe("MembersPage — AQU-485 roster visibility", () => {
       isLoading: false,
       error: null,
       rosterHidden: true,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -288,6 +310,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -326,6 +349,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -379,6 +403,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -424,6 +449,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -452,6 +478,7 @@ describe("MembersPage — Teams-style roster table", () => {
       isLoading: false,
       error: null,
       rosterHidden: false,
+      rosterAccessDenied: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
       addMany: vi.fn(async () => []),
@@ -465,5 +492,12 @@ describe("MembersPage — Teams-style roster table", () => {
     expect(screen.getByRole("dialog", { name: /add a member/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /add members/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /invite by email/i })).toBeInTheDocument()
+    // AQU-1107: default org-add is Contributor, and the dialog states that
+    // that role does not open projects until a project/team grant exists.
+    expect(screen.getByRole("combobox", { name: /^role$/i })).toHaveTextContent(/contributor/i)
+    expect(
+      screen.getByText(/cannot see or open projects until they are added to a specific project or team/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/only maintainer and owner can see every project/i)).toBeInTheDocument()
   })
 })

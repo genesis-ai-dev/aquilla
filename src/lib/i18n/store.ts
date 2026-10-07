@@ -7,7 +7,7 @@
  * a supported one, else English.
  */
 
-import { isSupportedLocale, normalizeLocale } from "./locales"
+import { isSupportedLocale, LOCALE_ALIASES, normalizeLocale } from "./locales"
 
 export const LOCALE_STORAGE_KEY = "aquilla-locale"
 
@@ -21,7 +21,17 @@ export function writeStoredLocale(code: string): void {
   window.localStorage.setItem(LOCALE_STORAGE_KEY, code)
 }
 
+/**
+ * A stored preference wins over the navigator, but only when it names a locale
+ * we can honour: an exact registry code, or a retired code with an explicit
+ * alias (`mfa` → `ms`, AQU-1306). A stored code that resolves only by the
+ * primary-subtag *guess* in `normalizeLocale` does not qualify — garbage in
+ * storage should not outrank a real `navigator.language`, which is why
+ * `isSupportedLocale` is checked here rather than normalizing unconditionally.
+ */
 export function detectInitialLocale(stored: string | null, navigatorLang: string | null): string {
-  if (stored && isSupportedLocale(stored)) return stored
+  if (stored && (isSupportedLocale(stored) || stored in LOCALE_ALIASES)) {
+    return normalizeLocale(stored)
+  }
   return normalizeLocale(navigatorLang)
 }

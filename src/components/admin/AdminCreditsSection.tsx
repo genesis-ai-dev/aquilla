@@ -15,9 +15,10 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import { AdminSectionSkeleton } from "./shared"
 
 /**
- * Platform-admin "Compute / Credits" section for the AdminConsole.
+ * Platform-admin "AI credits" section for the AdminConsole.
  *
  * Per-org table showing:
  *   - Daily & weekly credit spend (total + agent sub-spend highlighted)
@@ -25,6 +26,12 @@ import { OrgWithAvatar } from "@/components/OrgWithAvatar"
  *   - Editable caps + markup (inline inputs, saved on blur)
  *   - enforce toggle (log-only vs. hard-blocking)
  *   - showToOrg toggle (reveal panel to org maintainers)
+ *
+ * AQU-688: the pooled currency is "AI credits" everywhere it is named — the
+ * pool covers chat, TTS and agent alike, so "compute credits" described the
+ * bill rather than what the operator is budgeting. "Agent credits" stays the
+ * name of the agent RAIL inside that pool; it is a narrower thing, not a
+ * synonym. Both toggles carry hover help for the same reason.
  *
  * Platform-admin gate is enforced by AdminConsole — this component assumes
  * its parent has verified access; the server re-enforces on every API call.
@@ -156,6 +163,7 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
               onChange={(v) => void patch(row.original.orgId, { enforce: v })}
               label="enforce caps"
               caption="Enforce"
+              help="On: AI requests are refused with a 429 once this org is over a cap. Off (default): overages are logged only and still served."
               testId={`enforce-toggle-${row.original.orgId}`}
             />
             <Toggle
@@ -163,6 +171,7 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
               onChange={(v) => void patch(row.original.orgId, { showToOrg: v })}
               label="show to org maintainers"
               caption="Show org"
+              help="On: this org's own maintainers can see its AI-credit usage panel. Off (default): spend stays visible to platform admins only. Translators never see it either way."
               testId={`show-org-toggle-${row.original.orgId}`}
             />
           </div>
@@ -172,29 +181,47 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
     [patch],
   )
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading credits…</p>
-  if (error) return <p className="text-sm text-destructive">{error}</p>
-  if (rows === null) return <p className="text-sm text-muted-foreground">No credits data available.</p>
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground">No orgs found.</p>
+  // AQU-942: the table is this section's known shell, so only a load that has
+  // never produced rows may replace it. Gating on `loading` unmounted the whole
+  // table on every toggle (each `patch` round-trips through `refresh`, which
+  // flips `loading` back on), and gating on `error` threw the rows we already
+  // hold away because one patch failed. After the first resolve the shell
+  // stays mounted and the error rides above it.
+  if (rows === null) {
+    if (error) return <p className="text-sm text-destructive">{error}</p>
+    if (loading) return <AdminSectionSkeleton label="Loading credits" />
+    return <p className="text-sm text-muted-foreground">No credits data available.</p>
+  }
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <span>Credit = 1¢ customer price · agent rail 5× markup, others 4×.</span>
-        <span className="inline-flex items-center gap-3">
-          <RailKey label="Agent" dot="bg-amber-500" />
-          <RailKey label="Chat" dot="bg-sky-500" />
-          <RailKey label="TTS" dot="bg-violet-500" />
-        </span>
-      </div>
-      <DataTable
-        columns={columns}
-        data={rows}
-        getRowId={(row) => String(row.orgId)}
-        initialSorting={[{ id: "org", desc: false }]}
-        testId="admin-credits-table"
-        rowClassName="align-top"
-      />
+      {error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No orgs found.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>Credit = 1¢ customer price · agent rail 5× markup, others 4×.</span>
+            <span className="inline-flex items-center gap-3">
+              <RailKey label="Agent" dot="bg-amber-500" />
+              <RailKey label="Chat" dot="bg-sky-500" />
+              <RailKey label="TTS" dot="bg-violet-500" />
+            </span>
+          </div>
+          <DataTable
+            columns={columns}
+            data={rows}
+            getRowId={(row) => String(row.orgId)}
+            initialSorting={[{ id: "org", desc: false }]}
+            testId="admin-credits-table"
+            rowClassName="align-top"
+          />
+        </>
+      )}
     </div>
   )
 }
@@ -286,6 +313,7 @@ function Toggle({
   onChange,
   label,
   caption,
+  help,
   testId,
 }: {
   checked: boolean
@@ -293,18 +321,43 @@ function Toggle({
   label: string
   /** Inline caption shown next to the switch (e.g. "Enforce"). */
   caption?: string
+  /**
+   * What the toggle actually does (AQU-688). These captions are two words of
+   * platform jargon in a dense table; without this the operator has to read
+   * the source to recall what flipping one costs. It reaches a sighted
+   * operator as the caption's tooltip — the dotted underline is the
+   * affordance saying an explanation exists — and assistive tech as the
+   * switch's description. The caption stays a plain span rather than becoming
+   * a tab stop, matching the tooltip'd column headers above; the description
+   * is what keeps the text reachable without the hover.
+   */
+  help?: string
   testId: string
 }) {
+  const helpId = help ? `${testId}-help` : undefined
+  const captionEl = caption ? (
+    <span
+      className={`text-[11px] text-muted-foreground${help ? " cursor-help underline decoration-dotted underline-offset-2" : ""}`}
+    >
+      {caption}
+    </span>
+  ) : null
   return (
     <div className="flex items-center gap-1.5">
       <Switch
         checked={checked}
         onCheckedChange={onChange}
         aria-label={label}
+        aria-describedby={helpId}
         data-testid={testId}
         size="sm"
       />
-      {caption ? <span className="text-[11px] text-muted-foreground">{caption}</span> : null}
+      {captionEl && help ? <AppTooltip content={help}>{captionEl}</AppTooltip> : captionEl}
+      {help ? (
+        <span id={helpId} className="sr-only">
+          {help}
+        </span>
+      ) : null}
     </div>
   )
 }

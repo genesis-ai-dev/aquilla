@@ -3,6 +3,7 @@ import type { NavigateFunction } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
+import type { BatchValidateSummary } from "@/lib/review/batch-validate-summary"
 
 export interface FileProgressEntry {
   translated: number
@@ -23,7 +24,20 @@ export interface WorkspaceActionContext {
     untranscribed: number
     /** Cells with translated text but no recording yet. */
     unsynthesized: number
+    /** AQU-490: takes this viewer could still validate, policy applied. */
+    validatableTakes?: number
   }
+  /**
+   * AQU-1507: the eligibility split the batch-validate RUN will apply, so its
+   * confirmation dialog can promise the number of cells it is actually going to
+   * validate instead of the file's whole unvalidated count.
+   *
+   * A thunk rather than a value: it walks every cell of the open file, and the
+   * one action that needs it is behind a dialog that is usually never opened.
+   * Absent means "cannot be computed here" — the dialog then falls back to the
+   * no-target wording rather than inventing a count.
+   */
+  batchValidateSummary?: () => BatchValidateSummary
 }
 
 export interface WorkspaceActionRunArgs {
@@ -32,8 +46,9 @@ export interface WorkspaceActionRunArgs {
   runCompleteAll: () => void
   runExport: () => void
   runBatchValidate: () => void
-  /** File-scoped target import — populate the open file's translations. */
-  runImportIntoFile: () => void
+  /** AQU-490: bulk AUDIO validation. Separate from the text one on purpose —
+   *  a reviewer signing off translations has not listened to the takes. */
+  runBatchValidateAudio: () => void
   runTranscribeAll: () => void
   runSynthAll: () => void
   navigate: NavigateFunction
@@ -55,9 +70,25 @@ export interface WorkspaceAction {
      * batch size), so it can't be a static key — it's resolved at render by
      * calling the injected `t` here, same as everywhere else in the app,
      * rather than returning pre-resolved English from the registry.
+     *
+     * `joinList` is `useFormat().list` (AQU-1507): a body that enumerates
+     * several clauses needs a locale-aware join, not `", "`. Descriptions that
+     * render one sentence simply ignore it.
      */
-    description: (ctx: WorkspaceActionContext, t: TFunction) => string
+    description: (
+      ctx: WorkspaceActionContext,
+      t: TFunction,
+      joinList: (items: readonly string[]) => string,
+    ) => string
     confirmLabelKey: MessageKey
+    /**
+     * False when the body already says this run can do nothing (the reader
+     * may not validate, or nothing here is eligible). The dialog then offers
+     * no acknowledgement and no confirm button, only Close: a confirm that
+     * sends nothing and repeats the body in an error toast is a dead end.
+     * Absent means the action can always be confirmed.
+     */
+    canConfirm?: (ctx: WorkspaceActionContext) => boolean
   }
   comingSoon?: boolean
   run: (ctx: WorkspaceActionContext, args: WorkspaceActionRunArgs) => void

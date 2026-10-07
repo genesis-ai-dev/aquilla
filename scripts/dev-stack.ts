@@ -22,7 +22,7 @@
 //   * Loads db/postgres/schema.sql into the local Postgres on first create,
 //     and on every later boot reconciles drift additively (CREATE TABLE /
 //     ADD COLUMN IF NOT EXISTS for anything schema.sql has that the live
-//     container lacks — never drops data).
+//     container lacks, CREATE OR REPLACE for its views — never drops data).
 // All steps are safe to run on every boot.
 //
 // Lifecycle: writes a managed `.env.development.local` so the Vite client
@@ -32,6 +32,9 @@
 //
 // Flags:
 //   --no-sync     skip sync-worker (rare; some flows need only auth)
+//   --no-mock-llm skip scripts/mock-openrouter.ts and do not inject
+//                 OPENROUTER_API_KEY=mock. Hosted chat then 500s with
+//                 OPENROUTER_API_KEY is not configured (AQU-1158 local repro).
 //   --no-sandbox  skip the agent-worker sandbox service. Without this flag,
 //                 an explicitly configured endpoint is used first; otherwise
 //                 a local container is auto-started when Docker is available.
@@ -67,6 +70,8 @@ import {
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
 import { parsePgSchema } from "./dev-stack-schema-parser"
+import { reconcilePgViews } from "./dev-stack-schema-views"
+import { finalizeProgressSchema } from "./dev-stack-progress-schema"
 import {
   resolveConfiguredAgentSandbox,
   type AgentSandboxConnection,
@@ -125,6 +130,8 @@ const MANAGE_PG_CONTAINER = !EXTERNAL_PG_URL
 
 const args = process.argv.slice(2)
 const WITHOUT_SYNC = args.includes("--no-sync")
+const WITHOUT_MOCK_LLM =
+  args.includes("--no-mock-llm") || process.env.DEV_STACK_NO_MOCK_LLM === "1"
 // --no-sandbox forces the agent-worker to be skipped even when Docker is up.
 const WITHOUT_SANDBOX = args.includes("--no-sandbox")
 const VERBOSE = args.includes("--verbose") || process.env.DEV_STACK_VERBOSE === "1"
@@ -344,7 +351,12 @@ async function ensurePgSchema(url: string): Promise<void> {
 function backfillMissingLocalProgress(): void {
   const result = spawnSync(
     "npx",
-    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-only"],
+    // AQU-1493: --unreferenced-lines catches Scripture files whose stored line
+    // placements (cell_plan_keys) predate where lines with no reference count
+    // now (added lines with the line above, headings with the verse below). It
+    // walks only files holding such a line, and selects nothing once the
+    // stored rows agree, so later boots pay a read and no rewrite.
+    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-books", "--unreferenced-lines"],
     {
       cwd: REPO_ROOT,
       env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },
@@ -362,15 +374,15 @@ function backfillMissingLocalProgress(): void {
 }
 
 /**
- * Additive-only drift repair: create tables (plus their indexes) and add
- * columns that schema.sql has but the live container lacks. Never drops or
- * rewrites anything, so it's safe on every boot.
+ * Additive-only drift repair: create tables (plus their indexes), add columns
+ * and (re)create the views that schema.sql has but the live container lacks.
+ * Never drops or rewrites table data, so it's safe on every boot.
  */
 async function reconcilePgSchema(
   client: import("pg").Client,
   schemaSql: string,
 ): Promise<void> {
-  const { tables, indexesByTable } = parsePgSchema(schemaSql)
+  const { tables, indexesByTable, views } = parsePgSchema(schemaSql)
   const { rows } = await client.query(
     `SELECT table_name, column_name FROM information_schema.columns
      WHERE table_schema = 'public'`,
@@ -438,47 +450,38 @@ async function reconcilePgSchema(
     patched.push(...await finalizeArtifactBindingSchema(client, run))
   }
 
-  // AQU-538 (migrations 0057 expand + 0061 contract): the cells PK gained the
-  // target_lang lane. The generic loop above adds the column, but a drifted
-  // container still carries the 4-column PK — and Postgres rejects
-  // `ON CONFLICT (…, target_lang)` without a matching unique constraint,
-  // 500-ing every commit. Local dev has no old workers serving, so we skip the
-  // production expand/contract dance and rebuild the PK straight to the 5-column
-  // form here; all pre-lane rows carry '' so it's trivially unique. Idempotent
-  // (skipped once target_lang is in the PK).
+  // AQU-1420: row identity is lane_id. A container created before that still
+  // has target_lang in the primary key, and Postgres rejects the new
+  // ON CONFLICT (…, lane_id) until the key matches. Local dev has no old
+  // workers serving, so rebuild straight to the lane_id key. Idempotent
+  // (skipped once lane_id is in the PK). lane_id is NOT NULL, so the key
+  // cannot collapse two rows that never received a lane.
   const { rows: pkCols } = await client.query(
     `SELECT a.attname FROM pg_index i
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'cells'::regclass AND i.indisprimary`,
   )
-  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE cells DROP CONSTRAINT cells_pkey;
-       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)`,
-      "rebuilding the cells primary key with target_lang (migrations 0057+0061)",
+       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, lane_id)`,
+      "rebuilding the cells primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt cells PK with target_lang")
+    patched.push("rebuilt cells PK on lane_id")
   }
 
-  // AQU-538 (migrations 0058 expand + 0062 contract): cell_validators and file_section_progress gained
-  // target_lang in their PKs so validations and progress rollups are per-lane.
-  // Same rationale as the cells rebuild above — the generic loop adds the
-  // column, but a drifted container keeps the pre-lane PK and Postgres rejects
-  // the lane-qualified `ON CONFLICT` / upsert. All pre-lane rows carry '' so
-  // the new key is trivially unique. Idempotent (skipped once target_lang is
-  // in the PK).
   const { rows: validatorPkCols } = await client.query(
     `SELECT a.attname FROM pg_index i
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'cell_validators'::regclass AND i.indisprimary`,
   )
-  if (!(validatorPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(validatorPkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE cell_validators DROP CONSTRAINT cell_validators_pkey;
-       ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)`,
-      "rebuilding the cell_validators primary key with target_lang (migrations 0058+0062)",
+       ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, lane_id, username)`,
+      "rebuilding the cell_validators primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt cell_validators PK with target_lang")
+    patched.push("rebuilt cell_validators PK on lane_id")
   }
 
   const { rows: progressPkCols } = await client.query(
@@ -486,14 +489,16 @@ async function reconcilePgSchema(
      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
      WHERE i.indrelid = 'file_section_progress'::regclass AND i.indisprimary`,
   )
-  if (!(progressPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+  if (!(progressPkCols as { attname: string }[]).some((r) => r.attname === "lane_id")) {
     await run(
       `ALTER TABLE file_section_progress DROP CONSTRAINT file_section_progress_pkey;
-       ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, target_lang)`,
-      "rebuilding the file_section_progress primary key with target_lang (migrations 0058+0062)",
+       ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, lane_id)`,
+      "rebuilding the file_section_progress primary key on lane_id (AQU-1420)",
     )
-    patched.push("rebuilt file_section_progress PK with target_lang")
+    patched.push("rebuilt file_section_progress PK on lane_id")
   }
+
+  await finalizeProgressSchema(run)
 
   // AQU-AGENT: the Agent API changeset lifecycle added the transitional
   // 'committing' status (schema.sql line ~782, used by commit.ts). The generic
@@ -514,6 +519,9 @@ async function reconcilePgSchema(
     )
     patched.push("rebuilt changesets_status_check with 'committing'")
   }
+
+  // Views last: every table and column they read is in place by now.
+  patched.push(...await reconcilePgViews(client, run, views))
 
   if (patched.length) {
     console.log(
@@ -595,7 +603,10 @@ async function main(): Promise<void> {
   // Without a real OpenRouter key, boot the scripted mock so the agent and
   // chat paths work end-to-end (deterministic model, zero cost). A real key
   // in auth-worker/.dev.vars wins — no mock, no overrides.
-  const useMockLlm = !identityHasRealOpenRouterKey()
+  const useMockLlm = !WITHOUT_MOCK_LLM && !identityHasRealOpenRouterKey()
+  if (WITHOUT_MOCK_LLM) {
+    console.log("[dev-stack] mock OpenRouter skipped (--no-mock-llm)")
+  }
   if (useMockLlm) {
     await freePort(MOCK_LLM_PORT)
     console.log(`[dev-stack] starting mock OpenRouter on :${MOCK_LLM_PORT}… (no real OPENROUTER_API_KEY in auth-worker/.dev.vars)`)
@@ -828,7 +839,9 @@ async function main(): Promise<void> {
     `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/chat/  (served by identity worker)`,
     useMockLlm
       ? `         llm      -> http://127.0.0.1:${MOCK_LLM_PORT}/  (scripted mock — set OPENROUTER_API_KEY in auth-worker/.dev.vars for a real model)`
-      : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
+      : WITHOUT_MOCK_LLM
+        ? `         llm      -> skipped (--no-mock-llm; hosted chat 500s without OPENROUTER_API_KEY)`
+        : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
     `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local Wrangler state)`,
     "[dev-stack] press Ctrl+C to stop",
     "",

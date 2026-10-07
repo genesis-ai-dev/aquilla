@@ -1,9 +1,38 @@
 // Organization-permission helpers for the codex-web identity/project backend.
 
 import type { Env, AuthUser } from "../types"
-import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
+import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole, resolveProjectRoles } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
+import {
+  inCountedFileSql,
+  inCountedFileSetSql,
+  uncountedFilesCteSql,
+  countedFileSql,
+  notHiddenFileSql,
+} from "../../../db/shared/counted-files"
+import { orgPathContribution } from "../../../db/shared/project-roles"
+import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
+import {
+  loadLaneGrantsForProjects,
+  loadTargetLaneIdentitiesForProjects,
+} from "../../../db/shared/lane-visibility"
+import {
+  READ_WALL_MAINTAINER,
+  laneReadWallEnabled,
+  legacyTagsForVisibleLanes,
+  portfolioTextFromVisibleLanes,
+  visibleDefaultLaneLanguage,
+  visibleLaneTags,
+} from "../../../src/lib/lanes/read-wall"
+import { extraRegistryLanes } from "../../../src/lib/lanes/registry-lanes"
+import {
+  emptyPortfolioAggregate,
+  summarizePortfoliosByOrg,
+  type OrgPortfolioAggregate,
+  type PortfolioAggregate,
+} from "../../../src/lib/frontier/portfolio-metrics"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -22,7 +51,28 @@ export interface UserOrg {
 }
 
 /**
- * Return the user's owned organization, lazy-creating one if absent.
+ * Find the user's personal org without creating one. Prefers billing_scope
+ * 'personal'; falls back to an owned org with billing_scope NULL (legacy
+ * personal workspaces predate the column and were never backfilled). A
+ * 'team' org is never personal.
+ */
+export async function findPersonalOrg(
+  env: Env,
+  userId: number,
+): Promise<{ id: number; name: string | null } | null> {
+  return env.AQUILLA_PG.prepare(
+    `SELECT id, name FROM organizations
+      WHERE owner_user_id = ? AND (billing_scope = 'personal' OR billing_scope IS NULL)
+      ORDER BY (billing_scope = 'personal') DESC NULLS LAST, id ASC
+      LIMIT 1`,
+  )
+    .bind(userId)
+    .first<{ id: number; name: string | null }>()
+}
+
+/**
+ * Return the user's personal organization, lazy-creating one if absent.
+ * Owning a team org does not count: only billing_scope 'personal' matches.
  * Personal orgs are created without a Stripe customer. The caller becomes
  * a role-700 owner.
  */
@@ -30,11 +80,7 @@ export async function getOrCreateUserOrg(
   env: Env,
   user: AuthUser,
 ): Promise<UserOrg> {
-  const existing = await env.AQUILLA_PG.prepare(
-    "SELECT id, name FROM organizations WHERE owner_user_id = ? ORDER BY id ASC LIMIT 1",
-  )
-    .bind(user.id)
-    .first<{ id: number; name: string | null }>()
+  const existing = await findPersonalOrg(env, user.id)
 
   if (existing) {
     return { id: existing.id, name: existing.name, role: 700 }
@@ -42,8 +88,10 @@ export async function getOrCreateUserOrg(
 
   const name = `${user.username}'s workspace`
   const inserted = await env.AQUILLA_PG.prepare(
-    `INSERT INTO organizations (name, owner_user_id)
-     VALUES (?, ?) RETURNING id`,
+    `INSERT INTO organizations (name, owner_user_id, billing_scope)
+     VALUES (?, ?, 'personal')
+     ON CONFLICT (owner_user_id) WHERE billing_scope = 'personal'
+     DO UPDATE SET billing_scope = EXCLUDED.billing_scope RETURNING id`,
   )
     .bind(name, user.id)
     .first<{ id: number }>()
@@ -62,7 +110,7 @@ export async function getOrCreateUserOrg(
 
 export async function createOrgForUser(env: Env, user: AuthUser, name: string): Promise<{ id: number; name: string }> {
   const inserted = await env.AQUILLA_PG.prepare(
-    "INSERT INTO organizations (name, owner_user_id) VALUES (?, ?) RETURNING id",
+    "INSERT INTO organizations (name, owner_user_id, billing_scope) VALUES (?, ?, 'team') RETURNING id",
   ).bind(name, user.id).first<{ id: number }>()
   if (!inserted) throw new Error("failed to insert organization")
   await env.AQUILLA_PG.prepare(
@@ -75,6 +123,87 @@ export async function renameOrg(env: Env, orgId: number, name: string): Promise<
   await env.AQUILLA_PG.prepare(
     "UPDATE organizations SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   ).bind(name, orgId).run()
+}
+
+export type DeleteOrganizationResult =
+  | { ok: true }
+  | { ok: false; reason: "has_projects"; projectCount: number }
+
+/**
+ * Hard-delete an organization and the rows that belong only to it.
+ *
+ * AQU-1108 decisions, taken from the ticket's acceptance tests:
+ * - Any project row (including archived) blocks the delete. There is no
+ *   hard-delete for projects, so cascading them would orphan or destroy
+ *   translation data. `projects.org_id` is never left pointing at a missing org.
+ * - Members, teams, invites, org-scoped PATs, device grants, integrations,
+ *   billing, and usage rows are removed in the same transaction.
+ * - The personal workspace may be deleted. `GET /orgs/me` and an empty
+ *   `listUserOrgs` lazily create a fresh one.
+ *
+ * Caller authorization stays in the route: membership role >= owner, with no
+ * platform-admin elevation.
+ */
+export async function deleteOrganization(
+  env: Env,
+  orgId: number,
+): Promise<DeleteOrganizationResult> {
+  const db = env.AQUILLA_PG
+  if (!db.transaction) throw new Error("Deleting an organization requires Postgres transactions")
+  return db.transaction(async (tx) => {
+    const counted = await tx.prepare(
+      "SELECT COUNT(*) AS n FROM projects WHERE org_id = ?",
+    ).bind(orgId).first<{ n: number | string }>()
+    const projectCount = Number(counted?.n ?? 0)
+    if (projectCount > 0) return { ok: false, reason: "has_projects", projectCount }
+
+    const orgText = String(orgId)
+    // Child tables first. Some of these FKs cascade and some do not; deleting
+    // explicitly keeps the same result on a database whose FKs were omitted.
+    const byOrgId = [
+      "DELETE FROM workspace_plan_change_reviews WHERE org_id = ?",
+      "DELETE FROM workspace_subscription_state WHERE org_id = ?",
+      "DELETE FROM workspace_usage_requests WHERE org_id = ?",
+      "DELETE FROM workspace_checkout_attempts WHERE org_id = ?",
+      "DELETE FROM workspace_plan_entitlements WHERE org_id = ?",
+      "DELETE FROM billing_price_cohorts WHERE org_id = ?",
+      "DELETE FROM org_billing_events WHERE org_id = ?",
+      "DELETE FROM org_word_usage_daily WHERE org_id = ?",
+      "DELETE FROM org_credit_usage_daily WHERE org_id = ?",
+      "DELETE FROM tts_usage_daily WHERE org_id = ?",
+      "DELETE FROM org_billing WHERE org_id = ?",
+      "DELETE FROM rule_applicability WHERE rule_id IN (SELECT id FROM style_rules WHERE org_id = ?)",
+      "DELETE FROM style_rules WHERE org_id = ?",
+      "DELETE FROM knowledge_docs WHERE org_id = ?",
+      "DELETE FROM org_invites WHERE org_id = ?",
+      "DELETE FROM org_settings WHERE org_id = ?",
+      "DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE org_id = ?)",
+      "DELETE FROM group_project_grants WHERE group_id IN (SELECT id FROM groups WHERE org_id = ?)",
+      "DELETE FROM groups WHERE org_id = ?",
+      "DELETE FROM org_members WHERE org_id = ?",
+    ]
+    for (const sql of byOrgId) {
+      await tx.prepare(sql).bind(orgId).run()
+    }
+    const byOrgText = [
+      `DELETE FROM integration_item_links WHERE link_id IN (
+         SELECT l.id FROM integration_links l
+         JOIN integration_connections c ON c.id = l.connection_id
+         WHERE c.org_id = ?
+       )`,
+      `DELETE FROM integration_links WHERE connection_id IN (
+         SELECT id FROM integration_connections WHERE org_id = ?
+       )`,
+      "DELETE FROM integration_connections WHERE org_id = ?",
+      "DELETE FROM api_credentials WHERE org_id = ?",
+      "DELETE FROM agent_authorizations WHERE org_id = ?",
+    ]
+    for (const sql of byOrgText) {
+      await tx.prepare(sql).bind(orgText).run()
+    }
+    await tx.prepare("DELETE FROM organizations WHERE id = ?").bind(orgId).run()
+    return { ok: true }
+  })
 }
 
 export interface UserOrgSummary {
@@ -117,6 +246,121 @@ export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSum
   }
 
   return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
+}
+
+/** First page of the org-switcher catalog (platform-admin append). */
+export const ORG_DIRECTORY_DEFAULT_LIMIT = 40
+export const ORG_DIRECTORY_MAX_LIMIT = 100
+
+export function encodeOrgDirectoryCursor(id: number, name: string | null): string {
+  return `${id}:${encodeURIComponent(name ?? "")}`
+}
+
+export function decodeOrgDirectoryCursor(raw: string): { id: number; name: string } | null {
+  const sep = raw.indexOf(":")
+  if (sep < 0) return null
+  const id = Number(raw.slice(0, sep))
+  if (!Number.isInteger(id) || id < 1) return null
+  try {
+    return { id, name: decodeURIComponent(raw.slice(sep + 1)) }
+  } catch {
+    return null
+  }
+}
+
+export function clampOrgDirectoryLimit(raw: string | undefined): number {
+  const n = raw == null || raw === "" ? ORG_DIRECTORY_DEFAULT_LIMIT : Number(raw)
+  if (!Number.isFinite(n)) return ORG_DIRECTORY_DEFAULT_LIMIT
+  return Math.min(ORG_DIRECTORY_MAX_LIMIT, Math.max(1, Math.floor(n)))
+}
+
+/** Same page size as the org switcher — project tables and pickers share it. */
+export const PROJECT_DIRECTORY_DEFAULT_LIMIT = ORG_DIRECTORY_DEFAULT_LIMIT
+export const PROJECT_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
+
+export const clampProjectDirectoryLimit = clampOrgDirectoryLimit
+
+/** Same page size as the org switcher / project tables. */
+export const TEAM_DIRECTORY_DEFAULT_LIMIT = ORG_DIRECTORY_DEFAULT_LIMIT
+export const TEAM_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
+export const clampTeamDirectoryLimit = clampOrgDirectoryLimit
+export const encodeTeamDirectoryCursor = encodeOrgDirectoryCursor
+export const decodeTeamDirectoryCursor = decodeOrgDirectoryCursor
+
+export function encodeProjectDirectoryCursor(id: string, name: string): string {
+  return `${encodeURIComponent(id)}:${encodeURIComponent(name)}`
+}
+
+export function decodeProjectDirectoryCursor(raw: string): { id: string; name: string } | null {
+  const sep = raw.indexOf(":")
+  if (sep < 0) return null
+  try {
+    const id = decodeURIComponent(raw.slice(0, sep))
+    const name = decodeURIComponent(raw.slice(sep + 1))
+    if (!id) return null
+    return { id, name }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * One page of orgs the caller does not already reach via membership or a
+ * project grant. Used by GET /orgs?limit= for the switcher's infinite list —
+ * never by the unparameterized memberships fetch (session boot).
+ */
+export async function listPlatformAdminOrgsPage(
+  env: Env,
+  opts: {
+    excludeIds: ReadonlySet<number>
+    /** Lowercased substring; empty string matches all names. */
+    q: string
+    limit: number
+    cursor: { id: number; name: string } | null
+  },
+): Promise<{ orgs: Array<{ id: number; name: string | null }>; nextCursor: string | null }> {
+  const binds: unknown[] = []
+  const where: string[] = []
+
+  if (opts.q) {
+    where.push("strpos(lower(coalesce(name, '')), ?) > 0")
+    binds.push(opts.q)
+  }
+
+  const exclude = [...opts.excludeIds]
+  if (exclude.length > 0) {
+    where.push(`id NOT IN (${exclude.map(() => "?").join(", ")})`)
+    binds.push(...exclude)
+  }
+
+  if (opts.cursor) {
+    const cursorName = opts.cursor.name.toLowerCase()
+    where.push(
+      "(lower(coalesce(name, '')) > ? OR (lower(coalesce(name, '')) = ? AND id > ?))",
+    )
+    binds.push(cursorName, cursorName, opts.cursor.id)
+  }
+
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""
+  binds.push(opts.limit + 1)
+
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT id, name FROM organizations
+      ${whereSql}
+      ORDER BY lower(coalesce(name, '')), id
+      LIMIT ?`,
+  )
+    .bind(...binds)
+    .all<{ id: number; name: string | null }>()
+
+  const list = rows.results ?? []
+  const hasMore = list.length > opts.limit
+  const page = hasMore ? list.slice(0, opts.limit) : list
+  const last = page[page.length - 1]
+  return {
+    orgs: page,
+    nextCursor: hasMore && last ? encodeOrgDirectoryCursor(last.id, last.name) : null,
+  }
 }
 
 /**
@@ -252,14 +496,23 @@ export async function bumpOrgActivity(
   if (last != null && now - last < ORG_ACTIVITY_DEBOUNCE_MS) return
   orgActivityBumpedAt.set(key, now)
   try {
+    // One round-trip: bump the org row AND record "this user used the app
+    // today" for retention (user_activity_days, see migration 0090). The CTE
+    // keeps the day insert independent of the UPDATE's WHERE, so a user whose
+    // row another isolate bumped seconds ago still gets today's activity day.
     await env.AQUILLA_PG.prepare(
-      `UPDATE org_members
-          SET last_active_at = CURRENT_TIMESTAMP
-        WHERE org_id = ? AND user_id = ?
-          AND (last_active_at IS NULL
-               OR last_active_at < now() - interval '5 minutes')`,
+      `WITH bump AS (
+         UPDATE org_members
+            SET last_active_at = CURRENT_TIMESTAMP
+          WHERE org_id = ? AND user_id = ?
+            AND (last_active_at IS NULL
+                 OR last_active_at < now() - interval '5 minutes')
+       )
+       INSERT INTO user_activity_days (user_id, day)
+       VALUES (?, (now() AT TIME ZONE 'UTC')::date)
+       ON CONFLICT DO NOTHING`,
     )
-      .bind(orgId, userId)
+      .bind(orgId, userId, userId)
       .run()
   } catch (err) {
     console.warn("bumpOrgActivity failed (non-fatal):", err)
@@ -436,11 +689,20 @@ export async function listEffectiveProjectMembers(
       .bind(orgId)
       .all<{ user_id: number; username: string; email: string | null; role_level: number }>()
 
+    // Direct and group paths are already recorded above, so `allPaths` tells
+    // us which other paths each org member holds on THIS project — exactly
+    // what orgPathContribution needs (AQU-435 floor + AQU-1274 no silent
+    // demotion). Same rule as the resolver, so this roster can't disagree
+    // with what enforcement does.
     for (const r of orgMembers.results ?? []) {
-      // AQU-435: only Maintainer+ org roles are an access path — a
-      // sub-maintainer org member does NOT appear as having access via org.
-      if (r.role_level < ORG_WIDE_ACCESS_FLOOR) continue
-      record(r.user_id, r.username, r.email, "org", r.role_level)
+      const existing = allPaths.get(r.user_id)?.paths ?? []
+      const level = orgPathContribution({
+        orgLevel: r.role_level,
+        hasDirectGrant: existing.some((p) => p.source === "override"),
+        hasGroupGrant: existing.some((p) => p.source === "group"),
+      })
+      if (level == null) continue
+      record(r.user_id, r.username, r.email, "org", level)
     }
   }
 
@@ -647,12 +909,21 @@ export async function listEffectiveMembersForOrg(
     if (r.role_level == null) continue
     record(r.project_id, r.user_id, r.username, "group", r.role_level)
   }
-  // org + creator paths apply to every accessible project. AQU-435: the org
-  // path exists only for Maintainer+ members.
+  // org + creator paths apply to every accessible project. AQU-435: below
+  // Maintainer the org path opens nothing; AQU-1274: it still keeps a team
+  // attachment from silently demoting a higher org role. Direct and group
+  // paths are recorded above, so the per-project map answers both questions.
   for (const p of projects) {
+    const perProject = ensure(p.id)
     for (const om of orgMembers.results ?? []) {
-      if (om.role_level < ORG_WIDE_ACCESS_FLOOR) continue
-      record(p.id, om.user_id, om.username, "org", om.role_level)
+      const existing = perProject.get(om.user_id)?.paths ?? []
+      const level = orgPathContribution({
+        orgLevel: om.role_level,
+        hasDirectGrant: existing.some((x) => x.source === "override"),
+        hasGroupGrant: existing.some((x) => x.source === "group"),
+      })
+      if (level == null) continue
+      record(p.id, om.user_id, om.username, "org", level)
     }
     const cu = creatorUsername.get(p.created_by)
     if (cu) record(p.id, p.created_by, cu, "creator", 700)
@@ -673,12 +944,74 @@ export interface OrgGroupSummary {
   isInternal: boolean
 }
 
-/** Groups in an org, with counts and whether the viewer is a member. */
-export async function listOrgGroups(
+export type TeamDirectoryVisibility = "all" | "internal" | "public"
+
+export type TeamDirectoryPageOpts = {
+  q: string
+  limit: number
+  cursor: { id: number; name: string } | null
+  visibility: TeamDirectoryVisibility
+}
+
+type OrgGroupDbRow = {
+  id: number
+  name: string
+  is_internal: number | boolean
+  member_count: number
+  project_count: number
+  viewer_is_member: number
+}
+
+function mapOrgGroupRow(r: OrgGroupDbRow): OrgGroupSummary {
+  return {
+    id: r.id,
+    name: r.name,
+    memberCount: r.member_count,
+    projectCount: r.project_count,
+    viewerIsMember: r.viewer_is_member === 1,
+    isInternal: r.is_internal === 1 || r.is_internal === true,
+  }
+}
+
+export function parseTeamDirectoryVisibility(raw: string | undefined): TeamDirectoryVisibility {
+  if (raw === "internal" || raw === "public" || raw === "all") return raw
+  return "all"
+}
+
+/**
+ * One page (or the full set) of teams in an org, ordered by name. Used by the
+ * org Teams table so search and infinite scroll do not dump every group.
+ * `memberOnly` is the AQU-789 gate: non-maintainers only see teams they belong to.
+ */
+export async function listOrgGroupsPage(
   env: Env,
   orgId: number,
   viewerId: number,
-): Promise<OrgGroupSummary[]> {
+  page: TeamDirectoryPageOpts | null,
+  access: { memberOnly: boolean },
+): Promise<{ groups: OrgGroupSummary[]; nextCursor: string | null }> {
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (access.memberOnly) {
+    extraWhere.push(
+      "EXISTS (SELECT 1 FROM group_members gm_vis WHERE gm_vis.group_id = g.id AND gm_vis.user_id = ?)",
+    )
+    extraBinds.push(viewerId)
+  }
+  if (page?.q) {
+    extraWhere.push("strpos(lower(g.name), ?) > 0")
+    extraBinds.push(page.q)
+  }
+  if (page?.visibility === "internal") extraWhere.push("g.is_internal IS TRUE")
+  else if (page?.visibility === "public") extraWhere.push("g.is_internal IS NOT TRUE")
+  if (page?.cursor) {
+    extraWhere.push("(lower(g.name) > ? OR (lower(g.name) = ? AND g.id > ?))")
+    extraBinds.push(page.cursor.name.toLowerCase(), page.cursor.name.toLowerCase(), page.cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const limitSql = page ? " LIMIT ?" : ""
+  if (page) extraBinds.push(page.limit + 1)
+
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT g.id AS id, g.name AS name, g.is_internal AS is_internal,
             (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
@@ -686,19 +1019,31 @@ export async function listOrgGroups(
             (EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id = g.id AND gm2.user_id = ?))::int AS viewer_is_member
        FROM groups g
       WHERE g.org_id = ?
-      ORDER BY LOWER(g.name)`,
+        ${extraWhereSql}
+      ORDER BY LOWER(g.name), g.id
+      ${limitSql}`,
   )
-    .bind(viewerId, orgId)
-    .all<{ id: number; name: string; is_internal: number | boolean; member_count: number; project_count: number; viewer_is_member: number }>()
+    .bind(viewerId, orgId, ...extraBinds)
+    .all<OrgGroupDbRow>()
 
-  return (rows.results ?? []).map((r) => ({
-    id: r.id,
-    name: r.name,
-    memberCount: r.member_count,
-    projectCount: r.project_count,
-    viewerIsMember: r.viewer_is_member === 1,
-    isInternal: r.is_internal === 1 || r.is_internal === true,
-  }))
+  const list = rows.results ?? []
+  const hasMore = page != null && list.length > page.limit
+  const pageRows = hasMore ? list.slice(0, page.limit) : list
+  const last = pageRows[pageRows.length - 1]
+  return {
+    groups: pageRows.map(mapOrgGroupRow),
+    nextCursor: hasMore && last ? encodeTeamDirectoryCursor(last.id, last.name) : null,
+  }
+}
+
+/** Groups in an org, with counts and whether the viewer is a member. */
+export async function listOrgGroups(
+  env: Env,
+  orgId: number,
+  viewerId: number,
+): Promise<OrgGroupSummary[]> {
+  const { groups } = await listOrgGroupsPage(env, orgId, viewerId, null, { memberOnly: false })
+  return groups
 }
 
 /** ISO-8601 for JSON; Hyperdrive may hand back a Date or a timestamp string. */
@@ -717,7 +1062,16 @@ export interface OrgGroupDetail {
   name: string
   description: string | null
 
-  members: Array<{ userId: number; username: string; email: string | null; roleLevel: number | null; addedAt: string | null }>
+  members: Array<{
+    userId: number
+    username: string
+    email: string | null
+    /** Org role (unchanged meaning). */
+    roleLevel: number | null
+    /** AQU-1352 P2: team-scope role; null = legacy member (per-project grants only). */
+    teamRoleLevel: number | null
+    addedAt: string | null
+  }>
   projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt: string | null }>
 }
 
@@ -736,7 +1090,7 @@ export async function getOrgGroupDetail(
 
   const members = await env.AQUILLA_PG.prepare(
     `SELECT gm.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level,
-            gm.added_at AS added_at
+            gm.role_level AS team_role_level, gm.added_at AS added_at
        FROM group_members gm
        JOIN users u ON u.id = gm.user_id
        LEFT JOIN org_members om ON om.org_id = ? AND om.user_id = gm.user_id
@@ -744,7 +1098,7 @@ export async function getOrgGroupDetail(
       ORDER BY LOWER(u.username)`,
   )
     .bind(orgId, groupId)
-    .all<{ user_id: number; username: string; email: string | null; role_level: number | null; added_at: string | Date | null }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number | null; team_role_level: number | null; added_at: string | Date | null }>()
 
   const projects = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted,
@@ -766,6 +1120,7 @@ export async function getOrgGroupDetail(
       username: m.username,
       email: m.email ?? null,
       roleLevel: m.role_level,
+      teamRoleLevel: m.team_role_level == null ? null : Number(m.team_role_level),
       addedAt: timestampIso(m.added_at),
     })),
     projects: (projects.results ?? []).map((p) => ({
@@ -889,6 +1244,14 @@ export interface PortfolioLane {
   filledCells: number
   validatedCells: number
   lastEditAt: number | null
+  /** Display name from the `lanes` row. Absent when the project has no row yet. */
+  name?: string | null
+  /** Opaque lane id. */
+  laneId?: string | null
+  /** Display order from `lanes.position`. */
+  position?: number
+  /** AQU-1458: archived lanes stay in the payload so the overview can tuck them away. */
+  archived?: boolean
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
@@ -927,17 +1290,33 @@ interface PortfolioDbRow {
   units_total: number
   units_done: number
   units_overdue: number
+  created_by: number | string | null
 }
 
-function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, PortfolioLane[]>): PortfolioRow {
+/** Text totals recomputed from the lanes this caller may see. */
+interface VisiblePortfolioText {
+  lanes: PortfolioLane[]
+  totalCells: number
+  filledCells: number
+  validatedCells: number
+  lastEditAt: number | null
+  aiDraftedCells: number
+  targetLanguage: string | null
+}
+
+function mapPortfolioRow(
+  r: PortfolioDbRow,
+  lanesByProject: Map<string, PortfolioLane[]>,
+  visibleText?: VisiblePortfolioText,
+): PortfolioRow {
   return {
     id: r.id,
     name: r.name,
-    totalCells: r.total_cells,
-    validatedCells: r.validated_cells,
-    filledCells: r.filled_cells,
-    aiDraftedCells: r.ai_drafted_cells,
-    lastEditAt: r.last_edit_at,
+    totalCells: visibleText ? visibleText.totalCells : r.total_cells,
+    validatedCells: visibleText ? visibleText.validatedCells : r.validated_cells,
+    filledCells: visibleText ? visibleText.filledCells : r.filled_cells,
+    aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
+    lastEditAt: visibleText ? visibleText.lastEditAt : r.last_edit_at,
     audioCells: r.audio_cells,
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
@@ -945,8 +1324,8 @@ function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, Portfoli
     // "" (empty settings default) is normalized to null so the client shows a
     // graceful "no language set" rather than a blank/broken "→" (AQU-523).
     sourceLanguage: r.source_language || null,
-    targetLanguage: r.target_language || null,
-    lanes: lanesByProject.get(r.id) ?? [],
+    targetLanguage: visibleText ? visibleText.targetLanguage : (r.target_language || null),
+    lanes: visibleText ? visibleText.lanes : (lanesByProject.get(r.id) ?? []),
     unitsTotal: Number(r.units_total) || 0,
     unitsDone: Number(r.units_done) || 0,
     unitsOverdue: Number(r.units_overdue) || 0,
@@ -962,12 +1341,22 @@ interface LaneDbRow {
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
   updated_at: number | string | null
+  // AQU-1083: the structural subset of each of the three above, so a lane can
+  // subtract at read time exactly as the headline numbers beside it do.
+  structural_count: number | string | null
+  structural_filled_count: number | string | null
+  structural_validator_histogram: Record<string, number> | string | null
 }
 
 interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
   target_lanes: unknown
+  archived_lanes: unknown
+  /** The default lane's language. The same string may also sit in target_lanes. */
+  target_language: string | null
+  /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
+  count_structural?: string | null
 }
 
 /** Endorsement threshold at which a cell counts as validated, per the project's settings (default 1, cap 15). */
@@ -1003,29 +1392,78 @@ function validatedFromHistogram(raw: LaneDbRow["validator_histogram"], threshold
  * file per lane since migration 0055) — a SUM, not new bookkeeping. Lanes are
  * ordered default ('') first, then by tag, for deterministic output.
  */
-async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<string, PortfolioLane[]>> {
+async function fetchPortfolioLanes(
+  env: Env,
+  orgIds: number[],
+  projectIds?: readonly string[],
+): Promise<Map<string, PortfolioLane[]>> {
   const byProject = new Map<string, PortfolioLane[]>()
   if (orgIds.length === 0) return byProject
   const placeholders = orgIds.map(() => "?").join(", ")
-  const [laneRows, settingsRows] = await Promise.all([
+  const projectFilter =
+    projectIds != null && projectIds.length > 0
+      ? ` AND p.id IN (${projectIds.map(() => "?").join(", ")})`
+      : ""
+  const orgBinds: unknown[] = [...orgIds]
+  const projectBinds: unknown[] = projectIds != null && projectIds.length > 0 ? [...projectIds] : []
+  const [laneRows, settingsRows, nameRows] = await Promise.all([
     env.AQUILLA_PG.prepare(
       `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
               fsp.total_count AS total_count, fsp.filled_count AS filled_count,
-              fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at
+              fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at,
+              fsp.structural_count AS structural_count,
+              fsp.structural_filled_count AS structural_filled_count,
+              fsp.structural_validator_histogram AS structural_validator_histogram
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
-        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'`,
-    ).bind(...orgIds).all<LaneDbRow>(),
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'
+          -- AQU-1626: one progress row per file per lane, so a hidden or
+          -- deleted file contributes one here too — and a lane chip that
+          -- disagreed with the project total beside it is how the caption-track
+          -- inflation first showed up.
+          AND ${inCountedFileSql('fsp')}${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
-      `SELECT ps.project_id AS project_id,
+      // Driven FROM projects, not from project_settings: a project that has
+      // never had a settings row still inherits its org's answer, and inner-
+      // joining the settings table hides exactly those projects. The columns
+      // this used to read come back null for them, which is what they meant
+      // before anyway (default threshold, no registered lanes).
+      `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
-              ps.target_lanes AS target_lanes
-         FROM project_settings ps
-         JOIN projects p ON p.id = ps.project_id
-        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL`,
-    ).bind(...orgIds).all<PortfolioSettingsDbRow>(),
+              ps.target_lanes AS target_lanes,
+              (ps.settings::jsonb)->'archivedLanes' AS archived_lanes,
+              ps.target_language AS target_language,
+              COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
+    env.AQUILLA_PG.prepare(
+      `SELECT l.project_id AS project_id, l.id AS id, ${laneDisplayNameSql("l")} AS name,
+              l.legacy_tag AS legacy_tag, l.position AS position,
+              l.archived_at AS archived_at
+         FROM lanes l
+         JOIN projects p ON p.id = l.project_id
+        WHERE l.role = 'target' AND p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<{
+      project_id: string
+      id: string
+      name: string
+      legacy_tag: string | null
+      position: number
+      archived_at: string | null
+    }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
+  // AQU-1083: which projects leave structural cells out. Absent = count them,
+  // so a project with no settings row at all keeps today's numbers.
+  const excluding = new Set(
+    (settingsRows.results ?? [])
+      .filter((row) => row.count_structural === "false")
+      .map((row) => row.project_id),
+  )
   // Accumulate one lane entry per (project, target_lang).
   const acc = new Map<string, Map<string, PortfolioLane>>()
   for (const row of laneRows.results ?? []) {
@@ -1035,9 +1473,20 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
     const lane = row.target_lang ?? ""
     let entry = lanes.get(lane)
     if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
-    entry.totalCells += Number(row.total_count) || 0
-    entry.filledCells += Number(row.filled_count) || 0
-    entry.validatedCells += validatedFromHistogram(row.validator_histogram, threshold)
+    // AQU-1083: subtract per file row, then clamp — a partially backfilled
+    // project must never contribute a negative number to the lane's sum.
+    const drop = excluding.has(row.project_id)
+    const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
+    const structuralFilled = drop ? Number(row.structural_filled_count) || 0 : 0
+    const structuralValidated = drop
+      ? validatedFromHistogram(row.structural_validator_histogram, threshold)
+      : 0
+    entry.totalCells += Math.max(0, (Number(row.total_count) || 0) - structuralTotal)
+    entry.filledCells += Math.max(0, (Number(row.filled_count) || 0) - structuralFilled)
+    entry.validatedCells += Math.max(
+      0,
+      validatedFromHistogram(row.validator_histogram, threshold) - structuralValidated,
+    )
     const updatedAt = row.updated_at == null ? null : Number(row.updated_at)
     if (updatedAt != null && Number.isFinite(updatedAt)) {
       entry.lastEditAt = entry.lastEditAt == null ? updatedAt : Math.max(entry.lastEditAt, updatedAt)
@@ -1048,8 +1497,10 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
   // first translation lands. The denominator is borrowed from the '' row
   // (source-cell count is lane-independent); no '' row means the project has
   // no progress rows at all and the registered lane stays 0/0.
+  // AQU-1473: the primary language is the '' lane even when create also wrote
+  // it into targetLanes. Adding it again paints the first language twice.
   for (const row of settingsRows.results ?? []) {
-    const registered = readTargetLanes(row.target_lanes)
+    const registered = extraRegistryLanes(readTargetLanes(row.target_lanes), row.target_language)
     if (registered.length === 0) continue
     let lanes = acc.get(row.project_id)
     if (!lanes) {
@@ -1058,14 +1509,77 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
     }
     const denominator = lanes.get("")?.totalCells ?? 0
     for (const lane of registered) {
-      if (lane === "" || lanes.has(lane)) continue
+      if (lanes.has(lane)) continue
       lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
+    }
+  }
+  for (const row of nameRows.results ?? []) {
+    const tag = row.legacy_tag ?? ""
+    let lanes = acc.get(row.project_id)
+    if (!lanes) {
+      lanes = new Map()
+      acc.set(row.project_id, lanes)
+    }
+    let entry = lanes.get(tag)
+    if (!entry) {
+      const denominator = lanes.get("")?.totalCells ?? 0
+      entry = { lane: tag, totalCells: tag === "" ? 0 : denominator, filledCells: 0, validatedCells: 0, lastEditAt: null }
+      lanes.set(tag, entry)
+    }
+    entry.name = row.name
+    entry.laneId = row.id
+    entry.position = Number(row.position) || 0
+  }
+  // AQU-1458: a lane is archived when its row says so, or when an older
+  // project only recorded the tag in settings.archivedLanes.
+  //
+  // AQU-1600: the former default lane ('') archives like any other, so the
+  // empty tag is carried through both maps instead of being dropped. Only the
+  // ROW can archive it — settings.archivedLanes is a list of non-empty tags
+  // and never names it — so the settings mirror is consulted for non-empty
+  // tags only.
+  const archivedTagsByProject = new Map<string, Set<string>>()
+  for (const row of settingsRows.results ?? []) {
+    const tags = new Set(
+      readTargetLanes(row.archived_lanes)
+        .map((tag) => tag.toLowerCase())
+        .filter((tag) => tag !== ""),
+    )
+    if (tags.size > 0) archivedTagsByProject.set(row.project_id, tags)
+  }
+  const archivedRowTags = new Map<string, Set<string>>()
+  for (const row of nameRows.results ?? []) {
+    if (row.archived_at == null || row.archived_at === "") continue
+    if (row.legacy_tag == null) continue
+    const tag = row.legacy_tag.trim().toLowerCase()
+    let tags = archivedRowTags.get(row.project_id)
+    if (!tags) {
+      tags = new Set()
+      archivedRowTags.set(row.project_id, tags)
+    }
+    tags.add(tag)
+  }
+  for (const [projectId, lanes] of acc) {
+    const fromSettings = archivedTagsByProject.get(projectId)
+    const fromRows = archivedRowTags.get(projectId)
+    if (!fromSettings && !fromRows) continue
+    for (const entry of lanes.values()) {
+      const key = entry.lane.toLowerCase()
+      if (fromRows?.has(key) || (key !== "" && fromSettings?.has(key))) entry.archived = true
     }
   }
   for (const [projectId, lanes] of acc) {
     byProject.set(
       projectId,
-      [...lanes.values()].sort((a, b) => (a.lane === b.lane ? 0 : a.lane === "" ? -1 : b.lane === "" ? 1 : a.lane < b.lane ? -1 : 1)),
+      [...lanes.values()].sort((a, b) => {
+        const ap = a.position ?? (a.lane === "" ? -1 : 1_000_000)
+        const bp = b.position ?? (b.lane === "" ? -1 : 1_000_000)
+        if (ap !== bp) return ap - bp
+        if (a.lane === b.lane) return 0
+        if (a.lane === "") return -1
+        if (b.lane === "") return 1
+        return a.lane < b.lane ? -1 : 1
+      }),
     )
   }
   return byProject
@@ -1103,13 +1617,397 @@ const PORTFOLIO_VISIBILITY_PREDICATE = `(
                         AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )`
 
-/** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
-export async function getOrgPortfolio(
+/**
+ * AQU-1083: does this project count structural cells toward progress? Its own
+ * answer, else its org's, else yes.
+ *
+ * MAX() because the surrounding query groups by project and these join 1:1 —
+ * the same reason source_language is read that way. STORED generated columns,
+ * never the settings blob: parsing ~6 MB of JSON per fan-out row is what timed
+ * this dashboard out at 15 seconds in the first place.
+ */
+const PORTFOLIO_EXCLUDE_STRUCTURAL =
+  "COALESCE(MAX(ps.count_structural), MAX(os.count_structural)) = 'false'"
+
+/** `total − structural` when the policy excludes, floored at zero. */
+const lessStructural = (total: string, structural: string) =>
+  `GREATEST(0, ${total} - CASE WHEN ${PORTFOLIO_EXCLUDE_STRUCTURAL} THEN ${structural} ELSE 0 END)`
+
+/**
+ * The per-project cell rollups.
+ *
+ * ai_drafted follows the policy for the same reason audio does: the client
+ * divides it by total_cells, so shrinking the denominator alone would let a
+ * scripture project whose headings were machine-drafted read over 100%.
+ */
+const PORTFOLIO_CELL_COLUMNS = `
+            ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
+            ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
+            ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
+            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,`
+
+/**
+ * Shared join tail — the org default now has to reach the rollups too.
+ *
+ * AQU-1626: the files join carries `countedFileSql`, so a tombstoned file and a
+ * hidden companion (a cue sheet, a linked video's caption track) stay out of
+ * every column above. Without it a 500-cue caption track added 500 untranslated
+ * cells to this org's totals while the plan board — which has always applied the
+ * rule — showed the real number two tiles away. It belongs in the JOIN rather
+ * than the WHERE because this is a LEFT join: in the WHERE it would discard the
+ * project row itself for a project whose only file is hidden, instead of
+ * counting it as empty.
+ */
+const PORTFOLIO_JOINS = `
+       LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN org_settings os ON os.org_id = p.org_id
+       LEFT JOIN au ON au.project_id = p.id
+       LEFT JOIN pu ON pu.project_id = p.id`
+
+/** AQU-1097: planning-unit counts, read from the `pu` CTE above. */
+const PORTFOLIO_UNIT_COLUMNS = `
+            COALESCE(MAX(pu.units_total), 0)           AS units_total,
+            COALESCE(MAX(pu.units_done), 0)            AS units_done,
+            COALESCE(MAX(pu.units_overdue), 0)         AS units_overdue`
+
+/**
+ * Audio coverage and validation, with structural cells dropped where a project
+ * excludes them.
+ *
+ * `audioPct` divides audio cells by the TEXT total while `audioValidatedPct`
+ * divides by the audio total, so leaving audio alone while the text denominator
+ * shrank would let a scripture project whose headings were voiced read over
+ * 100% covered. Bulk synthesis has no type filter, so those takes genuinely
+ * exist.
+ *
+ * `recorded_ms` never takes the exclusion: it measures work that was actually
+ * done rather than progress against a denominator — the same reasoning that
+ * keeps word counts out of this setting.
+ *
+ * Shape matters here. `cell_audio` keys on four columns where `cells` keys on
+ * five, so joining them directly fans out per side and per lane; COUNT(DISTINCT)
+ * would survive that but SUM would not, silently multiplying recorded_ms. And
+ * the structural cell ids are gathered ONCE per excluding project rather than
+ * probed per audio row — for every project that counts headings (all of them,
+ * until someone opts out) that CTE is empty and the join costs nothing. The
+ * previous shape of this query, three correlated subqueries over ~300k rows,
+ * is what caused the 15s dashboard timeout; this must not walk back into it.
+ *
+ * It did walk back into it once (2026-10-05), and both halves of how are now
+ * closed by construction rather than left to the planner:
+ *
+ *   * "Costs nothing" was only true while Postgres happened to hash the
+ *     excluding projects first and skip `cells` on finding none. `cells` was
+ *     joined TO `policy`, so nothing required that order, and one more
+ *     predicate on the join (AQU-1626's counted-files probe) flipped it to a
+ *     merge join that read all of `cells` — 2.2M pages — before discovering
+ *     there was nothing to match. `structural_cells` therefore names its
+ *     projects up front, as an array the executor has in hand before it
+ *     touches `cells`: empty array, no read; otherwise an index lookup per
+ *     excluding project.
+ *   * The counted-files rule is applied against `uncounted_files`, one small
+ *     set built once for the page's projects, never as a probe per audio row
+ *     (see `inCountedFileSetSql`). That probe ran ~140k times here.
+ *
+ * Measured on the dev database for an 8-org, 433-project caller, same rows
+ * either way: 6-9s warm and 74s cold before, 0.7s after.
+ *
+ * What this does NOT make free is a scope where many projects really do
+ * exclude headings. The array bounds the read to those projects' source cells
+ * (about 1.3s per million cells; 5s with a 198-project org simulated as opted
+ * out), which beats reading the whole table but is not nothing. If orgs start
+ * opting out at that scale the answer is a partial index on structural source
+ * cells, not another join shape.
+ */
+const portfolioCtes = (orgPredicate: string) => `
+     WITH policy AS (
+       SELECT p.id AS project_id,
+              COALESCE(ps.count_structural, os.count_structural) = 'false' AS excluded,
+              -- AQU-490: how many validators a TAKE needs on this project, read
+              -- from the generated column rather than the settings blob, which
+              -- runs to several megabytes and is what timed this dashboard out
+              -- at fifteen seconds once already. The regex guard is not
+              -- decoration: the column is TEXT off a jsonb ->>, so a project
+              -- that ever stored a non-integer would abort the whole portfolio
+              -- query with a cast error rather than just reading wrong.
+              GREATEST(1, LEAST(15, COALESCE(
+                CASE WHEN ps.validation_count_audio ~ '^[0-9]+$'
+                     THEN ps.validation_count_audio::integer END, 1))) AS audio_threshold
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.${orgPredicate}
+     ), ${uncountedFilesCteSql('SELECT project_id FROM policy')},
+     structural_cells AS (
+       -- AQU-1626: scoped to counted files, because this set is a SUBTRACTOR
+       -- and has to describe the same files the totals above now do. A heading
+       -- inside a hidden or deleted file is no longer in the numerator, so
+       -- subtracting it would push a project's count below its real one.
+       --
+       -- The project filter is an ARRAY on purpose, not a join to policy: see
+       -- the note above portfolioCtes. Do not turn it back into a join.
+       SELECT DISTINCT c.project_id, c.file_id, c.cell_id
+         FROM cells c
+        WHERE c.project_id = ANY(ARRAY(
+                SELECT pol.project_id FROM policy pol WHERE pol.excluded))
+          AND c.side = 'source' AND c.type IN ('heading', 'paratext')
+          AND ${inCountedFileSetSql('c')}
+     ), au_cells AS MATERIALIZED (
+       -- AQU-490, level one: one row per CELL, carrying the minimum vote count
+       -- across its selected dub takes. Two tracks sound together, so a cell is
+       -- only as validated as its least-validated track, and the minimum turns
+       -- that into a number the level above can simply compare.
+       --
+       -- The role filter is what keeps a media project honest. The shared
+       -- programme audio is attached, selected, to every cell of an imported
+       -- file, so counting it made audio-first-test read as fully recorded with
+       -- 52.9 hours of work done — one clip's duration multiplied across 508
+       -- cells — when almost nothing had been dubbed.
+       -- ONE TAKE PER TRACK. The third of three readers of this definition,
+       -- and the last to get the rule: a generated voice left selected beside
+       -- a real recording is silent, so nobody can judge it, and counting it
+       -- held whole projects' tiles below the board's own number (adversarial
+       -- review, 2026-09-22). The recorded-milliseconds sum below deliberately
+       -- keeps every selected dub take: that is hours of audio present, not
+       -- hours left to judge.
+       SELECT a.project_id, a.file_id, a.cell_id,
+              MIN(a.validator_count) FILTER (
+                WHERE ${takeSoundsOnItsTrackSql('a')}
+              ) AS dub_votes,
+              SUM(a.duration_ms) AS recorded_ms,
+              BOOL_OR(sc.cell_id IS NOT NULL) AS structural
+         FROM cell_audio a
+         LEFT JOIN structural_cells sc
+           ON sc.project_id = a.project_id
+          AND sc.file_id = a.file_id
+          AND sc.cell_id = a.cell_id
+        WHERE a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
+          -- AQU-1626: takes recorded against a cue sheet or a deleted file are
+          -- not coverage of the work. The recorded-milliseconds sum takes the
+          -- same filter: a tombstoned file's hours are not hours the project
+          -- has banked.
+          AND ${inCountedFileSetSql('a')}
+          AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
+        GROUP BY a.project_id, a.file_id, a.cell_id
+     ), au AS MATERIALIZED (
+       -- Level two: count those cells per project, against the project's own
+       -- threshold. A plain join to policy, deliberately -- asking for the
+       -- threshold with a correlated subquery per row is the shape that caused
+       -- the timeout, and it must not come back through this door.
+       SELECT c.project_id,
+              COUNT(*) FILTER (WHERE NOT c.structural) AS audio_cells,
+              COUNT(*) FILTER (
+                WHERE NOT c.structural AND c.dub_votes >= pol.audio_threshold
+              ) AS validated_audio_cells,
+              COALESCE(SUM(c.recorded_ms), 0) AS recorded_ms
+         FROM au_cells c
+         JOIN policy pol ON pol.project_id = c.project_id
+        GROUP BY c.project_id
+     ), pu AS MATERIALIZED (
+       ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
+     )`
+
+export type PortfolioPageOpts = {
+  q: string
+  limit: number
+  cursor: { id: string; name: string } | null
+}
+
+/**
+ * Machine-drafted target cells per lane, for the projects a below-Maintainer
+ * caller is about to see. Skipped entirely when the wall does not restrict
+ * anyone on the page. Structural cells drop out only when the project excludes
+ * them, matching the portfolio's own text totals.
+ *
+ * This is the one statement on the dashboard that has to look at `cells`
+ * itself: `files.ai_drafted_count` is per file, and the wall needs the count
+ * per lane. Two things keep that from being a read of the whole table, which
+ * is what it was (2.28M pages on dev: 4.4s warm, 75s cold, for a caller with
+ * 155 projects below the wall).
+ *
+ *   * `cells` is driven by an ARRAY of the page's project ids, not joined to
+ *     `pol` and left to the planner. Joined, Postgres used an index for 52
+ *     projects and a parallel seq scan of `cells` for 155, and then threw
+ *     away every row but 132. An array is in the executor's hands
+ *     before the scan starts and is costed as a handful of lookups, so the
+ *     plan cannot flip back however long the list gets. Same reasoning as
+ *     `structural_cells` above; do not turn it back into a join.
+ *   * `idx_cells_ai_drafted` (migration 0137) holds only the rows this
+ *     statement wants: target cells still carrying an untouched machine
+ *     draft, keyed by project. With it the read is those rows and nothing
+ *     else. Without it the array still bounds the read to the listed
+ *     projects' target cells through `idx_cells_lane_last_edit`, which for
+ *     the same caller is 255k pages instead of 2.28M: 1.0s when they are
+ *     cached and 23-29s when they are not. So the statement is correct
+ *     either side of the migration, but it is the index that makes it fast.
+ *
+ * The counted-files rule takes its set form for the reason given on
+ * `inCountedFileSetSql`: this filters rows across many projects, and the
+ * per-row probe reads a project's whole file list each time it runs.
+ */
+async function aiDraftedByLane(
   env: Env,
-  orgId: number,
+  projectIds: readonly string[],
+): Promise<Map<string, Map<string, number>>> {
+  const byProject = new Map<string, Map<string, number>>()
+  if (projectIds.length === 0) return byProject
+  const placeholders = projectIds.map(() => "?").join(", ")
+  const { results } = await env.AQUILLA_PG.prepare(
+    `WITH pol AS (
+       SELECT p.id AS project_id,
+              COALESCE(ps.count_structural, os.count_structural, 'true') = 'false' AS excluded
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.id IN (${placeholders})
+     ), ${uncountedFilesCteSql('SELECT project_id FROM pol')}
+     SELECT c.project_id AS project_id,
+            COALESCE(c.target_lang, '') AS target_lang,
+            COUNT(*)::int AS n
+       FROM cells c
+       JOIN pol ON pol.project_id = c.project_id
+      WHERE c.project_id = ANY(ARRAY(SELECT project_id FROM pol))
+        -- These two literals are idx_cells_ai_drafted's predicate. Postgres
+        -- uses a partial index only when the query implies its WHERE, so
+        -- they have to stay literals and stay in step with the index.
+        AND c.side = 'target' AND c.ai_drafted = 1
+        -- AQU-1626: the client divides this by the portfolio's total_cells, so
+        -- it has to be scoped to the same files that total now counts. A
+        -- caption track machine-drafted on import would otherwise push the
+        -- share past 100% against a denominator that no longer includes it.
+        AND ${inCountedFileSetSql('c')}
+        AND NOT (
+          pol.excluded AND EXISTS (
+            SELECT 1 FROM cells src
+             WHERE src.project_id = c.project_id
+               AND src.file_id = c.file_id
+               AND src.cell_id = c.cell_id
+               AND src.side = 'source'
+               AND src.type IN ('heading', 'paratext')
+          )
+        )
+      GROUP BY c.project_id, COALESCE(c.target_lang, '')`,
+  ).bind(...projectIds).all<{ project_id: string; target_lang: string; n: number }>()
+  for (const row of results ?? []) {
+    let lanes = byProject.get(row.project_id)
+    if (!lanes) {
+      lanes = new Map()
+      byProject.set(row.project_id, lanes)
+    }
+    lanes.set(row.target_lang ?? "", Number(row.n) || 0)
+  }
+  return byProject
+}
+
+/**
+ * Per-project text the caller may see. Null when the wall is off, the caller
+ * is a platform admin, or every project on the page is already unrestricted
+ * (org Maintainer+, creator, or a resolved role at Maintainer+). A missing map
+ * entry means that project stays on the SQL totals.
+ */
+async function visiblePortfolioText(
+  env: Env,
   viewer: { userId: number; isAdmin: boolean },
+  rows: PortfolioDbRow[],
+  lanesByProject: Map<string, PortfolioLane[]>,
+): Promise<Map<string, VisiblePortfolioText> | null> {
+  if (viewer.isAdmin || !laneReadWallEnabled(env.LANE_READ_WALL) || rows.length === 0) return null
+
+  const orgIds = [...new Set(rows.map((row) => row.org_id))]
+  const orgPlaceholders = orgIds.map(() => "?").join(", ")
+  const orgRoles = await env.AQUILLA_PG.prepare(
+    `SELECT org_id, role_level FROM org_members
+      WHERE user_id = ? AND org_id IN (${orgPlaceholders})`,
+  ).bind(viewer.userId, ...orgIds).all<{ org_id: number; role_level: number }>()
+  const orgLevel = new Map(
+    (orgRoles.results ?? []).map((row) => [Number(row.org_id), Number(row.role_level)]),
+  )
+
+  // Role resolution reads user.id and user.email. Platform admins are already
+  // handled by viewer.isAdmin, so an empty email cannot match the allowlist
+  // and widen this caller.
+  const user = { id: viewer.userId, email: "" } as AuthUser
+  // One set-based resolve for the page. This used to be resolveProjectRole per
+  // row: four statements a project, seven under ACCESS_GRANTS_RESOLVER=shadow,
+  // which came to 1,085 for one dev caller's 155 projects below the wall.
+  const unsettled = rows.filter(
+    (row) =>
+      (orgLevel.get(Number(row.org_id)) ?? 0) < READ_WALL_MAINTAINER &&
+      Number(row.created_by) !== viewer.userId,
+  )
+  const roles = await resolveProjectRoles(env, user, unsettled.map((row) => row.id))
+  const restricted = unsettled.filter((row) => {
+    const role = roles.get(row.id)
+    return !(role != null && role.level >= READ_WALL_MAINTAINER)
+  })
+  if (restricted.length === 0) return null
+
+  const projectIds = restricted.map((row) => row.id)
+  const [identities, grants, aiCounts] = await Promise.all([
+    loadTargetLaneIdentitiesForProjects(env.AQUILLA_PG, projectIds),
+    loadLaneGrantsForProjects(env.AQUILLA_PG, viewer.userId, projectIds),
+    aiDraftedByLane(env, projectIds),
+  ])
+
+  const overrides = new Map<string, VisiblePortfolioText>()
+  for (const row of restricted) {
+    const role = roles.get(row.id)
+    const visible = visibleLaneTags({
+      enabled: true,
+      role: role?.level ?? 0,
+      laneGrants: grants.get(row.id) ?? [],
+    })
+    const tags = legacyTagsForVisibleLanes(identities.get(row.id) ?? [], visible) ?? new Set<string>()
+    const text = portfolioTextFromVisibleLanes(lanesByProject.get(row.id) ?? [], tags)
+    let aiDraftedCells = 0
+    for (const [lane, count] of aiCounts.get(row.id) ?? []) {
+      if (tags.has(lane)) aiDraftedCells += count
+    }
+    overrides.set(row.id, {
+      lanes: text?.lanes ?? [],
+      totalCells: text?.totalCells ?? 0,
+      filledCells: text?.filledCells ?? 0,
+      validatedCells: text?.validatedCells ?? 0,
+      lastEditAt: text?.lastEditAt ?? null,
+      aiDraftedCells,
+      targetLanguage: visibleDefaultLaneLanguage(row.target_language || null, tags),
+    })
+  }
+  return overrides
+}
+
+/**
+ * One page (or the full set) of visible portfolio rows across `orgIds`,
+ * ordered by name. Used by the org / all-orgs project tables so search and
+ * infinite scroll do not dump every project to the client.
+ */
+export async function listOrgPortfolioPage(
+  env: Env,
+  orgIds: number[],
+  viewer: { userId: number; isAdmin: boolean },
+  page: PortfolioPageOpts | null,
   now: number = Date.now(),
-): Promise<PortfolioRow[]> {
+): Promise<{ projects: OrgPortfolioRow[]; nextCursor: string | null }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) return { projects: [], nextCursor: null }
+
+  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (page?.q) {
+    extraWhere.push("strpos(lower(p.name), ?) > 0")
+    extraBinds.push(page.q)
+  }
+  if (page?.cursor) {
+    extraWhere.push("(lower(p.name) > ? OR (lower(p.name) = ? AND p.id > ?))")
+    extraBinds.push(page.cursor.name.toLowerCase(), page.cursor.name.toLowerCase(), page.cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const orderSql = page ? "LOWER(p.name), p.id" : "p.org_id, LOWER(p.name)"
+  const limitSql = page ? " LIMIT ?" : ""
+  if (page) extraBinds.push(page.limit + 1)
+
   // Perf (dashboard 15s timeout fix):
   //  - The AQU-523 language pair reads the STORED generated columns on
   //    project_settings (migration 0054) — never (settings::jsonb)->>'…'
@@ -1120,51 +2018,68 @@ export async function getOrgPortfolio(
   //    grouped pass replaces them. It joins 1:1 on project_id, so MAX()
   //    collapses the file fan-out without affecting the SUMs (same for the
   //    1:1 project_settings join).
+  //  - pu (AQU-1097): plan-unit counts per project, same 1:1 MATERIALIZED
+  //    shape as au, bounded to the same org set.
   const rows = await env.AQUILLA_PG.prepare(
-    `WITH au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
-                AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM cell_audio ca
-        WHERE ca.deleted = 0
-          AND ca.project_id IN (SELECT id FROM projects WHERE org_id = ?)
-        GROUP BY ca.project_id
-     ), pu AS MATERIALIZED (
-       ${planUnitCountsSql("f.project_id IN (SELECT id FROM projects WHERE org_id = ?)")}
-     )
-     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
-            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
-            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
-            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
-            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
+    `${portfolioCtes(`org_id IN (${placeholders})`)}
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(ps.source_language)                 AS source_language,
             MAX(ps.target_language)                 AS target_language,
+            MAX(p.created_by)                       AS created_by,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,
-            COALESCE(MAX(pu.units_total), 0)           AS units_total,
-            COALESCE(MAX(pu.units_done), 0)            AS units_done,
-            COALESCE(MAX(pu.units_overdue), 0)         AS units_overdue
-       FROM projects p
-       LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
-       LEFT JOIN au ON au.project_id = p.id
-       LEFT JOIN pu ON pu.project_id = p.id
-      WHERE p.org_id = ? AND p.archived_at IS NULL
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,${PORTFOLIO_UNIT_COLUMNS}
+       FROM projects p${PORTFOLIO_JOINS}
+      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
-      GROUP BY p.id, p.name
-      ORDER BY LOWER(p.name)`,
+        ${extraWhereSql}
+      GROUP BY p.org_id, p.id, p.name
+      ORDER BY ${orderSql}
+      ${limitSql}`,
   ).bind(
-    orgId,
-    aoeTodayIso(now), orgId,
-    orgId,
+    // Org scopes in CTE order: the AQU-1083 policy, the audio scope inside it,
+    // the plan-unit counts (preceded by their AoE cutoff date), then the outer
+    // WHERE.
+    ...uniqueOrgIds, ...uniqueOrgIds,
+    aoeTodayIso(now), ...uniqueOrgIds,
+    ...uniqueOrgIds,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+    ...extraBinds,
   ).all<PortfolioDbRow>()
-  const lanesByProject = await fetchPortfolioLanes(env, [orgId])
-  return (rows.results ?? []).map((r) => mapPortfolioRow(r, lanesByProject))
+
+  const list = rows.results ?? []
+  const hasMore = page != null && list.length > page.limit
+  const pageRows = hasMore ? list.slice(0, page.limit) : list
+  const last = pageRows[pageRows.length - 1]
+  const lanesByProject = await fetchPortfolioLanes(
+    env,
+    uniqueOrgIds,
+    page ? pageRows.map((row) => row.id) : undefined,
+  )
+  // AQU-1421: below Maintainer, with the read wall on, lane names and the text
+  // totals that sum them come from the granted lanes only. Audio stays (a take
+  // is keyed by cell, not by lane). Plan-unit counts stay (a unit is a file
+  // section, not a lane). Wall off is the query as written.
+  const visibleText = await visiblePortfolioText(env, viewer, pageRows, lanesByProject)
+  return {
+    projects: pageRows.map((row) => ({
+      ...mapPortfolioRow(row, lanesByProject, visibleText?.get(row.id)),
+      orgId: row.org_id,
+    })),
+    nextCursor: hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null,
+  }
+}
+
+/** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
+export async function getOrgPortfolio(
+  env: Env,
+  orgId: number,
+  viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
+): Promise<PortfolioRow[]> {
+  const { projects } = await listOrgPortfolioPage(env, [orgId], viewer, null, now)
+  return projects.map(({ orgId: _orgId, ...project }) => project)
 }
 
 /**
@@ -1187,6 +2102,10 @@ export async function getOrgDeletedFiles(
        JOIN projects p ON p.id = f.project_id
       WHERE p.org_id = ?
         AND f.deleted_at IS NOT NULL
+        -- AQU-1626: a hidden companion file is machinery, so deleting its
+        -- parent must not put a "Cues" row in Recently deleted for a person to
+        -- puzzle over (or restore on its own).
+        AND ${notHiddenFileSql('f')}
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       ORDER BY f.deleted_at DESC NULLS LAST, LOWER(f.name)`,
   ).bind(
@@ -1220,59 +2139,31 @@ export async function getOrgPortfolios(
   viewer: { userId: number; isAdmin: boolean },
   now: number = Date.now(),
 ): Promise<OrgPortfolioRow[]> {
+  const { projects } = await listOrgPortfolioPage(env, orgIds, viewer, null, now)
+  return projects
+}
+
+/**
+ * Overview totals for the same visible projects `getOrgPortfolios` would
+ * return. The client dashboard no longer needs that full payload to paint
+ * translated/validated averages and stalled, overdue, and attention counts.
+ *
+ * This does not change the portfolio SQL. Query-plan work on that rollup is
+ * separate (the cells-scan follow-up). Values stay the unweighted per-project
+ * mean, under the same visibility predicate and lane-activity rules.
+ */
+export async function summarizeVisiblePortfolios(
+  env: Env,
+  orgIds: number[],
+  viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
+): Promise<{ totals: PortfolioAggregate; orgs: OrgPortfolioAggregate[] }> {
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
-  if (uniqueOrgIds.length === 0) return []
-  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-  // One set-based aggregate keeps the request to a fixed number of database
-  // round trips regardless of organization count. The expensive cell_audio
-  // scan is still bounded to projects in the authorized org set. Lane metadata
-  // uses the small generated project_settings projections, so this no longer
-  // transfers/parses hundreds of MB of full settings blobs for large accounts.
-  const rows = await env.AQUILLA_PG.prepare(
-    `WITH au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
-                AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM cell_audio ca
-        WHERE ca.deleted = 0
-          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
-        GROUP BY ca.project_id
-     ), pu AS MATERIALIZED (
-       ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))`)}
-     )
-     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
-            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
-            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
-            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
-            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
-            MAX(f.last_edit_at)                     AS last_edit_at,
-            MAX(ps.source_language)                 AS source_language,
-            MAX(ps.target_language)                 AS target_language,
-            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
-            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,
-            COALESCE(MAX(pu.units_total), 0)           AS units_total,
-            COALESCE(MAX(pu.units_done), 0)            AS units_done,
-            COALESCE(MAX(pu.units_overdue), 0)         AS units_overdue
-       FROM projects p
-       LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
-       LEFT JOIN au ON au.project_id = p.id
-       LEFT JOIN pu ON pu.project_id = p.id
-      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
-        AND ${PORTFOLIO_VISIBILITY_PREDICATE}
-      GROUP BY p.org_id, p.id, p.name
-      ORDER BY p.org_id, LOWER(p.name)`,
-  ).bind(
-    ...uniqueOrgIds,
-    aoeTodayIso(now), ...uniqueOrgIds,
-    ...uniqueOrgIds,
-    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
-  ).all<PortfolioDbRow>()
-  const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
-  return (rows.results ?? []).map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id }))
+  if (uniqueOrgIds.length === 0) {
+    return { totals: emptyPortfolioAggregate(), orgs: [] }
+  }
+  const { projects } = await listOrgPortfolioPage(env, uniqueOrgIds, viewer, null, now)
+  return summarizePortfoliosByOrg(projects, uniqueOrgIds, now)
 }
 
 export interface ProjectAccessBreakdown {
@@ -1305,9 +2196,6 @@ export async function getMemberEffectiveAccess(
     "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
   ).bind(orgId, userId).first<{ role_level: number }>()
   const orgRole = orgRow?.role_level ?? null
-  // AQU-435: sub-maintainer org membership confers no project access, so it
-  // must not show up as a per-project grant path or inflate `resolved`.
-  const orgAccessRole = orgRole != null && orgRole >= ORG_WIDE_ACCESS_FLOOR ? orgRole : null
 
   const direct = await env.AQUILLA_PG.prepare(
     `SELECT pm.project_id AS project_id, p.name AS name, pm.role_level AS role_level
@@ -1333,7 +2221,9 @@ export async function getMemberEffectiveAccess(
   const ensure = (projectId: string, name: string): ProjectAccessBreakdown => {
     let row = map.get(projectId)
     if (!row) {
-      row = { projectId, projectName: name, direct: null, groups: [], org: orgAccessRole, creator: false, resolved: 0 }
+      // `org` is filled in per-project below — whether a sub-maintainer org
+      // role contributes depends on that project's other paths (AQU-1274).
+      row = { projectId, projectName: name, direct: null, groups: [], org: null, creator: false, resolved: 0 }
       map.set(projectId, row)
     }
     return row
@@ -1344,6 +2234,14 @@ export async function getMemberEffectiveAccess(
 
   for (const row of map.values()) {
     const groupMax = row.groups.reduce((m, g) => Math.max(m, g.roleLevel), 0)
+    // Same rule as the resolver (AQU-435 floor + AQU-1274 no-silent-demotion),
+    // so the drill-down can never claim a different resolved role than the
+    // one enforcement actually uses.
+    row.org = orgPathContribution({
+      orgLevel: orgRole,
+      hasDirectGrant: row.direct != null,
+      hasGroupGrant: groupMax > 0,
+    })
     row.resolved = Math.max(row.direct ?? 0, groupMax, row.org ?? 0, row.creator ? 700 : 0)
   }
 
@@ -1592,6 +2490,45 @@ export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
  * PROJECT_LEAD default when the org hasn't configured one, or configured a
  * value outside the role ladder).
  */
+/**
+ * AQU-1083: the org's default for whether structural cells — chapter headings,
+ * section titles, book names — count toward progress.
+ *
+ * TRUE unless an org says otherwise, which is what every project does today, so
+ * nothing moves when this ships. An org that wants its percentages to describe
+ * only translated content opts out, and a project may still override it.
+ */
+export const DEFAULT_COUNT_STRUCTURAL_CELLS = true
+
+export async function getOrgCountStructuralCells(env: Env, orgId: number): Promise<boolean> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  const raw = (settings as Record<string, unknown>)?.countStructuralCells
+  return typeof raw === "boolean" ? raw : DEFAULT_COUNT_STRUCTURAL_CELLS
+}
+
+/**
+ * Whether the org lets bulk text validation sign off untouched AI drafts
+ * (`allowBulkValidateAiDrafts`, off unless the org opts in), resolved through
+ * a project's org. Null for a project with no org.
+ *
+ * Read here, for the project settings response, because the org settings
+ * route answers only org members: a project member who is not in the org got
+ * a 403 there, so the switch always read off for them however the org set it.
+ */
+export async function getOrgAllowBulkValidateAiDraftsForProject(
+  env: Env,
+  projectId: string,
+): Promise<boolean | null> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return null
+  const settings = await loadOrgSettingsBlob(env, project.org_id)
+  return (settings as Record<string, unknown>)?.allowBulkValidateAiDrafts === true
+}
+
 export async function getTermbaseEditMinRole(env: Env, orgId: number): Promise<number> {
   const settings = await loadOrgSettingsBlob(env, orgId)
   return extractRoleFloor(settings, "termbaseEditMinRole", DEFAULT_TERMBASE_EDIT_MIN_ROLE)
@@ -1613,5 +2550,202 @@ export async function getTermbaseEditMinRoleForProject(
     .first<{ org_id: number | null }>()
   if (!project?.org_id) return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   return getTermbaseEditMinRole(env, project.org_id)
+}
+
+/**
+ * AQU-1083: the org default a project inherits when it has no answer of its
+ * own. Null for a project with no org — there is no default to inherit, which
+ * the caller renders as the built-in "count them".
+ *
+ * This rides on the project's SETTINGS response rather than its project
+ * record, deliberately: an open editor re-reads its settings on a remote
+ * change frame and on window focus, and never re-reads the project record at
+ * all. Putting it here is what lets an org-level flip reach a workspace that
+ * is already open.
+ */
+export async function getOrgCountStructuralCellsForProject(
+  env: Env,
+  projectId: string,
+): Promise<boolean | null> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return null
+  return getOrgCountStructuralCells(env, project.org_id)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1037: configurable work-assignment floor
+//
+// Covers assignment.create/reassign/unassign in sync-worker (file, chapter,
+// and target-lane-pinned work) plus changeset routing in auth-worker. The
+// unset fallback preserves the historical PROJECT_LEAD requirement.
+// ──────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_ASSIGNMENT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
+
+/** Resolve the minimum project role allowed to assign work in an org. */
+export async function getAssignmentMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "assignmentMinRole", DEFAULT_ASSIGNMENT_MIN_ROLE)
+}
+
+/** Resolve assignment authority through a project's org. */
+export async function getAssignmentMinRoleForProject(
+  env: Env,
+  projectId: string,
+): Promise<number> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return DEFAULT_ASSIGNMENT_MIN_ROLE
+  return getAssignmentMinRole(env, project.org_id)
+}
+
+/**
+ * AQU-1308: the assign-work picker IS the roster — you cannot route work to
+ * someone you cannot name. `rosterViewMinRole` (AQU-485, default MAINTAINER
+ * 600) and `assignmentMinRole` (AQU-1037, default PROJECT_LEAD 500) are
+ * independent floors, and the assignment floor ships *below* the roster
+ * floor. So out of the box a project lead is authorized to assign work while
+ * being forbidden to read the roster the picker needs: the API gate
+ * contradicts the UI gate, the members fetch 403s with `rosterHidden`, and
+ * every partner org's Assignee dropdown renders empty.
+ *
+ * Resolve the effective project-roster floor as the LOWER of the two: anyone
+ * the org lets assign work may enumerate that project's members. An org that
+ * genuinely wants the roster hidden from its leads must raise
+ * `assignmentMinRole` to match — one coherent contract instead of two
+ * silently-conflicting defaults. Everyone below the assignment floor stays
+ * subject to `rosterViewMinRole` exactly as before, so AQU-485's
+ * safe-by-default promise for contributors/reviewers/viewers is untouched.
+ *
+ * The carve-out stops at the default roster floor (MAINTAINER). Raising the
+ * roster above that — "only owners can see this" — is an explicit choice that
+ * the assignment floor must not punch through. Otherwise the badge saves
+ * owner-only, then a maintainer still reads the project roster because the
+ * assignment default (PROJECT_LEAD) pulls the effective floor back down.
+ *
+ * Scoped to the per-project roster (the picker's source). The org-wide
+ * members list keeps the plain `rosterViewMinRole` gate — assigning work is a
+ * project-scoped authority and confers no org-wide roster visibility.
+ */
+export async function getProjectRosterViewMinRole(env: Env, orgId: number): Promise<number> {
+  const [rosterFloor, assignmentFloor] = await Promise.all([
+    getRosterViewMinRole(env, orgId),
+    getAssignmentMinRole(env, orgId),
+  ])
+  if (rosterFloor > DEFAULT_ROSTER_VIEW_MIN_ROLE) return rosterFloor
+  return Math.min(rosterFloor, assignmentFloor)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1086: configurable project-language edit floor
+//
+// Second write-gating permission-policy key, built on exactly the same
+// org_settings plumbing as termbaseEditMinRole above. It answers "who may
+// change a project's source/target language and its extra target lanes" —
+// Project managers (project_lead 500) running day-to-day projects hit wrong
+// or reset languages and today must escalate to a Maintainer for a routine
+// correction.
+//
+// The default is MAINTAINER (600), i.e. today's behaviour byte-for-byte: an
+// org opts in by lowering the floor to PROJECT_LEAD. This is the opposite
+// choice from the termbase floor (which defaults to 500 to close a
+// pre-existing client/server divergence) and matches the read floors —
+// other partners deliberately keep languages maintainer-only.
+//
+// Scope is the language keys ONLY. Lowering this floor must never widen
+// write access to AI config, validation, health, timeline, or anything else
+// in the settings blob — enforcement is the language-scoped carve-out in
+// routes/project-settings.ts, which keys off the CHANGED keys of a write.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor for editing a project's languages when the org hasn't set one. */
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = 600 // ROLE.MAINTAINER
+
+/**
+ * Resolve the effective language-edit floor for an org (falls back to the
+ * MAINTAINER default when the org hasn't configured one, or configured a
+ * value outside the role ladder).
+ */
+export async function getLanguageEditMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "languageEditMinRole", DEFAULT_LANGUAGE_EDIT_MIN_ROLE)
+}
+
+/**
+ * Resolve the language-edit floor that applies to a project, via its org.
+ * Projects with no org (personal / not-yet-attached) fall back to the same
+ * MAINTAINER default — there is no org policy to consult.
+ */
+export async function getLanguageEditMinRoleForProject(
+  env: Env,
+  projectId: string,
+): Promise<number> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+  return getLanguageEditMinRole(env, project.org_id)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1002: configurable comment floors
+//
+// Two more write floors on the same org_settings pattern. Partners split on
+// this one — AQU-999 hardened foreign resolve to CONTRIBUTOR, and some orgs
+// then wanted it lower (translators settle the threads on files they
+// translate) while others wanted it reserved for maintainers. A floor, not a
+// global default, is the only answer that serves both.
+//
+// Defaults reproduce post-AQU-999 behaviour exactly, so an org that never sets
+// them sees no change: COMMENTER (200) to open a thread, CONTRIBUTOR (400) to
+// resolve one somebody else opened.
+//
+// ENFORCEMENT LIVES IN SYNC-WORKER, which owns comments — see
+// sync-worker/src/events/comment-floors.ts, which reads the same two keys with
+// the same defaults. auth-worker only resolves them here so the floors can
+// travel with the project record for client gating (below), exactly as
+// termbaseEditMinRole does.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor to open a comment thread when the org hasn't set one. */
+export const DEFAULT_COMMENT_CREATE_MIN_ROLE = 200 // ROLE.COMMENTER
+/** Default floor to resolve/reopen someone else's thread when unset. */
+export const DEFAULT_COMMENT_RESOLVE_MIN_ROLE = 400 // ROLE.CONTRIBUTOR
+
+export interface CommentFloors {
+  commentCreateMinRole: number
+  commentResolveMinRole: number
+}
+
+/** The floors in force for an org, each falling back independently. */
+export async function getCommentFloors(env: Env, orgId: number): Promise<CommentFloors> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return {
+    commentCreateMinRole: extractRoleFloor(
+      settings,
+      "commentCreateMinRole",
+      DEFAULT_COMMENT_CREATE_MIN_ROLE,
+    ),
+    commentResolveMinRole: extractRoleFloor(
+      settings,
+      "commentResolveMinRole",
+      DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
+    ),
+  }
+}
+
+/** Defaults for a project with no org to consult (personal / not attached). */
+export const DEFAULT_COMMENT_FLOORS: CommentFloors = {
+  commentCreateMinRole: DEFAULT_COMMENT_CREATE_MIN_ROLE,
+  commentResolveMinRole: DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
 }
 

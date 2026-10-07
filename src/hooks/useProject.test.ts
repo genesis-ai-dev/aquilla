@@ -11,7 +11,9 @@ import type { ResolveProjectResult } from "@/lib/sync/cloud-projects"
 
 // --- mocks ---------------------------------------------------------------
 
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   resolveCloudProjectResult: vi.fn(),
   minimalProjectRecord: vi.fn((project: { id: string; name: string; role: { level: number; name: string; source: string } }) => ({
     id: project.id,
@@ -41,6 +43,7 @@ vi.mock("@/hooks/useProjectSettings", () => ({
 
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => undefined),
+  subscribeProjectRecords: vi.fn(() => () => {}),
 }))
 
 // Import after mocks are registered.

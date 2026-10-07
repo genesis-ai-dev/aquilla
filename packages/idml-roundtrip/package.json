@@ -32,16 +32,16 @@
     "prepack": "pnpm run build && pnpm run test"
   },
   "dependencies": {
-    "jszip": "3.10.1"
+    "jszip": "3.10.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
-    "@sparticuz/chromium": "149.0.0",
-    "@types/node": "^26.1.2",
-    "tsx": "^4.23.1",
+    "@playwright/test": "^1.63.0",
+    "@sparticuz/chromium": "153.0.0",
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15",
     "typescript": "~7.0.2",
-    "vite": "^8.2.0",
-    "vitest": "^4.1.10"
+    "vite": "^8.3.1",
+    "vitest": "^5.0.1"
   },
   "publishConfig": {
     "access": "restricted",

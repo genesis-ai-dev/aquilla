@@ -10,6 +10,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { ChevronDown, ChevronRight, ClipboardList } from "lucide-react"
+import { AssignmentLaneBadge } from "@/components/AssignmentLaneBadge"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -18,6 +19,7 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 interface ProjectAssignedToMeProps {
   projectId: string
@@ -30,6 +32,8 @@ interface ProjectAssignedToMeProps {
   onJumpToAssignment?: (assignment: MyAssignment) => void
   /** Refresh token — increment to force a re-fetch (e.g. after a new assignment lands). */
   refreshKey?: number
+  /** Human label for the default ('') lane — the project's target language. */
+  defaultLaneLabel?: string
 }
 
 export function ProjectAssignedToMe({
@@ -37,6 +41,7 @@ export function ProjectAssignedToMe({
   jwt,
   onJumpToAssignment,
   refreshKey = 0,
+  defaultLaneLabel = "",
 }: ProjectAssignedToMeProps) {
   const t = useT()
   const [assignments, setAssignments] = useState<MyAssignment[]>([])
@@ -91,7 +96,7 @@ export function ProjectAssignedToMe({
             <p className="px-2 py-1 text-xs text-destructive">{error}</p>
           ) : (
             assignments.map((a) => {
-              const pct = a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
+              const pct = progressPercent(a.cellsDone, a.cellsTotal)
               return (
                 <AppTooltip
                   key={a.assignmentId}
@@ -112,12 +117,12 @@ export function ProjectAssignedToMe({
                     <div className="flex items-center justify-between gap-1">
                       <span className="flex min-w-0 items-center gap-1">
                         <span className="truncate text-xs font-medium leading-tight">{a.scopeLabel}</span>
-                        {/* AQU-538 (§3.5): lane chip when pinned to a lane. */}
-                        {a.targetLang && (
-                          <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] leading-none">
-                            {a.targetLang}
-                          </Badge>
-                        )}
+                        <AssignmentLaneBadge
+                          targetLang={a.targetLang}
+                          defaultLaneLabel={defaultLaneLabel}
+                          fallbackLabel={t("org.projectOverview.laneDefaultFallback")}
+                          className="h-4 px-1 text-[9px] leading-none"
+                        />
                       </span>
                       <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
                     </div>

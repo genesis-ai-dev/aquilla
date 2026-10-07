@@ -32,6 +32,12 @@ export interface MemberScope {
  * A `null` scopes (couldn't load) is treated as IN scope so the client never
  * hides an action the server would actually allow — the server stays
  * authoritative, and a genuine refusal still surfaces via the outbox 403 path.
+ *
+ * AQU-1607: `lane` here is a lane TAG, because the client's active lane still
+ * is one. A stored lane scope is a lane id, so callers pass scopes already
+ * read back as tags (`laneScopesAsTags`) — ProjectWorkspace does that once
+ * where it loads them. Handing raw id-valued scopes to this would match
+ * nothing and hide actions the server allows.
  */
 export function isInMemberScope(
   scopes: MemberScope[] | null | undefined,
@@ -60,10 +66,49 @@ function authHeaders(jwt: string): HeadersInit {
  * someone else's scopes) and on any network error — callers should treat a
  * null the same as "couldn't determine scopes", not "unscoped".
  */
+/** The caller's own scopes, plus whether the project's org lets lane-limited
+ *  members assign work (`null` when the server didn't say — an older server). */
+export interface MyScopeGrant {
+  scopes: MemberScope[]
+  allowScopedLaneAssignment: boolean | null
+}
+
+/**
+ * GET the caller's OWN scopes (`me`). Unlike `fetchMemberScopes`, this also
+ * returns `allowScopedLaneAssignment`: a guest — a project member outside the
+ * org — can't read the org's settings, so this is how the client learns the
+ * lane-assignment setting for them (AQU-581 review). `null` on failure.
+ */
+export async function fetchMyScopeGrant(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = AUTH_API_URL,
+): Promise<MyScopeGrant | null> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/members/me/scopes`,
+      { headers: authHeaders(jwt) },
+    )
+    if (!res.ok) {
+      console.warn(`[member-scopes] fetchMyScopeGrant ${projectId} → HTTP ${res.status}`)
+      return null
+    }
+    const body = (await res.json()) as { scopes?: MemberScope[]; allowScopedLaneAssignment?: unknown }
+    return {
+      scopes: body.scopes ?? [],
+      allowScopedLaneAssignment:
+        typeof body.allowScopedLaneAssignment === "boolean" ? body.allowScopedLaneAssignment : null,
+    }
+  } catch (err) {
+    console.warn("[member-scopes] fetchMyScopeGrant failed:", err)
+    return null
+  }
+}
+
 export async function fetchMemberScopes(
   jwt: string,
   projectId: string,
-  userId: number,
+  userId: number | "me",
   apiUrl: string = AUTH_API_URL,
 ): Promise<MemberScope[] | null> {
   try {
@@ -84,10 +129,55 @@ export async function fetchMemberScopes(
 }
 
 /**
+ * AQU-1607: a member's scopes plus display names for the lanes they name. A
+ * lane scope is a lane id, so a surface that shows a scope without loading
+ * the project's lanes (the members matrix's chips) reads its label from here.
+ * `laneNames` covers only the lanes the scopes name, and an older server
+ * simply omits it — fall back to the raw value.
+ */
+export interface MemberScopeView {
+  scopes: MemberScope[]
+  laneNames: Record<string, string>
+}
+
+/** Label for one lane scope: its lane's name when known, else the raw value. */
+export function laneScopeLabel(value: string, laneNames: Record<string, string> | undefined): string {
+  return laneNames?.[value] ?? value
+}
+
+export async function fetchMemberScopeView(
+  jwt: string,
+  projectId: string,
+  userId: number | "me",
+  apiUrl: string = AUTH_API_URL,
+): Promise<MemberScopeView | null> {
+  try {
+    const res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(String(userId))}/scopes`,
+      { headers: authHeaders(jwt) },
+    )
+    if (!res.ok) {
+      console.warn(`[member-scopes] fetchMemberScopeView ${projectId}/${userId} → HTTP ${res.status}`)
+      return null
+    }
+    const body = (await res.json()) as { scopes?: MemberScope[]; laneNames?: Record<string, string> }
+    return { scopes: body.scopes ?? [], laneNames: body.laneNames ?? {} }
+  } catch (err) {
+    console.warn("[member-scopes] fetchMemberScopeView failed:", err)
+    return null
+  }
+}
+
+/**
  * PUT /api/v2/projects/:projectId/members/:userId/scopes — replace-set a
  * member's scopes. Requires project_lead (500+); throws on any non-2xx
  * (including the 400 "leads must stay unscoped" rejection) or network error
  * so the caller's save action can surface the failure.
+ *
+ * AQU-1607: returns the saved scopes AND the names of the lanes they name.
+ * A caller that renders a scope needs those: the lanes a member is scoped to
+ * after a save are not the ones they had before it, so a cache built at load
+ * time has no name for a lane just granted and would print its id.
  */
 export async function putMemberScopes(
   jwt: string,
@@ -95,7 +185,7 @@ export async function putMemberScopes(
   userId: number,
   scopes: MemberScope[],
   apiUrl: string = AUTH_API_URL,
-): Promise<MemberScope[]> {
+): Promise<MemberScopeView> {
   const res = await fetch(
     `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(String(userId))}/scopes`,
     {
@@ -106,8 +196,13 @@ export async function putMemberScopes(
   )
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { error?: string })
-    throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`)
+    // AQU-1607: a lane value naming two lanes or none is refused with the
+    // values named — keep them in the message so the operator can see which.
+    const detail = body as { error?: string; ambiguous?: string[]; unmatched?: string[] }
+    const offenders = [...(detail.ambiguous ?? []), ...(detail.unmatched ?? [])]
+    const message = detail.error ?? `HTTP ${res.status}`
+    throw new Error(offenders.length > 0 ? `${message}: ${offenders.join(", ")}` : message)
   }
-  const body = (await res.json()) as { scopes?: MemberScope[] }
-  return body.scopes ?? []
+  const body = (await res.json()) as { scopes?: MemberScope[]; laneNames?: Record<string, string> }
+  return { scopes: body.scopes ?? [], laneNames: body.laneNames ?? {} }
 }

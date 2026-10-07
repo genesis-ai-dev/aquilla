@@ -2,6 +2,59 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## All locales topped up from `pnpm i18n:todo` — 2026-10-03
+>
+> The 14,590 untranslated or stale leaves in `th`, `my`, `ms`, `id`, `ar`, `zh-Hans`,
+> `zh-Hant`, `ru` and `fr` were machine-translated by Claude Sonnet agents (65 chunks of up
+> to 250 leaves, each with the translator note from the context sidecar) and merged with
+> `scripts/i18n-catalog.ts import`. **No native speaker has read any of it.** Mechanical
+> checks: 0 missing leaves and 0 `{placeholder}`/tag drift after merge (Arabic and Russian
+> plural forms may drop `{count}`, e.g. the dual). About 670 leaves still show in
+> `i18n:todo` because the agents returned them identical to English (names, cognates,
+> formats); the importer skips those by design. `ms` is standard Bahasa Melayu, not Patani
+> Malay. `my`, `ms` and `ar` still need their reviewers before this is treated as shipped
+> quality.
+
+> ## `fr` (French) — AQU-1432, 2026-09-25
+>
+> Machine-translated by Claude Sonnet agents from the full `pnpm i18n:todo` packet (6,446
+> leaves, 5,660 of 5,810 keys written; the rest are formats, product names, cognates and
+> placeholder-only strings that `parseTranslatedCatalog` skips as identical to English). **No
+> French speaker has read it.** The brief asked for international (not Québécois) French,
+> *vous*, infinitive buttons, French typography, and a fixed glossary (cell → cellule, lane →
+> piste, changeset → ensemble de modifications, termbase → base terminologique,
+> back-translation → rétrotraduction). Mechanical checks: 0 placeholder or tag drift and 0
+> missing leaves after merge. Hand fixes: `org.projectOverview.deadlineDatePlaceholder` stays
+> English because `DatePicker` only parses the en-US shape (the same trap as
+> `common.datePlaceholder`), and ten short labels were tightened to fit their length hints.
+> About 170 strings still exceed a soft length hint, mostly long descriptions. A native
+> review should check these first: role names (réviseur / responsable de projet / mainteneur),
+> the audio voice-tone adjectives, and the milestone gender agreement ("Diapositive précédente").
+
+> ## Correction — the `mfa` catalog was not Patani Malay (AQU-1306)
+>
+> Everything below about `mfa` describes a catalog that **was standard Malay, not Patani
+> Malay**. The Pattani Malay team reported on 2026-09-17 that selecting "Bahasa Melayu
+> Patani" produced ordinary Bahasa Malaysia, and an audit of all 4,251 translated values
+> confirmed it: **zero** distinctively Patani forms anywhere (no `kawe`, `takdok`, `guano`,
+> `mano`, `nok`, `buleh`), against 1,121 values carrying a distinctively standard-Malay form
+> whose Patani counterpart differs (`anda` ×361, `tidak` ×345, `tiada` ×208, `boleh` ×138).
+>
+> The "measurably worked" note below is the tell, not a success: the sweep agent argued about
+> what belongs in **"professional Malay technical UI"** and was never reasoning about Patani
+> at all. The coverage table's `mfa` row therefore measured fill rate against the wrong
+> language — a 98.5% score for content that was 0% Patani Malay.
+>
+> AQU-1306 moved the catalog to its true code, `ms` / "Bahasa Melayu"
+> (`src/lib/i18n/messages/ms.ts`), and retired `mfa` from the switcher; stored `mfa`
+> preferences alias to `ms` so nobody loses a working UI. **Patani Malay is now an unshipped
+> language**, and it must be authored and signed off by Patani Malay speakers — it is not
+> derivable from the `ms` catalog by machine, which is precisely how this shipped.
+>
+> The lesson generalizes to the rest of this document: an unreviewed catalog can be wrong
+> about *which language it is*, not merely about word choice, and none of the mechanical
+> checks listed under "Why coverage can never read 100%" can see that.
+
 ## What these translations are
 
 Every string added to `src/lib/i18n/messages/{th,my,mfa,ar}.ts` in this pass was produced by

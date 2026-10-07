@@ -8,22 +8,42 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  *
  * The pipeline's LLM calls happen SERVER-SIDE (auth-worker tick → mock
  * OpenRouter via OPENROUTER_BASE_URL, routed by the [[ctx:*]] prompt
- * markers), so no per-device provider override is needed. The flag is
- * device-local by design — the spec toggles it through the real settings UI.
+ * markers), so no per-device provider override is needed.
+ *
+ * AQU-1246: the gate is a PROJECT-WIDE, server-stored opt-in written through
+ * the real settings UI by a project owner/lead — not the old device-local
+ * switch. Driving it through the UI is deliberate: it exercises the settings
+ * PATCH and its role gate, which is what actually decides whether the pill
+ * exists.
  */
 test("contextual run pill drives a seeded file to parked with staged drafts", async ({ alice }) => {
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { name: `Contextual ${Date.now()}` })
 
-  // The device-local flag is ON by default (it gates discovery of the play
-  // button, not spend). Assert that through the real settings UI rather than
-  // assuming it: if the default is ever flipped back, this fails here with an
-  // obvious cause instead of as a missing pill fifty lines down.
+  // AQU-1246: a fresh project is NOT opted in, so there is no Autopilot
+  // surface anywhere yet. Assert the OFF state through the real settings UI
+  // and opt in from there — if the opt-in ever stops persisting, this fails
+  // here with an obvious cause instead of as a missing pill fifty lines down.
   await alice.goto(`/project/${seeded.projectId}/settings`)
   await alice.getByRole("link", { name: /Experimental/ }).click()
-  const flagSwitch = alice.getByRole("switch", { name: "Show Autopilot controls" })
-  await expect(flagSwitch).toBeVisible()
-  await expect(flagSwitch).toBeChecked()
+  const optIn = alice.getByRole("switch", { name: "Try Autopilot" })
+  await expect(optIn).toBeVisible()
+  await expect(optIn).not.toBeChecked()
+  // The legacy device-local switch is gone — a member must not be able to
+  // reveal the experiment for themselves in one click.
+  await expect(alice.getByRole("switch", { name: "Show Autopilot controls" })).toHaveCount(0)
+
+  // alice owns the seeded project, so the settings PATCH is admitted. Wait for
+  // the server to accept it before navigating — the gate is server-stored, and
+  // the workspace reads it back from the settings row.
+  const optInSaved = alice.waitForResponse((r) =>
+    ["PATCH", "PUT"].includes(r.request().method())
+    && new URL(r.url()).pathname.endsWith(`/projects/${seeded.projectId}/settings`)
+    && r.status() === 200,
+  )
+  await optIn.click()
+  await optInSaved
+  await expect(optIn).toBeChecked()
 
   // The pill is visible while its server capability snapshot is still
   // hydrating. Wait for that authoritative response before pressing Play so

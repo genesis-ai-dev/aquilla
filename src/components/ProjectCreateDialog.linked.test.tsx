@@ -7,8 +7,34 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { useState } from "react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
+import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
+import { pickComboboxOption } from "@/test-utils/combobox"
+import { isLinkSeedFailed, resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
 
+// AQU-1352: the destination picker fetches create-targets on open; submit waits
+// for it, so resolve to Personal (the server always lists it).
+// AQU-1561: the dialog reads the chosen upstream's file list so the lead can
+// pick which files to bring in. These tests are about everything else in the
+// create flow, so the list resolves to one file and stays all-checked — the
+// whole-project default, which keeps `linkProjectSource` carrying no `fileIds`
+// exactly as it did before that slice.
+vi.mock("@/lib/sync/link-source-preview", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/link-source-preview")>()
+  return {
+    ...actual,
+    loadUpstreamFileChoices: vi
+      .fn()
+      .mockResolvedValue([{ id: "up-file-1", name: "MAT", clashes: false }]),
+  }
+})
+
+vi.mock("@/lib/sync/create-targets", () => ({
+  fetchCreateTargets: vi.fn().mockResolvedValue([
+    { kind: "personal", orgId: null, name: "Personal", path: ["Personal"], role: 700, teams: [] },
+  ]),
+}))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
     session: { jwt: "tok", username: "wendi" },
@@ -35,7 +61,17 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   return { ...actual, createCloudProject: vi.fn().mockResolvedValue(undefined) }
 })
 vi.mock("@/lib/sync/project-settings", () => ({
-  patchProjectSettings: vi.fn().mockResolvedValue(undefined),
+  PROJECT_SETTINGS_VERSION_INITIAL: 0,
+  fetchProjectSettings: vi.fn(),
+  patchProjectSettings: vi.fn().mockResolvedValue({
+    kind: "ok",
+    value: {
+      version: 1,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: { id: 1, username: "wendi" },
+      settings: {},
+    },
+  }),
 }))
 vi.mock("@/lib/sync/archive", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/archive")>()
@@ -55,52 +91,57 @@ vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import { patchProjectSettings } from "@/lib/sync/project-settings"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 const mockLinkProjectSource = vi.mocked(linkProjectSource)
 const mockTriggerLinkSync = vi.mocked(triggerLinkSync)
+const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
 
-// Base UI Select renders a combobox trigger; options live in a portaled
-// popup. Clicks on options don't reliably commit a selection under
-// happy-dom, but hover-highlighting + Enter does (the keyboard path). The
-// trigger's displayed label can lag a tick behind the committed value in
-// this harness, so callers assert on the resulting application state
-// (e.g. a mocked call's arguments) rather than the trigger's textContent.
-async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => {
-    expect(screen.queryByRole("listbox")).toBeNull()
-  })
-}
 
 describe("ProjectCreateDialog — linked-target creation flow", () => {
   beforeEach(() => {
     mockCreateCloudProject.mockClear()
     mockLinkProjectSource.mockClear()
     mockTriggerLinkSync.mockClear()
+    mockPatchProjectSettings.mockClear()
+    mockTriggerLinkSync.mockResolvedValue(true)
+    resetLinkSeedStatusForTests()
     mockLinkProjectSource.mockResolvedValue({
       projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
       gate: "validated", previousSourceProjectId: null, seeded: true,
     })
   })
 
-  it("shows the upstream picker + clone/live + consumes choice only for the linked-target shape", async () => {
+  it("shows the live intro + upstream picker + corpus choice for the linked-target shape", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    expect(screen.queryAllByText(/Upstream project/i)).toHaveLength(0)
+    // Self-contained Advanced shows the optional clone path, not the live one.
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    expect(screen.getByText(/import a/i)).toBeTruthy()
+    expect(screen.queryByText(/creating a/i)).toBeNull()
 
-    // Open the advanced disclosure and pick "linked-target".
+    fireEvent.click(screen.getByText(/Linked target/i))
+
+    expect(screen.getByText(/creating a/i)).toBeTruthy()
+    expect(screen.getByRole("combobox", { name: /Upstream project/i })).toBeTruthy()
+    expect(screen.queryByText(/Clone or live\?/i)).toBeNull()
+    expect(screen.getByText(/Which corpus should become this project's source\?/i)).toBeTruthy()
+  })
+
+  it("shows the upstream project name on the trigger after selection, not its UUID", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    expect(screen.getByRole("combobox", { name: /Upstream project/i })).toBeTruthy()
-    expect(screen.getByText(/Clone or live\?/i)).toBeTruthy()
-    expect(screen.getByText(/What should become this project's source\?/i)).toBeTruthy()
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
+
+    const trigger = screen.getByRole("combobox", { name: /Upstream project/i })
+    await waitFor(() => {
+      expect(trigger.textContent).toMatch(/English Source/)
+      expect(trigger.textContent).not.toMatch(/upstream-1/)
+    })
   })
 
   it("creates the project then links it to the chosen upstream with mode/consumes", async () => {
@@ -114,10 +155,10 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
 
-    // Consumes defaults to "source"; mode defaults to "live" — leave as-is
-    // and submit.
+    // Corpus choice is no longer prefilled — pick "Its Source" explicitly.
+    fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
 
     await waitFor(() => {
@@ -144,6 +185,42 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     expect(mockTriggerLinkSync).not.toHaveBeenCalled()
   })
 
+  it("applies extra target lanes on the linked-target shape too", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "Multilingual Linked" } })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
+    fireEvent.change(screen.getByTestId("create-extra-lang-input"), { target: { value: "French" } })
+
+    fireEvent.click(screen.getByTestId("create-add-target-lang"))
+    fireEvent.change(screen.getByTestId("create-target-lang-input-1"), { target: { value: "es" } })
+
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    fireEvent.click(screen.getByText(/Linked target/i))
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+
+    await waitFor(() => {
+      expect(mockLinkProjectSource).toHaveBeenCalledTimes(1)
+    })
+
+    // The lanes PATCH used to be gated on the self-contained shape; a linked
+    // target is precisely the case that wants several of them.
+    await waitFor(() => {
+      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+      const [, , settings, version] = mockPatchProjectSettings.mock.calls[0]!
+      expect(settings).toEqual({
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        targetLanes: ["French", "es"],
+      })
+      expect(version).toBe(0)
+    })
+  })
+
   it("QA-BUG-1: self-heals client-side when the server reports seeding did NOT run (mode=live)", async () => {
     mockLinkProjectSource.mockResolvedValueOnce({
       projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
@@ -160,7 +237,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    await pickSelectOption(/Upstream project/i, /English Source/i)
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
+    fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
 
     await waitFor(() => {
@@ -176,6 +254,95 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     expect(linkOrder).toBeLessThan(healOrder)
   })
 
+  // AQU-1544. The self-heal above used to be awaited and its answer dropped,
+  // so when it failed too the dialog opened the new project — linked, empty,
+  // and with nothing said. Creation still completes (the project exists and is
+  // linked; AQU-1519 says a successful create always closes the dialog), so the
+  // message has to reach the page the user lands on. `Landing` stands in for
+  // that page the way ProjectOverview mounts it: the dialog's real output — the
+  // created project's id and the failure it parked — goes through the real
+  // banner, rather than each being asserted against a hand-made stand-in.
+  describe("when the first mirror sync failed (AQU-1544)", () => {
+    const SEED_FAILED =
+      "The link to the source project was saved, but its files have not arrived here yet. " +
+      "Try again to bring them in."
+
+    function Landing({ onSynced }: { onSynced: () => void }) {
+      const [createdId, setCreatedId] = useState<string | null>(null)
+      return (
+        <>
+          <ProjectCreateDialog onCreated={(project) => setCreatedId(project.id)} />
+          {createdId && <LinkSeedFailedBanner projectId={createdId} onSynced={onSynced} />}
+        </>
+      )
+    }
+
+    async function createLinkedTarget() {
+      fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+      fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "French Episode 1" } })
+      fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
+      fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
+      fireEvent.click(screen.getByText("Advanced: project shape"))
+      fireEvent.click(screen.getByText(/Linked target/i))
+      await pickComboboxOption(/Upstream project/i, /English Source/i)
+      fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
+      fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    }
+
+    it("lands on a message with a retry instead of an unexplained empty project", async () => {
+      mockLinkProjectSource.mockResolvedValueOnce({
+        projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
+        gate: "validated", previousSourceProjectId: null, seeded: false,
+      })
+      mockTriggerLinkSync.mockResolvedValue(false)
+      const onSynced = vi.fn()
+
+      render(<Landing onSynced={onSynced} />)
+      await createLinkedTarget()
+
+      expect(await screen.findByText(SEED_FAILED)).toBeTruthy()
+      expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+      // The project was still created and linked — this is a warning about a
+      // project that exists, not a failed create.
+      expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
+      const createdId = mockTriggerLinkSync.mock.calls[0]![1]
+      expect(isLinkSeedFailed(createdId)).toBe(true)
+
+      // A retry that fails leaves the message and the action where they were.
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+      await screen.findByText(/That attempt did not bring them in either/)
+      expect(screen.getByText(SEED_FAILED)).toBeTruthy()
+      expect(onSynced).not.toHaveBeenCalled()
+
+      // A retry that works tells the page to refresh and clears the message.
+      mockTriggerLinkSync.mockResolvedValue(true)
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+      await waitFor(() => expect(onSynced).toHaveBeenCalledTimes(1))
+      expect(screen.queryByText(SEED_FAILED)).toBeNull()
+      expect(mockTriggerLinkSync).toHaveBeenLastCalledWith("tok", createdId)
+      // Never a second link, whatever the retries did.
+      expect(mockLinkProjectSource).toHaveBeenCalledTimes(1)
+    })
+
+    it("shows nothing when the client-side self-heal worked", async () => {
+      mockLinkProjectSource.mockResolvedValueOnce({
+        projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
+        gate: "validated", previousSourceProjectId: null, seeded: false,
+      })
+      mockTriggerLinkSync.mockResolvedValue(true)
+
+      render(<Landing onSynced={vi.fn()} />)
+      await createLinkedTarget()
+
+      await waitFor(() => expect(mockTriggerLinkSync).toHaveBeenCalledTimes(1))
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: /Create & Link/i })).toBeNull(),
+      )
+      expect(screen.queryByText(SEED_FAILED)).toBeNull()
+      expect(isLinkSeedFailed(mockTriggerLinkSync.mock.calls[0]![1])).toBe(false)
+    })
+  })
+
   it("shows validation when upstream project is missing for linked-target", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
@@ -189,5 +356,24 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     await waitFor(() => {
       expect(screen.getByText(/choose an upstream project/i)).toBeInTheDocument()
     })
+  })
+
+  it("shows validation when corpus choice is missing for linked-target", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "X" } })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
+    fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    fireEvent.click(screen.getByText(/Linked target/i))
+    await pickComboboxOption(/Upstream project/i, /English Source/i)
+
+    fireEvent.submit(document.getElementById("project-create-form")!)
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Choose which corpus should become this project's source/i),
+      ).toBeInTheDocument()
+    })
+    expect(mockCreateCloudProject).not.toHaveBeenCalled()
   })
 })

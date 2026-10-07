@@ -15,6 +15,7 @@
  * optimistic-overlay note below).
  */
 
+import { useCallback } from "react"
 import type { ComponentType } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -26,14 +27,13 @@ import {
   LibraryBig,
   ShieldCheck,
   Sparkles,
-  Target,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
-import { LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
+import { BRIEF_ICON, LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
 import { useLiveness } from "@/hooks/useLiveness"
 import { useProject } from "@/hooks/useProject"
@@ -56,6 +56,13 @@ import { AuthoredEntriesSection } from "@/components/living-memory/AuthoredEntri
 import { RecentExamplesSection } from "@/components/living-memory/ExamplesSection"
 import { BriefPane } from "@/components/living-memory/BriefPane"
 import { PredictionPromptSection } from "@/components/living-memory/PredictionPromptSection"
+import { QualityStyleRules } from "@/components/living-memory/QualityStyleRules"
+import type { RefineSegment } from "@/components/living-memory/RefineApplicabilityDialog"
+import { cellCoordinates } from "@/lib/rules/applicability"
+import { resolveFileGenre } from "@/lib/rules/file-genre"
+import { bookGenre } from "@/lib/scripture/book-genres"
+import { fetchAllFileCells } from "@/lib/sync/cells-read"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 // Pure entry helpers live in living-memory/entries.ts; re-exported so existing
@@ -81,7 +88,7 @@ export interface LivingMemorySectionDef {
 export const LIVING_MEMORY_SECTIONS: readonly LivingMemorySectionDef[] = [
   {
     id: "brief",
-    icon: Target,
+    icon: BRIEF_ICON,
     titleKey: "terminology.livingMemory.section.brief.title",
     descriptionKey: "terminology.livingMemory.section.brief.description",
   },
@@ -130,12 +137,17 @@ interface LivingMemoryPageProps {
   project?: ProjectRecord | null
   refreshProject?: () => void
   projectSettings?: UseProjectSettings
+  /** AQU-1509: the editor's active lane, shared with the Rules section. */
+  activeLane?: string
+  onActiveLaneChange?: (lane: string) => void
 }
 
 export function LivingMemoryPage({
   project: workspaceProject,
   refreshProject: workspaceRefreshProject,
   projectSettings: workspaceProjectSettings,
+  activeLane,
+  onActiveLaneChange,
 }: LivingMemoryPageProps = {}) {
   const { locale } = useI18n()
   const t = useT()
@@ -200,8 +212,9 @@ export function LivingMemoryPage({
   const brief = settings.translationBrief ?? project?.translationBrief
   // completionSettings comes from the overlaid project record (device-local
   // apiKey + server-side voice profiles merged in overlayDeviceLocalSettings /
-  // overlaySettings). If undefined (no LLM configured), the brief pane's
-  // generation affordances fall back to opening the builder.
+  // overlaySettings). Undefined while the record hydrates, and for a project
+  // that never customized AI — the brief pane resolves both to the Frontier
+  // platform default rather than reading them as "no provider" (AQU-1671).
   const completionSettings = project?.completionSettings
 
   async function handleAdd(kind: LivingMemoryEntry["kind"], text: string) {
@@ -316,6 +329,48 @@ export function LivingMemoryPage({
 
   // Pane bodies keyed off the section id here (not inline in JSX) — the
   // MAINTAINER-gated pieces share the page-level settings instance via props.
+  // AQU-934 phase 3c: source segments for AI applicability refinement. Reading
+  // cells is the page's job, not the section's. Coordinates come from the SAME
+  // `cellCoordinates` the resolver uses, so a proposal cannot address a cell
+  // differently from the rule that will later match it.
+  const jwtForCells = session?.jwt
+  const loadSegments = useCallback(
+    async (fileId: string | null, signal: AbortSignal): Promise<readonly RefineSegment[]> => {
+      if (!projectId || !jwtForCells) return []
+      const files = (project?.files ?? []).filter((file) => fileId == null || file.id === fileId)
+      if (files.length === 0) return []
+      const getToken = buildFileScopedTokenFetcher(() => jwtForCells, projectId)
+      const segments: RefineSegment[] = []
+      for (const file of files) {
+        if (signal.aborted) break
+        const token = await getToken(file.id)
+        if (!token) continue
+        const rows = await fetchAllFileCells(projectId, file.id, token, "source")
+        const genre = resolveFileGenre(file.id, file.bookCode, settings.fileGenres)
+        for (const row of rows) {
+          const text = row.value.trim()
+          if (!text) continue
+          segments.push({
+            id: row.cellId,
+            text,
+            ...(row.canonicalRef ? { ref: row.canonicalRef } : {}),
+            coords: cellCoordinates(
+              { id: row.cellId, ...(row.canonicalRef ? { globalReferences: [row.canonicalRef] } : {}) },
+              {
+                fileId: file.id,
+                ...(file.bookCode ? { bookCode: file.bookCode } : {}),
+                ...(genre ? { genre } : {}),
+              },
+              bookGenre,
+            ),
+          })
+        }
+      }
+      return segments
+    },
+    [projectId, jwtForCells, project?.files, settings.fileGenres],
+  )
+
   const paneBody = (id: LivingMemorySectionId) => {
     switch (id) {
       case "brief":
@@ -382,8 +437,24 @@ export function LivingMemoryPage({
                   refreshProject={refreshProject}
                   patchSettings={patchSettings}
                   roleLevel={roleLevel}
+                  activeLane={activeLane}
+                  onActiveLaneChange={onActiveLaneChange}
                 />
               </section>
+            ) : null}
+            {projectId ? (
+              <QualityStyleRules
+                projectId={projectId}
+                roleLevel={entriesReady ? roleLevel : null}
+                completionSettings={completionSettings}
+                session={session ?? null}
+                files={project?.files ?? []}
+                fileGenres={settings.fileGenres}
+                canEditSettings={entriesReady && canEdit}
+                reasonCannotEditSettings={entriesReady ? reasonCannotEdit : "role"}
+                patchFileGenres={patchSettings}
+                loadSegments={loadSegments}
+              />
             ) : null}
           </>
         )

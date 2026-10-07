@@ -9,7 +9,7 @@
  * hook-count limit, stable input order, and all-or-nothing publication.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { buildCellData, type CellData } from "@/hooks/useCells"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -39,6 +39,22 @@ export interface UseProjectCellsResult {
   isTruncated: boolean
   /** A complete snapshot is never published when one file fails. */
   error?: Error
+  /**
+   * Soft refetch of the server snapshot — call after a known write so the
+   * corpus reflects it. Unlike the initial load this keeps the current
+   * snapshot on screen while the new one streams in (no blanking, no spinner).
+   */
+  revalidate: () => void
+  /**
+   * Optimistically patch a target-side cell so a caller that commits through
+   * `emitTargetCellCommit` sees its own edit immediately, without waiting on
+   * the outbox overlay's debounce. The shadow is dropped once an authoritative
+   * snapshot reports the same value (see `reconcileOptimisticEdits`).
+   */
+  applyOptimisticTargetEdit: (
+    cell: { cellId: string; fileId: string },
+    patch: { value: string; valueHtml?: string; aiDrafted?: boolean },
+  ) => void
 }
 
 export interface UseProjectCellsOpts {
@@ -141,6 +157,36 @@ interface PendingTargetEdit {
   aiDrafted: boolean
 }
 
+/** Overlay map key. Cell ids are unique per file, not per project. */
+export function overlayKey(fileId: string, cellId: string): string {
+  return `${fileId}\0${cellId}`
+}
+
+/**
+ * Drop optimistic shadows the server has caught up with.
+ *
+ * A shadow outlives the outbox row that produced it: the flusher deletes the
+ * row the moment the write is accepted, which removes the pending overlay. If
+ * the shadow were cleared at the same moment the cell would visibly snap back
+ * to the pre-edit snapshot until something remounted the hook. So a shadow is
+ * retired only when an authoritative snapshot actually reports its value.
+ */
+export function reconcileOptimisticEdits(
+  optimistic: ReadonlyMap<string, PendingTargetEdit>,
+  files: readonly ProjectFileCells[],
+): ReadonlyMap<string, PendingTargetEdit> {
+  if (optimistic.size === 0) return optimistic
+  const next = new Map(optimistic)
+  for (const file of files) {
+    for (const cell of file.cells) {
+      const key = overlayKey(file.fileId, cell.id)
+      const shadow = next.get(key)
+      if (shadow && shadow.value === cell.translated) next.delete(key)
+    }
+  }
+  return next.size === optimistic.size ? optimistic : next
+}
+
 function overlayPendingEdits(
   files: ProjectFileCells[],
   pending: ReadonlyMap<string, PendingTargetEdit>,
@@ -149,7 +195,7 @@ function overlayPendingEdits(
   return files.map((file) => ({
     ...file,
     cells: file.cells.map((cell) => {
-      const edit = pending.get(`${file.fileId}\0${cell.id}`)
+      const edit = pending.get(overlayKey(file.fileId, cell.id))
       if (!edit) return cell
       return {
         ...cell,
@@ -174,7 +220,35 @@ export function useProjectCells({
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<Error | undefined>()
   const [pending, setPending] = useState<ReadonlyMap<string, PendingTargetEdit>>(new Map())
+  const [optimistic, setOptimistic] = useState<ReadonlyMap<string, PendingTargetEdit>>(new Map())
+  const [reloadNonce, setReloadNonce] = useState(0)
   const generationRef = useRef(0)
+  // Set by revalidate() so the load effect can tell a refetch-after-write from
+  // a first load and skip the blanking + spinner.
+  const softReloadRef = useRef(false)
+
+  const revalidate = useCallback(() => {
+    softReloadRef.current = true
+    setReloadNonce((n) => n + 1)
+  }, [])
+
+  const applyOptimisticTargetEdit = useCallback(
+    (
+      cell: { cellId: string; fileId: string },
+      patch: { value: string; valueHtml?: string; aiDrafted?: boolean },
+    ) => {
+      setOptimistic((prev) => {
+        const next = new Map(prev)
+        next.set(overlayKey(cell.fileId, cell.cellId), {
+          value: patch.value,
+          valueHtml: patch.valueHtml,
+          aiDrafted: patch.aiDrafted === true,
+        })
+        return next
+      })
+    },
+    [],
+  )
 
   // Depend on content, not the caller's array identity. ProjectWorkspace maps
   // its file list inline and would otherwise restart a whole-project read on
@@ -188,26 +262,38 @@ export function useProjectCells({
 
   useEffect(() => {
     const generation = ++generationRef.current
+    // Consume the flag here: whatever this run is, the next one is a hard load
+    // unless revalidate() says otherwise.
+    const soft = softReloadRef.current
+    softReloadRef.current = false
     let cancelled = false
     if (!enabled || !projectId || requestedFiles.length === 0) {
       setServerFiles([])
+      setOptimistic(new Map())
       setIsLoading(false)
       setError(undefined)
       return
     }
 
-    setServerFiles([])
-    setIsLoading(true)
+    if (!soft) {
+      setServerFiles([])
+      setOptimistic(new Map())
+      setIsLoading(true)
+    }
     setError(undefined)
     void loadProjectCellFiles({ projectId, projectFiles: requestedFiles, getToken, lane })
       .then((files) => {
         if (cancelled || generation !== generationRef.current) return
         setServerFiles(files)
+        setOptimistic((prev) => reconcileOptimisticEdits(prev, files))
         setIsLoading(false)
       })
       .catch((cause: unknown) => {
         if (cancelled || generation !== generationRef.current) return
-        setServerFiles([])
+        // A soft refetch that fails keeps the last good snapshot on screen —
+        // the caller's write already landed in the outbox and is still shown
+        // through the pending/optimistic overlays.
+        if (!soft) setServerFiles([])
         setError(cause instanceof Error ? cause : new Error(String(cause)))
         setIsLoading(false)
       })
@@ -215,7 +301,7 @@ export function useProjectCells({
     return () => {
       cancelled = true
     }
-  }, [enabled, getToken, lane, projectId, requestedFiles])
+  }, [enabled, getToken, lane, projectId, reloadNonce, requestedFiles])
 
   // Match useCells' pending-edit semantics so a project export includes edits
   // still queued locally, while quarantined writes remain excluded.
@@ -246,7 +332,7 @@ export function useProjectCells({
             ai_suggestion?: true
           }
           if ((payload.targetLang ?? "") !== lane || typeof payload.value !== "string") continue
-          next.set(`${fileId}\0${cellId}`, {
+          next.set(overlayKey(fileId, cellId), {
             value: payload.value,
             valueHtml: payload.valueHtml,
             aiDrafted: payload.ai_suggestion === true,
@@ -276,10 +362,19 @@ export function useProjectCells({
     }
   }, [enabled, lane, projectId, requestedFiles])
 
+  // Optimistic shadows win over the outbox overlay: they are the same edit,
+  // stamped by the committer before the outbox row is readable, and they
+  // outlive that row once the flusher accepts it.
+  const overlay = useMemo(() => {
+    if (optimistic.size === 0) return pending
+    if (pending.size === 0) return optimistic
+    return new Map([...pending, ...optimistic])
+  }, [optimistic, pending])
+
   const files = useMemo(
-    () => overlayPendingEdits(serverFiles, pending),
-    [pending, serverFiles],
+    () => overlayPendingEdits(serverFiles, overlay),
+    [overlay, serverFiles],
   )
 
-  return { files, isLoading, isTruncated: false, error }
+  return { files, isLoading, isTruncated: false, error, revalidate, applyOptimisticTargetEdit }
 }

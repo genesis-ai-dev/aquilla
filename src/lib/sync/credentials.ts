@@ -10,13 +10,23 @@ import { fetchWithTimeout } from "../frontier/orgs"
 
 export type CredentialMode = "ask" | "act"
 
+/** AQU-1242: the token's write ceiling. `"read"` refuses every write surface on
+ *  the Agent API; `"write"` is the original grant and the server-side default. */
+export type CredentialAccess = "read" | "write"
+
 /** Public credential DTO — never includes the token hash or plaintext. */
 export interface ApiCredential {
   id: string
   name: string
   mode: CredentialMode
+  /** AQU-1242: `"read"` means this token cannot change anything, whatever its
+   *  mode says. Compare against `"read"` rather than `"write"` — an auth-worker
+   *  deployed before this field existed omits it, and the permissive value is
+   *  the one that must survive that gap. */
+  access: CredentialAccess
   /** Org scope, if any. Stored as TEXT server-side (see migration 0054). */
   orgId: string | null
+  orgIds?: string[]
   /** Project scope, if any. */
   projectId: string | null
   tokenPrefix: string
@@ -24,15 +34,25 @@ export interface ApiCredential {
   expiresAt: string | null
   lastUsedAt: string | null
   revokedAt: string | null
+  /** AQU-1180: does this token see real human identities in agent-facing
+   *  responses? Off unless an owner deliberately turned it on. */
+  pii: boolean
 }
 
 export interface MintCredentialInput {
   name: string
   mode: CredentialMode
+  /** AQU-1242: omit for `"write"` (the server's default). `"read"` + mode
+   *  `"act"` is rejected server-side as a contradiction. */
+  access?: CredentialAccess
   orgId?: string
   projectId?: string
   /** ISO-8601 timestamp; omit for "never expires". */
   expiresAt?: string
+  /** AQU-1180: expose translator names/user ids to the agent. Omit for the
+   *  safe default (pseudonymous ids). Server-side this requires OWNER of the
+   *  scoped org/project and 403s otherwise. */
+  pii?: boolean
 }
 
 export interface MintCredentialResult {

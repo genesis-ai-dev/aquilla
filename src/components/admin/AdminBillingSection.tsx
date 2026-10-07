@@ -5,9 +5,12 @@ import { DataTable } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Section } from "@/components/ui/page"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
+import { AdminSectionSkeleton } from "./shared"
 import { formatAgentCredits, formatUsdFromCents, normalizeBillingPlan } from "@/lib/billing/plans"
 import {
+  patchAdminWeeklyAllowance,
   getAdminBillingOrgs,
   getAdminBillingPlans,
   grantAdminCredits,
@@ -34,6 +37,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
   const [busy, setBusy] = useState(false)
   const aliveRef = useRef(true)
 
+  const [freeWeekly, setFreeWeekly] = useState("25")
   const [price, setPrice] = useState("")
   const [addonPrice, setAddonPrice] = useState("")
   const [wordsPerCredit, setWordsPerCredit] = useState("")
@@ -55,6 +59,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     try {
       const [plans, rows] = await Promise.all([getAdminBillingPlans(jwt), getAdminBillingOrgs(jwt)])
       if (!aliveRef.current) return
+      setFreeWeekly(String(plans.plan.freeWeeklyAllowance ?? 25))
       setCatalog(plans)
       setOrgs(rows)
       setPrice(String(plans.plan.priceCents / 100))
@@ -82,6 +87,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     setNotice(null)
     try {
       const saved = await updateAdminBillingPlans(jwt, {
+        freeWeeklyAllowance: Number(freeWeekly),
         ifMatchVersion: catalog.version,
         priceCents: Math.round(Number(price) * 100),
         addonPriceCents: Math.round(Number(addonPrice) * 100),
@@ -124,7 +130,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         cell: ({ row }) => (
           <div className="min-w-[120px]">
             <OrgWithAvatar name={row.original.orgName ?? `#${row.original.orgId}`} />
-            <div className="pl-7 text-[10px] tabular-nums text-muted-foreground">#{row.original.orgId}</div>
+            <div className="pl-7 text-[10px] tabular-nums text-muted-foreground">#{row.original.orgId} · {row.original.ownerUsername}</div>
           </div>
         ),
       },
@@ -156,11 +162,21 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
             <span className="text-muted-foreground"> / {formatAgentCredits(row.original.allowanceCredits)}</span>
             {normalizeBillingPlan(row.original.plan) === "enterprise" ? (
               <div className="text-[10px] text-muted-foreground">
-                {row.original.languageCount} language{row.original.languageCount === 1 ? "" : "s"}
+                {row.original.languageCount} lane{row.original.languageCount === 1 ? "" : "s"}
               </div>
             ) : null}
           </div>
         ),
+      },
+      {
+        id: "weekly",
+        header: "Weekly AI allowance",
+        cell: ({ row }) => <OverrideCredits
+          label={`weekly allowance for ${row.original.orgName ?? row.original.orgId}`}
+          testId={`weekly-allowance-${row.original.orgId}`}
+          value={row.original.weeklyAllowance ?? null}
+          onCommit={value => void act(() => patchAdminWeeklyAllowance(jwt, row.original.orgId, value))}
+        />,
       },
       {
         id: "override",
@@ -179,6 +195,25 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           <span className="text-xs tabular-nums text-muted-foreground">
             {formatAgentCredits(row.original.complimentaryCredits)}
           </span>
+        ),
+      },
+      {
+        id: "period",
+        header: "Capacity period",
+        cell: ({ row }) => (
+          <div className="text-xs text-muted-foreground" data-testid={`admin-period-${row.original.orgId}`}>
+            {row.original.periodStart || row.original.periodEnd ? (
+              <span className="flex items-center gap-1">
+                <DateTooltip value={row.original.periodStart} label="Period start" />
+                <span aria-hidden>→</span>
+                <DateTooltip value={row.original.periodEnd} label="Period end" />
+              </span>
+            ) : (
+              <span title="No billing period on record — the allowance applies to the current cycle.">
+                No period set
+              </span>
+            )}
+          </div>
         ),
       },
       {
@@ -213,7 +248,12 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     [act, jwt],
   )
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading billing…</p>
+  // AQU-942: only a first load that has resolved nothing may replace the
+  // section. Every grant/reset/save round-trips through `refresh`, which flips
+  // `loading` back on — gating on it alone unmounted the catalog form and the
+  // org table after each action, losing the table's sort/scroll and flashing
+  // the whole tab. Errors already render inline inside the shell below.
+  if (loading && !catalog && !orgs) return <AdminSectionSkeleton label="Loading billing" />
   if (error && !catalog) return <p className="text-sm text-destructive">{error}</p>
 
   return (
@@ -223,13 +263,14 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         description="Included agent credits per tier. Users never see agent-processed words — only credits. Existing subscribers keep their Stripe price."
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <AmountField label="Free weekly AI allowance (internal units)" value={freeWeekly} onChange={setFreeWeekly} />
           <AmountField label="Words per credit (internal)" value={wordsPerCredit} onChange={setWordsPerCredit} />
           <AmountField label="Explore credits / cycle" value={exploreCredits} onChange={setExploreCredits} />
           <AmountField label="Field credits / cycle" value={fieldCredits} onChange={setFieldCredits} />
           <AmountField label="Field Plan ($ / 4 weeks)" value={price} onChange={setPrice} />
           <AmountField label="Add-on credits / pack" value={addonCredits} onChange={setAddonCredits} />
           <AmountField label="Add-on ($ / pack)" value={addonPrice} onChange={setAddonPrice} />
-          <AmountField label="Enterprise credits / language / year" value={enterpriseCredits} onChange={setEnterpriseCredits} />
+          <AmountField label="Enterprise credits / lane / year" value={enterpriseCredits} onChange={setEnterpriseCredits} />
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button onClick={() => void saveCatalog()} disabled={busy || !catalog} data-testid="save-field-plan">
@@ -245,13 +286,30 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         {catalog ? <p className="mt-2 text-xs text-muted-foreground">{catalog.note}</p> : null}
       </Section>
 
-      <Section title="Organizations" description="Override included agent credits, grant courtesy credits after an outage, or put an org on Explore / Field / Enterprise.">
+      <p className="text-sm text-muted-foreground" data-testid="weekly-enforcement-status">
+        {catalog?.weeklyUsageEnforced
+          ? "Weekly AI allowance enforcement is enabled."
+          : "Weekly AI allowance enforcement is off. These allowances take effect when enforcement is enabled."}
+      </p>
+      <Section title="Organizations" description="Set weekly AI capacity for a team or a user’s personal workspace. Weekly grants preserve usage and Stripe billing. Blank uses the plan default. Legacy controls appear separately.">
         {orgs && orgs.length > 0 ? (
           <DataTable
             columns={columns}
             data={orgs}
             getRowId={(row) => String(row.orgId)}
             initialSorting={[{ id: "org", desc: false }]}
+            searchPlaceholder="Search organizations…"
+            globalFilterFn={(row, _columnId, filterValue) => {
+              const q = String(filterValue).trim().toLowerCase()
+              if (!q) return true
+              const org = row.original
+              return (
+                (org.orgName ?? "").toLowerCase().includes(q) ||
+                (org.ownerUsername ?? "").toLowerCase().includes(q) ||
+                `#${org.orgId}`.includes(q) ||
+                String(org.orgId).includes(q)
+              )
+            }}
             testId="admin-billing-orgs"
             rowClassName="align-top"
           />
@@ -275,9 +333,13 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
 }
 
 function OverrideCredits({
+  label = "included credits override",
+  testId,
   value,
   onCommit,
 }: {
+  label?: string
+  testId?: string
   value: number | null
   onCommit: (v: number | null) => void
 }) {
@@ -289,7 +351,8 @@ function OverrideCredits({
     <Input
       type="number"
       min={0}
-      aria-label="included credits override"
+      aria-label={label}
+      data-testid={testId}
       placeholder="tier default"
       value={local}
       onChange={(e) => setLocal(e.target.value)}
@@ -299,7 +362,7 @@ function OverrideCredits({
           return
         }
         const n = Number(local)
-        if (!Number.isNaN(n) && n >= 0 && n !== value) onCommit(n)
+        if (Number.isSafeInteger(n) && n >= 0 && n <= 10_000_000 && n !== value) onCommit(n)
       }}
       className="h-7 w-24 text-xs tabular-nums"
     />
@@ -350,7 +413,7 @@ function OrgActions({
           +1,000 agent credits
         </Button>
         <Button size="sm" variant="outline" onClick={onGrantCredits} data-testid={`grant-credits-${org.orgId}`}>
-          +100 compute credits
+          +100 AI credits
         </Button>
       </div>
       {confirm == null ? (

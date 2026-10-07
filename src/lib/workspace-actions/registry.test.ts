@@ -5,13 +5,20 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { en } from "@/lib/i18n/messages/en"
 import { translate } from "@/lib/i18n/translate"
+import { formatList } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
+import type { BatchValidateCandidate } from "@/lib/review/batch-validate-summary"
+import { summarizeBatchValidate } from "@/lib/review/batch-validate-summary"
 
 // English-only `t`, standing in for the real I18nProvider hook — description()
 // is resolved outside React (registry.ts has no component tree), so tests
 // call it the same way ProjectWorkspace does: inject a `t`, don't hardcode
 // English strings here.
 const t: TFunction = (key, vars) => translate(undefined, key, vars)
+
+// `useFormat().list` outside React (AQU-1507) — the locale-aware join a
+// confirmation body that enumerates several clauses needs.
+const joinList = (items: readonly string[]) => formatList(items)
 
 // `en` values are `string | PluralMessage`; every labelKey used below resolves
 // to a plain string, so this narrows without a plural-form branch.
@@ -34,6 +41,52 @@ function ctx(overrides: Partial<WorkspaceActionContext> = {}): WorkspaceActionCo
     fileProgress: new Map(),
     ...overrides,
   }
+}
+
+// ── AQU-1507 fixtures: candidates for the shared batch-validate summary ─────
+const ME = "me"
+
+function cell(i: number, over: Partial<BatchValidateCandidate> = {}): BatchValidateCandidate {
+  return { id: `c${i}`, fileId: "f1", translated: "bonjour", targetEventId: `e${i}`, ...over }
+}
+const make = (n: number, over: Partial<BatchValidateCandidate> = {}) =>
+  Array.from({ length: n }, (_, i) => cell(i, over))
+
+/** Human-written, committed, not yet signed off by me — the run validates these. */
+const eligibleCells = (n: number) => make(n)
+/** No target text at all: the footer counts them, the run cannot. */
+const untranslatedCells = (n: number) => make(n, { translated: "", targetEventId: null })
+/** Already carrying my validation, so a second vote would be a wasted request. */
+const alreadyMineCells = (n: number) => make(n, { activeValidators: [ME] })
+/** Translated but never committed: the footer counts them, the run cannot. */
+const uncommittedCells = (n: number) => make(n, { targetEventId: null })
+
+function summarizeOptions(over: Partial<Parameters<typeof summarizeBatchValidate>[1]> = {}) {
+  return { username: ME, myScopes: [], activeLane: "fr", ...over }
+}
+
+/**
+ * The confirmation body the dialog would render, driven through the SAME
+ * summary `runBatchValidate` consumes — which is the whole point of AQU-1507.
+ */
+function batchValidateDescription(
+  candidates: BatchValidateCandidate[],
+  over: { project?: ProjectRecord, cap?: number | null, canValidate?: boolean } = {},
+): string {
+  const action = workspaceActions.find((a) => a.id === "batch-validate")!
+  const summary = summarizeBatchValidate(
+    candidates,
+    summarizeOptions({ cap: over.cap, canValidate: over.canValidate }),
+  )
+  return action.requiresConfirmation!.description(
+    ctx({
+      project: over.project ?? project,
+      activeFileId: "f1",
+      batchValidateSummary: () => summary,
+    }),
+    t,
+    joinList,
+  )
 }
 
 function mockActions(): WorkspaceAction[] {
@@ -158,26 +211,65 @@ describe("AQU-365: header actions hidden for below-floor roles", () => {
   })
 })
 
-describe("AQU-503: target import is discoverable by wording", () => {
-  const importIntoFile = workspaceActions.find((a) => a.id === "import-into-file")!
+// AQU-481: the source-import action was the one primary entry with no role gate
+// (`isAvailable: () => true`), so a VIEWER got the full Import type-picker with
+// every importer clickable. Source import emits `file.create`, whose server
+// floor is PROJECT_LEAD (500) — the server always refused, making this an
+// affordance-honesty bug rather than a security hole. These guard the floor.
+// AQU-1365: the same dialog now also imports a translation of a file already
+// here (`target.cell.commit`, CONTRIBUTOR 400), so the floor moved down to
+// Contributor; the dialog greys out New source text below PROJECT_LEAD.
+describe("AQU-481 / AQU-1365: Import is refused below CONTRIBUTOR", () => {
+  const importNew = workspaceActions.find((a) => a.id === "import-new")!
 
-  it("labels the file-scoped target importer with the word 'target'", () => {
-    // A PM (Anna) searching for the "Target Import" option must recognize this
-    // entry by its wording. The label must name the TARGET column so it is not
-    // confused with the primary "Import" (source) action.
-    expect(englishOf(importIntoFile.labelKey).toLowerCase()).toContain("target")
+  function ctxWithRole(roleLevel: number | null, overrides: Partial<WorkspaceActionContext> = {}) {
+    const projectWithRole: ProjectRecord = roleLevel === null
+      ? project
+      : { ...project, syncRole: { level: roleLevel, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" } }
+    return ctx({ project: projectWithRole, ...overrides })
+  }
+
+  it("refuses the import action for a VIEWER (100) — the reported repro", () => {
+    expect(importNew.isAvailable(ctxWithRole(ROLE.VIEWER))).toBe(false)
+    // …and with a file open, which is the "More actions" half of the repro.
+    expect(importNew.isAvailable(ctxWithRole(ROLE.VIEWER, { activeFileId: "f1" }))).toBe(false)
   })
 
-  it("shows the target importer whenever a file is open, for any role (not permission-gated)", () => {
-    // Investigation found this action has no role floor — the discoverability
-    // gap was wording/location, not permissions. Guard that it stays visible
-    // once a file is open, even for a viewer-level role.
-    const projectWithRole: ProjectRecord = {
-      ...project,
-      syncRole: { level: ROLE.VIEWER, name: "viewer", source: "server", fetchedAt: "2026-01-01T00:00:00Z" },
+  it("refuses every role below CONTRIBUTOR (400)", () => {
+    for (const level of [ROLE.VIEWER, ROLE.COMMENTER, ROLE.REVIEWER]) {
+      expect(importNew.isAvailable(ctxWithRole(level))).toBe(false)
     }
-    expect(importIntoFile.isAvailable(ctx({ project: projectWithRole, activeFileId: "f1" }))).toBe(true)
-    expect(importIntoFile.isAvailable(ctx({ activeFileId: null }))).toBe(false)
+  })
+
+  it("allows CONTRIBUTOR (400) and above — a Contributor imports a translation", () => {
+    for (const level of [ROLE.CONTRIBUTOR, ROLE.PROJECT_LEAD, ROLE.MAINTAINER, ROLE.OWNER]) {
+      expect(importNew.isAvailable(ctxWithRole(level))).toBe(true)
+    }
+  })
+
+  it("fails open for a local project with no resolved syncRole", () => {
+    // No server floor to enforce against — a local/unsynced project must keep
+    // importing, same convention as canPerform and the AQU-365 actions above.
+    expect(importNew.isAvailable(ctxWithRole(null))).toBe(true)
+  })
+
+  it("no longer offers import as the default action to a viewer with no file open", () => {
+    // getDefaultAction only ever picks from getVisibleActions, so the gate above
+    // is what keeps a viewer's primary CTA off a dialog the server refuses.
+    const visible = getVisibleActions(workspaceActions, ctxWithRole(ROLE.VIEWER))
+    expect(visible.map((a) => a.id)).not.toContain("import-new")
+  })
+})
+
+// AQU-1365: target import starts from the big Import button now ("A
+// translation"), so the menu no longer carries a second import entry that a
+// translator can confuse with it. AQU-503's wording rule ("target" must be
+// findable) moved to the dialog's choice card (ImportDialog.translation.test).
+describe("AQU-1365: no file-scoped target import action remains in the menu", () => {
+  it("offers exactly one import action, and it is the Import dialog", () => {
+    const imports = workspaceActions.filter((a) => a.id.startsWith("import"))
+    expect(imports.map((a) => a.id)).toEqual(["import-new"])
+    expect(workspaceActions.some((a) => englishOf(a.labelKey).toLowerCase().includes("target"))).toBe(false)
   })
 })
 
@@ -205,6 +297,7 @@ describe("completionBatchSizeFor", () => {
     const desc = action.requiresConfirmation!.description(
       ctx({ project: p, activeFileId: "f1", fileProgress: new Map([["f1", { translated: 0, validated: 0, total: 10 }]]) }),
       t,
+      joinList,
     )
     expect(desc).toContain("next 3 untranslated cells")
     expect(desc).toContain("7 more after this")
@@ -212,12 +305,115 @@ describe("completionBatchSizeFor", () => {
 
   it("the batch-validate confirmation notes the per-run cap when set", () => {
     const p: ProjectRecord = { ...project, completionSettings: { endpoint: "", model: "", maxTokens: 512, temperature: 0.3, systemPrompt: "", validationBatchSize: 5 } }
-    const action = workspaceActions.find((a) => a.id === "batch-validate")!
-    const desc = action.requiresConfirmation!.description(
-      ctx({ project: p, activeFileId: "f1", fileProgress: new Map([["f1", { translated: 10, validated: 0, total: 10 }]]) }),
-      t,
+    const desc = batchValidateDescription(
+      eligibleCells(20),
+      { project: p, cap: 5 },
     )
+    // AQU-1507: the cap trims the promise as well as the run — 20 eligible
+    // cells behind a cap of 5 must not be announced as 20.
+    expect(desc).toContain("validates 5 eligible cells")
     expect(desc).toContain("At most 5 eligible cells are validated per run")
+  })
+})
+
+// ── AQU-1507: the confirmation promises what the RUN will do ────────────────
+//
+// The body used to be built from file progress (`total - validated`), which
+// counts untranslated cells, cells this reader had already signed off and cells
+// outside their assignment — none of which the run touches. On the reported file that read "83 cells are currently unvalidated"
+// and then validated zero. These tests pin the count to the very summary the
+// run consumes, so the two cannot drift apart again.
+describe("batch-validate confirmation body", () => {
+  it("promises only the cells the run will validate, and names the rest", () => {
+    // The reported file: 4 cells already signed off by this reader and 79
+    // untranslated cells, of which none is eligible.
+    const desc = batchValidateDescription([
+      ...untranslatedCells(79),
+      ...alreadyMineCells(4),
+    ])
+    // 83 is still a true number about this file — it is what the run will NOT
+    // touch. What must be gone is 83 offered as the thing about to happen.
+    expect(desc).not.toContain("83 cells are currently unvalidated")
+    expect(desc).not.toContain("validates 83")
+    expect(desc).toContain("Nothing in this file can be batch-validated right now.")
+    expect(desc).toContain("Skipped 83 cells")
+    expect(desc).toContain("79 still need a translation")
+    expect(desc).toContain("4 you had already validated")
+  })
+
+  it("counts a mixed file the way the run does, and accounts for every cell", () => {
+    const candidates = [
+      ...eligibleCells(6),
+      ...untranslatedCells(3),
+      ...uncommittedCells(2),
+      ...alreadyMineCells(1),
+    ]
+    const summary = summarizeBatchValidate(candidates, summarizeOptions({}))
+    // The invariant the dialog rests on: nothing is silently unaccounted for.
+    expect(summary.validatable.length + summary.skippedTotal + summary.cappedOut)
+      .toBe(candidates.length)
+
+    const desc = batchValidateDescription(candidates)
+    expect(desc).toContain("validates 6 eligible cells")
+    expect(desc).toContain("Skipped 6 cells")
+    expect(desc).toContain("3 still need a translation")
+    expect(desc).toContain("2 have no saved translation yet")
+    expect(desc).toContain("1 you had already validated")
+  })
+
+  // The AQU-1507 regression guard proper: the dialog must not carry its own
+  // notion of eligibility. Flip a cell so the SHARED predicate rejects it and
+  // the promised number has to move with it.
+  it("follows the shared eligibility predicate rather than a count of its own", () => {
+    const cells = eligibleCells(4)
+    expect(batchValidateDescription(cells)).toContain("validates 4 eligible cells")
+    const withIneligible: BatchValidateCandidate[] = [
+      ...cells.slice(0, 3),
+      { ...cells[3], targetEventId: null },
+    ]
+    expect(batchValidateDescription(withIneligible)).toContain("validates 3 eligible cells")
+  })
+
+  it("says there is nothing to look at on an empty file, without promising success", () => {
+    const desc = batchValidateDescription([])
+    expect(desc).toBe("There are no cells here to validate.")
+  })
+
+  it("explains a role below the validation floor instead of offering a count", () => {
+    const desc = batchValidateDescription(eligibleCells(3), { canValidate: false })
+    expect(desc).toBe("Your role cannot validate cells in this project.")
+  })
+})
+
+// Walk 10-02: a reader off the named-validator list could tick the box and
+// press "Validate text", which sent nothing and toasted the body back at them.
+describe("batch-validate can be confirmed only when the run will validate something", () => {
+  const action = workspaceActions.find((a) => a.id === "batch-validate")!
+  const canConfirm = (
+    candidates: BatchValidateCandidate[],
+    over: Partial<Parameters<typeof summarizeBatchValidate>[1]> = {},
+    activeFileId: string | null = "f1",
+  ) => {
+    const summary = summarizeBatchValidate(candidates, summarizeOptions(over))
+    return action.requiresConfirmation!.canConfirm!(ctx({ activeFileId, batchValidateSummary: () => summary }))
+  }
+
+  it("allows a run with eligible cells, including a partial one", () => {
+    expect(canConfirm(eligibleCells(2))).toBe(true)
+    expect(canConfirm([...eligibleCells(1), ...alreadyMineCells(2)])).toBe(true)
+  })
+
+  it("blocks every outcome that validates nothing", () => {
+    expect(canConfirm(eligibleCells(3), { canValidate: false, noPermissionReason: "allowlist" })).toBe(false)
+    expect(canConfirm(eligibleCells(3), { canValidate: false })).toBe(false)
+    expect(canConfirm(eligibleCells(3), { hasTarget: false })).toBe(false)
+    expect(canConfirm([])).toBe(false)
+    expect(canConfirm([...untranslatedCells(2), ...alreadyMineCells(1)])).toBe(false)
+  })
+
+  it("blocks when no file is open or the summary cannot be computed", () => {
+    expect(canConfirm(eligibleCells(2), {}, null)).toBe(false)
+    expect(action.requiresConfirmation!.canConfirm!(ctx({ activeFileId: "f1" }))).toBe(false)
   })
 })
 
@@ -272,7 +468,52 @@ describe("the audio actions are gated on their counts", () => {
   // so it has to be the same one the gate used.
   it("confirms with the count it was gated on", () => {
     const c = ctx({ activeFileId: "f1", audioCounts: { untranscribed: 7, unsynthesized: 4 } })
-    expect(find("transcribe-all").requiresConfirmation!.description(c, t)).toContain("7")
-    expect(find("synth-all").requiresConfirmation!.description(c, t)).toContain("4")
+    expect(find("transcribe-all").requiresConfirmation!.description(c, t, joinList)).toContain("7")
+    expect(find("synth-all").requiresConfirmation!.description(c, t, joinList)).toContain("4")
+  })
+})
+
+// ── AQU-490: bulk recording validation ─────────────────────────────────────
+//
+// Sam's ruling: a SEPARATE action beside the text one, in both places a bulk
+// text validate lives. Never combined — a reviewer signing off translations
+// has not listened to the recordings, and one button doing both would collect
+// sign-off nobody meant to give.
+describe("batch-validate-audio", () => {
+  const action = () => workspaceActions.find((a) => a.id === "batch-validate-audio")!
+  const withRole = (roleLevel: number, overrides: Partial<WorkspaceActionContext> = {}) => ctx({
+    project: { ...project, syncRole: { level: roleLevel, name: "t", source: "server", fetchedAt: "2026-01-01T00:00:00Z" } },
+    activeFileId: "f1",
+    ...overrides,
+  })
+
+  it("exists as its own action, distinct from the text one", () => {
+    expect(action()).toBeDefined()
+    expect(workspaceActions.find((a) => a.id === "batch-validate")).toBeDefined()
+  })
+
+  // A text-only project must not grow a menu item it can do nothing with.
+  it("hides itself when the file has no take this user could validate", () => {
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 0, unsynthesized: 0, validatableTakes: 0 } }))).toBe(false)
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 3, unsynthesized: 2 } }))).toBe(false)
+  })
+
+  it("appears once there is something to sign off", () => {
+    expect(action().isAvailable(withRole(600, { audioCounts: { untranscribed: 0, unsynthesized: 0, validatableTakes: 4 } }))).toBe(true)
+  })
+
+  // Reviewer floor, same as the text action — and the same as the server's.
+  it("stays hidden below the reviewer floor", () => {
+    const counts = { untranscribed: 0, unsynthesized: 0, validatableTakes: 4 }
+    expect(action().isAvailable(withRole(ROLE.COMMENTER, { audioCounts: counts }))).toBe(false)
+    expect(action().isAvailable(withRole(ROLE.REVIEWER, { audioCounts: counts }))).toBe(true)
+  })
+
+  it("runs its own handler, never the text one", () => {
+    const runBatchValidate = vi.fn()
+    const runBatchValidateAudio = vi.fn()
+    action().run(withRole(600), { runBatchValidate, runBatchValidateAudio } as never)
+    expect(runBatchValidateAudio).toHaveBeenCalledTimes(1)
+    expect(runBatchValidate).not.toHaveBeenCalled()
   })
 })

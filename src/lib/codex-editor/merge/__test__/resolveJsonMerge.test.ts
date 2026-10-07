@@ -30,4 +30,22 @@ describe("resolveJsonMergeTwoWay", () => {
     const out = await resolveJsonMergeTwoWay("", JSON.stringify({ a: 1 }))
     expect(JSON.parse(out)).toEqual({ a: 1 })
   })
+
+  it("does not let a __proto__ key repoint the merged object's prototype", async () => {
+    const ours = JSON.stringify({ a: 1 })
+    const theirs = '{"__proto__":{"polluted":true},"a":2}'
+    const out = await resolveJsonMergeTwoWay(ours, theirs)
+    const merged = JSON.parse(out) as Record<string, unknown>
+    expect(merged.a).toBe(2)
+    expect(Object.getPrototypeOf(merged)).toBe(Object.prototype)
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it("drops constructor/prototype keys instead of merging them", async () => {
+    const ours = JSON.stringify({ a: 1 })
+    const theirs = JSON.stringify({ constructor: { x: 1 }, prototype: { y: 2 } })
+    const merged = JSON.parse(await resolveJsonMergeTwoWay(ours, theirs)) as Record<string, unknown>
+    expect(Object.prototype.hasOwnProperty.call(merged, "constructor")).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(merged, "prototype")).toBe(false)
+  })
 })

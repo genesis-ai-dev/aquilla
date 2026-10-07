@@ -26,6 +26,7 @@
 // role-policy.ts). Author is bound to the token, never the request body.
 
 import { verifyTokenForDoc } from '../auth'
+import { youTubeVideoId } from '../../../src/lib/video/youtube'
 import { ROLE } from './role-policy'
 import { withCors } from '../cors'
 import {
@@ -38,7 +39,8 @@ import {
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
-import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES } from '../../../shared/import-contract'
+import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES, MAX_CELL_TEXT_BYTES } from '../../../shared/import-contract'
+import { publishImportedTrack, type ImportedTrackPublication } from './import-track-publication'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
@@ -82,7 +84,9 @@ const MAX_CELLS_PER_REQUEST = 5000
 // Per-field byte caps — generous for a single verse/segment/sentence-sized
 // cell, but enough to stop one malformed/malicious cell from persisting a
 // multi-MB blob into a row that every reader of the file re-fetches.
-const MAX_CELL_TEXT_BYTES = 256 * 1024
+// `MAX_CELL_TEXT_BYTES` lives in shared/import-contract so the browser importer
+// enforces the identical ceiling before uploading (AQU-990); this route stays
+// the trust boundary that re-checks it.
 const MAX_METADATA_BYTES = 64 * 1024
 
 function utf8Bytes(s: string): number {
@@ -171,6 +175,7 @@ interface ImportAudioAttachment {
   trimStartMs?: number
   trimEndMs?: number
   timings?: Array<{ word: string; t0: number; t1: number; start: number; end: number }>
+  transcription?: string
 }
 
 interface ImportBody {
@@ -199,6 +204,10 @@ interface ImportBody {
   publishEventId?: string
   /** Media metadata persisted atomically with the reveal event. */
   attachments?: ImportAudioAttachment[]
+  /** Attach a staged hidden caption file to this parent media timeline. */
+  trackPublication?: ImportedTrackPublication
+  /** Linked picture, committed with the staged file reveal. */
+  video?: { id: string; coreMediaUrl: string }
 }
 
 function isImportBody(x: unknown): x is ImportBody {
@@ -210,6 +219,7 @@ function isImportBody(x: unknown): x is ImportBody {
     Array.isArray(b.cells) &&
     (b.targets === undefined || Array.isArray(b.targets)) &&
     (b.attachments === undefined || Array.isArray(b.attachments)) &&
+    (b.video === undefined || (b.video !== null && typeof b.video === 'object' && !Array.isArray(b.video))) &&
     (b.complete === undefined || typeof b.complete === 'boolean')
   )
 }
@@ -250,6 +260,26 @@ export async function handleBulkImportRequest(
       new Response('body must be { projectId, fileId, cells[] }', { status: 400 }),
       request,
     )
+  }
+  if (body.video !== undefined) {
+    const video = body.video
+    const videoId = typeof video.coreMediaUrl === 'string' ? youTubeVideoId(video.coreMediaUrl) : null
+    const linkedYouTube = videoId !== null
+      && video.coreMediaUrl === `https://www.youtube.com/watch?v=${videoId}`
+    // Uploaded pictures must share a source attachment. The completion path
+    // also verifies that attachment's artifact belongs to this file.
+    const uploadedClip = typeof video.coreMediaUrl === 'string'
+      && video.coreMediaUrl.startsWith('frontier-audio://')
+      && (body.attachments ?? []).some(attachment => attachment?.url === video.coreMediaUrl)
+    if (!body.complete || body.file || body.cells.length !== 0
+      || body.targets?.length || 'trackPublication' in body
+      || typeof body.publishEventId !== 'string' || !body.publishEventId
+      || body.publishEventId.length > 255
+      || typeof video.id !== 'string' || !video.id || video.id.length > 255
+      || video.id === body.publishEventId
+      || (!linkedYouTube && !uploadedClip)) {
+      return withCors(new Response('invalid linked picture publication', { status: 400 }), request)
+    }
   }
   if (body.cells.length > MAX_CELLS_PER_REQUEST) {
     return withCors(
@@ -350,6 +380,36 @@ export async function handleBulkImportRequest(
       : `user:${auth.claims.userId}`
   const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
 
+  if (body.trackPublication !== undefined) {
+    if (!body.complete || body.file || body.cells.length || body.targets?.length
+      || body.attachments?.length || !body.publishEventId) {
+      return withCors(new Response('text track publication requires an empty completion request', {
+        status: 400,
+      }), request)
+    }
+    try {
+      const result = await publishImportedTrack(db, {
+        projectId: body.projectId, fileId: body.fileId, author,
+        role: auth.claims.role, clientTs, publishEventId: body.publishEventId,
+        publication: body.trackPublication,
+      })
+      if (!result.ok) return withCors(new Response(result.reason, { status: result.status }), request)
+      if (env.ProjectSync) {
+        const notify = notifyProjectDoFileProgressChanged(
+          env, body.projectId, body.fileId, true,
+        ).catch(err => console.warn('[import] track publication notify failed:', err))
+        if (ctx) ctx.waitUntil(notify)
+        else await notify
+      }
+      return withCors(Response.json({ accepted: 0, fileId: body.fileId }), request)
+    } catch (err) {
+      console.error('[import] text track publication failed:', err)
+      return withCors(Response.json({ error: 'Text track publication failed' }, {
+        status: 500,
+      }), request)
+    }
+  }
+
   // The browser sends this empty, authenticated marker only after every
   // concurrent data chunk has settled. Source chunks intentionally perform no
   // full-file scans; finalize all derived counters exactly once here. The
@@ -388,6 +448,8 @@ export async function handleBulkImportRequest(
           || !optionalFiniteNonNegative(attachment.trimStartMs)
           || !optionalFiniteNonNegative(attachment.trimEndMs)
           || !validImportTimings(attachment.timings)
+          || (attachment.transcription !== undefined &&
+            (typeof attachment.transcription !== 'string' || attachment.slot !== 'recording'))
           || (
             attachment.trimStartMs !== undefined
             && attachment.trimEndMs !== undefined
@@ -416,6 +478,7 @@ export async function handleBulkImportRequest(
             ...(attachment.trimStartMs !== undefined ? { trimStartMs: attachment.trimStartMs } : {}),
             ...(attachment.trimEndMs !== undefined ? { trimEndMs: attachment.trimEndMs } : {}),
             ...(attachment.timings !== undefined ? { timings: attachment.timings } : {}),
+            ...(attachment.transcription !== undefined ? { transcription: attachment.transcription } : {}),
           },
           clientTs,
           serverTs: eventTs++,
@@ -444,6 +507,15 @@ export async function handleBulkImportRequest(
         if (new Set(artifacts.results.map((row) => row.audio_id)).size !== audioIds.length) {
           return withCors(new Response('media attachment has no matching uploaded artifact', { status: 409 }), request)
         }
+      }
+      if (body.video) {
+        finalizeEvents.push({
+          id: body.video.id, schemaVersion: 1, projectId: body.projectId,
+          fileId: body.fileId, cellId: null, parentId: null,
+          kind: 'file.video.set', author,
+          payload: { coreMediaUrl: body.video.coreMediaUrl },
+          clientTs, serverTs: eventTs++,
+        })
       }
       if (body.publishEventId) {
         const restoreEvent: PersistedEvent<'file.restore'> = {
@@ -477,13 +549,18 @@ export async function handleBulkImportRequest(
           serverTs: event.serverTs,
           serverSeq: seqBase + index,
         }))))
-        for (const event of finalizeEvents) buildEventProjectionStmts(db, event, finalizeStmts)
+        finalizeEvents.forEach((event, index) => {
+          buildEventProjectionStmts(db, event, finalizeStmts, {
+            importPublicationSeq: seqBase + index,
+          })
+        })
         finalizeStmts.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
       }
       await runImportBatch(db, finalizeStmts)
     } catch (err) {
+      console.error("[import] finalization failed:", err)
       return withCors(
-        Response.json({ error: `Import finalization failed: ${String(err)}` }, { status: 500 }),
+        Response.json({ error: "Import finalization failed" }, { status: 500 }),
         request,
       )
     }
@@ -709,8 +786,9 @@ export async function handleBulkImportRequest(
     // retaining the same atomic ordering and rollback behavior.
     await runImportBatch(db, stmts)
   } catch (err) {
+    console.error("[import] DB batch failed:", err)
     return withCors(
-      Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 }),
+      Response.json({ error: "DB batch failed" }, { status: 500 }),
       request,
     )
   }

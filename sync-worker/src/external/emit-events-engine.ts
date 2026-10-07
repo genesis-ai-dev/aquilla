@@ -12,10 +12,13 @@
 
 import { errorResponse, toErrorResponse } from './errors'
 import {
+  TERM_EMIT_KINDS,
   TESTIMONY_EMIT_KINDS,
+  emitKindEffectLabel,
   type EmitEventInput,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import { isBindingTermWrite, resolveTermbaseFloor } from '../events/termbase-authority'
 import { laneCellKey } from './commands'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import {
@@ -25,12 +28,23 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
+import { emitEventsTelemetry, reviewTelemetryAllowed, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { PROJECT_SENTINEL_FILE_ID as PROJECT_SENTINEL } from '../events/authorize'
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
+import { resolveCommentFloors } from '../events/comment-floors'
+import { loadProjectSettings } from '../../../db/shared/projects'
+import { canonicalLaneId, settingsTargetLanguage } from './canonical-lane'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import {
+  archiveCheckApplies,
+  archivedLaneReason,
+  archivedTagsFromSettings,
+} from '../../../src/lib/lanes/archived-lane'
 import type { CommentScope, EventKind, RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
@@ -41,8 +55,10 @@ import type {
   PlannedEventIds,
   ProvenanceChannel,
   StoredChangeset,
+  TestimonySummaryEntry,
 } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 
 /** Kinds whose payload pins the live target head (and source, for repin). */
 const PIN_KINDS = new Set([
@@ -54,6 +70,11 @@ const PIN_KINDS = new Set([
 
 /** Statements per POST to the /events perimeter (mirrors PLAN_IMPORT_CHUNK). */
 const EMIT_CHUNK = 100
+
+/** Per-cell text budget in the testimony summary (AQU-1184). Long enough to
+ *  recognise the sentence being endorsed, short enough that a 200-event batch
+ *  stays a reasonable summary JSONB. */
+const TESTIMONY_TEXT_MAX = 300
 
 interface CommentRow {
   comment_id: string
@@ -67,6 +88,12 @@ interface CommentRow {
 
 interface FileRow {
   id: string
+  deleted_at: number | null
+}
+
+interface ConceptRow {
+  concept_id: string
+  status: string
   deleted_at: number | null
 }
 
@@ -107,6 +134,26 @@ async function loadFiles(
   return map
 }
 
+/** Batch-load referenced terminology concepts, keyed by concept_id. */
+async function loadConcepts(
+  db: AquillaDb,
+  projectId: string,
+  ids: readonly string[],
+): Promise<Map<string, ConceptRow>> {
+  const map = new Map<string, ConceptRow>()
+  if (ids.length === 0) return map
+  const placeholders = ids.map(() => '?').join(', ')
+  const { results } = await db
+    .prepare(
+      `SELECT concept_id, status, deleted_at
+         FROM concepts WHERE project_id = ? AND concept_id IN (${placeholders})`,
+    )
+    .bind(projectId, ...ids)
+    .all<ConceptRow>()
+  for (const row of results) map.set(row.concept_id, row)
+  return map
+}
+
 /** Batch-load referenced assignments (existence only), keyed by assignment_id. */
 async function loadAssignments(
   db: AquillaDb,
@@ -132,8 +179,18 @@ function collectRefs(events: readonly EmitEventInput[]) {
   const fileIds = new Set<string>()
   const commentIds = new Set<string>()
   const assignmentIds = new Set<string>()
+  const conceptIds = new Set<string>()
   for (const e of events) {
-    if (PIN_KINDS.has(e.kind) || e.kind === 'cell.waive' || e.kind === 'cell.unwaive') {
+    if (
+      PIN_KINDS.has(e.kind) ||
+      e.kind === 'cell.waive' ||
+      e.kind === 'cell.unwaive' ||
+      // AQU-1426: HideCell/ShowCell desugar to this kind. It takes no pin (the
+      // event sets a flag and never touches the chain), but the cell has to
+      // still EXIST at commit — the projection's UPDATE would otherwise match
+      // zero rows and land an event with no effect, silently.
+      e.kind === 'source.cell.visibility.set'
+    ) {
       cellRefs.push({ fileId: e.fileId!, cellId: e.cellId!, ...(e.laneId ? { laneId: e.laneId } : {}) })
     }
     if (e.kind === 'comment.create') {
@@ -154,8 +211,19 @@ function collectRefs(events: readonly EmitEventInput[]) {
     if (e.kind === 'assignment.reassign' || e.kind === 'assignment.unassign') {
       assignmentIds.add(e.payload.assignmentId as string)
     }
+    // term.create names a concept that must NOT exist yet; the rest name one
+    // that must. Both need the row loaded.
+    if (TERM_EMIT_KINDS.has(e.kind) && typeof e.payload.conceptId === 'string') {
+      conceptIds.add(e.payload.conceptId)
+    }
   }
-  return { cellRefs, fileIds: [...fileIds], commentIds: [...commentIds], assignmentIds: [...assignmentIds] }
+  return {
+    cellRefs,
+    fileIds: [...fileIds],
+    commentIds: [...commentIds],
+    assignmentIds: [...assignmentIds],
+    conceptIds: [...conceptIds],
+  }
 }
 
 /**
@@ -176,20 +244,64 @@ export async function prepareEmitEvents(
   projectId: string,
   id: string,
   autonomyMode: 'ask' | 'act',
-  cmd: EmitEventsCommand,
+  requested: EmitEventsCommand,
   env: ExternalEnv,
   callerRoleLevel: number,
 ): Promise<Response> {
+  // AQU-1532: settings are loaded only when an event names a lane. A lane id
+  // naming the primary language becomes '' (the default lane) before head
+  // resolution, the archive check and the staged plan.
+  const projectSettings = requested.events.some((e) => e.laneId)
+    ? await loadProjectSettings(db, projectId)
+    : null
+  const cmd = projectSettings
+    ? canonicalEmitEvents(requested, settingsTargetLanguage(projectSettings.settings))
+    : requested
   const refs = collectRefs(cmd.events)
-  const [states, files, comments, assignments] = await Promise.all([
+  const hasTerms = cmd.events.some((e) => TERM_EMIT_KINDS.has(e.kind))
+  const [states, files, comments, assignments, concepts, termbaseFloor, commentFloors] = await Promise.all([
     resolveCellStates(db, projectId, refs.cellRefs),
     loadFiles(db, projectId, refs.fileIds),
     loadComments(db, projectId, refs.commentIds),
     loadAssignments(db, projectId, refs.assignmentIds),
+    loadConcepts(db, projectId, refs.conceptIds),
+    // Only pay for the org lookup when the batch actually touches terminology.
+    hasTerms ? resolveTermbaseFloor(db, projectId) : Promise.resolve(0),
+    // AQU-1002: the org's configurable comment floors. Resolved once for the
+    // whole plan alongside the other reference loads — the plan is
+    // single-project, so there is nothing to key a cache on.
+    resolveCommentFloors(db, projectId),
   ])
 
   const failed = (i: number, message: string, details?: unknown): Response =>
     errorResponse('validation_failed', `events[${i}]: ${message}`, details)
+
+  const namedLaneEvents = cmd.events.some((e) => e.laneId && archiveCheckApplies(e.kind))
+  if (namedLaneEvents && projectSettings) {
+    const lanes = (projectSettings.lanes ?? [])
+      .filter((lane) => lane.role === 'target')
+      .map((lane) => ({
+        id: lane.id,
+        // AQU-1592: name the lane the way the screen does — the name when one
+        // was set, else the language.
+        name: laneDisplayName(lane),
+        legacyTag: lane.legacyTag,
+        archivedAt: lane.archivedAt,
+      }))
+    const archivedTags = archivedTagsFromSettings(projectSettings.settings)
+    const { visible: visibleLaneIds } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      callerRoleLevel,
+    )
+    for (const [i, e] of cmd.events.entries()) {
+      if (!e.laneId || !archiveCheckApplies(e.kind)) continue
+      const archived = archivedLaneReason({ tag: e.laneId, lanes, archivedTags, visibleLaneIds })
+      if (archived) return failed(i, archived)
+    }
+  }
 
   const preconditionByKey = new Map<string, CellPrecondition>()
   const plannedEmit: NonNullable<PlannedEventIds['emitEvents']> = []
@@ -213,6 +325,22 @@ export async function prepareEmitEvents(
         }
         if (e.kind === 'target.cell.repin' && s.sourceEventId == null) {
           return failed(i, `cell ${e.cellId} has no source to repin against`)
+        }
+        // AQU-1184 guardrail 1 — no validation-laundering of AI content.
+        // The in-app policy (AQU-983) deliberately skips ai_drafted cells in
+        // bulk validate so a reviewer must open each one; this surface must
+        // not become the way around it. There is NO flag to bypass this: an
+        // agent validating text an agent drafted is not review. A human
+        // target commit or an individual in-app validation clears
+        // cells.ai_drafted (AQU-292), after which the cell validates through
+        // here like any other. Drift the other way (the cell becomes an AI
+        // draft between prepare and commit) necessarily moves the target
+        // head, which the stored pin catches as plan_stale.
+        if (e.kind === 'cell.validate' && s.targetAiDrafted === true) {
+          return failed(
+            i,
+            `cell ${e.cellId} in file ${e.fileId} is an unreviewed AI draft — AI-drafted text must be reviewed by a human in the app before it can be validated; no API flag bypasses this`,
+          )
         }
         preconditionByKey.set(laneCellKey(e.fileId!, e.cellId!, e.laneId), {
           fileId: e.fileId!,
@@ -251,6 +379,15 @@ export async function prepareEmitEvents(
         const f = files.get(e.fileId)
         if (!f || f.deleted_at != null) return failed(i, `file ${e.fileId} does not exist`)
       }
+      // AQU-1002: org-configurable floor to open a thread or post a reply.
+      // Only ever raises the static COMMENTER floor the generic prepare gate
+      // already applied; mirrors the /events perimeter's own check.
+      if (callerRoleLevel < commentFloors.createMinRole) {
+        return errorResponse(
+          'permission_denied',
+          `events[${i}]: creating a comment requires ${roleLabel(commentFloors.createMinRole)} (${commentFloors.createMinRole})`,
+        )
+      }
       if (!e.payload.commentId) planned.commentId = uuidv7()
     }
 
@@ -261,10 +398,15 @@ export async function prepareEmitEvents(
       if (e.kind === 'comment.resolve' && row.parent_comment_id != null) {
         return failed(i, `comment ${commentId} is a reply — only top-level threads can be resolved`)
       }
-      // AQU-999: foreign-comment floor comes from FOREIGN_COMMENT_ROLE, the
-      // same table the /events perimeter reads — maintainer (600) for
-      // edit/delete, contributor (400) for resolve/reopen.
-      const foreignFloor = requiredRoleForForeignComment(e.kind)
+      // AQU-999: edit/delete read FOREIGN_COMMENT_ROLE, the same table the
+      // /events perimeter reads — maintainer (600) for both.
+      // AQU-1002: resolve/reopen instead reads the org's configurable floor,
+      // defaulting to AQU-999's contributor (400). Both perimeters resolve it
+      // the same way, so the policy cannot drift between them.
+      const foreignFloor =
+        e.kind === 'comment.resolve'
+          ? commentFloors.resolveMinRole
+          : requiredRoleForForeignComment(e.kind)
       if (row.author_id !== cred.username && callerRoleLevel < foreignFloor) {
         const verb = e.kind === 'comment.resolve' ? 'resolving' : 'mutating'
         return errorResponse(
@@ -315,18 +457,91 @@ export async function prepareEmitEvents(
       }
     }
 
+    if (TERM_EMIT_KINDS.has(e.kind)) {
+      const conceptId = e.payload.conceptId as string | undefined
+      if (e.kind === 'term.create') {
+        // A create naming an existing concept would project as an idempotent
+        // upsert — silently OVERWRITING someone's term. Reject it: the caller
+        // meant term.update, or meant a new concept and reused an id.
+        if (conceptId && concepts.has(conceptId)) {
+          return failed(i, `concept ${conceptId} already exists — use term.update to change it`)
+        }
+        if (!conceptId) planned.conceptId = uuidv7()
+      } else {
+        const row = concepts.get(conceptId!)
+        if (!row || row.deleted_at != null) return failed(i, `concept ${conceptId} does not exist`)
+        // Only a draft is promotable — the projection guards on that, so an
+        // approve of an active or deprecated concept would apply as a silent
+        // no-op and report success. Say no here instead.
+        if (e.kind === 'term.approve' && row.status !== 'draft') {
+          return failed(i, `concept ${conceptId} is ${row.status}, not a draft awaiting approval`)
+        }
+      }
+      // The org's termbase floor gates BINDING writes (anything but suggesting
+      // a draft) — the same raise termbase-authority.ts applies at the /events
+      // perimeter. Mirrored here so a plan the caller could never commit is
+      // denied now rather than staged for a human to approve into a 403.
+      if (isBindingTermWrite(e.kind, e.payload) && callerRoleLevel < termbaseFloor) {
+        return errorResponse(
+          'permission_denied',
+          `events[${i}]: ${e.kind === 'term.create' ? 'creating an active term' : e.kind} requires role ${termbaseFloor} on this project's org (suggest instead with term.create status "draft")`,
+        )
+      }
+      // Terminology is project-level: route under the sentinel, like a
+      // project-scoped comment.
+      fileId = PROJECT_SENTINEL
+    }
+
     plannedEmit.push(planned)
     normalized.push({ ...e, ...(fileId !== undefined ? { fileId } : {}) })
   }
 
-  // Per-kind effect lines, first-seen order; testimony kinds flagged (†).
+  // Per-kind effect lines, first-seen order; testimony kinds flagged (†). The
+  // `label` is what the approval page shows a non-developer reviewer — see
+  // emitKindEffectLabel. It is computed here rather than in the client so every
+  // reviewing surface (page, chat card, receipt) says the same sentence.
   const byKind = new Map<string, EmitEventsSummaryEntry>()
   for (const e of normalized) {
     const entry = byKind.get(e.kind)
     if (entry) entry.count++
-    else byKind.set(e.kind, { kind: e.kind, count: 1, testimony: TESTIMONY_EMIT_KINDS.has(e.kind) })
+    else
+      byKind.set(e.kind, {
+        kind: e.kind,
+        count: 1,
+        testimony: TESTIMONY_EMIT_KINDS.has(e.kind),
+        label: '',
+      })
   }
-  const summary: ChangesetSummary = { events: [...byKind.values()], warnings: [] }
+  for (const entry of byKind.values()) {
+    // AQU-1426: hand the label one representative payload — a kind that carries
+    // a direction (source.cell.visibility.set: hide vs show) cannot be phrased
+    // from kind + count alone. Safe because prepare refuses a plan that mixes
+    // the two directions, so the first event of a group speaks for all of them.
+    const sample = normalized.find((e) => e.kind === entry.kind)?.payload
+    entry.label = emitKindEffectLabel(entry.kind, entry.count, sample)
+  }
+  // AQU-1184 guardrail 2: name every staged validation cell-by-cell, with the
+  // text as the server currently reads it, so the approver endorses specific
+  // sentences rather than a count. Batches are capped at
+  // EMIT_EVENTS_MAX_EVENTS, so this list is bounded by construction.
+  const testimony: TestimonySummaryEntry[] = []
+  for (const e of normalized) {
+    if (e.kind !== 'cell.validate' && e.kind !== 'cell.unvalidate') continue
+    const value = states.get(laneCellKey(e.fileId!, e.cellId!, e.laneId))?.targetValue ?? ''
+    testimony.push({
+      kind: e.kind,
+      fileId: e.fileId!,
+      cellId: e.cellId!,
+      ...(e.laneId ? { laneId: e.laneId } : {}),
+      text: value.slice(0, TESTIMONY_TEXT_MAX),
+      truncated: value.length > TESTIMONY_TEXT_MAX,
+    })
+  }
+  const summary: ChangesetSummary = {
+    events: [...byKind.values()],
+    ...(testimony.length > 0 ? { testimony } : {}),
+    warnings: [],
+  }
 
   const command: EmitEventsCommand = { kind: 'EmitEvents', events: normalized }
   return stageAndRespond(db, env, {
@@ -342,12 +557,33 @@ export async function prepareEmitEvents(
   })
 }
 
+/**
+ * AQU-1532: the plan with every lane id made canonical. A lane id naming the
+ * primary language becomes '' (the default lane). It is kept as '' rather than
+ * dropped, because `assignment.reassign` reads an absent laneId as "keep the
+ * lane" and '' as "move to the default lane".
+ */
+function canonicalEmitEvents(cmd: EmitEventsCommand, targetLanguage: string | null): EmitEventsCommand {
+  return {
+    ...cmd,
+    events: cmd.events.map((e) =>
+      e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) },
+    ),
+  }
+}
+
+/** AQU-1462: stamp the lane so authorize can refuse an archived one. */
+function withLaneTag(kind: string, laneId: string | undefined, payload: Record<string, unknown>): Record<string, unknown> {
+  if (!laneId || !archiveCheckApplies(kind)) return payload
+  return { ...payload, targetLang: laneId }
+}
+
 /** Build the compiled payload for one plan event, filling server-resolved pins
  *  from the stored precondition and minted ids from the planned ledger. */
 function compilePayload(
   e: EmitEventInput,
   pin: CellPrecondition | undefined,
-  planned: { commentId?: string; assignmentId?: string } | undefined,
+  planned: { commentId?: string; assignmentId?: string; conceptId?: string } | undefined,
 ): Record<string, unknown> | null {
   switch (e.kind) {
     case 'cell.validate':
@@ -362,10 +598,13 @@ function compilePayload(
       }
     case 'cell.backtranslation.set':
       if (!pin?.targetHeadEventId) return null
-      return { ...e.payload, targetEventId: pin.targetHeadEventId }
+      return withLaneTag(e.kind, e.laneId, { ...e.payload, targetEventId: pin.targetHeadEventId })
     case 'target.cell.repin':
       if (!pin?.targetHeadEventId || !pin.sourceEventId) return null
-      return { sourceEventId: pin.sourceEventId, expectedTargetEventId: pin.targetHeadEventId }
+      return withLaneTag(e.kind, e.laneId, {
+        sourceEventId: pin.sourceEventId,
+        expectedTargetEventId: pin.targetHeadEventId,
+      })
     case 'comment.create': {
       const scope: CommentScope =
         e.fileId && e.cellId
@@ -381,6 +620,11 @@ function compilePayload(
         ...(e.payload.createdForTranslated !== undefined
           ? { createdForTranslated: e.payload.createdForTranslated }
           : {}),
+        // AQU-1233: every comment staged through the Agent API is agent-posted,
+        // so the marker is set here rather than taken from the caller — the
+        // payload validator already drops a supplied `viaAgent`, which means a
+        // credential can neither forge nor suppress it.
+        viaAgent: true,
       }
     }
     case 'assignment.create':
@@ -391,10 +635,16 @@ function compilePayload(
       }
     case 'assignment.reassign':
       return { ...e.payload, ...(e.laneId !== undefined ? { targetLang: e.laneId } : {}) }
+    case 'term.create':
+      return {
+        ...e.payload,
+        conceptId: (e.payload.conceptId as string | undefined) ?? planned?.conceptId ?? uuidv7(),
+      }
     default:
       // comment.edit/delete/resolve, cell.waive/unwaive, file.*,
       // assignment.unassign: the normalized payload IS the wire payload.
-      return { ...e.payload }
+      // AQU-1462 stamps targetLang only for kinds the archive check reads.
+      return withLaneTag(e.kind, e.laneId, { ...e.payload })
   }
 }
 
@@ -424,11 +674,12 @@ export async function commitEmitEvents(
 
   if (wasStaged) {
     const refs = collectRefs(cmd.events)
-    const [states, files, comments, assignments] = await Promise.all([
+    const [states, files, comments, assignments, concepts] = await Promise.all([
       resolveCellStates(db, projectId, refs.cellRefs),
       loadFiles(db, projectId, refs.fileIds),
       loadComments(db, projectId, refs.commentIds),
       loadAssignments(db, projectId, refs.assignmentIds),
+      loadConcepts(db, projectId, refs.conceptIds),
     ])
     const stale = async (message: string): Promise<Response> => {
       await markChangesetStale(db, cs.id)
@@ -438,6 +689,18 @@ export async function commitEmitEvents(
       if (e.kind === 'cell.waive' || e.kind === 'cell.unwaive' || (e.kind === 'comment.create' && e.cellId)) {
         const s = states.get(laneCellKey(e.fileId!, e.cellId!, e.kind === 'comment.create' ? undefined : e.laneId))
         if (!s || (!s.sourceExists && !s.targetExists)) {
+          return stale(`events[${i}]: cell ${e.cellId} no longer exists`)
+        }
+      }
+      // AQU-1426 hide/show: the flag lives on the SOURCE row, so a surviving
+      // target row is not enough — a deleted source row means there is nothing
+      // left to park. Deliberately NOT re-checking the cell's current
+      // visibility: the compiled event SETS the flag rather than toggling it, so
+      // a human hiding the same cell between prepare and approval leaves commit
+      // landing exactly the state that was approved.
+      if (e.kind === 'source.cell.visibility.set') {
+        const s = states.get(laneCellKey(e.fileId!, e.cellId!))
+        if (!s?.sourceExists) {
           return stale(`events[${i}]: cell ${e.cellId} no longer exists`)
         }
       }
@@ -468,6 +731,20 @@ export async function commitEmitEvents(
           return stale(`events[${i}]: assignment ${e.payload.assignmentId} no longer exists`)
         }
       }
+      if (TERM_EMIT_KINDS.has(e.kind)) {
+        const conceptId = e.payload.conceptId as string | undefined
+        const row = conceptId ? concepts.get(conceptId) : undefined
+        if (e.kind === 'term.create') {
+          // Someone created this concept between prepare and approval — landing
+          // the plan now would overwrite their entry, which is exactly the
+          // lost-update the term.* events exist to prevent.
+          if (row && row.deleted_at == null) {
+            return stale(`events[${i}]: concept ${conceptId} was created since prepare`)
+          }
+        } else if (!row || row.deleted_at != null) {
+          return stale(`events[${i}]: concept ${conceptId} no longer exists`)
+        }
+      }
     }
   }
 
@@ -477,14 +754,23 @@ export async function commitEmitEvents(
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
 
+  // AQU-1532: a plan staged before prepare canonicalized lane ids can still
+  // name the primary language. Pins stay keyed by the stored lane id; the
+  // compiled payload carries the canonical one.
+  const targetLanguage = cmd.events.some((e) => e.laneId)
+    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    : null
   for (const [i, e] of cmd.events.entries()) {
     const planned = cs.plannedIds?.emitEvents?.[i]
     const pin = e.cellId ? pins.get(laneCellKey(e.fileId!, e.cellId, e.laneId)) : undefined
-    const payload = compilePayload(e, pin, planned)
+    const compiledEvent = e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) }
+    const payload = compilePayload(compiledEvent, pin, planned)
     if (payload === null) {
       return errorResponse('job_failed', `events[${i}]: stored plan is missing its precondition pin`)
     }
-    const fileId = e.fileId ?? (e.kind.startsWith('comment.') ? PROJECT_SENTINEL : undefined)
+    const fileId =
+      e.fileId ??
+      (e.kind.startsWith('comment.') || TERM_EMIT_KINDS.has(e.kind) ? PROJECT_SENTINEL : undefined)
     if (!fileId) return errorResponse('job_failed', `events[${i}]: stored plan is missing its fileId`)
     // Generic compile: the per-kind payload shape was enforced by the
     // validator + compilePayload, so one unknown-cast at the envelope seam
@@ -532,12 +818,16 @@ export async function commitEmitEvents(
     }
   }
 
+  // AQU-1571: a refusal names the file and line the agent sent, so it can tell
+  // which validation (say, its own edit) was refused. Comment and term events
+  // were routed under the project sentinel and read back blank.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -545,10 +835,7 @@ export async function commitEmitEvents(
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
   await stampProvenance(db, provenance, appliedIds)
 
-  const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  const warnings: ChangesetWarning[] = [...cs.summary.warnings, ...rejectedWarnings(rejected, where)]
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
     appliedCount: appliedIds.length,
@@ -557,5 +844,26 @@ export async function commitEmitEvents(
     committedAt: new Date().toISOString(),
   }
   await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
+
+  // AQU-1572: report the validations that landed — after the terminal write,
+  // and only the accepted events, so a refused, stale or still-staged plan
+  // reports nothing. allEventIds[i] is cmd.events[i]'s compiled id. A
+  // session commit reports only with the person's analytics switch on. The
+  // lane is the canonical one the compiled event carried (a lane naming the
+  // primary language is the default lane, ''), as the browser reports it.
+  if (reviewTelemetryAllowed(request, channel)) {
+    sendReviewTelemetry(
+      env,
+      ctx,
+      cred.username,
+      emitEventsTelemetry(
+        projectId,
+        cmd.events
+          .filter((_, i) => acceptedIds.has(allEventIds[i]))
+          .map((e) => (e.laneId === undefined ? e : { ...e, laneId: canonicalLaneId(e.laneId, targetLanguage) })),
+        telemetrySourceFor(channel),
+      ),
+    )
+  }
   return Response.json({ receipt })
 }

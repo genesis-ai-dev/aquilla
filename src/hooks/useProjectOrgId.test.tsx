@@ -7,7 +7,9 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 vi.mock("./useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "alice" } }),
 }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// AQU-1357: partial mock — see src/lib/sync/cloud-projects-mock-guard.test.ts.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   resolveCloudProjectResult: vi.fn(),
 }))
 vi.mock("@/lib/frontier/session-expiry", () => ({

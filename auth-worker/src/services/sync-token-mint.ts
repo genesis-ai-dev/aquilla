@@ -55,7 +55,8 @@ export function isPathSafeId(id: string): boolean {
 export type SyncTokenMintFailure =
   /** SYNC_SECRET_KEY unset — deployment config, not a caller problem. */
   | "not_configured"
-  /** No projects row — the route may branch to auto-register on this. */
+  /** No projects row. AQU-299 / SEC-9: callers answer 403, identically to
+   *  "no_access" — minting a token never creates a project. */
   | "project_not_found"
   | "project_archived"
   /** AQU-285: is_active = false blocks new write-capable mints. */
@@ -75,8 +76,9 @@ export type SyncTokenMintResult =
   | { ok: false; reason: SyncTokenMintFailure }
 
 /**
- * Sign a sync token for an ALREADY-RESOLVED role (the route's auto-register
- * path supplies the creator/OWNER resolution itself). Loads the user's
+ * Sign a sync token for an ALREADY-RESOLVED role — the signing half of
+ * mintSyncTokenForUser, split out so a caller that has resolved the role by
+ * another route can reuse it without re-resolving. Loads the user's
  * lane/file scopes (AQU-553) — the claim is omitted entirely when unscoped so
  * an absent claim keeps meaning "no restriction" on the sync-worker side.
  */
@@ -100,6 +102,11 @@ export async function signSyncTokenWithRole(
     value: r.value,
   }))
 
+  const grantRows = await env.AQUILLA_PG.prepare(
+    "SELECT lane, role_level FROM project_member_lane_roles WHERE project_id = ? AND user_id = ? ORDER BY lane",
+  ).bind(projectId, user.id).all<{ lane: string; role_level: number }>()
+  const laneGrants = (grantRows.results ?? []).map((r) => ({ lane: r.lane, level: r.role_level }))
+
   const now = Math.floor(Date.now() / 1000)
   const claims: SyncTokenClaims = {
     userId: user.id,
@@ -113,6 +120,8 @@ export async function signSyncTokenWithRole(
     src: resolved.source,
     // AQU-553: omit entirely when unscoped (no rows).
     ...(scopes.length > 0 ? { scopes } : {}),
+    // AQU-730: omit entirely when the user has no lane grants (dual-read).
+    ...(laneGrants.length > 0 ? { laneGrants } : {}),
     aud: "sync",
     iat: now,
     exp: now + SYNC_TOKEN_TTL_SECONDS,

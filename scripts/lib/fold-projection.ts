@@ -258,7 +258,12 @@ function apply(e: FoldEvent, s: State): void {
     case "comment.create": {
       const scope = p.scope as { kind: string; fileId?: string; cellId?: string }
       const commentId = p.commentId as string
-      // ON CONFLICT(comment_id) DO NOTHING — first writer wins.
+      // ON CONFLICT(project_id, comment_id) DO NOTHING — first writer wins.
+      // AQU-1296: keying this map on the bare comment id stays correct because
+      // foldProjection folds ONE project's event log at a time, so `s.comments`
+      // never holds two projects' rows. The cross-project collision lives in
+      // the bulk INSERT that loads these rows (pg-build-projections.ts), whose
+      // conflict target is the project-scoped pair.
       if (s.comments.has(commentId)) return
       s.comments.set(commentId, {
         comment_id: commentId,

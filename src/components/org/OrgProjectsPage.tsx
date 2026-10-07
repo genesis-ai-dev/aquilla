@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -35,12 +35,17 @@ import {
   useOrgPortfolio,
   type StatusFilter,
 } from "@/hooks/useOrgPortfolio"
+import { useProjectDirectory } from "@/hooks/useProjectDirectory"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { partitionSharedProjects, toSharedPortfolioRow } from "@/lib/frontier/shared-projects"
+import { fetchArchivedProjectsResult } from "@/lib/sync/cloud-projects"
+import { toArchivedProjectRow, withArchivedProjects } from "./archived-project-rows"
+import type { OrgProjectRow } from "./OrgProjectsDataTable"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
-import { buttonVariants } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Page, PageHeader } from "@/components/ui/page"
+import { Archive } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { readProjectLens } from "./OrgHome"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -62,6 +67,7 @@ export function OrgProjectsPage() {
     orgs,
     accessibleProjects,
     isLoading: orgLoading,
+    accessibleProjectsLoading,
   } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -80,7 +86,26 @@ export function OrgProjectsPage() {
   const [roleFilter, setRoleFilter] = useState<RoleFilter>(ROLE_FILTER_ALL)
   // AQU-1043: last-edit recency narrowing, composed with all three below.
   const [updatedFilter, setUpdatedFilter] = useState<UpdatedFilter>(UPDATED_FILTER_ANY)
+  const [projectQuery, setProjectQuery] = useState("")
+  // AQU-1070: off by default — the projects list stays the *active* working set
+  // unless a PM asks to see what was stood down.
+  const [showArchived, setShowArchived] = useState(false)
+  // Tagged with the org it was read for, so switching orgs can never splice a
+  // previous org's archived rows into the new one's list while the refetch runs.
+  const [archived, setArchived] = useState<{ orgId: number | null; rows: OrgProjectRow[] }>({
+    orgId: null,
+    rows: [],
+  })
+  const [directoryTick, setDirectoryTick] = useState(0)
   const projectLens = readProjectLens()
+
+  const directory = useProjectDirectory({
+    jwt,
+    enabled: Boolean(jwt) && activeOrgId != null && !isGuestOrg,
+    query: projectQuery,
+    orgIds: activeOrgId != null ? [activeOrgId] : [],
+    refreshKey: directoryTick,
+  })
 
   const guestOrgId = activeGuestOrg?.id ?? null
   const guestOrgName =
@@ -91,6 +116,7 @@ export function OrgProjectsPage() {
 
   const guestProjects = useMemo(() => {
     if (!isGuestOrg || guestOrgId == null) return []
+    const queryNorm = projectQuery.trim().toLowerCase()
     return partitionSharedProjects(
       accessibleProjects,
       orgs,
@@ -109,7 +135,36 @@ export function OrgProjectsPage() {
             : false,
         }
       })
-  }, [isGuestOrg, guestOrgId, accessibleProjects, orgs, activeOrgId, username])
+      .filter((row) =>
+        queryNorm === ""
+          ? true
+          : `${row.name} ${row.orgName ?? ""} ${row.pm?.username ?? ""}`.toLowerCase().includes(queryNorm),
+      )
+  }, [isGuestOrg, guestOrgId, accessibleProjects, orgs, activeOrgId, username, projectQuery])
+
+  // AQU-1070: the archived list is its own endpoint (the portfolio/directory
+  // reads filter archived rows out server-side), so it is fetched on demand
+  // rather than always. Race-guarded like the other read hooks — a stale
+  // response from a previous org or a previous toggle never lands.
+  const archivedRequestRef = useRef(0)
+  useEffect(() => {
+    if (!showArchived || !jwt || isGuestOrg || activeOrgId == null) return
+    const ticket = ++archivedRequestRef.current
+    const orgId = activeOrgId
+    const orgName = activeOrg?.name ?? null
+    void fetchArchivedProjectsResult(jwt, orgId).then((result) => {
+      if (archivedRequestRef.current !== ticket) return
+      setArchived({
+        orgId,
+        rows: result.ok ? result.projects.map((project) => toArchivedProjectRow(project, orgName)) : [],
+      })
+    })
+  }, [showArchived, jwt, isGuestOrg, activeOrgId, activeOrg?.name, directoryTick])
+
+  const pmByProjectId = useMemo(
+    () => new Map(accessibleProjects.map((project) => [project.id, project.pm ?? null])),
+    [accessibleProjects],
+  )
 
   function handleCreated(project: ProjectRecord) {
     void portfolio.refreshAccessibleProjects()
@@ -137,13 +192,29 @@ export function OrgProjectsPage() {
     )
   }
 
-  const isPageLoading = sessionLoading || orgLoading || portfolio.isLoading
-  const sourceProjects = isGuestOrg ? guestProjects : portfolio.projects
+  const isPageLoading =
+    sessionLoading ||
+    orgLoading ||
+    accessibleProjectsLoading ||
+    (isGuestOrg
+      ? false
+      : directory.loading && directory.projects.length === 0)
+  const memberProjects = directory.projects.map((project) => ({
+    ...project,
+    orgId: project.orgId ?? activeOrgId ?? undefined,
+    orgName: activeOrg?.name ?? "Workspace",
+    pm: pmByProjectId.has(project.id) ? pmByProjectId.get(project.id) ?? null : project.pm,
+  }))
+  const liveProjects = isGuestOrg ? guestProjects : memberProjects
+  // Archived rows join the same list the filters and search run over, so
+  // narrowing behaves identically whether or not the toggle is on.
+  const sourceProjects =
+    showArchived && archived.orgId === activeOrgId
+      ? withArchivedProjects(liveProjects, archived.rows)
+      : liveProjects
   const statusFilteredProjects = isPageLoading
     ? []
-    : isGuestOrg
-      ? portfolio.filterByStatus(statusFilter, guestProjects)
-      : portfolio.filterByStatus(statusFilter)
+    : portfolio.filterByStatus(statusFilter, sourceProjects)
   const noProjects = !isPageLoading && sourceProjects.length === 0
   // AQU-1040: options come from every loaded row, not the status-filtered
   // slice, so toggling status never silently drops the PM you picked. A PM that
@@ -183,9 +254,9 @@ export function OrgProjectsPage() {
       header={<OrgBreadcrumb section="Projects" />}
       statusBar={null}
       main={
-        <Page size="full">
+        <Page size="full" fill>
           {/* Title matches Teams/Members max width; table uses the full content well. */}
-          <div className="max-w-6xl">
+          <div className="max-w-6xl shrink-0">
             <PageHeader
               title={t("nav.projects")}
               description={
@@ -196,87 +267,114 @@ export function OrgProjectsPage() {
               inset={false}
             />
           </div>
-          {portfolio.error ? (
-            <p className="max-w-6xl text-sm text-destructive">{portfolio.error}</p>
+          {portfolio.error || directory.error ? (
+            <p className="max-w-6xl shrink-0 text-sm text-destructive">{directory.error ?? portfolio.error}</p>
           ) : (
-            <OrgProjectsDataTable
-              projects={visibleProjects}
-              now={portfolio.now}
-              roleByProjectId={portfolio.roleByProjectId}
-              defaultLaneLabelByProjectId={portfolio.defaultLaneLabelByProjectId}
-              filesByProjectId={portfolio.filesByProjectId}
-              orgId={activeOrgId}
-              jwt={jwt}
-              author={session?.username}
-              allowSelfAssignment={orgSettings.allowSelfAssignment}
-              viewerUsername={username}
-              onLanesChanged={portfolio.bumpRefresh}
-              initialLens={statusFilter === "attention" ? "attention" : projectLens}
-              loading={isPageLoading}
-              loadingLabel={t("org.projectsList.loadingLabel")}
-              toolbarLeading={
-                // AQU-1044: the four narrowing dimensions (Status, PM, Role,
-                // Updated) live in one Sort by menu — one submenu each. The
-                // toolbar row is still a flex/wrap track: further sibling
-                // controls slot in next to it, no wrapper needed.
-                <ProjectSortMenu
-                  status={statusFilter}
-                  onStatusChange={setStatusFilter}
-                  pm={activePmFilter}
-                  pmUsernames={pmUsernames}
-                  showUnassignedPm={showUnassignedPm}
-                  viewerUsername={username}
-                  onPmChange={setPmFilter}
-                  role={activeRoleFilter}
-                  roleNames={roleNames}
-                  onRoleChange={setRoleFilter}
-                  updated={activeUpdatedFilter}
-                  onUpdatedChange={setUpdatedFilter}
-                  className="bg-card"
-                />
-              }
-              toolbarTrailing={
-                !isGuestOrg && activeOrgId != null ? (
-                  <div className="ml-auto shrink-0">
-                    <ProjectCreateDialog
-                      orgId={activeOrgId}
-                      onCreated={handleCreated}
-                      linkableProjects={accessibleProjects}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <OrgProjectsDataTable
+                projects={visibleProjects}
+                now={portfolio.now}
+                roleByProjectId={portfolio.roleByProjectId}
+                defaultLaneLabelByProjectId={portfolio.defaultLaneLabelByProjectId}
+                filesByProjectId={portfolio.filesByProjectId}
+                orgId={activeOrgId}
+                jwt={jwt}
+                author={session?.username}
+                allowSelfAssignment={orgSettings.allowSelfAssignment}
+                assignmentMinRole={orgSettings.assignmentMinRole}
+                viewerUsername={username}
+                onLanesChanged={() => {
+                  portfolio.bumpRefresh()
+                  setDirectoryTick((tick) => tick + 1)
+                }}
+                initialLens={statusFilter === "attention" ? "attention" : projectLens}
+                loading={isPageLoading}
+                loadingLabel={t("org.projectsList.loadingLabel")}
+                searchValue={projectQuery}
+                onSearchChange={setProjectQuery}
+                searching={!isGuestOrg && directory.searching}
+                hasMore={!isGuestOrg && directory.hasMore}
+                onLoadMore={directory.loadMore}
+                loadingMore={directory.loadingMore}
+                toolbarLeading={
+                  // AQU-1044: the four narrowing dimensions (Status, PM, Role,
+                  // Updated) live in one Sort by menu — one submenu each. The
+                  // toolbar row is still a flex/wrap track: further sibling
+                  // controls slot in next to it, no wrapper needed.
+                  <>
+                    <ProjectSortMenu
+                      status={statusFilter}
+                      onStatusChange={setStatusFilter}
+                      pm={activePmFilter}
+                      pmUsernames={pmUsernames}
+                      showUnassignedPm={showUnassignedPm}
+                      viewerUsername={username}
+                      onPmChange={setPmFilter}
+                      role={activeRoleFilter}
+                      roleNames={roleNames}
+                      onRoleChange={setRoleFilter}
+                      updated={activeUpdatedFilter}
+                      onUpdatedChange={setUpdatedFilter}
+                      className="bg-card"
                     />
-                  </div>
-                ) : null
-              }
-              emptyTitle={
-                noProjects
-                  ? isGuestOrg
-                    ? t("org.guestOrgHome.emptyTitle", { orgName: guestOrgName })
-                    : t("org.orgHome.projectsPanel.emptyTitle")
-                  : activePmFilter !== PM_FILTER_ALL ||
-                      activeRoleFilter !== ROLE_FILTER_ALL ||
-                      activeUpdatedFilter !== UPDATED_FILTER_ANY
-                    ? // AQU-1040/AQU-1042/AQU-1043: a filter combination that matches
-                      // nothing is a filtered-empty table, not an empty org.
-                      // AQU-1027: name the reason when the viewer manages nothing at
-                      // all here, rather than blaming the filter combination.
-                      activePmFilter === PM_FILTER_MINE && managesNone
-                      ? t("org.orgProjectsPage.pmFilter.mineEmptyTitle")
-                      : t("org.orgHome.projectsPanel.noMatchingProjects")
-                    : statusFilter === "stalled"
-                      ? t("org.orgHome.emptyTitle.stalled")
-                      : statusFilter === "attention"
-                        ? t("org.orgHome.emptyTitle.attention")
-                        : statusFilter === "overdue"
-                          ? t("org.orgHome.emptyTitle.overdue")
-                          : t("org.orgHome.projectsPanel.emptyTitle")
-              }
-              emptyDescription={
-                noProjects
-                  ? isGuestOrg
-                    ? t("org.guestOrgHome.emptyDescription")
-                    : t("org.overview.emptyDescription")
-                  : undefined
-              }
-            />
+                    {!isGuestOrg && (
+                      <Button
+                        variant={showArchived ? "secondary" : "outline"}
+                        size="sm"
+                        aria-pressed={showArchived}
+                        data-testid="show-archived-toggle"
+                        className={showArchived ? undefined : "bg-card"}
+                        onClick={() => setShowArchived((on) => !on)}
+                      >
+                        <Archive className="size-4" />
+                        {t("org.orgProjectsPage.showArchived")}
+                      </Button>
+                    )}
+                  </>
+                }
+                toolbarTrailing={
+                  !isGuestOrg && activeOrgId != null ? (
+                    <div className="ml-auto shrink-0">
+                      <ProjectCreateDialog
+                        orgId={activeOrgId}
+                        onCreated={handleCreated}
+                        linkableProjects={accessibleProjects}
+                      />
+                    </div>
+                  ) : null
+                }
+                emptyTitle={
+                  noProjects
+                    ? isGuestOrg
+                      ? t("org.guestOrgHome.emptyTitle", { orgName: guestOrgName })
+                      : t("org.orgHome.projectsPanel.emptyTitle")
+                    : activePmFilter !== PM_FILTER_ALL ||
+                        activeRoleFilter !== ROLE_FILTER_ALL ||
+                        activeUpdatedFilter !== UPDATED_FILTER_ANY
+                      ? // AQU-1040/AQU-1042/AQU-1043: a filter combination that matches
+                        // nothing is a filtered-empty table, not an empty org.
+                        // AQU-1027: name the reason when the viewer manages nothing at
+                        // all here, rather than blaming the filter combination.
+                        activePmFilter === PM_FILTER_MINE && managesNone
+                        ? t("org.orgProjectsPage.pmFilter.mineEmptyTitle")
+                        : t("org.orgHome.projectsPanel.noMatchingProjects")
+                      : statusFilter === "stalled"
+                        ? t("org.orgHome.emptyTitle.stalled")
+                        : statusFilter === "attention"
+                          ? t("org.orgHome.emptyTitle.attention")
+                          : statusFilter === "overdue"
+                            ? t("org.orgHome.emptyTitle.overdue")
+                            : t("org.orgHome.projectsPanel.emptyTitle")
+                }
+                emptyDescription={
+                  noProjects
+                    ? isGuestOrg
+                      ? t("org.guestOrgHome.emptyDescription")
+                      : t("org.overview.emptyDescription")
+                    : undefined
+                }
+              />
+            </div>
           )}
         </Page>
       }

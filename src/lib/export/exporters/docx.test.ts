@@ -506,3 +506,204 @@ describe("exportDocx — self-closing <w:p/> adjacency (Finding 1)", () => {
     expect(xml).toContain("<w:p/>")
   })
 })
+
+// ── AQU-1068: content added and removed in the app ───────────────────────────
+//
+// Sam settled both rules on 2026-09-09. An added cell is ALWAYS content the
+// client's file is missing, never a note-to-self, so it must reach the export
+// as a new paragraph after the one it follows. And a removed cell's paragraph
+// must LEAVE — until now it looked exactly like an untranslated paragraph, so
+// every removal was silently undone and the client got their original words
+// back in a file they had deliberately edited.
+
+/** A cell somebody added in the app: the origin marker, and no locator. */
+function addedCell(id: string, translated: string): CellData {
+  return {
+    ...makeCell(id, "", translated, id),
+    metadata: { aquillaOrigin: { version: 1, kind: "user-insert" } },
+  }
+}
+
+async function documentXml(blob: Blob): Promise<string> {
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+  return (await zip.file("word/document.xml")!.async("string"))
+}
+
+/** The metadata shape the server reports for a removed cell. */
+const removedAt = (paragraph: number) => ({
+  metadata: {
+    aquillaImport: {
+      sourceLocator: {
+        kind: "package-block",
+        memberPath: "word/document.xml",
+        blockPath: `w:p[${paragraph}]`,
+        segment: 0,
+      },
+    },
+  },
+})
+
+describe("exportDocx — content added in the app", () => {
+  it("writes an added cell as a new paragraph after the one it follows", async () => {
+    const bytes = await makeDocx(para("First.") + para("Second."))
+    const cells = [
+      withDocxLocator(makeCell("c1", "First.", "Premier.", "g1"), 1),
+      addedCell("added", "Ajouté."),
+      withDocxLocator(makeCell("c2", "Second.", "Deuxième.", "g2"), 2),
+    ]
+    const result = await exportDocx(bytes, cells)
+    const xml = await documentXml(result.blob)
+
+    expect(result.inserted).toBe(1)
+    // Order is what matters: the addition sits between its anchor and the next.
+    expect(xml.indexOf("Premier.")).toBeLessThan(xml.indexOf("Ajouté."))
+    expect(xml.indexOf("Ajouté.")).toBeLessThan(xml.indexOf("Deuxième."))
+  })
+
+  it("clones the anchor paragraph's style", async () => {
+    const bytes = await makeDocx(para("Heading text.", "Heading1") + para("Body."))
+    const cells = [
+      withDocxLocator(makeCell("c1", "Heading text.", "Titre.", "g1"), 1),
+      addedCell("added", "Ajouté."),
+      withDocxLocator(makeCell("c2", "Body.", "Corps.", "g2"), 2),
+    ]
+    const xml = await documentXml((await exportDocx(bytes, cells)).blob)
+
+    // Two paragraphs now carry Heading1: the anchor and the addition.
+    expect(xml.match(/w:val="Heading1"/g)).toHaveLength(2)
+  })
+
+  it("keeps several additions on one anchor in order", async () => {
+    const bytes = await makeDocx(para("First.") + para("Second."))
+    const cells = [
+      withDocxLocator(makeCell("c1", "First.", "Premier.", "g1"), 1),
+      addedCell("a1", "Un."),
+      addedCell("a2", "Deux."),
+      withDocxLocator(makeCell("c2", "Second.", "Deuxième.", "g2"), 2),
+    ]
+    const xml = await documentXml((await exportDocx(bytes, cells)).blob)
+
+    expect(xml.indexOf("Un.")).toBeLessThan(xml.indexOf("Deux."))
+    expect(xml.indexOf("Deux.")).toBeLessThan(xml.indexOf("Deuxième."))
+  })
+
+  it("leaves an UNTRANSLATED added cell out", async () => {
+    // The native export writes translations into the client's file; an added
+    // cell with none has nothing to write.
+    const bytes = await makeDocx(para("First."))
+    const cells = [
+      withDocxLocator(makeCell("c1", "First.", "Premier.", "g1"), 1),
+      addedCell("added", ""),
+    ]
+    const result = await exportDocx(bytes, cells)
+    expect(result.inserted).toBe(0)
+  })
+
+  it("places nothing for an added cell with no preceding located cell", async () => {
+    // Nowhere to put it. Dropping it at the top of the document would be a guess.
+    const bytes = await makeDocx(para("First."))
+    const cells = [
+      addedCell("added", "Ajouté."),
+      withDocxLocator(makeCell("c1", "First.", "Premier.", "g1"), 1),
+    ]
+    const result = await exportDocx(bytes, cells)
+    expect(result.inserted).toBe(0)
+    expect(await documentXml(result.blob)).not.toContain("Ajouté.")
+  })
+
+  it("adds nothing on a LEGACY file that has no locators", async () => {
+    // Those map cells to paragraphs BY POSITION, where an inserted paragraph
+    // would shift every mapping after it. The export dialog's note says so.
+    const bytes = await makeDocx(para("First.") + para("Second."))
+    const cells = [
+      makeCell("c1", "First.", "Premier.", "g1"),
+      addedCell("added", "Ajouté."),
+      makeCell("c2", "Second.", "Deuxième.", "g2"),
+    ]
+    const result = await exportDocx(bytes, cells)
+    const xml = await documentXml(result.blob)
+
+    expect(result.inserted).toBe(0)
+    expect(xml).not.toContain("Ajouté.")
+    // ...and the positional mapping is still correct, which is what the
+    // buildLegacyGroups guard exists for.
+    expect(xml).toContain("Premier.")
+    expect(xml).toContain("Deuxième.")
+  })
+})
+
+describe("exportDocx — content removed in the app", () => {
+  it("drops the paragraph whose cell was removed", async () => {
+    const bytes = await makeDocx(para("First.") + para("Doomed.") + para("Third."))
+    const cells = [
+      withDocxLocator(makeCell("c1", "First.", "Premier.", "g1"), 1),
+      withDocxLocator(makeCell("c3", "Third.", "Troisième.", "g3"), 3),
+    ]
+    const result = await exportDocx(bytes, cells, { removedCells: [removedAt(2)] })
+    const xml = await documentXml(result.blob)
+
+    expect(result.removed).toBe(1)
+    expect(xml).not.toContain("Doomed.")
+    expect(xml).toContain("Premier.")
+    expect(xml).toContain("Troisième.")
+  })
+
+  it("KEEPS the client's paragraph when the cell is merely untranslated", async () => {
+    // The distinction this whole mechanism exists for. Both cases look the same
+    // from the cell list; only the server's record of the deletion separates
+    // them, and getting it wrong deletes the client's content.
+    const bytes = await makeDocx(para("First.") + para("Untranslated.") + para("Third."))
+    const cells = [
+      withDocxLocator(makeCell("c1", "First.", "Premier.", "g1"), 1),
+      withDocxLocator(makeCell("c2", "Untranslated.", "", "g2"), 2),
+      withDocxLocator(makeCell("c3", "Third.", "Troisième.", "g3"), 3),
+    ]
+    const result = await exportDocx(bytes, cells)
+    const xml = await documentXml(result.blob)
+
+    expect(result.removed).toBe(0)
+    expect(xml).toContain("Untranslated.")
+  })
+
+  it("does not shift the paragraphs after it", async () => {
+    // `paragraphIndex` counts the INPUT scan, so a dropped paragraph cannot
+    // move a later locator. If it could, every translation after a removal
+    // would land one paragraph early.
+    const bytes = await makeDocx(para("One.") + para("Two.") + para("Three.") + para("Four."))
+    const cells = [
+      withDocxLocator(makeCell("c1", "One.", "Un.", "g1"), 1),
+      withDocxLocator(makeCell("c3", "Three.", "Trois.", "g3"), 3),
+      withDocxLocator(makeCell("c4", "Four.", "Quatre.", "g4"), 4),
+    ]
+    const xml = await documentXml((await exportDocx(bytes, cells, { removedCells: [removedAt(2)] })).blob)
+
+    expect(xml).not.toContain("Two.")
+    expect(xml.indexOf("Un.")).toBeLessThan(xml.indexOf("Trois."))
+    expect(xml.indexOf("Trois.")).toBeLessThan(xml.indexOf("Quatre."))
+  })
+
+  it("removes several at once", async () => {
+    const bytes = await makeDocx(para("One.") + para("Two.") + para("Three."))
+    const cells = [withDocxLocator(makeCell("c2", "Two.", "Deux.", "g2"), 2)]
+    const result = await exportDocx(bytes, cells, {
+      removedCells: [removedAt(1), removedAt(3)],
+    })
+    const xml = await documentXml(result.blob)
+
+    expect(result.removed).toBe(2)
+    expect(xml).not.toContain("One.")
+    expect(xml).not.toContain("Three.")
+    expect(xml).toContain("Deux.")
+  })
+
+  it("changes nothing when the removed list is empty", async () => {
+    const bytes = await makeDocx(para("First.") + para("Second."))
+    const cells = [
+      withDocxLocator(makeCell("c1", "First.", "Premier.", "g1"), 1),
+      withDocxLocator(makeCell("c2", "Second.", "Deuxième.", "g2"), 2),
+    ]
+    const withEmpty = await documentXml((await exportDocx(bytes, cells, { removedCells: [] })).blob)
+    const without = await documentXml((await exportDocx(bytes, cells)).blob)
+    expect(withEmpty).toBe(without)
+  })
+})

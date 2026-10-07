@@ -169,6 +169,16 @@ function dice(shared: number, lenA: number, lenB: number): number {
   return lenA + lenB === 0 ? 0 : (2 * shared) / (lenA + lenB)
 }
 
+/** Non-overlapping codepoint ranges checked in `dominantScript`. Latin has no
+ * single contiguous range, so it stays a regex test outside this table. */
+const SCRIPT_CODEPOINT_RANGES: ReadonlyArray<{ name: string; min: number; max: number }> = [
+  { name: "hebrew", min: 0x0590, max: 0x05ff },
+  { name: "arabic", min: 0x0600, max: 0x06ff },
+  { name: "greek", min: 0x0370, max: 0x03ff },
+  { name: "cyrillic", min: 0x0400, max: 0x04ff },
+  { name: "han", min: 0x4e00, max: 0x9fff },
+]
+
 /**
  * Which writing system a cue is in, or null when it has no letters to judge by
  * (a cue of pure digits or punctuation commits to nothing).
@@ -187,11 +197,8 @@ export function dominantScript(text: string): string | null {
   const bump = (name: string) => counts.set(name, (counts.get(name) ?? 0) + 1)
   for (const ch of text) {
     const c = ch.codePointAt(0)!
-    if (c >= 0x0590 && c <= 0x05ff) bump("hebrew")
-    else if (c >= 0x0600 && c <= 0x06ff) bump("arabic")
-    else if (c >= 0x0370 && c <= 0x03ff) bump("greek")
-    else if (c >= 0x0400 && c <= 0x04ff) bump("cyrillic")
-    else if (c >= 0x4e00 && c <= 0x9fff) bump("han")
+    const range = SCRIPT_CODEPOINT_RANGES.find((r) => c >= r.min && c <= r.max)
+    if (range) bump(range.name)
     else if (/\p{Script=Latin}/u.test(ch)) bump("latin")
   }
   let best: string | null = null

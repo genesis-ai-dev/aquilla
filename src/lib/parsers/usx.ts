@@ -16,6 +16,7 @@
 // for now an imported USX exports as USFM, which Paratext also reads.)
 
 import { classifyMarker } from "./usfm-markers"
+import { sanitizeParseDetail } from "./parse-error-detail"
 
 /** True if a USX <para> wraps verses (a paragraph marker) vs. carries its own
  *  text (a heading/title). Drives whether content goes on the marker line. */
@@ -100,7 +101,12 @@ function emit(node: Node, out: string[]): void {
 export function usxToUsfm(xml: string): string {
   const doc = new DOMParser().parseFromString(xml, "application/xml")
   const err = doc.querySelector("parsererror")
-  if (err) throw new Error(`USX parse error: ${err.textContent?.slice(0, 200) ?? "malformed XML"}`)
+  // OPS-30: see tmx.ts — no document text in a message that becomes telemetry.
+  if (err) {
+    throw new Error(
+      `USX parse error: ${sanitizeParseDetail(err.textContent ?? "malformed XML").slice(0, 200)}`,
+    )
+  }
   const root = doc.querySelector("usx") ?? doc.documentElement
   if (!root) throw new Error("USX has no root element")
 

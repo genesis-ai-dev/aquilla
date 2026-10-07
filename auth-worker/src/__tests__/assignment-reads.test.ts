@@ -38,6 +38,18 @@ async function seedOrgWithAssignments() {
       ('as-anna', 'f1', 'c1'), ('as-anna', 'f1', 'c2'), ('as-anna', 'f1', 'c3'),
       ('as-bob', 'f1', 'c4'), ('as-bob', 'f1', 'c5')`,
   ).run()
+  // SOURCE rows: one per assigned cell. assignment_cells is populated by an
+  // INSERT..SELECT over `cells WHERE side = 'source'`, so in production a
+  // source row is what put each id there — and AQU-1068 derives the assignment
+  // DENOMINATOR by counting the ones that still exist.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES
+      ('pa', 'f1', 'c1', 'source', 's', 'e-pa', 1),
+      ('pa', 'f1', 'c2', 'source', 's', 'e-pa', 1),
+      ('pa', 'f1', 'c3', 'source', 's', 'e-pa', 1),
+      ('pa', 'f1', 'c4', 'source', 's', 'e-pa', 1),
+      ('pa', 'f1', 'c5', 'source', 's', 'e-pa', 1)`,
+  ).run()
   // Target cells: a row exists iff that cell has a target translation; validated
   // marks reviewer sign-off. anna c1+c2 done; bob c4 done.
   await env.AQUILLA_PG.prepare(
@@ -166,10 +178,122 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
     expect(byId["as-anna"].fileName).toBe("01-GEN.usfm")
   })
 
+  // AQU-894: the sidebar asks "is this file mine?" of every row, and `fileId`
+  // (a LIMIT 1 pick) cannot answer it for a scope spanning more than one file.
+  it("returns EVERY file an assignment's cells touch, not just the routing one", async () => {
+    await seedOrgWithAssignments()
+    // Give anna a second file inside the SAME assignment — the multi-book
+    // scope ("Genesis + Exodus") that `fileId` alone silently halves.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES ('f2', 'pa', '02-EXO.usfm', 'e-pa')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES
+        ('pa', 'f2', 'c6', 'source', 's', 'e-pa', 1)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna', 'f2', 'c6')",
+    ).run()
+    // And an open assignment whose scope resolved to nothing at all.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, created_by, created_at, unassigned_at) VALUES
+        ('as-anna-empty', 'pa', 2, 'books', 'Ruth', 0, 1, 1200, NULL)`,
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; fileId: string | null; fileIds: string[] }>
+    }
+    const byId = Object.fromEntries(body.assignments.map((a) => [a.assignmentId, a]))
+    expect(byId["as-anna"].fileIds).toEqual(["f1", "f2"])
+    // The routing field keeps its old meaning: one of them, not all of them.
+    expect(byId["as-anna"].fileIds).toContain(byId["as-anna"].fileId)
+    expect(byId["as-anna-empty"].fileIds).toEqual([])
+    // Still the caller's own rows only — bob's assignment leaks nothing here.
+    expect(byId["as-bob"]).toBeUndefined()
+  })
+
+  // AQU-1628: a selection-scoped assignment's extent cannot be re-derived from
+  // scope_label, so the inbox hands the editor gutter its cell ids. Any other
+  // scope leaves the field absent — the gutter reads scope_kind, and an empty
+  // list there would be indistinguishable from "covers nothing".
+  it("returns cellIds for a 'cells' scope and omits them for every other scope", async () => {
+    await seedOrgWithAssignments()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, created_by, created_at, unassigned_at) VALUES
+        ('as-anna-sel', 'pa', 2, 'cells', '2 verse(s)', 2, 1, 1300, NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna-sel', 'f1', 'c1'), ('as-anna-sel', 'f1', 'c2')",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; scopeKind: string; cellIds?: string[] }>
+    }
+    const byId = Object.fromEntries(body.assignments.map((a) => [a.assignmentId, a]))
+    expect(byId["as-anna-sel"].scopeKind).toBe("cells")
+    expect(byId["as-anna-sel"].cellIds).toEqual(["c1", "c2"])
+    // The book-scope row in the same inbox stays as it was.
+    expect(byId["as-anna"].cellIds).toBeUndefined()
+  })
+
   it("403s a user with no access to the project", async () => {
     await seedOrgWithAssignments()
     const res = await app.request(
       "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("outsider")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+  })
+})
+
+describe("GET /api/v2/projects/:projectId/assignments/given (AQU-581)", () => {
+  it("lists only the open assignments the caller handed out, with who they went to", async () => {
+    await seedOrgWithAssignments()
+    // anna (a Contributor coordinator) handed one to bob, and took one back.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, created_by, created_at, unassigned_at) VALUES
+        ('by-anna', 'pa', 3, 'chapters', 'Genesis 2', 'es', 0, 2, 1200, NULL),
+        ('by-anna-gone', 'pa', 3, 'chapters', 'Genesis 3', 'es', 0, 2, 1300, 1400)`,
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/given",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; assigneeUserId: number; username: string | null; targetLang: string }>
+    }
+    expect(body.assignments).toEqual([
+      expect.objectContaining({ assignmentId: "by-anna", assigneeUserId: 3, username: "bob", targetLang: "es" }),
+    ])
+
+    const wendi = await app.request(
+      "/api/v2/projects/pa/assignments/given",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const wendiBody = (await wendi.json()) as { assignments: Array<{ assignmentId: string }> }
+    expect(wendiBody.assignments.map((a) => a.assignmentId).sort()).toEqual(["as-anna", "as-bob"])
+  })
+
+  it("403s a user with no access to the project", async () => {
+    await seedOrgWithAssignments()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/given",
       { headers: authHeader(await jwtFor("outsider")) },
       env,
     )
@@ -275,6 +399,31 @@ describe("GET /api/v2/projects/:projectId/assignments/all (per-project roster)",
     expect(body.roster).toHaveLength(2)
   })
 
+  it("403s a maintainer when the roster floor is owner-only", async () => {
+    await seedOrgWithAssignments()
+    // wendi created the project, so she resolves as owner (700). mia is a
+    // maintainer on both the org and the project, and not the creator.
+    await seedUser(4, "mia")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 4, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 4, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, '{\"rosterViewMinRole\":700}', 1, 1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/all",
+      { headers: authHeader(await jwtFor("mia")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { rosterHidden?: boolean; roster?: unknown }
+    expect(body.rosterHidden).toBe(true)
+    expect(body.roster).toBeUndefined()
+  })
+
   it("403s a contributor (anna) and a non-member (outsider)", async () => {
     await seedOrgWithAssignments()
     const annaRes = await app.request(
@@ -290,5 +439,129 @@ describe("GET /api/v2/projects/:projectId/assignments/all (per-project roster)",
       env,
     )
     expect(outRes.status).toBe(403)
+  })
+})
+
+describe("assignment totals survive a removed cell (AQU-1068)", () => {
+  // `assignments.cells_total` is stamped once at assignment.create and never
+  // recomputed. Before cells could be removed that was harmless; once a
+  // maintainer can take one out of a file, a stored denominator counts a row
+  // that no longer exists and the assignment can never reach 100% again.
+  // Both halves are derived from the live projection now.
+
+  it("drops the denominator when an assigned cell is removed, so the count stays reachable", async () => {
+    await seedOrgWithAssignments()
+    // anna: 3 assigned, 2 validated. Remove c3 — the one still outstanding.
+    await env.AQUILLA_PG.prepare(
+      `DELETE FROM cells WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id = 'c3'`,
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    const body = (await res.json()) as {
+      assignments: Array<{ cellsTotal: number; cellsDone: number }>
+    }
+    // The stored column still says 3; nobody reads it.
+    expect(body.assignments[0]).toMatchObject({ cellsTotal: 2, cellsDone: 2 })
+  })
+
+  it("leaves the orphaned assignment_cells row harmless rather than counting it", async () => {
+    // There is no DELETE FROM assignment_cells anywhere in the codebase, so the
+    // row outlives the cell by design. Deriving from `cells` makes it invisible
+    // instead of making it wrong.
+    await seedOrgWithAssignments()
+    await env.AQUILLA_PG.prepare(
+      `DELETE FROM cells WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id IN ('c1', 'c2', 'c3')`,
+    ).run()
+
+    const orphans = await env.AQUILLA_PG.prepare(
+      `SELECT COUNT(*)::int AS n FROM assignment_cells WHERE assignment_id = 'as-anna'`,
+    ).first<{ n: number }>()
+    expect(orphans?.n).toBe(3)
+
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    const body = (await res.json()) as { assignments: Array<{ cellsTotal: number; cellsDone: number }> }
+    expect(body.assignments[0]).toMatchObject({ cellsTotal: 0, cellsDone: 0 })
+  })
+})
+
+// AQU-1493: a chapter assignment now takes the chapter's headings along (they
+// count in the chapter on the board). With headings switched off, every
+// assignee-facing figure has to leave them out too — the plan inspector's row
+// for the same person already does — or the person sits at 2 of 3 forever with
+// nothing left that the team counts.
+describe("assignment progress follows the 'count headings' setting", () => {
+  async function seedWithHeading() {
+    await seedOrgWithAssignments()
+    // A heading in bob's chapter, assigned with it, not translated.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, type) VALUES
+        ('pa', 'f1', 'h1', 'source', 'The Creation', 'e-pa', 1, 'heading')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-bob', 'f1', 'h1')",
+    ).run()
+  }
+  async function bobsRow(path: string, user: string, key = "assignments") {
+    const res = await app.request(path, { headers: authHeader(await jwtFor(user)) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Record<string, Array<{ assignmentId: string; cellsTotal: number; cellsDone: number }>>
+    return body[key].find((a) => a.assignmentId === "as-bob")
+  }
+
+  it("counts the heading while the project counts headings", async () => {
+    await seedWithHeading()
+    expect(await bobsRow("/api/v2/orgs/1/assignments/workload", "wendi")).toMatchObject({
+      cellsTotal: 3,
+      cellsDone: 1,
+    })
+  })
+
+  it("leaves the heading out when the project does not count headings", async () => {
+    await seedWithHeading()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":false}')`,
+    ).run()
+    expect(await bobsRow("/api/v2/orgs/1/assignments/workload", "wendi")).toMatchObject({
+      cellsTotal: 2,
+      cellsDone: 1,
+    })
+  })
+
+  it("takes the org's setting when the project has none, and drops a validated heading from done too", async () => {
+    await seedWithHeading()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO org_settings (org_id, settings) VALUES (1, '{"countStructuralCells":false}')`,
+    ).run()
+    // Validated anyway: still not part of the count, on either side.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, validated) VALUES
+        ('pa', 'f1', 'h1', 'target', 'x', 'e-pa', 1, 1)`,
+    ).run()
+    expect(await bobsRow("/api/v2/orgs/1/assignments/workload", "wendi")).toMatchObject({
+      cellsTotal: 2,
+      cellsDone: 1,
+    })
+  })
+
+  it("lets the project's own 'count them' override an org that does not", async () => {
+    await seedWithHeading()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO org_settings (org_id, settings) VALUES (1, '{"countStructuralCells":false}')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":true}')`,
+    ).run()
+    expect(await bobsRow("/api/v2/orgs/1/assignments/workload", "wendi")).toMatchObject({
+      cellsTotal: 3,
+      cellsDone: 1,
+    })
   })
 })

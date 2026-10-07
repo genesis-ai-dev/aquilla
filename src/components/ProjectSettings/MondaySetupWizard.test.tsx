@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { pickSelectOption as selectOption } from "@/test-utils/select"
 import { MondaySetupWizard } from "./MondaySetupWizard"
 import * as api from "@/lib/monday/api"
 
@@ -74,7 +75,6 @@ function renderWizard(props: Partial<Parameters<typeof MondaySetupWizard>[0]> = 
       orgId={7}
       jwt="tok"
       orgConnected
-      accountSlug="acme"
       onLinked={onLinked}
       onUnlinked={onUnlinked}
       onConnected={onConnected}
@@ -84,16 +84,11 @@ function renderWizard(props: Partial<Parameters<typeof MondaySetupWizard>[0]> = 
   return { onLinked, onUnlinked, onConnected }
 }
 
-// Base UI Select renders a combobox trigger with portaled options; under
-// happy-dom, hover-highlighting the option and pressing Enter commits it
-// (same pattern as ProjectSettings.aiSettingsPersistence.test.tsx).
+// The shared helper drives the pointer sequence Base UI requires to commit a
+// choice (see src/test-utils/select.tsx); here we additionally hold it to
+// rendering the chosen label on the trigger.
 async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+  const trigger = await selectOption(triggerName, optionName)
   await waitFor(() => {
     expect(trigger.textContent).toMatch(optionName)
   })
@@ -109,6 +104,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocked.analyzeMondayMapping.mockResolvedValue(analysis())
   mocked.fetchMondayBoardStructure.mockResolvedValue({
+    url: "https://actual-account.monday.com/boards/b1",
     columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }],
     groups: [],
   })
@@ -158,6 +154,7 @@ describe("MondaySetupWizard", () => {
     expect(mocked.syncMondayNow).toHaveBeenCalledWith("tok", "p1")
     expect(onLinked).toHaveBeenCalled()
     expect(screen.getByText(/pushed 3 items/i)).toBeTruthy()
+    expect(screen.getByRole("link", { name: /view board/i }).getAttribute("href")).toBe("https://actual-account.monday.com/boards/b1")
   })
 
   it("says so when the link saved but the first push failed", async () => {
@@ -228,6 +225,7 @@ describe("MondaySetupWizard", () => {
     renderWizard()
     await scanToReview()
 
+    fireEvent.click(screen.getByRole("button", { name: /customize data and columns/i }))
     await pickSelectOption(/board items/i, /one item per file/i)
     fireEvent.click(screen.getByRole("button", { name: /apply and push/i }))
 
@@ -243,6 +241,7 @@ describe("MondaySetupWizard", () => {
     renderWizard()
     await scanToReview()
 
+    fireEvent.click(screen.getByRole("button", { name: /customize data and columns/i }))
     fireEvent.click(screen.getByRole("button", { name: /remove mapping row/i }))
     // Nothing mapped means nothing to push — Apply must not be offered.
     await waitFor(() => {
@@ -250,4 +249,13 @@ describe("MondaySetupWizard", () => {
       expect(apply.disabled).toBe(true)
     })
   })
+})
+
+it("does not call a skipped push successful", async () => {
+  mocked.syncMondayNow.mockResolvedValue({ ok: true, pushed: false })
+  renderWizard()
+  await scanToReview()
+  expect(screen.queryByRole("combobox", { name: /board items/i })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /apply and push/i }))
+  expect(await screen.findByRole("heading", { name: /sync needs attention/i })).toBeTruthy()
 })

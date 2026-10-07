@@ -51,6 +51,12 @@ export interface RailPinInputs {
   showMicDeniedHelp: boolean
   /** The "replace existing translation?" confirmation is open. */
   showGenerateConfirm: boolean
+  /**
+   * AQU-200: the rail's `⋯` overflow is open. Its popup portals OUT of the
+   * rail, so the rail's focus-capture never sees the focus that moved into it
+   * — without this the rail would idle-collapse out from under an open menu.
+   */
+  overflowOpen: boolean
   /** Focus is somewhere within the row (e.g. the target editor is focused). */
   hasFocusWithin: boolean
   /** A remote change arrived while editing — the conflict banner is showing. */
@@ -66,12 +72,13 @@ export function computeRailPinned({
   railHasFocus,
   showMicDeniedHelp,
   showGenerateConfirm,
+  overflowOpen,
   hasFocusWithin,
   remoteChangedWhileFocused,
 }: RailPinInputs): boolean {
   // In-flight interactions always pin (unchanged AQU-354 behavior): an open
   // panel/popover or a focused rail control must never be yanked away.
-  if (expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm) {
+  if (expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm || overflowOpen) {
     return true
   }
   // AQU-621: a focused target cell pins the rail so it never idle-collapses to a

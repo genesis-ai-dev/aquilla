@@ -1,0 +1,10 @@
+{
+  // Worker runtime code only, without Vite's types: wrangler does not define
+  // `import.meta.env`, so a Worker reading it must fail here rather than at
+  // runtime. Tests are checked by tsconfig.json.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types", "node"]
+  },
+  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts"]
+}

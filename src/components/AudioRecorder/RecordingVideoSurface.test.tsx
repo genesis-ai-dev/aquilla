@@ -59,6 +59,10 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
   const video = () => screen.getByTestId("rec-video") as HTMLVideoElement
 
   it("rewinds by the countdown's length and rolls, so the line arrives at zero", () => {
+    // Freeze the clock: the component reads Date.now() again at mount, and on a
+    // loaded CI box the milliseconds between the two reads showed up as a
+    // 0.05 s drift in currentTime.
+    vi.useFakeTimers()
     render(
       <RecordingVideoSurface
         src="film.webm"
@@ -132,6 +136,54 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
     // cut on the operator's entrance.
     expect(video().currentTime).toBeCloseTo(120, 1)
     expect(pause).not.toHaveBeenCalled()
+  })
+
+  // AQU-1210 (Sam, 2026-09-25): FILM PLAY-ALONG. Playing a take back inside
+  // the recorder plays the picture with it, following the take's own player.
+  describe("play-along", () => {
+    const surface = (follow: { filmSec: number; playing: boolean } | null, running = false) => (
+      <RecordingVideoSurface
+        src="film.webm" startSec={120} running={running} armNonce={1} leadIn={null} follow={follow}
+      />
+    )
+
+    it("starts where the take is, and rolls", () => {
+      const { rerender } = render(surface(null))
+      expect(play).not.toHaveBeenCalled()
+      rerender(surface({ filmSec: 120.7, playing: true }))
+      expect(video().currentTime).toBeCloseTo(120.7, 2)
+      expect(play).toHaveBeenCalled()
+    })
+
+    it("leaves a small drift alone and follows a scrub", () => {
+      const { rerender } = render(surface({ filmSec: 120.7, playing: true }))
+      video().currentTime = 120.8
+      rerender(surface({ filmSec: 120.9, playing: true }))
+      // 0.1s apart: a seek would stutter more than the drift costs.
+      expect(video().currentTime).toBeCloseTo(120.8, 2)
+      rerender(surface({ filmSec: 122.5, playing: true }))
+      expect(video().currentTime).toBeCloseTo(122.5, 2)
+    })
+
+    it("stops with the take, on the frame it reached", () => {
+      const { rerender } = render(surface({ filmSec: 121, playing: true }))
+      pause.mockClear()
+      rerender(surface({ filmSec: 121, playing: false }))
+      expect(pause).toHaveBeenCalled()
+      expect(video().currentTime).toBeCloseTo(121, 2)
+    })
+
+    it("does nothing when nothing is being followed (the setting is off)", () => {
+      const { rerender } = render(surface(null))
+      rerender(surface(null))
+      expect(play).not.toHaveBeenCalled()
+      expect(video().currentTime).toBeCloseTo(120, 1)
+    })
+
+    it("never moves the picture under a take being captured", () => {
+      render(surface({ filmSec: 130, playing: true }, true))
+      expect(video().currentTime).toBeCloseTo(120, 1)
+    })
   })
 
   it("pauses when a countdown is cancelled without a take", () => {

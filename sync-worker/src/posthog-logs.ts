@@ -8,9 +8,26 @@
 // Callers pass the returned promise to `ctx.waitUntil` so the response isn't
 // blocked; failures are swallowed — telemetry must never take down a request.
 
+import { redactLogPath } from "../../shared/log-path-redaction"
+
 const OTLP_SEVERITY = { info: 9, warn: 13, error: 17 } as const
 
 export type LogLevel = keyof typeof OTLP_SEVERITY
+
+/**
+ * PostHog ingest region (AQU-854). Aquilla's telemetry lives in PostHog **EU**
+ * Cloud; the region is part of the ingest hostname, so a worker that falls
+ * back to the US host silently ships request/error logs into a US processor.
+ * EU is therefore the default and an unset or blank `POSTHOG_HOST` must never
+ * degrade to US.
+ */
+export const POSTHOG_EU_INGEST_HOST = "https://eu.i.posthog.com"
+
+/** Resolve the ingest host: an explicit non-blank value wins, else EU. */
+export function resolvePosthogHost(raw: string | undefined | null): string {
+  const trimmed = raw?.trim()
+  return trimmed ? trimmed : POSTHOG_EU_INGEST_HOST
+}
 
 export interface PosthogLogEnv {
   POSTHOG_KEY?: string
@@ -25,7 +42,7 @@ export function shipLog(
   attributes: Record<string, string | number | undefined> = {},
 ): Promise<void> {
   if (!env.POSTHOG_KEY) return Promise.resolve()
-  const host = env.POSTHOG_HOST ?? "https://us.i.posthog.com"
+  const host = resolvePosthogHost(env.POSTHOG_HOST)
   const body = {
     resourceLogs: [
       {
@@ -69,6 +86,13 @@ export function shipLog(
 /**
  * Log a non-OK response (4xx/5xx) with enough shape to answer "what failed
  * for this user" — route, method, status, and a snippet of the error body.
+ *
+ * [Pen test] Auth & session mgmt (2026-10-05, OPS-42): the path goes through
+ * `redactLogPath` first. Seven routes carry a live invite / access-link token
+ * as a path segment, and their ordinary failures (mistyped PIN, lapsed
+ * session) would otherwise ship a working credential to PostHog. Only
+ * `url.pathname` is ever read — never `url.search`, which carries an OAuth
+ * `?code=` on the Monday callback.
  */
 export async function shipErrorResponse(
   env: PosthogLogEnv,
@@ -77,6 +101,7 @@ export async function shipErrorResponse(
   response: Response,
 ): Promise<void> {
   const url = new URL(request.url)
+  const path = redactLogPath(url.pathname)
   let bodySnippet: string | undefined
   try {
     bodySnippet = (await response.clone().text()).slice(0, 500)
@@ -87,10 +112,10 @@ export async function shipErrorResponse(
     env,
     service,
     response.status >= 500 ? "error" : "warn",
-    `${request.method} ${url.pathname} → ${response.status}`,
+    `${request.method} ${path} → ${response.status}`,
     {
       "http.method": request.method,
-      "http.path": url.pathname,
+      "http.path": path,
       "http.status": response.status,
       "error.body": bodySnippet,
     },

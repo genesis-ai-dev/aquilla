@@ -42,7 +42,19 @@ async function authorizeTrackSetRaw(payload: unknown, role: number) {
     payload,
     clientTs: 1000,
   } as unknown as RawEvent<'file.track.set'>
-  return await authorize(token, raw, SECRET)
+  // Shape tests authorize against a valid content-ownership boundary. Real
+  // ownership and missing-database cases live in authorize-track-content.
+  const hasContent = (payload as { patch?: { contentFileId?: unknown } })?.patch?.contentFileId !== undefined
+  const db = hasContent ? {
+    prepare(sql: string) {
+      return { bind() { return { async first() {
+        return sql.includes('project_settings')
+          ? { settings: JSON.stringify({ allowTrackEditing: true }) }
+          : { id: 'owned-content' }
+      } } } }
+    },
+  } as unknown as AquillaDb : undefined
+  return await authorize(token, raw, SECRET, db)
 }
 
 function makeNoOpD1(): AquillaDb {
@@ -99,6 +111,37 @@ describe('file.track.set — role floor', () => {
 })
 
 describe('file.track.set — accepted writes', () => {
+  it('accepts a text track pinned to independent cue content', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'captions-track',
+      patch: { kind: 'source-subtitles', name: 'Captions', contentFileId: 'caption-content' },
+    })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts explicit backfill of the default text track', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'source-subtitles', patch: { contentFileId: 'caption-content' },
+    })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it.each(['', 'bad/path', 'x'.repeat(201), 42, [], {}].map(contentFileId => ({ contentFileId })))(
+    'rejects unusable content file identity: $contentFileId', async ({ contentFileId }) => {
+      const authed = await authorizeTrackSet({
+        trackId: 'captions-track', patch: { kind: 'source-subtitles', contentFileId },
+      })
+      expectRejected(dispatch(authed), /unusable contentFileId/)
+    },
+  )
+
+  it('rejects a content reference back to the timeline itself', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'captions-track', patch: { kind: 'source-subtitles', contentFileId: 'file-x' },
+    })
+    expectRejected(dispatch(authed), /own content/)
+  })
+
   it('routes an upsert to the handler: events INSERT + files UPDATE', async () => {
     const authed = await authorizeTrackSet({
       trackId: '9f1c3a7e-2b40-4d55-8e0a-6c1d2f3a4b5c',

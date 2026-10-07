@@ -21,7 +21,7 @@
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
  *       Focus-lock transitions by another user.
- *   { t: "link.upstream-changed", project, upstream, untilSeq, fileIds, cellIds }
+ *   { t: "link.upstream-changed", project, upstream, untilSeq, fileIds, cellIds, filesChanged }
  *       FRO-479 push accelerator: this project's live upstream committed
  *       lane-relevant changes. LOSSY — never load-bearing (see
  *       docs/superpowers/specs/2026-07-06-linked-projects-provenance-invalidation-design.md
@@ -41,6 +41,7 @@
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
+import { recordSyncBytes } from "./connection-activity"
 import type { CellRow } from "./cells-read-types"
 import type { TargetPresenceSelection } from "./presence-store"
 import type {
@@ -124,6 +125,9 @@ export type ProjectWsServerMessage =
       untilSeq: number
       fileIds: string[]
       cellIds: string[]
+      /** AQU-1545: the upstream created or renamed a file — the file list
+       *  moves, not just cells. False when an older worker omits it. */
+      filesChanged: boolean
     }
   /** Contextual translation pipeline activity (slice D2). LOSSY — never
    *  load-bearing; the run-store mirror re-hydrates from the transport
@@ -197,6 +201,8 @@ export type ProjectWsClientMessage =
   | { t: "focus.claim"; cellId: string; leaseMs?: number }
   | { t: "focus.renew"; cellId: string }
   | { t: "focus.release"; cellId: string }
+  /** Heartbeat; the DO answers `pong`. Sent by the reconciler itself. */
+  | { t: "ping"; ts?: number }
   | {
       t: "presence.update"
       currentFileId?: string | null
@@ -238,6 +244,40 @@ export interface WsReconcilerOptions {
   minBackoffMs?: number
   /** Max backoff between reconnects in ms. */
   maxBackoffMs?: number
+  /** How often an open socket sends a heartbeat `ping`. 0 disables. */
+  heartbeatIntervalMs?: number
+  /** A socket that receives nothing within this long of a ping is dead. */
+  heartbeatTimeoutMs?: number
+}
+
+// ── Heartbeat ─────────────────────────────────────────────────────────────
+//
+// A half-open socket — a proxy, NAT, or sleeping laptop dropped one leg —
+// stays OPEN on this side indefinitely while the DO has forgotten it, so every
+// broadcast is silently missed and nothing ever reconnects. Found live: the
+// desktop app's project sockets went silent for ten minutes after a reload
+// while a fresh socket on the same channel received every frame.
+//
+// The DO answers `ping` with `pong`. Only once some socket in this page has
+// seen a pong do we start killing silent sockets: a sync-worker that predates
+// the pong handler ignores pings, and without this guard every quiet channel
+// would be torn down every interval until the worker is deployed.
+
+let serverPongSeen = false
+
+/** Test-only: forget that the server has answered a ping. */
+export function __resetHeartbeatForTests(): void {
+  serverPongSeen = false
+}
+
+/** Cheap pre-check before a JSON.parse: `pong` frames are tiny. */
+function isPongFrame(raw: string): boolean {
+  if (raw.length > 64 || !raw.includes('"pong"')) return false
+  try {
+    return (JSON.parse(raw) as { t?: unknown }).t === "pong"
+  } catch {
+    return false
+  }
 }
 
 export interface WsReconciler {
@@ -311,6 +351,8 @@ export function createWsReconciler(
   // a 250ms floor had the whole fleet reconnecting (and resyncing) in lockstep.
   const minBackoff = options.minBackoffMs ?? 1_000
   const maxBackoff = options.maxBackoffMs ?? 30_000
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 25_000
+  const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 10_000
   const Ctor =
     options.webSocketCtor ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
   if (!Ctor) {
@@ -323,6 +365,61 @@ export function createWsReconciler(
   let closed = false
   let backoffMs = minBackoff
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  let heartbeatDeadline: ReturnType<typeof setTimeout> | null = null
+  let lastReceivedAt = 0
+
+  function stopHeartbeat(): void {
+    if (heartbeatTimer !== null) clearInterval(heartbeatTimer)
+    if (heartbeatDeadline !== null) clearTimeout(heartbeatDeadline)
+    heartbeatTimer = null
+    heartbeatDeadline = null
+  }
+
+  /**
+   * Replace a socket that stopped answering. Doesn't wait for `onclose`: on a
+   * half-open socket the closing handshake can take minutes to give up.
+   */
+  function dropDeadSocket(ws: WebSocket): void {
+    if (socket !== ws) return
+    stopHeartbeat()
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onerror = null
+    ws.onclose = null
+    try {
+      ws.close(4000, "heartbeat timeout")
+    } catch {
+      /* swallow */
+    }
+    socket = null
+    safeEmit(() => handlers.onError?.(new Error("ws: heartbeat timeout")))
+    safeEmit(() => handlers.onClose?.({ code: 4000, reason: "heartbeat timeout", wasClean: false } as CloseEvent))
+    backoffMs = minBackoff
+    void connect()
+  }
+
+  function startHeartbeat(ws: WebSocket): void {
+    stopHeartbeat()
+    if (heartbeatIntervalMs <= 0) return
+    heartbeatTimer = setInterval(() => {
+      if (socket !== ws || ws.readyState !== host.Open) {
+        stopHeartbeat()
+        return
+      }
+      const sentAt = Date.now()
+      try {
+        ws.send(JSON.stringify({ t: "ping", ts: sentAt } satisfies ProjectWsClientMessage))
+      } catch {
+        /* a failing send surfaces through onerror/onclose */
+      }
+      if (!serverPongSeen || heartbeatDeadline !== null) return
+      heartbeatDeadline = setTimeout(() => {
+        heartbeatDeadline = null
+        if (lastReceivedAt < sentAt) dropDeadSocket(ws)
+      }, heartbeatTimeoutMs)
+    }, heartbeatIntervalMs)
+  }
 
   function safeEmit(fn: (() => void) | undefined): void {
     if (!fn) return
@@ -393,12 +490,21 @@ export function createWsReconciler(
 
     ws.onopen = () => {
       backoffMs = minBackoff
+      lastReceivedAt = Date.now()
+      startHeartbeat(ws)
       safeEmit(() => handlers.onOpen?.({ connId: socketConnId }))
     }
     ws.onmessage = (ev: MessageEvent) => {
+      // Any frame proves the socket is alive, not just a pong.
+      lastReceivedAt = Date.now()
       let parsed: ProjectWsServerMessage | null = null
       try {
         const raw = typeof ev.data === "string" ? ev.data : String(ev.data)
+        if (isPongFrame(raw)) {
+          serverPongSeen = true
+          return
+        }
+        recordSyncBytes("download", raw)
         parsed = parseProjectWsMessage(raw)
       } catch (err) {
         const e = err instanceof Error ? err : new Error(String(err))
@@ -417,6 +523,7 @@ export function createWsReconciler(
       safeEmit(() => handlers.onError?.(new Error("ws: socket error")))
     }
     ws.onclose = (closeEvent: CloseEvent) => {
+      if (socket === ws) stopHeartbeat()
       safeEmit(() => handlers.onClose?.(closeEvent))
       socket = null
       scheduleReconnect()
@@ -439,13 +546,16 @@ export function createWsReconciler(
     send(msg: ProjectWsClientMessage): boolean {
       if (!socket || socket.readyState !== host.Open) return false
       try {
-        socket.send(JSON.stringify(msg))
+        const payload = JSON.stringify(msg)
+        socket.send(payload)
+        recordSyncBytes("upload", payload)
         return true
       } catch {
         return false
       }
     },
     reconnect(): void {
+      stopHeartbeat()
       if (socket) {
         try {
           socket.close()
@@ -462,6 +572,7 @@ export function createWsReconciler(
     },
     close(): void {
       closed = true
+      stopHeartbeat()
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
@@ -638,6 +749,7 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       untilSeq: m.untilSeq,
       fileIds: m.fileIds.filter((f): f is string => typeof f === "string"),
       cellIds: m.cellIds.filter((c): c is string => typeof c === "string"),
+      filesChanged: m.filesChanged === true,
     }
   }
   return null
@@ -1004,20 +1116,39 @@ export interface LinkUpstreamChangedHandlerOptions {
    *  Frames for any other project are ignored (a stale reconciler from a
    *  just-closed project, or — defensively — a server bug). */
   currentProjectId(): string | null
-  /** Triggers a refetch of stale-source state (`useStaleSourceCells.revalidate`). */
+  /** Re-reads stale-source state WITHOUT triggering a sync of its own
+   *  (`useStaleSourceCells.refetch`) — this handler owns the sync. */
   revalidateStaleSource(): void
-  /** Fire-and-forget POST /link/sync for the currently open project/file —
-   *  same shape as `useStaleSourceCells.ts`'s existing `triggerLinkSync`. */
-  triggerLinkSync(): void
+  /** POST /link/sync for the currently open project, then whatever refreshes
+   *  follow it. `filesChanged` is true when any frame this sync answers said
+   *  the upstream created or renamed a file. Return the promise when there is
+   *  one: a frame that lands while it is still running is answered by another
+   *  sync once it settles, because the running one may have read the upstream
+   *  before that frame's change committed. */
+  triggerLinkSync(change: { filesChanged: boolean }): Promise<unknown> | void
   /** Debounce window — bursts of frames (e.g. a large upstream re-import)
    *  collapse to one sync per project per window (spec: "one sync per 5s
    *  per project so bursts don't hammer the route"). */
   debounceMs?: number
   /** Injectable clock for tests. */
   now?(): number
+  /** Injectable timer for tests; returns a cancel function. */
+  setTimer?(fn: () => void, ms: number): () => void
+}
+
+export interface LinkUpstreamChangedHandler {
+  (msg: Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>): void
+  /** Drop a sync still waiting for its window. Call when the socket that feeds
+   *  this handler is torn down; a sync already running is left to finish. */
+  dispose(): void
 }
 
 const LINK_UPSTREAM_CHANGED_DEFAULT_DEBOUNCE_MS = 5000
+
+const defaultSetTimer = (fn: () => void, ms: number): (() => void) => {
+  const id = setTimeout(fn, ms)
+  return () => clearTimeout(id)
+}
 
 /**
  * Build a handler for `link.upstream-changed` frames. Always calls
@@ -1027,27 +1158,80 @@ const LINK_UPSTREAM_CHANGED_DEFAULT_DEBOUNCE_MS = 5000
  * re-import) collapses to one `/link/sync` POST instead of hammering the
  * route once per frame.
  *
- * Pure with respect to time: pass `now` in tests to avoid fake timers.
+ * The debounce keeps its trailing edge. The first frame syncs at once; frames
+ * inside the window, or while that sync is still running, are not dropped but
+ * owed ONE more sync, run when the window closes and the running sync has
+ * settled. AQU-1545: the window used to swallow them, so a burst of upstream
+ * hides left the open downstream showing only the first until a reload.
  */
 export function createLinkUpstreamChangedHandler(
   options: LinkUpstreamChangedHandlerOptions,
-): (msg: Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>) => void {
+): LinkUpstreamChangedHandler {
   const debounceMs = options.debounceMs ?? LINK_UPSTREAM_CHANGED_DEFAULT_DEBOUNCE_MS
   const now = options.now ?? (() => Date.now())
+  const setTimer = options.setTimer ?? defaultSetTimer
   // -Infinity, not 0: with an injected `now: () => t` starting at t=0 (as
   // tests do), a `lastSyncAt` of 0 would suppress the very first call.
   let lastSyncAt = -Infinity
+  let running = false
+  /** A frame arrived that no sync started since has covered. */
+  let owed = false
+  /** One of those frames created or renamed an upstream file. */
+  let owedFilesChanged = false
+  let cancelTimer: (() => void) | null = null
+  let disposed = false
 
-  return (msg) => {
+  const runSync = (): void => {
+    cancelTimer = null
+    if (disposed) return
+    const filesChanged = owedFilesChanged
+    owed = false
+    owedFilesChanged = false
+    running = true
+    lastSyncAt = now()
+    let pending: Promise<unknown> | void
+    try {
+      pending = options.triggerLinkSync({ filesChanged })
+    } catch {
+      pending = undefined
+    }
+    void Promise.resolve(pending)
+      .catch(() => {
+        // Best-effort: the lazy pull on the next file open is the floor.
+      })
+      .finally(() => {
+        running = false
+        if (owed) arm()
+      })
+  }
+
+  const arm = (): void => {
+    if (disposed || running || cancelTimer) return
+    const wait = lastSyncAt + debounceMs - now()
+    if (wait <= 0) {
+      runSync()
+      return
+    }
+    cancelTimer = setTimer(runSync, wait)
+  }
+
+  const handle = (msg: Extract<ProjectWsServerMessage, { t: "link.upstream-changed" }>): void => {
     const pid = options.currentProjectId()
     if (!pid || msg.project !== pid) return
 
     // Staleness must reflect the frame immediately — cheap GET, no debounce.
     options.revalidateStaleSource()
 
-    const t = now()
-    if (t - lastSyncAt < debounceMs) return
-    lastSyncAt = t
-    options.triggerLinkSync()
+    owed = true
+    if (msg.filesChanged) owedFilesChanged = true
+    arm()
   }
+
+  return Object.assign(handle, {
+    dispose: () => {
+      disposed = true
+      cancelTimer?.()
+      cancelTimer = null
+    },
+  })
 }

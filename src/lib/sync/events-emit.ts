@@ -18,7 +18,7 @@ import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canPerform, requiredRoleFor, ROLE } from "./role-policy"
-import type { TermRendering } from "@/lib/terminology/types"
+import type { TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 import {
   OUTBOX_SCHEMA_VERSION,
   type OutboxEventKind,
@@ -28,6 +28,10 @@ import {
 } from "./outbox-types"
 import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
+// AQU-1572: per-gesture validation / audio telemetry. Instrumented here, at
+// the one seam every such gesture already passes through.
+import { captureAudioAction, captureCellValidation } from "@/lib/cell-telemetry"
+import type { AudioOrigin, TelemetrySource, TelemetrySurface } from "@/lib/cell-telemetry"
 import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
 import type { TrackKind } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -35,6 +39,26 @@ import type { CameraState } from "@/lib/sync/cells-read-types"
 // Session-scoped flags — reset on page reload (true "first in session" semantics).
 let _firstCommitFired = false
 let _firstValidateFired = false
+
+/**
+ * AQU-1462: a non-empty lane tag rides on the event so an archived lane can
+ * refuse it. The default lane is omitted. An absent tag is a shared write.
+ *
+ * AQU-1612: the lane row's id rides along with it when the caller has one.
+ * Both forms name the same lane and the server refuses an event where they
+ * disagree, so a caller passes the pair it read off one lane row — never a tag
+ * from one lane and an id from another. The tag stays mandatory for a named
+ * lane: it is the frozen event key replay and the chain slot are built from.
+ */
+function targetLaneFields(lane: {
+  targetLang?: string
+  laneId?: string
+}): { targetLang?: string; laneId?: string } {
+  return {
+    ...(lane.targetLang ? { targetLang: lane.targetLang } : {}),
+    ...(lane.laneId ? { laneId: lane.laneId } : {}),
+  }
+}
 
 // ── Envelope construction ─────────────────────────────────────────────────
 
@@ -190,6 +214,13 @@ export async function enqueueEvents<K extends OutboxEventKind>(
 // ── Convenience builders for common writer flows ──────────────────────────
 
 export interface CellCommitInput {
+  /**
+   * AQU-1578: caller-minted event id (UUIDv7). The editor mints it so it can
+   * record the commit as the cell's pending head BEFORE the asynchronous
+   * outbox write — a second commit inside that window must chain on it.
+   * Omit to have the envelope builder mint one.
+   */
+  id?: string
   projectId: string
   fileId: string
   cellId: string
@@ -204,6 +235,8 @@ export interface CellCommitInput {
    * chain slot server-side.
    */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   value: string
   valueHtml?: string
   author: string
@@ -220,6 +253,14 @@ export interface CellCommitInput {
    */
   searchQuery?: string
   replaceString?: string
+  /**
+   * AQU-1391: the cell whose validation propagated this text to a repeated
+   * source segment. Provenance only — it makes the history drawer able to say
+   * "copied from a repetition" rather than showing an authorless edit, and it
+   * lets the toast's Undo be told apart from the propagation it reverses (the
+   * undo commits carry no such tag).
+   */
+  propagatedFromCellId?: string
 }
 
 function noteTargetCellCommit(input: CellCommitInput): void {
@@ -247,6 +288,7 @@ function targetCellCommitEventInput(
   input: CellCommitInput,
 ): BuildEventInput<"target.cell.commit"> {
   return {
+    ...(input.id ? { id: input.id } : {}),
     kind: "target.cell.commit",
     projectId: input.projectId,
     fileId: input.fileId,
@@ -259,11 +301,14 @@ function targetCellCommitEventInput(
       ...(input.sourceEventId !== undefined
         ? { sourceEventId: input.sourceEventId }
         : {}),
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+      ...targetLaneFields(input),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
       ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
       ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
+      ...(input.propagatedFromCellId !== undefined
+        ? { propagated_from_cell_id: input.propagatedFromCellId }
+        : {}),
     },
     clientTs: input.clientTs,
   }
@@ -316,6 +361,22 @@ export interface CellValidateInput {
    * OMITTED from the wire payload, so N=1 validations are byte-identical.
    */
   targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  /**
+   * AQU-1572: who performed the gesture — telemetry only, never written to the
+   * wire payload. Defaults to a person in the UI.
+   */
+  source?: TelemetrySource
+  /**
+   * AQU-1572: this validation was added BY the app, not asked for: the vote
+   * your own edit casts for itself (`shouldAutoValidateHumanEdit`). Telemetry
+   * only, never on the wire. Reported as `auto: true` so a dashboard can
+   * count deliberate reviews apart from it; everything else reports `false`.
+   */
+  auto?: boolean
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
   author: string
   clientTs?: number
 }
@@ -347,9 +408,23 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     payload: {
       editEventId: input.editEventId,
       // AQU-538: '' (default lane) is omitted from the wire.
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
+  })
+  // AQU-1572: the per-gesture event, which the milestone above cannot stand in
+  // for — that one fires once per session, so it can say somebody validated
+  // and never how much. Counted after the enqueue, so a write that threw is
+  // not reported as a validation that happened.
+  captureCellValidation(true, {
+    medium: "text",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    lane: input.targetLang,
+    source: input.source,
+    auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -366,9 +441,19 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     payload: {
       editEventId: input.editEventId,
       // AQU-538: '' (default lane) is omitted from the wire.
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
+  })
+  captureCellValidation(false, { // AQU-1572
+    medium: "text",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    lane: input.targetLang,
+    source: input.source,
+    auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -385,6 +470,10 @@ export interface CellWaiveInput {
   ruleId: string
   /** Optional human-entered justification. */
   reason?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -401,6 +490,7 @@ export async function emitCellWaive(input: CellWaiveInput): Promise<string> {
     payload: {
       ruleId: input.ruleId,
       ...(input.reason ? { reason: input.reason } : {}),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -412,6 +502,10 @@ export interface CellUnwaiveInput {
   fileId: string
   cellId: string
   ruleId: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -425,7 +519,7 @@ export async function emitCellUnwaive(input: CellUnwaiveInput): Promise<string> 
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { ruleId: input.ruleId },
+    payload: { ruleId: input.ruleId, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -462,11 +556,43 @@ export interface CellAudioAttachInput {
    * recorded takes on target cells.
    */
   transcription?: string
+  /** AQU-1462: lane the member is working in. Omitted for a shared clip. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  /**
+   * AQU-1572: which gesture produced this clip — telemetry only, never on the
+   * wire. ONLY the originating gesture passes one (an upload or LinkMedia
+   * attach, a synthesis, a recorder save). The derived re-attaches — denoise,
+   * the transcription's timings write-back, diarization, the recorder's heal
+   * path — deliberately leave it undefined and emit nothing, because they all
+   * re-attach a clip that was already counted once.
+   */
+  audioOrigin?: AudioOrigin
+  /** AQU-1572: synthesis backend, for `audioOrigin: "generate"`. Telemetry only. */
+  ttsProvider?: string
+  /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
+  source?: TelemetrySource
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
   author: string
   clientTs?: number
 }
 
 /** Emit a `cell.audio.attach` — records a clip and selects it in its slot. */
+/**
+ * AQU-1572: the length that will PLAY, for telemetry. A recorder take is
+ * attached with its trim window (the pre-roll and tail it keeps but does not
+ * play), and the file's own length would overstate every take by that much.
+ * Nothing known, nothing sent.
+ */
+function playedDuration(input: CellAudioAttachInput): { durationMs?: number } {
+  const start = input.trimStartMs ?? 0
+  const end = input.trimEndMs ?? input.durationMs
+  if (end === undefined || !Number.isFinite(end) || end - start <= 0) return {}
+  return { durationMs: end - start }
+}
+
 export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<string> {
   const { eventId } = await enqueueEvent({
     kind: "cell.audio.attach",
@@ -488,9 +614,28 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.trimEndMs !== undefined ? { trimEndMs: intMs(input.trimEndMs) } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
+  // AQU-1572: only the ORIGINATING gesture reports; a derived re-attach passes
+  // no origin and so cannot double-count a clip. After the enqueue, because a
+  // throw here aborts the attach (attach-file deletes the orphaned R2 object).
+  if (input.audioOrigin) {
+    captureAudioAction({
+      origin: input.audioOrigin,
+      projectId: input.projectId,
+      fileId: input.fileId,
+      cellId: input.cellId,
+      slot: input.slot,
+      lane: input.targetLang,
+      source: input.source,
+      surface: input.surface,
+      ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
+      ...(input.ttsProvider !== undefined ? { provider: input.ttsProvider } : {}),
+      ...playedDuration(input),
+    })
+  }
   return eventId
 }
 
@@ -501,6 +646,10 @@ export interface CellAudioRenameInput {
   audioId: string
   /** The take's new permanent name; null clears back to unnamed. */
   label: string | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -514,7 +663,7 @@ export async function emitCellAudioRename(input: CellAudioRenameInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, label: input.label },
+    payload: { audioId: input.audioId, label: input.label, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -528,6 +677,10 @@ export interface CellAudioTrimInput {
   /** The COMPLETE window. null on either end = back to the clip's own edge. */
   trimStartMs: number | null
   trimEndMs: number | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -555,6 +708,7 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
       audioId: input.audioId,
       trimStartMs: input.trimStartMs,
       trimEndMs: input.trimEndMs,
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -570,6 +724,10 @@ export interface CellAudioPlaceInput {
    *  leads its line), `0` is a real placement, and `null` clears it back to the
    *  line's start. */
   targetOffsetMs: number | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -598,7 +756,7 @@ export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<st
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs },
+    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -660,6 +818,10 @@ export interface CellAudioMeasureInput {
   audioId: string
   /** The clip's decoded length. The server fills only a NULL duration. */
   durationMs: number
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -677,7 +839,7 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs) },
+    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs), ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -687,9 +849,14 @@ export interface CellAudioSelectInput {
   projectId: string
   fileId: string
   cellId: string
-  audioId: string
+  /** null empties the slot — see emitCellAudioDeselect. */
+  audioId: string | null
   /** Open string (AQU-646): a track id addresses an extra target track. */
   slot: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -703,10 +870,25 @@ export async function emitCellAudioSelect(input: CellAudioSelectInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, slot: input.slot },
+    payload: { audioId: input.audioId, slot: input.slot, ...targetLaneFields(input) },
     clientTs: input.clientTs,
   })
   return eventId
+}
+
+/**
+ * Leave a slot with NOTHING selected. (2026-09-28)
+ *
+ * A line plays its recording-slot take whenever there is one, so switching it
+ * to its generated voice has to empty that slot. A line with an imported source
+ * clip parks the slot on the clip instead; everything else — every text file —
+ * has nothing to park it on, and picking the generated take used to change
+ * nothing at all (Sam, Mark 1:3).
+ */
+export function emitCellAudioDeselect(
+  input: Omit<CellAudioSelectInput, "audioId">,
+): Promise<string> {
+  return emitCellAudioSelect({ ...input, audioId: null })
 }
 
 export interface CellRetimeInput {
@@ -750,6 +932,10 @@ export interface CellLaneRetimeInput {
    *  historical events keep projecting. See lane-timing.ts for why the read
    *  fallback is permanent rather than a migration. */
   targetStartMs?: number | null
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -779,6 +965,7 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
       ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: intMs(input.subtitleEndMs) } : {}),
       ...(input.targetOffsetMs !== undefined ? { targetOffsetMs: intMs(input.targetOffsetMs) } : {}),
       ...(input.targetStartMs !== undefined ? { targetStartMs: intMs(input.targetStartMs) } : {}),
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -860,6 +1047,7 @@ export interface FileTrackSetInput {
     /** Which track's cells an added track's chips line up with. Set once, at
      *  creation; the server refuses it on a reserved (derived) track id. */
     sourceTrackId?: string | null
+    contentFileId?: string | null
   } | null
   author: string
   clientTs?: number
@@ -891,6 +1079,10 @@ export interface CellAudioRemoveInput {
   fileId: string
   cellId: string
   audioId: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -904,8 +1096,105 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId },
+    payload: { audioId: input.audioId, ...targetLaneFields(input) },
     clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+// ── Audio validation (AQU-490) ────────────────────────────────────────────
+// A vote is on a TAKE, so these carry an audioId where the text pair carries
+// an editEventId. Non-chain-mutating like the text pair, for the same reason:
+// the projection treats them as additive writes to cell_audio_validators
+// rather than as a new head, so parentId is omitted.
+//
+// These kinds have existed server-side since AQU-508 and no client has ever
+// emitted them — which is why every audio-validated number in the product is
+// zero, and why the plan board measures audio on "recorded" instead.
+
+export interface CellAudioValidateInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** AQU-1462: lane the member is working in. The vote itself stays shared. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  /** AQU-1572: who performed the gesture. Telemetry only, never on the wire. */
+  source?: TelemetrySource
+  /**
+   * AQU-1572: the recorder's own vote for a fresh take
+   * (`shouldAutoValidateFreshRecording`), not a listener's review. Telemetry
+   * only, never on the wire; reported as `auto: true`.
+   */
+  auto?: boolean
+  /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
+  surface?: TelemetrySurface
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.audio.validate` — one person's vote on one take. */
+export async function emitCellAudioValidate(input: CellAudioValidateInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.validate",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, ...targetLaneFields(input) },
+    clientTs: input.clientTs,
+  })
+  captureCellValidation(true, { // AQU-1572
+    medium: "audio",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    lane: input.targetLang,
+    source: input.source,
+    auto: input.auto,
+    surface: input.surface,
+  })
+  return eventId
+}
+
+export interface CellAudioUnvalidateInput extends CellAudioValidateInput {
+  /**
+   * Whose vote to remove. Omit for your own — which is what every caller but
+   * the maintainer's "remove this person's validation" does. Naming somebody
+   * else is gated on MAINTAINER at the route; sending it as your own username
+   * is allowed and means the same as omitting it.
+   */
+  targetUsername?: string
+}
+
+/** Mirror of `emitCellAudioValidate` for withdrawing a vote. */
+export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.unvalidate",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      ...(input.targetUsername ? { targetUsername: input.targetUsername } : {}),
+      ...targetLaneFields(input),
+    },
+    clientTs: input.clientTs,
+  })
+  captureCellValidation(false, { // AQU-1572
+    medium: "audio",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    lane: input.targetLang,
+    source: input.source,
+    auto: input.auto,
+    surface: input.surface,
   })
   return eventId
 }
@@ -921,6 +1210,10 @@ export interface CellBacktranslationSetInput {
   /** The target.cell.commit event_id this BT describes. */
   targetEventId: string
   polished: boolean
+  /** AQU-1462: lane whose translation this back-translation describes. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -945,6 +1238,7 @@ export async function emitCellBacktranslationSet(
       ...(input.btHtml !== undefined ? { btHtml: input.btHtml } : {}),
       targetEventId: input.targetEventId,
       polished: input.polished,
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })
@@ -1168,6 +1462,48 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
     parentId: input.parentId ?? null,
     author: input.author,
     payload: {},
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface SourceCellVisibilityInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** true parks the cell, false brings it back. */
+  hidden: boolean
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1422: park (or un-park) one cell — the three-dot menu's "Hide cell" /
+ * "Show cell".
+ *
+ * NO `parentId`, and that is the point: this kind is NOT chain-mutating. It
+ * moves only `cells.hidden_at` on the shared source row, so
+ *
+ *   - nothing is deleted (unlike `source.cell.delete`, which drops the
+ *     projection row) — the source text, every lane's translation, recordings,
+ *     comments and validations survive and come back on show; and
+ *   - `cells.event_id` does not advance, so no lane's translation goes stale.
+ *     Hiding a cell says nothing about whether its text changed, and AD-9
+ *     compares a target's pin against the source head.
+ *
+ * One event covers every language: hiding is per CELL, not per lane.
+ */
+export async function emitSourceCellVisibilitySet(
+  input: SourceCellVisibilityInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.visibility.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { hidden: input.hidden },
     clientTs: input.clientTs,
   })
   return eventId
@@ -1416,6 +1752,45 @@ export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<stri
   return eventId
 }
 
+export interface FileReorderInput {
+  projectId: string
+  fileId: string
+  /** Hand-placed position within the file's corpus group; null clears it back
+   *  to the automatic name-derived order. See `src/lib/sidebar/file-sort-index.ts`
+   *  for the arithmetic that produces the value. */
+  sortIndex: number | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1569: persist a file's hand-placed position so it survives reload and
+ * reaches every other member — the order is part of the project, not a
+ * per-browser preference. File-scoped and non-chain-mutating (`parentId =
+ * null`), like `file.corpus.set`; the server projects it as a `files` UPDATE
+ * merging `sortIndex` into files.meta.
+ *
+ * A non-finite index is sent as `null` (a clear) rather than written: the
+ * value is arithmetic on floats, and persisting a NaN would give the file a
+ * position no comparator can order it by.
+ */
+export async function emitFileReorder(input: FileReorderInput): Promise<string> {
+  const usable =
+    typeof input.sortIndex === "number" && Number.isFinite(input.sortIndex)
+      ? input.sortIndex
+      : null
+  const { eventId } = await enqueueEvent({
+    kind: "file.reorder",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { sortIndex: usable },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export async function emitFileRename(input: FileRenameInput): Promise<string> {
   const { eventId } = await enqueueEvent({
     kind: "file.rename",
@@ -1504,6 +1879,7 @@ export interface TermCreateInput {
   status: "active" | "draft" | "deprecated"
   notes?: string
   caseSensitive?: boolean
+  match?: TermMatchOptions
   author: string
   clientTs?: number
 }
@@ -1522,6 +1898,7 @@ export async function emitTermCreate(input: TermCreateInput): Promise<string> {
       status: input.status,
       ...(input.notes ? { notes: input.notes } : {}),
       ...(input.caseSensitive ? { caseSensitive: true } : {}),
+      ...(input.match ? { match: input.match } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -1536,6 +1913,7 @@ export interface TermUpdateInput {
   renderings?: TermRendering[]
   notes?: string
   caseSensitive?: boolean
+  match?: TermMatchOptions
   author: string
   clientTs?: number
 }
@@ -1558,6 +1936,7 @@ export async function emitTermUpdate(input: TermUpdateInput): Promise<string> {
       ...(input.renderings !== undefined ? { renderings: input.renderings } : {}),
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
       ...(input.caseSensitive !== undefined ? { caseSensitive: input.caseSensitive } : {}),
+      ...(input.match !== undefined ? { match: input.match } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -1611,6 +1990,75 @@ export async function emitTermReject(input: TermRejectInput): Promise<string> {
     parentId: null,
     author: input.author,
     payload: { conceptId: input.conceptId, mode: input.mode },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+// ── Cell attachments (AQU-777) ────────────────────────────────────────────
+
+export interface CellAttachmentAddInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Client-generated uuidv7 — the projection's key within the project. */
+  attachmentId: string
+  /** R2 object name inside the cell's file scope ("<attachmentId>.<ext>"). */
+  objectName: string
+  /** The user-visible file name, as picked. */
+  name: string
+  mimeType?: string
+  sizeBytes?: number
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.attachment.add`. The bytes must already be in R2 — the caller
+ * (src/lib/attachments/attach-file.ts) PUTs first and cleans the object up if
+ * this emit throws, so a projected row never points at nothing.
+ */
+export async function emitCellAttachmentAdd(input: CellAttachmentAddInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.attachment.add",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      attachmentId: input.attachmentId,
+      objectName: input.objectName,
+      name: input.name,
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      ...(input.sizeBytes !== undefined ? { sizeBytes: input.sizeBytes } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAttachmentRemoveInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  attachmentId: string
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.attachment.remove` — soft-deletes the projection row. */
+export async function emitCellAttachmentRemove(
+  input: CellAttachmentRemoveInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.attachment.remove",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { attachmentId: input.attachmentId },
     clientTs: input.clientTs,
   })
   return eventId

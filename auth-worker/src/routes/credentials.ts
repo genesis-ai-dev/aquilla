@@ -12,6 +12,18 @@
 //     org. An 'act' credential must therefore carry a scope.
 //   - The credential is a ceiling only: every API call re-resolves the user's
 //     live role, so a credential never exceeds the user.
+//   - `access` (AQU-1242) is the credential's WRITE ceiling, orthogonal to
+//     `mode`: 'read' refuses every write surface on the Agent API, 'write'
+//     (the default, so existing tokens and callers are unaffected) is the
+//     original grant. 'read' + mode 'act' is a contradiction and is rejected —
+//     'act' means "commits apply immediately", and a read-only token has no
+//     commits. Access is fixed at mint time; no API call can raise it.
+//   - `pii` (AQU-1180) opts the credential IN to seeing real human identities
+//     in agent-facing responses. Default off; requires OWNER of the scoped org
+//     or project, and an unscoped credential can never carry it. Everything
+//     the Agent API returns lands in whatever AI console holds the token, and
+//     for translation teams in restricted regions that makes translator
+//     identity a safety exposure — see sync-worker/src/external/pii.ts.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -33,23 +45,32 @@ const credentials = new Hono<AuthHonoEnv>()
 const createSchema = z.object({
   name: z.string().min(1).max(200),
   mode: z.enum(["ask", "act"]),
+  // AQU-1242: omitted = "write", so every existing caller (and the
+  // /connect-agent grant flow) keeps minting read-write tokens unchanged.
+  access: z.enum(["read", "write"]).optional(),
   orgId: z.string().min(1).optional(),
   projectId: z.string().min(1).optional(),
   // ISO-8601 timestamp; validated as a real date below.
   expiresAt: z.string().datetime().optional(),
+  // AQU-1180: opt IN to human identity in agent-facing responses. Omitted =
+  // false; the safe answer is the one you get by not thinking about it.
+  pii: z.boolean().optional(),
 })
 
 interface CredentialRow {
   id: string
   name: string
   mode: "ask" | "act"
+  access: "read" | "write"
   org_id: string | null
+  org_ids?: string[] | null
   project_id: string | null
   token_prefix: string
   created_at: string
   expires_at: string | null
   last_used_at: string | null
   revoked_at: string | null
+  pii: boolean | null
 }
 
 /** Public JSON shape — never includes token_hash. */
@@ -58,19 +79,43 @@ function toDto(r: CredentialRow) {
     id: r.id,
     name: r.name,
     mode: r.mode,
+    // AQU-1242: surfaced so the token list can mark which tokens can change
+    // anything — the same reason `pii` is surfaced below.
+    access: r.access,
     orgId: r.org_id,
+    ...(r.org_ids != null ? { orgIds: r.org_ids } : {}),
     projectId: r.project_id,
     tokenPrefix: r.token_prefix,
     createdAt: r.created_at,
     expiresAt: r.expires_at,
     lastUsedAt: r.last_used_at,
     revokedAt: r.revoked_at,
+    // AQU-1180: surfaced so the token list can mark which tokens see real
+    // names — a human auditing their tokens has to be able to tell.
+    pii: r.pii === true,
   }
 }
 
 credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c) => {
   const user = c.get("user")
-  const { name, mode, orgId, projectId, expiresAt } = c.req.valid("json")
+  const { name, mode, orgId, projectId, expiresAt, pii, access } = c.req.valid("json")
+  const wantsPii = pii === true
+  const accessValue = access ?? "write"
+
+  // AQU-1242: 'act' is a statement about how a commit behaves, so asking for it
+  // on a token that can never commit is a mistake worth naming rather than
+  // silently coercing — a caller who wrote both fields deliberately should learn
+  // which one the server ignored, not discover it from a later 403.
+  if (accessValue === "read" && mode === "act") {
+    return c.json(
+      {
+        error: "validation_failed",
+        message:
+          "A read-only credential cannot be act-mode: act mode describes how a commit applies, and a read-only credential cannot commit. Use mode \"ask\" (it is not consulted on a read-only token) or access \"write\".",
+      },
+      400,
+    )
+  }
 
   // [Pen test] API security & data exposure (2026-08-13): throttle minting
   // before doing any scope resolution — see rate-limit.ts for rationale.
@@ -114,6 +159,35 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
     }
   }
 
+  // AQU-1180: a `pii` credential hands a third-party AI console the real names
+  // of everyone who has edited the project. That is a decision about other
+  // people's safety, so it needs the person who is accountable for the team:
+  // OWNER of the scope, not merely someone who can write to it. An unscoped
+  // (user-global) credential can never carry it — there is no owner of "every
+  // project this user can reach" to make that call.
+  if (wantsPii) {
+    if (scopeLevel === null) {
+      return c.json(
+        {
+          error: "permission_denied",
+          message:
+            "A credential that exposes translator identity must be scoped to a single org or project, and minted by an owner of it.",
+        },
+        403,
+      )
+    }
+    if (scopeLevel < ROLE.OWNER) {
+      return c.json(
+        {
+          error: "permission_denied",
+          message:
+            "Only an owner of this org or project can mint a credential that exposes translator identity (names and user ids) to an agent.",
+        },
+        403,
+      )
+    }
+  }
+
   let expiresAtValue: string | null = null
   if (expiresAt) {
     const ts = new Date(expiresAt).getTime()
@@ -131,10 +205,10 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
 
   const row = await c.env.AQUILLA_PG.prepare(
     `INSERT INTO api_credentials
-        (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     RETURNING id, name, mode, org_id, project_id, token_prefix,
-               created_at, expires_at, last_used_at, revoked_at`,
+        (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at, pii, access)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     RETURNING id, name, mode, access, org_id, project_id, token_prefix,
+               created_at, expires_at, last_used_at, revoked_at, pii`,
   )
     .bind(
       id,
@@ -146,6 +220,8 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
       orgId ?? null,
       projectId ?? null,
       expiresAtValue,
+      wantsPii,
+      accessValue,
     )
     .first<CredentialRow>()
 
@@ -158,8 +234,8 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
 credentials.get("/", authMiddleware, async (c) => {
   const user = c.get("user")
   const result = await c.env.AQUILLA_PG.prepare(
-    `SELECT id, name, mode, org_id, project_id, token_prefix,
-            created_at, expires_at, last_used_at, revoked_at
+    `SELECT id, name, mode, access, org_id, org_ids, project_id, token_prefix,
+            created_at, expires_at, last_used_at, revoked_at, pii
        FROM api_credentials
       WHERE user_id = ?
       ORDER BY created_at DESC`,

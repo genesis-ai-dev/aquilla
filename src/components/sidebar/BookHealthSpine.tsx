@@ -1,4 +1,7 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import { ChevronDown } from "lucide-react"
+import { usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
+import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { healthRibbonColor, healthRibbonOpacity } from "@/lib/health/health-ribbon"
 import { cn } from "@/lib/utils"
@@ -6,7 +9,14 @@ import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
 export interface BookHealthCell {
   id: string
-  stage: "untranslated" | "automatic" | "validated"
+  /**
+   * AQU-1083: `excluded` is a heading in a project that does not count
+   * headings toward progress. It is drawn — the map still shows the whole
+   * file — but it is not work, so it must not read as untranslated. That is
+   * the entire point of the setting: a chapter title left alone is finished
+   * business, not an outstanding task.
+   */
+  stage: "untranslated" | "automatic" | "validated" | "excluded"
   health?: number
   hasIssue?: boolean
 }
@@ -129,6 +139,9 @@ function cellBucketVisual(cells: BookHealthCell[]): { color: string; issue: bool
 function cellDescription(cell: BookHealthCell, index: number): string {
   const prefix = `Cell ${index + 1}`
   const warning = cell.hasIssue ? " · automatic warning" : ""
+  // Says WHY it is grey. Without this the square is indistinguishable from a
+  // faint untranslated one to anyone reading it with a screen reader.
+  if (cell.stage === "excluded") return `${prefix}: heading — not counted toward progress${warning}`
   if (cell.stage === "validated") return `${prefix}: human validated${warning}`
   if (cell.stage === "automatic") {
     return cell.health === undefined
@@ -166,23 +179,36 @@ function chapterTooltip(chapter: BookHealthChapter, visual: ChapterVisual, t: TF
   )
 }
 
+/** Default when a caller supplies no key. FileSectionGrid always passes a
+ *  per-file key; sharing one bucket would leak collapse state between files. */
+const DEFAULT_BOOK_COLLAPSE_KEY = "aquilla:sidebar:book-collapsed"
+
 export function BookHealthSpine({
   chapters,
   onChapterClick,
   className,
+  bookCollapseStorageKey = DEFAULT_BOOK_COLLAPSE_KEY,
 }: {
   chapters: BookHealthChapter[]
   onChapterClick: (label: string) => void
   className?: string
+  /**
+   * AQU-1187: localStorage key holding the collapsed book ids for this file, so
+   * a book folded shut stays shut across reloads the way corpus groups do.
+   */
+  bookCollapseStorageKey?: string
 }) {
   const t = useT()
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(() => new Set())
-  const visuals = chapters.map(chapterVisual)
+  const { members: collapsedBooks, toggle: toggleBook } = usePersistedToggleSet(bookCollapseStorageKey)
 
-  return (
-    <div data-testid="book-health-spine" className={cn("py-1 pl-6 pr-1", className)}>
-      {chapters.map((chapter, index) => {
-        const visual = visuals[index]
+  // AQU-1187: only a file that actually spans several books gets a tree. A
+  // per-book file (USFM, Paratext) and any non-scripture file get null back and
+  // render the flat spine they always have.
+  const bookGroups = useMemo(() => groupChaptersByBook(chapters), [chapters])
+
+  function renderChapter(chapter: BookHealthChapter) {
+        const visual = chapterVisual(chapter)
         const chapterCells = chapter.cells ?? []
         const isLong = chapterCells.length > COLLAPSED_CELL_LIMIT
         const isExpanded = expandedChapters.has(chapter.key)
@@ -221,18 +247,27 @@ export function BookHealthSpine({
                   >
                     {visibleCells.map((cell, cellIndex) => {
                       const tick = cellBucketVisual([cell])
+                      // AQU-1083: an excluded heading is drawn HOLLOW rather
+                      // than in a paler shade of the untranslated fill. The
+                      // three filled stages are points on one "how done is
+                      // this" scale, and a lighter fill just reads as a
+                      // fainter point on it — exactly the wrong message. An
+                      // outline is visibly not on the scale at all.
+                      const excluded = cell.stage === "excluded"
                       return (
                         <span
                           key={cell.id}
                           data-testid="book-health-cell"
+                          data-excluded={excluded || undefined}
                           role="img"
                           aria-label={cellDescription(cell, cellIndex)}
                           title={cellDescription(cell, cellIndex)}
                           className={cn(
                             "size-[7px] rounded-[1px]",
+                            excluded && "ring-1 ring-inset ring-slate-400/50 dark:ring-slate-500/50",
                             tick.issue && "ring-1 ring-inset ring-amber-500",
                           )}
-                          style={{ backgroundColor: tick.color }}
+                          style={{ backgroundColor: excluded ? "transparent" : tick.color }}
                         />
                       )
                     })}
@@ -271,6 +306,40 @@ export function BookHealthSpine({
               )}
             </div>
           </AppTooltip>
+        )
+  }
+
+  if (!bookGroups) {
+    return (
+      <div data-testid="book-health-spine" className={cn("py-1 pl-6 pr-1", className)}>
+        {chapters.map(renderChapter)}
+      </div>
+    )
+  }
+
+  return (
+    <div data-testid="book-health-spine" className={cn("py-1 pl-6 pr-1", className)}>
+      {bookGroups.map((group) => {
+        const isCollapsed = collapsedBooks.has(group.id)
+        return (
+          <div key={group.id} data-testid="book-health-book" data-book={group.id}>
+            <button
+              type="button"
+              data-testid="book-health-book-toggle"
+              aria-expanded={!isCollapsed}
+              aria-label={
+                isCollapsed
+                  ? t("nav.fileList.expandGroup", { group: group.id })
+                  : t("nav.fileList.collapseGroup", { group: group.id })
+              }
+              className="flex w-full items-center gap-1 rounded-lg px-1 py-1 text-start text-[11px] font-semibold text-foreground transition-colors hover:bg-accent/70"
+              onClick={() => toggleBook(group.id)}
+            >
+              <ChevronDown className={cn("h-3 w-3 shrink-0", isCollapsed && "-rotate-90")} />
+              <span className="truncate">{group.id}</span>
+            </button>
+            {!isCollapsed && group.chapters.map(renderChapter)}
+          </div>
         )
       })}
     </div>

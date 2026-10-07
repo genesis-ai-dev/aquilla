@@ -13,9 +13,9 @@
 //     (removing the direct row is NOT a demotion of additive paths)
 //   - src:"platform" tokens (ADMIN_EMAILS operators) are exempt — the
 //     documented platform-admin exemption (no membership rows to re-check)
-//   - missing project row → accepted (mint-time gate is the authority; the
-//     sync-token route auto-registers projects, so real removals always have
-//     a row)
+//   - missing project row → accepted (mint-time gate is the authority; AQU-299
+//     / SEC-9: the sync-token route 403s an unknown projectId, so a live
+//     project always has a row and real removals always have one)
 
 import { describe, it, expect, vi } from 'vitest'
 

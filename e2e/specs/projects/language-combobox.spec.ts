@@ -16,9 +16,13 @@
  *      dropdown; the field stores the display name, not the code.
  *   2. Target language(s) chips → type a custom label that is in no catalog
  *      ("Grade 7 English") and press Enter; the chip sticks verbatim.
- *   3. In the SAME session, type "swah" and pick "Swahili" from the dropdown;
- *      that chip sticks too, alongside the custom one.
- *   4. Create, then reopen Settings → the saved values are exactly what was
+ *   3. AQU-1116 — in the same chips field, type "Ger" and press Enter; the
+ *      pre-highlighted "German" is committed, not the typed "Ger". Steps 2 and
+ *      3 are the same keystroke on the same field, separated only by whether
+ *      the catalog had a match — which is exactly the line the fix draws.
+ *   4. In the SAME session, type "swah" and pick "Swahili" from the dropdown;
+ *      that chip sticks too, alongside the others.
+ *   5. Create, then reopen Settings → the saved values are exactly what was
  *      committed ("French" / "Grade 7 English").
  */
 
@@ -63,7 +67,24 @@ test("language fields suggest from the catalog and still accept custom text", as
   // The draft is consumed, not left behind.
   await expect(target).toHaveValue("")
 
-  // 3. A dropdown pick and a custom label coexist in one session.
+  // 3. AQU-1116 — type-then-Enter takes the pre-highlighted top match. This is
+  //    the same key, on the same field, as step 2: proving both in one real
+  //    browser session is the point, since what separates them is only whether
+  //    the catalog had a match to highlight.
+  await target.pressSequentially("Ger", { delay: 30 })
+  const german = alice.getByRole("option", { name: /^German/ })
+  await expect(german).toBeVisible({ timeout: 5_000 })
+  await expect(german).toHaveAttribute("aria-selected", "true")
+  await target.press("Enter")
+
+  await expect(dialog.getByTestId("create-extra-lang-chip-German")).toBeVisible({
+    timeout: 5_000,
+  })
+  // Enter committed the match, not the "Ger" that was typed.
+  await expect(dialog.getByTestId("create-extra-lang-chip-Ger")).toHaveCount(0)
+  await expect(target).toHaveValue("")
+
+  // 4. A dropdown pick and a custom label coexist in one session.
   await target.pressSequentially("swah", { delay: 30 })
   const swahili = alice.getByRole("option", { name: /^Swahili/ })
   await expect(swahili).toBeVisible({ timeout: 5_000 })
@@ -78,7 +99,7 @@ test("language fields suggest from the catalog and still accept custom text", as
   await dialog.getByRole("button", { name: /^Create Project$/i }).click()
   await expect(dialog).toBeHidden({ timeout: 15_000 })
 
-  // 4. What was committed is what got saved.
+  // 5. What was committed is what got saved.
   await dash.openProject(name)
   const settings = new ProjectSettings(alice)
   await settings.openSettings()

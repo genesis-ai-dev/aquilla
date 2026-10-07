@@ -5,9 +5,10 @@
  * The shell (sidebar, top bar, status bar) stays mounted at all times;
  * only this component swaps in place of the EditorTable.
  */
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom"
-import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText, Plus, BookOpen } from "lucide-react"
+import { Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Clock, ScrollText, Plus, BookOpen, Layers } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/page"
 import { Input } from "@/components/ui/input"
@@ -21,11 +22,15 @@ import {
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleEditor } from "./RuleEditor"
+import { OrgRulesPanel } from "@/components/rules/OrgRulesPanel"
+import { SeverityBadge, SeverityIcon } from "@/components/rules/RuleSeverity"
 import { LaneCombobox } from "@/components/LaneCombobox"
-import { lanesWithRules, filterRulesForDisplay } from "@/lib/rules/rule-engine"
+import { rulesForLane, ruleLaneScope, type RuleLaneScope } from "@/lib/rules/rule-engine"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { RuleImportDialog } from "./RuleImportDialog"
-import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
-import { cn } from "@/lib/utils"
+import { RuleSuggestionItem, RuleSuggestionsFooter } from "@/components/rules/RuleSuggestions"
+import { useRuleSuggestions } from "@/hooks/useRuleSuggestions"
+import { useFlipAnimation } from "@/hooks/useFlipAnimation"
 import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
 import type { CompletionSettings, ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
@@ -34,6 +39,7 @@ import type { OrgWideSettings, OrgPatchResult, PromotionRequestResult } from "@/
 import { v4 as uuid } from "uuid"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { laneDisplayName } from "@/lib/lanes/lane-display"
 
 type UseRulesReturn = ReturnType<typeof useRules>
 
@@ -48,6 +54,10 @@ interface Props {
   setBuiltinOverride: UseRulesReturn["setBuiltinOverride"]
   infractions: Map<string, import("@/lib/parsers/types").RuleInfraction[]>
   cells: CellData[]
+  /** The corpus behind `cells` is still loading; mining it now would see nothing. */
+  cellsLoading?: boolean
+  /** The corpus read failed, so `cells` is empty for a reason other than "no edits". */
+  cellsError?: Error
   completionSettings?: CompletionSettings
   orgRules?: TranslationRule[]
   canEditOrgRules?: boolean
@@ -60,25 +70,10 @@ interface Props {
   setEditingRuleId: (id: string | "new" | null) => void
   /** Settings pane: skip the in-main title toolbar; PageHeader owns the title. */
   embedded?: boolean
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const t = useT()
-  return (
-    <Badge variant={severity === "major" ? "destructive" : "outline"}>
-      {severity === "major" ? t("rules.severity.major") : t("rules.severity.minor")}
-    </Badge>
-  )
-}
-
-function SeverityIcon({ severity }: { severity: string }) {
-  const Icon = severity === "major" ? AlertTriangle : AlertCircle
-  return (
-    <Icon className={cn(
-      "size-4 shrink-0",
-      severity === "major" ? "text-destructive" : "text-muted-foreground",
-    )} />
-  )
+  /** AQU-1509: the editor's active lane tag (`''` = default lane). When set
+   *  with `onActiveLaneChange`, switching lanes here switches the editor too. */
+  activeLane?: string
+  onActiveLaneChange?: (lane: string) => void
 }
 
 export function RulesSurface({
@@ -92,6 +87,8 @@ export function RulesSurface({
   setBuiltinOverride,
   infractions,
   cells,
+  cellsLoading,
+  cellsError,
   completionSettings,
   orgRules = [],
   canEditOrgRules = false,
@@ -102,6 +99,8 @@ export function RulesSurface({
   editingRuleId,
   setEditingRuleId,
   embedded = false,
+  activeLane,
+  onActiveLaneChange,
 }: Props) {
   const t = useT()
   const navigate = useNavigate()
@@ -110,33 +109,56 @@ export function RulesSurface({
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
   const [promoteRule, setPromoteRule] = useState<TranslationRule | null>(null)
   const [promoting, setPromoting] = useState(false)
-  const [editingOrgRuleId, setEditingOrgRuleId] = useState<string | "new" | null>(null)
   const [requestedRuleIds, setRequestedRuleIds] = useState<Set<string>>(new Set())
   const [requestingRuleId, setRequestingRuleId] = useState<string | null>(null)
   const [requestNotice, setRequestNotice] = useState<Map<string, string>>(new Map())
 
   // AQU-609: lane scope for PROJECT rules. Named lanes come from the project
   // record; `''` (the default lane) is labeled with the base target language.
-  const projectLanes = project.targetLanes ?? []
-  const defaultLaneLabel = project.targetLanguage || undefined
-  const laneBadgeLabel = (rule: TranslationRule): string =>
-    (rule.lane ?? "") === ""
-      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
-      : rule.lane ?? ""
+  const projectLanes = extraRegistryLanes(project.targetLanes, project.targetLanguage)
+  const laneRows = (project.lanes ?? []).filter((lane) => lane.role === "target")
+  const defaultLaneRow = laneRows.find((lane) => (lane.legacyTag ?? "") === "")
+  const defaultLaneLabel = defaultLaneRow
+    ? laneDisplayName(defaultLaneRow)
+    : project.targetLanguage || undefined
+  // AQU-1592: a lane's label is its display name — the name when the user set
+  // one, else the language it carries. `lane.name` alone is null on a lane that
+  // only ever got a language.
+  const laneLabels = Object.fromEntries(
+    laneRows.map((lane) => [lane.legacyTag ?? "", laneDisplayName(lane)]),
+  )
 
-  // AQU-609: display filter for the Project Rules list. Options list only
-  // lanes that actually hold rules — a 150-lane project must not produce a
-  // 150-item dropdown. Falls back to "all" if the selected lane's last rule
-  // was deleted (its option disappears with it).
-  const [laneFilter, setLaneFilter] = useState<string>("all")
-  const laneFilterLanes = lanesWithRules(userRules)
-  const effectiveLaneFilter =
-    laneFilter === "all" || laneFilter === "project" ||
-    laneFilterLanes.includes(laneFilter.slice("lane:".length))
-      ? laneFilter
-      : "all"
-  const visibleUserRules = filterRulesForDisplay(userRules, effectiveLaneFilter)
-  const showLaneFilter = projectLanes.length > 0 || laneFilterLanes.length > 0
+  const laneName = (tag: string): string =>
+    laneLabels[tag] || (tag === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : tag)
+
+  // AQU-1509: the page is always viewing ONE lane — the editor's active lane
+  // when the workspace shares it, else a local choice. Options are every
+  // target lane (same list and order as the editor's lane switcher), searched
+  // through LaneCombobox because projects can carry 150+ lanes.
+  const [localLane, setLocalLane] = useState("")
+  const laneOptions = (() => {
+    const tags = laneRows.length > 0
+      ? [...laneRows].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id)).map((lane) => lane.legacyTag ?? "")
+      : projectLanes
+    const unique = [...new Set(tags)]
+    if (!unique.includes("")) unique.unshift("")
+    const archived = new Set(laneRows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? ""))
+    return unique.map((tag) => ({ tag, archived: archived.has(tag) }))
+  })()
+  const requestedLane = activeLane ?? localLane
+  const viewLane = laneOptions.some((o) => o.tag === requestedLane) ? requestedLane : ""
+  const setViewLane = onActiveLaneChange ?? setLocalLane
+  const hasLaneRules = userRules.some((rule) => rule.scope === "lane")
+  const multiLane = laneOptions.length > 1 || hasLaneRules
+
+  // Default: only rules enforced in the viewed lane. Other lanes' rules are
+  // one click away and sort last, marked as not applied here.
+  const [showOtherLanes, setShowOtherLanes] = useState(false)
+  const appliedUserRules = rulesForLane(userRules, viewLane)
+  const otherLaneRules = userRules.filter((rule) => ruleLaneScope(rule, viewLane) === "other")
+  const visibleUserRules = !multiLane
+    ? userRules
+    : showOtherLanes ? [...appliedUserRules, ...otherLaneRules] : appliedUserRules
 
   useEffect(() => {
     const focusId = searchParams.get("ruleId")
@@ -189,44 +211,19 @@ export function RulesSurface({
     }
   }
 
-  async function updateOrgRule(ruleId: string, updates: Partial<TranslationRule>) {
-    if (!patchOrgSettings) return
-    const updated = orgRules.map((r) => r.id === ruleId ? { ...r, ...updates } : r)
-    await patchOrgSettings({ rules: updated })
-  }
-
-  async function deleteOrgRule(ruleId: string) {
-    if (!patchOrgSettings) return
-    const updated = orgRules.filter((r) => r.id !== ruleId)
-    await patchOrgSettings({ rules: updated })
-  }
-
-  async function addOrgRule(rule: Omit<TranslationRule, "id" | "createdAt">) {
-    if (!patchOrgSettings) return
-    const newRule: TranslationRule = { ...rule, id: uuid(), scope: "org", createdAt: new Date().toISOString() }
-    await patchOrgSettings({ rules: [...orgRules, newRule] })
-  }
-
-  async function handleApproveRequest(req: PromotionRequest) {
-    if (!patchOrgSettings) return
-    const promoted: TranslationRule = {
-      ...req.rule,
-      id: uuid(),
-      scope: "org",
-      lane: undefined, // an org rule applies everywhere — drop any lane pin
-      sourceProjectId: req.sourceProjectId,
-      createdAt: new Date().toISOString(),
-    }
-    const newOrgRules = [...orgRules, promoted]
-    const newPendingRequests = promotionRequests.filter((r) => r.id !== req.id)
-    await patchOrgSettings({ rules: newOrgRules, promotionRequests: newPendingRequests })
-  }
-
-  async function handleDismissRequest(reqId: string) {
-    if (!patchOrgSettings) return
-    const newPendingRequests = promotionRequests.filter((r) => r.id !== reqId)
-    await patchOrgSettings({ promotionRequests: newPendingRequests })
-  }
+  // Suggested rules are reviewed in place at the bottom of the project rules
+  // list; approving one hands its row over to the saved rule, animated.
+  const suggestions = useRuleSuggestions({
+    projectId,
+    completionSettings,
+    cells,
+    cellsLoading: cellsLoading ?? false,
+    cellsError,
+    userRules,
+    addRule,
+  })
+  const projectRulesListRef = useRef<HTMLUListElement>(null)
+  useFlipAnimation(projectRulesListRef)
 
   function toggleExpanded(ruleId: string) {
     setExpandedRuleId((cur) => cur === ruleId ? null : ruleId)
@@ -252,12 +249,6 @@ export function RulesSurface({
         completionSettings={completionSettings}
         onAdd={addRule}
         projectId={projectId}
-      />
-      <RuleSuggestFromEditsDialog
-        completionSettings={completionSettings}
-        onAdd={addRule}
-        projectId={projectId}
-        cells={cells}
       />
       <Button
         onClick={() => setEditingRuleId("new")}
@@ -303,40 +294,13 @@ export function RulesSurface({
             className="shrink-0 rounded-none border-0"
             cells={cells}
             lanes={projectLanes}
+            laneLabels={laneLabels}
             defaultLaneLabel={defaultLaneLabel}
             onSave={async (rule) => {
               await addRule(rule)
               setEditingRuleId(null)
             }}
             onCancel={() => setEditingRuleId(null)}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Create org rule — dialog, not inline */}
-      <Dialog
-        open={editingOrgRuleId === "new"}
-        onOpenChange={(open) => { if (!open) setEditingOrgRuleId(null) }}
-      >
-        <DialogContent
-          showCloseButton={false}
-          className="max-h-[90vh] max-w-2xl gap-0 overflow-y-auto p-0 sm:max-w-2xl"
-        >
-          <DialogHeader className="sr-only">
-            <DialogTitle>{t("rules.surface.createOrgRuleDialog.title")}</DialogTitle>
-            <DialogDescription>{t("rules.surface.createOrgRuleDialog.description")}</DialogDescription>
-          </DialogHeader>
-          {/* shrink-0: the editor root clips its own overflow, so as a flex
-              item it would shrink to the dialog height and hide its footer
-              instead of letting DialogContent scroll. */}
-          <RuleEditor
-            className="shrink-0 rounded-none border-0"
-            cells={cells}
-            onSave={async (rule) => {
-              await addOrgRule(rule)
-              setEditingOrgRuleId(null)
-            }}
-            onCancel={() => setEditingOrgRuleId(null)}
           />
         </DialogContent>
       </Dialog>
@@ -349,50 +313,61 @@ export function RulesSurface({
           </AppTooltip>
         )}
 
+        {multiLane && (
+          <section
+            aria-label={t("rules.surface.laneScope.ariaLabel")}
+            data-testid="rules-lane-scope"
+            className="flex flex-col gap-2 rounded-md border bg-muted/40 p-3"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Layers className="size-4 text-muted-foreground" aria-hidden />
+              <span className="text-sm font-medium">{t("rules.surface.laneScope.viewingLabel")}</span>
+              <LaneCombobox
+                options={laneOptions.map((o) => ({ value: o.tag, label: laneName(o.tag), archived: o.archived }))}
+                value={viewLane}
+                onValueChange={setViewLane}
+                searchPlaceholder={t("editor.lane.searchPlaceholder")}
+                searchAriaLabel={t("editor.lane.searchAriaLabel")}
+                emptyText={t("editor.lane.searchEmpty")}
+                trigger={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t("rules.surface.laneScope.chooseLaneAriaLabel", { lane: laneName(viewLane) })}
+                  >
+                    {laneName(viewLane)}
+                    <ChevronDown className="size-3.5 text-muted-foreground" />
+                  </Button>
+                }
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("rules.surface.laneScope.explainer", { lane: laneName(viewLane) })}
+              {onActiveLaneChange && ` ${t("rules.surface.laneScope.sharedWithEditor")}`}
+            </p>
+          </section>
+        )}
+
         {/* Card order is most-specific scope first: project rules (incl.
             lane-scoped) → org rules → app built-ins (AQU-609 feedback). */}
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle>{t("rules.surface.projectRulesCardTitle", { count: userRules.length })}</CardTitle>
-              {showLaneFilter && (
-                <LaneCombobox
-                  options={[
-                    { value: "all", label: t("rules.surface.laneFilter.all") },
-                    { value: "project", label: t("rules.surface.laneFilter.projectWide") },
-                    ...laneFilterLanes.map((lane) => ({
-                      value: `lane:${lane}`,
-                      label: lane === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : lane,
-                    })),
-                  ]}
-                  value={effectiveLaneFilter}
-                  onValueChange={setLaneFilter}
-                  searchPlaceholder={t("editor.lane.searchPlaceholder")}
-                  searchAriaLabel={t("editor.lane.searchAriaLabel")}
-                  emptyText={t("editor.lane.searchEmpty")}
-                  align="end"
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="ms-auto"
-                      aria-label={t("rules.surface.laneFilterAriaLabel")}
-                    >
-                      {effectiveLaneFilter === "all"
-                        ? t("rules.surface.laneFilter.all")
-                        : effectiveLaneFilter === "project"
-                          ? t("rules.surface.laneFilter.projectWide")
-                          : (() => {
-                              const lane = effectiveLaneFilter.slice("lane:".length)
-                              return lane === ""
-                                ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
-                                : lane
-                            })()}
-                      <ChevronDown className="size-3.5 text-muted-foreground" />
-                    </Button>
-                  }
-                />
+              {multiLane && otherLaneRules.length > 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="ms-auto"
+                  aria-pressed={showOtherLanes}
+                  onClick={() => setShowOtherLanes((v) => !v)}
+                >
+                  {showOtherLanes
+                    ? t("rules.surface.laneScope.hideOtherLanes")
+                    : t("rules.surface.laneScope.showOtherLanes", { count: otherLaneRules.length })}
+                </Button>
               )}
             </div>
           </CardHeader>
@@ -412,286 +387,182 @@ export function RulesSurface({
               />
             ) : visibleUserRules.length === 0 ? (
               <p className="py-2 text-xs text-muted-foreground">
-                {t("rules.surface.laneFilterNoMatches")}
+                {t("rules.surface.laneScope.noRulesInLane", { lane: laneName(viewLane) })}
               </p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {visibleUserRules.map((rule) => {
-                  const expanded = expandedRuleId === rule.id
-                  const laneScoped = rule.scope === "lane"
-                  return (
-                    <li key={rule.id} id={`rule-row-${rule.id}`} className="rounded-md border p-3">
-                      {/* Two-row layout: text + badges get the full width (with
-                          compact icon actions on the right); the wide buttons
-                          and the Enabled switch live on their own line below —
-                          one long name must never smush into the action row. */}
-                      <div className="flex items-start gap-3">
-                        <SeverityIcon severity={rule.severity} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-sm font-medium">{rule.name}</span>
-                            <SeverityBadge severity={rule.severity} />
-                            <Badge variant="secondary">{rule.source}</Badge>
-                            {laneScoped && (
-                              <Badge variant="outline">{laneBadgeLabel(rule)}</Badge>
-                            )}
-                            {rule.autofix && <Badge variant="outline">{t("rules.surface.autofixBadge")}</Badge>}
-                          </div>
-                          {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
+            ) : null}
+            <ul ref={projectRulesListRef} className="relative flex flex-col gap-2">
+              {visibleUserRules.map((rule) => {
+                const expanded = expandedRuleId === rule.id
+                const laneScope = ruleLaneScope(rule, viewLane)
+                const adoptedDraftId = suggestions.adoptedDraftId(rule)
+                return (
+                  <li
+                    key={rule.id}
+                    id={`rule-row-${rule.id}`}
+                    data-flip-key={rule.id}
+                    data-flip-from={adoptedDraftId ? `draft-${adoptedDraftId}` : undefined}
+                    data-lane-scope={multiLane ? laneScope : undefined}
+                    className={cn("rounded-md border p-3", multiLane && laneScope === "other" && "border-dashed bg-muted/30")}
+                  >
+                    {/* Two-row layout: text + badges get the full width (with
+                        compact icon actions on the right); the wide buttons
+                        and the Enabled switch live on their own line below —
+                        one long name must never smush into the action row. */}
+                    <div className="flex items-start gap-3">
+                      <SeverityIcon severity={rule.severity} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-medium">{rule.name}</span>
+                          <SeverityBadge severity={rule.severity} />
+                          <Badge variant="secondary">{rule.source}</Badge>
+                          {multiLane && <LaneScopeBadge scope={laneScope} laneLabel={laneName(rule.lane ?? "")} />}
+                          {rule.autofix && <Badge variant="outline">{t("rules.surface.autofixBadge")}</Badge>}
                         </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <AppTooltip content={t("rules.editor.editRuleHeading")}>
-                            <Button
-                              variant="ghost"
-                              onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
-                              disabled={editingRuleId !== null && editingRuleId !== rule.id}
-                              aria-label={t("rules.editor.editRuleHeading")}
-                            >
-                              <Pencil />
-                            </Button>
-                          </AppTooltip>
-                          <Button variant="ghost" onClick={() => toggleExpanded(rule.id)}>
-                            {expanded ? <ChevronUp /> : <ChevronDown />}
-                          </Button>
-                          <Button variant="ghost" onClick={() => deleteRule(rule.id)}>
-                            <Trash2 />
-                          </Button>
-                        </div>
+                        {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
+                        {multiLane && laneScope === "other" && (
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {t("rules.surface.laneScope.notAppliedHere", { lane: laneName(viewLane) })}
+                          </p>
+                        )}
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 ps-7">
-                        <AppTooltip content={t("rules.surface.tryToFixAllTooltip")}>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <AppTooltip content={t("rules.editor.editRuleHeading")}>
                           <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
+                            variant="ghost"
+                            onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
+                            disabled={editingRuleId !== null && editingRuleId !== rule.id}
+                            aria-label={t("rules.editor.editRuleHeading")}
                           >
-                            <Wand2 data-icon="inline-start" />
-                            {t("rules.surface.tryToFixAllButton")}
+                            <Pencil />
                           </Button>
                         </AppTooltip>
-                        {canEditOrgRules && patchOrgSettings && (
-                          <AppTooltip content={t("rules.surface.promoteToOrgTooltip")}>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setPromoteRule(rule)}
-                          >
-                            <ArrowUpCircle data-icon="inline-start" />
-                            {t("rules.surface.promoteToOrgButton")}
-                          </Button>
-                          </AppTooltip>
-                        )}
-                        {!canEditOrgRules && canRequestPromotion && requestPromotion && (
-                          (() => {
-                            const alreadyRequested = requestedRuleIds.has(rule.id) ||
-                              promotionRequests.some((r) => r.rule.id === rule.id && r.sourceProjectId === projectId)
-                            const notice = requestNotice.get(rule.id)
-                            const isRequesting = requestingRuleId === rule.id
-                            return alreadyRequested || notice ? (
-                              <Badge variant="secondary">
-                                <Clock data-icon="inline-start" />
-                                {notice ?? t("rules.surface.requestedBadge")}
-                              </Badge>
-                            ) : (
-                              <AppTooltip content={t("rules.surface.requestPromotionTooltip")}>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleRequestPromotion(rule)}
-                                  disabled={isRequesting}
-                                >
-                                  <ArrowUpCircle data-icon="inline-start" />
-                                  {isRequesting ? t("rules.surface.requestingButton") : t("rules.surface.requestPromotionButton")}
-                                </Button>
-                              </AppTooltip>
-                            )
-                          })()
-                        )}
-                        <div className="flex-1" />
-                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Switch
-                            size="sm"
-                            checked={rule.enabled}
-                            onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })}
-                            aria-label={
-                              rule.enabled
-                                ? t("rules.surface.disableRuleAriaLabel", { name: rule.name })
-                                : t("rules.surface.enableRuleAriaLabel", { name: rule.name })
-                            }
-                          />
-                          {t("rules.surface.enabledLabel")}
-                        </label>
+                        <Button variant="ghost" onClick={() => toggleExpanded(rule.id)}>
+                          {expanded ? <ChevronUp /> : <ChevronDown />}
+                        </Button>
+                        <Button variant="ghost" onClick={() => deleteRule(rule.id)}>
+                          <Trash2 />
+                        </Button>
                       </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 ps-7">
+                      <AppTooltip content={t("rules.surface.tryToFixAllTooltip")}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
+                        >
+                          <Wand2 data-icon="inline-start" />
+                          {t("rules.surface.tryToFixAllButton")}
+                        </Button>
+                      </AppTooltip>
+                      {canEditOrgRules && patchOrgSettings && (
+                        <AppTooltip content={t("rules.surface.promoteToOrgTooltip")}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setPromoteRule(rule)}
+                        >
+                          <ArrowUpCircle data-icon="inline-start" />
+                          {t("rules.surface.promoteToOrgButton")}
+                        </Button>
+                        </AppTooltip>
+                      )}
+                      {!canEditOrgRules && canRequestPromotion && requestPromotion && (
+                        (() => {
+                          const alreadyRequested = requestedRuleIds.has(rule.id) ||
+                            promotionRequests.some((r) => r.rule.id === rule.id && r.sourceProjectId === projectId)
+                          const notice = requestNotice.get(rule.id)
+                          const isRequesting = requestingRuleId === rule.id
+                          return alreadyRequested || notice ? (
+                            <Badge variant="secondary">
+                              <Clock data-icon="inline-start" />
+                              {notice ?? t("rules.surface.requestedBadge")}
+                            </Badge>
+                          ) : (
+                            <AppTooltip content={t("rules.surface.requestPromotionTooltip")}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRequestPromotion(rule)}
+                                disabled={isRequesting}
+                              >
+                                <ArrowUpCircle data-icon="inline-start" />
+                                {isRequesting ? t("rules.surface.requestingButton") : t("rules.surface.requestPromotionButton")}
+                              </Button>
+                            </AppTooltip>
+                          )
+                        })()
+                      )}
+                      <div className="flex-1" />
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Switch
+                          size="sm"
+                          checked={rule.enabled}
+                          onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })}
+                          aria-label={
+                            rule.enabled
+                              ? t("rules.surface.disableRuleAriaLabel", { name: rule.name })
+                              : t("rules.surface.enableRuleAriaLabel", { name: rule.name })
+                          }
+                        />
+                        {t("rules.surface.enabledLabel")}
+                      </label>
+                    </div>
 
-                      {expanded && (
-                        <AutofixEditor rule={rule} onUpdate={(af) => updateRule(rule.id, { autofix: af })} />
-                      )}
-                      {editingRuleId === rule.id && (
-                        <>
-                          <Separator className="my-3" />
-                          <RuleEditor
-                            initialRule={rule}
-                            cells={cells}
-                            lanes={projectLanes}
-                            defaultLaneLabel={defaultLaneLabel}
-                            onSave={async (updates) => {
-                              await updateRule(rule.id, updates)
-                              setEditingRuleId(null)
-                            }}
-                            onCancel={() => setEditingRuleId(null)}
-                          />
-                        </>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
+                    {expanded && (
+                      <AutofixEditor rule={rule} onUpdate={(af) => updateRule(rule.id, { autofix: af })} />
+                    )}
+                    {editingRuleId === rule.id && (
+                      <>
+                        <Separator className="my-3" />
+                        <RuleEditor
+                          initialRule={rule}
+                          cells={cells}
+                          lanes={projectLanes}
+                          laneLabels={laneLabels}
+                          defaultLaneLabel={defaultLaneLabel}
+                          onSave={async (updates) => {
+                            await updateRule(rule.id, updates)
+                            setEditingRuleId(null)
+                          }}
+                          onCancel={() => setEditingRuleId(null)}
+                        />
+                      </>
+                    )}
+                  </li>
+                )
+              })}
+              {suggestions.drafts.map((draft) => (
+                <RuleSuggestionItem
+                  key={draft.id}
+                  draft={draft}
+                  onApprove={suggestions.approve}
+                  onDismiss={suggestions.dismiss}
+                />
+              ))}
+              <RuleSuggestionsFooter
+                onSuggest={suggestions.suggest}
+                hasSuggested={suggestions.hasSuggested}
+                loading={suggestions.loading}
+                message={suggestions.message}
+                isConfigured={suggestions.isConfigured}
+                cellsLoading={cellsLoading ?? false}
+                cellsError={cellsError}
+              />
+            </ul>
           </CardContent>
         </Card>
 
-        {/* Org rules */}
-        {(orgRules.length > 0 || canEditOrgRules) && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Building2 className="size-4 text-muted-foreground" />
-                <CardTitle>{t("rules.surface.orgRulesCardTitle", { count: orgRules.length })}</CardTitle>
-                {canEditOrgRules && (
-                  <Button
-                    variant="outline"
-                    className="ms-auto"
-                    onClick={() => setEditingOrgRuleId("new")}
-                    disabled={editingOrgRuleId !== null}
-                  >
-                    <Plus className="size-4" aria-hidden />
-                    {t("rules.surface.addOrgRuleButton")}
-                  </Button>
-                )}
-                {!canEditOrgRules && (
-                  <Badge variant="secondary" className="ms-auto">
-                    <Lock data-icon="inline-start" />
-                    {t("common.readOnly")}
-                  </Badge>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {orgRules.length === 0 ? (
-                <EmptyState
-                  variant="inline"
-                  className="px-0 py-4"
-                  icon={Building2}
-                  title={t("rules.surface.noOrgRules.title")}
-                  description={t("rules.surface.noOrgRules.description")}
-                />
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {orgRules.map((rule) => (
-                    <li key={rule.id} className="rounded-md border p-3">
-                      <div className="flex items-center gap-3">
-                        <SeverityIcon severity={rule.severity} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">{rule.name}</span>
-                            <SeverityBadge severity={rule.severity} />
-                            <Badge>{t("common.org")}</Badge>
-                          </div>
-                          {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
-                        </div>
-                        {canEditOrgRules && (
-                          <>
-                            <AppTooltip content={t("rules.surface.editOrgRuleTooltip")}>
-                              <Button
-                                variant="ghost"
-                                onClick={() => setEditingOrgRuleId(editingOrgRuleId === rule.id ? null : rule.id)}
-                                disabled={editingOrgRuleId !== null && editingOrgRuleId !== rule.id}
-                                aria-label={t("rules.surface.editOrgRuleTooltip")}
-                              >
-                                <Pencil />
-                              </Button>
-                            </AppTooltip>
-                            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                              <Switch
-                                size="sm"
-                                checked={rule.enabled}
-                                onCheckedChange={(checked) => updateOrgRule(rule.id, { enabled: checked })}
-                                aria-label={
-                                  rule.enabled
-                                    ? t("rules.surface.disableOrgRuleAriaLabel", { name: rule.name })
-                                    : t("rules.surface.enableOrgRuleAriaLabel", { name: rule.name })
-                                }
-                              />
-                              {t("rules.surface.enabledLabel")}
-                            </label>
-                            <Button variant="ghost" onClick={() => deleteOrgRule(rule.id)}>
-                              <Trash2 />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                      {editingOrgRuleId === rule.id && canEditOrgRules && (
-                        <>
-                          <Separator className="my-3" />
-                          <RuleEditor
-                            initialRule={rule}
-                            cells={cells}
-                            onSave={async (updates) => {
-                              await updateOrgRule(rule.id, updates)
-                              setEditingOrgRuleId(null)
-                            }}
-                            onCancel={() => setEditingOrgRuleId(null)}
-                          />
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {canEditOrgRules && promotionRequests.length > 0 && (
-                <>
-                  <Separator className="my-4" />
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <Clock className="size-3.5" />
-                    {t("rules.surface.pendingRequests", { count: promotionRequests.length })}
-                  </p>
-                  <ul className="flex flex-col gap-2">
-                    {promotionRequests.map((req) => (
-                      <li key={req.id} className="rounded-md border bg-muted/30 p-3">
-                        <div className="flex items-start gap-3">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium">{req.rule.name}</p>
-                            {req.rule.description && (
-                              <p className="mt-0.5 text-xs text-muted-foreground truncate">{req.rule.description}</p>
-                            )}
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {t("rules.surface.requestedBy", {
-                                requester: req.requestedByName ?? t("rules.surface.requestedByFallback", { userId: req.requestedBy }),
-                              })}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <AppTooltip content={t("rules.surface.approveRequestTooltip")}>
-                              <Button size="sm" onClick={() => handleApproveRequest(req)}>
-                                {t("rules.surface.approveButton")}
-                              </Button>
-                            </AppTooltip>
-                            <AppTooltip content={t("rules.surface.dismissRequestTooltip")}>
-                              <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)}>
-                                {t("common.dismiss")}
-                              </Button>
-                            </AppTooltip>
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        )}
+        {/* Org rules — AQU-1131 extracted this into OrgRulesPanel so the same
+            library also renders standalone at /orgs/:orgId/settings/rules. */}
+        <OrgRulesPanel
+          orgRules={orgRules}
+          canEdit={canEditOrgRules}
+          patchOrgSettings={patchOrgSettings}
+          promotionRequests={promotionRequests}
+          cells={cells}
+          hideWhenEmpty
+        />
 
         {/* Promote confirmation dialog */}
         {promoteRule && (
@@ -752,4 +623,12 @@ function AutofixEditor({ rule, onUpdate }: { rule: TranslationRule; onUpdate: (a
       </div>
     </>
   )
+}
+
+/** AQU-1509: states a project rule's lane scope relative to the viewed lane. */
+function LaneScopeBadge({ scope, laneLabel }: { scope: RuleLaneScope; laneLabel: string }) {
+  const t = useT()
+  if (scope === "all") return <Badge variant="secondary">{t("rules.surface.laneScope.badgeAll")}</Badge>
+  if (scope === "this") return <Badge>{t("rules.surface.laneScope.badgeThis", { lane: laneLabel })}</Badge>
+  return <Badge variant="outline" className="border-dashed">{t("rules.surface.laneScope.badgeOther", { lane: laneLabel })}</Badge>
 }

@@ -19,7 +19,7 @@ import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { setActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
+import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
 import { selectQueueForFile, type QueueForFile } from "./queue-scope"
 
@@ -96,6 +96,39 @@ export function useQueueCurrentCellId(): string | null {
   return useSyncExternalStore(subscribe, runningCellId, () => null)
 }
 
+function subscribeClock(listener: () => void): () => void {
+  const unsubState = subscribe(listener)
+  const unsubProgress = subscribeProgress(listener)
+  return () => { unsubState(); unsubProgress() }
+}
+
+/** Clip seconds while Play All is sounding this cell, otherwise null.
+ *  Other rows keep a stable null so the transport tick does not repaint them. */
+export function useQueueCellPlayhead(cellId: string | undefined): number | null {
+  return useSyncExternalStore(
+    subscribeClock,
+    () => {
+      if (!cellId || state.kind !== "playing" || state.cellId !== cellId) return null
+      return progress.currentTime
+    },
+    () => null,
+  )
+}
+
+/** @internal — drive the playhead hook without opening an audio element. */
+export function __setQueuePlaybackForTests(next: {
+  cellId: string | null
+  currentTime: number
+  playing: boolean
+}): void {
+  state = next.playing && next.cellId
+    ? { kind: "playing", cellIndex: 0, cellId: next.cellId }
+    : IDLE
+  progress = { ...progress, currentTime: next.currentTime }
+  notify()
+  notifyProgress()
+}
+
 // ── Missing-clip registry (decision 2026-08-05) ─────────────────────────────
 // Lines whose dub audio DEFINITIVELY 404'd (deleted, or an upload that never
 // completed) — the timeline paints a per-chip badge from this, so the user is
@@ -133,7 +166,7 @@ function sweepMissingClips(cells: readonly CellData[]): void {
   let changed = false
   for (const [cellId, audioId] of missingClips) {
     const cell = byId.get(cellId)
-    const target = cell ? activeTargetForCell(cell) : null
+    const target = cell ? resolveTargetAudio(cell) : null
     if (!cell || target?.audioId !== audioId || cell.attachments?.[audioId]?.pendingSync) {
       missingClips.delete(cellId)
       changed = true
@@ -177,15 +210,29 @@ export interface QueueProgress {
   rate: number
   /** 0..1 volume (persists across tracks). */
   volume: number
+  /**
+   * AQU-1747: true when `currentTime` is a second on the AUDIO-FIRST
+   * PROGRAMME clock — the whole file's verses laid end to end, which is the
+   * x-axis a Free-timing timeline draws. It is the audio-first counterpart to
+   * `queueClockIsFileTime`: between them a consumer can tell a position it may
+   * paint from a per-take clock that restarts at 0 and means nothing outside
+   * its own clip. Derived in one place (`progOwnsProgressClock`) rather than
+   * set per call site, so it cannot drift from whichever path wrote the value.
+   */
+  programmeClock: boolean
 }
 
-let progress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+let progress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
 const progressListeners = new Set<() => void>()
 
 function notifyProgress(): void { for (const l of progressListeners) l() }
 
 function setProgress(patch: Partial<QueueProgress>): void {
-  progress = { ...progress, ...patch }
+  // The clock domain is re-derived on EVERY publish rather than passed in by
+  // each of the ~15 writers: the programme and dubbing paths both write
+  // `currentTime`, and a writer that forgot the tag would silently hand a
+  // per-clip second to a consumer painting a programme position. (AQU-1747)
+  progress = { ...progress, ...patch, programmeClock: progOwnsProgressClock() }
   notifyProgress()
 }
 
@@ -637,6 +684,30 @@ function progRunning(): boolean {
   return timingMode === "audioFirst" && (state.kind === "playing" || state.kind === "loading")
 }
 
+/**
+ * Is `progress.currentTime` a PROGRAMME second? (AQU-1747)
+ *
+ * `progIndex >= 0` is already this module's own test for "the programme
+ * transport owns playback" (see pauseQueue / resumeQueue / the skips):
+ * `progEngageForContext` clears it when a context falls through to the dubbing
+ * path, so a take playing on its own per-take clock reads false here and no
+ * consumer can mistake that 0 for the left edge of the file.
+ *
+ * The snapshot exclusion is the other half, and it is not theoretical: a
+ * deliberate one-cell context ("play just this line") builds a one-slot
+ * programme that starts at 0, so publishing its clock as a programme position
+ * would yank a file-wide playhead to the left edge — exactly the bug the
+ * per-take guard was added for, arriving by another route.
+ */
+function progOwnsProgressClock(): boolean {
+  return (
+    timingMode === "audioFirst" &&
+    programme != null &&
+    progIndex >= 0 &&
+    activeContext?.snapshot !== true
+  )
+}
+
 function progCurrentSlot(): ProgrammeSlot | null {
   return programme?.slots[progIndex] ?? null
 }
@@ -682,10 +753,19 @@ function progRebuild(): void {
   }
   // Must match the timeline's own ordering exactly, or the transport and the
   // drawing would disagree about where a verse is: same filter, same sort.
-  const dialogue = sortByLens(
+  const mediaCells = sortByLens(
     ctx.cells.filter((c) => (c.medium ?? "text") === "media" && hasTiming(c)),
     "time",
   )
+  // AQU-1704: a video-less subtitle import has no media cells, so its cues are
+  // the verses. TimelineEditor's layout falls back to the subtitle lane the same way.
+  const dialogue =
+    mediaCells.length > 0
+      ? mediaCells
+      : sortByLens(
+          ctx.cells.filter((c) => hasTiming(c)),
+          "time",
+        )
   programme = buildProgramme(dialogue)
   setProgress({ duration: programme.totalSec })
 }
@@ -852,7 +932,7 @@ function classifyTargetFailure(
   if (cause !== undefined) return isMissingAudioError(cause) ? "missing" : "other"
   const ctx = activeContext
   const cell = ctx?.cells.find((c) => c.id === cellId)
-  const target = cell ? activeTargetForCell(cell) : null
+  const target = cell ? resolveTargetAudio(cell) : null
   if (!ctx || !cell || !target) return "other"
   const frontier = parseFrontierAudioUrl(target.url)
   if (!frontier) return "other"
@@ -1152,7 +1232,10 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
   }
   audio.onplay = () => {
     if (seq !== currentSeq) return
-    setActiveAudio(coordinatorController)
+    // CLAIM (2026-09-29): starting the timeline silences a waveform or a chip
+    // preview that is sounding — it used to only record itself, and a take
+    // playing in an expanded line's Recording tab went on over the timeline.
+    claimActiveAudio(coordinatorController)
     for (const e of overlayPool) if (e.element) void e.element.play().catch(() => { /* user-driven */ })
     setState({ kind: "playing", ...progStateCell() })
   }
@@ -1300,7 +1383,7 @@ async function progPlaySlot(
   pendingDubs = []
   pendingEarlyDubs = [] // belt-and-braces: dubbing-only state, dead in audio-first
 
-  const target = slot.targetWindow ? activeTargetForCell(cell) : null
+  const target = slot.targetWindow ? resolveTargetAudio(cell) : null
   const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
   const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
 
@@ -2126,7 +2209,7 @@ function progPrefetchNext(): void {
   const next = progNextPlayable(progIndex + 1)
   const slot = next >= 0 ? prog.slots[next] : null
   const cell = slot ? ctx.cells.find((c) => c.id === slot.cellId) : null
-  const target = cell && slot?.targetWindow ? activeTargetForCell(cell) : null
+  const target = cell && slot?.targetWindow ? resolveTargetAudio(cell) : null
   if (!slot || !cell || !target) {
     disposeProgPrefetch()
     return
@@ -2532,7 +2615,10 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
 
   audio.onplay = () => {
     if (seq !== currentSeq) return
-    setActiveAudio(coordinatorController)
+    // CLAIM (2026-09-29): starting the timeline silences a waveform or a chip
+    // preview that is sounding — it used to only record itself, and a take
+    // playing in an expanded line's Recording tab went on over the timeline.
+    claimActiveAudio(coordinatorController)
     // The dub overlays ride the master's transport (rounds 5-7).
     for (const e of overlayPool) {
       if (e.element) void e.element.play().catch(() => { /* user-driven, ignore */ })
@@ -2839,7 +2925,7 @@ export async function resumeQueue(): Promise<void> {
       const cell = activeContext?.cells.find((c) => c.id === slot.cellId)
       const into = Math.max(0, progress.currentTime - slot.startSec)
       const dubDue = Boolean(
-        slot.targetWindow && cell && activeTargetForCell(cell) && into < slot.targetLenSec,
+        slot.targetWindow && cell && resolveTargetAudio(cell) && into < slot.targetLenSec,
       )
       const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
       const dubReady = overlayPool.some((e) => e.element && e.element.readyState >= 3)
@@ -2981,7 +3067,7 @@ export function updateQueueCells(cells: CellData[]): void {
       const entry = overlayPool.find((e) => e.cellId === onCellId)
       if (entry) {
         const cell = activeContext?.cells.find((c) => c.id === onCellId)
-        const target = cell ? activeTargetForCell(cell) : null
+        const target = cell ? resolveTargetAudio(cell) : null
         const slot = slots[i]
         if (!target || !slot.targetWindow || target.audioId !== entry.audioId) {
           removeOverlayEntry(entry)

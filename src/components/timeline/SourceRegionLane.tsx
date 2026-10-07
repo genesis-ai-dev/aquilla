@@ -113,20 +113,31 @@ function SourceRegionLaneImpl({
     return isVisible(s.start, s.end, viewStartSec, viewEndSec)
   })
   // Neighbour walls + snap targets, from the FULL cue list — a cue's
-  // neighbour may be scrolled out of view. Cues are a transcript: they may
-  // touch but never overlap or leapfrog, so a drag stops at the neighbouring
-  // cue's edge — the same rule the subtitle row enforces on its own cells.
-  const cueWalls = new Map<string, { minStartSec: number; maxEndSec: number; candidates: number[] }>()
+  // neighbour may be scrolled out of view.
+  //
+  // AQU-1068 item 5 (Sam, 2026-09-09): the walls are the neighbours' STARTS.
+  // This used to read "cues are a transcript: they may touch but never overlap
+  // or leapfrog", and stopped a drag at the neighbouring cue's near edge. A
+  // transcript does say two things at once — two speakers talking over each
+  // other — and the timed exporters already sort by start time, so overlap is
+  // free now. What a cue may still not do is BEGIN outside its neighbours'
+  // starts: that is what would part the clock order from the anchor chain the
+  // text table reads. Same rule on the subtitle row, which builds its own.
+  //
+  // The snap CANDIDATES keep both edges: snapping a cue's end to the next
+  // cue's start is still the common tidy-up, and it is no longer a wall.
+  const cueWalls = new Map<string, { minStartSec: number; maxEndSec: number; maxStartSec?: number; candidates: number[] }>()
   if (retimable && onRetime) {
     for (let i = 0; i < cells.length; i += 1) {
-      const prevEnd = i > 0 ? cells[i - 1].endTime : undefined
-      const nextStart = i < cells.length - 1 ? cells[i + 1].startTime : undefined
+      const prev = i > 0 ? cells[i - 1] : undefined
+      const next = i < cells.length - 1 ? cells[i + 1] : undefined
       cueWalls.set(cells[i].id, {
-        minStartSec: prevEnd ?? 0,
-        maxEndSec: nextStart ?? Number.POSITIVE_INFINITY,
+        minStartSec: prev?.startTime ?? 0,
+        maxStartSec: next?.startTime ?? Number.POSITIVE_INFINITY,
+        maxEndSec: Number.POSITIVE_INFINITY,
         candidates: [
-          ...(prevEnd != null ? [prevEnd] : []),
-          ...(nextStart != null ? [nextStart] : []),
+          ...(prev?.endTime != null ? [prev.endTime] : []),
+          ...(next?.startTime != null ? [next.startTime] : []),
         ],
       })
     }

@@ -106,6 +106,34 @@ describe("createChapterHealthBuilder", () => {
     expect(second[0].cells?.map((cell) => cell.id)).toEqual(["a", "b"])
   })
 
+  it("prunes disappeared cells across regrouping, missing summaries, and empty chapters", () => {
+    const h = harness()
+    const first = h.builder.build(h.chapters, h.readers)
+    const original = structuredClone(first)
+    const check = (chapters: ChapterHealthSource[]) => {
+      const actual = h.builder.build(chapters, h.readers)
+      expect(actual).toEqual(createChapterHealthBuilder().build(chapters, h.readers))
+      return actual
+    }
+    const regrouped = [
+      { ...h.chapters[1], cellIds: ["c", "b"] },
+      { ...h.chapters[0], cellIds: ["d", "a"] },
+    ]
+    check(regrouped)
+    h.summaries.delete("b")
+    check(regrouped)
+    h.summaries.set("b", { status: "validated", translated: "returned" })
+    h.issues.add("b")
+    expect(check(regrouped)[0].cells?.[1]).toMatchObject({ id: "b", stage: "validated", hasIssue: true })
+    // Same number of chapters, but entirely different keys and no cells.
+    check(regrouped.map((chapter, i) => ({ ...chapter, key: `empty-${i}`, cellIds: [] })))
+    const returned = check(h.chapters)
+    expect(returned[0].cells?.[0]).not.toBe(first[0].cells?.[0])
+    check([])
+    check(h.chapters)
+    expect(first).toEqual(original)
+  })
+
   it("clear() forgets identities so the next build allocates afresh", () => {
     const h = harness()
     const first = h.builder.build(h.chapters, h.readers)
@@ -113,6 +141,51 @@ describe("createChapterHealthBuilder", () => {
     const second = h.builder.build(h.chapters, h.readers)
     expect(second).not.toBe(first)
     expect(second).toEqual(first)
+  })
+})
+
+// AQU-1083. The chapter map is one of two places that count cells in the
+// browser rather than reading a number the server resolved, so it is one of
+// two places the policy has to be applied by hand.
+describe("headings a project does not count (AQU-1083)", () => {
+  it("marks them excluded rather than untranslated, and scores them not at all", () => {
+    // An untypeset heading and an untranslated verse look identical to
+    // getSummary — both empty. Only the exclusion tells them apart, and
+    // getting it wrong leaves a chapter title looking like outstanding work,
+    // which is the confusion this whole setting exists to remove.
+    const h = harness()
+    h.summaries.set("c", { status: "empty", translated: "" })
+    const cells = h.builder.build(h.chapters, {
+      ...h.readers,
+      isExcluded: (id: string) => id === "c",
+    })[0].cells!
+    expect(cells.map((cell) => cell.stage)).toEqual(["validated", "automatic", "excluded"])
+    expect(cells[2].health).toBeUndefined()
+  })
+
+  it("keeps a square for every cell — the map still shows the whole file", () => {
+    const h = harness()
+    const cells = h.builder.build(h.chapters, {
+      ...h.readers,
+      isExcluded: (id: string) => id === "c",
+    })[0].cells!
+    expect(cells).toHaveLength(3)
+  })
+
+  it("never scores an excluded cell even when it has been translated", () => {
+    // A team can translate its headings and still not want them counted.
+    const h = harness()
+    const cells = h.builder.build(h.chapters, {
+      ...h.readers,
+      isExcluded: (id: string) => id === "a",
+    })[0].cells!
+    expect(cells[0]).toMatchObject({ id: "a", stage: "excluded", health: undefined })
+  })
+
+  it("behaves exactly as before when the reader is absent", () => {
+    const h = harness()
+    expect(h.builder.build(h.chapters, h.readers))
+      .toEqual(createChapterHealthBuilder().build(h.chapters, { ...h.readers, isExcluded: () => false }))
   })
 })
 

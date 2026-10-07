@@ -1,4 +1,4 @@
-import type { Page, Request } from "@playwright/test"
+import type { Page, Request, Route } from "@playwright/test"
 import { test, expect } from "../../helpers/multi-user"
 import { waitForProjectSyncReady } from "../../helpers/project-sync"
 import { addProjectMember, ROLE } from "../../helpers/frontier-api"
@@ -44,6 +44,7 @@ const BOB_VALUES = ["bravo one", "bravo two revised wording", "bravo three"] as 
 interface CommitEvent {
   kind: string
   cellId?: string
+  parentId?: string | null
   payload?: { value?: string }
 }
 
@@ -143,25 +144,62 @@ test("two users edit the same cell on a throttled network: converge, keep both e
     await sent
   }
 
-  // 1. Alice takes the cell. Bob's row goes read-only as soon as her claim
-  //    fans out over the (unthrottled) socket — the UI state that blocks a
-  //    second simultaneous editor. Asserted, not assumed.
-  await aliceWs.activateTargetCell(CELL_INDEX)
-  await expect.poll(
-    () => bobWs.isTargetLockedByOther(CELL_INDEX),
-    { message: "bob's row should be read-only while alice holds the focus lock" },
-  ).toBe(true)
-  await aliceWs.replaceActiveTargetText(CELL_INDEX, ALICE_VALUES[0])
-  const aliceFirstSent = waitForCommitSent(alice, cellId, ALICE_VALUES[0])
-  await aliceWs.blurEditor()
-  await aliceFirstSent
+  // AQU-1220: latency cannot guarantee a race. Hold both real first-commit
+  // requests before either reaches the server, then verify their parents.
+  // This still exercises the client producer and the server compare-and-swap;
+  // no event payload or response is synthesized by the test.
+  const racingRequests: Request[] = []
+  const racingContinuations: Promise<void>[] = []
+  let releaseRace!: () => void
+  const raceReady = new Promise<void>((resolve) => { releaseRace = resolve })
+  const holdFirstCommit = async (route: Route) => {
+    const values = commitValuesIn(route.request(), cellId)
+    if (values.includes(ALICE_VALUES[0]) || values.includes(BOB_VALUES[0])) {
+      racingRequests.push(route.request())
+      const continued = raceReady.then(() => route.continue())
+      racingContinuations.push(continued)
+      await continued
+      return
+    }
+    await route.continue()
+  }
+  await alice.route("**/events", holdFirstCommit)
+  await bob.route("**/events", holdFirstCommit)
+  try {
+    // 1. Alice takes the cell. Bob must observe the advisory focus lock.
+    await aliceWs.activateTargetCell(CELL_INDEX)
+    await expect.poll(
+      () => bobWs.isTargetLockedByOther(CELL_INDEX),
+      { message: "bob's row should be read-only while alice holds the focus lock" },
+    ).toBe(true)
+    await aliceWs.replaceActiveTargetText(CELL_INDEX, ALICE_VALUES[0])
+    const aliceFirstSent = waitForCommitSent(alice, cellId, ALICE_VALUES[0])
+    await aliceWs.blurEditor()
+    await aliceFirstSent
 
-  // 2. The race: alice's commit is still crossing the slow link when bob
-  //    (unlocked over the fast socket) commits his own first value. Bob has
-  //    not yet received alice's head through his throttled refetch, so both
-  //    commits chain on the same (empty) parent and exactly one wins the
-  //    compare-and-swap; the other is a bumped sibling.
-  await commitAs("bob", BOB_VALUES[0])
+    // 2. Alice's request is held while Bob produces his own first commit.
+    // The unthrottled socket releases her lock independently of that request.
+    await commitAs("bob", BOB_VALUES[0])
+    await expect.poll(() => racingRequests.length, {
+      message: "both first commits must reach the barrier before either applies",
+      timeout: 30_000,
+    }).toBe(2)
+    const parents = racingRequests.map((request) => {
+      const body = request.postDataJSON() as { events: CommitEvent[] }
+      return body.events.find(
+        (event) => event.kind === "target.cell.commit" && event.cellId === cellId,
+      )?.parentId
+    })
+    expect(parents[0], "Alice's serialized commit has an explicit parent")
+      .toBeDefined()
+    expect(parents[1], "the racing commits must share the same parent")
+      .toBe(parents[0])
+  } finally {
+    releaseRace()
+    await Promise.all(racingContinuations)
+    await alice.unroute("**/events", holdFirstCommit)
+    await bob.unroute("**/events", holdFirstCommit)
+  }
 
   // 3. Two more rounds each, interleaved. Each user first catches up with the
   //    server head so the follow-ups chain correctly, then commits through the

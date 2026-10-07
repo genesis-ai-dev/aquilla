@@ -17,6 +17,59 @@ import { defineNamespace, plural } from "./types"
  */
 export const onboarding = defineNamespace({
   keys: {
+    "onboarding.connect.title": "Connect your agent",
+    "onboarding.connect.description": "Approve access to one Aquilla project. Your agent gets its credential from Aquilla.",
+    "onboarding.connect.approved": "Access approved. Return to your agent to finish connecting. You can revoke access at any time.",
+    "onboarding.connect.handoff": "Agent still waiting? Paste this message into its chat. It contains no secrets.",
+    "onboarding.connect.handoffCopy": "Copy message",
+    "onboarding.connect.handoffCopied": "Copied",
+    "onboarding.connect.denied": "Access denied. Your agent receives no credential.",
+    "onboarding.connect.manage": "Manage agent access",
+    "onboarding.connect.account": "Signed in as {username}",
+    "onboarding.connect.code": "Connection code",
+    "onboarding.connect.review": "Review request",
+    "onboarding.connect.agent": "Agent name: {name}",
+    "onboarding.connect.unverified": "This name is supplied by the agent and is not verified. Only approve a request you just started.",
+    "onboarding.connect.ask": "Read project data and stage changes. Applying changes requires your separate approval.",
+    "onboarding.connect.act": "Read project data and apply changes with no further approval.",
+    "onboarding.connect.expiry": "Access doesn't expire. You can see when it was last used and revoke it from API tokens at any time.",
+    "onboarding.connect.project": "Project",
+    "onboarding.connect.choose": "Choose a project",
+    "onboarding.connect.noProjects": "You do not have the required access to an available project.",
+    "onboarding.connect.modeChanged":
+      "The agent asked for {requested} mode. It will get the mode you pick here.",
+    "onboarding.connect.pinned":
+      "The agent asked for this specific project, so it can't be changed here. Deny the request if it isn't the one you want.",
+    "onboarding.connect.scope": "Access to",
+    "onboarding.connect.scopeProject": "One project",
+    "onboarding.connect.scopeOrg": "A whole organization",
+    "onboarding.connect.scopeHint":
+      "Organization access covers every project in it, including ones added later. Only organizations and projects where you hold the required role are listed.",
+    "onboarding.connect.chooseOrg": "Choose an organization",
+    "onboarding.connect.noOrgs": "You do not have the required access to an available organization.",
+    "onboarding.connect.confirm": "I started this request and the code {code} matches the code shown by my agent.",
+    "onboarding.connect.approve": "Authorize agent",
+    "onboarding.connect.deny": "Deny access",
+    "onboarding.connect.error": "Unable to complete this request. It may have expired, already been used, or your access may have changed. Check your connection and try again.",
+    "onboarding.connect.setup": "Connect an AI agent",
+    "onboarding.connect.setupBody": "Copy these instructions to your agent. Approve its request in Aquilla without sharing a token or setting an environment variable.",
+    "onboarding.connect.copy": "Copy connection instructions",
+    "onboarding.connect.copyError": "Could not copy. Select and copy the instructions below.",
+    // — OAuth consent for MCP hosts (ChatGPT, Claude, Codex): /oauth/consent ———
+    "onboarding.oauth.title": "Connect {client} to Aquilla",
+    "onboarding.oauth.titleGeneric": "Connect an app to Aquilla",
+    "onboarding.oauth.description": "This app wants to use Aquilla's agent tools on your behalf. Choose what it may reach.",
+    "onboarding.oauth.verified": "Request from {host}. The app supplies its own name; Aquilla checked only the domain.",
+    "onboarding.oauth.return": "After you choose, you return to {host}.",
+    "onboarding.oauth.act": "This app can create and update content in the organizations you select, within your current permissions.",
+    "onboarding.oauth.organizations": "Organizations",
+    "onboarding.oauth.allOrganizations": "All current organizations",
+    "onboarding.oauth.scopeHint": "Only organizations where you have maintainer access or higher appear here. Access includes their current and future projects. Organizations you join later require a new connection.",
+    "onboarding.oauth.validation": "Saving a change does not mark it as human-validated. Reviewers validate each translation version on its own.",
+    "onboarding.oauth.approve": "Allow access",
+    "onboarding.oauth.redirecting": "Returning you to {host}…",
+    "onboarding.oauth.invalid": "This connection request is not valid. Start the connection again from the app you came from.",
+
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
     "onboarding.common.skipForNow": "Skip for now",
@@ -39,6 +92,8 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
     "onboarding.wizard.setupAriaLabel": "Account setup",
     "onboarding.wizard.stepProgress": "Step {step} of {total}",
+    "onboarding.wizard.billingAfterSetup": "Your selected plan and billing interval will be reviewed after setup. No purchase occurs during setup.",
+    "onboarding.wizard.billingInvalid": "This plan selection is unavailable. You can finish setup and choose a plan later.",
 
     // ═══════════════════════════════════════════════════════════════════════
     // Product tour (ProductTour.tsx) — TOUR_STEPS content + chrome
@@ -213,11 +268,7 @@ export const onboarding = defineNamespace({
 
     // — AiModelsStep — model metadata (was module-level ModelMeta consts)
     "onboarding.checklist.aiModels.whisper.label": "Whisper transcription",
-    "onboarding.checklist.aiModels.whisper.blurb":
-      "Word-level timing for recorded audio. Runs locally; no network after download.",
-    "onboarding.checklist.aiModels.kokoro.label": "Kokoro voices",
-    "onboarding.checklist.aiModels.kokoro.blurb":
-      "English voices that run in the browser after a one-time download.",
+    // Whisper blurb reuses `audio.consent.whisper.short` (identical text — AQU-1211)
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
       "Local voices for many languages — one language model per download.",
@@ -233,7 +284,7 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.aiModels.voiceLegend": "Voice generation",
     "onboarding.checklist.aiModels.noneLabel": "None — set up later",
     "onboarding.checklist.aiModels.noneHint":
-      "Skip voice generation entirely. You can come back from project settings.",
+      "Skip voice generation. You can come back from project settings.",
     "onboarding.checklist.aiModels.geminiLabel": "Gemini (cloud, BYOK)",
     "onboarding.checklist.aiModels.geminiHint":
       "Highest quality, promptable voices. Needs a Google AI Studio API key. No local download.",
@@ -293,14 +344,15 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.shareLinkHint":
       "Anyone with the link joins as a contributor after signing in. Use this when you don't have the recipient's username yet.",
 
-    // — ComingSoonStep + its two checklist entries —
-    "onboarding.checklist.comingSoon.badge": "Coming soon",
-    "onboarding.checklist.comingSoon.standards.title": "Upload project standards",
-    "onboarding.checklist.comingSoon.standards.description":
+    // — LinkStep: optional steps that open the surface where the work happens —
+    "onboarding.checklist.standards.title": "Set project standards",
+    "onboarding.checklist.standards.description":
       "Style guides and translation standards the AI will follow.",
-    "onboarding.checklist.comingSoon.glossary.title": "Import terminology / translation memory",
-    "onboarding.checklist.comingSoon.glossary.description":
-      "Existing TM or term lists to keep terminology consistent.",
+    "onboarding.checklist.standards.actionLabel": "Open standards",
+    "onboarding.checklist.glossary.title": "Import terminology",
+    "onboarding.checklist.glossary.description":
+      "Existing term lists (CSV, TBX, LIFT) to keep terminology consistent.",
+    "onboarding.checklist.glossary.actionLabel": "Open terminology",
 
     // ═══════════════════════════════════════════════════════════════════════
     // System prompt nudge (editor banner)
@@ -359,6 +411,13 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.appearance.groupLabel": "Theme",
     "onboarding.preferences.appearance.themeDescription":
       "Follow your system appearance or choose a theme for this device.",
+    "onboarding.preferences.fontSize.groupLabel": "App font size",
+    "onboarding.preferences.fontSize.rowDescription":
+      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can override the cell size; reset there to follow this size again.",
+    "onboarding.preferences.fontSize.small": "Small",
+    "onboarding.preferences.fontSize.default": "Default",
+    "onboarding.preferences.fontSize.large": "Large",
+    "onboarding.preferences.fontSize.extraLarge": "Extra Large",
 
     // — LanguageSection — group label reuses `language.label` (identical text)
     "onboarding.preferences.language.rowDescription":
@@ -395,7 +454,16 @@ export const onboarding = defineNamespace({
       "Optional personal AI provider override for this device only.",
     "onboarding.preferences.section.localModels.title": "Local models",
     "onboarding.preferences.section.localModels.description":
-      "Whisper transcription and Kokoro / MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
+      "Whisper transcription and MMS voices run in your browser — stored once and shared across all projects on this device.",
+    // Tauri desktop app only — not shown in the browser SPA (no local proxy to configure
+    // there). Named "Offline AI provider" rather than "Local LLM" so it doesn't read as a
+    // sibling of "Local models" right above it — that section is on-device Whisper/MMS
+    // voice models (speech, always active); this one is a text-generation endpoint (chat/
+    // translation, offline-only), the same shape of setting as "AI provider keys" above but
+    // for when there's no connection at all.
+    "onboarding.preferences.section.localLlm.title": "Offline AI provider",
+    "onboarding.preferences.section.localLlm.description":
+      "The endpoint used for AI translations when this device has no connection — separate from the on-device voice models above.",
     "onboarding.preferences.section.usage.title": "Usage",
     "onboarding.preferences.section.usage.description": "Your audio and AI activity. No pricing is shown here.",
     "onboarding.preferences.section.apiTokens.title": "API tokens",
@@ -409,6 +477,7 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.hint.notSet": "Not set",
     "onboarding.preferences.hint.personal": "Personal",
     "onboarding.preferences.hint.onDevice": "On-device",
+    "onboarding.preferences.hint.offlineOnly": "Offline only",
 
     // — Page chrome — title reuses `nav.account.preferences` (identical text)
     "onboarding.preferences.pageDescription":
@@ -433,6 +502,9 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.expiredBadge": "Expired",
     // "Expires {date}" row text reuses `common.expiresOn` (identical text)
     "onboarding.apiTokens.lastUsedOn": "Last used {date}",
+    "onboarding.apiTokens.createdOn": "Created {date}",
+    "onboarding.apiTokens.scope.orgBadge": "Whole org: {name}",
+    "onboarding.apiTokens.scope.projectBadge": "Project: {name}",
     "onboarding.apiTokens.agentSetupButton": "Agent setup",
     // "Revoke" button reuses `common.revoke` (identical text)
     "onboarding.apiTokens.revokeDialogTitle": "Revoke token?",
@@ -444,6 +516,13 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.newTokenDialogTitle": "Your new API token",
     "onboarding.apiTokens.showOnceWarning":
       "Copy this now — you will not see it again. If you lose it, revoke this token and mint a new one.",
+    // Pasting a token into a chat window is the most common way these leak:
+    // the transcript, and often the vendor's logs, keep it for the token's
+    // whole 30-day life. Say so at the one moment the plaintext is on screen.
+    "onboarding.apiTokens.exposureWarning":
+      "Anyone holding this token has your {mode}-mode access to this scope until it expires or you revoke it. Put it straight into a credential store or a private file. Don't paste it into a chat, a terminal command, or anything an agent prints — it stays in those transcripts and logs.",
+    "onboarding.apiTokens.exposureConnectHint":
+      "Connecting an agent? \"Connect an AI agent\" above is safer: the agent gets its own credential directly and the token never passes through you.",
     "onboarding.apiTokens.agentHandoffHint":
       "Handing this to an agent? Copy the token wrapped in a ready-to-paste prompt that sends the agent to the API's self-describing endpoint to learn what it can do, and spells out this token's {mode} mode.",
     "onboarding.apiTokens.copyAgentInstructions": "Copy agent instructions",
@@ -456,6 +535,18 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.newTokenTrigger": "New token",
     "onboarding.apiTokens.newTokenDialogHeading": "New API token",
     "onboarding.apiTokens.namePlaceholder": "e.g. Import agent",
+    // AQU-1242: access is the write ceiling, asked before mode because it
+    // decides whether mode applies at all.
+    "onboarding.apiTokens.accessLabel": "Access",
+    "onboarding.apiTokens.accessReadLabel": "Read-only",
+    "onboarding.apiTokens.accessReadDescription":
+      "the agent can read, search and export, but cannot change anything.",
+    "onboarding.apiTokens.accessWriteLabel": "Read and write",
+    "onboarding.apiTokens.accessWriteDescription":
+      "the agent can also propose and apply changes, subject to the mode below.",
+    "onboarding.apiTokens.accessReadBadge": "read-only",
+    "onboarding.apiTokens.modeNotApplicable":
+      "Mode only applies to a token that can write. A read-only token has nothing to approve.",
     // "Mode" field label reuses `common.modeLabel` (identical text)
     "onboarding.apiTokens.modeAskLabel": "Ask",
     "onboarding.apiTokens.modeAskDescription": "every write waits for your approval.",
@@ -467,6 +558,13 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.orgHint": "Only orgs where you're at least a contributor are listed.",
     "onboarding.apiTokens.projectPlaceholder": "No project (org-wide)",
     "onboarding.apiTokens.expiryLabel": "Expiry",
+    // AQU-1180 — the mint screen has to say in plain words what turning this on
+    // exposes, because the people exposed are not the person clicking.
+    "onboarding.apiTokens.piiLabel": "Show translator names to the agent",
+    "onboarding.apiTokens.piiDescription":
+      "Off by default: the agent sees a stable anonymous id per person instead of a name, so it can tell edits apart without knowing who made them. Turn this on and every name it reads is sent to whichever AI service you paste the token into, and kept in that service's logs. Only an owner of the selected organization or project can turn it on.",
+    "onboarding.apiTokens.piiRequiresOwner":
+      "Select an organization or project you own to enable this.",
     "onboarding.apiTokens.nameRequired": "Give this token a name.",
     "onboarding.apiTokens.mintFailed": "Failed to mint token.",
     "onboarding.apiTokens.mintingButton": "Minting…",
@@ -478,7 +576,7 @@ export const onboarding = defineNamespace({
     // agent rail label reuses `nav.dock.agentTab` (identical text)
     "onboarding.credits.rail.llm": "Chat",
     "onboarding.credits.rail.tts": "TTS",
-    "onboarding.credits.panelTitle": "Compute credits",
+    "onboarding.credits.panelTitle": "AI credits",
     "onboarding.credits.panelDescription": "Usage against daily & weekly caps, broken out by rail",
     "onboarding.credits.agentSpendNote": "Agent spend (elevated rail — own cap, 5× markup)",
     "onboarding.credits.dialSummary": "Agent credits used today: {credits}",
@@ -503,6 +601,14 @@ export const onboarding = defineNamespace({
           step: "Current step number (1-based).",
           total: "Total number of steps in the wizard (8).",
         },
+      },
+      "onboarding.wizard.billingAfterSetup": {
+        description:
+          "Note above the onboarding wizard when the user arrived from a pricing link with a plan already chosen. The plan is reviewed after setup; nothing is bought during setup.",
+      },
+      "onboarding.wizard.billingInvalid": {
+        description:
+          "Alert above the onboarding wizard when the pricing link the user arrived from names a plan or billing interval that does not exist. Setup can still be finished.",
       },
       "onboarding.tour.skipAriaLabel": {
         description: "Accessible name of the small X button that dismisses the whole product tour.",
@@ -590,7 +696,7 @@ export const onboarding = defineNamespace({
       },
       "onboarding.checklist.aiModels.sizeMb": {
         description:
-          "Size badge next to an individual model's name (Whisper, Kokoro, MMS) before it has been downloaded.",
+          "Size badge next to an individual model's name (Whisper, MMS) before it has been downloaded.",
         placeholders: { size: "That model's download size in megabytes. A plain number." },
       },
       "onboarding.checklist.invite.copyLinkAriaLabel": {
@@ -623,6 +729,51 @@ export const onboarding = defineNamespace({
         description: "Last-used date shown on a token's row in the personal API tokens list.",
         placeholders: { date: "The date the token was last used, already locale-formatted." },
       },
+      "onboarding.apiTokens.createdOn": {
+        description: "Creation date shown on a token's row in the personal API tokens list.",
+        placeholders: { date: "The date the token was created, already locale-formatted." },
+      },
+      "onboarding.apiTokens.scope.orgBadge": {
+        description:
+          "Scope chip on a token's row for a token scoped to an entire organization. Rendered next to a building icon.",
+        placeholders: { name: "The organization's name, or its raw id when the name can't be resolved." },
+      },
+      "onboarding.apiTokens.scope.projectBadge": {
+        description:
+          "Scope chip on a token's row for a token scoped to a single project. Rendered next to a folder icon.",
+        placeholders: { name: "The project's name, or its raw id when the name can't be resolved." },
+      },
+      "onboarding.apiTokens.exposureWarning": {
+        description:
+          "Security warning shown beside the plaintext token immediately after minting it, explaining that the token is a live credential and must not be pasted into chats or logs.",
+        placeholders: { mode: "The token's access mode, 'ask' or 'act'. Not translated — a literal API value." },
+      },
+      "onboarding.connect.modeChanged": {
+        description:
+          "Note under the mode picker on the agent-consent page, shown only when the human picked a different mode than the agent requested.",
+        placeholders: { requested: "The mode the agent asked for, 'ask' or 'act'. Not translated — a literal API value." },
+      },
+      "onboarding.connect.account": {
+        description:
+          "Line at the top of the agent-consent page naming the Aquilla account the approval would be granted under, so the human can spot that they are signed in as the wrong user before authorizing an agent.",
+        placeholders: {
+          username: "The signed-in user's own Aquilla username. Not translated — a user-chosen account name, shown verbatim.",
+        },
+      },
+      "onboarding.connect.agent": {
+        description:
+          "Line on the agent-consent page naming the agent that is asking for access. The warning immediately below it (onboarding.connect.unverified) tells the human this name is self-reported, so keep this string a plain statement of the name rather than an endorsement of it.",
+        placeholders: {
+          name: "The display name the agent supplied when it started the connection request. Not translated, not verified by Aquilla, and chosen by whoever ran the agent.",
+        },
+      },
+      "onboarding.connect.confirm": {
+        description:
+          "Label of the checkbox the human must tick before the 'Authorize agent' button becomes enabled on the agent-consent page. It is the anti-phishing step of the device flow: the human asserts that they started this request and that the code on screen is the same one their agent is displaying.",
+        placeholders: {
+          code: "The connection code the human typed into the 'Connection code' field, in XXXX-XXXX form (uppercase letters and digits, with the ambiguous 0/1/I/O omitted). Not translated — echoed back verbatim so it can be compared character by character with the code the agent shows.",
+        },
+      },
       "onboarding.apiTokens.revokeWarning": {
         description:
           "Confirmation-dialog warning when revoking an API token. Rendered immediately after the bold token name, so it starts with the parenthesised prefix.",
@@ -648,6 +799,41 @@ export const onboarding = defineNamespace({
         description:
           "Small footer line in the agent-credits popover, stating remaining daily allowance.",
         placeholders: { remaining: "Agent credits remaining today, already locale-formatted." },
+      },
+      "onboarding.oauth.title": {
+        description:
+          "Heading of the consent page an AI app (for example ChatGPT) opens when a person connects it to Aquilla. The person is deciding whether that app may act on their projects.",
+        placeholders: {
+          client: "The app's display name as the app itself declares it (for example 'ChatGPT'). Not translated and not verified — the line below the heading shows the verified domain.",
+        },
+      },
+      "onboarding.oauth.verified": {
+        description:
+          "Security note under the heading of the app-consent page. It tells the person that the app name is self-declared and that only the web domain was checked, so they can spot an impostor.",
+        placeholders: { host: "The web domain that identified the app, for example 'chatgpt.com'. Not translated." },
+      },
+      "onboarding.oauth.act": {
+        description: "OAuth consent explains that the app can change content in selected organizations, subject to current permissions.",
+      },
+      "onboarding.oauth.organizations": {
+        description: "Legend above the organization access checkboxes on OAuth consent.",
+      },
+      "onboarding.oauth.allOrganizations": {
+        description: "Checkbox selecting every currently eligible organization. This selection excludes organizations joined later.",
+      },
+      "onboarding.oauth.scopeHint": {
+        description: "Consent note explaining the maintainer permission floor, access to future projects in selected organizations, and a new grant for later organizations.",
+      },
+      "onboarding.oauth.validation": {
+        description: "Consent note distinguishing saving a change from human linguistic validation of a specific translation version.",
+      },
+      "onboarding.oauth.return": {
+        description: "Line on the app-consent page saying which website the browser goes back to after the person allows or denies access.",
+        placeholders: { host: "The web domain the browser returns to, for example 'chatgpt.com'. Not translated." },
+      },
+      "onboarding.oauth.redirecting": {
+        description: "Status shown on the app-consent page while the browser leaves Aquilla and goes back to the app.",
+        placeholders: { host: "The web domain the browser is going back to. Not translated." },
       },
     },
   },

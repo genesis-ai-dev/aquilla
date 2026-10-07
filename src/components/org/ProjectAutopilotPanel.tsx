@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Link } from "react-router-dom"
 import {
   AlertTriangle,
   ChevronRight,
@@ -23,6 +24,13 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   fetchContextualOverview,
@@ -30,6 +38,7 @@ import {
   type ContextualOverview,
   type ContextualOverviewFile,
   type ProjectRunStartResult,
+  type StartBlockerId,
 } from "@/lib/contextual/transport"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 
@@ -40,6 +49,24 @@ interface ProjectAutopilotPanelProps {
   projectId: string
   fileNames: Map<string, string>
   canStart: boolean
+  /**
+   * AQU-935: the project's selectable target-language lanes, default lane
+   * FIRST as `''` — callers build `['', ...project.targetLanes]`, the same
+   * contract `EditorTable` and `ProjectWorkspace` already use. Omitted or a
+   * single entry means a single-language project, which keeps the card exactly
+   * as it was: one static lane pill, no chooser.
+   */
+  lanes?: readonly string[]
+  /** Human label for the default (`''`) lane — the project's target language. */
+  defaultLaneLabel?: string
+  /**
+   * AQU-1586: lane tag → the language that lane's ROW names. A non-default
+   * lane used to label itself with its own tag, but a tag is the event key and
+   * `planNewTargetLane` sets it to the opaque lane id whenever the language is
+   * already taken by a sibling — so the chooser offered "a3f09c1e". Absent
+   * entries fall back to the tag, which is all a pre-AQU-1418 server gives.
+   */
+  laneLabels?: Readonly<Record<string, string>>
 }
 
 type PanelState =
@@ -169,7 +196,18 @@ function primaryLine(
     return t("autopilot.overview.queuedPassages", { count: remaining })
   }
   if (state === "idle") return t("autopilot.overview.idle")
-  if (state === "review") return t("autopilot.overview.reviewDrafts", { count: overview.proposedDrafts })
+  if (state === "review") {
+    // AQU-1301: name the passage the run is parked on rather than a total that
+    // says how far behind the reviewer is and nothing about where to start.
+    const review = reviewSplit(overview)
+    if (review.spanLabel) {
+      return t("autopilot.overview.reviewAtPassage", {
+        spanLabel: review.spanLabel,
+        count: review.actionable,
+      })
+    }
+    return t("autopilot.overview.reviewDrafts", { count: overview.proposedDrafts })
+  }
   if (state === "complete") return t("autopilot.overview.complete")
   if (state === "stopped") return t("autopilot.overview.stopped")
   return t("autopilot.overview.notStarted")
@@ -234,11 +272,14 @@ function ActionWidget({
   label,
   ariaLabel,
   count,
+  detail,
   onClick,
 }: {
   label: string
   ariaLabel: string
   count: number
+  /** Second line: the backlog behind the headline number, when there is one. */
+  detail?: string | null
   onClick: () => void
 }) {
   return (
@@ -249,13 +290,151 @@ function ActionWidget({
       aria-label={ariaLabel}
       onClick={onClick}
     >
-      <span className="min-w-0"><span className="block text-lg font-semibold tabular-nums">{count}</span><span className="block text-xs text-muted-foreground">{label}</span></span>
+      <span className="min-w-0">
+        <span className="block text-lg font-semibold tabular-nums">{count}</span>
+        <span className="block text-xs text-muted-foreground">{label}</span>
+        {detail && <span className="block text-xs text-muted-foreground">{detail}</span>}
+      </span>
       <ChevronRight data-icon="inline-end" aria-hidden />
     </Button>
   )
 }
 
-export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: ProjectAutopilotPanelProps) {
+/**
+ * The review tile's two numbers (AQU-1301): what is actionable now — the
+ * drafts sitting in the passages the runs parked on — and how much is queued
+ * behind them. A server that predates the split reports no
+ * `currentSpanDrafts`, and the tile falls back to the flat total rather than
+ * claiming a passage breakdown it does not have.
+ */
+function reviewSplit(overview: ContextualOverview): {
+  actionable: number
+  backlog: number
+  /** The parked passage's reference, when exactly one run is parked. */
+  spanLabel: string | null
+} {
+  const total = overview.proposedDrafts
+  if (typeof overview.currentSpanDrafts !== "number") {
+    return { actionable: total, backlog: 0, spanLabel: null }
+  }
+  const actionable = Math.min(overview.currentSpanDrafts, total)
+  const parked = overview.files.filter((file) => (file.currentSpanDrafts ?? 0) > 0)
+  return {
+    actionable,
+    backlog: Math.max(0, total - actionable),
+    // Naming one passage is only honest when there IS one. Several parked
+    // files get the count and the per-file rows below, not a guess.
+    spanLabel: parked.length === 1 ? parked[0]?.currentSpanLabel ?? null : null,
+  }
+}
+
+/** The prerequisites the server refuses to start without (AQU-827), rendered
+ *  as the fix rather than as a rejection: each one names the missing piece and
+ *  links to the exact surface that supplies it. The button is disabled instead
+ *  of hidden so the capability stays discoverable while it is unavailable. */
+function StartGateNotice({
+  projectId,
+  blockers,
+  t,
+}: {
+  projectId: string
+  blockers: StartBlockerId[]
+  t: TFunction
+}) {
+  const links: Record<StartBlockerId, { to: string; label: string; detail: string }> = {
+    languages: {
+      to: `/project/${projectId}/settings`,
+      label: t("autopilot.startGate.settingsLink"),
+      detail: t("autopilot.startGate.languages"),
+    },
+    brief: {
+      to: `/project/${projectId}/memory/brief`,
+      label: t("autopilot.startGate.briefLink"),
+      detail: t("autopilot.startGate.brief"),
+    },
+  }
+  return (
+    <div className="rounded-md border border-dashed p-3 text-sm" data-testid="autopilot-start-gate">
+      <p className="font-medium">{t("autopilot.startGate.title")}</p>
+      <ul className="mt-2 flex flex-col gap-1.5">
+        {blockers.map((id) => (
+          <li key={id} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-muted-foreground">{links[id].detail}</span>
+            <Link
+              to={links[id].to}
+              className="text-xs text-primary underline-offset-2 hover:underline"
+            >
+              {links[id].label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * The lane row (AQU-935). A project-wide run drafts ONE target language, and
+ * the card used to name none — "Run Autopilot" silently took the default lane
+ * even on a project carrying three. So the lane is stated before the button,
+ * always, and becomes a chooser exactly when there is a choice to make and the
+ * viewer is allowed to make it.
+ *
+ * A viewer sees the same sentence without the control: the lane is information
+ * about the project, not a permission.
+ */
+function LaneRow({
+  lanes,
+  lane,
+  onLaneChange,
+  laneLabel,
+  disabled,
+  t,
+}: {
+  lanes: readonly string[]
+  lane: string
+  onLaneChange: (next: string) => void
+  laneLabel: (value: string) => string
+  /** True ⇒ the lane renders as static text instead of a chooser: viewers,
+   *  single-lane projects, and the moment a start is already in flight. */
+  disabled: boolean
+  t: TFunction
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="autopilot-lane">
+      <span className="text-xs text-muted-foreground">{t("autopilot.lane.label")}</span>
+      {disabled ? (
+        <Badge variant="outline" data-testid="autopilot-lane-static">{laneLabel(lane)}</Badge>
+      ) : (
+        <Select value={lane} onValueChange={(next) => onLaneChange(String(next ?? ""))}>
+          <SelectTrigger size="sm" className="w-auto min-w-40" aria-label={t("autopilot.lane.selectAria")}>
+            {/* Render the label ourselves: the default `SelectValue` learns an
+                item's text from the popup, which is unmounted until the first
+                open — so a closed trigger would sit empty on arrival, exactly
+                when the lane most needs naming (AQU-935). */}
+            <SelectValue>{(value) => laneLabel(String(value ?? ""))}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {lanes.map((value) => (
+              <SelectItem key={value || "__default__"} value={value}>
+                {laneLabel(value)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  )
+}
+
+export function ProjectAutopilotPanel({
+  projectId,
+  fileNames,
+  canStart,
+  lanes: laneProp,
+  defaultLaneLabel = "",
+  laneLabels,
+}: ProjectAutopilotPanelProps) {
   const { locale, t } = useI18n()
   const [overview, setOverview] = useState<ContextualOverview | null>(null)
   const [loading, setLoading] = useState(true)
@@ -266,7 +445,30 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
   const [lastGoodAt, setLastGoodAt] = useState<Date | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [inspectorSection, setInspectorSection] = useState<AutopilotInspectorSection>("activity")
+  const [laneChoice, setLaneChoice] = useState("")
   const seqRef = useRef(0)
+
+  // Always at least the default lane, and always with it first. A caller that
+  // forgets `''` would otherwise offer a list the start request cannot express.
+  const lanes = useMemo(() => {
+    const rest = (laneProp ?? []).filter((value) => value !== "")
+    return ["", ...rest]
+  }, [laneProp])
+
+  // A lane removed from project settings while this card was open must not stay
+  // selected — the server would reject the start as unregistered, which reads
+  // as "Autopilot is broken" rather than "that language is gone". Derived at
+  // render rather than corrected in an effect, so there is never a frame that
+  // renders (or could start) a lane the project no longer has.
+  const lane = lanes.includes(laneChoice) ? laneChoice : ""
+
+  const laneLabel = useCallback(
+    (value: string) =>
+      value
+        ? laneLabels?.[value] || value
+        : laneLabels?.[""] || defaultLaneLabel || t("autopilot.lane.projectDefault"),
+    [defaultLaneLabel, laneLabels, t],
+  )
 
   const load = useCallback(async () => {
     const seq = ++seqRef.current
@@ -319,7 +521,7 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
     setStartFailed(false)
     setStartResult(null)
     try {
-      const result = await startProjectContextualRun(projectId)
+      const result = await startProjectContextualRun(projectId, lane)
       setStartResult(result)
       await load()
     } catch {
@@ -356,12 +558,26 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
     ? overview.totalSpans
     : progressFiles.reduce((total, file) => total + file.totalSpans, 0)
   const workingFileCount = new Set(progressFiles.map((file) => file.fileId)).size
+  const review = reviewSplit(overview)
   const attentionItems = countAttentionItems(overview.files)
   const suggestionCount = overview.readiness?.items.filter((item) => item.level !== "ready").length ?? 0
+  // AQU-935: only THIS lane's runs block a start in this lane — the server
+  // scopes its conflict detection the same way. A run drafting Burmese is not
+  // a reason the Thai lane cannot begin, and hiding the button for it left a
+  // multi-lane project with no way to start its other languages at all.
+  //
+  // `targetLang` is optional on the wire: a server predating lane-aware runs
+  // omits it, and every row then reads as the default lane — which is exactly
+  // what such a server means.
   const hasBlockingRun = overview.files.some((file) =>
-    WORKING_STATUSES.has(file.status) || file.status === "paused" || fileHasQueuedWork(file),
+    (file.targetLang ?? "") === lane
+    && (WORKING_STATUSES.has(file.status) || file.status === "paused" || fileHasQueuedWork(file)),
   )
   const showStart = canStart && !initialLoadFailed && (starting || !hasBlockingRun)
+  // The server rejects a start without these (AQU-827); mirror it here so the
+  // user is told what is missing instead of pressing a button that fails.
+  const startBlockers = overview.readiness?.startBlockers ?? []
+  const startBlocked = startBlockers.length > 0
 
   return (
     <>
@@ -375,7 +591,7 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
           <CardDescription>{primaryLine(state, overview, workingDone, workingTotal, workingFileCount, workingTotalsKnown, starting, initialLoadFailed, t)}</CardDescription>
           {showStart && (
             <CardAction>
-              <Button type="button" size="sm" variant={state === "not-started" ? "default" : "outline"} disabled={starting} onClick={() => void handleStart()}>
+              <Button type="button" size="sm" variant={state === "not-started" ? "default" : "outline"} disabled={starting || startBlocked} onClick={() => void handleStart()}>
                 {starting ? <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden /> : <PencilSparkles data-icon="inline-start" aria-hidden />}
                 {t("autopilot.action.run")}
               </Button>
@@ -383,7 +599,20 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
           )}
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
+          <LaneRow
+            lanes={lanes}
+            lane={lane}
+            onLaneChange={setLaneChoice}
+            laneLabel={laneLabel}
+            // A single-lane project has nothing to choose, and a viewer has no
+            // say — both get the name without the control (AQU-935).
+            disabled={lanes.length < 2 || !canStart || starting}
+            t={t}
+          />
           {starting && <p role="status" aria-live="polite" className="text-sm font-medium">{t("autopilot.feedback.starting")}</p>}
+          {showStart && startBlocked && (
+            <StartGateNotice projectId={projectId} blockers={startBlockers} t={t} />
+          )}
           {state !== "not-started" && <AutopilotProcessGraph overview={overview} compact />}
           {state === "working" && !starting && workingTotalsKnown && workingTotal > 0 && (
             <Progress
@@ -394,8 +623,11 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <ActionWidget
               label={t("autopilot.overview.widget.reviewLabel")}
-              ariaLabel={t("autopilot.overview.widget.reviewAria", { count: overview.proposedDrafts })}
-              count={overview.proposedDrafts}
+              ariaLabel={t("autopilot.overview.widget.reviewAria", { count: review.actionable })}
+              count={review.actionable}
+              detail={review.backlog > 0
+                ? t("autopilot.overview.widget.reviewBacklog", { count: review.backlog })
+                : null}
               onClick={() => openInspector("review")}
             />
             <ActionWidget

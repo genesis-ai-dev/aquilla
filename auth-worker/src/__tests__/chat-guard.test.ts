@@ -66,6 +66,23 @@ describe("chat /api/v1/chat/completions — allowlist guard", () => {
     expect(res.status).toBe(401)
   })
 
+  it("returns 500 when OPENROUTER_API_KEY is unset (AQU-1158)", async () => {
+    await seedUser(1158, "or-key-missing")
+    const jwt = await jwtFor("or-key-missing")
+    const testEnv = withEnvOverrides({ OPENROUTER_API_KEY: undefined })
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: authHeader(jwt),
+        body: chatBody(ALLOWED_MODEL),
+      },
+      testEnv,
+    )
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "OPENROUTER_API_KEY is not configured" })
+  })
+
   it("returns 400 for a non-allowlisted model", async () => {
     await seedUser(1, "alice")
     const jwt = await jwtFor("alice")
@@ -157,6 +174,53 @@ describe("chat /api/v1/chat/completions — allowlist guard", () => {
     const body = (await res.json()) as { error: string; message: string }
     expect(body.error).toBe("openrouter_error")
     expect(body.message.length).toBeLessThanOrEqual(500)
+  })
+})
+
+// [Pen test] API security & data exposure (2026-09-03): every spend guard
+// below (AI budget, credit cap, word cap) is log-only in every deployed
+// environment — this per-user sliding-window throttle is the only thing that
+// actually blocks a flood against the shared OPENROUTER_API_KEY.
+describe("chat /api/v1/chat/completions — rate limiting", () => {
+  it("429s a user that has flooded the window, without calling upstream", async () => {
+    await seedUser(7, "grace")
+    const jwt = await jwtFor("grace")
+    const upstream = mockUpstreamSuccess()
+    await pg.exec(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'chat_completions', 'user:7', 1 FROM generate_series(1, 300)`,
+    )
+    const testEnv = withEnvOverrides({ OPENROUTER_API_KEY: "test-key" })
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      testEnv,
+    )
+
+    expect(res.status).toBe(429)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toBe("rate_limited")
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it("does not throttle a fresh user, even when another user has flooded the window", async () => {
+    await seedUser(8, "heidi")
+    const jwt = await jwtFor("heidi")
+    mockUpstreamSuccess()
+    await pg.exec(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'chat_completions', 'user:999', 1 FROM generate_series(1, 300)`,
+    )
+    const testEnv = withEnvOverrides({ OPENROUTER_API_KEY: "test-key" })
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      testEnv,
+    )
+
+    expect(res.status).toBe(200)
   })
 })
 
@@ -278,6 +342,36 @@ describe("chat /api/v1/chat/completions — budget enforcement", () => {
     )
     // Must pass through (upstream mocked to 200), not 429.
     expect(res.status).toBe(200)
+  })
+
+  // AQU-617: in log-only mode the counters can never reject a request, so
+  // they must not cost the translator a round trip — they ride waitUntil.
+  // They still have to count: the admin usage view and a later switch to
+  // enforce both read these rows, user and global alike.
+  it("log-only mode counts the request after the response, user and global both", async () => {
+    await seedUser(6, "frank")
+    const jwt = await jwtFor("frank")
+    mockUpstreamSuccess()
+    const deferred: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => void deferred.push(p), passThroughOnException() {}, props: {} }
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      withEnvOverrides({ OPENROUTER_API_KEY: "test-key" }),
+      ctx as unknown as ExecutionContext,
+    )
+    expect(res.status).toBe(200)
+    expect(deferred.length).toBeGreaterThan(0)
+    await Promise.all(deferred)
+
+    const counts = await env.AQUILLA_PG
+      .prepare(`SELECT user_id, request_count FROM ai_usage_daily ORDER BY user_id`)
+      .all<{ user_id: number; request_count: number }>()
+    expect(counts.results).toEqual([
+      { user_id: 0, request_count: 1 },
+      { user_id: 6, request_count: 1 },
+    ])
   })
 })
 
@@ -408,5 +502,35 @@ describe("chat /api/v1/chat/completions — org credit attribution (AQU-414 foll
       attributionEnv(),
     )
     expect(passed.status).toBe(200)
+  })
+
+  // AQU-617: sparkle predictions stream, and every awaited write between the
+  // provider's headers and our first byte is latency the translator waits
+  // through. The ledger row for a streamed reply must ride waitUntil, not the
+  // response path, and must still land with the same org attribution.
+  it("defers a streamed reply's ledger write past the response, and it still lands", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+    const deferred: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => void deferred.push(p), passThroughOnException() {}, props: {} }
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL, { projectId: PROJECT, stream: true }) },
+      attributionEnv(),
+      ctx as unknown as ExecutionContext,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain("OK")
+    expect(deferred.length).toBeGreaterThan(0)
+
+    await Promise.all(deferred)
+    expect(await llmLedger()).toEqual([{ org_id: 1, user_id: 1 }])
   })
 })

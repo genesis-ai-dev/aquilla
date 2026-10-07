@@ -65,9 +65,16 @@ writer, a mapping bug) that needs a human, not another automatic retry.
 
 - `PUSH_EVENTS_PER_SEC` — target push throughput; canary default `100`, steady
   state `400` once Hyperdrive + PostHog look clean at canary rate.
-- `FETCH_CONCURRENCY` — concurrent git fetch/clone operations (default `4`).
+- `FETCH_CONCURRENCY` — concurrent git fetch/clone operations (default `1`).
 - `MATERIALIZE_CONCURRENCY` — concurrent materialize (plan-build) operations,
-  CPU/disk bound so kept low (default `2`).
+  CPU/disk bound so kept low (default `1`).
+- `AUDIO_COPY_CONCURRENCY` — concurrent R2 object copies for audio (default
+  `4`); attachment bytes do not pass through local disk.
+- `MIGRATE_INBOX_POLL_MS` — webhook inbox polling interval (default `5000`).
+  A separate background loop keeps polling during long clone, materialize, and
+  push stages; periodic reconciliation remains the fallback for missed hooks.
+- `MIGRATE_RECONCILE_MS` — full GitLab activity reconciliation interval
+  (default `900000`, or 15 minutes).
 - The push stage itself is strictly serial (one writer, one chunk at a time) —
   there is no push concurrency knob; only the pacer's rate.
 
@@ -90,9 +97,12 @@ the box), or `tsx scripts/migrate-daemon/main.ts <command>` directly.
   it.
 
 - **`once [--only <gitlab-id>] [--dry-run] [--force]`** — drains every ready job
-  once and exits. `--only` first registers/looks up a single GitLab project id
-  before draining (used for the canary). `--force` forces re-materialization
-  even if the checkout looks unchanged. Example output:
+  once and exits. `--only` first registers/looks up a single GitLab project id,
+  then scopes the drain to that project's jobs only — other projects' ready jobs
+  are left untouched, and the weekly reseed pass is skipped (used for the
+  canary). Without `--only`, `once` drains every ready job for every project.
+  `--force` forces re-materialization even if the checkout looks unchanged.
+  Example output:
   ```
   once: 3 job(s) done, 0 planned, 1 with errors
     job 42 project 913: verify mismatch persisted after ledger reseed and forced re-materialize
@@ -140,13 +150,13 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   scheduler deletes the file once its job reaches `done`. A plan therefore only
   survives on disk while its job is unfinished (a dry-run leaves it at
   `planned`, so `--dry-run` runs do accumulate one plan per project).
-- `daemon.log` — stdout of the systemd unit (`StandardOutput=append:...`),
-  rotated by `/etc/logrotate.d/aquilla-migrate` (weekly, 8 rotations,
-  compressed, copytruncate so the daemon's open file handle stays valid).
+- On the Hetzner systemd host, logs go to journald and can be read with
+  `journalctl -u aquilla-migrate`; the database, clones, and plans live under
+  `/var/lib/aquilla-migrate`.
 
 ## Operations
 
-- **Deploy (first time)** — two steps, because the box requires an
+- **Legacy deploy (first time)** — two steps, because the old box requires an
   interactive sudo password so a non-interactive SSH session can't run
   privileged commands:
   1. As `clear` (no sudo): `ssh clear@<box> 'bash -s' < deploy/migrate-daemon/install.sh [branch] [env-file]`
@@ -159,6 +169,23 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
      the systemd unit, installs the env file (if given), writes the
      logrotate stanza, and enables (but does not start) the service.
   See `deploy/migrate-daemon/env.example` for every variable.
+
+- **Hetzner host** — the daemon runs as the dedicated `aquilla-migrate` user
+  on `ubuntu-4gb-hel1-1`. The checked-in unit is
+  `deploy/migrate-daemon/aquilla-migrate-hetzner.service`. The app and Node 22
+  runtime live under `/opt`; mutable state lives under `/var/lib`. Install the
+  unit as `/etc/systemd/system/aquilla-migrate.service`, create
+  `/etc/aquilla-migrate/env` with mode `0640` and owner `root:aquilla-migrate`,
+  then run `systemctl daemon-reload`. Keep `DRY_RUN=1` for initial validation.
+  Start the service only after the active-writer cutover is confirmed and the
+  required credentials are in the environment file. Read logs with
+  `journalctl -u aquilla-migrate -f`. The unit loads `tsx` through Node's
+  `--import` flag, avoiding a CLI wrapper process so systemd tracks and signals
+  the daemon process itself during a drain.
+  Roll later `dev` commits forward as root with
+  `bash deploy/migrate-daemon/update-hetzner.sh`; it verifies a clean checkout,
+  checks out the exact fetched `dev` commit using the repository deploy key,
+  installs the lockfile, and restarts the unit only when it was already active.
 
   **Why user-space pnpm**: the box's system `node` (`/usr/bin/node`) has no
   bundled `pnpm`, and `corepack enable` writes shims next to it — into
@@ -175,6 +202,16 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   not re-running `install.sh` — is the sanctioned way to ship a new build; a
   failed pull or install here just leaves the current version running instead of
   crash-looping the service.
+
+- **What `systemctl restart` actually does**: the unit sends SIGTERM to the
+  daemon's main process only (`KillMode=mixed`); `withLock` in `main.ts`
+  catches it, aborts the scheduler loop, lets any in-flight chunk finish, and
+  releases the R2 run lock before exiting — so `update.sh` never leaves the
+  lock lease to expire on its own. systemd allows up to `TimeoutStopSec=600`
+  (10 minutes) for that drain before escalating to SIGKILL. Duplicate SIGTERMs
+  arriving within ~2s of the first (pnpm/tsx forwarding their own copy of the
+  signal is normal and harmless) are folded into the same drain; a second,
+  later SIGTERM still forces an immediate exit without releasing gracefully.
 
 - **Read status**: `pnpm migrate:daemon status` (from `~/aquilla` on the box, or
   point `MIGRATE_HOME` at a copy of `daemon.db` from elsewhere).
@@ -195,9 +232,8 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   attachment behaviour must not shift under the migration. Plans, by contrast,
   are pruned (see Files on disk).
 
-- **Tail logs**: `tail -f ~/aquilla-migrate/daemon.log` on the box, or
-  `journalctl -u aquilla-migrate -f` for the unit's own lifecycle events
-  (start/stop/restart, not stdout — stdout is redirected to the log file).
+- **Tail logs**: `journalctl -u aquilla-migrate -f` on Hetzner. The legacy
+  box writes stdout to `~/aquilla-migrate/daemon.log`.
 
 - **Discord digest**: if `DISCORD_WEBHOOK_URL` is set, the daemon posts an
   hourly digest (events pushed, jobs done, breaker trips, failures) plus a
@@ -221,7 +257,7 @@ covers every project, not a per-project webhook):
    ```bash
    aws s3 ls s3://aquilla-snapshots/_migrate/inbox/ --endpoint-url <r2-endpoint>
    ```
-   The daemon's `inbox` poll (every `inboxPollMs`, default 30s) picks these up
+  The daemon's `inbox` poll (every `MIGRATE_INBOX_POLL_MS`, default 5s) picks these up
    and enqueues jobs; you should see a `detected` job appear in `status` within
    a poll interval.
 
@@ -256,23 +292,33 @@ empty-ledger run emits no reconciliation events at all and `order` reports 0.
 
 From the design spec's Rollout plan:
 
-1. Ship the sync-worker PR (webhook inbox, idempotent projection, count
-   endpoint) and deploy it.
-2. Bring the daemon up on the box in `DRY_RUN=1` for a **2-hour window**:
-   `reconcile` + fetch + materialize run for every project, nothing is pushed.
-   Then run `pnpm migrate:daemon status` and the parity gate against a fresh
-   `--dump-plan` from the Mac. Expect `status` to show roughly ≥419 projects
-   `ok`, ~26 `unmapped`, 0 stale-checkout failures, and the parity gate to
-   report zero differences. Attach both outputs to the PR.
-3. Canary: flip `DRY_RUN=0` with `PUSH_EVENTS_PER_SEC=100`, restart the service,
-   then `pnpm migrate:daemon once --only <id>` against a project already in
-   prod. Watch Neon `sweet-paper-88472094` query latency and the PostHog
-   `/migrate/*` log for 15 minutes.
-4. Raise `PUSH_EVENTS_PER_SEC` to `400` (steady state) and let the daemon drain
-   the full backlog overnight (UTC).
-5. Remove the content-migration step from `.github/workflows/audio-delta-sync.yml`
-   and register the GitLab system hook (see above) so the daemon is the sole
-   path going forward.
+- [x] Ship the sync-worker PR (webhook inbox, idempotent projection, count
+      endpoint) and deploy it.
+- [x] Bring the daemon up on the box in `DRY_RUN=1` for a **2-hour window**:
+      `reconcile` + fetch + materialize run for every project, nothing is
+      pushed. Then run `pnpm migrate:daemon status` and the parity gate
+      against a fresh `--dump-plan` from the Mac. Expect `status` to show
+      roughly ≥419 projects `ok`, ~26 `unmapped`, 0 stale-checkout failures,
+      and the parity gate to report zero differences. Attach both outputs to
+      the PR.
+- [x] Canary: flip `DRY_RUN=0` with `PUSH_EVENTS_PER_SEC=100`, restart the
+      service, then `pnpm migrate:daemon once --only <id>` against a project
+      already in prod. Watch Neon `sweet-paper-88472094` query latency and
+      the PostHog `/migrate/*` log for 15 minutes.
+- [x] Raise `PUSH_EVENTS_PER_SEC` to `400` (steady state) and let the daemon
+      drain the full backlog overnight (UTC). Daemon has been live since
+      2026-09-09.
+- [x] Remove the Mac crontab entry that ran `migrate-all --apply` every 15
+      minutes (removed 2026-09-10 — it contended for the same R2 run lock
+      the daemon now holds continuously).
+- [x] Remove the content-migration step from
+      `.github/workflows/audio-delta-sync.yml` so the daemon is the sole
+      content-writing path going forward. The nightly audio pass
+      (`--audio-fast --apply`) now takes its own R2 run lock
+      (`_migrate/audio-fast.lock`) so it no longer contends with the
+      daemon's continuous content-pass lease.
+- [ ] Register the GitLab system hook (see above) so the daemon's
+      near-real-time inbox path is live, not just its periodic reconcile.
 
 ## Known gaps
 
@@ -284,6 +330,8 @@ From the design spec's Rollout plan:
 - `once`'s exit code reflects **any** failed job currently in the queue, not
   only jobs touched by that invocation — a stale failed job from an earlier run
   will make an otherwise-clean `once --only <id>` exit non-zero.
-- Audio migration and users/groups migration are still handled by the nightly
-  `audio-delta-sync.yml` GitHub Actions workflow; this daemon only covers
-  content (sub-projects 2 and 3 will bring those under the daemon too).
+- Users/groups migration is still handled by the nightly
+  `audio-delta-sync.yml` GitHub Actions workflow. Audio migration is queued by
+  this daemon after content reaches the same commit and copies R2 objects
+  directly; remove only the workflow's audio step after the Hetzner daemon is
+  live and verified.

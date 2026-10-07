@@ -69,6 +69,9 @@ export interface AquiferPage {
   title: string
   truncated: boolean
   text: string
+  /** Markdown body, present once the site honours `format=md` (see the
+   *  module note). Upstream keeps `text` as a legacy alias of the same body. */
+  markdown?: string
 }
 
 export interface AquiferCitation {

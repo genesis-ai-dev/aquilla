@@ -52,6 +52,12 @@ export interface Env {
   ALGORITHM: string
   ACCESS_TOKEN_EXPIRE_MINUTES: string
 
+  /** [Pen test] Auth & session mgmt (2026-09-14): absolute cap, in days, on a
+   *  session's total age (from `sst`/original login), independent of how many
+   *  times it's been refreshed past its half-life. Defaults to 90 — see
+   *  middleware/auth.ts's `resolveSession`. */
+  MAX_SESSION_AGE_DAYS?: string
+
   // Sync-token signing, and — until ADMIN_SECRET is provisioned on both
   // workers — admin auth to aquilla-sync-worker. Shared between identity and
   // the sync worker.
@@ -67,7 +73,7 @@ export interface Env {
   /** PostHog project token (phc_…) — when set, 4xx/5xx responses are shipped
    *  to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
   POSTHOG_KEY?: string
-  /** PostHog ingest host. Defaults to https://us.i.posthog.com. */
+  /** PostHog ingest host. Defaults to https://eu.i.posthog.com (AQU-854). */
   POSTHOG_HOST?: string
 
   /** Cloudflare Email Service `send_email` binding — password reset and
@@ -85,14 +91,32 @@ export interface Env {
    *  form). Must be a routed/verified destination in Cloudflare Email Routing.
    *  Defaults to joel@frontierrnd.com (routes/contact.ts). */
   CONTACT_EMAIL?: string
+  /** Self-serve newsletter signup (services/resend-audience.ts). Both are
+   *  Worker SECRETS on Joel's SEPARATE Resend account — never reuse the
+   *  transactional RESEND_API_KEY. When either is absent the signup route
+   *  degrades to request-mode (notification email only, manual add). */
+  NEWSLETTER_RESEND_API_KEY?: string
+  /** ID of the "Frontier R&D Newsletter" segment in that Resend account. */
+  NEWSLETTER_RESEND_SEGMENT_ID?: string
   BASE_URL?: string
 
   /** Public invite link to the community (Discord). When set, the welcome
    *  email includes a "join the community" CTA; when absent the email simply
    *  omits it (no dead link). Plain config var, not a secret. */
   DISCORD_INVITE_URL?: string
+  /** Webhook URL of the private channel that receives in-app feedback
+   *  (services/discord-feedback.ts). Worker SECRET: anyone holding it can post
+   *  to the channel. When absent the route still accepts the report and answers
+   *  `delivered: false` (local/e2e). */
+  DISCORD_FEEDBACK_WEBHOOK_URL?: string
 
   ENVIRONMENT?: string
+  /**
+   * AQU-730 read wall. Exact "1" or "true" hides ungranted target lanes from
+   * members below Maintainer. Set on deployed dev and prod after the lane
+   * backfill's grant phase. Local and e2e leave it unset.
+   */
+  LANE_READ_WALL?: string
 
   // ── One-way frontier-db-v2 identity bridge (AQU-713) ──────────────────
   /** Fail-closed rollout flag. Only the exact string "true" enables legacy
@@ -119,6 +143,10 @@ export interface Env {
    * trimmed + lowercased for matching.
    */
   ADMIN_EMAILS?: string
+  /** AQU-1352 P1: project-role resolver selector — "off" (default when unset:
+   *  today's per-table queries), "shadow" (today's answer + access_grants
+   *  parity log), "on" (access_grants view answers). See db/shared/project-roles.ts. */
+  ACCESS_GRANTS_RESOLVER?: string
 
   /**
    * Step-up "sudo" switch (middleware/platform-admin.ts). When "true", the
@@ -147,6 +175,15 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
+   *  react loop use its fixed rules without calling Jev. Unset = on. */
+  JEV_REACT?: string
+  /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
+   *  every suggest request with no suggestions. Unset = on. */
+  SMART_EDITS?: string
+  /** Kill switch for the harmonizer (routes/ai-harmonize.ts): "off" answers
+   *  every passage request with no suggestions. Unset = on. */
+  HARMONIZER?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
    *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
@@ -175,6 +212,17 @@ export interface Env {
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
+  /** OAuth issuer for MCP hosts (ChatGPT plugin, Claude, Codex): this
+   *  worker's public base, e.g. https://api.aquilla.app/identity. Must equal
+   *  the sync-worker's AUTH_WORKER_URL, which its protected-resource metadata
+   *  names as the authorization server. Falls back to the request origin. */
+  MCP_OAUTH_ISSUER?: string
+  /** Secret: the plain-text token OpenAI's plugin portal issues to verify we
+   *  own api.aquilla.app, served at /.well-known/openai-apps-challenge. */
+  OPENAI_APPS_CHALLENGE?: string
+  /** Local stacks only (honoured with WRANGLER_LOCAL=1): a JSON array of
+   *  client metadata documents served instead of fetching their client_id. */
+  MCP_OAUTH_PINNED_CLIENTS?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may
@@ -198,6 +246,12 @@ export interface Env {
   /** "1" enables the per-call cost ledger (lib/cost-meter.ts). Off otherwise —
    *  no table, no writes. See docs/COST-METERING.md. */
   COST_METER?: string
+  /** "0" turns off Autopilot prompt/reply traces (lib/contextual/traces.ts).
+   *  On by default; rows expire after 30 days. */
+  CONTEXTUAL_TRACES?: string
+  /** "1" includes prompt/reply text in PostHog $ai_generation events for
+   *  Autopilot. Off by default: it sends translators' text to a third party. */
+  POSTHOG_LLM_CONTENT?: string
   /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
    *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
    *  writes attached files here so the sandbox's fetch-artifact can read them
@@ -255,6 +309,28 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_PUBLISHABLE_KEY?: string
   /** Recurring $500 / 4-week Field Plan price id (price_…). */
+  BILLING_CHECKOUT_ENABLED?: string
+  /** Weekly allowance metering, loopback request + provider only (see usage-mode.ts). */
+  BILLING_CHAT_USAGE_REHEARSAL?: string
+  /** Weekly allowance metering for any provider; retires legacy guards for metered calls. */
+  BILLING_WEEKLY_USAGE_ENFORCE?: string
+  /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
+   *  on a development deployment. Test-mode key required either way. */
+  BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
+  /** Live new-plan sales switch; turning it off preserves paid webhooks/portal. */
+  BILLING_WORKSPACE_CHECKOUT_ENABLED?: string
+  /** Production API and app host allowlist. Live keys never run locally. */
+  BILLING_LIVE_HOSTS?: string
+  /** Comma-separated API and app hosts allowed to run sandbox billing when
+   *  ENVIRONMENT=development (e.g. api.dev.aquilla.app,dev.aquilla.app). */
+  BILLING_SANDBOX_HOSTS?: string
+  /** Approved environment-specific catalog JSON. Amounts are fetched from Stripe. */
+  STRIPE_PRICE_CATALOG?: string
+  /** Explicit sandbox portal configurations; validated scope-specific management. */
+  STRIPE_PORTAL_PERSONAL_CONFIGURATION?: string
+  STRIPE_PORTAL_TEAM_CONFIGURATION?: string
+  STRIPE_PRICE_FIELD_MONTHLY?: string
+  STRIPE_PRICE_FIELD_ANNUAL?: string
   STRIPE_PRICE_FIELD?: string
   /** One-time $200 / 100k-word add-on price id (price_…). */
   STRIPE_PRICE_ADDON?: string
@@ -274,6 +350,13 @@ export type Variables = {
    *  so routes (e.g. POST /auth/logout) can read `jti`/`exp` without
    *  re-verifying the token. */
   tokenPayload: JWTPayload
+  /** Stable identity of the *credential* this request arrived on (not of its
+   *  bearer), set by authMiddleware — `jti:<jti>`, or `tok:<sha256>` for
+   *  pre-`jti` tokens. Authorization state that must not be shared across a
+   *  user's other sessions keys off this: see `requireAdminElevation`
+   *  (OPS-35). Same derivation as the isolate session cache, so the two
+   *  cannot disagree about what "this session" means. */
+  sessionKey: string
 }
 
 /**
@@ -358,6 +441,9 @@ export interface SyncTokenClaims {
    * gates target-side writes + validate/unvalidate against these scopes.
    */
   scopes?: Array<{ kind: "lane" | "file"; value: string }>
+  /** AQU-730: additive per-lane role grants. ABSENT = no grants. `lane` is
+   *  `lanes.id`, not a language. Each entry grants that lane at `level`. */
+  laneGrants?: Array<{ lane: string; level: number }>
   aud: "sync"
   iat: number
   exp: number

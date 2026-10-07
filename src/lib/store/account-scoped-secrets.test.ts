@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { act, renderHook } from "@testing-library/react"
 import {
   resetClientLocalStorageOwnerForTests,
   setClientLocalStorageOwner,
@@ -7,6 +8,7 @@ import { loadProjectTts, saveProjectTts } from "./project-tts-store"
 import {
   getUserProviderOverride,
   setUserProviderOverride,
+  useUserProviderOverride,
 } from "./user-provider-override"
 
 beforeEach(() => {
@@ -42,5 +44,22 @@ describe("account-scoped credential stores", () => {
 
     setClientLocalStorageOwner("alice")
     expect(loadProjectTts("shared-project")?.apiKey).toBe("alice-gemini-key")
+  })
+
+  it("notifies useUserProviderOverride after a Preferences save", () => {
+    const { result } = renderHook(() => useUserProviderOverride())
+    expect(result.current).toBeNull()
+
+    act(() => {
+      setUserProviderOverride({
+        endpoint: "https://openrouter.ai/api/v1",
+        apiKey: "sk-or-live",
+      })
+    })
+
+    expect(result.current).toMatchObject({
+      endpoint: "https://openrouter.ai/api/v1",
+      apiKey: "sk-or-live",
+    })
   })
 })

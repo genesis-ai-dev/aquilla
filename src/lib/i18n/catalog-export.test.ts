@@ -221,7 +221,7 @@ describe("context sidecar", () => {
     ])
     expect(entry.categoriesByLocale.th).toEqual(["other"])
     expect(entry.categoriesByLocale.my).toEqual(["other"])
-    expect(entry.categoriesByLocale.mfa).toEqual(["other"])
+    expect(entry.categoriesByLocale.ms).toEqual(["other"])
   })
 })
 

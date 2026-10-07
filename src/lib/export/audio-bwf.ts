@@ -84,7 +84,7 @@ interface Chunk {
 
 function readChunks(bytes: Uint8Array): { chunks: Chunk[]; valid: boolean } {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const tag = (o: number) => String.fromCharCode(bytes[o]!, bytes[o + 1]!, bytes[o + 2]!, bytes[o + 3]!)
+  const tag = (o: number) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3])
   if (bytes.byteLength < 12 || tag(0) !== "RIFF" || tag(8) !== "WAVE") return { chunks: [], valid: false }
   const chunks: Chunk[] = []
   let at = 12

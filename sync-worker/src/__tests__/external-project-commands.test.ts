@@ -154,6 +154,51 @@ describe('project commands — validation', () => {
     expect(body.error.code).toBe('validation_failed')
   })
 
+  // AQU-1140: the agent that imported the LOTE curriculum created a project
+  // literally named "default". The name is what humans see in the workspace from
+  // then on, so a content-free placeholder is rejected and the agent is told to
+  // derive a real one.
+  it.each([
+    'default',
+    'Default',
+    ' default ',
+    'Default Project',
+    'new_project',
+    'untitled',
+    'Untitled 2',
+    'unnamed',
+    '   ',
+  ])('CreateProject with the placeholder name %o → validation_failed', async (name) => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000a1', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { res, body } = await prepare(env, 'new-proj', token, [
+      { kind: 'CreateProject', name, orgId: ORG_ID },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    // No project row may be created by a rejected plan.
+    const row = await tdb.pg.query(`SELECT id FROM projects WHERE id = 'new-proj'`)
+    expect(row.rows.length).toBe(0)
+  })
+
+  it('CreateProject keeps accepting a real name, and stores it trimmed', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000a9', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { res, body } = await prepare(env, 'lote-proj', token, [
+      { kind: 'CreateProject', name: '  Living on the Edge  ', orgId: ORG_ID },
+    ])
+    expect(res.status).toBe(200)
+    expect(body.summary.projectName).toBe('Living on the Edge')
+  })
+
   it('UpdateProjectSettings with a non-integer ifMatchVersion → validation_failed', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb, {
@@ -252,6 +297,165 @@ describe('CreateProject — happy path (org-scoped maintainer)', () => {
     const cs = await tdb.rows<{ status: string; receipt: unknown }>('changesets')
     expect(cs[0].status).toBe('committed')
     expect(cs[0].receipt).not.toBeNull()
+  })
+})
+
+// AQU-1223. The bug these guard: CreateProject used to pick `name`/`orgId`/
+// `projectId` off the body and DROP everything else without a word — a caller
+// that sent languages got a 200 and a blank project, and had no way to find out.
+// Both halves matter: the language pair must actually land, and anything the
+// command does not implement must come back named.
+describe('CreateProject — accepted fields (AQU-1223)', () => {
+  /** Stage + human-approve + commit a CreateProject, returning the commit result. */
+  async function createProject(
+    env: ReturnType<typeof makeEnv>,
+    projectId: string,
+    token: string,
+    credentialId: string,
+    command: Record<string, unknown>,
+  ) {
+    const { body: prep } = await prepare(env, projectId, token, [command])
+    await seedConfirmation(tdb, prep.changeset.id, prep.digest, 1, credentialId)
+    return { prep, ...(await commit(env, projectId, token, prep.changeset.id)) }
+  }
+
+  async function settingsRow(projectId: string) {
+    const rows = await tdb.rows<{ project_id: string; settings: string; version: number }>('project_settings')
+    return rows.find((r) => r.project_id === projectId)
+  }
+
+  it('seeds sourceLanguage + targetLanguage into the settings blob at version 1', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const credentialId = '00000000-0000-0000-0000-0000000000c1'
+    const token = await credToken(tdb, {
+      credentialId, userId: 1, username: 'alice', orgId: String(ORG_ID), projectId: null,
+    })
+
+    const { res, body } = await createProject(env, 'with-langs', token, credentialId, {
+      kind: 'CreateProject', name: 'With Langs', orgId: ORG_ID,
+      sourceLanguage: 'en', targetLanguage: 'es',
+    })
+    expect(res.status).toBe(200)
+    expect(body.receipt.command).toBe('CreateProject')
+
+    const settings = await settingsRow('with-langs')
+    expect(settings).toBeDefined()
+    expect(JSON.parse(settings!.settings)).toMatchObject({ sourceLanguage: 'en', targetLanguage: 'es' })
+    // Version 1 is what the UI's create-then-patch(version 0) also produces, so
+    // a client that reads the version back and patches on top behaves the same
+    // whichever path created the project.
+    expect(settings!.version).toBe(1)
+  })
+
+  it("accepts targetLanguage: '' for the source-only shape", async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const credentialId = '00000000-0000-0000-0000-0000000000c2'
+    const token = await credToken(tdb, {
+      credentialId, userId: 1, username: 'alice', orgId: String(ORG_ID), projectId: null,
+    })
+
+    const { res } = await createProject(env, 'source-only', token, credentialId, {
+      kind: 'CreateProject', name: 'Source Only', orgId: ORG_ID,
+      sourceLanguage: 'grc', targetLanguage: '',
+    })
+    expect(res.status).toBe(200)
+    const settings = await settingsRow('source-only')
+    expect(JSON.parse(settings!.settings)).toMatchObject({ sourceLanguage: 'grc', targetLanguage: '' })
+  })
+
+  it('the approval summary names the language pair being seeded', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000c3', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { body: prep } = await prepare(env, 'summarised', token, [
+      { kind: 'CreateProject', name: 'Summarised', orgId: ORG_ID, sourceLanguage: 'en', targetLanguage: 'fr' },
+    ])
+    expect(prep.summary.newProjectLanguages).toBe('en → fr')
+  })
+
+  it('a bare name + orgId create still works and writes NO settings row', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const credentialId = '00000000-0000-0000-0000-0000000000c4'
+    const token = await credToken(tdb, {
+      credentialId, userId: 1, username: 'alice', orgId: String(ORG_ID), projectId: null,
+    })
+
+    const { res, prep } = await createProject(env, 'bare', token, credentialId, {
+      kind: 'CreateProject', name: 'Bare', orgId: ORG_ID,
+    })
+    expect(res.status).toBe(200)
+    // No language pair sent ⇒ nothing to summarize and no row: the lazy
+    // first-settings-write path is untouched for every pre-existing caller.
+    expect(prep.summary.newProjectLanguages).toBeUndefined()
+    expect(await settingsRow('bare')).toBeUndefined()
+
+    const created = (await tdb.rows<{ id: string; name: string }>('projects')).find((p) => p.id === 'bare')
+    expect(created?.name).toBe('Bare')
+  })
+
+  it.each([
+    ['description', { description: 'a blurb' }],
+    ['members', { members: [{ userId: 2, role: 'contributor' }] }],
+    ['settings', { settings: { validationCount: 3 } }],
+    ['targetLangauge', { targetLangauge: 'es' }], // the typo case
+  ])('rejects an unrecognized field (%s) by name instead of dropping it', async (field, extra) => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: `00000000-0000-0000-0000-0000000000d${field.length % 10}`, userId: 1,
+      username: 'alice', orgId: String(ORG_ID), projectId: null,
+    })
+
+    const { res, body } = await prepare(env, 'rejected', token, [
+      { kind: 'CreateProject', name: 'Rejected', orgId: ORG_ID, ...extra },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    // Named, not merely counted — the whole point is the caller learns WHICH
+    // field never landed.
+    expect(JSON.stringify(body.error)).toContain(field)
+    // And nothing was created behind the rejection.
+    expect((await tdb.rows<{ id: string }>('projects')).filter((p) => p.id === 'rejected')).toHaveLength(0)
+  })
+
+  it('names EVERY unrecognized field at once, not just the first', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000d9', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { res, body } = await prepare(env, 'multi-bad', token, [
+      {
+        kind: 'CreateProject', name: 'Multi', orgId: ORG_ID,
+        description: 'x', members: [], sourceLangauge: 'en',
+      },
+    ])
+    expect(res.status).toBe(400)
+    const serialized = JSON.stringify(body.error)
+    for (const field of ['description', 'members', 'sourceLangauge']) {
+      expect(serialized).toContain(field)
+    }
+  })
+
+  it('rejects a non-string language rather than coercing it', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000da', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { res, body } = await prepare(env, 'bad-lang', token, [
+      { kind: 'CreateProject', name: 'Bad Lang', orgId: ORG_ID, sourceLanguage: 42 },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
   })
 })
 
@@ -699,6 +903,112 @@ describe('discard — a committing changeset is rejected', () => {
     // Still committing — not discarded.
     const cs = await tdb.rows<{ status: string }>('changesets')
     expect(cs[0].status).toBe('committing')
+  })
+})
+
+// ── AQU-1225: pre-creation changesets must be discardable ────────────────────
+// A CreateProject changeset is staged under a project id that does not exist
+// yet, so discard's membership check could never resolve a role and always
+// returned permission_denied — leaving undiscardable junk in the approval queue
+// until it expired an hour later. Authorization falls back to the staging
+// credential; a different credential still cannot discard it.
+
+describe('AQU-1225: discard — pre-creation (CreateProject) changesets', () => {
+  it('the staging credential discards its own pre-creation changeset — it leaves the approval queue immediately', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600) // alice: org maintainer
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-000000001225', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null, mode: 'act',
+    })
+
+    const { body: prep } = await prepare(env, 'never-created', token, [
+      { kind: 'CreateProject', name: 'Never Created', orgId: ORG_ID },
+    ])
+    expect(prep.changeset.status).toBe('staged')
+    // Precondition of the bug: the target project genuinely does not exist yet.
+    expect((await tdb.rows<{ id: string }>('projects')).filter((p) => p.id === 'never-created')).toHaveLength(0)
+
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`${changesetsUrl('never-created')}/${prep.changeset.id}/discard`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    // The step that used to permission_denied now succeeds.
+    expect(res.status).toBe(200)
+    expect((await res.json() as any).changeset.status).toBe('discarded')
+
+    const rows = await tdb.rows<{ id: string; status: string }>('changesets')
+    expect(rows.find((c) => c.id === prep.changeset.id)?.status).toBe('discarded')
+  })
+
+  it('a DIFFERENT credential still cannot discard a pre-creation changeset', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600) // alice: org maintainer
+    const alice = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-000000001226', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null, mode: 'act',
+    })
+    // bob: a second org maintainer with his own credential — high enough org
+    // role that only the per-credential ownership rule can be what denies him.
+    // credToken seeds his users row, so his org membership goes in after it.
+    const bob = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-000000001227', userId: 2, username: 'bob',
+      orgId: String(ORG_ID), projectId: null, mode: 'act',
+    })
+    await tdb.pg.query(
+      `INSERT INTO org_members (org_id, user_id, role_level) VALUES ($1, 2, 600)`,
+      [ORG_ID],
+    )
+
+    const { body: prep } = await prepare(env, 'alice-only', alice, [
+      { kind: 'CreateProject', name: 'Alice Only', orgId: ORG_ID },
+    ])
+
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`${changesetsUrl('alice-only')}/${prep.changeset.id}/discard`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bob}` },
+      }),
+      env,
+    ))!
+    expect(res.status).toBe(403)
+    expect((await res.json() as any).error.code).toBe('permission_denied')
+
+    // Untouched — still staged, still alice's to discard.
+    const rows = await tdb.rows<{ id: string; status: string }>('changesets')
+    expect(rows.find((c) => c.id === prep.changeset.id)?.status).toBe('staged')
+  })
+
+  it('a POST-creation changeset keeps the membership check: the same credential is denied once membership is gone', async () => {
+    const env = makeEnv(tdb.db)
+    await seedSettingsProject(tdb, 'proj-live', 1, {}, 0)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-000000001228', userId: 1, username: 'alice',
+      orgId: null, projectId: 'proj-live', mode: 'act',
+    })
+    const { body: prep } = await prepare(env, 'proj-live', token, [
+      { kind: 'UpdateProjectSettings', projectId: 'proj-live', settings: { a: 1 }, ifMatchVersion: 0 },
+    ])
+
+    // The project EXISTS, so removing membership must still deny — the
+    // pre-creation fallback must not leak into the normal path.
+    await tdb.pg.query(`DELETE FROM project_members WHERE project_id = 'proj-live'`)
+
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`${changesetsUrl('proj-live')}/${prep.changeset.id}/discard`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    expect(res.status).toBe(403)
+    expect((await res.json() as any).error.code).toBe('permission_denied')
+
+    const rows = await tdb.rows<{ id: string; status: string }>('changesets')
+    expect(rows.find((c) => c.id === prep.changeset.id)?.status).toBe('staged')
   })
 })
 

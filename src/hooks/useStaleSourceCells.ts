@@ -57,13 +57,21 @@ export interface UseStaleSourceCellsResult {
   isError: boolean
   /** Project/file key for the most recent successful authoritative read. */
   lastSuccessfulFetchKey: string | null
-  /** Manual refetch — call after target commits or known upstream edits. */
+  /** Manual refetch — call after target commits or known upstream edits.
+   *  Also fires the lazy-pull mirror sync. */
   revalidate: () => void
+  /** AQU-1545: re-read staleness only, firing no sync — for a caller that runs
+   *  the sync itself (the `link.upstream-changed` push handler). A second
+   *  trigger per frame is not free: the server answers a sync requested while
+   *  one runs with another fold, so the extra trigger ran the real fold and
+   *  left the handler's own sync an empty one behind it. */
+  refetch: () => void
   /** QA-BUG-2: awaits POST /link/sync, THEN revalidates staleness. Callers
    *  that also need the mirrored cell TEXT to refresh (not just the
    *  staleness badge) should revalidate cells after this resolves too — see
-   *  ProjectWorkspace's `link.upstream-changed` handler. */
-  syncNow: () => Promise<void>
+   *  ProjectWorkspace's `link.upstream-changed` handler. Resolves true when the
+   *  sync request succeeded, false when it could not run or failed. */
+  syncNow: () => Promise<boolean>
 }
 
 // SWARM-TODO(AQU-476): verify the lazy-pull trigger end to end — create
@@ -102,13 +110,15 @@ export interface UseStaleSourceCellsResult {
  *  the POST settles, so callers who need the post-sync truth (the delayed
  *  re-fetch below, and ProjectWorkspace's push-accelerator handler) can wait
  *  for it — but `doFetch`'s own call to this is still fire-and-forget with
- *  respect to the stale-source READ (never delays that GET). */
-function triggerLinkSync(projectId: string, jwt: string): Promise<void> {
+ *  respect to the stale-source READ (never delays that GET). Resolves with
+ *  whether the sync request succeeded. */
+function triggerLinkSync(projectId: string, jwt: string): Promise<boolean> {
   const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/link/sync`
   return fetch(url, { method: "POST", headers: { Authorization: `Bearer ${jwt}` } })
-    .then(() => undefined)
+    .then((res) => res.ok)
     .catch(() => {
       /* best-effort; the next lazy-pull trigger or manual sync catches it */
+      return false
     })
 }
 
@@ -159,6 +169,11 @@ export function useStaleSourceCells(
   // QA-BUG-3: cancelled on unmount/re-run so a stale generation's delayed
   // re-fetch never clobbers a newer fetch's result.
   const postSyncRefetchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // `doFetch` re-enters itself from its own timers. It reaches those callbacks
+  // through this ref (kept pointed at the latest closure just below) rather than
+  // by name, so a deferred re-fetch always runs the current callback instead of
+  // the one captured when the timer was scheduled (react-hooks/immutability).
+  const doFetchRef = useRef<(triggerSync?: boolean) => Promise<void>>(async () => {})
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
@@ -200,7 +215,7 @@ export function useStaleSourceCells(
         if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
         tokenRetryRef.current = setTimeout(() => {
           tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetch()
+          if (generationRef.current === gen) void doFetchRef.current()
         }, delay)
         return
       }
@@ -217,7 +232,7 @@ export function useStaleSourceCells(
         void triggerLinkSync(pid, jwt).then(() => {
           postSyncRefetchRef.current = setTimeout(() => {
             postSyncRefetchRef.current = null
-            if (generationRef.current === gen) void doFetch(false)
+            if (generationRef.current === gen) void doFetchRef.current(false)
           }, POST_SYNC_REFETCH_DELAY_MS)
         })
       }
@@ -244,6 +259,7 @@ export function useStaleSourceCells(
       setIsLoading(false)
     }
   }, [resetToEmpty])
+  doFetchRef.current = doFetch
 
   useEffect(() => {
     void doFetch()
@@ -276,15 +292,24 @@ export function useStaleSourceCells(
   // source TEXT), not just staleness. Mints its own token via `getToken`
   // rather than reusing whatever `doFetch` last saw, since this can be
   // called independently of the read cycle.
-  const syncNow = useCallback(async (): Promise<void> => {
+  const syncNow = useCallback(async (): Promise<boolean> => {
     const pid = projectRef.current
     const fid = fileRef.current
     const getToken = tokenRef.current
-    if (!pid || !fid || !getToken) return
+    if (!pid || !fid || !getToken) return false
     const jwt = await getToken(fid)
-    if (!jwt) return
-    await triggerLinkSync(pid, jwt)
-    void doFetch()
+    if (!jwt) return false
+    const synced = await triggerLinkSync(pid, jwt)
+    // `false`: the sync this read follows has already landed, so it must not
+    // fire another one (the server answers a sync requested mid-sync with a
+    // fresh fold — AQU-1545 — so a redundant trigger is no longer free) and
+    // needs no delayed re-read for a race it cannot have.
+    void doFetch(false)
+    return synced
+  }, [doFetch])
+
+  const refetch = useCallback(() => {
+    void doFetch(false)
   }, [doFetch])
 
   return {
@@ -297,6 +322,7 @@ export function useStaleSourceCells(
     isError,
     lastSuccessfulFetchKey,
     revalidate: doFetch,
+    refetch,
     syncNow,
   }
 }

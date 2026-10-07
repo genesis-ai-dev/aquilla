@@ -1,12 +1,12 @@
-import { useState } from "react"
-import { X } from "lucide-react"
+import { useId, useState } from "react"
+import { AlertCircle, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, CommentThread as CommentThreadType } from "@/lib/parsers/types"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { canPerform, canMutateComment, foreignRoleFor } from "@/lib/sync/role-policy"
+import { canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { CommentThread } from "./CommentThread"
@@ -30,6 +30,21 @@ interface CommentsDrawerProps {
    * per-thread gate falls open and behaves exactly as before.
    */
   currentUsername?: string | null
+  /**
+   * AQU-1275: the comments feed failed to load. The drawer used to render the
+   * "No comments yet." empty state in this case, so a dropped request looked
+   * exactly like a cell whose threads had been deleted — the shape of the
+   * Pattani Malay report. Say the load failed and offer a retry instead.
+   */
+  isError?: boolean
+  /**
+   * AQU-1275: later pages of the project-wide comment list are still arriving.
+   * A cell whose threads haven't paged in yet is not an empty cell, so hold the
+   * empty state until the load finishes.
+   */
+  isLoadingRest?: boolean
+  /** Re-runs the comments load; wired to the error state's Retry button. */
+  onRetry?: () => void
 }
 
 /** Convert flat CommentRecord[] (event-log model) → CommentThread[] (legacy cell model) */
@@ -65,9 +80,10 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
   })
 }
 
-export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, currentUsername }: CommentsDrawerProps) {
+export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, currentUsername, isError = false, isLoadingRest = false, onRetry }: CommentsDrawerProps) {
   const t = useT()
   const [newThreadText, setNewThreadText] = useState("")
+  const newThreadHeadingId = useId()
   const permissions = useProjectPermissions(project)
   // Use liveComments (from useComments hook) when available; fall back to cell.threads
   const threads = liveComments !== undefined ? recordsToThreads(liveComments) : cell.threads
@@ -79,16 +95,22 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   // object so resolvePermissions returns the full defaults — we must also check
   // the live syncRole.
   const roleLevel = project.syncRole?.level ?? null
-  const cloudCanComment = canPerform("comment.create", roleLevel)
-  const cloudCanResolve = canPerform("comment.resolve", roleLevel)
+  // AQU-1002: the org's configurable floors, off the project record. Absent
+  // (list endpoint, older server, local project) ⇒ the stock defaults, so this
+  // is a no-op for every org that hasn't set a policy.
+  const floors = commentFloorsFrom(project)
+  const cloudCanComment = canMutateComment("comment.create", roleLevel, true, floors)
+  const cloudCanResolve = canMutateComment("comment.resolve", roleLevel, true, floors)
   // When a syncRole is present, let it take precedence; fall back to legacy permissions.
   const canComment = roleLevel !== null ? cloudCanComment : permissions.canEditComments
   // The role floor for resolving YOUR OWN thread. Whether it also covers a
   // given thread depends on who wrote that thread — decided per row below.
   const canResolveOwn = roleLevel !== null ? cloudCanResolve : permissions.canResolveComments
   // Build a helpful denial message for viewers who cannot comment.
+  // AQU-1002: name the org's configured create floor, not the static one, so
+  // the sentence matches the bar the server will actually apply.
   const commentDenialReason = !canComment
-    ? denialMessage(t, ROLE.COMMENTER, roleLevel)
+    ? denialMessage(t, floors.createMinRole, roleLevel)
     : null
 
   // AQU-1000: resolve authority is per THREAD, not per user. The server
@@ -96,7 +118,9 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   // floor; because the client flips `resolved` optimistically, offering the
   // control anyway made the thread close and then spring back open. Decide up
   // front instead, and when the answer is no, say why.
-  const foreignResolveFloor = foreignRoleFor("comment.resolve") ?? ROLE.MAINTAINER
+  // AQU-1002: the floor named in the denial sentence is the org's configured
+  // one, so the message matches the refusal the server would actually give.
+  const foreignResolveFloor = floors.resolveMinRole
   function resolveGateFor(thread: CommentThreadType): { canResolve: boolean; reason: string | null } {
     if (roleLevel === null) {
       // Local / git-imported project: no sync role to reason about, so keep the
@@ -107,7 +131,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
     // the server will compare against a real author_id we cannot see, so the
     // safe, honest answer is the higher floor.
     const isOwnThread = currentUsername != null && thread.authorId === currentUsername
-    if (canMutateComment("comment.resolve", roleLevel, isOwnThread)) {
+    if (canMutateComment("comment.resolve", roleLevel, isOwnThread, floors)) {
       return { canResolve: true, reason: null }
     }
     if (!canResolveOwn) {
@@ -160,8 +184,37 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-2">
+        {/*
+          AQU-1275: a failed or half-finished load must never read as "this cell
+          has no comments". The error banner stays above whatever threads did
+          land, because a partial list is also untrustworthy — the reporter saw
+          verses 1–13 while 14–48 silently vanished.
+        */}
+        {isError && (
+          <div
+            className="flex items-start gap-2 rounded-md border border-destructive p-2 text-xs text-destructive"
+            data-testid="comments-drawer-error"
+            role="status"
+          >
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div className="space-y-1.5">
+              <p>{t("comments.drawer.loadError")}</p>
+              {onRetry && (
+                <Button variant="outline" size="sm" onClick={onRetry} className="h-6 px-2 text-xs">
+                  {t("common.retry")}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
         {threads.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("comments.drawer.noComments")}</p>
+          isError ? null : isLoadingRest ? (
+            <p className="text-xs text-muted-foreground" data-testid="comments-drawer-loading">
+              {t("common.loading")}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">{t("comments.drawer.noComments")}</p>
+          )
         ) : (
           threads.map((thread) => {
             const gate = resolveGateFor(thread)
@@ -184,11 +237,15 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
 
       {canComment ? (
         <div className="border-t p-3 space-y-1.5">
-          <p className="text-xs font-medium">{t("comments.drawer.newThreadHeading")}</p>
+          <p id={newThreadHeadingId} className="text-xs font-medium">{t("comments.drawer.newThreadHeading")}</p>
           <Textarea
             value={newThreadText}
             onChange={(e) => setNewThreadText(e.target.value)}
             onKeyDown={handleNewThreadKeyDown}
+            // A placeholder is not an accessible name: it disappears on the
+            // first keystroke and screen readers may never announce it. Point
+            // at the heading that is already on screen.
+            aria-labelledby={newThreadHeadingId}
             placeholder={t("comments.drawer.newThreadPlaceholder")}
             rows={2}
             className="resize-none"

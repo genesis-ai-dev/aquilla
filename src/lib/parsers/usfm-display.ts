@@ -20,6 +20,13 @@
  * enclosed content stays. Unknown markers degrade safely: the token is
  * hidden, its content remains visible.
  *
+ * FORMATTING (AQU-578): unwrapping the token must not throw away the styling
+ * it carried. Each text segment reports the visual `marks` in force over it
+ * (bold/italic/small-caps/superscript), derived from the stack of open paired
+ * character markers, so the source column can render `\bd word\bd*` as bold
+ * instead of as plain text. Marks are additive metadata only — `text`,
+ * `rawStart`/`rawEnd` and therefore the round-trip guarantee are unchanged.
+ *
  * ROUND-TRIP GUARANTEE: this module never rewrites stored text. Every text
  * segment carries its [rawStart, rawEnd) span in the ORIGINAL string, so
  * offset-based annotations (violation ranges) can be clipped per segment via
@@ -29,13 +36,39 @@
 
 import { classifyMarker } from "./usfm-markers"
 
+/** Visual inline styling a USFM character marker asks for at display time. */
+export type UsfmInlineMark = "bold" | "italic" | "small-caps" | "superscript"
+
 export interface UsfmTextSegment {
   kind: "text"
   /** Verbatim slice raw.slice(rawStart, rawEnd) — never rewritten. */
   text: string
   rawStart: number
   rawEnd: number
+  /** Inline marks in force over this run, deduped and in MARK_ORDER. Empty
+   *  (the shared NO_MARKS constant) for unstyled runs — the common case. */
+  marks: readonly UsfmInlineMark[]
 }
+
+/** Character-marker role (usfm-markers.ts) → the marks it renders as. Roles
+ *  absent here (wordlist-entry, keyword, proper-name, words-of-jesus …) are
+ *  semantic, not visual, and carry no styling. `\add` is italic by the usual
+ *  English-Bible convention for supplied words. */
+const ROLE_MARKS: Record<string, readonly UsfmInlineMark[]> = {
+  bold: ["bold"],
+  italic: ["italic"],
+  emphasis: ["italic"],
+  "bold-italic": ["bold", "italic"],
+  "translator-addition": ["italic"],
+  "small-caps": ["small-caps"],
+  "divine-name": ["small-caps"],
+  superscript: ["superscript"],
+}
+
+/** Stable output order so segments compare equal regardless of nesting order. */
+const MARK_ORDER: readonly UsfmInlineMark[] = ["bold", "italic", "small-caps", "superscript"]
+
+const NO_MARKS: readonly UsfmInlineMark[] = Object.freeze([])
 
 export interface UsfmNoteSegment {
   kind: "note"
@@ -118,19 +151,40 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
   const segments: UsfmDisplaySegment[] = []
   const re = new RegExp(MARKER_TOKEN_RE.source, "g")
   let cursor = 0
-  // Depth of open paired character markers (\w…, \+nd…). While inside one,
-  // a "|" starts the USFM 3 attribute payload — clipped from display.
-  let charDepth = 0
+  // Roles of the currently open paired character markers (\w…, \+nd…),
+  // innermost last. While any is open, a "|" starts the USFM 3 attribute
+  // payload — clipped from display.
+  const charStack: string[] = []
+
+  /** Marks in force right now. `\no` (role "normal") cancels everything
+   *  outside it, so only the roles after the innermost \no contribute. */
+  const activeMarks = (): readonly UsfmInlineMark[] => {
+    if (charStack.length === 0) return NO_MARKS
+    const reset = charStack.lastIndexOf("normal")
+    const open = reset === -1 ? charStack : charStack.slice(reset + 1)
+    const found = new Set<UsfmInlineMark>()
+    for (const role of open) {
+      for (const mark of ROLE_MARKS[role] ?? NO_MARKS) found.add(mark)
+    }
+    if (found.size === 0) return NO_MARKS
+    return MARK_ORDER.filter((mark) => found.has(mark))
+  }
 
   const pushText = (from: number, to: number) => {
     if (to <= from) return
     let end = to
-    if (charDepth > 0) {
+    if (charStack.length > 0) {
       const pipe = raw.slice(from, to).indexOf("|")
       if (pipe !== -1) end = from + pipe
     }
     if (end > from) {
-      segments.push({ kind: "text", text: raw.slice(from, end), rawStart: from, rawEnd: end })
+      segments.push({
+        kind: "text",
+        text: raw.slice(from, end),
+        rawStart: from,
+        rawEnd: end,
+        marks: activeMarks(),
+      })
     }
   }
 
@@ -185,7 +239,7 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
     }
 
     if (isEnd) {
-      if (charDepth > 0) charDepth -= 1
+      if (charStack.length > 0) charStack.pop()
     } else if (spec && spec.structural) {
       // Structural line marker inside a verse (\p, \q2, \b, \li …) → break.
       const levelMatch = token.match(/(\d+)\*?$/)
@@ -198,7 +252,7 @@ export function segmentUsfmForDisplay(raw: string): UsfmDisplaySegment[] | null 
         rawEnd: after,
       })
     } else if (spec?.paired) {
-      charDepth += 1
+      charStack.push(spec.role)
     }
     // Non-structural unpaired markers (\fr, \ft outside a note — shouldn't
     // happen, plus unknown markers): token dropped, content kept.

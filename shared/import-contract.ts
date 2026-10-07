@@ -24,6 +24,19 @@ export const MAX_SOURCE_ARTIFACT_BYTES = 95 * 1024 * 1024
  */
 export const MAX_BUFFERED_SOURCE_ARTIFACT_BYTES = 50 * 1024 * 1024
 
+/**
+ * Largest UTF-8 payload accepted for a single cell's source or target text
+ * (`value` / `valueHtml`) by the bulk-import route. Declared here rather than
+ * in the worker so the client can partition or reject an oversized cell before
+ * an upload round-trip instead of surfacing the server's bare 413 (AQU-990).
+ */
+export const MAX_CELL_TEXT_BYTES = 256 * 1024
+
+/** UTF-8 byte length — the unit both import size ceilings are measured in. */
+export function utf8ByteLength(text: string): number {
+  return new TextEncoder().encode(text).length
+}
+
 export const ROUND_TRIP_FIDELITIES = [
   "native",
   "verified-recipe",
@@ -99,6 +112,67 @@ export function sourceArtifactDescriptor(format: string): {
       }
 }
 
+const HAS_EXTENSION = /\.[A-Za-z0-9]{1,8}$/
+const GENERATED_ID_STEM =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** True when the save stem is a file/blob UUID (with or without an extension). */
+export function isGeneratedDownloadStem(fileName: string): boolean {
+  const stem = fileName.trim().replace(/\.[A-Za-z0-9]{1,8}$/, "")
+  return stem.length > 0 && GENERATED_ID_STEM.test(stem)
+}
+
+/**
+ * Browser-save / zip-entry name for an original import blob (AQU-656).
+ * Uses the current file name; appends the artifact extension only when the
+ * name has none. `.sfm` counts as present for USFM.
+ */
+export function originalDownloadName(fileName: string, format: string): string {
+  const ext = sourceArtifactDescriptor(format).extension
+  const trimmed = fileName.trim() || `file.${ext}`
+  if (format === "usfm" && /\.(sfm|usfm)$/i.test(trimmed)) return trimmed
+  if (HAS_EXTENSION.test(trimmed)) return trimmed
+  return `${trimmed}.${ext}`
+}
+
+/**
+ * Same as originalDownloadName, but never emits a file-id UUID. Missing or
+ * generated names fall back to `original.{ext}` (or `originalName` when that
+ * is a real display name).
+ */
+export function humanOriginalDownloadName(
+  currentName: string | null | undefined,
+  format: string,
+  originalName?: string | null,
+): string {
+  for (const candidate of [currentName, originalName]) {
+    const trimmed = candidate?.trim()
+    if (trimmed && !isGeneratedDownloadStem(trimmed)) {
+      return originalDownloadName(trimmed, format)
+    }
+  }
+  return originalDownloadName("original", format)
+}
+
+/** Deduplicate zip entry names: `Matthew.docx`, `Matthew (2).docx`, … */
+export function uniqueZipEntryName(name: string, used: Set<string>): string {
+  if (!used.has(name)) {
+    used.add(name)
+    return name
+  }
+  const dot = name.lastIndexOf(".")
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const suffix = dot > 0 ? name.slice(dot) : ""
+  let n = 2
+  let next = `${stem} (${n})${suffix}`
+  while (used.has(next)) {
+    n += 1
+    next = `${stem} (${n})${suffix}`
+  }
+  used.add(next)
+  return next
+}
+
 export const IMPORT_UNIT_KINDS = [
   "verse",
   "heading",
@@ -124,6 +198,12 @@ export const IMPORT_MILESTONE_KINDS = [
   "time-range",
   "group",
   "part",
+  // A division the app proposed from scored cell boundaries rather than read
+  // out of the file (AQU-1387). The kind itself is the provenance marker: a
+  // renderer can badge it as a suggestion, and anything that must not act on a
+  // guess can filter it out, without a parallel boolean that older persisted
+  // envelopes would be missing.
+  "ai-section",
 ] as const
 
 export type ImportMilestoneKind = (typeof IMPORT_MILESTONE_KINDS)[number]
@@ -141,6 +221,45 @@ export interface ImportMilestone {
   label: string
   /** Compact picker badge, e.g. "1–2", "P", or "3". */
   shortLabel: string
+}
+
+/** Where a suggested passage's boundaries came from. */
+export const PASSAGE_SOURCES = ["section-counts", "model"] as const
+export type PassageSource = (typeof PASSAGE_SOURCES)[number]
+
+/**
+ * A suggested passage: the pericope-sized run of cells a translator actually
+ * works in (AQU-1387). Passages layer *under* whatever divisions the file
+ * already has — a scripture file keeps its chapters and gains passages inside
+ * them — so they are returned beside the milestone assignment rather than in
+ * place of it.
+ *
+ * Both sources emit this one shape on purpose: the "suggest the next few
+ * ranges" flow (AQU-515) then works identically on a Bible, on an EBL
+ * workbook, and on a media transcript.
+ */
+export interface ImportPassage {
+  /** Stable within one file and across deterministic re-imports. */
+  key: string
+  /** Opening words, or the verse range when both edges carry scripture refs. */
+  label: string
+  /** First unit of the passage, in file order. */
+  startUnitKey: string
+  /** Last unit of the passage, inclusive. */
+  endUnitKey: string
+  /** Units covered, inclusive of both edges. */
+  unitCount: number
+  /** Canonical refs of the edges, when they carry scripture addresses. */
+  startRef?: string
+  endRef?: string
+  /**
+   * Confidence that the passage's opening boundary is real, in [0,1]. For
+   * `section-counts` this is the share of the dataset's 20 translations that
+   * start a section there; for `model` it is the classifier's confidence.
+   * A caller ranking suggestions sorts on this.
+   */
+  strength: number
+  source: PassageSource
 }
 
 export type ImportAddress =

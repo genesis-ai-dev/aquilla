@@ -11,6 +11,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, vi, afterEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { laneDisplayName, laneLanguageCode } from "../../../src/lib/lanes/lane-display"
 
 async function seedProject(projectId: string, name: string, createdBy: number): Promise<void> {
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, ?)")
@@ -245,6 +246,165 @@ describe("POST /:projectId/merge-sibling — success path", () => {
       .first<{ archived_at: string | null }>()
     expect(donorRow?.archived_at).toBeNull()
     expect(await settingsOf("host-i")).toBeNull()
+  })
+})
+
+// AQU-1550: the merged lane has to be a real lane — a `lanes` record, not just
+// a tag in the host's settings. The fold (mocked here) creates the record with
+// the rows it writes; this route registers the tag through the shared settings
+// write, which keeps the two in step, and refuses a name the host already shows.
+describe("POST /:projectId/merge-sibling — the lane is a real lane (AQU-1550)", () => {
+  interface LaneRow {
+    /** AQU-1592: the stored freeform language. */
+    language: string | null
+    /** AQU-1592: null when the lane carries only a language. */
+    name: string | null
+    role: string
+    legacy_tag: string | null
+    lang_code: string | null
+  }
+
+  async function lanesOf(projectId: string): Promise<LaneRow[]> {
+    const { results } = await env.AQUILLA_PG.prepare(
+      "SELECT language, name, role, legacy_tag, lang_code FROM lanes WHERE project_id = ? ORDER BY position, id",
+    )
+      .bind(projectId)
+      .all<LaneRow>()
+    return results
+  }
+
+  async function seedLane(
+    projectId: string,
+    lane: {
+      id: string
+      /** AQU-1592: the freeform language. Defaults to '' when the test only cares about the name. */
+      language?: string
+      /** Null when the lane carries only a language. */
+      name: string | null
+      legacyTag: string
+      position: number
+    },
+  ): Promise<void> {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES (?, ?, 'target', ?, ?, NULL, ?, ?)",
+    )
+      .bind(lane.id, projectId, lane.language ?? "", lane.name, lane.legacyTag, lane.position)
+      .run()
+  }
+
+  it("leaves the host with a lane record for the tag, even when the fold had nothing to write", async () => {
+    await seedUser(10, "u10")
+    await seedProject("host-j", "Host", 10)
+    await seedProject("donor-j", "Donor", 10)
+    await grant("host-j", 10, 500)
+    await grant("donor-j", 10, 500)
+
+    // merged: 0 — the fold wrote no rows, so it created no lane either.
+    mockFold({ merged: 0, skipped: [], lane: "fr" })
+    const res = await post("host-j", await jwtFor("u10"), { donorProjectId: "donor-j", lane: "fr" })
+    expect(res.status).toBe(200)
+
+    expect(readLanes((await settingsOf("host-j"))?.settings)).toEqual(["fr"])
+    const lane = (await lanesOf("host-j")).find((row) => row.legacy_tag === "fr")
+    // AQU-1592: the tag IS the lane's language — tags are language labels. No
+    // derived name and no derived code are stored; laneDisplayName shows "fr"
+    // and laneLanguageCode derives "fr" from it at read time.
+    expect(lane).toEqual({
+      language: "fr",
+      name: null,
+      role: "target",
+      legacy_tag: "fr",
+      lang_code: null,
+    })
+    expect(laneDisplayName({ role: "target", language: lane!.language, name: lane!.name })).toBe("fr")
+    expect(
+      laneLanguageCode({ language: lane!.language, name: lane!.name, langCode: lane!.lang_code }),
+    ).toBe("fr")
+  })
+
+  it("400 and no fold when another of the host's lanes already shows that name", async () => {
+    await seedUser(11, "u11")
+    await seedProject("host-k", "Host", 11)
+    await seedProject("donor-k", "Donor", 11)
+    await grant("host-k", 11, 500)
+    await grant("donor-k", 11, 500)
+    // A lane added from the Languages screen: its tag is not its name.
+    await seedLane("host-k", { id: "lane-k1", name: "French", legacyTag: "lane-k1", position: 2 })
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "french" })
+    const res = await post("host-k", await jwtFor("u11"), { donorProjectId: "donor-k", lane: "french" })
+
+    expect(res.status).toBe(400)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(await settingsOf("host-k")).toBeNull()
+  })
+
+  it("a retry goes ahead when an earlier attempt already created the lane record", async () => {
+    await seedUser(12, "u12")
+    await seedProject("host-l", "Host", 12)
+    await seedProject("donor-l", "Donor", 12)
+    await grant("host-l", 12, 500)
+    await grant("donor-l", 12, 500)
+    // The earlier fold wrote some rows (and so the record) and then failed: the
+    // record exists, the tag was never registered.
+    await seedLane("host-l", { id: "lane-l1", name: "fr", legacyTag: "fr", position: 2 })
+
+    const fetchSpy = mockFold({ merged: 4, skipped: [], lane: "fr" })
+    const res = await post("host-l", await jwtFor("u12"), { donorProjectId: "donor-l", lane: "fr" })
+
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(readLanes((await settingsOf("host-l"))?.settings)).toEqual(["fr"])
+    // Still one record for the tag.
+    expect((await lanesOf("host-l")).filter((row) => row.legacy_tag === "fr")).toHaveLength(1)
+  })
+})
+
+// AQU-1550: the sync worker's fold endpoint re-checks the caller's live role on
+// the donor (pen test 2026-09-29), so the service token has to say who the
+// caller is. It used to carry `userId: 0`, which no project grants anything to
+// — every merge through this route was refused with a 403 the fold mock here
+// could never produce. The real two-worker call is covered end to end in
+// e2e/specs/projects/merge-sibling.spec.ts; these pin the claims.
+describe("POST /:projectId/merge-sibling — the fold token names the caller (AQU-1550)", () => {
+  function foldTokenClaims(fetchSpy: ReturnType<typeof mockFold>): Record<string, unknown> {
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit
+    const token = new Headers(init.headers).get("Authorization")!.replace(/^Bearer /, "")
+    const payload = token.split(".")[1]!.replace(/-/g, "+").replace(/_/g, "/")
+    return JSON.parse(atob(payload)) as Record<string, unknown>
+  }
+
+  it("carries the caller's user id and how their donor role was granted", async () => {
+    await seedUser(13, "u13")
+    await seedProject("host-m", "Host", 13)
+    await seedProject("donor-m", "Donor", 99) // someone else's project...
+    await grant("host-m", 13, 500)
+    await grant("donor-m", 13, 500) // ...that the caller leads by a direct grant
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-m", await jwtFor("u13"), { donorProjectId: "donor-m", lane: "fr" })
+    expect(res.status).toBe(200)
+
+    expect(foldTokenClaims(fetchSpy)).toMatchObject({
+      userId: 13,
+      projectId: "host-m",
+      role: 500,
+      src: "override",
+      aud: "sync",
+    })
+  })
+
+  it("marks a platform operator with no grant on the donor, the fold endpoint's one exemption", async () => {
+    // ADMIN_EMAILS is root@example.com in the test env (pg-test-env).
+    await seedUser(14, "root")
+    await seedProject("host-n", "Host", 99)
+    await seedProject("donor-n", "Donor", 99)
+
+    const fetchSpy = mockFold({ merged: 1, skipped: [], lane: "fr" })
+    const res = await post("host-n", await jwtFor("root"), { donorProjectId: "donor-n", lane: "fr" })
+    expect(res.status).toBe(200)
+
+    expect(foldTokenClaims(fetchSpy)).toMatchObject({ userId: 14, src: "platform" })
   })
 })
 

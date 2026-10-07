@@ -1,0 +1,192 @@
+import { readFileSync } from "node:fs"
+import { pathToFileURL } from "node:url"
+import { execFileSync } from "node:child_process"
+
+const REPO = "genesis-ai-dev/aquilla"
+const MARKER = "<!-- aquilla-smart-tests -->"
+const escape = (value) => String(value).replace(/[&<>|`\r\n]/g, (char) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "|": "&#124;", "`": "&#96;", "\r": " ", "\n": " " })[char])
+const UNAVAILABLE = "**HARNESS UNAVAILABLE — this run produced no journey coverage.**"
+const NOT_A_FINDING = "The harness could not collect trustworthy evidence on this commit, so this run reports nothing about these changes. It is not a product finding, and it is not a pass."
+/** The oracle self-test qualifies every other verdict a run emits. */
+const isSelfTest = (title) => typeof title === "string" && title.startsWith("oracle qualification:")
+const CONCLUSIVE = ["VERIFIED PASS", "PASS (model-free check)", "FAIL (model-free check)", "PRODUCT FAILURE"]
+const brief = (value) => escape(typeof value === "string" ? value.slice(0, 40)
+  : JSON.stringify(value ?? null).slice(0, 40))
+
+/**
+ * Name the precondition that disqualified the evidence.
+ *
+ * AQU-1354: one opaque sentence covered every shape of setup failure, so a
+ * harness image older than the evidence schema, a run against the wrong
+ * commit, a dirty checkout and a suite that never started all read identically
+ * on the PR. Nobody could root-cause the wholesale mode from the comment.
+ * Returns null when the evidence is usable.
+ */
+export function evidenceDefect(suite, sha) {
+  if (!suite) {
+    return "No evidence file reached the reporter, so setup, execution, or evidence collection failed before the suite finished."
+  }
+  if (suite.schemaVersion !== 2) {
+    return `Evidence declares schema version ${brief(suite.schemaVersion)}, not 2, so the deployed harness image does not match this reporter.`
+  }
+  if (suite.build !== sha) {
+    return `Evidence was collected for commit ${brief(suite.build)}, not this PR head, so it does not report on this commit.`
+  }
+  if (suite.dirty !== false) {
+    return "The tested checkout was not clean, so the run did not measure this commit alone."
+  }
+  if (!Array.isArray(suite.planned) || suite.planned.length === 0) {
+    return "The run collected no journey plan, so no outcome was attempted."
+  }
+  if (!Array.isArray(suite.tests)) return "The evidence carries no journey results."
+  return null
+}
+
+export function renderReport({ sha, phase, suite, runUrl, jobStatus }) {
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Expected an exact commit SHA")
+  if (!["running", "finished"].includes(phase)) throw new Error("Invalid report phase")
+  const hostedEvidence = /^https:\/\/aquilla-qa\.5-161-201-46\.sslip\.io\/aquilla-qa\/artifacts\/[a-f0-9]{64}\/suite\.json$/.test(runUrl ?? "")
+  if (runUrl && !hostedEvidence && !/^https:\/\/github\.com\/genesis-ai-dev\/aquilla\/actions\/runs\/\d+$/.test(runUrl)) {
+    throw new Error("Invalid workflow URL")
+  }
+  const lines = [MARKER, "## Jev smart testing", "",
+    `Commit: [\`${sha.slice(0, 8)}\`](https://github.com/${REPO}/commit/${sha}).`, "",
+    "Jev walks user journeys on a reset, isolated local stack built from this commit. Independent checks verify server state and fresh browser sessions.", ""]
+  if (phase === "running") {
+    lines.push("**Starting.** The runner has started setup. No outcome has passed yet.")
+  } else {
+    const defect = evidenceDefect(suite, sha)
+    if (defect) {
+      lines.push(UNAVAILABLE, "", NOT_A_FINDING, "",
+        `No complete, clean-checkout evidence matches this commit. ${defect}`)
+    } else {
+      const remaining = [...suite.planned]
+      let verified = suite.status === "passed" && (!jobStatus || jobStatus === "success")
+      let cost = 0
+      let costReported = 0
+      let modelCalls = 0
+      const rows = []
+      const passedTitles = new Set()
+      let conclusive = 0
+      for (const test of suite.tests) {
+        const index = remaining.indexOf(test.title)
+        if (index < 0) verified = false
+        else remaining.splice(index, 1)
+        const evidence = test.evidence?.["smart-testing-evidence"]
+        const live = test.title?.startsWith("Jev ") && !test.evidence?.["dom-audit"]
+        // AQU-1354: a model-free journey that ran and failed an assertion is a
+        // real failure. Calling it INCONCLUSIVE — the same word used when the
+        // harness never started — is why weeks of DOM-audit failures read as
+        // infrastructure noise. Only statuses that prove nothing about the
+        // product (a test timeout, an interrupted run, a skip) stay unknown.
+        let verdict = test.status === "passed" ? "PASS (model-free check)"
+          : test.status === "failed" ? "FAIL (model-free check)" : "INCONCLUSIVE"
+        if (live) {
+          const sameBuild = evidence?.build === sha && evidence?.dirty === false
+          const checks = evidence?.outcome?.checks
+          const checksPass = checks && Object.keys(checks).length > 0 && Object.values(checks).every((value) => value === true)
+          const passed = sameBuild && test.status === "passed" && evidence?.outcome?.verdict === "passed"
+            && checksPass && evidence?.inputObserved === true
+            && !["driver_error", "timed_out", "budget_exhausted", "incomplete"].includes(evidence?.agent?.status)
+            && typeof evidence?.agent?.status === "string"
+          verdict = passed ? "VERIFIED PASS" : sameBuild && evidence?.outcome?.verdict === "product_failure"
+            ? "PRODUCT FAILURE" : "INCONCLUSIVE"
+        } else if (!test.evidence?.["oracle-qualification"] && !test.evidence?.["dom-audit"]) {
+          verdict = "INCONCLUSIVE"
+        }
+        if (!["VERIFIED PASS", "PASS (model-free check)"].includes(verdict)) verified = false
+        else passedTitles.add(test.title)
+        if (CONCLUSIVE.includes(verdict)) conclusive++
+        const calls = evidence?.agent?.modelCalls ?? []
+        for (const call of calls) {
+          modelCalls++
+          if (typeof call.usage?.cost === "number" && Number.isFinite(call.usage.cost) && call.usage.cost >= 0) {
+            cost += call.usage.cost
+            costReported++
+          }
+        }
+        rows.push(`| ${escape(test.title)} | ${verdict} | ${(Number(test.durationMs) / 1000).toFixed(1)} s |`)
+      }
+      for (const title of remaining) rows.push(`| ${escape(title)} | NOT RUN | — |`)
+      if (remaining.length) verified = false
+      // A run whose oracle self-test did not pass has not qualified its own
+      // checks, so none of its verdicts — a product failure included — say
+      // anything about this commit. Publishing the rows anyway is what makes
+      // a dead harness read as the PR's fault, so they are withheld.
+      const selfTests = suite.planned.filter(isSelfTest)
+      const unqualified = selfTests.filter((title) => !passedTitles.has(title))
+      if (unqualified.length > 0 || conclusive === 0) {
+        lines.push(UNAVAILABLE, "", NOT_A_FINDING, "", unqualified.length > 0
+          ? `The oracle self-test did not pass (${unqualified.length} of ${selfTests.length}: ${unqualified.map(escape).join("; ")}), so every journey verdict in this run is unqualified.`
+          : `No journey reached a verdict (0 of ${suite.planned.length} planned).`,
+          "", "Per-journey rows are withheld deliberately: an unqualified run's rows read like product findings. Start with the runner and the stack it builds, not with this pull request's diff.")
+      } else {
+        lines.push(verified ? "**PASS — all listed outcomes verified.**" : "**NOT A PASS — review failures and incomplete checks.**",
+          "", "| Journey | Result | Duration |", "| --- | --- | --- |", ...rows,
+          "", `Provider-reported model cost: $${cost.toFixed(6)} (${costReported}/${modelCalls} calls report cost; excludes runner compute).`)
+        if (suite.parallel) {
+          const timing = suite.parallel
+          lines.push("", `Parallel execution: ${Number(timing.shards)} isolated stacks; `
+            + `${(Number(timing.wallMs) / 1000).toFixed(1)} s including setup; `
+            + `${(Number(timing.longestShardTestMs) / 1000).toFixed(1)} s for the slowest test shard.`)
+        }
+      }
+    }
+  }
+  if (suite?.harnessBuild) lines.push("", `Reviewed harness: \`${escape(suite.harnessBuild.slice(0, 8))}\`. PR code cannot replace these checks.`)
+  if (suite?.runner) lines.push("", `Hetzner: ${(Number(suite.runner.wallMs) / 1000).toFixed(1)} s including source preparation and setup; one active suite.`)
+  if (runUrl) lines.push("", hostedEvidence
+    ? `[Download outcome evidence](${runUrl}) (private bearer link; expires after seven days).`
+    : `[Run logs and downloadable evidence](${runUrl}).`)
+  lines.push("", "**Re-runs on this commit are not available.** The QA host queues one job per PR and commit, "
+    + "so a repeat event for this commit is discarded as a duplicate; reopening the PR does not requeue it. "
+    + "Push a new commit to dispatch a fresh run, or ask the QA host operator — the account that posted this "
+    + "comment — to requeue the job. A transient failure cannot be retried away, so read this report as it stands.")
+  lines.push("", "Advisory coverage, not a release guarantee. No retries convert a failed journey into a pass. Preview deployment and workflows outside these journeys are not verified by this run.")
+  return lines.join("\n")
+}
+
+/** Trusted reporting process: never imports or executes code from the PR. */
+export async function publishReport({ pr, sha, body, token, author, fetchImpl = fetch }) {
+  if (!Number.isSafeInteger(pr) || pr <= 0 || !/^[a-f0-9]{40}$/.test(sha)) throw new Error("Invalid PR identity")
+  const api = async (route, method = "GET", payload) => {
+    const response = await fetchImpl(`https://api.github.com/repos/${REPO}${route}`, {
+      method, redirect: "error", signal: AbortSignal.timeout(30_000),
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
+    })
+    if (!response.ok) throw new Error(`GitHub report request failed: HTTP ${response.status}`)
+    return response.json()
+  }
+  const matches = (pull) => pull.state === "open" && pull.head?.sha === sha && pull.head?.repo?.full_name === REPO
+  if (!matches(await api(`/pulls/${pr}`))) return "superseded"
+  let existing
+  for (let page = 1; page <= 20; page++) {
+    const comments = await api(`/issues/${pr}/comments?per_page=100&page=${page}`)
+    existing ??= comments.find((comment) => comment.user?.login === author && comment.body?.startsWith(MARKER))
+    if (comments.length < 100) break
+    if (page === 20) throw new Error("Comment pagination limit reached")
+  }
+  if (!matches(await api(`/pulls/${pr}`))) return "superseded"
+  if (existing?.body === body) return "unchanged"
+  if (existing && !Number.isSafeInteger(existing.id)) throw new Error("Invalid comment ID")
+  await api(existing ? `/issues/comments/${existing.id}` : `/issues/${pr}/comments`, existing ? "PATCH" : "POST", { body })
+  return existing ? "updated" : "created"
+}
+
+async function main() {
+  const [phase, prValue, sha, evidencePath] = process.argv.slice(2)
+  let suite
+  if (evidencePath) {
+    try { suite = JSON.parse(readFileSync(evidencePath, "utf8")) } catch { /* Report missing evidence honestly. */ }
+  }
+  const body = renderReport({ sha, phase, suite, runUrl: process.env.SMART_RUN_URL, jobStatus: process.env.SMART_JOB_STATUS })
+  const token = process.env.GITHUB_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim()
+  const author = process.env.GITHUB_ACTIONS === "true" ? "github-actions[bot]"
+    : execFileSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8" }).trim()
+  console.log(await publishReport({ pr: Number(prValue), sha, body, token, author }))
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(() => { console.error("Smart-test reporting failed; no success comment was fabricated."); process.exitCode = 1 })
+}

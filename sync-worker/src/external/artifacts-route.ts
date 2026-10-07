@@ -21,12 +21,12 @@
 import { errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import { handleParseArtifact } from './import-parse'
-import { assertCredentialScope } from './token-bridge'
+import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { r2KeyPrefix, audioObjectKey } from '../audio'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -54,11 +54,6 @@ const AUDIO_CONTENT_TYPES: Record<string, string> = {
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/artifacts(?:\/([^/]+)(?:\/(content|inspect|parse))?)?$/
 
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
-}
-
 function artifactR2Key(env: ExternalEnv, projectId: string, artifactId: string): string {
   return `${r2KeyPrefix(env)}artifacts/${projectId}/${artifactId}`
 }
@@ -71,20 +66,27 @@ interface AuthOk {
 export type AuthResult = AuthOk | { ok: false; response: Response }
 
 /** Credential → scope → live role. `minRole` gates the operation. Exported for
- *  the sibling parse route (import-parse.ts), which shares this gate. */
+ *  the sibling parse route (import-parse.ts), which shares this gate.
+ *
+ *  `writes` (AQU-1242) marks the operations that put bytes or rows somewhere — an
+ *  upload — so a read-only credential is refused. Parsing is deliberately NOT a
+ *  write: a preview parse returns cells without storing anything, and the
+ *  `stage: true` half goes on to `handlePrepare`, which owns that refusal. */
 export async function authArtifact(
   request: Request,
   env: ExternalEnv,
   projectId: string,
   minRole: number,
+  opts: { writes?: boolean } = {},
 ): Promise<AuthResult> {
   const db = env.AQUILLA_PG
   if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
 
-  const cred = await validateApiCredential(db, bearer(request) ?? '')
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
 
   try {
+    if (opts.writes === true) assertCredentialMayWrite(cred, 'upload an artifact')
     await assertCredentialScope(db, cred, projectId)
   } catch (err) {
     return { ok: false, response: toErrorResponse(err) }
@@ -152,7 +154,7 @@ export async function loadArtifact(
     .first<ArtifactRow>()
 }
 
-// ── POST (upload) ────────────────────────────────────────────────────────────
+// ── POST (upload) ──────────────────────────────────────────────────
 
 // [Pen test] API security & data exposure (2026-08-20): uploads (up to
 // MAX_ARTIFACT_BYTES = 25 MB each) had no per-credential throttle, unlike
@@ -166,7 +168,7 @@ async function handleUpload(
   projectId: string,
 ): Promise<Response> {
   if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
-  const authed = await authArtifact(request, env, projectId, ROLE.CONTRIBUTOR)
+  const authed = await authArtifact(request, env, projectId, ROLE.CONTRIBUTOR, { writes: true })
   if (!authed.ok) return authed.response
   const db = env.AQUILLA_PG as AquillaDb
 
@@ -270,7 +272,8 @@ async function handleUpload(
   } catch (err) {
     // Roll back the orphaned R2 object so a failed insert leaves no dangling blob.
     await env.SNAPSHOTS.delete(r2Key).catch(() => {})
-    return errorResponse('job_failed', `artifact insert failed: ${String(err)}`)
+    console.error("[external-artifacts] artifact insert failed:", err)
+    return errorResponse('job_failed', 'artifact insert failed')
   }
 
   return Response.json({
@@ -288,7 +291,7 @@ async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-// ── GET metadata / content ─────────────────────────────────────────────────
+// ── GET metadata / content ──────────────────────────────────────────
 
 // [Pen test] API security & data exposure (2026-08-27): metadata/inspect had
 // no throttle at all — only upload did. Cheap DB/64KB-sniff reads, so this
@@ -618,7 +621,7 @@ async function handleInspect(
   return Response.json({ detectedFormat, details })
 }
 
-// ── Router ──────────────────────────────────────────────────────────────────
+// ── Router ─────────────────────────────────────────────────────────────
 
 export async function handleExternalArtifactsRequest(
   request: Request,

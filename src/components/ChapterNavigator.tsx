@@ -10,9 +10,18 @@ import {
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  CheckCheck,
+  CheckIcon,
+  CornerDownRight,
+  Languages,
+  type LucideIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
 import {
   Combobox,
   ComboboxContent,
@@ -25,8 +34,11 @@ import {
 } from "@/components/ui/combobox"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat } from "@/lib/i18n/format"
+import { useOverflowTitle } from "@/hooks/useOverflowTitle"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 export interface MilestoneNavigationItem {
   key: string
@@ -57,12 +69,19 @@ interface NavigationRow {
   key: string
   milestone: MilestoneNavigationItem
   subsection?: MilestoneNavigationSubsection
+  /**
+   * AQU-1187: a book name heading above the chapters of one book, for a file
+   * that spans several books. Present only on heading rows, which label the
+   * list rather than navigating anywhere.
+   */
+  bookHeader?: string
 }
 
 // Fixed row heights so open doesn't wait on measureElement. Nested cell-range
 // rows are one line of label plus the same two-line progress column.
 const MILESTONE_ROW_HEIGHT_PX = 48
 const SUBSECTION_ROW_HEIGHT_PX = 40
+const BOOK_HEADER_ROW_HEIGHT_PX = 28
 
 /** Matches EditorTable: picker is absolutely centered from lg up. */
 const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
@@ -223,31 +242,89 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   }
   if (kinds.size === 1 && kinds.has("slide")) return VOCABULARIES.slide
   if (kinds.size === 1 && kinds.has("story")) return VOCABULARIES.story
-  if (kinds.size === 1 && kinds.has("section")) return VOCABULARIES.section
+  // An AI section (AQU-1387) is a section a translator navigates the same way;
+  // only its provenance differs, so it shares the section vocabulary rather
+  // than falling through to the generic "milestone" wording.
+  if ([...kinds].every((kind) => kind === "section" || kind === "ai-section")) {
+    return VOCABULARIES.section
+  }
   if (kinds.size === 1 && kinds.has("time-range")) return VOCABULARIES.timeRange
   if (kinds.size === 1 && kinds.has("part")) return VOCABULARIES.part
   if (kinds.size === 1 && kinds.has("group")) return VOCABULARIES.group
   return VOCABULARIES.milestone
 }
 
-function percent(part: number, total: number): number {
-  return total > 0 ? Math.round((part / total) * 100) : 0
+// AQU-1493: never 100 while a cell is outstanding.
+const percent = progressPercent
+
+/**
+ * One progress line: a marker icon, then the percentage right-aligned in the
+ * column. `label` ("N% translated") is what the icon means — carried as hover
+ * text and, because the digits themselves are `aria-hidden`, as the only thing
+ * a screen reader reads out, so the announcement keeps the full wording.
+ */
+function ProgressLine({ icon: Icon, iconClassName, label, value }: {
+  icon: LucideIcon
+  iconClassName: string
+  label: string
+  value: string
+}) {
+  return (
+    <span className="flex items-center gap-1" title={label}>
+      <Icon aria-hidden="true" className={cn("size-3 shrink-0", iconClassName)} />
+      <span aria-hidden="true" className="flex-1 text-end">{value}</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  )
 }
 
+/**
+ * AQU-1485: this column used to spell out "N% translated" / "N% validated" on
+ * every row. In a fixed-width dropdown that took over 40% of the row and left
+ * milestone titles about 12 characters, so a run of "1 Corinthians …"
+ * milestones all read "1 Corinthian…" and the picker couldn't be used to find
+ * one. The words are now the marker icons the file rows already use — amber
+ * for translated, emerald for validated — which makes the column's width
+ * independent of how long a locale's words for them are, and hands the space
+ * it saves to the title.
+ */
 function ProgressSummary({ translated, validated, total }: {
   translated: number
   validated: number
   total: number
 }) {
   const t = useT()
+  const f = useFormat()
+  // AQU-1493: the visible figure follows the same never-100-while-work-is-left
+  // rule as the label read out beside it (Jude 1 at 219/220 showed "100%").
+  const asPercent = (part: number) => f.percent(percent(part, total) / 100)
   return (
-    <span className="w-[7.5rem] shrink-0 justify-self-end text-end text-xs tabular-nums text-muted-foreground">
-      <span className="block">
-        {t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
-      </span>
-      <span className="block">
-        {t("editor.milestone.percentValidated", { percent: percent(validated, total) })}
-      </span>
+    <span className="w-14 shrink-0 text-xs tabular-nums text-muted-foreground">
+      <ProgressLine
+        icon={Languages}
+        iconClassName="text-amber-500"
+        label={t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
+        value={asPercent(translated)}
+      />
+      <ProgressLine
+        icon={CheckCheck}
+        iconClassName="text-emerald-500"
+        label={t("editor.milestone.percentValidated", { percent: percent(validated, total) })}
+        value={asPercent(validated)}
+      />
+    </span>
+  )
+}
+
+/**
+ * A label that still doesn't fit its box reveals its full text on hover
+ * (AQU-1485) — before, a clipped milestone title was unreachable.
+ */
+function TruncatedLabel({ text, className }: { text: string; className?: string }) {
+  const { ref, title } = useOverflowTitle(text)
+  return (
+    <span ref={ref} className={cn("block truncate", className)} title={title}>
+      {text}
     </span>
   )
 }
@@ -273,7 +350,9 @@ function VirtualizedMilestoneList({
     getScrollElement: () => scrollElementRef.current,
     getItemKey: (index) => filteredItems[index]?.key ?? index,
     estimateSize: (index) => (
-      filteredItems[index]?.subsection ? SUBSECTION_ROW_HEIGHT_PX : MILESTONE_ROW_HEIGHT_PX
+      filteredItems[index]?.bookHeader
+        ? BOOK_HEADER_ROW_HEIGHT_PX
+        : filteredItems[index]?.subsection ? SUBSECTION_ROW_HEIGHT_PX : MILESTONE_ROW_HEIGHT_PX
     ),
     overscan: 12,
     initialRect: { width: 320, height: 360 },
@@ -336,6 +415,37 @@ function VirtualizedMilestoneList({
             const subsection = row.subsection
             const expandable = !subsection && Boolean(row.milestone.subsections?.length)
 
+            if (row.bookHeader) {
+              // Still a Combobox.Item so Base UI's index bookkeeping (and the
+              // virtualizer's) stays 1:1 with filteredItems; `disabled` is what
+              // keeps keyboard navigation from ever landing on a heading.
+              return (
+                <ComboboxPrimitive.Item
+                  key={row.key}
+                  index={virtualItem.index}
+                  data-index={virtualItem.index}
+                  value={row}
+                  disabled
+                  data-testid="milestone-book-header"
+                  data-book={row.bookHeader}
+                  className="flex w-full items-center px-2 text-xs font-semibold text-muted-foreground select-none data-disabled:opacity-100"
+                  aria-setsize={filteredItems.length}
+                  aria-posinset={virtualItem.index + 1}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    width: "auto",
+                    height: virtualItem.size,
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <span className="truncate">{row.bookHeader}</span>
+                </ComboboxPrimitive.Item>
+              )
+            }
+
             return (
               <ComboboxPrimitive.Item
                 key={row.key}
@@ -345,7 +455,7 @@ function VirtualizedMilestoneList({
                 data-checked={isActive || undefined}
                 {...(subsection ? { "data-milestone-subsection": "" } : {})}
                 className={cn(
-                  "relative flex w-full cursor-default items-center gap-3 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
+                  "relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
                   // Cell ranges read as children of the milestone above them.
                   subsection && "ps-6",
                 )}
@@ -368,18 +478,19 @@ function VirtualizedMilestoneList({
                         aria-hidden="true"
                         className="size-3.5 shrink-0 text-muted-foreground"
                       />
-                      <span className="truncate">
-                        {t("editor.milestone.cellRange", { range: subsection.label })}
-                      </span>
+                      <TruncatedLabel
+                        text={t("editor.milestone.cellRange", { range: subsection.label })}
+                      />
                     </span>
                     <ProgressSummary {...subsection} />
                   </>
                 ) : (
                   <>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium tabular-nums">
-                        {row.milestone.label}
-                      </span>
+                      <TruncatedLabel
+                        text={row.milestone.label}
+                        className="font-medium tabular-nums"
+                      />
                       <span className="block text-xs text-muted-foreground">
                         {row.milestone.description}
                       </span>
@@ -443,6 +554,15 @@ export function MilestoneNavigator({
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
+  // AQU-1485: the trigger keeps its width, so a long title still clips (and
+  // disappears entirely in the icon-only state) — hover reveals it, and only
+  // when something is actually hidden. `iconOnlyTrigger` rechecks the measure
+  // because that flip hides the label with `display: none` rather than
+  // resizing it.
+  const { ref: triggerLabelRef, title: triggerLabelTitle } = useOverflowTitle(
+    active?.label ?? "",
+    iconOnlyTrigger,
+  )
   const activeSubsection = pageByMilestone
     ? undefined
     : active?.subsections?.find(
@@ -475,18 +595,31 @@ export function MilestoneNavigator({
   const canGoNext = activeDestinationIndex >= 0 && activeDestinationIndex < destinations.length - 1
 
   const rows = useMemo<NavigationRow[]>(
-    () => items.flatMap((milestone) => {
-      const milestoneRow: NavigationRow = { key: milestone.key, milestone }
-      if (milestone.key !== expandedKey || !milestone.subsections?.length) return [milestoneRow]
-      return [
-        milestoneRow,
-        ...milestone.subsections.map((subsection): NavigationRow => ({
-          key: subsection.key,
-          milestone,
-          subsection,
-        })),
-      ]
-    }),
+    () => {
+      const rowsFor = (milestone: MilestoneNavigationItem): NavigationRow[] => {
+        const milestoneRow: NavigationRow = { key: milestone.key, milestone }
+        if (milestone.key !== expandedKey || !milestone.subsections?.length) return [milestoneRow]
+        return [
+          milestoneRow,
+          ...milestone.subsections.map((subsection): NavigationRow => ({
+            key: subsection.key,
+            milestone,
+            subsection,
+          })),
+        ]
+      }
+
+      // AQU-1187: a file spanning several books (a whole-Bible import) gets its
+      // chapters filed under book headings, in canonical order, instead of one
+      // flat list of 1,189. Every other file — per-book scripture, media,
+      // prose — groups to null and keeps the flat list it always had.
+      const books = groupChaptersByBook(items)
+      if (!books) return items.flatMap(rowsFor)
+      return books.flatMap((book) => [
+        { key: `book:${book.id}`, milestone: book.chapters[0], bookHeader: book.id },
+        ...book.chapters.flatMap(rowsFor),
+      ])
+    },
     [expandedKey, items],
   )
 
@@ -568,6 +701,11 @@ export function MilestoneNavigator({
           autoHighlight
           onValueChange={(row, eventDetails) => {
             if (!row) return
+            if (row.bookHeader) {
+              // A heading names the group; it is not a destination.
+              eventDetails.cancel()
+              return
+            }
             if (row.subsection) {
               choose(row.milestone.key, row.subsection.key)
               return
@@ -582,13 +720,22 @@ export function MilestoneNavigator({
             choose(row.milestone.key)
           }}
           itemToStringLabel={(row) => (
-            row.subsection
-              ? t("editor.milestone.cellRange", { range: row.subsection.label })
-              : row.milestone.label
+            row.bookHeader
+              ? row.bookHeader
+              : row.subsection
+                ? t("editor.milestone.cellRange", { range: row.subsection.label })
+                : row.milestone.label
           )}
           itemToStringValue={(row) => row.key}
           isItemEqualToValue={(a, b) => a.key === b.key}
-          filter={(row, query) => milestoneMatchesSearch(row.milestone, query)}
+          filter={(row, query) => (
+            // Headings organize the browse list; once the user types, the
+            // matches stand on their own and an unmatched heading above them
+            // would only mislead ("Matthew 5" must not sit under "Genesis").
+            row.bookHeader
+              ? query.trim().length === 0
+              : milestoneMatchesSearch(row.milestone, query)
+          )}
           onItemHighlighted={(row, { reason, index }) => {
             const virtualizer = virtualizerRef.current
             if (!row || !virtualizer || index < 0) return
@@ -611,6 +758,7 @@ export function MilestoneNavigator({
               <Button
                 variant="outline"
                 data-icon-only={iconOnlyTrigger || undefined}
+                title={triggerLabelTitle}
                 // Default: padded label + chevron. data-icon-only: true icon
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
@@ -636,7 +784,10 @@ export function MilestoneNavigator({
                   : "flex min-w-0 items-center gap-2 text-start"
               }
             >
-              <span className="min-w-0 truncate font-semibold leading-none">
+              <span
+                ref={triggerLabelRef}
+                className="min-w-0 truncate font-semibold leading-none"
+              >
                 {active.label}
               </span>
               {/* Below xl: chapter label only — drop the verse/cell summary. */}

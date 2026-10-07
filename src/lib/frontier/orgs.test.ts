@@ -6,6 +6,7 @@ import {
   removeOrgMember,
   listOrgMemberProjects,
   listMyOrgs,
+  listOrgsPage,
 } from "./orgs";
 
 const ORIG = global.fetch;
@@ -85,5 +86,31 @@ describe("listMyOrgs", () => {
     expect(err).toBeInstanceOf(Error)
     expect((err as Error).message).not.toMatch(/HTTP\s*500/)
     expect((err as Error).name).toBe("UserError")
+  })
+});
+
+describe("listOrgsPage", () => {
+  it("GETs /api/v2/orgs with limit, q, and cursor", async () => {
+    let calledUrl = ""
+    global.fetch = vi.fn(async (input, init) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer jwt-123" })
+      return new Response(
+        JSON.stringify({
+          orgs: [{ id: 9, name: "Foreign", role: { level: 700, name: "admin" }, viaPlatformAdmin: true }],
+          nextCursor: "9:Foreign",
+        }),
+        { status: 200 },
+      )
+    }) as unknown as typeof fetch
+    const page = await listOrgsPage("jwt-123", { q: "for", limit: 40, cursor: "1:Acme" })
+    expect(calledUrl).toContain("/api/v2/orgs?")
+    expect(calledUrl).toContain("q=for")
+    expect(calledUrl).toContain("limit=40")
+    expect(calledUrl).toContain("cursor=1%3AAcme")
+    expect(page).toEqual({
+      orgs: [{ id: 9, name: "Foreign", role: { level: 700, name: "admin" }, viaPlatformAdmin: true }],
+      nextCursor: "9:Foreign",
+    })
   })
 });

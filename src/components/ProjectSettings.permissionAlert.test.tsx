@@ -32,6 +32,12 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 let currentProject: ProjectRecord = makeProject()
 let currentCanEdit = false
 let currentReasonCannotEdit: "offline" | "role" | null = "role"
+// AQU-1086: the language keys carry their own org-configurable floor, so the
+// hook exposes a second gate for them. Defaults here mirror the hook-wide one
+// (the org has not lowered languageEditMinRole).
+let currentCanEditLanguages = false
+let currentReasonCannotEditLanguages: "offline" | "role" | null = "role"
+let currentLanguageEditFloor = 600
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -45,6 +51,9 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   useProjectSettings: () => ({
     canEdit: currentCanEdit,
     reasonCannotEdit: currentReasonCannotEdit,
+    canEditLanguages: currentCanEditLanguages,
+    reasonCannotEditLanguages: currentReasonCannotEditLanguages,
+    languageEditFloor: currentLanguageEditFloor,
     patch: vi.fn().mockResolvedValue({ kind: "ok" }),
     version: 1,
     updatedAt: null,
@@ -141,6 +150,9 @@ beforeEach(() => {
   currentProject = makeProject()
   currentCanEdit = false
   currentReasonCannotEdit = "role"
+  currentCanEditLanguages = false
+  currentReasonCannotEditLanguages = "role"
+  currentLanguageEditFloor = 600
 })
 
 describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
@@ -186,5 +198,48 @@ describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
     currentReasonCannotEdit = "offline"
     renderSettings()
     expect(screen.queryByRole("alert")).toBeNull()
+  })
+})
+
+// AQU-1086: the Source/Target language fields sit behind the org's
+// configurable languageEditMinRole rather than the hook-wide maintainer floor.
+// Two things must hold: at the default the fields look exactly as they did
+// before, and with the floor lowered a project lead gets the fields WITHOUT
+// the rest of the form unlocking.
+describe("ProjectSettings — org-configurable language floor (AQU-1086)", () => {
+  it("project lead at the default floor sees the language fields locked, naming Maintainers", async () => {
+    currentProject = makeProject({ syncRole: { level: 500, source: "member" } } as Partial<ProjectRecord>)
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    const source = screen.getByLabelText(/source language/i)
+    expect(source).toBeDisabled()
+    await expectTooltip(source, /Only Maintainers can modify/)
+  })
+
+  it("project lead with the floor lowered to 500 can edit the language fields", () => {
+    currentProject = makeProject({
+      syncRole: { level: 500, source: "member" },
+      languageEditMinRole: 500,
+    } as Partial<ProjectRecord>)
+    currentCanEditLanguages = true
+    currentReasonCannotEditLanguages = null
+    currentLanguageEditFloor = 500
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    expect(screen.getByLabelText(/source language/i)).not.toBeDisabled()
+    expect(screen.getByLabelText(/target language/i)).not.toBeDisabled()
+  })
+
+  it("lowering the language floor does not unlock any other shared field", async () => {
+    currentProject = makeProject({
+      syncRole: { level: 500, source: "member" },
+      languageEditMinRole: 500,
+    } as Partial<ProjectRecord>)
+    currentCanEditLanguages = true
+    currentReasonCannotEditLanguages = null
+    currentLanguageEditFloor = 500
+    // canEdit (the hook-wide maintainer floor) stays false — see beforeEach.
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    const title = screen.getByLabelText(/title/i)
+    expect(title).toBeDisabled()
+    await expectTooltip(title, /Only Maintainers can modify/)
   })
 })

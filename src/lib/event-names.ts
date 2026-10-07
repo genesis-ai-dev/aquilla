@@ -42,6 +42,15 @@ export const IMPORT_COLLISION_SKIPPED = "import collision skipped"
 /** User chose to overwrite/duplicate colliding files in the collision resolution prompt. */
 export const IMPORT_COLLISION_DUPLICATED = "import collision duplicated"
 
+/**
+ * AQU-1365: a New source text upload looked like a translation of a file
+ * already in the project (its book is here, or it says it's in the target
+ * language), and the person answered "Is this a translation?". Properties:
+ * signal (book | language | both), file_count, flagged_count, choice
+ * (translation | update | separate | choose-file | leave-out | import-all | back).
+ */
+export const IMPORT_TRANSLATION_CHECK = "import translation check"
+
 // ── Editor — first commit + validation ───────────────────────────────────
 
 /**
@@ -88,3 +97,57 @@ export const INVITE_REDEEMED = "invite redeemed"
  * returned an irrecoverable 403 (quarantineOutboxEvents).
  */
 export const OUTBOX_QUARANTINED = "outbox record quarantined"
+
+// ── TTS provider cutover (AQU-1189) ───────────────────────────────────────
+
+/**
+ * Legacy OmniVoice project settings were rewritten onto Inworld and persisted.
+ * Fired once per project open that actually writes (localStorage + server
+ * mirror), not on the runtime remap that still covers unread copies.
+ */
+export const OMNIVOICE_VOICES_MIGRATED = "omnivoice voices migrated"
+
+// ── Batch text validation (AQU-1503) ──────────────────────────────────────
+
+/**
+ * A bulk text-validation was ATTEMPTED — from the selection toolbar's
+ * "Validate text" button or the "Batch validate text…" workspace action.
+ *
+ * Fires on EVERY attempt, including the ones that validate nothing. That is
+ * the whole point: the surface used to bail silently on four branches, and the
+ * only way the 2026-09-30 repro could be characterised at all was by the
+ * *absence* of events, which cannot distinguish "the click did nothing" from
+ * "nobody clicked". Properties carry the cell count and an outcome class
+ * (`batchValidateTelemetry` in lib/review/batch-validate-summary.ts).
+ */
+export const BATCH_VALIDATE_ATTEMPTED = "batch validate attempted"
+
+// ── Cell validation + audio actions (AQU-1572) ────────────────────────────
+
+/**
+ * A cell was validated. Unlike `FIRST_CELL_VALIDATE` (a once-per-session
+ * milestone) this fires on EVERY validation gesture, and carries `medium`
+ * (`text` | `audio`) so the review loop and the dubbing loop can be counted
+ * apart. Before this existed, a user toggling validation or working the Audio
+ * view left no trace at all — AQU-1571 had to be characterised by screenshot
+ * because PostHog had nothing to query.
+ */
+export const CELL_VALIDATED = "cell validated"
+
+/** Mirror of `CELL_VALIDATED` for the un-validate gesture. */
+export const CELL_UNVALIDATED = "cell unvalidated"
+
+/**
+ * A clip the user supplied was attached to a cell — an upload, a LinkMedia
+ * file, or a linked media URL. Only the *originating* gesture emits; the
+ * derived re-attaches (denoise, the transcription's timings write-back,
+ * diarization, the recorder's heal path) deliberately do not, or one clip
+ * would count several times.
+ */
+export const AUDIO_ATTACHED = "audio attached"
+
+/** A clip was synthesized for a cell (TTS / voice conversion). */
+export const AUDIO_GENERATED = "audio generated"
+
+/** A clip was recorded for a cell through the in-app recorder. */
+export const AUDIO_RECORDED = "audio recorded"

@@ -1,5 +1,5 @@
 /**
- * Tests for AdminCreditsSection — platform-admin compute/credits table.
+ * Tests for AdminCreditsSection — the platform-admin AI-credits table.
  *
  * WHY these tests matter:
  *   - The admin table must render per-org credit spend.
@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import { AdminCreditsSection } from "./AdminCreditsSection"
 import type { AdminOrgCredits } from "@/lib/sync/credits"
 
@@ -230,5 +231,102 @@ describe("AdminCreditsSection — showToOrg toggle", () => {
     await waitFor(() =>
       expect(mockPatch).toHaveBeenCalledWith("admin-jwt", 2, { showToOrg: false }),
     )
+  })
+})
+
+describe("AdminCreditsSection — AQU-942: the table is the known shell", () => {
+  it("shows a first-load placeholder, then the table", async () => {
+    // Only a load that has resolved nothing may stand in for the table.
+    let release: (rows: AdminOrgCredits[]) => void = () => {}
+    mockList.mockImplementationOnce(
+      () => new Promise<AdminOrgCredits[]>((resolve) => { release = resolve }),
+    )
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+
+    const status = screen.getByRole("status", { name: "Loading credits" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+
+    release([ORG_A])
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+    expect(screen.queryByRole("status", { name: "Loading credits" })).not.toBeInTheDocument()
+  })
+
+  it("keeps the table mounted while a toggle's revalidation is in flight", async () => {
+    // WHY: every `patch` round-trips through `refresh`, which flips `loading`
+    // back on. Gating the section on `loading` unmounted the whole table — and
+    // the admin's sort and scroll position — on each toggle.
+    mockList.mockResolvedValueOnce([ORG_A])
+    mockPatch.mockResolvedValue(undefined)
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    let release: (rows: AdminOrgCredits[]) => void = () => {}
+    mockList.mockImplementationOnce(
+      () => new Promise<AdminOrgCredits[]>((resolve) => { release = resolve }),
+    )
+    fireEvent.click(screen.getByTestId("enforce-toggle-1"))
+    await waitFor(() => expect(mockPatch).toHaveBeenCalled())
+
+    expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument()
+    expect(screen.queryByRole("status", { name: "Loading credits" })).not.toBeInTheDocument()
+
+    release([{ ...ORG_A, config: { ...ORG_A.config, enforce: true } }])
+    await waitFor(() =>
+      expect(screen.getByTestId("enforce-toggle-1")).toHaveAttribute("aria-checked", "true"),
+    )
+  })
+
+  it("keeps the table mounted when a toggle patch fails, and surfaces the error", async () => {
+    // WHY: the error gate threw away rows the section had already resolved, so
+    // one rejected patch replaced the entire table with a bare error line.
+    mockList.mockResolvedValue([ORG_A])
+    mockPatch.mockRejectedValue(new Error("cap patch rejected"))
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTestId("enforce-toggle-1"))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("cap patch rejected")
+    expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument()
+    expect(screen.getByText("Bible Translators")).toBeInTheDocument()
+  })
+
+  it("still distinguishes a resolved-empty org list from loading", async () => {
+    mockList.mockResolvedValue([])
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    expect(await screen.findByText("No orgs found.")).toBeInTheDocument()
+    expect(screen.queryByRole("status", { name: "Loading credits" })).not.toBeInTheDocument()
+  })
+})
+
+describe("AdminCreditsSection — AQU-688: the control captions explain themselves", () => {
+  // WHY: "Enforce" and "Show org" are two words of platform jargon sitting in a
+  // dense table, and the ticket was filed because the person who owns the
+  // console could not recall what "Show org" did. The explanation has to be
+  // reachable from the UI, not only from the source — so assert the caption is
+  // a tooltip trigger carrying the behaviour, not merely that a title
+  // attribute exists somewhere (AppTooltip strips `title` on purpose).
+  it("explains what Enforce and Show org do on hover", async () => {
+    mockList.mockResolvedValue([ORG_A])
+    renderWithTooltips(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    await expectTooltip(screen.getByText("Enforce"), /refused with a 429/)
+    await expectTooltip(screen.getByText("Show org"), /maintainers can see its AI-credit usage/)
+  })
+
+  it("carries the same explanation to assistive tech, where there is no hover", async () => {
+    // The caption is deliberately not a tab stop (it would add two per row to
+    // an admin table), so the switch itself has to describe its consequence —
+    // otherwise the fix only reaches operators using a mouse.
+    mockList.mockResolvedValue([ORG_A])
+    render(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    for (const testId of ["enforce-toggle-1", "show-org-toggle-1"]) {
+      const describedBy = screen.getByTestId(testId).getAttribute("aria-describedby")
+      expect(describedBy).toBeTruthy()
+      expect(document.getElementById(describedBy!)?.textContent).toMatch(/Off \(default\)/)
+    }
   })
 })

@@ -29,14 +29,22 @@ and applies before the next step reads the state it produced.
    first and pass it as ifMatchVersion (drift → plan_stale, re-read and stage
    again); one op per key (a duplicate key is validation_failed); floor
    MAINTAINER (600) for these keys. Register lanes BEFORE any lane-scoped
-   SetTranslation — prepare rejects an unregistered laneId.
+   SetTranslation — prepare rejects an unregistered laneId. The primary
+   targetLanguage IS the default lane: omitting laneId and passing the primary
+   both write it. A regional lane beside it (fr-CA in a French project) is its
+   own lane and must be registered.
 
-3. Termbase seed. Same command, key 'terminology':
-   propose_command({commands:[{kind:'PatchSettings', projectId, ifMatchVersion,
-     ops:[{key:'terminology', value:{concepts:[…]}}]}]})
-   Gotcha: 'terminology' has its OWN floor — the org's termbaseEditMinRole
-   (default PROJECT_LEAD 500), not 600. Seed from the source text and the
-   person's decisions, never from general knowledge. See docs('terminology').
+3. Termbase seed. Read the concepts table first (docs('terminology')): a
+   second term.create for an existing source term does not merge. Then:
+   propose_command({commands:[{kind:'EmitEvents', events:[{kind:'term.create',
+     payload:{sourceTerm, renderings:[{rendering, status:'preferred'}],
+     status:'active', notes?}}]}]})
+   Gotchas: EmitEvents is sole-command, max 200 events. status 'active' binds
+   and needs the org's termbaseEditMinRole (default PROJECT_LEAD 500);
+   status 'draft' is a suggestion a CONTRIBUTOR (400) may stage. Never seed
+   with a PatchSettings op on 'terminology': that key is retired, and the
+   editor ignores it once the project has any concept. Seed from the source
+   text and the person's decisions, never from general knowledge.
 
 4. Translation brief. Key 'translationBrief' (audience, purpose, register,
    literalness, key-term strategy, constraints), staged the same way at
@@ -55,7 +63,7 @@ and applies before the next step reads the state it produced.
 Done when readiness has no blocking gaps — verify, do not assume:
 - a source file exists with cells: read({fileId}) returns rows
 - targetLanes / sourceLanguage / targetLanguage are set
-- terminology has concepts (or the person explicitly deferred it)
+- the concepts table has live concepts (or the person explicitly deferred it)
 - translationBrief is non-null
 - at least one active assignment covers the work
 Report the gaps you could not close and who has to close them.
@@ -122,7 +130,7 @@ be applied and then has to be found and undone verse by verse. The whole point
 of the first cycle is to make that visible on ONE passage instead of a book.
 
 1. Pick ONE small passage the person names (a chapter, or ~10 cells).
-   read({ref:'MRK 4', filter:'untranslated'})
+   read({ref:'<BOOK> 4', filter:'untranslated'})   (<BOOK>: a code this project has)
 
 2. Measure readiness before drafting, and say the numbers out loud:
    - examples({text}) — how many validated pairs come back? Zero means the
@@ -131,7 +139,7 @@ of the first cycle is to make that visible on ONE passage instead of a book.
    - docs('terminology') — does the termbase have concepts?
    - is there a paired source file at all (docs('files-and-refs'))?
 
-3. Draft that passage only: draft({ref:'MRK 4', limit:10}). The draft tool
+3. Draft that passage only: draft({ref:'<BOOK> 4', limit:10}). The draft tool
    stages a proposal; it caps at 10 cells per call by design.
 
 4. Show the person the draft AND the gaps together. Name which gap shaped which
@@ -140,8 +148,8 @@ of the first cycle is to make that visible on ONE passage instead of a book.
    as a result.
 
 5. Fill the gaps — each of these is a staged changeset the person applies:
-   - termbase: PatchSettings op on 'terminology' (org termbase floor, default
-     500)
+   - termbase: term.create events in an EmitEvents changeset (status
+     'active' needs the org termbase floor, default 500; docs('terminology'))
    - brief: PatchSettings op on 'translationBrief' (MAINTAINER 600)
    - exemplars: there is no command for these. Ask the person to hand-translate
      and validate 5-10 cells. That is the highest-value thing they can do, and

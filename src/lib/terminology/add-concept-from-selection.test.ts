@@ -134,7 +134,7 @@ describe("draft concept visibility", () => {
       renderings: [],
       status: "draft",
     })
-    // TerminologyPage lists all concepts regardless of status.
+    // The glossary editor reads every status from this array (drafts render as pending rows).
     expect(updated.terminology!.some((c) => c.sourceTerm === "redemption")).toBe(true)
   })
 

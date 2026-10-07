@@ -9,18 +9,18 @@
 // Load creds first: set -a; . ./.env; set +a  (and set NEON_PG_HOST for the
 // branch you mean to touch — dev and production are DIFFERENT endpoints).
 //
-// WHY THIS EXISTS ALONGSIDE THE LAZY PATH. The concepts read route migrates a
-// project on first read, which guarantees nobody ever sees an empty termbase.
-// But the largest termbase on dev carries 961 concepts — 1922 statements — and
-// making one unlucky reader's GET pay for that is poor behaviour even when it
-// works. Running this ahead of a release means the lazy path only ever handles
-// stragglers and newly-noticed projects.
+// WHY THIS EXISTS. The concepts read route does NOT migrate. A migrate-on-read
+// of the largest dev termbase (961 concepts, 1922 statements) exceeded the
+// Worker budget, so a read only decodes the blob while it is still there.
+// This script is the cutover. It shares migrateProjectConcepts with no second
+// parser: when that function reports skipped entries, the warning below is
+// printed from the result.
 //
 // Shares the EXACT code path with the worker (`migrateProjectConcepts` over the
 // same Postgres shim), so there is no second implementation to drift.
 
 import { makePostgres } from "../db/shim/postgres"
-import { migrateProjectConcepts } from "../sync-worker/src/events/migrate-concepts"
+import { migrateProjectConcepts, migrationSkipWarning } from "../sync-worker/src/events/migrate-concepts"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -85,6 +85,9 @@ async function main(): Promise<void> {
       const ms = Date.now() - started
       migrated += result.count
       console.log(`  ✓ ${r.project_id}  ${result.count} concept(s)  ${ms}ms`)
+      if (result.skipped > 0) {
+        console.warn(migrationSkipWarning(r.project_id, result.skipped))
+      }
     }
     console.log(`\nmigrated ${migrated} concept(s) across ${rows.length} project(s)`)
   } finally {

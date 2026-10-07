@@ -1,6 +1,13 @@
+import type { ReactElement } from "react"
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { act, render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { act, render as rtlRender, screen, fireEvent, cleanup } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { ContextualRunPill } from "./ContextualRunPill"
+
+// The pill links into the run's Team conversation, so it needs a router. The
+// `wrapper` option (rather than wrapping at each call site) keeps `rerender`
+// re-wrapping correctly for the lane-switch cases below.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter })
 import {
   applyRemoteFrame as applyFrame,
   attachContextualRun,
@@ -47,6 +54,7 @@ function makeTransport(overrides: Partial<ContextualTransport> = {}): Contextual
     pause: vi.fn(async () => {}),
     resume: vi.fn(async () => {}),
     terminate: vi.fn(async () => {}),
+    continueRun: vi.fn(async () => {}),
     ...overrides,
   }
 }
@@ -95,6 +103,25 @@ describe("ContextualRunPill", () => {
     expect(resume.querySelector("svg.lucide-pencil-sparkles")).not.toBeNull()
   })
 
+  it("links into the run's own conversation once a run exists", () => {
+    // The pill is a readout; the run narrates itself in the Team surface. The
+    // link has to carry the SAME conversation id the dock and shared links
+    // use, or "open thread" would land somewhere else than clicking the row.
+    setContextualTransport(makeTransport())
+    applyRemoteFrame(frame("running", { done: 3, total: 12 }))
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    expect(screen.getByTestId("contextual-open-thread")).toHaveAttribute(
+      "href",
+      `/project/p1/agent?conversation=run%3A${RUN}`,
+    )
+  })
+
+  it("offers no thread link before a run exists to open", () => {
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+    expect(screen.queryByTestId("contextual-open-thread")).toBeNull()
+  })
+
   it("keeps Pause on the pause control — only the run/resume glyphs changed (AQU-1012)", () => {
     setContextualTransport(makeTransport())
     applyRemoteFrame(frame("running", { done: 3, total: 12 }))
@@ -140,7 +167,7 @@ describe("ContextualRunPill", () => {
       await Promise.resolve()
     })
     expect(onSetupNeeded).not.toHaveBeenCalled()
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "", undefined)
   })
 
   it("announces a visible recovery message when starting fails", async () => {
@@ -281,7 +308,7 @@ describe("ContextualRunPill", () => {
     expect(screen.queryByText(/Project default only/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
 
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr", undefined)
   })
 
   it("closes the default-run inspector when the editor switches to another language lane", async () => {
@@ -329,5 +356,64 @@ describe("ContextualRunPill", () => {
     render(<ContextualRunPill projectId="p1" fileId="file-1" canControl={false} />)
     expect(screen.queryByRole("button", { name: "Resume drafting" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Stop this run" })).not.toBeInTheDocument()
+  })
+
+  // ── Trust gate: parked awaiting input (AQU-1300) ─────────────────────────
+  //
+  // The single most important thing this pill does now is tell a person that
+  // Autopilot STOPPED ON PURPOSE and is waiting on them. It arrives as the
+  // same `parked` status as a finished run, so every assertion here is really
+  // about not confusing the two.
+
+  it("parked awaiting input reads as a hand-back, with both ways forward", () => {
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    expect(screen.getByText("Waiting for you · 5 passages left")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Translate everything" })).toBeInTheDocument()
+    // "Idle · no work queued" is the finished-run copy. Showing it here would
+    // tell the user Autopilot is done when five passages are still waiting.
+    expect(screen.queryByText("Idle · no work queued")).not.toBeInTheDocument()
+  })
+
+  it("offers neither action once the scope is genuinely finished", () => {
+    applyRemoteFrame({ ...frame("parked", { done: 6, total: 6 }), parkReason: "work_exhausted" })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Translate everything" })).not.toBeInTheDocument()
+  })
+
+  it("Continue asks for a batch; Translate everything asks for the whole scope", async () => {
+    const transport = makeTransport()
+    setContextualTransport(transport)
+    await attachContextualRun("p1", "file-1")
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    const view = render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }))
+    })
+    expect(transport.continueRun).toHaveBeenCalledWith(RUN, "batch")
+    view.unmount()
+
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Translate everything" }))
+    })
+    expect(transport.continueRun).toHaveBeenCalledWith(RUN, "all")
+  })
+
+  it("hides both actions from someone who cannot control the run", () => {
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl={false} />)
+
+    // A viewer still needs to know the run is waiting — they just cannot be
+    // the one to release it.
+    expect(screen.getByText("Waiting for you · 5 passages left")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Translate everything" })).not.toBeInTheDocument()
   })
 })

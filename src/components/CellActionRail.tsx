@@ -6,14 +6,25 @@
 // "selected" state for the row). This file is intentionally just chrome:
 // RailButton (one rail icon) + CellActionRail (the container with chevron).
 
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, MoreHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 // Bouncy spring matches the reference popout, slightly tamed for desktop.
 // Original: cubic-bezier(.68,-0.75,.27,1.75)
 const SPRING = "cubic-bezier(.68,-0.55,.32,1.45)"
+
+/** Notification-dot tones, shared by RailButton and the `⋯` trigger (AQU-200). */
+const DOT_CLASS = {
+  amber: "bg-amber-500",
+  red: "bg-red-500",
+  primary: "bg-primary",
+  emerald: "bg-emerald-500",
+} as const
+
+type DotTone = keyof typeof DOT_CLASS
 
 interface RailButtonProps {
   icon: React.ReactNode
@@ -21,7 +32,7 @@ interface RailButtonProps {
   onClick?: () => void
   disabled?: boolean
   /** Tiny notification dot on the button. Use sparingly. */
-  dot?: "amber" | "emerald" | "red" | "primary"
+  dot?: DotTone
   /** Indicates this button is in a transient busy state. */
   pulsing?: boolean
   /** Override the default muted tone (e.g. open-comments uses primary). */
@@ -34,15 +45,7 @@ export function RailButton({
   icon, tooltip, onClick, disabled, dot, pulsing, toneClass,
   onMouseDown, onMouseEnter,
 }: RailButtonProps) {
-  const dotColor = dot === "amber"
-    ? "bg-amber-500"
-    : dot === "red"
-      ? "bg-red-500"
-      : dot === "primary"
-        ? "bg-primary"
-        : dot === "emerald"
-          ? "bg-emerald-500"
-          : null
+  const dotColor = dot ? DOT_CLASS[dot] : null
 
   return (
     <div className="relative">
@@ -96,19 +99,36 @@ interface CellActionRailProps {
   showDetailsToggle?: boolean
   /** Tiny dot on the chevron — set when something inside the expansion needs
    *  attention (stale BT, transcript mismatch, unresolved infraction). */
-  expansionAttentionDot?: "amber" | "red" | "emerald" | "primary" | null
+  expansionAttentionDot?: DotTone | null
+  /**
+   * AQU-200: the only actions that stay visible as direct buttons. Everything
+   * passed as `children` collapses behind the single `⋯` overflow beside them.
+   */
+  primary?: React.ReactNode
+  /** AQU-200: `⋯` open state, lifted so the row can pin the rail while it is
+   *  open (the popup portals out of the rail, so focus-capture can't see it). */
+  overflowOpen?: boolean
+  onOverflowOpenChange?: (open: boolean) => void
+  /** AQU-200: dot on the `⋯` trigger, carrying the at-a-glance signal of
+   *  whatever it now hides (unread comments, an existing take). */
+  overflowAttentionDot?: DotTone | null
+  /** Accessible name for the `⋯` trigger. */
+  overflowLabel?: string
   children: React.ReactNode
 }
 
 /**
  * Horizontal rail rendered at the row's right edge. The chevron is anchored;
- * the children spring/fade into view when `revealed` flips true.
+ * `primary` and the `⋯` overflow spring/fade into view when `revealed` flips
+ * true, and the lower-frequency actions live inside the overflow (AQU-200).
  */
 export function CellActionRail({
   revealed, expanded, onToggleExpanded,
-  alwaysShowChevron, showDetailsToggle = true, expansionAttentionDot, children,
+  alwaysShowChevron, showDetailsToggle = true, expansionAttentionDot,
+  primary, overflowOpen = false, onOverflowOpenChange,
+  overflowAttentionDot, overflowLabel = "More actions", children,
 }: CellActionRailProps) {
-  const mountActions = revealed || expanded || import.meta.env.MODE === "test"
+  const mountActions = revealed || expanded || overflowOpen || import.meta.env.MODE === "test"
 
   return (
     <div
@@ -137,9 +157,53 @@ export function CellActionRail({
           pointerEvents: revealed ? "auto" : "none",
         }}
       >
-        {mountActions ? children : null}
+        {mountActions ? primary : null}
       </div>
-
+      {/* Keep the menu discoverable without hover, including on touch and
+          through the accessibility tree. Its contents still mount on open. */}
+      {/* AQU-200: one `⋯` in place of the five-to-seven buttons that used to
+          sit here. The popup mounts the SAME action nodes, so every
+          conditional gate (record-only-when-supported, play-only-with-audio,
+          …) still decides whether its button exists at all — the overflow
+          only decides where it is drawn. */}
+      {children != null && (
+        <Popover open={overflowOpen} onOpenChange={(open) => onOverflowOpenChange?.(open)}>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-tooltip={overflowLabel}
+                data-slot="cell-action-rail-overflow"
+                aria-label={overflowLabel}
+                onClick={(e) => e.stopPropagation()}
+                className="relative text-muted-foreground/70 hover:text-foreground"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+                {overflowAttentionDot && (
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "pointer-events-none absolute end-0.5 top-0.5 size-1.5 rounded-full ring-2 ring-background",
+                      DOT_CLASS[overflowAttentionDot],
+                    )}
+                  />
+                )}
+              </Button>
+            }
+          />
+          {/* Override the popover default (fixed-width vertical stack): this
+              is the rail's own button cluster, just relocated. */}
+          <PopoverContent
+            align="end"
+            side="bottom"
+            className="w-auto flex-row items-center gap-0 p-1"
+          >
+            {children}
+          </PopoverContent>
+        </Popover>
+      )}
       {showDetailsToggle && (
         <div
           className={cn(

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { getBookName, isKnownBookCode, compareByCanonicalBookOrder } from "./bible-book-names"
+import { getBookName, isKnownBookCode, compareByCanonicalBookOrder, bookCodeFromFileName, bookCodeFromFileNameStrict, bookCodeFromName } from "./bible-book-names"
 
 describe("getBookName", () => {
   it("returns English name for OT book codes", () => {
@@ -55,5 +55,76 @@ describe("compareByCanonicalBookOrder (AQU-582)", () => {
   it("sorts unknown (non-book) names after all known books, alphabetically", () => {
     expect([...["Zeta Notes", "John", "Alpha Notes", "Mark"]].sort(compareByCanonicalBookOrder))
       .toEqual(["Mark", "John", "Alpha Notes", "Zeta Notes"])
+  })
+})
+
+describe("bookCodeFromFileName (AQU-1084)", () => {
+  it("reads a bare code, with or without an extension, in any case", () => {
+    expect(bookCodeFromFileName("1CH")).toBe("1CH")
+    expect(bookCodeFromFileName("gen.usfm")).toBe("GEN")
+    expect(bookCodeFromFileName("Mat")).toBe("MAT")
+  })
+
+  it("prefers the end of the stem so numbered prefixes work", () => {
+    expect(bookCodeFromFileName("40-MAT.usfm")).toBe("MAT")
+  })
+
+  it("falls back to the front of the stem for friendly names", () => {
+    expect(bookCodeFromFileName("Genesis")).toBe("GEN")
+    expect(bookCodeFromFileName("Revelation.usfm")).toBe("REV")
+  })
+
+  // AQU-1365 review: the translation import picks a file, and offers to
+  // update its source text, from this. "Judges" read as JUD (Jude).
+  it("reads a book's full name before a three-letter prefix", () => {
+    expect(bookCodeFromFileName("Judges.usfm")).toBe("JDG")
+    expect(bookCodeFromFileName("Mark.usfm")).toBe("MRK")
+    expect(bookCodeFromFileName("John.usfm")).toBe("JHN")
+    expect(bookCodeFromFileName("Joel.usfm")).toBe("JOL")
+    expect(bookCodeFromFileName("1 Samuel - draft.usfm")).toBe("1SA")
+    expect(bookCodeFromFileName("Song of Songs.usfm")).toBe("SNG")
+  })
+
+  it("reads Paratext book files and a chapter number run on", () => {
+    expect(bookCodeFromFileName("41MRKENG.SFM")).toBe("MRK")
+    expect(bookCodeFromFileName("GEN1-source.usfm")).toBe("GEN")
+    expect(bookCodeFromFileName("JON-source.usfm")).toBe("JON")
+  })
+
+  it("returns undefined when neither end of the stem is a known code", () => {
+    expect(bookCodeFromFileName("readme")).toBeUndefined()
+    expect(bookCodeFromFileName("World English Bible (eng-engwebp)")).toBeUndefined()
+    expect(bookCodeFromFileName("")).toBeUndefined()
+  })
+})
+
+describe("bookCodeFromFileNameStrict (AQU-1365)", () => {
+  it("names a book only when the name says it outright", () => {
+    expect(bookCodeFromFileNameStrict("JON-source.usfm")).toBe("JON")
+    expect(bookCodeFromFileNameStrict("Judges.usfm")).toBe("JDG")
+    expect(bookCodeFromFileNameStrict("41MRKENG.SFM")).toBe("MRK")
+    // A three-letter run that happens to be a code is only a guess.
+    expect(bookCodeFromFileNameStrict("40-MAT.usfm")).toBeUndefined()
+    expect(bookCodeFromFileNameStrict("Judgment notes.usfm")).toBeUndefined()
+    expect(bookCodeFromFileName("Judgment notes.usfm")).toBe("JUD")
+  })
+})
+
+describe("bookCodeFromName", () => {
+  it("reads a code in any case, or the English name however it is spaced", () => {
+    expect(bookCodeFromName("gen")).toBe("GEN")
+    expect(bookCodeFromName("Genesis")).toBe("GEN")
+    expect(bookCodeFromName("1 Samuel")).toBe("1SA")
+    expect(bookCodeFromName("1samuel")).toBe("1SA")
+    expect(bookCodeFromName("song of songs")).toBe("SNG")
+  })
+  it("knows the common alternative names", () => {
+    expect(bookCodeFromName("Psalm")).toBe("PSA")
+    expect(bookCodeFromName("Song of Solomon")).toBe("SNG")
+  })
+  it("guesses nothing else", () => {
+    expect(bookCodeFromName("GNE")).toBeUndefined()
+    expect(bookCodeFromName("Génesis")).toBeUndefined()
+    expect(bookCodeFromName("")).toBeUndefined()
   })
 })

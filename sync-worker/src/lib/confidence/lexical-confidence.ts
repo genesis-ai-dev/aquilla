@@ -47,3 +47,28 @@ export function lexicalConfidence(queryText: string, neighborTexts: string[]): n
   }
   return best
 }
+
+/**
+ * Symmetric lexical similarity in [0, 1] between two texts: Jaccard over their
+ * distinct terms (|A ∩ B| / |A ∪ B|), same tokenization as above.
+ *
+ * Symmetric on purpose, unlike `lexicalConfidence`'s one-directional coverage
+ * (AQU-1232). Coverage answers "how much of A does B cover?", which a very long
+ * B trivially maximizes — fine when B is a validated exemplar, wrong when the
+ * caller asked "which cell is most LIKE this one" and would be handed a
+ * rambling superset. Jaccard penalizes the extra terms on either side, so a
+ * near-duplicate line outranks a long line that merely contains it.
+ */
+export function lexicalSimilarity(a: string, b: string): number {
+  const aTerms = new Set(tokenizeForConfidence(a))
+  const bTerms = new Set(tokenizeForConfidence(b))
+  if (aTerms.size === 0 || bTerms.size === 0) return 0
+
+  let intersection = 0
+  for (const term of aTerms) {
+    if (bTerms.has(term)) intersection++
+  }
+  if (intersection === 0) return 0
+  const union = aTerms.size + bTerms.size - intersection
+  return intersection / union
+}

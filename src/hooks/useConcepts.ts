@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchConcepts } from "@/lib/sync/concepts-read"
+import { subscribeAppliedEvents } from "@/lib/sync/outbox-flush"
 import type { Concept } from "@/lib/terminology/types"
 
 export interface UseConceptsOptions {
@@ -116,6 +117,17 @@ export function useConcepts(opts: UseConceptsOptions): UseConcepts {
     if (tokenReady === false) return
     void refresh()
   }, [refresh, tokenReady])
+
+  // Re-read once the outbox flush lands a term.* event for this project. The
+  // projection only reflects a write after the server acks it, so a refresh
+  // fired at enqueue time races the flush and reads the pre-write termbase —
+  // the term then "never appears" until a reload.
+  useEffect(() => {
+    if (!projectId) return
+    return subscribeAppliedEvents((frames) => {
+      if (frames.some((f) => f.project === projectId && f.kind.startsWith("term."))) void refresh()
+    })
+  }, [projectId, refresh])
 
   return { concepts, isLoading, error, refresh }
 }

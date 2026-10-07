@@ -8,6 +8,7 @@
 // project renders exactly one chip — visual parity with the pre-lane table.
 
 import type { PortfolioLane, PortfolioProject } from "@/lib/frontier/portfolio"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 /**
  * Display lanes for a project: the default ('') lane is always first, followed
@@ -34,7 +35,14 @@ export function displayLanes(p: PortfolioProject): PortfolioLane[] {
  * show their tag. `fallbackLabel` is the localized "no target set" placeholder
  * (`org.projectOverview.laneDefaultFallback`) — callers with a `t` should pass
  * it so non-English UIs don't leak the English literal. */
-export function laneChipLabel(lane: string, defaultLaneLabel: string, fallbackLabel = "Default"): string {
+export function laneChipLabel(
+  lane: string,
+  defaultLaneLabel: string,
+  fallbackLabel = "Default",
+  name?: string | null,
+): string {
+  const named = name?.trim()
+  if (named) return named
   if (lane) return lane
   return defaultLaneLabel.trim() || fallbackLabel
 }
@@ -59,9 +67,12 @@ export function resolveDefaultLaneLabel(
   return project.targetLanguage?.trim() || fileHint?.trim() || ""
 }
 
-/** A 0..100 integer percentage guarded against NaN (missing counts). */
+/**
+ * A 0..100 integer percentage guarded against NaN (missing counts), and never
+ * 100 while a cell in the lane is outstanding (AQU-1493).
+ */
 export function safePct(fraction: number): number {
-  return Number.isFinite(fraction) ? Math.round(fraction * 100) : 0
+  return progressPercentOfFraction(fraction)
 }
 
 /**

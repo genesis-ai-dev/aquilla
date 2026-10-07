@@ -3,3 +3,13 @@
 # `pnpm install` run in this directory: pnpm walks up, installs the ROOT project,
 # and never creates auth-worker/node_modules — breaking type-check/test/deploy on
 # any fresh checkout (CI deploy-workers.yml, new worktrees).
+#
+# AQU-1204: this file must declare at least one key. Dependabot's npm_and_yarn
+# file fetcher guards only against a *missing* pnpm-workspace.yaml
+# (`return {} unless pnpm_workspace_yaml`) and then indexes the parse result
+# (`parsed_pnpm_workspace_yaml["packages"]`). A comment-only document parses to
+# nil, so the /auth-worker job aborted with `undefined method '[]' for nil` and
+# never proposed dependency updates. `packages: []` is the honest declaration —
+# auth-worker is a workspace root with no member packages — and keeps the parse
+# a mapping.
+packages: []

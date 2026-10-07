@@ -15,6 +15,7 @@ import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
 import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
 import { v7 as uuidv7 } from "uuid"
+import type { ImportedTrackPublication } from "../../../shared/timeline-import"
 import {
   sourceArtifactDescriptor,
   type SourceArtifactFormat,
@@ -156,12 +157,23 @@ export interface StagedAudioAttachment {
   trimStartMs?: number
   trimEndMs?: number
   timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+  /** Supplied wording for a source media segment. */
+  transcription?: string
 }
 
 export interface PublishStagedImportArgs {
   projectId: string
   fileId: string
+  /** Retain the reveal receipt across explicit caller retries. */
+  publishEventId?: string
   attachments?: StagedAudioAttachment[]
+  /** Parent-scoped publication of a separate hidden caption file. */
+  trackPublication?: Omit<ImportedTrackPublication, "eventId">
+    & Partial<Pick<ImportedTrackPublication, "eventId">>
+  /** Stable uploaded clip reference; the player resolves its signed URL. */
+  coreMediaUrl?: string
+  /** Preview-owned picture receipt survives caller retries. */
+  videoEventId?: string
   getToken: (fileId: string) => Promise<string | null>
   signal?: AbortSignal
   fetchImpl?: typeof fetch
@@ -174,6 +186,10 @@ export interface ReconcileImportResult {
   added: number
   changed: number
   unchanged: number
+  /** AQU-1394: units whose source AND both neighbours are unchanged ("101%"). */
+  ice: number
+  /** AQU-1394: units whose source is unchanged but whose context moved ("100%"). */
+  exact: number
   retainedMissing: number
   importedTargets: number
 }
@@ -321,9 +337,16 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
     fileId: args.fileId,
     cells: [],
     complete: true,
-    publishEventId: uuidv7(),
+    publishEventId: args.publishEventId ?? uuidv7(),
+    ...(args.coreMediaUrl ? {
+      video: { id: args.videoEventId ?? uuidv7(), coreMediaUrl: args.coreMediaUrl },
+    } : {}),
     ...(args.attachments?.length ? {
       attachments: args.attachments.map((attachment) => ({ id: uuidv7(), ...attachment })),
+    } : {}),
+    ...(args.trackPublication ? {
+      trackPublication: { ...args.trackPublication,
+        eventId: args.trackPublication.eventId ?? uuidv7() },
     } : {}),
     clientTs: Date.now(),
   })

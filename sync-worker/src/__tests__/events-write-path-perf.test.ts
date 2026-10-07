@@ -71,6 +71,32 @@ function sourceCreate(i: number): RawEvent<'source.cell.create'> {
   }
 }
 
+/**
+ * A retime, which is what reads `project_settings` on this path now.
+ *
+ * These two cases used to drive the memoization proof with
+ * `source.cell.create`, whose `cellEditingFloor` lookup was a per-event
+ * settings read. That tier stopped being enforced at this perimeter on
+ * 2026-09-09 (see authorize.ts), so a create reads no settings at all and
+ * would prove nothing. `cell.retime` goes through `resolveTimingLocked`, which
+ * uses the same per-request cache, so the property under test is unchanged —
+ * only the kind that exercises it moved.
+ */
+function retime(i: number): RawEvent<'cell.retime'> {
+  return {
+    id: `evt-retime-${i}`,
+    schemaVersion: 1,
+    kind: 'cell.retime',
+    projectId: PROJECT,
+    fileId: FILE,
+    cellId: `cell-${i}`,
+    parentId: null,
+    author: 'alice',
+    payload: { startMs: 1000 * i, endMs: 1000 * i + 500 },
+    clientTs: 1000,
+  } as unknown as RawEvent<'cell.retime'>
+}
+
 async function post(db: AquillaDb, events: unknown[], role = ROLE.CONTRIBUTOR): Promise<EventsResponse> {
   const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role })
   const req = new Request('https://worker/events', {
@@ -170,9 +196,9 @@ describe('POST /events — counter recompute runs after the write transaction', 
     expect(writeTxn.sql.some(isCountersRecompute)).toBe(false)
     expect(writeTxn.sql.some(isProgressRecompute)).toBe(false)
 
-    // Exactly ONE recompute batch for the one (file, chunk), carrying exactly
-    // one files-counters recompute — same once-per-(file, chunk) coalescing as
-    // before, just in its own short transaction after the commit.
+    // Exactly ONE recompute batch for the one file, carrying exactly one
+    // files-counters recompute — the once-per-file coalescing, in its own short
+    // transaction after the commit.
     const recomputes = rest.filter((b) => b.sql.some(isCountersRecompute))
     expect(recomputes).toHaveLength(1)
     expect(recomputes[0].sql.filter(isCountersRecompute)).toHaveLength(1)
@@ -183,6 +209,57 @@ describe('POST /events — counter recompute runs after the write transaction', 
     const files = await td.rows<{ id: string; cell_count: number; filled_count: number }>('files')
     expect(files.map((f) => [f.id, f.cell_count, f.filled_count])).toEqual([[FILE, 2, 2]])
   })
+
+  it('AQU-1261: recomputes a multi-chunk file ONCE, not once per chunk', async () => {
+    // BATCH_LIMIT is 100 statements and a source.cell.create costs 3, so 60
+    // creates split into two write chunks (33 + 27). The recompute is a
+    // full-file aggregate scan, so its answer is a function of the file, not of
+    // how many chunks carried the events — running it per chunk scanned the
+    // whole file twice for one identical result, with only the second surviving.
+    const td = (t = await makeTestDb({ files: [{ id: FILE, project_id: PROJECT, name: 'x' }] }))
+    const { db, batches } = recordingDb(td)
+    const r = await post(db, Array.from({ length: 60 }, (_, i) => sourceCreate(i)))
+    expect(r.rejected).toEqual([])
+    expect(r.accepted).toHaveLength(60)
+
+    // Two write transactions, and exactly one recompute batch after them.
+    expect(batches.filter((b) => isWriteTxn(b.sql))).toHaveLength(2)
+    const recomputes = batches.filter((b) => b.sql.some(isCountersRecompute))
+    expect(recomputes).toHaveLength(1)
+    expect(recomputes[0].sql.filter(isCountersRecompute)).toHaveLength(1)
+    expect(batches.at(-1)).toBe(recomputes[0])
+
+    // One pass, and the totals still cover every chunk's cells.
+    const files = await td.rows<{ id: string; cell_count: number }>('files')
+    expect(files.map((f) => [f.id, f.cell_count])).toEqual([[FILE, 60]])
+  }, 120_000)
+
+  it('AQU-1261: a failed later chunk still recomputes over the durable prefix', async () => {
+    // Batch #1 is the first chunk's write transaction; failing batch #2 (the
+    // second chunk) leaves that first chunk's creates durably committed. Their
+    // counters must still be brought up to date — accepting a durable prefix
+    // while `files.cell_count` sat at 0 was the drift this guards. The exact
+    // split is a function of BATCH_LIMIT and is deliberately not asserted.
+    const td = (t = await makeTestDb({ files: [{ id: FILE, project_id: PROJECT, name: 'x' }] }))
+    const { db, batches } = recordingDb(td, { pipelined: true, failBatch: 2 })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const r = await post(db, Array.from({ length: 60 }, (_, i) => sourceCreate(i)))
+      // A partial commit: some events landed, the rest were rejected.
+      expect(r.accepted.length).toBeGreaterThan(0)
+      expect(r.accepted.length).toBeLessThan(60)
+      expect(r.accepted.length + r.rejected.length).toBe(60)
+      expect(error).toHaveBeenCalledWith('[events] DB batch failed:', expect.anything())
+
+      // The recompute ran after the failure, over exactly what landed.
+      const recomputes = batches.filter((b) => b.sql.some(isCountersRecompute))
+      expect(recomputes).toHaveLength(1)
+      const files = await td.rows<{ id: string; cell_count: number }>('files')
+      expect(files.map((f) => [f.id, f.cell_count])).toEqual([[FILE, r.accepted.length]])
+    } finally {
+      error.mockRestore()
+    }
+  }, 120_000)
 
   it('a failed recompute is logged loudly but the committed events stay accepted', async () => {
     const td = (t = await makeTestDb())
@@ -218,7 +295,10 @@ describe('authorize() — settings reads are memoized per request', () => {
               async first() {
                 if (sql.includes('FROM projects')) { reads.projects++; return { org_id: 7 } }
                 if (sql.includes('FROM org_settings')) { reads.org_settings++; return { settings: JSON.stringify({ allowSelfAssignment: true }) } }
-                if (sql.includes('FROM project_settings')) { reads.project_settings++; return { settings: JSON.stringify({ allowLineCreation: true }) } }
+                // `timingLocked: false` so the retime below PASSES the lock and
+                // the read is still made — a locked project would refuse it and
+                // the memoization would go untested.
+                if (sql.includes('FROM project_settings')) { reads.project_settings++; return { settings: JSON.stringify({ timingLocked: false }) } }
                 return null
               },
               async all() { return { results: [] } },
@@ -244,17 +324,36 @@ describe('authorize() — settings reads are memoized per request', () => {
       expect(a.ok).toBe(true)
       const s = await authorize(token, sourceCreate(i), SECRET, db, cache)
       expect(s.ok).toBe(true)
+      const r = await authorize(token, retime(i), SECRET, db, cache)
+      expect(r.ok).toBe(true)
     }
     expect(reads).toEqual({ projects: 1, org_settings: 1, project_settings: 1 })
   })
 
-  it('project_settings is read once per request for N contributor source.cell.create events', async () => {
+  it('a source.cell.create reads NO project settings at all', async () => {
+    // The tier came out of authorize() on 2026-09-09. This is the assertion
+    // that fails if anybody puts a per-event settings lookup back on the
+    // structural-cell path — the shape that made a 500-cell import 500 reads.
+    const { db, reads } = countingDb()
+    const cache = makeRequestCache(db)
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role: ROLE.CONTRIBUTOR, userId: 42 })
+    for (let i = 0; i < 3; i++) {
+      const s = await authorize(token, sourceCreate(i), SECRET, db, cache)
+      expect(s.ok).toBe(true)
+    }
+    expect(reads.project_settings).toBe(0)
+  })
+
+  it('settings are read once per request however many source.cell.create events arrive', async () => {
+    // The statement count must not scale with the batch. This held via the
+    // tier lookup's per-request cache until 2026-09-09; now the creates read
+    // no settings at all, which is the stronger version of the same property.
     const statementsFor = async (n: number) => {
       const db = await makeTestDb()
       try {
         await db.db
           .prepare(`INSERT INTO project_settings (project_id, settings, version, updated_at) VALUES (?, ?, 1, CURRENT_TIMESTAMP)`)
-          .bind(PROJECT, JSON.stringify({ allowLineCreation: true }))
+          .bind(PROJECT, JSON.stringify({ timingLocked: false }))
           .run()
         let statements = 0
         // Statements handed to batch() are unwrapped back to the shim's own

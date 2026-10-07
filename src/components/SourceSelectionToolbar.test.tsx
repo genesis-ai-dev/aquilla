@@ -2,6 +2,11 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import type { Concept } from "@/lib/terminology/types"
+import {
+  SOURCE_CELL_LAYERS,
+  SOURCE_CELL_MENU_Z,
+  SOURCE_SELECTION_RAIL_Z,
+} from "@/lib/editor/source-cell-layers"
 
 const noConcepts = { concepts: [] }
 
@@ -56,7 +61,10 @@ describe("SourceSelectionToolbar", () => {
     const sourceInput = await screen.findByLabelText(/source term for new concept/i)
     expect((sourceInput as HTMLInputElement).value).toBe("Holy Spirit")
     expect(screen.getByLabelText(/rendering for new concept/i)).toBeInTheDocument()
-    expect(screen.getByRole("checkbox", { name: /case insensitive/i })).toBeChecked()
+    // AQU-1271: case sensitivity moved into the collapsed "Matching options"
+    // disclosure, stated positively — unchecked = the case-insensitive default.
+    fireEvent.click(screen.getByRole("button", { name: /matching options/i }))
+    expect(screen.getByRole("checkbox", { name: /match case/i })).not.toBeChecked()
     expect(document.querySelector('[data-slot="popover-content"]')).not.toBeNull()
   })
 
@@ -94,6 +102,36 @@ describe("SourceSelectionToolbar", () => {
     expect(onViewConcept).toHaveBeenCalledWith("concept-grace")
   })
 
+  // AQU-1272: "View term" used to appear on a bidirectional substring test, so
+  // it was silent on a prefixed/differently-pointed selection the rest of the
+  // terminology stack recognises — and loud on an unrelated neighbour.
+  it("offers View term for a prefixed selection of a pointed term", () => {
+    render(
+      <SourceSelectionToolbar
+        sourceSelection="וְהָאָ֗רֶץ"
+        concepts={[{ ...MATCHING_CONCEPT, id: "concept-haaretz", sourceTerm: "הָאָ֗רֶץ" }]}
+        termMatching={{ prefixes: ["ו", "ה", "ב", "ל"], suffixes: ["ים"] }}
+        onAskAi={vi.fn()}
+        onViewConcept={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: /^View term$/i })).toBeInTheDocument()
+  })
+
+  it("does not offer View term for a selection that merely contains the term as a substring", () => {
+    render(
+      <SourceSelectionToolbar
+        sourceSelection="graceful"
+        concepts={[MATCHING_CONCEPT]}
+        onAskAi={vi.fn()}
+        onViewConcept={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole("button", { name: /^View term$/i })).not.toBeInTheDocument()
+  })
+
   it("keeps View term a native button when Base UI composes the trigger", () => {
     render(
       <SourceSelectionToolbar
@@ -108,6 +146,9 @@ describe("SourceSelectionToolbar", () => {
     expect(viewTerm).not.toHaveAttribute("role")
   })
 
+  // AQU-1134: the rail and the source cell menu trigger overlap in the source
+  // cell's corner. Assert against the shared layer contract rather than a
+  // literal class, so bumping one side without the other fails here.
   it("renders in front of the source edit control", () => {
     const { container } = render(
       <SourceSelectionToolbar
@@ -117,6 +158,8 @@ describe("SourceSelectionToolbar", () => {
       />,
     )
 
-    expect(container.firstElementChild).toHaveClass("z-20")
+    expect(container.firstElementChild).toHaveClass(SOURCE_SELECTION_RAIL_Z)
+    expect(container.firstElementChild).not.toHaveClass(SOURCE_CELL_MENU_Z)
+    expect(SOURCE_CELL_LAYERS.selectionRail).toBeGreaterThan(SOURCE_CELL_LAYERS.cellMenu)
   })
 })

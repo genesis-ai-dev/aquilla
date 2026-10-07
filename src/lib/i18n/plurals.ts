@@ -75,13 +75,21 @@ export function isPluralMessage(value: MessageValue | undefined): value is Plura
  * Locales whose plural rules `Intl.PluralRules` does not know, mapped to the
  * categories CLDR actually gives them.
  *
- * `Intl.PluralRules("mfa")` does not throw — `mfa` is a well-formed language
- * subtag — it silently falls back to the runtime default locale's rules, which
- * would tell a Patani Malay translator they need an `one` form. Malay has a
- * single form, so that would be asking for work that cannot be used.
+ * This exists for Malay, which reached the app as `mfa` (Patani Malay) until
+ * AQU-1306 renamed the mislabelled catalog to `ms`. `Intl.PluralRules("mfa")`
+ * does not throw — `mfa` is a well-formed language subtag — it silently falls
+ * back to the runtime default locale's rules, which would tell a Malay
+ * translator they need a `one` form. Malay has a single form, so that would be
+ * asking for work that cannot be used.
+ *
+ * `ms` IS known to CLDR (`other` only), so the `ms` entry below is belt-and-
+ * braces rather than load-bearing; `mfa` stays listed because the alias in
+ * `locales.ts` keeps that code reachable from stored preferences, and because a
+ * future genuine Pattani Malay catalog will need the same single form.
  */
 const CATEGORY_OVERRIDES: Record<string, readonly PluralCategory[]> = {
-  // Patani Malay, like Malay/Indonesian: no grammatical plural.
+  // Malay and Patani Malay, like Indonesian: no grammatical plural.
+  ms: ["other"],
   mfa: ["other"],
 }
 

@@ -4,7 +4,8 @@
 //   * file_section_progress (scope='file') — totals/filled + validator
 //     histogram per (file, lane). Aggregated across all lanes (v1), falling
 //     back to files.cell_count/filled_count/approved_count when a file has no
-//     progress rows yet (pre-backfill).
+//     progress rows yet (pre-backfill). That fallback only stands on a project
+//     with at most one target lane — see `singleLane` below (AQU-1620).
 //   * project_settings.validation_count (generated column) and the
 //     validationCountAudio key for validation thresholds. Same thresholding as
 //     sync-worker's progress-read-route: a cell counts as validated when its
@@ -15,6 +16,7 @@
 //     events table is unreachable.
 
 import { ROLE } from "../../types"
+import { countedFileSql } from "../../../../db/shared/counted-files"
 
 export interface MondayEntityMetrics {
   completion_pct: number
@@ -47,6 +49,9 @@ interface FileRow {
   cell_count: number
   filled_count: number
   approved_count: number
+  structural_cell_count: number
+  structural_filled_count: number
+  structural_approved_count: number
 }
 
 interface ProgressRow {
@@ -54,6 +59,9 @@ interface ProgressRow {
   total_count: number
   filled_count: number
   validator_histogram: unknown
+  structural_count: number
+  structural_filled_count: number
+  structural_validator_histogram: unknown
 }
 
 function parseHistogram(raw: unknown): Map<number, number> {
@@ -138,12 +146,49 @@ export async function computeProjectMetrics(
   const threshold = toThreshold(settings?.validation_count, 1)
   const audioThreshold = toThreshold(settings?.validation_count_audio, threshold)
 
+  // AQU-1083: do headings count? The project's answer, else its org's, else
+  // yes. Generated columns on both, for the reason stated above about blobs.
+  const policy = await db
+    .prepare(
+      `SELECT COALESCE(ps.count_structural, os.count_structural) AS effective
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.id = ?`,
+    )
+    .bind(projectId)
+    .first<{ effective: string | null }>()
+  // Monday must agree with the dashboard: these numbers are pushed to a board
+  // people plan against, and a board that disagrees with the app is worse than
+  // one that is merely out of date.
+  const countStructural = policy?.effective !== 'false'
+
+  // AQU-1620: `files.filled_count` / `approved_count` sum every target lane,
+  // while `files.cell_count` counts each cell once — so the pre-backfill
+  // fallback below was dividing an all-lanes fill by a one-lane total and
+  // completion could pass 100%. Same rule as the progress read fallback
+  // (AQU-1588): with at most one target lane the file counters *are* that
+  // lane's work, so they stand; with two or more the sum is partly another
+  // lane's work, so the numerators are empty rather than wrong. None yet
+  // counts as one and an archived lane still counts, because both are what
+  // the counters already added up. The denominator is `files.cell_count`
+  // either way. A project with progress rows never reaches this.
+  const laneCountRow = await db
+    .prepare("SELECT COUNT(*) AS target_lanes FROM lanes WHERE project_id = ? AND role = 'target'")
+    .bind(projectId)
+    .first<{ target_lanes: number | string | null }>()
+  const singleLane = Number(laneCountRow?.target_lanes ?? 0) <= 1
+
   const filesResult = await db
     .prepare(
-      `SELECT id, name, cell_count, filled_count, approved_count
-         FROM files
-        WHERE project_id = ? AND deleted_at IS NULL
-        ORDER BY name ASC`,
+      // AQU-1626: `files f` aliased so the counted-file rule can apply. A cue
+      // sheet or a caption track is machinery, not a deliverable, so it must
+      // not be pushed to Monday as a row for a partner to chase.
+      `SELECT f.id, f.name, f.cell_count, f.filled_count, f.approved_count,
+              f.structural_cell_count, f.structural_filled_count, f.structural_approved_count
+         FROM files f
+        WHERE f.project_id = ? AND ${countedFileSql('f')}
+        ORDER BY f.name ASC`,
     )
     .bind(projectId)
     .all<FileRow>()
@@ -151,7 +196,8 @@ export async function computeProjectMetrics(
 
   const progressResult = await db
     .prepare(
-      `SELECT file_id, total_count, filled_count, validator_histogram
+      `SELECT file_id, total_count, filled_count, validator_histogram,
+              structural_count, structural_filled_count, structural_validator_histogram
          FROM file_section_progress
         WHERE project_id = ? AND scope = 'file'`,
     )
@@ -205,21 +251,39 @@ export async function computeProjectMetrics(
         for (const [bucket, amount] of parseHistogram(lane.validator_histogram)) {
           histogram.set(bucket, (histogram.get(bucket) ?? 0) + amount)
         }
+        if (!countStructural) {
+          total -= Number(lane.structural_count) || 0
+          filled -= Number(lane.structural_filled_count) || 0
+          // Bucket-wise, because validatedAtThreshold reads cumulatively.
+          for (const [bucket, amount] of parseHistogram(lane.structural_validator_histogram)) {
+            const remaining = (histogram.get(bucket) ?? 0) - amount
+            if (remaining > 0) histogram.set(bucket, remaining)
+            else histogram.delete(bucket)
+          }
+        }
       }
       totals = {
-        total,
-        filled,
+        total: Math.max(0, total),
+        filled: Math.max(0, filled),
         validated: validatedAtThreshold(histogram, threshold),
         audioValidated: validatedAtThreshold(histogram, audioThreshold),
       }
     } else {
-      // Pre-backfill fallback: file counters (approved ≈ validated).
-      totals = {
-        total: Number(file.cell_count) || 0,
-        filled: Number(file.filled_count) || 0,
-        validated: Number(file.approved_count) || 0,
-        audioValidated: 0,
-      }
+      // Pre-backfill fallback: file counters (approved ≈ validated), and only
+      // on a single-lane project — see `singleLane` above.
+      const less = (n: unknown) => (countStructural ? 0 : Number(n) || 0)
+      const total = Math.max(0, (Number(file.cell_count) || 0) - less(file.structural_cell_count))
+      totals = singleLane
+        ? {
+            total,
+            filled: Math.max(0, (Number(file.filled_count) || 0) - less(file.structural_filled_count)),
+            validated: Math.max(
+              0,
+              (Number(file.approved_count) || 0) - less(file.structural_approved_count),
+            ),
+            audioValidated: 0,
+          }
+        : { total, filled: 0, validated: 0, audioValidated: 0 }
     }
     projectTotals.total += totals.total
     projectTotals.filled += totals.filled

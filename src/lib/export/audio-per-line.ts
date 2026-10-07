@@ -37,6 +37,7 @@ import { isDefaultTrackSlot, slotForTrack } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
+import { stripInternalIds } from "./internal-id-names"
 import {
   characterFileKey,
   characterIdentity,
@@ -187,7 +188,16 @@ export function trackFolderNames(tracks: readonly { id: string; name: string }[]
   for (const track of tracks) {
     // No `|| "track"` fallback: `characterKey` already ends in `|| "unnamed"`,
     // so this cannot be empty and that arm was never reachable.
-    const base = characterFileKey(track.name)
+    //
+    // AQU-1461: an id is stripped out of the name FIRST. A track always derives a
+    // kind label ("Target audio", "Audio") when it has no override, so the id
+    // here comes from a stored rename, and a folder called
+    // `a89dec11-d60e-48c1-…/` tells whoever opens the zip nothing about which
+    // lane its takes are on. `characterFileKey` lands an all-id name on
+    // `NO_CHARACTER`, which is a character's word rather than a track's, so the
+    // readable part is taken first and only an empty result falls through.
+    const readable = stripInternalIds(track.name)
+    const base = readable.trim() ? characterFileKey(readable) : "track"
     let name = base
     let n = 2
     while (used.has(name.toLowerCase())) {
@@ -207,7 +217,10 @@ export function perLineFileName(
   ext: string,
   opts: { fileBase?: string; langCode: string },
 ): string {
-  const stem = opts.fileBase ? `${characterKey(opts.fileBase)}_` : ""
+  // AQU-1461: same guard as the character export — the stem is the file's
+  // display name, and an id in it rides into every entry of the zip.
+  const fileStem = opts.fileBase ? stripInternalIds(opts.fileBase) : ""
+  const stem = fileStem.trim() ? `${characterKey(fileStem)}_` : ""
   const line = String(clip.lineNumber).padStart(4, "0")
   return `${stem}${opts.langCode}_L${line}_${characterFileKey(clip.character)}.${ext}`
 }
@@ -348,6 +361,27 @@ export async function exportAudioPerLine(
       }
       if (bytes.length === 0) throw new Error("empty audio")
 
+      // …AND WHAT IT PLAYS, NOT EVERYTHING THAT WAS RECORDED (2026-08-27).
+      //
+      // Sam's ruling: an export contains what you hear. A PCM WAV can be cut
+      // by byte range with no decoder, which keeps this file's no-decoding
+      // charter intact. Anything else — a webm mic take, an uploaded mp3 —
+      // comes back untouched and is counted, because those carry no embedded
+      // timestamp at all and travel on the manifest.
+      //
+      // FOR EVERY LINE, TIMED OR NOT (2026-09-29). This used to run only on a
+      // timed line, beside the timestamp: a take trimmed in the recorder on an
+      // untimed line went out with the silence or false start its trim hides,
+      // and uncounted, so nothing said so.
+      const attachment = cell.attachments?.[clip.audioId]
+      const before = bytes
+      bytes = trimWav(bytes, {
+        trimStartMs: attachment?.trimStartMs,
+        trimEndMs: attachment?.trimEndMs,
+      })
+      const wanted = attachment?.trimStartMs != null || attachment?.trimEndMs != null
+      if (wanted && bytes === before) untrimmed += 1
+
       if (clip.startSec == null) untimed += 1
       else {
         // WHERE THE TAKE SITS, NOT WHERE ITS LINE STARTS.
@@ -359,30 +393,14 @@ export async function exportAudioPerLine(
         // position it USED to have. `targetChipGeom` is the same resolver the
         // lane draws with, so the DAW and the timeline now agree by
         // construction rather than by coincidence.
-        const attachment = cell.attachments?.[clip.audioId]
+        //
+        // `placeSec` is the take's AUDIBLE start — anchor plus head trim —
+        // which is why the bytes above are the trimmed ones: untrimmed, the
+        // line landed in a DAW late by exactly that trim, with the material
+        // the trim hides audible in front of it. That is the ordinary case:
+        // `take-margins.ts` gives every recorded take a head trim at birth.
         const geom = targetChipGeom(cell, attachment)
         const placeSec = geom?.start ?? clip.startSec
-        // …AND WHAT IT PLAYS, NOT EVERYTHING THAT WAS RECORDED (2026-08-27).
-        //
-        // `placeSec` is the take's AUDIBLE start — anchor plus head trim — so
-        // handing over the untrimmed bytes stamped with it put the line into a
-        // DAW late by exactly that trim, with the material the trim hides
-        // audible in front of it. And this is the ordinary case, not a rare
-        // one: `take-margins.ts` gives every recorded take a head trim at
-        // birth to undo the pre-roll anchor shift.
-        //
-        // Sam's ruling: an export contains what you hear. A PCM WAV can be cut
-        // by byte range with no decoder, which keeps this file's no-decoding
-        // charter intact. Anything else — a webm mic take, an uploaded mp3 —
-        // comes back untouched and is counted below, because those carry no
-        // embedded timestamp at all and travel on the manifest.
-        const before = bytes
-        bytes = trimWav(bytes, {
-          trimStartMs: attachment?.trimStartMs,
-          trimEndMs: attachment?.trimEndMs,
-        })
-        const wanted = attachment?.trimStartMs != null || attachment?.trimEndMs != null
-        if (wanted && bytes === before) untrimmed += 1
         bytes = withBwfTimestamp(bytes, {
           // A hyphen, not an em dash: the bext fields are Latin-1 and the
           // writer turns anything above 0xFF into "?", so the pretty dash came

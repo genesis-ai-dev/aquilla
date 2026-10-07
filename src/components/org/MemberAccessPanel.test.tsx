@@ -40,8 +40,25 @@ describe("MemberAccessRow", () => {
     expect(await screen.findByText("John")).toBeInTheDocument()
     expect(screen.getByText("Mark")).toBeInTheDocument()
     expect(screen.getByText(/Org role:/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/does not grant project access/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/can see every project in this org/i)).not.toBeInTheDocument()
     // a team path chip renders for the project
     expect(screen.getAllByText(/Translators/).length).toBeGreaterThan(0)
+  })
+
+  it("says a Maintainer org role can see every project (AQU-1107)", async () => {
+    vi.mocked(getMemberAccess).mockResolvedValue({
+      ...ACCESS,
+      orgRole: 600,
+      projects: ACCESS.projects.map((p) => ({ ...p, org: 600 })),
+    })
+    renderRow()
+    fireEvent.click(screen.getByRole("button", { name: /anna/ }))
+    await screen.findByText("John")
+    expect(screen.getByText(/can see every project in this org/i)).toBeInTheDocument()
+    expect(screen.queryByText(/does not grant project access/i)).not.toBeInTheDocument()
   })
 
   it("revokes the direct grant via removeProjectMember, leaving inherited paths", async () => {

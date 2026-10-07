@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, type MouseEvent } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Building2 } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
@@ -13,17 +13,26 @@ import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 /**
  * Tenants — flat cross-tenant list of organizations. Team nesting lives on the
  * Teams tab; this table only shows a per-org team count. Row click switches
- * into the org workspace (platform admins resolve owner-level everywhere).
+ * into the org workspace (platform admins resolve owner-level everywhere). The
+ * trailing actions column jumps straight to an org's Members page or its
+ * People & access page (AQU-1322); those buttons stop the click so the row
+ * handler does not also fire.
  */
 
 export function AdminTenantsSection({
   orgs,
   teams,
   onOpenOrg,
+  onOpenOrgPath,
+  onOpenInvites,
 }: {
   orgs: AdminOrg[]
   teams: AdminTeam[]
   onOpenOrg: (orgId: number) => void
+  /** Open an org subpage such as "/members" or "/access". */
+  onOpenOrgPath: (orgId: number, subpath: string) => void
+  /** Open the admin invites tab with this org pre-selected. */
+  onOpenInvites?: (orgId: number) => void
 }) {
   const teamCountByOrg = useMemo(() => {
     const map = new Map<number, number>()
@@ -91,6 +100,22 @@ export function AdminTenantsSection({
         ),
       },
       {
+        // AQU-1071: the billing band's own count, per tenant. Sorts missing last
+        // so a server without the field cannot read as "fewest lanes".
+        id: "languages",
+        accessorFn: (o) => missingLast(o.activeLanguageCount),
+        sortUndefined: SORT_MISSING_LAST,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Lanes" className="justify-end" />
+        ),
+        cell: ({ row }) =>
+          row.original.activeLanguageCount == null ? (
+            <div className="text-right text-muted-foreground">—</div>
+          ) : (
+            <div className="text-right tabular-nums">{row.original.activeLanguageCount}</div>
+          ),
+      },
+      {
         id: "created",
         accessorFn: (o) => missingLast(o.createdAt || undefined),
         sortUndefined: SORT_MISSING_LAST,
@@ -102,8 +127,40 @@ export function AdminTenantsSection({
           />
         ),
       },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => null,
+        cell: ({ row }) => {
+          const orgId = row.original.id
+          const open = (subpath: string) => (e: MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation()
+            onOpenOrgPath(orgId, subpath)
+          }
+          const openInvites = (e: MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation()
+            onOpenInvites?.(orgId)
+          }
+          const linkClass = "text-xs text-primary hover:underline"
+          return (
+            <div className="flex justify-end gap-3 whitespace-nowrap">
+              <button type="button" className={linkClass} onClick={open("/members")}>
+                Members
+              </button>
+              <button type="button" className={linkClass} onClick={open("/access")}>
+                People &amp; access
+              </button>
+              {onOpenInvites && (
+                <button type="button" className={linkClass} onClick={openInvites}>
+                  Invites &amp; links
+                </button>
+              )}
+            </div>
+          )
+        },
+      },
     ],
-    [teamCountByOrg],
+    [teamCountByOrg, onOpenOrgPath, onOpenInvites],
   )
 
   return (

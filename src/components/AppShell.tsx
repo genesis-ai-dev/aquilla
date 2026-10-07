@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useContext, useEffect, useState, type ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { usePanelRef } from "react-resizable-panels"
 import { PanelLeft } from "lucide-react"
@@ -9,6 +9,7 @@ import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { HelpMenu } from "./HelpMenu"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
+import { ConnectivityStatusChip } from "./ConnectivityStatusChip"
 import { NavHistoryControls } from "./NavHistoryControls"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -24,21 +25,9 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
+import { useIsLgUp } from "@/hooks/useIsLgUp"
 
-/** Tailwind `lg` — below this, org chrome and the editor dock move into a sheet. */
-const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
-
-export function useIsLgUp(): boolean {
-  return useSyncExternalStore(
-    (onStoreChange) => {
-      const mq = window.matchMedia(LG_MIN_WIDTH_QUERY)
-      mq.addEventListener("change", onStoreChange)
-      return () => mq.removeEventListener("change", onStoreChange)
-    },
-    () => window.matchMedia(LG_MIN_WIDTH_QUERY).matches,
-    () => true,
-  )
-}
+export { useIsLgUp } from "@/hooks/useIsLgUp"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
 //   (no z) — in-flow chrome (workspace header, status bar, sidebar). It sits
@@ -176,7 +165,7 @@ export function AppShell({
   // boundary, clearing its error state. Chrome (sidebar, header, status bar)
   // stays outside the boundary so navigation itself is never blocked by a
   // crash in the main content.
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   // Optional read (not useBrand) — the shell is rendered by page tests that
   // don't mount BrandProvider; the logo link is chrome, not a hard dependency.
   const brand = useContext(BrandContext)
@@ -206,9 +195,34 @@ export function AppShell({
   const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
 
+  // A pick inside the sheet can navigate by query alone — choosing an Agent
+  // conversation while already on /agent only changes ?conversation=. The
+  // sheet is modal, so a URL change while it is open comes from a pick in it;
+  // close on the query too. (Push vs replace can't be told apart here: App's
+  // `<Routes location=…>` reports every navigation below it as POP.)
   useEffect(() => {
     setNavOpen(false)
-  }, [pathname])
+  }, [pathname, search])
+
+  /**
+   * Mark the document while this frame is on screen, so the base stylesheet
+   * can refuse a viewport scroll ONLY here.
+   *
+   * Scoped rather than global, and a page that is not in this frame is why:
+   * /privacy-policy renders a 3,400px document straight into the body. A
+   * blanket `overflow: hidden` on html made two thirds of it unreachable —
+   * no wheel, no scrollbar, no End key — including the page's own analytics
+   * opt-out and every contact address on it. Login, the invite and verify
+   * routes, the approval page and the 404 are all in the same position, and
+   * three of them carry a comment saying they scroll the document by design.
+   *
+   * Inside the frame the opposite holds: every pane scrolls on its own, so a
+   * document scroll can only slide the whole application off the top.
+   */
+  useEffect(() => {
+    document.documentElement.dataset.appFrame = "true"
+    return () => { delete document.documentElement.dataset.appFrame }
+  }, [])
 
   useEffect(() => {
     if (lgUp) setNavOpen(false)
@@ -327,23 +341,67 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {/* Keep build and shared utilities in one footer row in both sidebar
-          layouts. Help stays compact beside localization; the org-only Tour
-          remains hidden in the project editor. */}
+      {/* AQU-1548: two footer rows — build label (AQU-1023), then connectivity
+          + Help + localization — under the account row. The labelled Feedback
+          button (AQU-1028) that used to lead the footer is gone; feedback is
+          the last item in the Help menu again.
+          AQU-1523's width rule survives that removal and still binds: the
+          build label keeps a line to itself, because at the footer's 10px
+          monospace it needs ~190px of the sidebar's 224px and anything sharing
+          the row fits it down to "v0" (see the release row below). Help stays
+          compact beside localization; the org-only Tour remains hidden in the
+          project editor. Both sidebar layouts (org chrome and the project
+          dock) render this same footer. */}
       <div
         data-slot="app-shell-sidebar-footer"
-        className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
+        className={cn(
+          "flex shrink-0 flex-col gap-1 px-2 pb-2",
+          // Collapsed rail is 40px after the aside's ps-2 — pin to the same
+          // icon column the chrome header above uses so nothing spills.
+          chromeCollapsed && "w-10 items-center",
+        )}
       >
-        <div className="min-w-0">
+        {/* The build label gets a line to itself. Nothing else can share it:
+            at the footer's 10px monospace the label needs ~190px, and the
+            sidebar's 224px leaves ~208px once the footer's own padding is
+            taken — so a 68px Help+localization pair beside it starves the
+            label however the row is justified. A preview walk measured
+            exactly that, with the label fitted to 13px ("v0"). */}
+        <div
+          data-slot="app-shell-sidebar-release-row"
+          className={cn("flex min-w-0 max-w-full items-center", chromeCollapsed && "w-full")}
+        >
           <VersionTag />
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <HelpMenu compact showTour={!useDockResize} />
-          {i18n && (
-            <LanguageSwitcher
-              ariaLabel={i18n.t("language.switcher.chrome")}
-            />
+        <div
+          data-slot="app-shell-sidebar-utility-row"
+          className={cn(
+            "flex items-center gap-2",
+            chromeCollapsed ? "w-full flex-col gap-1" : "justify-between",
           )}
+        >
+          {/* Always-present left child: the chip renders null off the Tauri
+              runtime (i.e. in every browser), and without a placeholder
+              `justify-between` would drop Help and localization to the start
+              edge instead of holding them at the end. Hidden in the 40px rail
+              for the same reason as BetaBadge above — no room for a text chip. */}
+          <div className="flex min-w-0 items-center">
+            {!chromeCollapsed && <ConnectivityStatusChip />}
+          </div>
+          <div
+            className={cn(
+              "flex shrink-0 items-center gap-1",
+              // Two 32px controls do not fit side by side in the 40px rail.
+              chromeCollapsed && "flex-col",
+            )}
+          >
+            <HelpMenu compact showTour={!useDockResize} />
+            {i18n && (
+              <LanguageSwitcher
+                ariaLabel={i18n.t("language.switcher.chrome")}
+              />
+            )}
+          </div>
         </div>
       </div>
     </aside>

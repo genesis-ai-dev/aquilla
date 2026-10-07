@@ -3,8 +3,16 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Navigate, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { Settings, OrgSettingsIdentity, OrgSettingsKnowledge, OrgSettingsSecurity } from "./Settings"
-import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
+import { renameOrg, listMyOrgs, deleteOrg, OrgHasProjectsError } from "@/lib/frontier/orgs"
 import { toast } from "@/components/ui/toast"
+
+// AQU-1277: OrgProvider loads the project directory via
+// fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
+// it reached production identity for real while the tests stayed green.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+}))
 
 vi.mock("@/components/ui/toast", () => ({
   toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
@@ -18,6 +26,15 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
   renameOrg: vi.fn(async () => {}),
+  deleteOrg: vi.fn(async () => {}),
+  OrgHasProjectsError: class OrgHasProjectsError extends Error {
+    projectCount: number
+    constructor(projectCount: number) {
+      super("organization_has_projects")
+      this.name = "OrgHasProjectsError"
+      this.projectCount = projectCount
+    }
+  },
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/lib/frontier/knowledge-base", () => ({
@@ -34,6 +51,8 @@ const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     exportMinRole: null,
+    egressMinRole: 700,
+    canEgress: true,
     patch: mockPatch,
     settings: {},
     orgRules: [],
@@ -54,19 +73,30 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     memberProgressViewMinRole: 600,
     // AQU-496: self-assignment authority — default leads-only.
     allowSelfAssignment: false,
+    // AQU-1037: assigning work to others defaults to Project lead.
+    assignmentMinRole: 500,
     // AQU-822: terminology floor — default Project lead.
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
+    // AQU-1002: comment floors — defaults reproduce post-AQU-999 behaviour.
+    commentCreateMinRole: 200,
+    commentResolveMinRole: 400,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),
   canEditRosterProgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditAssignmentAuthority: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditTermbaseFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
+  canEditEgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
+  canEditCommentFloors: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
 beforeEach(() => {
   localStorage.clear()
   rosterSettings.canViewRoster = true
+  vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+  vi.mocked(deleteOrg).mockReset()
+  vi.mocked(deleteOrg).mockResolvedValue(undefined)
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -94,6 +124,8 @@ function renderSettings(path = "/orgs/1/settings") {
         <Routes>
           <Route path="/orgs/:orgId/settings" element={<Settings />} />
           <Route path="/orgs/:orgId/settings/identity" element={<OrgSettingsIdentity />} />
+          <Route path="/orgs/:orgId/overview" element={<div>Org overview</div>} />
+          <Route path="/orgs/all" element={<div>All organizations</div>} />
           <Route path="/orgs/:orgId/settings/security" element={<OrgSettingsSecurity />} />
           <Route path="/orgs/:orgId/settings/knowledge" element={<OrgSettingsKnowledge />} />
           <Route path="/orgs/:orgId/settings/export" element={<Navigate to="../security" replace relative="path" />} />
@@ -118,7 +150,12 @@ describe("Org Settings", () => {
 
     renderSettings("/orgs/1/settings/knowledge")
     expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument()
-    expect(screen.getAllByText(/every project in this organization/i)).toHaveLength(1)
+    // The page header carries the description; the surface hides its own copy
+    // (showTitle={false}), so it appears once. Let the document list settle
+    // first — its empty state also says "every project in this organization",
+    // and this assertion used to pass only by running before that render.
+    expect(await screen.findByText("No knowledge documents yet")).toBeInTheDocument()
+    expect(screen.getAllByText(/^Add reference documents that every project/i)).toHaveLength(1)
   })
 
   it("shows the org name and an owner can rename it on blur", async () => {
@@ -140,6 +177,52 @@ describe("Org Settings", () => {
     const input = await screen.findByLabelText(/^Organization name$/i)
     await waitFor(() => expect(input).toHaveValue("Come and See"))
     expect(input).toBeDisabled()
+    expect(screen.queryByRole("button", { name: /delete organization/i })).toBeNull()
+  })
+
+  it("shows a Danger zone only to the owner", async () => {
+    renderSettings("/orgs/1/settings/identity")
+    expect(await screen.findByRole("button", { name: /delete organization/i })).toBeInTheDocument()
+    expect(screen.getByText("Danger zone")).toBeInTheDocument()
+  })
+
+  it("hides the Danger zone from a maintainer who can still rename", async () => {
+    vi.mocked(listMyOrgs).mockResolvedValueOnce([{ id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } }])
+    renderSettings("/orgs/1/settings/identity")
+    const input = await screen.findByLabelText(/^Organization name$/i)
+    await waitFor(() => expect(input).toHaveValue("Come and See"))
+    expect(input).toBeEnabled()
+    expect(screen.queryByRole("button", { name: /delete organization/i })).toBeNull()
+  })
+
+  it("leaves the organization in place when delete is cancelled", async () => {
+    renderSettings("/orgs/1/settings/identity")
+    fireEvent.click(await screen.findByRole("button", { name: /delete organization/i }))
+    expect(await screen.findByRole("heading", { name: "Delete 'Come and See'?" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Delete 'Come and See'?" })).toBeNull())
+    expect(deleteOrg).not.toHaveBeenCalled()
+  })
+
+  it("deletes the organization after confirm and switches to another org", async () => {
+    renderSettings("/orgs/1/settings/identity")
+    fireEvent.click(await screen.findByRole("button", { name: /delete organization/i }))
+    vi.mocked(listMyOrgs).mockResolvedValueOnce([
+      { id: 2, name: "Fresh workspace", role: { level: 700, name: "owner" } },
+    ])
+    fireEvent.click(await screen.findByRole("button", { name: /^confirm$/i }))
+    await waitFor(() => expect(deleteOrg).toHaveBeenCalledWith("jwt", 1))
+    expect(await screen.findByText("Org overview")).toBeInTheDocument()
+    expect(localStorage.getItem("org:active")).toBe("2")
+  })
+
+  it("keeps the organization and explains when it still has projects", async () => {
+    vi.mocked(deleteOrg).mockRejectedValueOnce(new OrgHasProjectsError(2))
+    renderSettings("/orgs/1/settings/identity")
+    fireEvent.click(await screen.findByRole("button", { name: /delete organization/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /^confirm$/i }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/still has projects/i)
+    expect(screen.getByLabelText(/^Organization name$/i)).toHaveValue("Come and See")
   })
 })
 
@@ -152,6 +235,7 @@ describe("Security settings page", () => {
     expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
     expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
     expect(screen.getByLabelText(/who can export/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can assign work/i)).toBeDefined()
     expect(screen.getByLabelText(/allow self-assignment/i)).toBeDefined()
     expect(screen.getByLabelText(/who can manage terminology/i)).toBeDefined()
   })
@@ -166,6 +250,15 @@ describe("Security settings page", () => {
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ exportMinRole: 400 }))
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
     expect(toast.add).not.toHaveBeenCalled()
+  })
+
+  it("patches the egress floor on change — an owner opens Data egress to maintainers (AQU-907)", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByLabelText(/who can use data egress/i)).toBeDefined())
+
+    await pickSelectOption(/who can use data egress/i, /maintainer \(600\)/i)
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ egressMinRole: 600 }))
   })
 
   it("surfaces a server error when the export save fails", async () => {

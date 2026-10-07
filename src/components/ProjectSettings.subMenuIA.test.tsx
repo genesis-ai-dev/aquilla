@@ -59,6 +59,7 @@ const PROJECT_ID = "proj-submenu-ia"
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
     id: PROJECT_ID,
+    orgId: 7,
     name: "Sub-menu IA Test Project",
     files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
     sourceLanguage: "English",
@@ -99,11 +100,23 @@ vi.mock("@/hooks/useProjectSettings", () => ({
 }))
 
 vi.mock("@/hooks/useOrg", () => ({
-  useOrg: () => ({ org: null }),
+  useOrg: () => ({ org: { id: 99 } }),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "tester" }, loading: false }),
+}))
+
+// AQU-1525: the Source & sync pane now mounts LinkSourceSection for a project
+// with no upstream, and that card lists the projects the user can link to.
+// Stubbed so the pane stays offline-deterministic (the real hook fetches).
+vi.mock("@/hooks/useAccessibleProjects", () => ({
+  useProjectsForNavigation: () => ({
+    projects: [{ id: "proj-upstream", name: "English Source", role: { level: 100 } }],
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }))
 
 vi.mock("@/hooks/useAccounts", () => ({
@@ -190,6 +203,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     memberProgressViewMinRole: 600,
     allowSelfAssignment: false,
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -412,11 +426,15 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByLabelText(/search by name or email/i)).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings/source-sync`)
-    // This project has a git origin but no source link, so only Git Sync
-    // renders in this pane — confirms the group still mounts correctly when
-    // some of its member sections are conditionally hidden.
-    // PageHeader description also mentions "git sync", so match the card title exactly.
+    // This project has a git origin but no source link, so Git Sync and
+    // (AQU-1525) the "Link to a source project" card render in this pane while
+    // Source link / Upstream changes stay hidden — confirms the group still
+    // mounts correctly when some of its member sections are conditionally
+    // hidden. PageHeader description also mentions "git sync", so match the
+    // card title exactly.
     expect(screen.getByText("Git Sync")).toBeTruthy()
+    expect(screen.getByText("Link to a source project")).toBeTruthy()
+    expect(screen.queryByText("Source link")).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
     // The system prompt moved to Living Memory (memory/instructions) — the AI
@@ -432,10 +450,13 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/validation`)
     expect(screen.getByLabelText(/required validators \(text\)/i)).toBeTruthy()
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
-    expect(screen.getByText(/retrieval support/i)).toBeTruthy()
-    // Retrieval support sits under Validation + Harmonization on this pane.
-    const validationHeading = screen.getByText(/^validation$/i)
-    const retrievalHeading = screen.getByText(/retrieval support/i)
+    expect(screen.getByText(/^health$/i)).toBeTruthy()
+    // AQU-764: the decay panel is named "Health", not "Retrieval support".
+    // It sits under the validation cards + Harmonization on this pane. The
+    // text and audio rules are two cards since 2026-10-03.
+    expect(screen.getByText(/^audio validation$/i)).toBeTruthy()
+    const validationHeading = screen.getByText(/^text validation$/i)
+    const retrievalHeading = screen.getByText(/^health$/i)
     expect(
       validationHeading.compareDocumentPosition(retrievalHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -522,4 +543,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByText(/roster hidden/i)).toBeNull()
     expect(screen.getByText("General")).toBeTruthy()
   })
+})
+
+vi.mock("./ProjectSettings/MondayIntegrationSection", () => ({
+  MondayIntegrationSection: ({ orgId }: { orgId: number | null }) => (
+    <div data-testid="monday-project-org">{orgId}</div>
+  ),
+}))
+it("AQU-1208: Monday setup uses the project's organization, not the personal organization", () => {
+  renderAt(`/project/${PROJECT_ID}/settings/integrations`)
+  expect(screen.getByTestId("monday-project-org")).toHaveTextContent("7")
 })

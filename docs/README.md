@@ -5,6 +5,8 @@ design and audit material.
 
 ## Current operational truth
 
+- [Self hosting guide](SELF-HOSTING.md) — local evaluation, your own Cloudflare
+  deployment, required and optional services, database bootstrap, and operations.
 - [Deployment environments](DEPLOYMENT-ENVIRONMENTS.md) — canonical branch,
   Wrangler profile, hostname, Worker, Neon branch, R2 bucket, and deploy-command
   mapping.
@@ -20,6 +22,8 @@ design and audit material.
 - [Operational security](OPSEC.md) — sensitive data inventory, threat model,
   open risks, and which security controls are actually enforced. Re-run its
   mechanical checks with `pnpm run scan:secrets` and `pnpm audit --prod`.
+- [Inworld TTS 2 Flash](INWORLD-TTS.md) — commercial hosted TTS / clone
+  engine (AQU-1189). Where to put `INWORLD_API_KEY`.
 
 Runtime configuration in `wrangler.toml`, `auth-worker/wrangler.toml`,
 `sync-worker/wrangler.toml`, the deploy workflows, and `package.json` is enforced

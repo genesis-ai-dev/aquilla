@@ -15,4 +15,9 @@ export interface Env {
   Sandbox: DurableObjectNamespace<Sandbox>
   /** R2 bucket holding agent artifacts / media blobs (aquilla-snapshots). */
   SNAPSHOTS: R2Bucket
+  /** PostHog *project* token (phc_…, public). When set, slow/error logs are
+   *  shipped to PostHog Logs (see posthog-logs.ts). Unset locally/in tests. */
+  POSTHOG_KEY?: string
+  /** PostHog ingest host; defaults to https://eu.i.posthog.com (AQU-854). */
+  POSTHOG_HOST?: string
 }

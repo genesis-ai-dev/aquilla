@@ -108,6 +108,11 @@ export function projectMemoryPath(projectId: string, section?: string): string {
     : `/project/${projectId}/memory`
 }
 
+/** Project overview — the project's home page (`/projects/$id`). */
+export function projectOverviewPath(projectId: string): string {
+  return `/projects/${projectId}`
+}
+
 /** Default work surface — paired cell editor (`/project/$id/editor`). */
 export function projectEditorPath(projectId: string, fileId?: string | null): string {
   const base = `/project/${projectId}/editor`
@@ -151,4 +156,25 @@ export function editorReturnFromLocation(
   const raw = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("return")
   const returnTo = safeReturnPath(raw)
   return returnTo && isProjectEditorPath(returnTo, projectId) ? returnTo : null
+}
+
+/**
+ * The fileId in a project-editor path (`/project/:id/editor/file/:fileId`).
+ * Null for the bare editor path, another project's editor, or any other path.
+ */
+export function fileIdFromEditorPath(
+  path: string | null | undefined,
+  projectId: string,
+): string | null {
+  if (!path) return null
+  const pathname = path.split(/[?#]/)[0] ?? ""
+  const prefix = `${projectEditorPath(projectId)}/file/`
+  if (!pathname.startsWith(prefix)) return null
+  const raw = pathname.slice(prefix.length).split("/")[0]
+  if (!raw) return null
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }

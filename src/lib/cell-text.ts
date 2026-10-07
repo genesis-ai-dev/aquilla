@@ -1,4 +1,5 @@
 import type { SegmentMedium } from "@/lib/sync/cells-read-types"
+import { semanticSourceText } from "@/lib/semantic-source-text"
 
 /**
  * Extract human-readable plain text from a stored cell value.
@@ -51,10 +52,14 @@ export interface SourceTextCell {
  * as source text — decision 2026-08-05: transcription when present, blank
  * when not). Display code deliberately does NOT — on screen the filename is
  * a useful placeholder.
+ *
+ * AQU-1231: the rule itself lives in the alias-free leaf
+ * `lib/semantic-source-text.ts` so sync-worker's term-consistency read can
+ * share it (sync-worker's tsconfig has no `@/` paths). This stays the typed
+ * entry point SPA callers use.
  */
 export function effectiveSourceText(cell: SourceTextCell): string {
-  if ((cell.medium ?? "text") !== "media") return cell.original
-  return cell.transcription?.trim() ? cell.transcription : ""
+  return semanticSourceText(cell)
 }
 
 /** `SourceTextCell` plus the HTML twin of `original`. */

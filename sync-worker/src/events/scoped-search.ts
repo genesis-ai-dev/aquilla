@@ -14,6 +14,9 @@
 //     by the caller, so it cannot be accidentally omitted.
 
 import type { SyncTokenClaims } from "../auth"
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
+import { notHiddenSql, visibleSourceSql } from "./hidden-cells-scope"
+import { inCountedFileSql } from "../../../db/shared/counted-files"
 
 // ---------------------------------------------------------------------------
 // Branded type — the permission gate
@@ -221,6 +224,17 @@ export async function queryScopedSearch(
     "FROM cells",
     "WHERE cells.value_tsv @@ plainto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
+    // AQU-1424: a parked cell is not searchable. The anti-join is required
+    // rather than `cells.hidden_at IS NULL` because this query matches EITHER
+    // side and the flag lives only on the shared source row — reading it off the
+    // matched row would let every target-side hit through. It also settles
+    // Find & Replace, whose candidates are these results.
+    `AND ${notHiddenSql("cells")}`,
+    // AQU-1626: and neither is a cell inside a deleted file or a hidden
+    // companion (a cue sheet, a caption track). A cue is timecode text, so
+    // searching a dubbed project returned pages of machine rows above the
+    // script the person was actually looking for.
+    `AND ${inCountedFileSql("cells")}`,
   ]
   const binds: unknown[] = [q, q, q, verifiedProjectId]
 
@@ -293,6 +307,13 @@ export async function queryScopedExact(
     "  AND paired.side       = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
     "WHERE cells.value_tsv @@ phraseto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
+    // AQU-1424: as in queryScoped — parked cells leave the results, and with
+    // them the Find & Replace candidate list built from those results.
+    `AND ${notHiddenSql("cells")}`,
+    // AQU-1626: likewise deleted files and hidden companions. This one matters
+    // twice over: Find & Replace WRITES to what it finds, and a replace into a
+    // cue sheet corrupts a timecode nobody was editing.
+    `AND ${inCountedFileSql("cells")}`,
   ]
   const binds: unknown[] = [exactText, exactText, exactText, verifiedProjectId]
 
@@ -380,6 +401,9 @@ export async function querySourceNeighbors(
     "WHERE c.value_tsv @@ to_tsquery('simple', ?)",
     "AND c.project_id = ?",
     "AND c.side = 'source'",
+    // AQU-1424: a parked cell is neither a neighbor nor a precedent. `c` IS the
+    // source row here, so the flag can be read off it directly.
+    `AND ${visibleSourceSql("c")}`,
   ]
   const binds: unknown[] = [tsq, tsq, verifiedProjectId]
 
@@ -408,6 +432,106 @@ export async function querySourceNeighbors(
     cellId: row.cell_id,
     value: row.value,
     targetValue: row.target_value,
+    rank: row.rank,
+  }))
+}
+
+// ---------------------------------------------------------------------------
+// querySimilarSourceCells — AQU-1232 agent-memory retrieval
+// ---------------------------------------------------------------------------
+
+/** A source cell that lexically overlaps the query text, with its target. */
+export interface SimilarSourceCell {
+  cellId: string
+  fileId: string
+  /** The candidate's SOURCE value — the retrieval key. */
+  sourceValue: string
+  /** The candidate's current TARGET value (the rendering to reuse). */
+  targetValue: string
+  /** Target-language lane the target lives in ('' = the default lane). */
+  targetLang: string
+  /** Postgres ts_rank of the candidate against the query terms. Used only to
+   *  order the candidate POOL; the score returned to callers is the pure-JS
+   *  Jaccard in lexical-confidence.ts (ts_rank is unnormalized and length-
+   *  sensitive, so it is not a similarity a caller can threshold on). */
+  rank: number
+}
+
+/**
+ * Retrieve up to `limit` translated source cells in the project whose SOURCE
+ * lexically overlaps `queryText`, each with its current target.
+ *
+ * Deliberately NOT `querySourceNeighbors`: that one is the AD-14 confidence
+ * hot path — same-lane, health-shaped, and returning only (cellId, value,
+ * targetValue, rank). The agent-memory surface needs `fileId` and `targetLang`
+ * so a caller can locate and disambiguate the rendering it is being offered,
+ * and must span every lane. Widening the confidence row shape for that would
+ * push extra columns through the batched `queryFileSourceNeighbors` LATERAL
+ * join on the health path for no benefit there, so this stays a sibling query
+ * in the same choke-point module rather than a shared one.
+ *
+ * v1 is LEXICAL ONLY — any-term overlap over the existing `value_tsv` full-text
+ * column. No embeddings, no vector store, no new infrastructure.
+ *
+ * Returns [] when `queryText` has no tokenizable terms.
+ */
+export async function querySimilarSourceCells(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  queryText: string,
+  opts: { limit?: number; excludeCellId?: string },
+): Promise<SimilarSourceCell[]> {
+  const tsq = neighborTsquery(queryText)
+  if (tsq === null) return []
+
+  const limit = clampLimit(opts.limit)
+
+  const parts: string[] = [
+    "SELECT c.cell_id AS cell_id, c.file_id AS file_id, c.value AS source_value,",
+    "       t.value AS target_value, t.target_lang AS target_lang,",
+    "       ts_rank(c.value_tsv, to_tsquery('simple', ?)) AS rank",
+    "FROM cells c",
+    "JOIN cells t",
+    "  ON  t.project_id = c.project_id",
+    "  AND t.file_id    = c.file_id",
+    "  AND t.cell_id    = c.cell_id",
+    "  AND t.side       = 'target'",
+    "  AND t.value     != ''", // a candidate without a rendering is useless here
+    "WHERE c.value_tsv @@ to_tsquery('simple', ?)",
+    "AND c.project_id = ?",
+    "AND c.side = 'source'",
+    // AQU-1424: a parked cell is neither a neighbor nor a precedent. `c` IS the
+    // source row here, so the flag can be read off it directly.
+    `AND ${visibleSourceSql("c")}`,
+  ]
+  const binds: unknown[] = [tsq, tsq, verifiedProjectId]
+
+  if (opts.excludeCellId !== undefined) {
+    // Never let a cell retrieve itself as its own precedent.
+    parts.push("AND c.cell_id != ?")
+    binds.push(opts.excludeCellId)
+  }
+  parts.push("ORDER BY rank DESC")
+  parts.push("LIMIT ?")
+  binds.push(limit)
+
+  const result = await db
+    .prepare(parts.join(" "))
+    .bind(...binds)
+    .all<{
+      cell_id: string
+      file_id: string
+      source_value: string
+      target_value: string
+      target_lang: string | null
+      rank: number
+    }>()
+  return result.results.map((row) => ({
+    cellId: row.cell_id,
+    fileId: row.file_id,
+    sourceValue: row.source_value,
+    targetValue: row.target_value,
+    targetLang: row.target_lang ?? "",
     rank: row.rank,
   }))
 }
@@ -483,8 +607,11 @@ export async function queryFileSourceNeighbors(
     "  JOIN cells t" +
     "    ON t.project_id = s.project_id AND t.file_id = s.file_id" +
     "   AND t.cell_id = s.cell_id AND t.side = 'target'" +
-    "   AND t.target_lang = ?" +
+    "   AND " + targetLaneDualReadSql("t") +
     "  WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'" +
+    // AQU-1424: a parked cell does not ASK for neighbors either — nothing will
+    // be drafted into it while it is hidden.
+    "    AND " + visibleSourceSql("s") +
     "    AND t.value <> '' AND t.validated = 0" +
     "  LIMIT ?" +
     ") " +
@@ -502,8 +629,10 @@ export async function queryFileSourceNeighbors(
     "  JOIN cells tc" +
     "    ON tc.project_id = c.project_id AND tc.file_id = c.file_id" +
     "   AND tc.cell_id = c.cell_id AND tc.side = 'target' AND tc.value <> ''" +
-    "   AND tc.target_lang = ?" +
+    "   AND " + targetLaneDualReadSql("tc") +
     "  WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'" +
+    // AQU-1424: and it is not offered AS a neighbor.
+    "    AND " + visibleSourceSql("c") +
     "    AND c.cell_id <> a.asker_id" +
     "    AND c.value_tsv @@ to_tsquery('simple', q.terms)" +
     "  ORDER BY rank DESC" +
@@ -513,7 +642,16 @@ export async function queryFileSourceNeighbors(
   const result = await withNeighborTimeout(db, (h) =>
     h
       .prepare(sql)
-      .bind(targetLang, verifiedProjectId, fileId, maxAskers, targetLang, verifiedProjectId, fileId, topK)
+      .bind(
+        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+        verifiedProjectId,
+        fileId,
+        maxAskers,
+        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+        verifiedProjectId,
+        fileId,
+        topK,
+      )
       .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>(),
   )
 

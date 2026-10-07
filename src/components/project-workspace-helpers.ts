@@ -4,6 +4,12 @@
 
 import { ROLE } from "@/lib/frontier/roles"
 import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
+import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
+import type { BacktranslationRecord } from "@/lib/completion/bt-record"
+import type { CellSummary } from "@/hooks/useActiveCellStore"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import type { Concept } from "@/lib/terminology/types"
+import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 
 /**
  * Returns true iff the completion-settings save should actually patch
@@ -47,6 +53,37 @@ export function shouldSelfHealZeroFileLink(args: {
 }
 
 /**
+ * The zero-file self-heal itself, once `shouldSelfHealZeroFileLink` has said
+ * to fire. Pulled out of the effect so its three outcomes can be tested
+ * without mounting the workspace.
+ *
+ * AQU-1544: a failed attempt used to be dropped, leaving a linked project
+ * with an unexplained empty file list for whoever opened it — the person who
+ * linked it, or a teammate later. It is now parked in `link-seed-status`,
+ * which is what puts LinkSeedFailedBanner (and its "Try again") on screen.
+ * And when a link flow has ALREADY parked a failure for this project (the
+ * Import dialog and the create dialog each retry once before giving up), no
+ * further automatic attempt is made: it would only repeat the failure behind
+ * the banner's back.
+ */
+export async function selfHealZeroFileLink(args: {
+  projectId: string
+  jwt: string
+  triggerSync: (jwt: string, projectId: string) => Promise<boolean>
+  refresh: () => void
+}): Promise<"skipped" | "healed" | "failed"> {
+  const { projectId, jwt, triggerSync, refresh } = args
+  if (isLinkSeedFailed(projectId)) return "skipped"
+  const ok = await triggerSync(jwt, projectId)
+  if (ok) {
+    refresh()
+    return "healed"
+  }
+  markLinkSeedFailed(projectId)
+  return "failed"
+}
+
+/**
  * A deterministic check run describes ONE file's cells. If the user switches
  * files while the (async) run is in flight, its result must not be committed —
  * it would clobber the now-active file's state with the prior file's findings.
@@ -57,16 +94,6 @@ export function shouldApplyCheckResult(
   activeFileId: string | null,
 ): boolean {
   return resultFileId != null && resultFileId === activeFileId
-}
-
-/** Sidebar Agent rail click: focus the workbench only while it is the
- *  active center surface. A leftover Agent tab in the strip (after
- *  minimize / switching to a file) must not steal the click — that is
- *  dock mode again. */
-export function resolveSidebarAgentClick(
-  workbenchActive: boolean,
-): "activate-editor-tab" | "open-dock" {
-  return workbenchActive ? "activate-editor-tab" : "open-dock"
 }
 
 /**
@@ -160,4 +187,242 @@ export function trackDeleteGate(
     refused: refused != null,
     reason: refused?.lastError?.reason ?? null,
   }
+}
+
+/**
+ * AQU-207: assemble every glosser seed the workspace contributes, in one pure
+ * place so the composition is testable without rendering ProjectWorkspace.
+ *
+ * Four sources feed the statistical BT, in ascending order of how explicitly
+ * the user asked for them:
+ *   - corrected BTs from the cache (2, or 5 when unpolished — a raw human edit)
+ *   - termbase renderings (preferred 3 / admitted 1 / forbidden -3)
+ *   - confirmed / invalidated interlinear alignments (±2 via
+ *     `btSeedsFromAlignmentSeeds`)
+ *
+ * The alignment source was the one missing until AQU-207: those seeds were
+ * persisted and fed back into `interlinear.ts`'s own model, so the panel's
+ * suggestions sharpened, but the BT the user actually reads never moved.
+ */
+export function buildGlosserSeeds(args: {
+  corpusCells: readonly CellSummary[]
+  backtranslationCache: ReadonlyMap<string, BacktranslationRecord>
+  terminology: ProjectRecord["terminology"] | undefined
+  alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
+}): BtSeed[] {
+  const { corpusCells, backtranslationCache, terminology, alignmentSeeds } = args
+  const seeds: BtSeed[] = []
+
+  // High-weight seeds from previous user-corrected BTs stored in the cache.
+  // Corrected BTs (saved via onSaveBacktranslation) are re-fed as seeds so
+  // future glosses reflect the reviewer's intent.
+  const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
+  for (const record of backtranslationCache.values()) {
+    const cell = corpusByCellId.get(record.cellId)
+    if (!cell?.translated) continue
+    // A BT pinned to a superseded target event describes text that no longer
+    // exists — seeding from it would teach the glosser a stale rendering.
+    if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
+      continue
+    }
+    seeds.push({
+      source: record.btText,
+      target: record.forText || cell.translated,
+      weight: record.polished === false ? 5 : 2,
+      originId: record.cellId,
+    })
+  }
+
+  // Seed from project termbase: active concepts feed preferred/admitted/forbidden
+  // renderings into the glosser so terminology constraints propagate to BTs.
+  for (const concept of terminology ?? []) {
+    if (concept.status !== "active") continue
+    for (const rendering of concept.renderings) {
+      const weight =
+        rendering.status === "preferred" ? 3 :
+        rendering.status === "admitted" ? 1 :
+        -3 // forbidden
+      seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
+    }
+  }
+
+  // AQU-207: alignments the user confirmed / invalidated in the interlinear
+  // panel are seeds too — this is what makes a confirmation move the BT.
+  seeds.push(...btSeedsFromAlignmentSeeds(alignmentSeeds ?? []))
+
+  return seeds
+}
+
+/** AQU-1326: the deferral gate's state. `open` is what the secondary per-file
+ *  hooks read; `file` and `sawLoad` exist only so the reducer can tell the
+ *  three "not loading" situations apart. */
+export interface PaintGate {
+  /** The file this gate describes, so a switch re-closes it. */
+  file: string | null
+  /** True once a load for `file` has actually been observed in flight. */
+  sawLoad: boolean
+  /** True once the secondary per-file reads may start. */
+  open: boolean
+}
+
+/**
+ * AQU-1326: decides when the workspace's secondary per-file reads (validation
+ * stats, comments, audio attachments, the sidebar progress rollup) may start.
+ * They must wait for the editor's own first cell page, so the cell stream gets
+ * the connection to itself on open.
+ *
+ * The subtlety this exists for: the cell store's `isLoading` starts FALSE and
+ * only flips true once its fetch gets past an async cache read. So "not
+ * loading" at mount is indistinguishable from "finished loading", and gating
+ * on it directly opens the gate on the first commit — before the cell stream
+ * has even been requested, which is the exact fan-out being prevented. A
+ * finished load therefore only counts once a load was actually seen.
+ *
+ * The three releases that are NOT a first paint are all real and all needed:
+ * no file open (nothing to wait behind), a failed load (no rows are coming),
+ * and a load that finished with zero rows (an empty file must not strand these
+ * hooks forever).
+ */
+export function nextPaintGate(
+  prev: PaintGate,
+  input: {
+    fileId: string | null
+    cellCount: number
+    cellsError: boolean
+    cellsLoading: boolean
+  },
+): PaintGate {
+  const file = input.fileId
+  const freshFile = prev.file !== file
+  const sawLoad = (freshFile ? false : prev.sawLoad) || input.cellsLoading
+  // On a file switch the cell count can still describe the PREVIOUS file for a
+  // render, so it is not trusted until the gate has settled on this file. The
+  // other two releases are trusted immediately: suppressing them on a fresh
+  // file risks latching the gate shut, because nothing would necessarily
+  // change again to re-run this.
+  const open = !file
+    ? true
+    : input.cellsError
+      || (sawLoad && !input.cellsLoading)
+      || (!freshFile && input.cellCount > 0)
+  if (!freshFile && prev.open === open && prev.sawLoad === sawLoad) return prev
+  return { file, sawLoad, open }
+}
+
+/**
+ * Everything a WebSocket reconnect must pull back (AQU-845, AQU-817).
+ *
+ * The per-project DO holds no durable state and never replays (AD-1), so every
+ * `event.applied` frame that lands while a client's socket is down is lost to
+ * that client permanently. A reopen is the only signal that such a gap may
+ * exist, so each broadcast-fed projection has to be re-read there or it stays
+ * stale until a full page reload.
+ *
+ * Comments were the projection this list forgot: AQU-845 wired cells, audit
+ * stats and file progress, but a comment frame missed during a redeploy, a DO
+ * eviction, a blip or a sleeping laptop left the reader's thread list frozen —
+ * the AQU-817 report of a contributor's comment never reaching another member
+ * in the same cell. Extracted so the fan-out is pinned by a test rather than
+ * living only inside the 11.5k-line shell's async connect effect.
+ */
+export interface ReconnectResyncTargets {
+  revalidateCells(): void
+  revalidateAuditStats(): void
+  invalidateProjectFileProgress(): void
+  /** AQU-817 — comments are broadcast-only too. */
+  refreshComments(): void | Promise<void>
+  refreshAllFilesProgress(): Promise<void>
+}
+
+export function runReconnectResync(targets: ReconnectResyncTargets): void {
+  targets.revalidateCells()
+  targets.revalidateAuditStats()
+  targets.invalidateProjectFileProgress()
+  // useComments.refresh() resolves even on failure (it sets its own isError),
+  // but each leg is isolated anyway: one projection's transient read failure
+  // must not skip the others, and must not surface as an unhandled rejection.
+  void Promise.resolve(targets.refreshComments()).catch(() => {
+    // The next focus return or reconnect retries.
+  })
+  void targets.refreshAllFilesProgress().catch(() => {
+    // The next normal sidebar refresh retries a transient failure.
+  })
+}
+
+/**
+ * What a live-linked project re-reads after a push-triggered mirror sync
+ * (AQU-479's `link.upstream-changed`) has landed.
+ *
+ * The sync writes this project's events server-side without an
+ * `event.applied` broadcast, so nothing else tells this client what it
+ * changed. The open file's cells are always re-read (the existing QA-BUG-2
+ * step). AQU-1545 adds the rest: the sync recomputed the touched files'
+ * progress, so the cached figures are dropped and re-read — a hidden cell
+ * stops counting as work without a reload — and when a frame said the
+ * upstream created or renamed a file, the project is re-read so the file list
+ * shows it (the same re-read a same-project `file.*` frame triggers).
+ *
+ * Decided from the frames, never from what this client's own sync request
+ * reports it mirrored: the fold may have been run by another trigger (a second
+ * tab, a teammate in the same project, the file-open lazy pull), in which case
+ * this client's request is answered by an empty one and would refresh nothing.
+ */
+export interface PushedLinkSyncTargets {
+  revalidateCells(): void
+  refreshProject(): void
+  invalidateProjectFileProgress(): void
+  refreshAllFilesProgress(): Promise<void>
+}
+
+export function runAfterPushedLinkSync(
+  outcome: { synced: boolean; filesChanged: boolean },
+  targets: PushedLinkSyncTargets,
+): void {
+  targets.revalidateCells()
+  if (!outcome.synced) return
+  if (outcome.filesChanged) targets.refreshProject()
+  targets.invalidateProjectFileProgress()
+  void targets.refreshAllFilesProgress().catch(() => {
+    // The next normal sidebar refresh retries a transient failure.
+  })
+}
+
+/**
+ * AQU-1721: which concepts each workspace surface reads. The editor surfaces
+ * (source highlights, the term-lookup popover, Check file) apply the termbases
+ * this project subscribes to ahead of its own concepts, in the order `useRules`
+ * compiles them. The glossary edits this project's own termbase, so it gets
+ * only those. A glossary edit is a `term.*` event keyed by concept id under
+ * this project's id: the server would drop one for an upstream concept while
+ * the glossary showed it saved.
+ *
+ * With no subscriptions, `editor` is `local` itself, so the editor record keeps
+ * its identity and the common case allocates nothing.
+ */
+export function workspaceTerminology(
+  local: Concept[],
+  subscribed: Concept[],
+): { editor: Concept[]; glossary: Concept[] } {
+  return {
+    editor: subscribed.length === 0 ? local : [...subscribed, ...local],
+    glossary: local,
+  }
+}
+
+/**
+ * AQU-1752: timeline Space and "Play from this cue" wait for the file's
+ * audio-attachment read.
+ *
+ * A media cell counts as file-timed only once its source clip is merged in.
+ * Until the timeline's `useFileAudioAttachments` reports `hasLoaded`, the
+ * picture or the virtual clock looks like it owns the file, and a press
+ * starts that engine. When the read lands, ownership can flip to the queue
+ * and the clock that already started is torn down, so nothing sounds.
+ *
+ * The press is dropped. Nothing is handed to the queue when the clip
+ * arrives; the next press goes to whichever engine the read says owns the
+ * file.
+ */
+export function timelinePlayReady(audioHasLoaded: boolean): boolean {
+  return audioHasLoaded
 }

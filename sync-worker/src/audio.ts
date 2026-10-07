@@ -22,6 +22,7 @@
 // projects/{pid}/files/{fid}/, so wiping a file naturally wipes its audio.
 
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
+import { artifactBindingConflictColumn, laneIdResolveSql } from "./events/lane-id-sql"
 import { adminBearerMatches } from "./lib/admin-secret"
 
 export interface AudioEnv {
@@ -325,6 +326,7 @@ export async function handleAudioRequest(
     })
     if (artifactId) {
       const db = env.AQUILLA_PG!
+      const conflictColumn = await artifactBindingConflictColumn(db)
       try {
         await db.batch([
           db.prepare(
@@ -349,19 +351,29 @@ export async function handleAudioRequest(
           db.prepare(
             `INSERT INTO artifact_bindings (
                id, project_id, artifact_id, file_id, binding_role, target_lang,
-               member_path, profile_id, profile_version, fidelity, manifest, recipe
+               member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
              ) VALUES (?::uuid, ?, ?::uuid, ?, 'source', '', '', 'builtin:media', '1',
-                       'preserved-only', '{}'::jsonb, NULL)
-             ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
-             DO UPDATE SET updated_at = now()`,
-          ).bind(crypto.randomUUID(), projectId, artifactId, fileId),
+                       'preserved-only', '{}'::jsonb, NULL, ${laneIdResolveSql('source')})
+             ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
+             DO UPDATE SET
+               updated_at = now()`,
+            // AQU-1240 slice 8: source-side media binding -> the source lane.
+          ).bind(crypto.randomUUID(), projectId, artifactId, fileId, projectId),
+          // Imported media is also the original source. Reuse its R2 object
+          // rather than uploading another copy for Download original.
+          db.prepare(
+            `INSERT INTO file_source_blobs (
+               file_id, project_id, format, raw_source, r2_key, size_bytes, created_at
+             ) VALUES (?, ?, ?, NULL, ?, ?, (extract(epoch from now()) * 1000)::bigint)
+             ON CONFLICT (file_id) DO NOTHING`,
+          ).bind(fileId, projectId,
+            /\.([a-z0-9]+)$/i.exec(audioId)?.[1].toLowerCase() ?? "bin",
+            key, body.byteLength),
         ])
       } catch (error) {
         if (!existing) await env.SNAPSHOTS.delete(key).catch(() => {})
-        return withAudioCors(new Response(
-          `audio artifact metadata write failed: ${error instanceof Error ? error.message : String(error)}`,
-          { status: 500 },
-        ))
+        console.error("[audio] artifact metadata write failed:", error)
+        return withAudioCors(new Response("audio artifact metadata write failed", { status: 500 }))
       }
     }
     return withAudioCors(

@@ -520,9 +520,11 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
 
   // snapshot() is the stored column. Writers leave it empty; the lane tag is
   // what these assertions mean by target_lang.
-  function cellsByLane(tables: { cells: Array<Record<string, unknown>>; lanes: Array<Record<string, unknown>> }) {
-    const tag = new Map(tables.lanes.map((l) => [l.id, (l.legacy_tag as string | null) ?? '']))
-    return tables.cells.map((c) => ({ ...c, target_lang: tag.get(c.lane_id) ?? '' }))
+  function cellsByLane(tables: Record<string, Array<Record<string, unknown>>>) {
+    const tag = new Map((tables.lanes ?? []).map((l) => [l.id, (l.legacy_tag as string | null) ?? '']))
+    return (tables.cells ?? []).map((c) => ({ ...c, target_lang: tag.get(c.lane_id) ?? '' })) as Array<
+      Record<string, unknown> & { target_lang: string }
+    >
   }
 
   it("two lanes' first commits share the source parent and BOTH project (separate requests)", async () => {

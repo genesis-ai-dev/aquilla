@@ -142,7 +142,6 @@ function apply(e: FoldEvent, s: State): void {
         file_id: e.fileId,
         cell_id: cellId,
         side: "source",
-        target_lang: "", // projection column is not filled (AQU-1611b)
         value,
         value_html: (p.valueHtml as string) ?? null,
         type: (p.type as string) ?? null,
@@ -180,7 +179,6 @@ function apply(e: FoldEvent, s: State): void {
         file_id: e.fileId,
         cell_id: e.cellId,
         side: "target",
-        target_lang: "",
         type: null,
         canonical_ref: null,
         anchor_cell_id: null,
@@ -221,7 +219,6 @@ function apply(e: FoldEvent, s: State): void {
         project_id: e.projectId,
         file_id: e.fileId,
         cell_id: e.cellId,
-        target_lang: "",
         event_id: (p.editEventId as string) ?? null,
         username: e.author,
         decided_ts: e.serverTs,

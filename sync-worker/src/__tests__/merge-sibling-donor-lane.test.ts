@@ -93,17 +93,13 @@ async function seedPair(
     [HOST_FILE, HOST, DONOR_FILE, DONOR],
   )
   await db.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-     SELECT $1, $2, 'c-' || g, 'source', '', 'Verse ' || g, 'hsrc-' || g, 'lead', 1, $3
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) SELECT $1, $2, 'c-' || g, 'source', 'Verse ' || g, 'hsrc-' || g, 'lead', 1, $3 FROM generate_series(1, $4::int) g`,
     [HOST, HOST_FILE, HOST_SOURCE_LANE, cells],
   )
   for (const lane of donorLanes) {
     await db.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-       SELECT $1, $2, 'c-' || g, 'target', $3, $4 || ' ' || g, 'dtgt-' || $5 || '-' || g, 'translator', 1, $5
-         FROM generate_series(1, $6::int) g`,
-      [DONOR, DONOR_FILE, lane.tag, lane.name, lane.id, cells],
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) SELECT $1, $2, 'c-' || g, 'target', $3 || ' ' || g, 'dtgt-' || $4 || '-' || g, 'translator', 1, $4 FROM generate_series(1, $5::int) g`,
+      [DONOR, DONOR_FILE, lane.name, lane.id, cells],
     )
   }
 }
@@ -255,8 +251,7 @@ describe("mergeSibling — the donor lane is chosen by id (AQU-1602)", () => {
     // No host source cells, so every donor cell is skipped.
     await seedPair(t, 0, [{ id: "d-fr", name: "French", tag: "fr" }])
     await t.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-       VALUES ($1, $2, 'orphan', 'target', 'fr', 'Orphelin', 'dtgt-orphan', 'translator', 1, 'd-fr')`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) VALUES ($1, $2, 'orphan', 'target', 'Orphelin', 'dtgt-orphan', 'translator', 1, 'd-fr')`,
       [DONOR, DONOR_FILE],
     )
 

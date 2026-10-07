@@ -29,7 +29,7 @@ const SCHEMA = readFileSync(
  */
 export const DRIVER_MAX_BIND_PARAMS = 65_533
 
-/** Projection tables whose target_lang column is no longer the lane tag. */
+/** Projection tables whose wire tag is lanes.legacy_tag, not a column. */
 const WIRE_TAG_TABLES = new Set([
   "cells",
   "cell_validators",
@@ -135,13 +135,41 @@ function typeDefault(type: string): unknown {
   return "" // text / varchar / etc.
 }
 
+// A seed object may still carry `target_lang` as the tag the old column
+// stored. That is not a column write (0155 dropped it). When the seed names
+// the tag and omits lane_id, resolve the lane the test functions mint, the
+// same ones writer SQL is rewritten to. A seed that already has lane_id
+// keeps it.
+async function withSeedLane(
+  pg: PGlite,
+  table: string,
+  row: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (!WIRE_TAG_TABLES.has(table)) return row
+  const existing = row.lane_id
+  if (typeof existing === "string" && existing.trim() !== "") return row
+  if (!("target_lang" in row) || typeof row.project_id !== "string") return row
+  const source =
+    (table === "cells" && row.side === "source") ||
+    (table === "artifact_bindings" && row.binding_role === "source")
+  const tag = row.target_lang == null ? "" : String(row.target_lang)
+  const resolved = await pg.query<{ id: string | null }>(
+    source
+      ? `SELECT aquilla_test_resolve_source_lane($1) AS id`
+      : `SELECT aquilla_test_resolve_target_lane($1, $2) AS id`,
+    source ? [row.project_id] : [row.project_id, tag],
+  )
+  return { ...row, lane_id: resolved.rows[0]?.id }
+}
+
 // Seed rows tolerantly (the legacy fake had no constraints): drop unknown +
 // generated columns, and auto-fill required (NOT NULL, no default) columns the
 // seed omits with a type-appropriate placeholder so real-PG constraints pass.
 async function seedRows(pg: PGlite, table: string, rows: ReadonlyArray<object>) {
   if (rows.length === 0) return
   const meta = await tableMeta(pg, table)
-  for (const row of rows as ReadonlyArray<Record<string, unknown>>) {
+  for (const raw of rows as ReadonlyArray<Record<string, unknown>>) {
+    const row = await withSeedLane(pg, table, raw)
     const cols: string[] = []
     const vals: unknown[] = []
     for (const m of meta) {
@@ -184,9 +212,9 @@ export async function makeTestDb(seed: Seed = {}, opts: TestDbOptions = {}): Pro
     db,
     pg,
     rows: async <T = Record<string, unknown>>(table: string) => {
-      // Writers leave target_lang at its default. Tests that ask rows()
-      // "which lane?" get the wire tag, lanes.legacy_tag. The stored column
-      // is what snapshot() and a direct query return.
+      // Tests that ask rows() "which lane?" get the wire tag,
+      // lanes.legacy_tag. snapshot() and a direct query return the columns
+      // that still exist; the projection column does not.
       const result = await pg.query<T & { lane_id?: string | null; project_id?: string; target_lang?: string }>(
         `SELECT * FROM ${table}`,
       )

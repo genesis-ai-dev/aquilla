@@ -71,15 +71,11 @@ async function seedSharedCells(
   count: number,
 ): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, $3::text || '-' || g, 'source', '', 'Verse ' || g, 'hsrc-' || $3::text || '-' || g, 'lead', 1
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at) SELECT $1, $2, $3::text || '-' || g, 'source', 'Verse ' || g, 'hsrc-' || $3::text || '-' || g, 'lead', 1 FROM generate_series(1, $4::int) g`,
     [HOST, hostFile, book, count],
   )
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, $3::text || '-' || g, 'target', '', 'Verset ' || g, 'dtgt-' || $3::text || '-' || g, 'translator', 1
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at) SELECT $1, $2, $3::text || '-' || g, 'target', 'Verset ' || g, 'dtgt-' || $3::text || '-' || g, 'translator', 1 FROM generate_series(1, $4::int) g`,
     [DONOR, donorFile, book, count],
   )
 }
@@ -87,9 +83,7 @@ async function seedSharedCells(
 /** Donor translations of cells the host does not have — reported as skipped. */
 async function seedDonorOnlyCells(t: TestDb, donorFile: string, count: number): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, 'orphan-' || g, 'target', '', 'Orphelin ' || g, 'dtgt-orphan-' || g, 'translator', 1
-       FROM generate_series(1, $3::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at) SELECT $1, $2, 'orphan-' || g, 'target', 'Orphelin ' || g, 'dtgt-orphan-' || g, 'translator', 1 FROM generate_series(1, $3::int) g`,
     [DONOR, donorFile, count],
   )
 }

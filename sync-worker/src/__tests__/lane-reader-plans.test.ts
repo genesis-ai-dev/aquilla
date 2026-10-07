@@ -41,13 +41,11 @@ describe('AQU-1611 lane-id reader plans (PGlite)', () => {
     t = await makeTestDb()
     for (let i = 1; i <= 40; i++) {
       await t.pg.query(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, word_count)
-         VALUES ($1, $2, $3, 'source', '', 'word', $4, $5, 1)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count) VALUES ($1, $2, $3, 'source', 'word', $4, $5, 1)`,
         [PROJECT, FILE, `cell-${i}`, `ev-s-${i}`, i],
       )
       await t.pg.query(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, word_count)
-         VALUES ($1, $2, $3, 'target', '', 'word', $4, $5, 1)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count) VALUES ($1, $2, $3, 'target', 'word', $4, $5, 1)`,
         [PROJECT, FILE, `cell-${i}`, `ev-t-${i}`, i],
       )
     }

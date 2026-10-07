@@ -662,12 +662,10 @@ describe('UpdateProjectSettings — validation threshold is a POLICY key (AQU-92
     // A target cell with two validators pinned to its head event → validated 0
     // at threshold 3, but flips to 1 once the threshold drops to 1.
     await tdb.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, validated, target_lang, last_edit_at)
-       VALUES ('proj-v', 'f1', 'c1', 'target', 'v', 'e1', 0, '', 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, validated, last_edit_at) VALUES ('proj-v', 'f1', 'c1', 'target', 'v', 'e1', 0, 1)`,
     )
     await tdb.pg.query(
-      `INSERT INTO cell_validators (project_id, file_id, cell_id, target_lang, event_id, username, decided_ts)
-       VALUES ('proj-v', 'f1', 'c1', '', 'e1', 'u1', 1), ('proj-v', 'f1', 'c1', '', 'e1', 'u2', 1)`,
+      `INSERT INTO cell_validators (project_id, file_id, cell_id, event_id, username, decided_ts) VALUES ('proj-v', 'f1', 'c1', 'e1', 'u1', 1), ('proj-v', 'f1', 'c1', 'e1', 'u2', 1)`,
     )
 
     const token = await credToken(tdb, {

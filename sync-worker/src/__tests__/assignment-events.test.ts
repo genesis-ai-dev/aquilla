@@ -194,7 +194,7 @@ describe('assignment.create — cells scope (AQU-1628)', () => {
 })
 
 describe('assignment.create — lane (AQU-538 §3.5)', () => {
-  it('leaves assignments.target_lang at its default and mints the lane from the tag', async () => {
+  it('mints the lane from the tag', async () => {
     const { db, snapshot } = await makeTestDb({ cells: seededCells() })
     const authed = await authorizeAssignment('assignment.create', {
       assignmentId: 'as-lane',
@@ -210,7 +210,6 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
 
     const tables = await snapshot()
     const row = tables.assignments.find((a) => a.assignment_id === 'as-lane')
-    expect(row!.target_lang).toBe('')
     expect(tables.lanes.find((l) => l.id === row!.lane_id)!.legacy_tag).toBe('es')
   })
 
@@ -233,11 +232,10 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
     await db.batch(handleAssignmentEvent(db, authed, 2100, 2).stmts)
 
     const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-lane-id')
-    expect(row!.target_lang).toBe('')
     expect(row!.lane_id).toBe('lane-es')
   })
 
-  it('defaults target_lang to the empty string when the lane is absent', async () => {
+  it('mints the default lane when the event names no lane', async () => {
     const { db, snapshot } = await makeTestDb({ cells: seededCells() })
     const authed = await authorizeAssignment('assignment.create', {
       assignmentId: 'as-nolane',
@@ -250,8 +248,9 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
     const result = handleAssignmentEvent(db, authed, 2200, 3)
     await db.batch(result.stmts)
 
-    const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-nolane')
-    expect(row!.target_lang).toBe('')
+    const tables = await snapshot()
+    const row = tables.assignments.find((a) => a.assignment_id === 'as-nolane')
+    expect(tables.lanes.find((l) => l.id === row!.lane_id)!.legacy_tag).toBe('')
   })
 
   it('assignment.reassign re-pins the lane when targetLang is provided, and leaves it when absent', async () => {
@@ -265,9 +264,10 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
       assigneeUserId: 55,
     })
     await db.batch(handleAssignmentEvent(db, plain, 4100, 4).stmts)
-    let row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-re')
+    let tables = await snapshot()
+    let row = tables.assignments.find((a) => a.assignment_id === 'as-re')
     expect(row!.assignee_user_id).toBe(55)
-    expect(row!.target_lang).toBe('es')
+    expect(tables.lanes.find((l) => l.id === row!.lane_id)!.legacy_tag).toBe('es')
 
     // A reassign carrying a lane re-pins it.
     const repin = await authorizeAssignment('assignment.reassign', {
@@ -276,10 +276,8 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
       targetLang: 'fr',
     })
     await db.batch(handleAssignmentEvent(db, repin, 4200, 5).stmts)
-    const tables = await snapshot()
+    tables = await snapshot()
     row = tables.assignments.find((a) => a.assignment_id === 'as-re')
-    // The column is whatever the row was written with. Reassign moves lane_id.
-    expect(row!.target_lang).toBe('es')
     expect(tables.lanes.find((l) => l.id === row!.lane_id)!.legacy_tag).toBe('fr')
   })
 })
@@ -399,7 +397,8 @@ describe('assignment.create — chapter scope follows the board (AQU-1493)', () 
     const board = await db
       .prepare(
         `SELECT section_key, total_count FROM file_section_progress
-          WHERE project_id = 'proj-1' AND file_id = 'file-gen' AND scope = 'section' AND target_lang = ''
+          WHERE project_id = 'proj-1' AND file_id = 'file-gen' AND scope = 'section'
+            AND lane_id = (SELECT id FROM lanes WHERE project_id = 'proj-1' AND role = 'source')
           ORDER BY section_key`,
       )
       .all<{ section_key: string; total_count: number }>()

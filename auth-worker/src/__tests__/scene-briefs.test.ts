@@ -258,7 +258,12 @@ describe("scene-brief run evidence", () => {
     // Execute the exact prerequisite and activity migrations so policy/function
     // dependencies match production rather than being stubbed in the test.
     await pg.exec(RLS_MIGRATION)
-    await pg.exec(ACTIVITY_MIGRATION)
+    // 0074 also creates contextual_runs_project_lane_time on target_lang.
+    // That index already exists, on lane_id, and 0155 dropped the column.
+    await pg.exec(ACTIVITY_MIGRATION.replace(
+      /CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time[\s\S]*?;/,
+      "-- contextual_runs_project_lane_time already exists on lane_id\n",
+    ))
 
     const recovered = await listSceneBriefsByRun(env.AQUILLA_PG, PROJECT, "legacy-run")
     expect(recovered.map((brief) => brief.id)).toEqual(["legacy-object"])

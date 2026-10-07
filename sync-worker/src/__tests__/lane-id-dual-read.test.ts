@@ -299,16 +299,11 @@ describe('buildUsfmExportPlan dual-read', () => {
       ],
     })
     await pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, anchor_cell_id, metadata, event_id, last_edit_at)
-       VALUES ($1, $2, 'a1', 'source', '', '', NULL, 'c4', $3, 'head-a1', 1),
-              ($1, $2, 'a2', 'source', '', '', NULL, 'c4', $3, 'head-a2', 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, anchor_cell_id, metadata, event_id, last_edit_at) VALUES ($1, $2, 'a1', 'source', '', NULL, 'c4', $3, 'head-a1', 1), ($1, $2, 'a2', 'source', '', NULL, 'c4', $3, 'head-a2', 1)`,
       [PROJECT, FILE, JSON.stringify({ aquillaOrigin: { version: 1, kind: 'user-insert' } })],
     )
     await pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at)
-       VALUES ($1, $2, 'a1', 'target', 'xx', $3, 'added-by-id', 'tgt-a1', 1),
-              ($1, $2, 'a2', 'target', 'es', NULL, 'added-by-tag', 'tgt-a2', 1),
-              ($1, $2, 'a1', 'target', 'fr', NULL, 'added-french', 'tgt-a1-fr', 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at) VALUES ($1, $2, 'a1', 'target', $3, 'added-by-id', 'tgt-a1', 1), ($1, $2, 'a2', 'target', (SELECT aquilla_test_resolve_target_lane($1, 'es')), 'added-by-tag', 'tgt-a2', 1), ($1, $2, 'a1', 'target', (SELECT aquilla_test_resolve_target_lane($1, 'fr')), 'added-french', 'tgt-a1-fr', 1)`,
       [PROJECT, FILE, ES_LANE],
     )
     const { edits } = await buildUsfmExportPlan(db, PROJECT, FILE, 'es')

@@ -166,12 +166,12 @@ async function setUpProject(
   return { fileId, cellId: source.rows[0].cell_id }
 }
 
-async function targetRows(): Promise<{ target_lang: string; value: string; lane_id: string; legacy_tag: string }[]> {
-  const { rows } = await tdb.pg.query<{ target_lang: string; value: string; lane_id: string; legacy_tag: string }>(
-    `SELECT c.target_lang, c.value, c.lane_id, l.legacy_tag
-       FROM cells c JOIN lanes l ON l.id = c.lane_id
+async function targetRows(): Promise<{ value: string; lane_id: string; legacy_tag: string }[]> {
+  const { rows } = await tdb.pg.query<{ value: string; lane_id: string; legacy_tag: string }>(
+    `SELECT c.value, c.lane_id, l.legacy_tag
+       FROM cells c JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
       WHERE c.project_id = $1 AND c.side = 'target'
-      ORDER BY c.target_lang, c.value`,
+      ORDER BY l.legacy_tag, c.value`,
     [PROJECT],
   )
   return rows
@@ -193,7 +193,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(r.commit?.body.receipt.appliedCount).toBe(1)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'primary text', legacy_tag: '' }),
+      expect.objectContaining({ value: 'primary text', legacy_tag: '' }),
     ])
   })
 
@@ -203,7 +203,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     expect(r.prepareStatus).toBe(200)
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'upper', legacy_tag: '' }),
+      expect.objectContaining({ value: 'upper', legacy_tag: '' }),
     ])
   })
 
@@ -220,7 +220,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const r = await setTranslation(fileId, cellId, 'no lane')
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'no lane', legacy_tag: '' }),
+      expect.objectContaining({ value: 'no lane', legacy_tag: '' }),
     ])
   })
 
@@ -234,7 +234,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const done = await commit(prep.body)
     expect(done.status, JSON.stringify(done.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'second' }),
+      expect.objectContaining({ value: 'second' }),
     ])
   })
 
@@ -243,7 +243,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const r = await setTranslation(fileId, cellId, 'hola', 'es')
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'hola', legacy_tag: 'es' }),
+      expect.objectContaining({ value: 'hola', legacy_tag: 'es' }),
     ])
   })
 
@@ -258,7 +258,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const r = await setTranslation(fileId, cellId, 'icitte', 'fr-CA')
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'icitte', legacy_tag: 'fr-CA' }),
+      expect.objectContaining({ value: 'icitte', legacy_tag: 'fr-CA' }),
     ])
   })
 
@@ -296,8 +296,8 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
       { laneId: 'es', content: 'variante' },
     ])
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'primary variant', legacy_tag: '' }),
-      expect.objectContaining({ target_lang: '', value: 'variante', legacy_tag: 'es' }),
+      expect.objectContaining({ value: 'primary variant', legacy_tag: '' }),
+      expect.objectContaining({ value: 'variante', legacy_tag: 'es' }),
     ])
   })
 
@@ -310,12 +310,12 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
       { kind: 'EmitEvents', events: [{ kind: 'cell.validate', fileId, cellId, laneId: 'bla', payload: {} }] },
     ])
     expect(done.receipt.appliedCount).toBe(1)
-    const validators = await tdb.pg.query<{ target_lang: string; legacy_tag: string }>(
-      `SELECT v.target_lang, l.legacy_tag
-         FROM cell_validators v JOIN lanes l ON l.id = v.lane_id
+    const validators = await tdb.pg.query<{ legacy_tag: string }>(
+      `SELECT l.legacy_tag
+         FROM cell_validators v JOIN lanes l ON l.project_id = v.project_id AND l.id = v.lane_id
         WHERE v.project_id = $1 AND v.cell_id = $2`,
       [PROJECT, cellId],
     )
-    expect(validators.rows).toEqual([{ target_lang: '', legacy_tag: '' }])
+    expect(validators.rows).toEqual([{ legacy_tag: '' }])
   })
 })

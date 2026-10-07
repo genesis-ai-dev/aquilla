@@ -1076,9 +1076,7 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
     expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'first', '')).toBe('h')
 
     // With the front matter done, chapter 2's pre-verse text precedes 2:1.
-    await db.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, validated, endorsement_count, word_count)
-                      VALUES (?, ?, 'h', 'target', '', 'Titel', 'tev-h', 'alice', 2, 1, 1, 1),
-                             (?, ?, 'mt', 'target', '', 'Titel', 'tev-mt', 'alice', 2, 1, 1, 1)`)
+    await db.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, endorsement_count, word_count) VALUES (?, ?, 'h', 'target', 'Titel', 'tev-h', 'alice', 2, 1, 1, 1), (?, ?, 'mt', 'target', 'Titel', 'tev-mt', 'alice', 2, 1, 1, 1)`)
       .bind(PROJECT, 'bible', PROJECT, 'bible').run()
     expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'untranslated', '')).toBe('c2pre')
   })

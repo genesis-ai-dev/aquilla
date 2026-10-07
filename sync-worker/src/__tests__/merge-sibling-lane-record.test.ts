@@ -68,15 +68,11 @@ async function seedPair(db: TestDb, cells: number, hostSettings?: Record<string,
     [HOST_FILE, HOST, DONOR_FILE, DONOR],
   )
   await db.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-     SELECT $1, $2, 'c-' || g, 'source', '', 'Verse ' || g, 'hsrc-' || g, 'lead', 1, $3
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) SELECT $1, $2, 'c-' || g, 'source', 'Verse ' || g, 'hsrc-' || g, 'lead', 1, $3 FROM generate_series(1, $4::int) g`,
     [HOST, HOST_FILE, HOST_SOURCE_LANE, cells],
   )
   await db.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-     SELECT $1, $2, 'c-' || g, 'target', '', 'Verset ' || g, 'dtgt-' || g, 'translator', 1, $3
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) SELECT $1, $2, 'c-' || g, 'target', 'Verset ' || g, 'dtgt-' || g, 'translator', 1, $3 FROM generate_series(1, $4::int) g`,
     [DONOR, DONOR_FILE, DONOR_DEFAULT_LANE, cells],
   )
 }
@@ -248,8 +244,7 @@ describe("mergeSibling — the fold's lane is a real lane (AQU-1550)", () => {
     t = await realLaneDb()
     await seedPair(t, 0)
     await t.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-       VALUES ($1, $2, 'orphan', 'target', '', 'Orphelin', 'dtgt-orphan', 'translator', 1, $3)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) VALUES ($1, $2, 'orphan', 'target', 'Orphelin', 'dtgt-orphan', 'translator', 1, $3)`,
       [DONOR, DONOR_FILE, DONOR_DEFAULT_LANE],
     )
 

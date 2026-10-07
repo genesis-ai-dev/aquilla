@@ -7,15 +7,15 @@
 // only by the PGlite harnesses, mints the lane that row's tag implies and
 // stamps its id so those tests keep passing.
 //
-// AQU-1611b: projection writers no longer fill target_lang, so a row they
-// insert carries the column default ''. The trigger still mints from the
-// stored tag when a fixture INSERT names the column and leaves lane_id null.
-// A writer statement does not: its lane_id subquery is the only place the
-// event tag still appears. rewriteTestLaneResolve turns that subquery, in
-// test executors only, into aquilla_test_resolve_* which looks the lane up
-// and, while aquilla.test_lane_fill is on, mints it from the bound tag.
-// Production SQL is unchanged. With the GUC off, the functions only look
-// up, so a missing lane still fails the NOT NULL constraint.
+// AQU-1611c: the projection target_lang columns are gone, so this trigger
+// cannot read NEW.target_lang. A row that arrives with lane_id already set
+// is left alone. A row that omits it mints the lane its role implies: a
+// source cell or source binding gets the source lane; everything else gets
+// the target lane whose legacy_tag is '' (the former default). A fixture
+// that used to name a non-empty tag must pass lane_id, or the writer SQL
+// must go through aquilla_test_resolve_target_lane / source (see
+// rewriteTestLaneResolve). Production SQL is unchanged. With the GUC off,
+// the functions only look up, so a missing lane still fails NOT NULL.
 //
 // It does not run in production, dev-stack, or e2e. Set the custom GUC
 // aquilla.test_lane_fill to 'off' in a test that needs the real rejection
@@ -49,6 +49,7 @@ DECLARE
   v_role text;
   v_tag text;
   v_id text;
+  v_row jsonb;
 BEGIN
   IF current_setting('aquilla.test_lane_fill', true) = 'off' THEN
     RETURN NEW;
@@ -57,25 +58,21 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  IF TG_TABLE_NAME = 'cells' THEN
-    IF NEW.side = 'source' THEN
-      v_role := 'source';
-      v_tag := NULL;
-    ELSE
-      v_role := 'target';
-      v_tag := COALESCE(NEW.target_lang, '');
-    END IF;
-  ELSIF TG_TABLE_NAME = 'artifact_bindings' THEN
-    IF NEW.binding_role = 'source' THEN
-      v_role := 'source';
-      v_tag := NULL;
-    ELSE
-      v_role := 'target';
-      v_tag := COALESCE(NEW.target_lang, '');
-    END IF;
+  -- The projection column is gone. A missing lane_id can only mean the
+  -- former default: source rows get the source lane, and every other row
+  -- gets the target lane whose legacy_tag is ''. to_jsonb so a table that
+  -- has neither side nor binding_role (validators, progress, assignments)
+  -- does not touch a field it does not have.
+  v_row := to_jsonb(NEW);
+  IF TG_TABLE_NAME = 'cells' AND v_row ->> 'side' = 'source' THEN
+    v_role := 'source';
+    v_tag := NULL;
+  ELSIF TG_TABLE_NAME = 'artifact_bindings' AND v_row ->> 'binding_role' = 'source' THEN
+    v_role := 'source';
+    v_tag := NULL;
   ELSE
     v_role := 'target';
-    v_tag := COALESCE(NEW.target_lang, '');
+    v_tag := '';
   END IF;
 
   IF v_role = 'source' THEN

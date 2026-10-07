@@ -142,7 +142,7 @@ function ToastItem({
     <Toast toast={toastItem}>
       <ToastPulse pulsing={pulsing}>
         <ToastContent>
-          <ToastIcon type={toastItem.type} />
+          <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <ToastTitle />
             <ToastDescription />
@@ -155,8 +155,46 @@ function ToastItem({
   )
 }
 
+function iconFromToast(data: object | undefined): React.ReactNode | null {
+  if (!data || !("icon" in data)) return null
+  const icon = (data as { icon?: unknown }).icon
+  return React.isValidElement(icon) ? icon : null
+}
+
+function undoFromToast(data: object | undefined): (() => void) | null {
+  if (!data || !("undo" in data)) return null
+  const undo = (data as { undo?: unknown }).undo
+  return typeof undo === "function" ? (undo as () => void) : null
+}
+
+/** Ctrl/Cmd+Z belongs to the field when the user is typing. */
+function isTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"
+}
+
 function ToastList() {
   const { toasts } = ToastPrimitive.useToastManager()
+
+  React.useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.repeat || event.altKey || event.shiftKey) return
+      if (event.key !== "z" && event.key !== "Z") return
+      if (!event.ctrlKey && !event.metaKey) return
+      if (isTextEntry(event.target)) return
+      const pending = toasts.find(
+        (item) => item.actionProps != null && undoFromToast(item.data) != null,
+      )
+      const undo = pending ? undoFromToast(pending.data) : null
+      if (!undo) return
+      event.preventDefault()
+      undo()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [toasts])
 
   return toasts.map((toastItem) => (
     <ToastItem key={toastItem.id} toast={toastItem} />
@@ -239,40 +277,40 @@ function ToastClose({
   )
 }
 
-function ToastIcon({ type }: { type: string | undefined }) {
-  let icon: React.ReactNode = null
+function ToastIcon({ type, icon }: { type: string | undefined; icon?: React.ReactNode | null }) {
+  let glyph: React.ReactNode = icon ?? null
 
   if (type === "success") {
-    icon = (
+    glyph = (
       <CircleCheckIcon aria-hidden="true" />
     )
   }
 
   if (type === "info") {
-    icon = (
+    glyph = (
       <InfoIcon aria-hidden="true" />
     )
   }
 
   if (type === "warning") {
-    icon = (
+    glyph = (
       <TriangleAlertIcon aria-hidden="true" />
     )
   }
 
   if (type === "error") {
-    icon = (
+    glyph = (
       <OctagonXIcon className="text-destructive" aria-hidden="true" />
     )
   }
 
   if (type === "loading") {
-    icon = (
+    glyph = (
       <Loader2Icon className="animate-spin" aria-hidden="true" />
     )
   }
 
-  if (!icon) {
+  if (!glyph) {
     return null
   }
 
@@ -281,7 +319,7 @@ function ToastIcon({ type }: { type: string | undefined }) {
       data-slot="toast-icon"
       className="shrink-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4"
     >
-      {icon}
+      {glyph}
     </span>
   )
 }

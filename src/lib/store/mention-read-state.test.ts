@@ -4,7 +4,9 @@ import {
   getMentionDismissedIds,
   getMentionReadIds,
   markMentionsRead,
+  markMentionsUnread,
   resetMentionReadStateForTests,
+  restoreMentions,
 } from "./mention-read-state"
 
 describe("mention read state", () => {
@@ -35,10 +37,24 @@ describe("mention read state", () => {
     expect(stored.has("c404")).toBe(true)
   })
 
+  it("marks a read mention unread again", () => {
+    markMentionsRead("proj-1", "alice", ["c1", "c2"])
+    markMentionsUnread("proj-1", "alice", ["c1"])
+    expect(getMentionReadIds("proj-1", "alice").has("c1")).toBe(false)
+    expect(getMentionReadIds("proj-1", "alice").has("c2")).toBe(true)
+  })
+
   it("hides dismissed mentions without marking them read", () => {
     dismissMentions("proj-1", "alice", ["c1"])
     expect(getMentionDismissedIds("proj-1", "alice").has("c1")).toBe(true)
     expect(getMentionReadIds("proj-1", "alice").has("c1")).toBe(false)
     expect(getMentionDismissedIds("proj-1", "bob").has("c1")).toBe(false)
+  })
+
+  it("restores a dismissed mention", () => {
+    dismissMentions("proj-1", "alice", ["c1", "c2"])
+    restoreMentions("proj-1", "alice", ["c1"])
+    expect(getMentionDismissedIds("proj-1", "alice").has("c1")).toBe(false)
+    expect(getMentionDismissedIds("proj-1", "alice").has("c2")).toBe(true)
   })
 })

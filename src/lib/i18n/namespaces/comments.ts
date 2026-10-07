@@ -101,9 +101,14 @@ export const comments = defineNamespace({
     "comments.inbox.empty": "When a teammate @mentions you in a comment, it shows up here.",
     "comments.inbox.markAllRead": "Mark all as read",
     "comments.inbox.markRead": "Mark as read",
+    "comments.inbox.markUnread": "Mark unread",
     "comments.inbox.commented": "{author} commented: {excerpt}",
     "comments.inbox.unreadsOnly": "Show unreads only",
     "comments.inbox.actionsAria": "Notification actions",
+    "comments.inbox.delete": "Delete notification",
+    "comments.inbox.deletedToast": "Notification deleted",
+    "comments.inbox.undo": "Undo",
+    "comments.inbox.undoneToast": "Undo \"{action}\"",
     "comments.inbox.deleteAll": "Delete all",
     "comments.inbox.deleteAllRead": "Delete all read",
     "comments.inbox.deleteTitle": "Delete notification?",
@@ -524,6 +529,11 @@ export const comments = defineNamespace({
           "Item in the right-click menu on one notification. Marks that row read without " +
           "opening it. Shown only while the row is unread.",
       },
+      "comments.inbox.markUnread": {
+        description:
+          "Item in the right-click menu on one notification. Marks that row unread again. " +
+          "Shown only while the row is already read.",
+      },
       "comments.inbox.commented": {
         description:
           "Second line of a notification row. Names who wrote the comment, then the " +
@@ -542,6 +552,32 @@ export const comments = defineNamespace({
         description:
           "Accessible name of the ⋯ button at the top right of the notifications popover. " +
           "The button itself has no visible text.",
+      },
+      "comments.inbox.delete": {
+        description:
+          "Item in the right-click menu on one notification. Removes that row from this " +
+          "device's inbox immediately. Does not delete the comment. A toast offers undo.",
+      },
+      "comments.inbox.deletedToast": {
+        description:
+          "Toast shown after one notification is removed from the inbox. Paired with " +
+          "an Undo button. The comment itself stays.",
+      },
+      "comments.inbox.undoneToast": {
+        description:
+          "Success toast after Undo (or Ctrl+Z) puts a notification back. {action} is " +
+          "the title of the toast that was undone, shown in quotes. A check icon sits " +
+          "beside it. The only button is close.",
+        placeholders: {
+          action: "Title of the toast that was undone, such as Notification deleted.",
+        },
+      },
+      "comments.inbox.undo": {
+        description:
+          "Button on the notification-deleted toast that puts that notification back " +
+          "in the inbox. Ctrl+Z does the same while this button is showing. Afterward " +
+          "the button is replaced by the normal close button.",
+        maxLength: 16,
       },
       "comments.inbox.deleteAll": {
         description:

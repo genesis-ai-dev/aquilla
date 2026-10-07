@@ -76,6 +76,30 @@ function createIdSetStore(legacyKey: (projectId: string, reader: string) => stri
     notify()
   }
 
+  function remove(projectId: string, reader: string, commentIds: readonly string[]): void {
+    if (commentIds.length === 0) return
+    const key = legacyKey(projectId, reader)
+    const next = new Set(get(projectId, reader))
+    let changed = false
+    for (const id of commentIds) {
+      if (!id || !next.delete(id)) continue
+      changed = true
+    }
+    if (!changed) return
+    const trimmed = [...next]
+    const stored = trimmed.length === 0 ? EMPTY : new Set(trimmed)
+    if (typeof localStorage !== "undefined") {
+      try {
+        if (trimmed.length === 0) localStorage.removeItem(key)
+        else localStorage.setItem(key, JSON.stringify(trimmed))
+      } catch {
+        // Quota or a blocked store: the in-memory snapshot still updates.
+      }
+    }
+    snapshot = { storageKey: key, ids: stored }
+    notify()
+  }
+
   function subscribe(listener: () => void): () => void {
     listeners.add(listener)
     const unsubOwner = subscribeClientLocalStorageOwner(() => {
@@ -100,7 +124,7 @@ function createIdSetStore(legacyKey: (projectId: string, reader: string) => stri
     snapshot = { storageKey: "", ids: EMPTY }
   }
 
-  return { get, add, useIds, reset }
+  return { get, add, remove, useIds, reset }
 }
 
 const readStore = createIdSetStore((projectId, reader) =>
@@ -124,6 +148,15 @@ export function markMentionsRead(
   readStore.add(projectId, reader, commentIds)
 }
 
+/** Forget these comment ids so the notifications read as unread again. */
+export function markMentionsUnread(
+  projectId: string,
+  reader: string,
+  commentIds: readonly string[],
+): void {
+  readStore.remove(projectId, reader, commentIds)
+}
+
 /** Reactive read marks for one project and reader. */
 export function useMentionReadIds(projectId: string, reader: string): ReadonlySet<string> {
   return readStore.useIds(projectId, reader)
@@ -141,6 +174,15 @@ export function dismissMentions(
   commentIds: readonly string[],
 ): void {
   dismissedStore.add(projectId, reader, commentIds)
+}
+
+/** Put dismissed notifications back. Used by the undo toast. */
+export function restoreMentions(
+  projectId: string,
+  reader: string,
+  commentIds: readonly string[],
+): void {
+  dismissedStore.remove(projectId, reader, commentIds)
 }
 
 /** Reactive dismissed marks for one project and reader. */

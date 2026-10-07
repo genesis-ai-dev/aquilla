@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { NotificationsInbox } from "./NotificationsInbox"
+import { Toaster, toast } from "@/components/ui/toast"
 import { resetMentionReadStateForTests } from "@/lib/store/mention-read-state"
 
 function comment(overrides: Partial<CommentRecord> = {}): CommentRecord {
@@ -33,6 +34,8 @@ function LocationProbe() {
 
 function renderInbox(comments: CommentRecord[]) {
   return render(
+    <>
+    <Toaster />
     <MemoryRouter initialEntries={["/project/proj-1/editor/file/file-1"]}>
       <Routes>
         <Route
@@ -49,7 +52,8 @@ function renderInbox(comments: CommentRecord[]) {
           }
         />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
+    </>
   )
 }
 
@@ -57,6 +61,7 @@ describe("NotificationsInbox", () => {
   beforeEach(() => {
     localStorage.clear()
     resetMentionReadStateForTests()
+    toast.close()
   })
 
   it("shows an unread mention and jumps to that cell's thread when opened", async () => {
@@ -126,6 +131,30 @@ describe("NotificationsInbox", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/project/proj-1/editor/file/file-1")
   })
 
+  it("keeps a clicked notification where it was and only marks it read", async () => {
+    const user = userEvent.setup()
+    renderInbox([
+      comment({ commentId: "older", body: "@[alice] one" }),
+      comment({
+        commentId: "newer",
+        cellId: "cell-2",
+        cellRef: "GEN 1:2",
+        createdAt: 1_700_000_000_100,
+        body: "@[alice] two",
+      }),
+    ])
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    await user.click(screen.getByRole("button", { name: /GEN 1:2/ }))
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const rows = screen.getAllByRole("button", { name: /GEN 1:/ })
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("GEN 1:2"),
+      expect.stringContaining("GEN 1:1"),
+    ])
+    expect(rows[0].querySelector("[data-testid=notification-unread-dot]")).toBeNull()
+    expect(rows[1].querySelector("[data-testid=notification-unread-dot]")).toBeTruthy()
+  })
+
   it("marks one notification read from the right-click menu without opening it", async () => {
     const user = userEvent.setup()
     renderInbox([comment()])
@@ -138,7 +167,21 @@ describe("NotificationsInbox", () => {
     expect(screen.getByText("GEN 1:1")).toBeInTheDocument()
   })
 
-  it("deletes one notification from the right-click menu after confirming", async () => {
+  it("marks a read notification unread from the right-click menu", async () => {
+    const user = userEvent.setup()
+    renderInbox([comment()])
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    fireEvent.contextMenu(screen.getByRole("button", { name: /GEN 1:1/ }))
+    await user.click(screen.getByRole("menuitem", { name: "Mark as read" }))
+    fireEvent.contextMenu(screen.getByRole("button", { name: /GEN 1:1/ }))
+    expect(screen.queryByRole("menuitem", { name: "Mark as read" })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("menuitem", { name: "Mark unread" }))
+    expect(screen.getByTestId("notification-unread-dot")).toBeInTheDocument()
+    expect(screen.getByTestId("notifications-unread-count")).toHaveTextContent("1")
+    expect(screen.getByTestId("location")).toHaveTextContent("/project/proj-1/editor/file/file-1")
+  })
+
+  it("deletes one notification immediately and restores it from the undo toast", async () => {
     const user = userEvent.setup()
     renderInbox([
       comment(),
@@ -146,11 +189,80 @@ describe("NotificationsInbox", () => {
     ])
     await user.click(screen.getByTestId("notifications-inbox-trigger"))
     fireEvent.contextMenu(screen.getByRole("button", { name: /GEN 1:1/ }))
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }))
-    expect(screen.getByRole("heading", { name: "Delete notification?" })).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(screen.getByRole("menuitem", { name: "Delete notification" }))
+    expect(screen.queryByRole("heading", { name: "Delete notification?" })).not.toBeInTheDocument()
+    expect(document.querySelector(".lucide-mail-x")).toBeTruthy()
     expect(screen.queryByText("GEN 1:1")).not.toBeInTheDocument()
     expect(screen.getByText("GEN 1:2")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Undo" }))
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument()
+    expect(screen.getByText("Notification deleted")).toBeInTheDocument()
+    expect(screen.getByText('Undo "Notification deleted"')).toBeInTheDocument()
+    expect(document.querySelector("[data-slot='toast-icon']")).toBeTruthy()
+    expect(screen.getAllByRole("button", { name: "Close toast" }).length).toBeGreaterThanOrEqual(2)
+    const trigger = screen.getByTestId("notifications-inbox-trigger")
+    if (trigger.getAttribute("aria-expanded") !== "true") {
+      await user.click(trigger)
+    }
+    expect(screen.getByText("GEN 1:1")).toBeInTheDocument()
+    expect(screen.getByText("GEN 1:2")).toBeInTheDocument()
+  })
+
+  it("undoes a deleted notification with ctrl+z", async () => {
+    const user = userEvent.setup()
+    renderInbox([comment()])
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    fireEvent.contextMenu(screen.getByRole("button", { name: /GEN 1:1/ }))
+    await user.click(screen.getByRole("menuitem", { name: "Delete notification" }))
+    expect(screen.queryByText("GEN 1:1")).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true })
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument()
+    expect(screen.getByText('Undo "Notification deleted"')).toBeInTheDocument()
+    expect(document.querySelector("[data-slot='toast-icon']")).toBeTruthy()
+    const trigger = screen.getByTestId("notifications-inbox-trigger")
+    if (trigger.getAttribute("aria-expanded") !== "true") {
+      await user.click(trigger)
+    }
+    expect(screen.getByText("GEN 1:1")).toBeInTheDocument()
+  })
+
+  it("virtualizes a long list instead of painting every row", async () => {
+    const user = userEvent.setup()
+    renderInbox(
+      Array.from({ length: 30 }, (_, index) =>
+        comment({
+          commentId: `c${index}`,
+          cellId: `cell-${index}`,
+          cellRef: `GEN 2:${index + 1}`,
+          body: `@[alice] note ${index}`,
+          createdAt: 1_700_000_000_000 + index,
+        }),
+      ),
+    )
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const rows = screen.getAllByRole("button", { name: /GEN 2:/ })
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.length).toBeLessThan(30)
+    expect(screen.getByRole("button", { name: /GEN 2:30\b/ })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /GEN 2:1\b/ })).not.toBeInTheDocument()
+  })
+
+  it("moves through notifications with the arrow keys and opens the focused one", async () => {
+    const user = userEvent.setup()
+    renderInbox([
+      comment({ commentId: "a", body: "@[alice] one" }),
+      comment({ commentId: "b", cellId: "cell-2", cellRef: "GEN 1:2", body: "@[alice] two" }),
+    ])
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const first = screen.getByRole("button", { name: /GEN 1:1/ })
+    const second = screen.getByRole("button", { name: /GEN 1:2/ })
+    expect(first).toHaveFocus()
+    await user.keyboard("{ArrowDown}")
+    expect(second).toHaveFocus()
+    await user.keyboard("{Enter}")
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/project/proj-1/editor/file/file-1?cellId=cell-2&comments=1&commentId=b",
+    )
   })
 
   it("shows only unread rows, and delete all read leaves the unread ones", async () => {

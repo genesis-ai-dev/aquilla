@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react"
-import { Bell, Check, ListFilter, MailCheck, MoreHorizontal, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type Ref } from "react"
+import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
+import { Bell, MailBadge, MailCheck, MailX, MoreHorizontal } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { Button } from "@/components/ui/button"
@@ -24,19 +25,23 @@ import {
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { cellTextSnippet, mentionNoticesFor, type MentionNotice } from "@/lib/comments/mention-inbox"
 import {
   dismissMentions,
   markMentionsRead,
+  markMentionsUnread,
+  restoreMentions,
   useMentionDismissedIds,
   useMentionReadIds,
 } from "@/lib/store/mention-read-state"
 import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
-const VISIBLE_NOTICES = 40
+/** Rough row height. Rows truncate to two lines, so a fixed estimate is enough. */
+const NOTICE_ROW_PX = 64
 
 type PendingDelete =
   | { kind: "one"; commentId: string }
@@ -73,6 +78,7 @@ export function NotificationsInbox({
   // The confirm dialog is portaled outside the popover. Hold the inbox open
   // across that outside press, then release on the next turn.
   const holdOpen = useRef(false)
+  const firstNoticeRef = useRef<HTMLButtonElement>(null)
   const readIds = useMentionReadIds(projectId, readerUsername)
   const dismissedIds = useMentionDismissedIds(projectId, readerUsername)
   const notices = useMemo(
@@ -84,7 +90,9 @@ export function NotificationsInbox({
   )
   const unread = notices.filter((notice) => !readIds.has(notice.commentId))
   const read = notices.filter((notice) => readIds.has(notice.commentId))
-  const shown = (unreadsOnly ? unread : [...unread, ...read]).slice(0, VISIBLE_NOTICES)
+  // Newest first, the order mentionNoticesFor already produced. Marking a row
+  // read only drops its dot; it does not sink to the bottom.
+  const shown = unreadsOnly ? unread : notices
 
   function openNotice(notice: MentionNotice) {
     markMentionsRead(projectId, readerUsername, [notice.commentId])
@@ -94,6 +102,35 @@ export function NotificationsInbox({
       return
     }
     navigate(`/project/${projectId}/comments`)
+  }
+
+  function dismissOne(commentId: string) {
+    dismissMentions(projectId, readerUsername, [commentId])
+    const toastId = `mention-dismiss:${projectId}:${commentId}`
+    const action = t("comments.inbox.deletedToast")
+    const icon = <MailX aria-hidden />
+    let settled = false
+    function undo() {
+      if (settled) return
+      settled = true
+      restoreMentions(projectId, readerUsername, [commentId])
+      toast.update(toastId, { actionProps: undefined, data: { icon } })
+      toast.add({
+        id: `mention-undone:${toastId}`,
+        type: "success",
+        title: t("comments.inbox.undoneToast", { action }),
+      })
+    }
+    toast.add({
+      id: toastId,
+      title: action,
+      timeout: 10_000,
+      data: { undo, icon },
+      actionProps: {
+        children: t("comments.inbox.undo"),
+        onClick: () => undo(),
+      },
+    })
   }
 
   function askDelete(pending: PendingDelete) {
@@ -166,24 +203,25 @@ export function NotificationsInbox({
           align="end"
           side="bottom"
           sideOffset={6}
-          className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
+          initialFocus={shown.length > 0 ? firstNoticeRef : undefined}
+          className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden px-0.5 pt-0.5 pb-0"
         >
-          <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
-            <h3 className="text-sm font-semibold tracking-tight">{t("comments.inbox.title")}</h3>
+          <header className="flex shrink-0 items-center justify-between gap-2">
+            <h3 className="text-base font-semibold tracking-tight">{t("comments.inbox.title")}</h3>
             {notices.length > 0 && (
-              <div className="flex items-center gap-0.5">
+              <div className="flex items-center gap-1">
                 <AppTooltip content={t("comments.inbox.unreadsOnly")}>
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon-xs"
+                    size="icon-sm"
                     aria-pressed={unreadsOnly}
                     aria-label={t("comments.inbox.unreadsOnly")}
                     data-testid="notifications-unreads-only"
                     className={unreadsOnly ? "bg-accent text-foreground" : undefined}
                     onClick={() => setUnreadsOnly((value) => !value)}
                   >
-                    <ListFilter />
+                    <MailBadge />
                   </Button>
                 </AppTooltip>
                 <DropdownMenu>
@@ -192,7 +230,7 @@ export function NotificationsInbox({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon-xs"
+                        size="icon-sm"
                         aria-label={t("comments.inbox.actionsAria")}
                         data-testid="notifications-actions"
                       />
@@ -216,11 +254,11 @@ export function NotificationsInbox({
                     </MenuItem>
                     <MenuSeparator />
                     <MenuItem disabled={notices.length === 0} onClick={() => askDelete({ kind: "all" })}>
-                      <Trash2 />
+                      <MailX />
                       {t("comments.inbox.deleteAll")}
                     </MenuItem>
                     <MenuItem disabled={read.length === 0} onClick={() => askDelete({ kind: "read" })}>
-                      <Trash2 />
+                      <MailX />
                       {t("comments.inbox.deleteAllRead")}
                     </MenuItem>
                   </DropdownMenuContent>
@@ -242,33 +280,22 @@ export function NotificationsInbox({
               </p>
             </div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-              <ul>
-                {shown.map((notice) => {
-                  const isUnread = !readIds.has(notice.commentId)
-                  const place = placeLabel(notice, files, cellTextById, t)
-                  return (
-                    <li key={notice.commentId}>
-                      <NotificationRow
-                        notice={notice}
-                        isUnread={isUnread}
-                        title={place || notice.authorLabel}
-                        timeLabel={formatRelativeTime(notice.createdAt, t)}
-                        subtitle={t("comments.inbox.commented", {
-                          author: notice.authorLabel,
-                          excerpt: notice.excerpt,
-                        })}
-                        markReadLabel={t("comments.inbox.markRead")}
-                        deleteLabel={t("common.delete")}
-                        onOpen={() => openNotice(notice)}
-                        onMarkRead={() => markMentionsRead(projectId, readerUsername, [notice.commentId])}
-                        onDelete={() => askDelete({ kind: "one", commentId: notice.commentId })}
-                      />
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
+            <NotificationList
+              label={t("comments.inbox.title")}
+              notices={shown}
+              readIds={readIds}
+              files={files}
+              cellTextById={cellTextById}
+              firstNoticeRef={firstNoticeRef}
+              markReadLabel={t("comments.inbox.markRead")}
+              markUnreadLabel={t("comments.inbox.markUnread")}
+              deleteLabel={t("comments.inbox.delete")}
+              t={t}
+              onOpen={openNotice}
+              onMarkRead={(commentId) => markMentionsRead(projectId, readerUsername, [commentId])}
+              onMarkUnread={(commentId) => markMentionsUnread(projectId, readerUsername, [commentId])}
+              onDelete={dismissOne}
+            />
           )}
         </PopoverContent>
       </Popover>
@@ -295,28 +322,203 @@ export function NotificationsInbox({
   )
 }
 
+function NotificationList({
+  label,
+  notices,
+  readIds,
+  files,
+  cellTextById,
+  firstNoticeRef,
+  markReadLabel,
+  markUnreadLabel,
+  deleteLabel,
+  t,
+  onOpen,
+  onMarkRead,
+  onMarkUnread,
+  onDelete,
+}: {
+  label: string
+  notices: MentionNotice[]
+  readIds: ReadonlySet<string>
+  files: readonly { id: string; name: string }[]
+  cellTextById: ReadonlyMap<string, string> | undefined
+  firstNoticeRef: Ref<HTMLButtonElement>
+  markReadLabel: string
+  markUnreadLabel: string
+  deleteLabel: string
+  t: TFunction
+  onOpen: (notice: MentionNotice) => void
+  onMarkRead: (commentId: string) => void
+  onMarkUnread: (commentId: string) => void
+  onDelete: (commentId: string) => void
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const pendingFocus = useRef<number | null>(null)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const virtualizer = useVirtualizer({
+    count: notices.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => notices[index]?.commentId ?? index,
+    estimateSize: () => NOTICE_ROW_PX,
+    overscan: 8,
+    initialRect: { width: 420, height: 360 },
+    // happy-dom reports 0×0 for CSS-sized scrollports; coerce so rows mount.
+    observeElementRect: (instance, cb) =>
+      observeElementRect(instance, (rect) => {
+        cb({
+          width: rect.width > 0 ? rect.width : 420,
+          height: rect.height > 0 ? rect.height : 360,
+        })
+      }),
+  })
+
+  const handleScrollRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      scrollRef.current = element
+      if (element) virtualizer.measure()
+    },
+    [virtualizer],
+  )
+
+  const focusRow = useCallback((index: number) => {
+    scrollRef.current
+      ?.querySelector<HTMLButtonElement>(`[data-notice-index="${index}"]`)
+      ?.focus()
+  }, [])
+
+  useEffect(() => {
+    const index = pendingFocus.current
+    if (index == null) return
+    const button = scrollRef.current?.querySelector<HTMLButtonElement>(
+      `[data-notice-index="${index}"]`,
+    )
+    if (!button) return
+    button.focus()
+    pendingFocus.current = null
+  })
+
+  function focusIndex(index: number) {
+    const count = notices.length
+    const next = ((index % count) + count) % count
+    setActiveIndex(next)
+    pendingFocus.current = next
+    const isStart = next === 0
+    const isEnd = next === count - 1
+    // In-window rows are already painted. Scroll when the destination is an
+    // edge the current window does not contain, the same rule as the chapter
+    // picker: the virtualizer follows the highlight, it does not own the keys.
+    const visible = scrollRef.current?.querySelector(`[data-notice-index="${next}"]`)
+    if (!visible || isStart || isEnd) {
+      virtualizer.scrollToIndex(next, { align: isEnd ? "end" : "start" })
+    }
+    focusRow(next)
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    if (notices.length === 0) return
+    const page = Math.max(1, virtualizer.range.endIndex - virtualizer.range.startIndex)
+    let next: number | null = null
+    if (event.key === "ArrowDown") next = activeIndex + 1
+    else if (event.key === "ArrowUp") next = activeIndex - 1
+    else if (event.key === "Home") next = 0
+    else if (event.key === "End") next = notices.length - 1
+    else if (event.key === "PageDown") next = Math.min(notices.length - 1, activeIndex + page)
+    else if (event.key === "PageUp") next = Math.max(0, activeIndex - page)
+    else return
+    event.preventDefault()
+    focusIndex(next)
+  }
+
+  return (
+    <div
+      ref={handleScrollRef}
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pb-0.5"
+    >
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const notice = notices[virtualItem.index]
+          if (!notice) return null
+          const place = placeLabel(notice, files, cellTextById, t)
+          return (
+            <div
+              key={virtualItem.key}
+              data-index={virtualItem.index}
+              className="absolute top-0 left-0 w-full"
+              style={{
+                height: virtualItem.size,
+                transform: `translateY(${virtualItem.start}px)`,
+              }}
+            >
+              <NotificationRow
+                notice={notice}
+                isUnread={!readIds.has(notice.commentId)}
+                index={virtualItem.index}
+                setSize={notices.length}
+                active={virtualItem.index === activeIndex}
+                buttonRef={virtualItem.index === 0 ? firstNoticeRef : undefined}
+                title={place || notice.authorLabel}
+                timeLabel={formatRelativeTime(notice.createdAt, t)}
+                subtitle={t("comments.inbox.commented", {
+                  author: notice.authorLabel,
+                  excerpt: notice.excerpt,
+                })}
+                markReadLabel={markReadLabel}
+                markUnreadLabel={markUnreadLabel}
+                deleteLabel={deleteLabel}
+                onOpen={() => onOpen(notice)}
+                onMarkRead={() => onMarkRead(notice.commentId)}
+                onMarkUnread={() => onMarkUnread(notice.commentId)}
+                onDelete={() => onDelete(notice.commentId)}
+                onFocus={() => setActiveIndex(virtualItem.index)}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function NotificationRow({
   notice,
   isUnread,
+  index,
+  setSize,
+  active,
+  buttonRef,
   title,
   timeLabel,
   subtitle,
   markReadLabel,
+  markUnreadLabel,
   deleteLabel,
   onOpen,
   onMarkRead,
+  onMarkUnread,
   onDelete,
+  onFocus,
 }: {
   notice: MentionNotice
   isUnread: boolean
+  index: number
+  setSize: number
+  active: boolean
+  buttonRef?: Ref<HTMLButtonElement>
   title: string
   timeLabel: string
   subtitle: string
   markReadLabel: string
+  markUnreadLabel: string
   deleteLabel: string
   onOpen: () => void
   onMarkRead: () => void
+  onMarkUnread: () => void
   onDelete: () => void
+  onFocus: () => void
 }) {
   return (
     <ContextMenu>
@@ -324,8 +526,15 @@ function NotificationRow({
         render={
           <button
             type="button"
+            ref={buttonRef}
+            tabIndex={active ? 0 : -1}
+            data-notice-index={index}
+            aria-setsize={setSize}
+            aria-posinset={index + 1}
             onClick={onOpen}
-            className="flex w-full items-start gap-2.5 px-3 py-2 text-start transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            onFocus={onFocus}
+            data-active={active || undefined}
+            className="flex h-full w-full cursor-default items-start gap-2 rounded-md px-2 py-1.5 text-start outline-hidden select-none hover:bg-accent/40 focus-visible:bg-accent focus-visible:text-accent-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground data-[active=true]:hover:bg-accent"
           />
         }
       >
@@ -342,7 +551,7 @@ function NotificationRow({
                   className="size-1.5 shrink-0 rounded-full bg-primary"
                 />
               )}
-              <span className={cn("truncate text-sm", isUnread ? "font-semibold" : "font-medium text-foreground/90")} data-ph-mask>
+              <span className={cn("truncate text-sm font-medium", isUnread ? "text-foreground" : "text-foreground/90")} data-ph-mask>
                 {title}
               </span>
             </span>
@@ -356,15 +565,20 @@ function NotificationRow({
         </span>
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-44">
-        {isUnread && (
+        {isUnread ? (
           <MenuItem onClick={onMarkRead}>
-            <Check />
+            <MailCheck />
             {markReadLabel}
           </MenuItem>
+        ) : (
+          <MenuItem onClick={onMarkUnread}>
+            <MailBadge />
+            {markUnreadLabel}
+          </MenuItem>
         )}
-        {isUnread && <MenuSeparator />}
+        <MenuSeparator />
         <MenuItem onClick={onDelete}>
-          <Trash2 />
+          <MailX />
           {deleteLabel}
         </MenuItem>
       </ContextMenuContent>

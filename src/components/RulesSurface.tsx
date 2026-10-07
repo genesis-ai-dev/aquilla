@@ -37,6 +37,7 @@ import type { OrgWideSettings, OrgPatchResult, PromotionRequestResult } from "@/
 import { v4 as uuid } from "uuid"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { laneDisplayName } from "@/lib/lanes/lane-display"
 
 type UseRulesReturn = ReturnType<typeof useRules>
 
@@ -115,9 +116,14 @@ export function RulesSurface({
   const projectLanes = extraRegistryLanes(project.targetLanes, project.targetLanguage)
   const laneRows = (project.lanes ?? []).filter((lane) => lane.role === "target")
   const defaultLaneRow = laneRows.find((lane) => (lane.legacyTag ?? "") === "")
-  const defaultLaneLabel = defaultLaneRow?.name || project.targetLanguage || undefined
+  const defaultLaneLabel = defaultLaneRow
+    ? laneDisplayName(defaultLaneRow)
+    : project.targetLanguage || undefined
+  // AQU-1592: a lane's label is its display name — the name when the user set
+  // one, else the language it carries. `lane.name` alone is null on a lane that
+  // only ever got a language.
   const laneLabels = Object.fromEntries(
-    laneRows.map((lane) => [lane.legacyTag ?? "", lane.name]),
+    laneRows.map((lane) => [lane.legacyTag ?? "", laneDisplayName(lane)]),
   )
 
   const laneName = (tag: string): string =>

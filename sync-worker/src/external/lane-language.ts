@@ -16,7 +16,8 @@ import { laneRowLanguage } from '../../../src/lib/lanes/lane-language'
 
 interface LaneRow {
   id: string
-  name: string
+  language: string | null
+  name: string | null
   lang_code: string | null
   legacy_tag: string | null
 }
@@ -36,17 +37,15 @@ export async function laneLanguage(
 ): Promise<string | null> {
   const row = await db
     .prepare(
-      "SELECT id, name, lang_code, legacy_tag FROM lanes " +
+      "SELECT id, language, name, lang_code, legacy_tag FROM lanes " +
         "WHERE project_id = ? AND role = 'target' AND legacy_tag = ? LIMIT 1",
     )
     .bind(projectId, legacyTag)
     .first<LaneRow>()
   if (!row) return null
-  // `legacy_tag` is selected and passed on purpose: for a lane whose tag IS
-  // its language the resolver answers with that tag, so a lane that already
-  // worked keeps sending the exact string it always sent ("fr-CA", not "fra").
   return laneRowLanguage({
     id: row.id,
+    language: row.language,
     name: row.name,
     langCode: row.lang_code,
     legacyTag: row.legacy_tag,

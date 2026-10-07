@@ -16,6 +16,7 @@
 import { describe, it, expect, afterEach } from "vitest"
 import { mergeSibling } from "../events/merge-sibling-route"
 import { makeTestDb, type TestDb, type TestDbOptions } from "./helpers/pg-test-db"
+import { laneDisplayName, laneLanguageCode } from "../../../src/lib/lanes/lane-display"
 
 const HOST = "host-proj"
 const DONOR = "donor-proj"
@@ -47,11 +48,13 @@ async function realLaneDb(opts: TestDbOptions = {}): Promise<TestDb> {
 async function seedPair(db: TestDb, cells: number, hostSettings?: Record<string, unknown>): Promise<void> {
   await db.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Host', 1), ($2, 'Donor', 1)`, [HOST, DONOR])
   await db.pg.query(
-    `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position) VALUES
-       ($1, $2, 'source', 'English', 'en', NULL, 0),
-       ($3, $2, 'target', 'Spanish', 'es', '', 1),
-       ($4, $5, 'source', 'English', 'en', NULL, 0),
-       ($6, $5, 'target', 'French', 'fr', '', 1)`,
+    // AQU-1592: seeded in the post-0136 shape — the typed `language`, no stored
+    // name and no stored code, both of which are derived on read.
+    `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES
+       ($1, $2, 'source', 'English', NULL, NULL, NULL, 0),
+       ($3, $2, 'target', 'Spanish', NULL, NULL, '', 1),
+       ($4, $5, 'source', 'English', NULL, NULL, NULL, 0),
+       ($6, $5, 'target', 'French', NULL, NULL, '', 1)`,
     [HOST_SOURCE_LANE, HOST, HOST_DEFAULT_LANE, DONOR_SOURCE_LANE, DONOR, DONOR_DEFAULT_LANE],
   )
   if (hostSettings) {
@@ -80,17 +83,25 @@ async function seedPair(db: TestDb, cells: number, hostSettings?: Record<string,
 
 interface LaneRow {
   id: string
-  role: string
-  name: string
+  role: "source" | "target"
+  /** AQU-1592: the stored freeform language. */
+  language: string | null
+  /** AQU-1592: null when the lane carries only a language. */
+  name: string | null
   lang_code: string | null
   legacy_tag: string | null
   position: number
   archived_at: string | null
 }
 
+/** The identity fields `laneLanguageCode` reads, in its camelCase shape. */
+function laneFields(row: LaneRow) {
+  return { role: row.role as "source" | "target", language: row.language, name: row.name, langCode: row.lang_code }
+}
+
 async function hostLanes(db: TestDb): Promise<LaneRow[]> {
   const r = await db.pg.query<LaneRow>(
-    `SELECT id, role, name, lang_code, legacy_tag, position, archived_at
+    `SELECT id, role, language, name, lang_code, legacy_tag, position, archived_at
        FROM lanes WHERE project_id = $1 ORDER BY position, id`,
     [HOST],
   )
@@ -116,14 +127,25 @@ describe("mergeSibling — the fold's lane is a real lane (AQU-1550)", () => {
 
     expect(result).toMatchObject({ merged: 3, skipped: [], lane: "fr" })
     const lanes = await hostLanes(t)
-    // The host's own lanes are as they were; the new one follows them.
-    expect(lanes.map((l) => [l.id, l.name, l.position])).toEqual([
+    // The host's own lanes are as they were; the new one follows them. Compared
+    // on the DISPLAY name (AQU-1592), which is what the screen shows: these
+    // lanes store only a language, so that is what they display.
+    expect(lanes.map((l) => [l.id, laneDisplayName(l), l.position])).toEqual([
       [HOST_SOURCE_LANE, "English", 0],
       [HOST_DEFAULT_LANE, "Spanish", 1],
       [expect.any(String), "fr", 2],
     ])
     const lane = lanes[2]!
-    expect(lane).toMatchObject({ role: "target", legacy_tag: "fr", lang_code: "fr", archived_at: null })
+    // The tag IS the new lane's language; no derived name or code is stored.
+    expect(lane).toMatchObject({
+      role: "target",
+      language: "fr",
+      name: null,
+      lang_code: null,
+      legacy_tag: "fr",
+      archived_at: null,
+    })
+    expect(laneLanguageCode(laneFields(lane))).toBe("fr")
     expect(await hostLaneCells(t, "fr")).toEqual([
       { cell_id: "c-1", value: "Verset 1", lane_id: lane.id },
       { cell_id: "c-2", value: "Verset 2", lane_id: lane.id },
@@ -141,28 +163,34 @@ describe("mergeSibling — the fold's lane is a real lane (AQU-1550)", () => {
     expect(donorLanes.rows.map((r) => r.id)).toEqual([DONOR_SOURCE_LANE, DONOR_DEFAULT_LANE])
   })
 
-  it("names the lane after its tag, and works out the language code when the tag is a language name", async () => {
+  it("takes its language from its tag, and derives the code when the tag is a language name", async () => {
     t = await realLaneDb()
     await seedPair(t, 1)
 
     await mergeSibling(t.db, { hostProjectId: HOST, donorProjectId: DONOR, lane: "French" })
 
-    const lane = (await hostLanes(t)).find((l) => l.legacy_tag === "French")
-    expect(lane).toMatchObject({ name: "French", lang_code: "fr", role: "target" })
+    const lane = (await hostLanes(t)).find((l) => l.legacy_tag === "French")!
+    // AQU-1592: the tag is stored as the lane's LANGUAGE. The display name and
+    // the "fr" code are derived from it on read, never written — a code written
+    // here would keep claiming "French" after someone edited the label.
+    expect(lane).toMatchObject({ language: "French", name: null, lang_code: null, role: "target" })
+    expect(laneDisplayName(lane)).toBe("French")
+    expect(laneLanguageCode(laneFields(lane))).toBe("fr")
   })
 
   it("puts the lane after the lanes the host already has", async () => {
     t = await realLaneDb()
     await seedPair(t, 1, { targetLanguage: "Spanish", targetLanes: ["pt"] })
     await t.pg.query(
-      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
-       VALUES ('h-pt', $1, 'target', 'Brazilian Portuguese', 'pt', 'pt', 2)`,
+      // A lane whose maintainer gave it a display name of its own.
+      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+       VALUES ('h-pt', $1, 'target', 'Portuguese', 'Brazilian Portuguese', NULL, 'pt', 2)`,
       [HOST],
     )
 
     await mergeSibling(t.db, { hostProjectId: HOST, donorProjectId: DONOR, lane: "fr" })
 
-    expect((await hostLanes(t)).map((l) => [l.name, l.legacy_tag, l.position])).toEqual([
+    expect((await hostLanes(t)).map((l) => [laneDisplayName(l), l.legacy_tag, l.position])).toEqual([
       ["English", null, 0],
       ["Spanish", "", 1],
       // An existing lane keeps the name its maintainer gave it.

@@ -475,14 +475,17 @@ describe("AgentWorkbench review loop", () => {
     const eventCount = await outboxRecordCountAllOwners()
     expect(before.decided.size).toBe(2)
 
-    // Opening the menu alone changes nothing — only the item does.
-    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
-    expect(await screen.findByRole("menuitem", { name: /New chat/ })).toBeInTheDocument()
+    // AQU-1774: New chat is a labelled button on this surface, not a menu
+    // item. Opening the chats menu beside it changes nothing — only the
+    // button does.
+    fireEvent.click(screen.getByRole("button", { name: "Previous chats" }))
+    expect(await screen.findByRole("menuitem", { name: "No previous chats" })).toBeInTheDocument()
     expect(store.getState().sessionId).toBe(before.sessionId)
     expect(store.getState().runs).toEqual(before.runs)
     expect(store.getState().decided).toEqual(before.decided)
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /New chat/ }))
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }))
     await waitFor(() => expect(store.getState().sessionId).not.toBe(before.sessionId))
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     expect(store.getState().runs).toEqual([])
@@ -501,14 +504,14 @@ describe("AgentWorkbench review loop", () => {
     const props = workbenchProps()
     const view = render(<AgentWorkbench {...props} />)
     const before = agentSessionStore(PROJECT, "alice").getState()
-    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
-    expect(await screen.findByRole("menuitem", { name: /New chat/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Previous chats" }))
+    expect(await screen.findByRole("menuitem", { name: "No previous chats" })).toBeInTheDocument()
 
     const next = workbenchProps()
     if (scope === "project") next.agent.projectId = `${PROJECT}-other`
     else next.agent.author = "bob"
     view.rerender(<AgentWorkbench {...next} />)
-    await waitFor(() => expect(screen.queryByRole("menuitem", { name: /New chat/ })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "No previous chats" })).not.toBeInTheDocument())
     expect(agentSessionStore(PROJECT, "alice").getState().sessionId).toBe(before.sessionId)
     expect(agentSessionStore(PROJECT, "alice").getState().runs).toEqual(before.runs)
   })
@@ -589,7 +592,11 @@ describe("AgentWorkbench unified view navigation", () => {
     expect(within(toolbar).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
     expect(within(toolbar).getByRole("tab", { name: "Document" })).toBeInTheDocument()
     expect(within(toolbar).getByRole("tab", { name: "Project knowledge" })).toBeInTheDocument()
-    expect(within(toolbar).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
+    // AQU-1774: the chat actions read as words on this row — no icon-only
+    // "Chat options", and nothing still calling itself a "New session".
+    expect(within(toolbar).getByRole("button", { name: "New chat" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("button", { name: "Previous chats" })).toBeInTheDocument()
+    expect(within(toolbar).queryByRole("button", { name: "Chat options" })).not.toBeInTheDocument()
     expect(within(toolbar).queryByRole("button", { name: /New session/ })).not.toBeInTheDocument()
     expect(within(toolbar).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
 
@@ -608,7 +615,7 @@ describe("AgentWorkbench unified view navigation", () => {
 
     const header = screen.getByTestId("agent-toolbar-row")
     expect(within(header).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
-    expect(within(header).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
+    expect(within(header).getByRole("button", { name: "New chat" })).toBeInTheDocument()
     expect(within(header).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
 
     fireEvent.click(memoryTab)
@@ -641,9 +648,9 @@ describe("AgentWorkbench editor chrome (AQU-980)", () => {
     expect(textTab).toHaveClass("px-2", "py-1")
     expect(audioTab).toHaveClass("px-2", "py-1")
     // The view switch and the mode switch share one row; the session actions
-    // (Chat options, Back to editor) follow the mode switch.
+    // (New chat, Previous chats, Back to editor) follow the mode switch.
     expect(within(row).getByRole("tab", { name: "Conversation" })).toHaveAttribute("aria-selected", "true")
-    const chatOptions = within(row).getByRole("button", { name: "Chat options" })
+    const chatOptions = within(row).getByRole("button", { name: "New chat" })
     expect(agentMode.compareDocumentPosition(chatOptions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(textTab)
     expect(onLensChange).toHaveBeenCalledWith("text")

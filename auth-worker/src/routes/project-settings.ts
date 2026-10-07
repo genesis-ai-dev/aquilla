@@ -74,8 +74,8 @@ import {
   filterSettingsToVisibleLanes,
   restoreHiddenLaneSettings,
 } from "../../../src/lib/lanes/read-wall"
-import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
+import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"

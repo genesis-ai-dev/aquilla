@@ -686,8 +686,20 @@ describe("TimelineEditor", () => {
   it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
     localStorage.removeItem("aquilla:timelineAudibility:spkfile")
     lastAudibility = null
+    // AQU-1682: the Target audio row only has a speaker once it holds a take.
+    const TAKE = "audio-m1-1700000000-take.webm"
+    const withTake = [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10, selectedAudioId: TAKE,
+        attachments: {
+          [SOURCE_CLIP]: { type: "audio", url: "frontier-audio://src" },
+          [TAKE]: { type: "audio", url: "frontier-audio://take" },
+        },
+      } as Partial<CellData>),
+      mediaCells[1],
+    ]
     render(
-      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={withTake} onRetimeSubtitle={() => {}} />,
     )
     // Mount pushes the default (both audible).
     expect(lastAudibility).toEqual({ source: true, target: true })
@@ -1537,13 +1549,86 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
 
   it("leaves the target row's speaker button alone", () => {
     setVideoDurationSec(VIDEO, 120)
+    // AQU-1682: the Target audio row has a speaker once it holds a take.
+    const TAKE = "audio-s1-1700000000-take.webm"
+    const withTake = [
+      cell({
+        ...subtitleCells[0], selectedAudioId: TAKE,
+        attachments: { [TAKE]: { type: "audio", url: "frontier-audio://take" } },
+      } as Partial<CellData>),
+      subtitleCells[1],
+    ]
     render(
       <TimelineEditor
-        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={withTake}
         tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
       />,
     )
     expect(screen.getByTestId("tl-speaker-target")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  // AQU-1682: a lane's mute button only where the lane has something to play.
+  describe("a mute button only on a lane with something to play (AQU-1682)", () => {
+    beforeEach(() => {
+      localStorage.removeItem("aquilla:timelineAudibility:f1682")
+    })
+
+    it("gives an empty Target audio row no speaker", () => {
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+      // The film still sounds, so the Source audio row keeps its speaker.
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+    })
+
+    it("gives the Source audio row no speaker when nothing on it plays (cues, no video, no recording)", () => {
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={null} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+    })
+
+    it("gives the Source audio row no speaker in Free timing, where the video is hidden and silent", () => {
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells} timingMode="audioFirst"
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+    })
+
+    it("keeps the Source audio row's speaker for an imported recording", () => {
+      render(
+        <TimelineEditor fileId="f1682" coreMediaUrl={null} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
+      )
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+    })
+
+    it("keeps the button on a muted lane even when it has nothing to play, so it can be unmuted", () => {
+      localStorage.setItem("aquilla:timelineAudibility:f1682", JSON.stringify({ source: true, target: false }))
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      const target = screen.getByTestId("tl-speaker-target")
+      expect(target).toHaveAttribute("aria-pressed", "false")
+      fireEvent.click(target)
+      // Unmuted and still empty: now it goes.
+      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+    })
   })
 
   it("an imported recording keeps its gutter source speaker, and it still publishes", () => {

@@ -1291,16 +1291,16 @@ export const agent = defineNamespace({
         placeholders: { step: "The already-localized plain-language step sentence." },
       },
       "agent.chatOptions.label": {
-        description: "Accessible name for the workbench's overflow menu of occasional chat-management actions.",
+        description: "Accessible name for the icon-only chat menu on compact surfaces (the floating mini-chat's title bar), which holds New chat plus the list of past chats.",
       },
       "agent.chatOptions.newChat": {
-        description: "Menu action that starts a fresh conversation. Not destructive: the chat being left is saved on the server and listed under Previous chats.",
+        description: "Action that starts a fresh conversation — a labelled button on the workbench toolbar, a menu item on compact surfaces. Not destructive: the chat being left is saved on the server and listed under Previous chats.",
       },
       "agent.chatOptions.newChatDescription": {
-        description: "Explains that starting a new chat keeps the current one (reopenable under Previous chats), and that a reopened chat restores the messages but not the proposal cards from the original run. Do not soften the second half — it is the one thing that does not come back.",
+        description: "Explains that starting a new chat keeps the current one (reopenable under Previous chats), and that a reopened chat restores the messages but not the proposal cards from the original run. Shown as the New chat button's tooltip on the workbench and as the menu item's description on compact surfaces. Do not soften the second half — it is the one thing that does not come back.",
       },
       "agent.chatOptions.previousHeading": {
-        description: "Inert heading above the list of the signed-in user's own past chats on this project.",
+        description: "Names the list of the signed-in user's own past chats on this project: an inert heading above the list in the compact icon menu, and the visible label plus accessible name of the chats menu on the workbench toolbar.",
       },
       "agent.chatOptions.previousLoading": {
         description: "Placeholder row while the user's chat list is being fetched.",

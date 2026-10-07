@@ -828,10 +828,10 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       const parsed = parseSettingsObject(settings.settings)
       const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
       languages = languagesForLanes(lanes, parsed, body.context?.lane ?? "")
-      if (resolvedLaneId) {
-        const fromLane = await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
-        if (fromLane) languages = { ...languages, targetLanguage: fromLane }
-      }
+      const fromLane = resolvedLaneId
+        ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
+        : null
+      if (fromLane) languages = { ...languages, targetLanguage: fromLane }
       briefSummary = settings.brief_summary ?? undefined
     }
   } catch {

@@ -770,15 +770,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "many languages lexicalize 'a term's review state' and 'a project's state' " +
     "differently, or decline the noun differently depending on the thing it " +
     "describes.",
-  "rules.createDialog.descriptionLabel":
-    "Visible field label above the free-text description input in the standalone " +
-    "rule-creation dialog — a sighted user reads it beside the input. " +
-    "nav.report.descriptionFieldLabel is a visually-hidden (screen-reader-only) " +
-    "label for a bug-report textarea that shows a placeholder instead of a visible " +
-    "label. A visible form label and an sr-only accessible name serve different " +
-    "audiences and often take different phrasing (e.g. a visible label can be " +
-    "terser since layout already implies context; an sr-only label must stand " +
-    "alone).",
   "audio.voice.clear":
     "One of a fixed set of one-word Gemini TTS voice tone descriptions (see " +
     "audio.voice.bright) — an ADJECTIVE describing how a voice sounds ('distinct, " +

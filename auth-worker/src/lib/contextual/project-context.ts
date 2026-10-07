@@ -37,7 +37,7 @@ import { conceptToRegexSource } from "../../../../src/lib/terminology/match"
 import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
 import type { TermMatchOptions, TermMatchingSettings } from "../../../../src/lib/terminology/model"
 import { readProjectConcepts } from "../concepts-read"
-import { laneLanguageForTag, type LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
+import type { LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
 import { languagesForLanes, loadLaneRows } from "../read-lane-language"
 import { conceptsForLane } from "../../../../src/lib/terminology/rendering-lane"
 
@@ -351,21 +351,6 @@ interface SettingsDb {
 
 interface SettingsRow {
   settings: unknown
-}
-
-/**
- * The language of the lane tagged `tag`. `''` is the former default lane,
- * already resolved (typed language, else the migration fallback) as
- * `defaultLanguage`. Any other tag goes through `laneLanguage` and does not
- * inherit the project target.
- */
-export function targetLanguageForTag(
-  tag: string,
-  lanes: readonly LaneLanguageRow[] | null | undefined,
-  defaultLanguage?: string,
-): string | undefined {
-  if (tag === "") return defaultLanguage
-  return laneLanguageForTag(tag, lanes) ?? undefined
 }
 
 function parseSettings(raw: unknown): Record<string, unknown> {

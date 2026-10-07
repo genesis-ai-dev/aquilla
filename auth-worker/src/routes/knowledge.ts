@@ -1,17 +1,19 @@
 // Knowledge base HTTP surface (spec: docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
 // projectKnowledge mounts at /api/v2/projects, orgKnowledge at /api/v2/orgs.
 // Originals live in R2 (SNAPSHOTS) under kb/…; extracted text + tree in
-// knowledge_docs via db/shared/knowledge.ts. Indexing runs async (waitUntil).
+// knowledge_docs via db/shared/knowledge.ts. Indexing runs async (waitUntil) on
+// a connection of its own — see indexDocOnOwnConnection (AQU-1763).
 import { Hono, type Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { ROLE } from "../types"
+import { ROLE, type Env } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
 import { shipLog } from "../posthog-logs"
 import { indexKnowledgeDoc } from "../lib/knowledge/index-doc"
 import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
+import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
   createDoc,
   listProjectDocs,
@@ -149,20 +151,78 @@ function runInBackground(c: Context<AuthHonoEnv>, task: Promise<void>): void {
   }
 }
 
+/** A Postgres handle the indexing job owns, plus the release that hands it
+ *  back. The job always awaits `close`, so it runs exactly once per handle. */
+export interface IndexingConnection {
+  db: AquillaDb
+  close(): Promise<void>
+}
+
+/** Open a connection the indexing job owns, or null when this worker has no
+ *  connection string to open one from (the vitest harness injects AQUILLA_PG
+ *  directly and sets none). */
+export function openIndexingConnection(
+  env: Pick<Env, "PG_CONNECTION_STRING">,
+): IndexingConnection | null {
+  if (!env.PG_CONNECTION_STRING) return null
+  const shim = makePostgres(env.PG_CONNECTION_STRING)
+  return { db: shim as unknown as AquillaDb, close: () => shim.close() }
+}
+
+/** Index one doc on a connection that outlives the response, releasing it only
+ *  once the job has settled.
+ *
+ *  AQU-1763: this job must NOT run on the request-scoped `AQUILLA_PG` shim.
+ *  index.ts closes that shim in its `finally` the moment the Response returns,
+ *  and postgres.js `end({ timeout: 5 })` destroys the pool 5s later — while
+ *  indexing is still awaiting a model round-trip of up to
+ *  `KB_INDEX_FETCH_TIMEOUT_MS` (60s). Both the terminal `index_status='ready'`
+ *  write and the compensating `'failed'` write in its catch then landed on a
+ *  dead connection, so the row never left `pending`: every upload showed
+ *  "Indexing…" and then "Indexing stalled" (AQU-1376's read-side window) for a
+ *  document that was never indexed at all — whatever its size, format or
+ *  language. The job therefore owns its connection for its lifetime, the same
+ *  contract the other post-response writers use (routes/agent.ts's `runShim`,
+ *  routes/chat.ts's `afterResponse`).
+ *
+ *  `open` is injectable so the regression test can supply a live handle while
+ *  the request-scoped one is already dead. */
+export async function indexDocOnOwnConnection(
+  env: Env,
+  docId: string,
+  open: (env: Pick<Env, "PG_CONNECTION_STRING">) => IndexingConnection | null = openIndexingConnection,
+): Promise<void> {
+  const own = open(env)
+  try {
+    await indexKnowledgeDoc(env, own?.db ?? env.AQUILLA_PG, docId)
+  } finally {
+    // Releasing the connection must not mask the job's own outcome, and
+    // indexKnowledgeDoc never throws — so a close failure is logged, not raised.
+    await own?.close().catch((err: unknown) => {
+      console.error(`[knowledge] releasing the indexing connection for ${docId} failed:`, err)
+    })
+  }
+}
+
 /** Fire the indexing job off c.executionCtx.waitUntil when available; in the
  *  test harness there's no real ExecutionContext and the getter throws, so
  *  fall back to letting the promise settle on its own (matches the pattern
  *  used elsewhere in this worker, e.g. routes/project-members.ts). */
 function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
-  const task = indexKnowledgeDoc(c.env, c.env.AQUILLA_PG, docId)
-  try {
-    c.executionCtx.waitUntil(task)
-  } catch {
-    void task
-  }
+  runInBackground(
+    c,
+    indexDocOnOwnConnection(c.env, docId).catch((err: unknown) => {
+      console.error(`[knowledge] indexing job for ${docId} failed to start:`, err)
+    }),
+  )
 }
 
-async function handleUpload(
+/** The one upload implementation: extension allowlist → size cap → text
+ *  extraction → R2 put → row insert → async indexing. Exported so the
+ *  server-to-server route the Agent API bridges through (routes/
+ *  knowledge-internal.ts, AQU-1762) runs exactly this, rather than forking a
+ *  second uploader that would strand its docs at index_status 'pending'. */
+export async function handleUpload(
   c: Context<AuthHonoEnv>,
   scope: KnowledgeScopeRef,
   createdBy: string,

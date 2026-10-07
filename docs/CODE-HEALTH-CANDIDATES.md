@@ -176,48 +176,14 @@ routine never modifies test files.
   suite — the test would need to be deleted too, which this routine cannot do. Needs a
   human (or a non-code-health change) to remove the pairing together.
 
-## `rules.page.*` i18n keys — orphaned by the `RulesPage.tsx` deletion above (2026-09-14)
+## `rules.*` i18n orphan keys — DONE 2026-10-07
 
-- **Found**: while deleting `src/components/RulesPage.tsx` this run, confirmed via
-  `grep -rn "rules\.page\." src --include=*.tsx --include=*.ts | grep -v src/lib/i18n/`
-  (empty result) that 7 message keys under the `rules.page.*` namespace —
-  `rules.page.heading`, `rules.page.corpusLoadErrorPrefix`, `rules.page.readOnlySuffix`,
-  `rules.page.rulesCardTitle`, `rules.page.noRulesYet`, `rules.page.deleteRuleDialogTitle`,
-  `rules.page.deleteRuleAriaLabel` — defined in `src/lib/i18n/namespaces/rules.ts` (under
-  its `── RulesPage.tsx (standalone rules page) ──` section header, ~line 385) were used
-  by nothing else. (`rules.loadingLabel`, defined in the same block, is *not* orphaned —
-  `src/components/ProjectSettings/RulesSection.tsx:129` still uses it, so leave it alone.)
-- **Friction**: each key also has a translated entry in every locale message file under
-  `src/lib/i18n/messages/*.ts` (confirmed present in at least `mfa.ts`, `zh-Hans.ts`,
-  `zh-Hant.ts`, `ar.ts`, `my.ts`, `th.ts` — likely all ~14+ locales). Removing the 7 keys
-  cleanly means touching the base namespace file's `messages`/`context.keys` blocks *and*
-  every locale file's corresponding entries — easily 15-20 files, well past this run's
-  single-theme budget when it's already spent on the component deletion itself.
-- **Why deferred**: pure scope-control — orphaned translation strings are inert (unused
-  keys don't fail build/lint/test), so there's no urgency forcing this into the same PR as
-  the component deletion. A future type-tightening or dead-code run can pick this up as its
-  own single-file-family sweep.
-- **Proof needed**: re-confirm each key still has zero non-i18n-file references (code
-  moves), then delete the `messages`/`context.keys` entries in `rules.ts` plus the matching
-  key in every locale file under `src/lib/i18n/messages/`; `pnpm build` and `pnpm test`
-  should stay green throughout since nothing reads these strings.
-- **Grown by the 2026-09-18 run**: deleting `RuleCreateDialog.tsx` and `RuleSuggestDialog.tsx`
-  (the two dialogs `RulesPage.tsx` was the only render site for — see the entry below)
-  orphaned 18 more keys in the same namespace file and the same way: 15 under
-  `rules.createDialog.*` (`namePlaceholder`, `descriptionLabel`, `ruleTypeLabel`,
-  `checkType.sourceTargetMatch`, `checkType.sourceRequiresTarget`, `checkType.targetForbids`,
-  `patternRegexLabel`, `patternFieldHint.match`, `forbiddenPatternRegexLabel`,
-  `patternFieldHint.forbidden`, `sourcePatternRegexLabel`, `requiredTargetPatternRegexLabel`,
-  `testYourRuleHeading`, `testSourcePlaceholder`, `testTargetPlaceholder`, `testButton`) and
-  3 under `rules.suggestDialog.*` (`description`, `analyzeButton`, `analyzedSummary`).
-  Confirmed orphaned by `grep -rn "rules\.createDialog\.\|rules\.suggestDialog\." src e2e
-  scripts | grep -v src/lib/i18n/` (empty). The live in-shell surface uses the separate
-  `rules.surface.*` namespace, so nothing shares these. Their two
-  `── RuleCreateDialog.tsx ──` / `── RuleSuggestDialog.tsx ──` section-header comments in
-  `namespaces/rules.ts` now point at deleted files; they were deliberately left in place so
-  the still-present keys keep their provenance — remove the headers together with the keys,
-  not before. Whoever picks this up should sweep all three prefixes (`rules.page.*`,
-  `rules.createDialog.*`, `rules.suggestDialog.*`) in one pass: same files, same proof.
+All three prefixes (`rules.page.*` 7, `rules.createDialog.*` 16, `rules.suggestDialog.*` 3 =
+26 keys), orphaned by the `RulesPage.tsx` / `RuleCreateDialog.tsx` / `RuleSuggestDialog.tsx`
+deletions of 2026-09-14 and -18, were swept in the 2026-10-07 run — see that run's entry at
+the bottom of this file for the proof, the budget overage it cost, and the recipe the
+`terminology.*` entry below can reuse verbatim. Nothing of this entry is left to do; do not
+reopen without a *new* `rules.*` orphan.
 
 ## `terminology.*` i18n keys — orphaned by the `TerminologyPage.tsx` deletion (2026-09-21)
 
@@ -1244,3 +1210,182 @@ attempt this run died at `[e2e-up] fatal: Error: [sync] timed out waiting for :9
 immediately, so kill the `node .../wrangler dev` processes (by PID if the pattern kill misses
 them) and confirm with `ps -eo pid,comm | grep -E "workerd|wrangler"` returning nothing before
 re-running. The retry then booted and ran normally.
+
+## 2026-10-07 — dead-key run: the `rules.*` i18n orphan sweep, five runs after it was queued
+
+**Done this run** (theme 1, dead-code deletion applied to the message catalog; 12 files,
+617 deletions / 4 insertions, no test file touched): the 26 orphaned keys under
+`rules.page.*` (7), `rules.createDialog.*` (16) and `rules.suggestDialog.*` (3), plus the
+one `duplicate-exceptions.ts` entry that went stale with them.
+
+- `src/lib/i18n/namespaces/rules.ts` — 26 entries out of `messages` (32 lines) and 26 out of
+  `_context.keys` (102 lines). The three `── RuleCreateDialog.tsx ──` /
+  `── RuleSuggestDialog.tsx ──` / `── RulesPage.tsx (standalone rules page) ──` section
+  headers named deleted files; the first two had nothing left under them and went, and the
+  third became `── ProjectSettings/RulesSection.tsx (the project's rules list) ──` because
+  its two surviving keys (`rules.loadingLabel`, `rules.terminologyUnavailableNotice`) are
+  live there (`RulesSection.tsx:145,156`). `rules.loadingLabel`'s own context note said it
+  was "rendered in two places … the standalone Rules page and the Rules section inside
+  Project Settings"; that is now one place, so the note was reworded — keeping the "worded
+  without naming its container" instruction, which is still the right instruction.
+- `src/lib/i18n/namespaces/duplicate-exceptions.ts` — the
+  `rules.createDialog.descriptionLabel` entry (9 lines). Mandatory, not optional: the second
+  `it()` in `no-duplicates.test.ts` hard-fails on an exception whose key no longer exists
+  **or** no longer collides, so it had to go in the same commit.
+- The nine generated catalogs `src/lib/i18n/messages/{ar,fr,id,ms,my,ru,th,zh-Hans,zh-Hant}.ts`
+  (26 lines each, 25 in `fr` — it never carried `createDialog.descriptionLabel`) and
+  `src/lib/i18n/source-hashes.json` (233 entries). Also mandatory: `Catalog` is
+  `Partial<Record<MessageKey, …>>`, so a key dropped from the base namespace is an
+  excess-property `tsc` error in every catalog that still carries it, and
+  `context.test.ts:41` asserts `unknownCatalogKeys(CATALOGS)` is `[]`. The removal is
+  all-or-nothing across all twelve files, exactly as the old entry predicted.
+
+**Proof** (nothing here was argued, all of it was run):
+
+- Orphan re-verified: `grep -rIn "rules\.page\.\|rules\.createDialog\.\|rules\.suggestDialog\."`
+  over `src e2e scripts worker auth-worker/src sync-worker/src agent-worker/src` outside
+  `src/lib/i18n/` is empty, and the only dynamic `` `rules.`` `` key construction in the repo
+  is `rules.builtin.<id>.*` / `rules.infraction.*` (`builtin-registry.ts:37`,
+  `namespaces/rules.ts:17,21`) — neither family touched.
+- **The no-duplicates guards were simulated before the edit, not after.** A throwaway script
+  re-implemented the three HARD assertions of `no-duplicates.test.ts` against the catalog
+  with the 26 keys and the one exception removed in memory. It confirmed (a) exactly one
+  exception loses its key, (b) the `"Description"` collision group drops from
+  `{nav.report.descriptionFieldLabel, rules.createDialog.descriptionLabel}` to a single key,
+  so no *other* exception goes stale and no group is left with 2+ unexcused keys, and (c) the
+  warning-only duplicate scan is unchanged at 210 groups before and after. Worth redoing for
+  the `terminology.*` sweep: it is the cheap way to find out whether a key deletion breaks a
+  guard three files away, and it costs minutes.
+- `npx tsc -b` green, `pnpm i18n:check` green (7045 keys covered, was 7071), the 15-file
+  `src/lib/i18n` suite 189/189 green, then the full gate (below).
+- `source-hashes.json` was rewritten with `JSON.stringify(all, null, 2) + "\n"`, which is
+  byte-identical to the sidecar's own writer (`scripts/i18n-catalog.ts:117`) — verified by a
+  no-op round-trip before touching it, so the diff is 233 deleted lines and nothing else.
+
+### Budget: this run went over, deliberately, and here is the arithmetic for the next one
+
+12 files / 617 lines against the stated ≤8 files / ≤300 lines. The overage is structural, not
+scope creep: **a single i18n key costs 11 lines in 11 files** (base namespace message +
+context, nine catalogs, one hash sidecar), so *no* i18n orphan sweep of any size fits the
+file budget, and 26 keys is the smallest unit that leaves the namespace consistent (all three
+prefixes share the two dialog section headers' provenance and the one duplicate exception).
+Five consecutive runs deferred this entry on the budget alone; the deferral was costing more
+than the overage, since every run re-derived the same verification. The diff is 617 deletions
+and 4 insertions, all in one key family — cheaper to review than 300 lines of changed logic.
+
+For the queued **`terminology.*` sweep (51 keys, ~900 lines)** the same arithmetic says: split
+by prefix, not by file. `terminology.page.*` (16) and `terminology.candidates.*` (11) are one
+run each; `libraryStats`/`reviewQueue`/`importDialog`/`common`/`conceptDialog` (24 together)
+are a third. Four of its keys carry duplicate exceptions (the entry above names them), so run
+the simulation per slice — a slice that strands the *other* half of a collision pair is the
+failure mode to look for.
+
+### Closed: the three feature-flag hooks are NOT debris — do not delete them
+
+The 2026-10-02 entry recommended `useAiSectionMilestonesEnabled`,
+`useMeaningUnitDraftingEnabled` and `usePassageTagsEnabled` as "the most likely to be real
+debris", sharing one question: did the flag ship or get dropped? **Neither** — and that is the
+answer, so strike the recommendation rather than carrying it to another run.
+
+All three modules (`src/lib/import/ai-sections-flag.ts`, `src/lib/completion/seams-flag.ts`,
+`src/lib/understanding/passage-tags-flag.ts`) are mirror copies of
+`src/lib/health/kill-switch.ts`, each a `(STORAGE_KEY, is*Enabled, set*Enabled, use*Enabled)`
+quartet, and each still waiting on the eval its own file header makes a precondition for
+flipping `DEFAULT_ENABLED`. In the canonical module the hook IS live (`EditorTable.tsx:71`,
+`ProjectWorkspace.tsx:78`, which also owns the UI toggle); in the three copies only the
+imperative getter got wired (`milestone-navigation.ts:225`, `useSeamClassification.ts:59`,
+`useCompletion.ts:629` — `arePassageTagsEnabled` has no non-test caller at all). So the hooks
+are the un-wired half of a deliberately copied pattern for a feature that has not landed yet:
+shape (c), forward-compat, not shape (a). Deleting them would also leave each module a
+three-quarter mirror, which reads worse than the full one. The setters, note, are frozen
+anyway — each flag module's own `*-flag.test.ts` calls them.
+
+### Candidate: `duplicate-exceptions.ts`'s header count is stale (121 entries, says 10)
+
+- **Found**: 2026-10-07, while removing the one stale entry.
+- **Friction**: the module docstring ends "…20 of the 30 entries this file used to carry
+  existed only for that reason and were removed … **The 10 that remain** are genuine meaning
+  splits." The file now holds **121** entries (120 after this run). A reader who trusts the
+  number will misjudge how much of the catalog is excused by an order of magnitude — and it
+  is the one sentence that tells them whether the default-deny policy is holding.
+- **Why deferred**: it is theme 6 (comment drift) and this run's theme was the key sweep;
+  more to the point the honest fix is not a new hard-coded number (it would rot the same way)
+  but either dropping the count or deriving it, and choosing between those is a judgement for
+  whoever owns the file's policy. A one-line candidate, but a real one.
+- **Proof needed**: comment-only, so `pnpm lint` error list byte-identical and
+  `pnpm build`/`pnpm test` green-to-green.
+
+### Baseline recorded 2026-10-07 (`origin/dev` `363c92f1`) — the greenest in months
+
+- **`pnpm build`** — green.
+- **`pnpm lint`** — exit 1, **2 errors**, 977 warnings. The errors are both
+  `no-useless-escape` on the same `\;` in a regex:
+  `sync-worker/src/events/content-disposition.ts:8:55` and
+  `sync-worker/src/__tests__/content-disposition.test.ts:9:50`. One of the two is a **test**
+  file, so this routine cannot fix the pair; a human can, in one commit, and it would take
+  `pnpm lint` to zero errors. Worth noting how far this fell: the 2026-10-02 baseline had
+  **125** errors, and the whole `i18n/no-unkeyed-string` billing-surface block is gone.
+- **`pnpm test`** — exit 1, **2 files / 4 tests** failing (1667 files / 18993 tests pass).
+  The 19-file portal/popup-timing cluster from 2026-10-02 is **gone** — `ui/tooltip`,
+  `ui/context-menu`, `AccountSwitcher`, `CommentsPage`, `LanguagesSection`,
+  `VerseResourcesSidebar` et al. all pass now, which supports that entry's guess that it was
+  one environmental root cause (a `@base-ui/react`/happy-dom move) rather than 14
+  regressions. What is left: `src/components/MemberLaneScopeEditor.test.tsx` ("labels a lane
+  tagged with its own id by the row's language, never the id", 1 test) and
+  `src/partner-integrations/biblica/__tests__/idml.biblica-scripture.test.ts` (3 tests —
+  writes an edited verse back into the publisher's slot / leaves untranslated verses alone /
+  refuses a mismatched character style). Pre-existing on `dev` at `363c92f1`, nowhere near
+  `src/lib/i18n/`, so nothing froze this run. The Biblica three are the pair worth a human's
+  eyes: partner-owned IDML export is a paying surface.
+- `src/lib/i18n/context.test.ts` passes again — the unfreezing the 2026-10-02 entry called
+  "the headline for the next run" still holds, and this run spent it.
+
+### Container setup 2026-10-07: the `onnxruntime-node` workaround is still the only blocker
+
+The 2026-10-02 recipe works verbatim and nothing else was needed. `pnpm i` dies in
+`onnxruntime-node`'s postinstall (`ECONNRESET` — the proxy cuts the native-binary download)
+and leaves `node_modules/.bin` unlinked; deleting the `- onnxruntime-node` line from
+`pnpm-workspace.yaml`'s `onlyBuiltDependencies`, re-running `pnpm i` (19s, exit 0) and
+restoring the file fixes it. **Restore it before `git status`** — it is a frozen path. Also
+note a trap worth stating: wrapping the install in `(pnpm i > log; echo "EXIT=$?")` reports
+the *echo's* status, so the subshell looked like exit 0 while the install had failed; read
+the log tail, not the wrapper's exit code.
+
+### Smoke baseline 2026-10-07: 92/99, and the 7 reds are the 2026-10-02 set minus one
+
+Three deltas from the 2026-10-02 smoke recipe, all of them container setup rather than product:
+
+- **The two rev-1243 Chromium symlinks are still needed and the 2026-10-05 recipe is exact.**
+  Image ships 1194, `@playwright/test` 1.63.0 pins 1243 (read it from
+  `node_modules/.pnpm/playwright-core@<v>/node_modules/playwright-core/browsers.json` — there
+  is no `browsers.json` under the hoisted `node_modules/playwright-core`). Both the
+  directory-level `chromium-1243/chrome-linux64` link and the binary-level
+  headless-shell link, plus the two marker files each.
+- **NEW, and it blocks the stack cold: the three worker packages need their own
+  `node_modules`.** A fresh container has none, and `scripts/e2e-up.ts` boot 3/8 dies at
+  `timed out waiting for http://127.0.0.1:10460/healthz` — which reads like a port/mock
+  problem and is not one. The real error is in `.e2e-logs*/mock-legacy-migration.log`:
+  `Cannot find package 'bcryptjs' imported from auth-worker/src/utils/password.ts`. Install
+  them, but **`npm ci` alone fails** with `ERESOLVE` (auth-worker's lock holds
+  `@cloudflare/vitest-pool-workers@0.22.0`, peer `vitest@^4.1.0`, against the root's
+  `vitest@5.0.1`) — a pre-existing conflict on `dev`, not something a cleanup run may fix.
+  `npm ci --legacy-peer-deps` in each of `auth-worker/`, `sync-worker/`, `agent-worker/`
+  works and, unlike `npm install`, leaves all three `package-lock.json` files untouched
+  (verified against `git status`) — which matters, because they are a frozen path here.
+- **Run ONE shard, not three.** `pnpm test:e2e:smoke` is `e2e-shard.ts 3`, and all three
+  shards timed out on their mocks' `/healthz` in this container. `npx tsx
+  scripts/e2e-shard.ts 1 -- smoke.spec` boots and runs 99 tests in ~20 min. The
+  kill-the-strays rule from 2026-10-05 held again, verbatim: the next run after a shard died
+  at `[sync] timed out waiting for :9788` with `exit 143`, and `kill -9` on the leftover
+  `wrangler dev` + `workerd` PIDs (found with `ps -eo pid,args`, not `pid,comm`) fixed it.
+
+Result: **92 passed / 7 failed**, and the 7 were A/B'd rather than argued — the diff was
+`git stash`ed and the three affected spec files re-run against untouched `dev`, which failed
+**the same 7: same files, same lines, same titles**. They are 2026-10-02's eight minus one:
+the six media-decode failures (`import-and-edit.smoke.spec.ts:138`, `:294`×3,
+`import-media-captions.smoke.spec.ts:132`×2 — still consistent with the Chromium
+substitution, since the shim runs a 141.x build that is not the pinned one) and the
+`project-trash.smoke.spec.ts:18` strict-mode toast collision, which remains a genuine
+test-side bug a human can fix in one line. **`agent/agent-connection.smoke.spec.ts:43`
+(AQU-1529) now passes** — the one that entry flagged as most worth a human's eyes. So the
+expected smoke baseline in this container is now 92/99.

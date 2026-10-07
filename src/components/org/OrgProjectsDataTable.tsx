@@ -203,7 +203,6 @@ export function OrgProjectsDataTable({
   emptyAction,
   testId = "org-projects-table",
   layout = "page",
-  defaultLaneLabelByProjectId,
   filesByProjectId,
   orgId = null,
   jwt,
@@ -235,12 +234,6 @@ export function OrgProjectsDataTable({
   testId?: string
   /** `page` = panel shell; `embedded` = in-Section admin table chrome. */
   layout?: "page" | "embedded"
-  /**
-   * AQU-538 §3.2: project → per-file target-language hint for the '' lane chip.
-   * AQU-606: only a *fallback* — `resolveDefaultLaneLabel` prefers the project's
-   * own `targetLanguage`, which is where migrated projects carry it.
-   */
-  defaultLaneLabelByProjectId?: Map<string, string>
   /** AQU-538 §3.2: project → its files, for the lane sub-row "Assign…" action. */
   filesByProjectId?: Map<string, { id: string; name: string }[]>
   /** The active org id — threaded to StaffLanePopover / AssignModal. */
@@ -389,7 +382,7 @@ export function OrgProjectsDataTable({
                 <LaneChips
                   projectId={p.id}
                   lanes={displayLanes(p)}
-                  defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
+                  defaultLaneLabel={resolveDefaultLaneLabel(p)}
                   onOverflowClick={embedded ? undefined : () => toggleExpand(p.id)}
                   maxVisible={embedded ? 2 : undefined}
                   className={cn("w-full", embedded && "flex-nowrap")}
@@ -647,7 +640,6 @@ export function OrgProjectsDataTable({
       showOrg,
       tableNow,
       toggleExpand,
-      defaultLaneLabelByProjectId,
       embedded,
       viewerUsername,
       t,
@@ -714,7 +706,7 @@ export function OrgProjectsDataTable({
                   <ProjectLaneSubRows
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p)}
                     colSpan={colSpan}
                     orgId={orgId}
                     onAssign={
@@ -805,10 +797,7 @@ export function OrgProjectsDataTable({
           targetLanes={displayLanes(assignProject)
             .map((l) => l.lane)
             .filter((l) => l !== "")}
-          defaultLaneLabel={resolveDefaultLaneLabel(
-            assignProject,
-            defaultLaneLabelByProjectId?.get(assignTarget.projectId),
-          )}
+          defaultLaneLabel={resolveDefaultLaneLabel(assignProject)}
           files={filesByProjectId?.get(assignTarget.projectId) ?? []}
           roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? 0}
           jwt={jwt}

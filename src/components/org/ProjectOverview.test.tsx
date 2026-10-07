@@ -345,7 +345,7 @@ afterEach(() => vi.clearAllMocks())
 
 /** Build a FileSummary stub for testing the file list. */
 function fileSummary(i: number): import("@/lib/sync/cells-read").FileSummary {
-  return { fileId: `f${i}`, projectId: "p1", name: `File${i}.usfm`, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
+  return { fileId: `f${i}`, projectId: "p1", name: `File${i}.usfm`, fileType: "usfm", declaredSourceLanguage: null, declaredTargetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
 }
 
 
@@ -2189,7 +2189,7 @@ describe("imported originals on the overview (AQU-656)", () => {
   ): import("@/lib/sync/cells-read").FileSummary {
     return {
       fileId, projectId: "p1", name, fileType: "usfm",
-      sourceLanguage: null, targetLanguage: null,
+      declaredSourceLanguage: null, declaredTargetLanguage: null,
       cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100,
       lastEditAt: null, hasOriginalSource,
     }

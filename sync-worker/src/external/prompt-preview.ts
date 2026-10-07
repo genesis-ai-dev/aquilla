@@ -53,7 +53,9 @@ import {
   applyBranchingSearchDefaults,
   loadBranchingSearchSettings,
 } from "../lib/branching-search/settings"
+import { resolveLane } from "../../../db/shared/lane-ref"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { conceptsForLane } from "../../../src/lib/terminology/rendering-lane"
 import {
   buildBriefBlock,
   buildPrompt,
@@ -389,7 +391,17 @@ export async function buildPromptPreview(
     }
   })
 
-  const terminologyRules = compileConceptsToRulesCore(concepts, WORKER_COMPILE_LABELS)
+  const emptyLane = await resolveLane(db, projectId, { targetLang: "" })
+  const activeLane = emptyLane.laneId
+    ? await resolveLane(db, projectId, { targetLang })
+    : null
+  const visibleConcepts = !emptyLane.laneId
+    ? concepts
+    : !activeLane?.laneId
+      ? concepts.map((concept) => ({ ...concept, renderings: [] }))
+      : conceptsForLane(concepts, activeLane.laneId, emptyLane.laneId)
+
+  const terminologyRules = compileConceptsToRulesCore(visibleConcepts, WORKER_COMPILE_LABELS)
   const rules: ScopedPromptRule[] = forLane(
     [
       ...rulesSetting(orgSettings, "rules"),
@@ -399,7 +411,7 @@ export async function buildPromptPreview(
     targetLang,
   )
 
-  const injectedTerms: InjectedTerm[] = concepts
+  const injectedTerms: InjectedTerm[] = visibleConcepts
     .filter((c) => c.status === "active")
     .map((c) => ({
       conceptId: c.id,

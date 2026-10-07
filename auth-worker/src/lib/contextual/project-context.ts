@@ -36,6 +36,7 @@ import {
 import { conceptToRegexSource } from "../../../../src/lib/terminology/match"
 import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
 import type { TermMatchOptions, TermMatchingSettings } from "../../../../src/lib/terminology/model"
+import { conceptsForLane } from "../../../../src/lib/terminology/rendering-lane"
 import { readProjectConcepts } from "../concepts-read"
 import type { LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
 import { languagesForLanes, loadLaneRows } from "../read-lane-language"
@@ -47,6 +48,8 @@ export type RenderingStatus = "preferred" | "admitted" | "forbidden"
 export interface TermRendering {
   rendering: string
   status: RenderingStatus
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 export interface Concept {
@@ -145,7 +148,12 @@ function parseConcepts(raw: unknown): Concept[] {
         const rr = r as Record<string, unknown>
         if (typeof rr.rendering !== "string" || !rr.rendering.trim()) continue
         if (rr.status !== "preferred" && rr.status !== "admitted" && rr.status !== "forbidden") continue
-        renderings.push({ rendering: rr.rendering.trim(), status: rr.status })
+        const laneId = typeof rr.laneId === "string" && rr.laneId !== "" ? rr.laneId : undefined
+        renderings.push({
+          rendering: rr.rendering.trim(),
+          status: rr.status,
+          ...(laneId ? { laneId } : {}),
+        })
       }
     }
     const match = coerceMatchOptions(c.match)
@@ -370,6 +378,7 @@ function parseSettings(raw: unknown): Record<string, unknown> {
 export async function loadProjectContext(
   db: SettingsDb,
   projectId: string,
+  lane?: { laneId?: string | null; targetLang?: string | null },
 ): Promise<ProjectContext> {
   const empty: ProjectContext = {
     briefParameters: {},
@@ -396,10 +405,11 @@ export async function loadProjectContext(
       ? (brief as Record<string, unknown>)
       : {}
 
-  const concepts = [
+  const loaded = [
     ...(await loadLocalConcepts(db, projectId)),
     ...(await loadSubscribedConcepts(db, projectId)),
   ]
+  const concepts = lane ? await conceptsForRequestedLane(db, projectId, loaded, lane) : loaded
   let lanes: LaneLanguageRow[] = []
   try {
     lanes = await loadLaneRows(db, projectId)
@@ -421,6 +431,42 @@ export async function loadProjectContext(
     ...(termMatching ? { termMatching } : {}),
     authoredRules: parseAuthoredRules(settings.rules),
   }
+}
+
+async function targetLaneId(
+  db: SettingsDb,
+  projectId: string,
+  ref: { laneId?: string | null; targetLang?: string | null },
+): Promise<string | null> {
+  const id = (ref.laneId ?? "").trim()
+  if (id) {
+    const row = await db
+      .prepare(`SELECT id FROM lanes WHERE project_id = ? AND id = ? AND role = 'target'`)
+      .bind(projectId, id)
+      .first<{ id: string }>()
+    return row?.id ?? null
+  }
+  const row = await db
+    .prepare(
+      `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`,
+    )
+    .bind(projectId, ref.targetLang ?? "")
+    .first<{ id: string }>()
+  return row?.id ?? null
+}
+
+/** Same rule as renderingLaneId. No `''` row: leave the list alone. */
+async function conceptsForRequestedLane(
+  db: SettingsDb,
+  projectId: string,
+  concepts: Concept[],
+  lane: { laneId?: string | null; targetLang?: string | null },
+): Promise<Concept[]> {
+  const emptyId = await targetLaneId(db, projectId, { targetLang: "" })
+  if (!emptyId) return concepts
+  const activeId = await targetLaneId(db, projectId, lane)
+  if (!activeId) return concepts.map((concept) => ({ ...concept, renderings: [] }))
+  return conceptsForLane(concepts, activeId, emptyId)
 }
 
 function stringList(raw: unknown): string[] {

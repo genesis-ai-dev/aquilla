@@ -589,6 +589,30 @@ export function coerceIntegerMsPayload(event: PersistedEvent): PersistedEvent {
   return fixed === null ? event : { ...event, payload: fixed }
 }
 
+/**
+ * Stamp a missing rendering `laneId` with the project's target lane whose
+ * `legacy_tag` is `''`. Same rule as `renderingLaneId` in
+ * src/lib/terminology/rendering-lane.ts: a non-empty laneId is kept, and
+ * when that lane row does not exist yet the rendering is stored unchanged.
+ *
+ * Two binds, in order: the renderings JSON text, then `project_id`.
+ * `jsonb_agg` of an empty array is NULL, so the COALESCE keeps `[]`.
+ */
+const STAMP_RENDERINGS_SQL = `(SELECT COALESCE(jsonb_agg(
+    CASE
+      WHEN COALESCE(elem->>'laneId', '') <> '' THEN elem
+      WHEN empty_lane.id IS NULL THEN elem
+      ELSE jsonb_set(elem, '{laneId}', to_jsonb(empty_lane.id), true)
+    END
+    ORDER BY ord
+  ), '[]'::jsonb)
+  FROM jsonb_array_elements(?::text::jsonb) WITH ORDINALITY AS rendering_elem(elem, ord)
+  LEFT JOIN LATERAL (
+    SELECT id FROM lanes
+    WHERE project_id = ? AND role = 'target' AND legacy_tag = ''
+    LIMIT 1
+  ) empty_lane ON TRUE)`
+
 export function buildEventProjectionStmts(
   db: AquillaDb,
   rawEvent: PersistedEvent,
@@ -2347,7 +2371,7 @@ case 'cell.audio.attach': {
             `INSERT INTO concepts (
               concept_id, project_id, source_term, renderings, notes,
               status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
+            ) VALUES (?, ?, ?, ${STAMP_RENDERINGS_SQL}, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
             ON CONFLICT(concept_id) DO NOTHING`,
           )
           .bind(
@@ -2355,6 +2379,7 @@ case 'cell.audio.attach': {
             event.projectId,
             p.sourceTerm,
             JSON.stringify(p.renderings ?? []),
+            event.projectId,
             p.notes ?? null,
             p.status,
             p.caseSensitive ? 1 : 0,
@@ -2375,12 +2400,21 @@ case 'cell.audio.attach': {
       // table exists at all. `renderings` is the deliberate exception: a
       // rendering list has no per-item identity to merge on, so it replaces
       // wholesale when present and is left untouched when absent.
+      // Absent renderings bind a single NULL into COALESCE so the column is
+      // left alone. Present renderings are stamped; that expression is never
+      // NULL (an empty list becomes '[]'), so it replaces the column.
+      const renderingsSql = p.renderings === undefined
+        ? 'COALESCE(?::text::jsonb, renderings)'
+        : STAMP_RENDERINGS_SQL
+      const renderingBinds = p.renderings === undefined
+        ? [null]
+        : [JSON.stringify(p.renderings), event.projectId]
       stmts.push(
         db
           .prepare(
             `UPDATE concepts SET
                source_term    = COALESCE(?, source_term),
-               renderings     = COALESCE(?::text::jsonb, renderings),
+               renderings     = ${renderingsSql},
                notes          = COALESCE(?, notes),
                case_sensitive = COALESCE(?, case_sensitive),
                match_options  = COALESCE(?::text::jsonb, match_options),
@@ -2389,7 +2423,7 @@ case 'cell.audio.attach': {
           )
           .bind(
             p.sourceTerm ?? null,
-            p.renderings === undefined ? null : JSON.stringify(p.renderings),
+            ...renderingBinds,
             p.notes ?? null,
             p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
             p.match === undefined ? null : JSON.stringify(p.match),

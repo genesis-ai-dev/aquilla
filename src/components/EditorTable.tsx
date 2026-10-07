@@ -7611,6 +7611,11 @@ function EditorRow({
                   idmlParagraphStyleId={idmlParagraphStyleId}
                   concepts={terminologyConcepts}
                   termMatching={project.termMatching}
+                  // AQU-1757: the same underlines as the plain path. The spans
+                  // index the text the checks read, not the markup.
+                  ranges={sourceRanges}
+                  rangeText={effectiveSourceText(cell)}
+                  onRangeClick={openInlineRule}
                 />
               </div>
             ) : (

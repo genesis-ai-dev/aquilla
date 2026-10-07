@@ -9,6 +9,7 @@ import * as doubleSpace from "./check-functions/double-space"
 import * as repeatedWord from "./check-functions/repeated-word"
 import * as unpairedSymbols from "./check-functions/unpaired-symbols"
 import * as abbreviationMismatch from "./check-functions/abbreviation-mismatch"
+import * as capitalization from "./check-functions/capitalization"
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -140,6 +141,16 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: abbreviationMismatch.runCheck,
     message: abbreviationMismatch.MESSAGE,
   },
+  "capitalization": {
+    id: "capitalization",
+    name: "Capitalization",
+    description: "A lowercase letter where a capital is expected — opening a sentence, or opening a paragraph or heading after its marker.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: capitalization.runCheck,
+    message: capitalization.MESSAGE,
+  },
 }
 
 export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
@@ -153,4 +164,5 @@ export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "repeated-word",
   "unpaired-symbols",
   "abbreviation-mismatch",
+  "capitalization",
 ]

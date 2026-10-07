@@ -32,6 +32,7 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "repeated-word": "rules.builtin.repeatedWord.name",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.name",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.name",
+  "capitalization": "rules.builtin.capitalization.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -45,10 +46,11 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "repeated-word": "rules.builtin.repeatedWord.description",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.description",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.description",
+  "capitalization": "rules.builtin.capitalization.description",
 }
 
 /**
- * Display name for any `TranslationRule` — translated for the ten built-in
+ * Display name for any `TranslationRule` — translated for the built-in
  * checks (app-authored chrome; resolved off the `builtin:` id prefix),
  * returned verbatim for a user or org rule (their OWN name is content and
  * must never be translated).

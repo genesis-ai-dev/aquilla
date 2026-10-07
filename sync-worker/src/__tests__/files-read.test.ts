@@ -63,6 +63,101 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.files[0].cellCount).toBe(1213)
   })
 
+  it("uses the single tagged lane when the project has no blank bridge", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "srcsw001", project_id: "proj-a", role: "source" },
+        { id: "tgtsw001", project_id: "proj-a", role: "target", legacy_tag: "sw" },
+      ],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 99, filled_count: 99, approved_count: 99,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+        target_lang: "sw", lane_id: "tgtsw001",
+        total_count: 4, filled_count: 2, validator_histogram: {},
+        revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-gen" })
+    const res = (await handleFilesReadRequest(new Request("https://w/api/v1/projects/proj-a/files", {
+      headers: { Authorization: `Bearer ${token}` },
+    }), envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { files: Array<{ cellCount: number; filledCount: number }> }
+    expect(body.files).toHaveLength(1)
+    expect(body.files[0]).toMatchObject({ cellCount: 4, filledCount: 2 })
+  })
+
+  it("does not list one file once per tagged lane when there is no blank bridge", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "tgtsw001", project_id: "proj-a", role: "target", legacy_tag: "sw" },
+        { id: "tgtfr001", project_id: "proj-a", role: "target", legacy_tag: "fr" },
+      ],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 50, filled_count: 40,
+      }],
+      file_section_progress: [
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "sw", lane_id: "tgtsw001",
+          total_count: 10, filled_count: 3, validator_histogram: {},
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "fr", lane_id: "tgtfr001",
+          total_count: 10, filled_count: 8, validator_histogram: {},
+          revision: 1, updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-gen" })
+    const res = (await handleFilesReadRequest(new Request("https://w/api/v1/projects/proj-a/files", {
+      headers: { Authorization: `Bearer ${token}` },
+    }), envWith(db)))!
+    const body = (await res.json()) as { files: Array<{ cellCount: number; filledCount: number }> }
+    expect(body.files).toHaveLength(1)
+    expect(body.files[0]).toMatchObject({ cellCount: 50, filledCount: 0 })
+  })
+
+  it("stays pinned to the blank bridge when that lane still exists", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "tgtblank", project_id: "proj-a", role: "target", legacy_tag: "" },
+        { id: "tgtsw001", project_id: "proj-a", role: "target", legacy_tag: "sw" },
+      ],
+      files: [{
+        id: "file-gen", project_id: "proj-a", name: "Genesis",
+        cell_count: 99, filled_count: 99,
+      }],
+      file_section_progress: [
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "", lane_id: "tgtblank",
+          total_count: 11, filled_count: 7, validator_histogram: {},
+          revision: 1, updated_at: 1,
+        },
+        {
+          project_id: "proj-a", file_id: "file-gen", scope: "file", section_key: "",
+          target_lang: "sw", lane_id: "tgtsw001",
+          total_count: 11, filled_count: 1, validator_histogram: {},
+          revision: 1, updated_at: 1,
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-gen" })
+    const res = (await handleFilesReadRequest(new Request("https://w/api/v1/projects/proj-a/files", {
+      headers: { Authorization: `Bearer ${token}` },
+    }), envWith(db)))!
+    const body = (await res.json()) as { files: Array<{ cellCount: number; filledCount: number }> }
+    expect(body.files).toHaveLength(1)
+    expect(body.files[0]).toMatchObject({ cellCount: 11, filledCount: 7 })
+  })
+
   it("prefers a projected zero over stale legacy counters", async () => {
     const { db } = await makeTestDb({
       files: [{

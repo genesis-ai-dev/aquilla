@@ -203,6 +203,10 @@ function waiversEqual(
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
     if (a[i].ruleId !== b[i].ruleId) return false
+    // AQU-1740: two waivers can now share a ruleId and differ only in the
+    // finding they name, so the hash has to be part of the comparison or a
+    // re-fetch that swapped one for the other would read as "unchanged".
+    if (a[i].matchHash !== b[i].matchHash) return false
     if (a[i].reason !== b[i].reason) return false
     if (a[i].waivedAt !== b[i].waivedAt) return false
     if (a[i].waivedBy !== b[i].waivedBy) return false

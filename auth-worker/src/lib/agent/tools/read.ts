@@ -370,8 +370,18 @@ async function ruleFlags(
   const flags = new Map<string, LintHit[]>()
   const rules = rulesForLane(await loadLintRules(db, ctx.projectId), ctx.lane)
   if (rules.length === 0) return flags
+  // AQU-1740: only CELL-WIDE waivers (match_hash = '') suppress a lint hit
+  // here. `lintDraft` tests patterns with `.test()` and never collects the
+  // matched text, so it has no finding identity to compare a per-finding
+  // waiver against — and silencing the whole rule off one accepted occurrence
+  // is the failure this ticket exists to remove. Erring toward flagging keeps
+  // a genuinely new problem visible to the agent; the cost is that the one
+  // accepted occurrence may be re-reported until lintDraft returns spans.
   const { results } = await db
-    .prepare(`SELECT cell_id, rule_id FROM cell_waivers WHERE project_id = ? AND file_id = ?`)
+    .prepare(
+      `SELECT cell_id, rule_id FROM cell_waivers
+        WHERE project_id = ? AND file_id = ? AND match_hash = ''`,
+    )
     .bind(ctx.projectId, fileId)
     .all<{ cell_id: string; rule_id: string }>()
   const waived = new Map<string, Set<string>>()

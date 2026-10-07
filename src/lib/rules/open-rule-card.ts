@@ -5,14 +5,19 @@
 // second card on top. One module-level store means opening another underline
 // replaces whatever card was open.
 //
-// Keyed by (cellId, ruleId) because the toast id is derived from both, and a
-// row only renders the card while the store says that row owns it.
+// Keyed by (cellId, ruleId, matchHash) because the toast id is derived from
+// them, and a row only renders the card while the store says that row owns it.
+// AQU-1740: the hash is which FINDING of the rule was clicked, so the card's
+// waive accepts that match rather than the rule across the whole cell.
 
 import { useSyncExternalStore } from "react"
 
 export interface OpenRuleCard {
   cellId: string
   ruleId: string
+  /** AQU-1740: the clicked finding, when the blot named one. Absent means the
+   *  card acts on the rule as a whole (absence rules, keyboard entry points). */
+  matchHash?: string
 }
 
 let openCard: OpenRuleCard | null = null
@@ -34,9 +39,15 @@ function emit(): void {
 }
 
 /** Open `ruleId`'s card for `cellId`, replacing any card already open. */
-export function openRuleCard(cellId: string, ruleId: string): void {
-  if (openCard?.cellId === cellId && openCard.ruleId === ruleId) return
-  openCard = { cellId, ruleId }
+export function openRuleCard(cellId: string, ruleId: string, matchHash?: string): void {
+  if (
+    openCard?.cellId === cellId &&
+    openCard.ruleId === ruleId &&
+    openCard.matchHash === matchHash
+  ) {
+    return
+  }
+  openCard = { cellId, ruleId, ...(matchHash ? { matchHash } : {}) }
   emit()
 }
 
@@ -58,8 +69,8 @@ export function resetRuleCardForTests(): void {
   listeners.clear()
 }
 
-/** The rule id this cell has open, or null when the card belongs elsewhere. */
-export function useOpenRuleId(cellId: string): string | null {
+/** The card this cell has open, or null when it belongs to another row. */
+export function useOpenRuleCard(cellId: string): OpenRuleCard | null {
   const card = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-  return card?.cellId === cellId ? card.ruleId : null
+  return card?.cellId === cellId ? card : null
 }

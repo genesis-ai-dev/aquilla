@@ -122,7 +122,7 @@ All tables carry project_id; ALWAYS filter with :project.
 - files (id, project_id, name, kind, role, book_code, source_file_id, cell_count, filled_count, approved_count, ai_drafted_count, word_count, last_edit_at, deleted_at) — deleted_at IS NULL = active. cell_count is distinct cells. filled_count, approved_count, ai_drafted_count, and word_count sum every target lane, so they are not one lane's progress.
 - events (id, project_id, file_id, cell_id, kind, author, payload TEXT json, client_ts, server_ts ms, parent_id, server_seq) — full append-only history; payload::jsonb to query inside. Timestamps are epoch ms — render them for humans (to_timestamp(server_ts/1000)::date or similar), never raw.
 - cell_validators (project_id, file_id, cell_id, event_id, username, decided_ts) — one row per validator per cell.
-- cell_waivers (project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts).
+- cell_waivers (project_id, file_id, cell_id, rule_id, match_hash, reason, waived_by, waived_ts) — one row per waived QA finding; match_hash '' means the rule is waived across the whole cell.
 - cell_backtranslations (project_id, file_id, cell_id, target_event_id, bt_text, polished 0/1, author, created_at).
 - cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected 0/1, deleted 0/1).
 - cell_word_morph (project_id, file_id, cell_id, word_seq, surface, lemma, morph_code, strongs_h, strongs_g) — per-word morphology for original-language files.

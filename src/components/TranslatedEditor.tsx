@@ -404,8 +404,13 @@ interface TranslatedEditorProps {
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
   ruleSeverity?: Map<string, "major" | "minor">
-  waivedRuleIds?: Set<string>
-  onRuleClick?: (ruleId: string, anchor: HTMLElement) => void
+  /** AQU-1740: one key per active waiver on this cell — `waiverKey(ruleId)`
+   *  cell-wide, `waiverKey(ruleId, matchHash)` for a single accepted finding.
+   *  See `waivedKeys` in `src/lib/rules/waivers.ts`. */
+  waivedKeys?: Set<string>
+  /** AQU-1740: `matchHash` names the finding the clicked blot covers, so the
+   *  caller's rule card can act on that match alone. */
+  onRuleClick?: (ruleId: string, anchor: HTMLElement, matchHash?: string) => void
   /**
    * AQU-664: hover ("wave over") a violation blot to preview the rule
    * explanation. Fires with the blot's `data-rule-id` + the blot element on
@@ -510,7 +515,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   heldByLabel,
   infractions,
   ruleSeverity,
-  waivedRuleIds,
+  waivedKeys,
   onRuleClick,
   onRuleHover,
   onLiveTextChange,
@@ -568,7 +573,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const latestViolationStateRef = useRef({
     infractions: infractions ?? [],
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
-    waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+    waivedKeys: waivedKeys ?? new Set<string>(),
   })
 
   const latestSmartEditsRef = useRef<readonly SmartEditSuggestion[]>(smartEdits ?? [])
@@ -1671,13 +1676,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     latestViolationStateRef.current = {
       infractions: infractions ?? [],
       ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
-      waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+      waivedKeys: waivedKeys ?? new Set<string>(),
     }
     if (editor) {
       const tr = editor.state.tr.setMeta(violationPluginKey, "rebuild")
       editor.view.dispatch(tr)
     }
-  }, [editor, infractions, ruleSeverity, waivedRuleIds])
+  }, [editor, infractions, ruleSeverity, waivedKeys])
 
   useEffect(() => {
     latestSmartEditsRef.current = smartEdits ?? []
@@ -1942,7 +1947,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             smartEdit: Boolean(smartEdits?.length),
             term: Boolean(onTermChipClick),
           })
-          if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element)
+          if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element, hit.matchHash)
           else if (hit?.kind === "smartEdit") {
             const suggestion = smartEdits?.find((s) => suggestionId(s) === hit.id)
             if (suggestion) setOpenSmartEdit({ suggestion, anchor: hit.element })

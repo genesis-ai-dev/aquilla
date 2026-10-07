@@ -610,9 +610,11 @@ describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
     expect(recorded[0].sql).toContain('INSERT INTO cell_waivers')
     expect(recorded[0].sql).toContain('rule_id')
     expect(recorded[0].sql).toContain('ON CONFLICT')
-    // Bind order: project, file, cell, ruleId, reason, author, serverTs.
+    // Bind order: project, file, cell, ruleId, matchHash, reason, author, serverTs.
+    // AQU-1740: an omitted matchHash stores as '' — "the rule is waived across
+    // the whole cell", which is what every pre-0150 row means.
     expect(recorded[0].args).toEqual([
-      'proj-1', 'file-a', 'cell-1', 'no-double-space', 'intentional', 'alice', 2000,
+      'proj-1', 'file-a', 'cell-1', 'no-double-space', '', 'intentional', 'alice', 2000,
     ])
     expect(touches).toEqual(['cell_waivers'])
   })
@@ -621,10 +623,27 @@ describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('cell.waive', { ruleId: 'rule-x' }), stmts)
-    expect(recorded[0].args[4]).toBeNull()
+    expect(recorded[0].args[5]).toBeNull()
   })
 
-  it('cell.unwaive emits a DELETE keyed by rule_id', () => {
+  // AQU-1740: the primary key now carries the finding, so two findings of one
+  // rule are two rows instead of one overwriting the other.
+  it('cell.waive keys the UPSERT on match_hash when the payload names a finding', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('cell.waive', { ruleId: 'builtin:repeated-word', matchHash: 'abc123' }),
+      stmts,
+    )
+    expect(recorded[0].sql).toContain('match_hash')
+    expect(recorded[0].sql).toContain(
+      'ON CONFLICT(project_id, file_id, cell_id, rule_id, match_hash)',
+    )
+    expect(recorded[0].args[4]).toBe('abc123')
+  })
+
+  it('cell.unwaive emits a DELETE keyed by rule_id and match_hash', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     const touches = buildEventProjectionStmts(
@@ -635,8 +654,21 @@ describe('buildEventProjectionStmts — cell.waive / cell.unwaive', () => {
     expect(stmts).toHaveLength(1)
     expect(recorded[0].sql).toContain('DELETE FROM cell_waivers')
     expect(recorded[0].sql).toContain('rule_id = ?')
-    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'no-double-space'])
+    expect(recorded[0].sql).toContain('match_hash = ?')
+    // '' — a cell-wide unwaive must not delete the per-finding rows.
+    expect(recorded[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'no-double-space', ''])
     expect(touches).toEqual(['cell_waivers'])
+  })
+
+  it('cell.unwaive deletes exactly the named finding', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('cell.unwaive', { ruleId: 'builtin:repeated-word', matchHash: 'abc123' }),
+      stmts,
+    )
+    expect(recorded[0].args[4]).toBe('abc123')
   })
 
   it('throws when fileId or cellId is missing', () => {

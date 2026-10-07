@@ -107,6 +107,7 @@ export type BuiltinCheckId =
   | "unpaired-symbols"
   | "abbreviation-mismatch"
   | "capitalization"
+  | "footnote-quote-mismatch"
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean

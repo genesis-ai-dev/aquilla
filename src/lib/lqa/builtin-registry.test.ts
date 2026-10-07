@@ -15,6 +15,7 @@ describe("builtin-registry", () => {
       "unpaired-symbols",
       "abbreviation-mismatch",
       "capitalization",
+      "footnote-quote-mismatch",
     ])
   })
 

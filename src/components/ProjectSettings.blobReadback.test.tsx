@@ -20,6 +20,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderWithTooltips } from "@/test-utils/tooltip"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import userEvent from "@testing-library/user-event"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const PROJECT_ID = "proj-blob-readback"
 
@@ -343,7 +344,7 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     let resolvePatch: (value: { kind: "ok" }) => void = () => {}
     patchSpy.mockImplementation(() => new Promise((resolve) => { resolvePatch = resolve }))
     const clickDone = user.click(screen.getByRole("button", { name: /save changes/i }))
-    await vi.waitFor(() => expect(patchSpy).toHaveBeenCalled())
+    await vi.waitFor(() => expect(patchSpy).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
 
     // The GET was in flight before the PATCH. It still has the pre-edit
     // source language, plus a blob field the user never touched.

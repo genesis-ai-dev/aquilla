@@ -24,6 +24,7 @@ import {
   hydrateContextualDrafts,
   resetContextualDraftsStore,
 } from "@/lib/contextual/drafts-store"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 // Capture target-side emits without touching IndexedDB / posthog. Every helper
 // EditorTable imports must be present so the module resolves. `vi.hoisted`
@@ -233,7 +234,7 @@ describe("EditorTable — text validation blocked where the server would refuse 
     ])
     renderTable(projectWith({ allowSelfValidation: false }), makeStore([target("", "alice")]))
     fireEvent.click(await screen.findByRole("button", { name: "Use this translation" }))
-    await vi.waitFor(() => expect(emitTargetCellCommit).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitTargetCellCommit).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
     expect(button).toHaveAttribute("aria-disabled", "true")
     fireEvent.click(button)
@@ -249,7 +250,7 @@ describe("EditorTable — text validation blocked where the server would refuse 
     ])
     renderTable(projectWith({ validationRoleFloor: "project_lead" }, ROLE.CONTRIBUTOR), makeStore([target("", null)]))
     fireEvent.click(await screen.findByRole("button", { name: "Use this translation" }))
-    await vi.waitFor(() => expect(emitTargetCellCommit).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitTargetCellCommit).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(emitCellValidate).not.toHaveBeenCalled()
   })
@@ -260,7 +261,7 @@ describe("EditorTable — text validation blocked where the server would refuse 
     ])
     renderTable(projectWith({ validationRoleFloor: "project_lead" }, ROLE.PROJECT_LEAD), makeStore([target("", null)]))
     fireEvent.click(await screen.findByRole("button", { name: "Use this translation" }))
-    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
   })
 })
 

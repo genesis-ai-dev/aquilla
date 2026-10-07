@@ -33,6 +33,7 @@ import {
   setAudioQualityPref,
 } from "@/lib/store/audio-quality-pref"
 import { resetLosslessSiblingMemoForTests } from "./lossless-sibling"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 class FakeAudio {
   static created: FakeAudio[] = []
@@ -105,7 +106,7 @@ describe("play-queue quality preference", () => {
 
   it("default (compressed): plays the .webm primary and never probes", async () => {
     startQueue({ cells: [generatedCell("c1")], projectId: "p1", session }, 0)
-    await vi.waitFor(() => expect(startedSrc().some((s) => s.includes(".webm"))).toBe(true))
+    await vi.waitFor(() => expect(startedSrc().some((s) => s.includes(".webm"))).toBe(true), { timeout: STALL_WATCHDOG_MS })
     expect(probeCellAudioPresent).not.toHaveBeenCalled()
   })
 
@@ -113,7 +114,7 @@ describe("play-queue quality preference", () => {
     setAudioQualityPref("original")
     probeCellAudioPresent.mockResolvedValue("present")
     startQueue({ cells: [generatedCell("c1")], projectId: "p1", session }, 0)
-    await vi.waitFor(() => expect(startedSrc().some((s) => s.includes(".wav"))).toBe(true))
+    await vi.waitFor(() => expect(startedSrc().some((s) => s.includes(".wav"))).toBe(true), { timeout: STALL_WATCHDOG_MS })
     expect(startedSrc().some((s) => s.includes(".webm"))).toBe(false)
     expect(probeCellAudioPresent).toHaveBeenCalledWith(expect.objectContaining({ ext: "wav" }))
   })
@@ -122,14 +123,14 @@ describe("play-queue quality preference", () => {
     setAudioQualityPref("original")
     probeCellAudioPresent.mockResolvedValue("missing")
     startQueue({ cells: [generatedCell("c1")], projectId: "p1", session }, 0)
-    await vi.waitFor(() => expect(startedSrc().some((s) => s.includes(".webm"))).toBe(true))
+    await vi.waitFor(() => expect(startedSrc().some((s) => s.includes(".webm"))).toBe(true), { timeout: STALL_WATCHDOG_MS })
     expect(startedSrc().some((s) => s.includes(".wav"))).toBe(false)
   })
 
   it("original + a MIC take: never probes, plays the take as-is", async () => {
     setAudioQualityPref("original")
     startQueue({ cells: [takeCell("c1")], projectId: "p1", session }, 0)
-    await vi.waitFor(() => expect(startedSrc().some((s) => s.includes(".webm"))).toBe(true))
+    await vi.waitFor(() => expect(startedSrc().some((s) => s.includes(".webm"))).toBe(true), { timeout: STALL_WATCHDOG_MS })
     expect(probeCellAudioPresent).not.toHaveBeenCalled()
   })
 })

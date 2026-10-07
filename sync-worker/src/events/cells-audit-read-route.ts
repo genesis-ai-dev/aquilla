@@ -87,7 +87,7 @@ export async function handleCellsAuditReadRequest(
 
   // DELETE-on-unwaive: every row present is an active waiver.
   const waiversSql = `
-    SELECT cell_id, rule_id, reason, waived_by, waived_ts
+    SELECT cell_id, rule_id, match_hash, reason, waived_by, waived_ts
     FROM cell_waivers
     WHERE project_id = ? AND file_id = ?${scopeSql}
   `
@@ -112,6 +112,8 @@ export async function handleCellsAuditReadRequest(
   interface WaiverRow {
     cell_id: string
     rule_id: string
+    /** AQU-1740: the waived finding's hash; '' = the rule is waived cell-wide. */
+    match_hash: string | null
     reason: string | null
     waived_by: string | null
     waived_ts: number
@@ -151,7 +153,7 @@ export async function handleCellsAuditReadRequest(
   // server clock in ms, surfaced here as an ISO timestamp.
   const waiversByCell = new Map<
     string,
-    { ruleId: string; reason?: string; waivedAt: string; waivedBy?: string }[]
+    { ruleId: string; matchHash?: string; reason?: string; waivedAt: string; waivedBy?: string }[]
   >()
   for (const w of waiversRes.results) {
     let list = waiversByCell.get(w.cell_id)
@@ -161,6 +163,10 @@ export async function handleCellsAuditReadRequest(
     }
     list.push({
       ruleId: w.rule_id,
+      // AQU-1740: '' on the wire would read as a per-finding waiver of the
+      // empty string, so the cell-wide case stays an ABSENT field — the same
+      // shape the client used before the column existed.
+      ...(w.match_hash ? { matchHash: w.match_hash } : {}),
       ...(w.reason ? { reason: w.reason } : {}),
       waivedAt: new Date(w.waived_ts).toISOString(),
       ...(w.waived_by ? { waivedBy: w.waived_by } : {}),

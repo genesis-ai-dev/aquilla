@@ -166,6 +166,14 @@ export interface PromotionRequest {
 
 export interface RuleWaiver {
   ruleId: string
+  /**
+   * AQU-1740: when present, this waiver dismisses only the ONE finding whose
+   * matched text hashes to this value (`spanMatchHash` in
+   * `src/lib/rules/match-hash.ts`); other matches of the same rule on the same
+   * cell stay active. Absent = the rule is waived on the whole cell, which is
+   * what every waiver stored before AQU-1740 means.
+   */
+  matchHash?: string
   /** Optional human-entered reason. */
   reason?: string
   /** ISO timestamp. */

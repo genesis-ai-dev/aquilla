@@ -205,8 +205,13 @@ import {
   type TextDirection,
   resolveTextDirection,
 } from "@/lib/text-direction"
-import { partitionInfractions } from "@/lib/rules/waivers"
-import { closeRuleCard, openRuleCard, useOpenRuleId } from "@/lib/rules/open-rule-card"
+import {
+  partitionInfractions,
+  isSpanWaived,
+  spanMatchHash,
+  waivedKeys as waivedKeysOf,
+} from "@/lib/rules/waivers"
+import { closeRuleCard, openRuleCard, useOpenRuleCard } from "@/lib/rules/open-rule-card"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
@@ -5198,7 +5203,8 @@ function EditorRow({
   // AQU-1634: the rule card is one app-wide surface, so its open state lives in
   // a shared store rather than per-row state — opening another row's underline
   // replaces the open card instead of stacking a second one.
-  const openRuleId = useOpenRuleId(cell.id)
+  const openCard = useOpenRuleCard(cell.id)
+  const openRuleId = openCard?.ruleId ?? null
   // Teardown (virtualisation, lane switch, file change) closes this row's card,
   // matching the per-row lifetime the card had before the store.
   useEffect(() => () => closeRuleCard(cell.id), [cell.id])
@@ -5541,10 +5547,9 @@ function EditorRow({
     return m
   }, [ruleMap])
 
-  const waivedRuleIds = useMemo(
-    () => new Set((cell.waivers ?? []).map((w) => w.ruleId)),
-    [cell.waivers],
-  )
+  // AQU-1740: keyed by (ruleId, matchHash) so a waiver on ONE finding only
+  // greys that finding's blot/highlight — see `waivedKeys` / `isSpanWaived`.
+  const waivedKeys = useMemo(() => waivedKeysOf(cell.waivers), [cell.waivers])
 
   // Stable identity across renders (cellInfractions/waivedInfractions are
   // themselves memoized in MemoizedRow) so TranslatedEditor's violation-
@@ -5579,7 +5584,7 @@ function EditorRow({
     [mergedInfractions, liveTermInfractions],
   )
 
-  const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
+  const handleWaive = useCallback((input: { ruleId: string; matchHash?: string; reason?: string }) => {
     closeRuleCard(cell.id)
     if (!project.id) return
     // Emits a `cell.waive` event into the outbox. The pending-outbox overlay
@@ -5591,6 +5596,7 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       ruleId: input.ruleId,
+      ...(input.matchHash ? { matchHash: input.matchHash } : {}),
       ...(input.reason ? { reason: input.reason } : {}),
       ...(activeLane ? { targetLang: activeLane } : {}),
       author: username,
@@ -5604,7 +5610,7 @@ function EditorRow({
     })
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
-  const handleUnwaive = useCallback((ruleId: string) => {
+  const handleUnwaive = useCallback((ruleId: string, matchHash?: string) => {
     closeRuleCard(cell.id)
     if (!project.id) return
     void emitCellUnwaive({
@@ -5612,6 +5618,7 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       ruleId,
+      ...(matchHash ? { matchHash } : {}),
       ...(activeLane ? { targetLang: activeLane } : {}),
       author: username,
     }).then(() => {
@@ -5627,35 +5634,39 @@ function EditorRow({
     const out: RangeHighlight[] = []
     const all = [...cellInfractions, ...waivedInfractions]
     for (const inf of all) {
-      const waived = waivedRuleIds.has(inf.ruleId)
       const severity = ruleSeverity.get(inf.ruleId) ?? "major"
       for (const span of inf.spans) {
         if (span.side !== "source") continue
+        const waived = isSpanWaived(waivedKeys, inf.ruleId, span)
+        const matchHash = spanMatchHash(span)
         out.push({
           start: span.start, end: span.end, ruleId: inf.ruleId,
+          ...(matchHash ? { matchHash } : {}),
           kind: waived ? "violation-waived" : (severity === "major" ? "violation-major" : "violation-minor"),
         })
       }
     }
     return out
-  }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+  }, [cellInfractions, waivedInfractions, waivedKeys, ruleSeverity])
 
   const targetRanges = useMemo<RangeHighlight[]>(() => {
     const out: RangeHighlight[] = []
     const all = [...cellInfractions, ...waivedInfractions]
     for (const inf of all) {
-      const waived = waivedRuleIds.has(inf.ruleId)
       const severity = ruleSeverity.get(inf.ruleId) ?? "major"
       for (const span of inf.spans) {
         if (span.side !== "target") continue
+        const waived = isSpanWaived(waivedKeys, inf.ruleId, span)
+        const matchHash = spanMatchHash(span)
         out.push({
           start: span.start, end: span.end, ruleId: inf.ruleId,
+          ...(matchHash ? { matchHash } : {}),
           kind: waived ? "violation-waived" : (severity === "major" ? "violation-major" : "violation-minor"),
         })
       }
     }
     return out
-  }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+  }, [cellInfractions, waivedInfractions, waivedKeys, ruleSeverity])
   const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // AQU-1484: the commit path below validates a human edit by itself, and that
@@ -6852,9 +6863,11 @@ function EditorRow({
   // Inline rule click → open the standard bottom-right violation toast. Keep
   // the row collapsed and clear the transient hover preview so one gesture
   // produces one violation surface.
-  const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement) => {
+  const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement, matchHash?: string) => {
     setHoveredRule(null)
-    openRuleCard(cell.id, ruleId)
+    // AQU-1740: carry the clicked finding so the card's waive accepts that
+    // match, not every match of the rule in this cell.
+    openRuleCard(cell.id, ruleId, matchHash)
   }, [cell.id])
 
   // Same card, opened from the cell's Issues tab instead of an inline blot.
@@ -7770,7 +7783,7 @@ function EditorRow({
                     heldByLabel={lockHolderLabel}
                     infractions={blotInfractions}
                     ruleSeverity={ruleSeverity}
-                    waivedRuleIds={waivedRuleIds}
+                    waivedKeys={waivedKeys}
                     onRuleClick={openInlineRule}
                     onRuleHover={handleRuleHover}
                     onLiveTextChange={setLiveTargetText}
@@ -8599,9 +8612,20 @@ function EditorRow({
       )}
 
       {openRuleId && (() => {
-        const inf = [...cellInfractions, ...waivedInfractions].find(
+        // AQU-1740: `partitionInfractions` can split one rule across an active
+        // and a waived infraction, so match on the CLICKED finding first — a
+        // blot the reviewer already accepted must open its waived entry (which
+        // offers "un-waive"), not the active one next to it.
+        const candidates = [...cellInfractions, ...waivedInfractions].filter(
           (i) => i.ruleId === openRuleId,
         )
+        const openMatchHash = openCard?.matchHash
+        const inf =
+          (openMatchHash
+            ? candidates.find((i) =>
+                i.spans.some((sp) => spanMatchHash(sp) === openMatchHash),
+              )
+            : undefined) ?? candidates[0]
         const rule = ruleMap.get(openRuleId)
         if (!inf || !rule) return null
         return (
@@ -8611,6 +8635,7 @@ function EditorRow({
               if (!next) closeRuleCard(cell.id)
             }}
             infraction={inf}
+            matchHash={openMatchHash}
             ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
             onOpenRule={(ruleId) => {

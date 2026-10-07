@@ -1583,20 +1583,26 @@ export function buildEventProjectionStmts(
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
       }
 
-      // DELETE-on-unwaive (mirrors cell_validators): a row exists iff the rule
-      // is currently waived on this cell. `cell.waive` upserts one row per
-      // (cell, rule); `cell.unwaive` deletes it. The waived_ts guard keeps an
-      // out-of-order replay from clobbering a newer decision. Waivers do not
-      // touch cells.event_id or the file counters — they only suppress a QA
-      // blot in the client, so no `cells` / `files` recompute here.
+      // DELETE-on-unwaive (mirrors cell_validators): a row exists iff that
+      // finding is currently waived on this cell. `cell.waive` upserts one row
+      // per (cell, rule, matchHash); `cell.unwaive` deletes it. The waived_ts
+      // guard keeps an out-of-order replay from clobbering a newer decision.
+      // Waivers do not touch cells.event_id or the file counters — they only
+      // suppress a QA blot in the client, so no `cells` / `files` recompute.
+      //
+      // AQU-1740: an absent `matchHash` stores as `''` — "no finding named",
+      // i.e. the rule is waived across the whole cell. That is both the
+      // pre-AQU-1740 meaning of every stored row and what an un-updated client
+      // still emits, so old events replay to the same state they always did.
+      const matchHash = p.matchHash ?? ''
       if (event.kind === 'cell.waive') {
         stmts.push(
           db
             .prepare(
               `INSERT INTO cell_waivers (
-                project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)
-              ON CONFLICT(project_id, file_id, cell_id, rule_id)
+                project_id, file_id, cell_id, rule_id, match_hash, reason, waived_by, waived_ts
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(project_id, file_id, cell_id, rule_id, match_hash)
               DO UPDATE SET
                 reason     = excluded.reason,
                 waived_by  = excluded.waived_by,
@@ -1608,6 +1614,7 @@ export function buildEventProjectionStmts(
               event.fileId,
               event.cellId,
               p.ruleId,
+              matchHash,
               p.reason ?? null,
               event.author,
               event.serverTs,
@@ -1618,9 +1625,9 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `DELETE FROM cell_waivers
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND rule_id = ?`,
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND rule_id = ? AND match_hash = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, p.ruleId),
+            .bind(event.projectId, event.fileId, event.cellId, p.ruleId, matchHash),
         )
       }
 

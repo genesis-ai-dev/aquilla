@@ -16,6 +16,9 @@ export interface RangeHighlight {
   end: number
   kind: "violation-major" | "violation-minor" | "violation-waived"
   ruleId: string
+  /** AQU-1740: the finding this underline covers, when it has one — lets a
+   *  click on it waive that match rather than the whole rule. */
+  matchHash?: string
 }
 
 /** The more severe finding sits innermost, closest to the text. */
@@ -53,7 +56,7 @@ interface HighlightedTextProps {
   showEvidence?: boolean
   /** Called with the rule id and the span element itself, so callers can
    *  anchor popovers to the violation glyph. Matches `TranslatedEditor.onRuleClick`. */
-  onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
+  onRangeClick?: (ruleId: string, anchor: HTMLElement, matchHash?: string) => void
 }
 
 export function HighlightedText({
@@ -104,7 +107,7 @@ function RangeStack({
           // this click owned by the innermost span so one gesture never
           // opens two popovers (AQU-1006 review regression).
           e.stopPropagation()
-          onRangeClick(range.ruleId, e.currentTarget)
+          onRangeClick(range.ruleId, e.currentTarget, range.matchHash)
         } : undefined}
         className={rangeSpanClass(range, depth)}
         data-rule-id={range.ruleId}

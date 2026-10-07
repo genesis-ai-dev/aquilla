@@ -48,6 +48,8 @@ export interface WaiverRow {
   file_id: string
   cell_id: string
   rule_id: string
+  /** AQU-1740: the waived finding; '' = the rule is waived cell-wide. */
+  match_hash: string
   reason: string | null
   waived_by: string
   waived_ts: number
@@ -528,7 +530,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // ── GET /cells/audit-stats — waivers select ────────────────────────
     // DELETE-on-unwaive: every row present is an active waiver.
     if (
-      /^SELECT cell_id, rule_id, reason, waived_by, waived_ts FROM cell_waivers WHERE project_id = \? AND file_id = \?$/.test(
+      /^SELECT cell_id, rule_id, match_hash, reason, waived_by, waived_ts FROM cell_waivers WHERE project_id = \? AND file_id = \?$/.test(
         normalized,
       )
     ) {
@@ -539,6 +541,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
         .map((w) => ({
           cell_id: w.cell_id,
           rule_id: w.rule_id,
+          match_hash: w.match_hash,
           reason: w.reason,
           waived_by: w.waived_by,
           waived_ts: w.waived_ts,
@@ -1169,23 +1172,25 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
-    // ── INSERT cell_waivers (UPSERT — cell.waive, 0017) ────────────────
+    // ── INSERT cell_waivers (UPSERT — cell.waive, 0017; match_hash in 0150) ──
     if (/^INSERT INTO cell_waivers/.test(normalized)) {
       const row: WaiverRow = {
         project_id: args[0] as string,
         file_id: args[1] as string,
         cell_id: args[2] as string,
         rule_id: args[3] as string,
-        reason: (args[4] as string | null) ?? null,
-        waived_by: args[5] as string,
-        waived_ts: args[6] as number,
+        match_hash: args[4] as string,
+        reason: (args[5] as string | null) ?? null,
+        waived_by: args[6] as string,
+        waived_ts: args[7] as number,
       }
       const idx = db.cell_waivers.findIndex(
         (w) =>
           w.project_id === row.project_id &&
           w.file_id === row.file_id &&
           w.cell_id === row.cell_id &&
-          w.rule_id === row.rule_id,
+          w.rule_id === row.rule_id &&
+          w.match_hash === row.match_hash,
       )
       if (idx === -1) {
         db.cell_waivers.push(row)
@@ -1197,7 +1202,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
 
     // ── DELETE cell_waivers (cell.unwaive, 0017) ───────────────────────
     if (
-      /^DELETE FROM cell_waivers WHERE project_id = \? AND file_id = \? AND cell_id = \? AND rule_id = \?$/.test(
+      /^DELETE FROM cell_waivers WHERE project_id = \? AND file_id = \? AND cell_id = \? AND rule_id = \? AND match_hash = \?$/.test(
         normalized,
       )
     ) {
@@ -1205,8 +1210,16 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const fid = args[1] as string
       const cid = args[2] as string
       const rid = args[3] as string
+      const mh = args[4] as string
       db.cell_waivers = db.cell_waivers.filter(
-        (w) => !(w.project_id === pid && w.file_id === fid && w.cell_id === cid && w.rule_id === rid),
+        (w) =>
+          !(
+            w.project_id === pid &&
+            w.file_id === fid &&
+            w.cell_id === cid &&
+            w.rule_id === rid &&
+            w.match_hash === mh
+          ),
       )
       return []
     }

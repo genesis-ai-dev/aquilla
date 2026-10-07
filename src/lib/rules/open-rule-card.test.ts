@@ -12,10 +12,15 @@ import {
   closeRuleCard,
   openRuleCard,
   resetRuleCardForTests,
-  useOpenRuleId,
+  useOpenRuleCard,
 } from "./open-rule-card"
 
 beforeEach(() => resetRuleCardForTests())
+
+/** The store now hands back the whole card (AQU-1740 added the clicked
+ *  finding's hash); these cases only care which rule is open. */
+const useOpenRuleId = (cellId: string): string | null =>
+  useOpenRuleCard(cellId)?.ruleId ?? null
 
 describe("open-rule-card", () => {
   it("reports the open rule only to the cell that owns the card", () => {
@@ -100,5 +105,46 @@ describe("open-rule-card", () => {
     closeRuleCard("cell-1")
     hook.rerender()
     expect(hook.result.current).toBeNull()
+  })
+
+  // AQU-1740: the card carries WHICH finding of the rule was clicked, so its
+  // waive accepts that match instead of the rule across the whole cell.
+  it("carries the clicked finding's hash, and re-keys on a second finding of the same rule", () => {
+    const hook = renderHook(() => useOpenRuleCard("cell-1"))
+
+    openRuleCard("cell-1", "r1", "hash-a")
+    hook.rerender()
+    expect(hook.result.current).toEqual({ cellId: "cell-1", ruleId: "r1", matchHash: "hash-a" })
+
+    openRuleCard("cell-1", "r1", "hash-b")
+    hook.rerender()
+    expect(hook.result.current?.matchHash).toBe("hash-b")
+  })
+
+  it("omits the hash for a card opened without one", () => {
+    const hook = renderHook(() => useOpenRuleCard("cell-1"))
+    openRuleCard("cell-1", "r1")
+    hook.rerender()
+    expect(hook.result.current).toEqual({ cellId: "cell-1", ruleId: "r1" })
+  })
+
+  // The no-op guard above compares the whole card, so the hash has to be part
+  // of it: same rule, same cell, DIFFERENT match is a different card, and
+  // treating it as a no-op would leave the first finding's waive gesture open.
+  it("re-opening the same rule on a different finding is not a no-op", () => {
+    const hook = renderHook(() => useOpenRuleCard("cell-1"))
+
+    openRuleCard("cell-1", "r1", "hash-a")
+    hook.rerender()
+    expect(hook.result.current?.matchHash).toBe("hash-a")
+
+    openRuleCard("cell-1", "r1", "hash-b")
+    hook.rerender()
+    expect(hook.result.current?.matchHash).toBe("hash-b")
+
+    // ...and dropping back to the cell-wide card is a change too.
+    openRuleCard("cell-1", "r1")
+    hook.rerender()
+    expect(hook.result.current?.matchHash).toBeUndefined()
   })
 })

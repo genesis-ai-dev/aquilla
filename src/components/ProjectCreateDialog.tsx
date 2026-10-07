@@ -36,10 +36,12 @@ import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { ProjectDestinationPicker, type Destination } from "@/components/ProjectDestinationPicker"
 import { ProjectTeamsPicker, teamsRequired } from "@/components/ProjectTeamsPicker"
 import {
+  createProjectLane,
   fetchProjectSettings,
-  patchProjectSettings,
-  PROJECT_SETTINGS_VERSION_INITIAL,
+  renameProjectLane,
 } from "@/lib/sync/project-settings"
+import { laneLanguage } from "@/lib/lanes/lane-display"
+import { isPrimaryRegistryLane } from "@/lib/lanes/registry-lanes"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
 import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
 import { InheritedSettingsChoice } from "@/components/ProjectSettings/InheritedSettingsChoice"
@@ -412,24 +414,29 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
             teamIds: destination.orgId != null ? teamIds : undefined,
           })
 
-          // One atomic settings write at version 0. The HTTP PATCH handler
-          // replaces the whole blob (no per-key merge), so languages and lanes
-          // must travel together — a second PATCH with only targetLanes would
-          // silently wipe sourceLanguage/targetLanguage (AQU-1250).
+          // AQU-1594: languages are lane rows, not project-level settings keys.
+          // The create already inserted a source lane. Name it, then add each
+          // requested target lane. The first target's legacy tag is its language.
           try {
-            const result = await patchProjectSettings(
-              jwt,
-              project.id,
-              {
-                sourceLanguage: project.sourceLanguage,
-                targetLanguage: project.targetLanguage,
-                targetLanes: completeTargetLanes(project.targetLanguage, extrasToApply),
-              },
-              PROJECT_SETTINGS_VERSION_INITIAL,
-            )
-            if (result.kind !== "ok") extraLanguagesFailed = true
+            const current = await fetchProjectSettings(jwt, project.id)
+            const sourceLane = current?.lanes?.find((lane) => lane.role === "source")
+            if (!sourceLane) {
+              extraLanguagesFailed = true
+            } else if (project.sourceLanguage) {
+              const renamed = await renameProjectLane(jwt, project.id, sourceLane.id, {
+                language: project.sourceLanguage,
+              })
+              if (renamed.kind !== "ok") extraLanguagesFailed = true
+            }
+            for (const language of completeTargetLanes(project.targetLanguage, extrasToApply)) {
+              const created = await createProjectLane(jwt, project.id, { name: "", language })
+              if (created.kind !== "ok") {
+                extraLanguagesFailed = true
+                break
+              }
+            }
           } catch (err) {
-            console.warn("[project-create] settings write failed (non-fatal):", err)
+            console.warn("[project-create] lane write failed (non-fatal):", err)
             extraLanguagesFailed = true
           }
 
@@ -1315,19 +1322,24 @@ function AddAsLaneRecommendation({
     onBusyChange(true)
     try {
       const current = await fetchProjectSettings(jwt, project.id)
-      const existingLanes = current?.settings.targetLanes ?? []
-      const lower = trimmed.toLowerCase()
-      if (existingLanes.some((l) => l.toLowerCase() === lower)) {
+      const existing = (current?.lanes ?? []).filter((lane) => lane.role === "target")
+      const known = existing
+        .map((lane) =>
+          laneLanguage(lane, {
+            settings: current?.settings,
+            role: "target",
+            legacyTag: lane.legacyTag,
+          }),
+        )
+        .filter((language) => language.length > 0)
+      const registry = known.length > 0 ? known : (current?.settings.targetLanes ?? [])
+      const already = registry.some((language) => isPrimaryRegistryLane(trimmed, language))
+      if (already) {
         fail(`"${trimmed}" is already a lane on ${project.name}.`)
         return
       }
 
-      const result = await patchProjectSettings(
-        jwt,
-        project.id,
-        { targetLanes: [...existingLanes, trimmed] },
-        current?.version ?? 0,
-      )
+      const result = await createProjectLane(jwt, project.id, { name: "", language: trimmed })
       if (result.kind === "ok") {
         setStatus("success")
         setMessage(`Added "${trimmed}" as a lane on ${project.name}. Open that project to start translating.`)
@@ -1341,11 +1353,11 @@ function AddAsLaneRecommendation({
         closeTimerRef.current = setTimeout(onAdded, 900)
         return
       }
-      if (result.kind === "conflict") {
-        fail("Someone else updated that project's settings just now. Try again.")
+      if (result.kind === "duplicate") {
+        fail(`"${trimmed}" is already a lane on ${project.name}.`)
         return
       }
-      if (result.kind === "forbidden") {
+      if (result.kind === "error" && result.message.includes("(403)")) {
         fail(`You need maintainer access on ${project.name} to add a lane there.`)
         return
       }

@@ -16,10 +16,12 @@
 // either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
+import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import {
   ensureProjectLaneStmts,
   listProjectLanes,
   retryingLaneIdCollision,
+  type AskedLane,
   type ProjectLaneRecord,
 } from "./lanes"
 
@@ -49,26 +51,20 @@ export interface CreateProjectInput {
    */
   writeCreatorMembership?: boolean
   /**
-   * AQU-1223: seed `settings.sourceLanguage` / `settings.targetLanguage` at
-   * creation, atomically with the project row.
+   * AQU-1594: the language pair becomes lane rows in the same batch as the
+   * project. It is NOT written into `project_settings` — new projects have no
+   * project-level language keys. Omit both and the project still gets its
+   * source lane (every project has one) and no target lane.
    *
-   * This is the same end state the UI's create flow reaches by calling
-   * `patchProjectSettings(..., version 0)` immediately after the create — the
-   * seeded row lands at **version 1**, so a client that reads the version back
-   * and patches on top of it behaves identically either way. Omit both (the
-   * auth-worker route does) and no settings row is written at all, leaving the
-   * lazy first-write path in `updateProjectSettingsShared` exactly as it was.
-   *
-   * Only the language pair is seedable here. Every other settings key needs the
-   * version guard and per-key role floors that PatchSettings owns, which a
-   * create — writing before any project role exists to resolve — cannot honor.
+   * The first target lane's `legacy_tag` is the language string, not `''`.
    */
   settingsSeed?: { sourceLanguage?: string; targetLanguage?: string }
+  /**
+   * Target lanes beyond the single `settingsSeed.targetLanguage`, each with
+   * the language the user typed and an optional display name. Same batch.
+   */
+  targetLanes?: ReadonlyArray<{ language: string; name?: string | null }>
 }
-
-/** Version a seeded settings row lands at, matching the UI's create-then-patch
- *  (`patchProjectSettings(..., 0)` → version 1). */
-const SEEDED_SETTINGS_VERSION = 1
 
 /**
  * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and,
@@ -78,12 +74,14 @@ const SEEDED_SETTINGS_VERSION = 1
  *
  * Throws on any DB error; the caller owns the error → HTTP-status mapping (the
  * auth-worker route wraps this in try/catch and returns 500 unchanged).
+ *
+ * AQU-1594: the same batch writes the source lane and each requested target
+ * lane. No project-level language keys are written.
  */
 export async function createProjectShared(
   db: AquillaDb,
   input: CreateProjectInput,
 ): Promise<{ inserted: boolean }> {
-  const seed = seededSettings(input.settingsSeed)
   // Lane ids are minted inside the attempt. A uq_lanes_id collision rolls the
   // whole batch back, so repeating it does not insert the project twice.
   return retryingLaneIdCollision(async () => {
@@ -112,52 +110,37 @@ export async function createProjectShared(
       )
     }
 
-    if (seed != null) {
-      // Same batch as the project insert: a create that reported the languages
-      // back to its caller must never leave a project without them (AQU-1223).
-      // DO NOTHING on conflict so an idempotent retry — or a settings row that
-      // somehow already exists for this id — never rolls a live blob backwards.
-      stmts.push(
-        db
-          .prepare(
-            `INSERT INTO project_settings (project_id, settings, version, updated_by)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(project_id) DO NOTHING`,
-          )
-          .bind(input.projectId, JSON.stringify(seed), SEEDED_SETTINGS_VERSION, input.createdBy),
-      )
-    }
-
-    // AQU-1240 slice 6: every new project gets a source lane + a default target
-    // lane in the same batch as the project row, so the first cell write can
-    // resolve lane_id. Languages from settingsSeed name the rows; otherwise they
-    // land as placeholders and a later settings PATCH promotes the names.
     stmts.push(
-      ...ensureProjectLaneStmts(db, input.projectId, { settings: seed }),
+      ...ensureProjectLaneStmts(db, input.projectId, { lanes: lanesForNewProject(input) }),
     )
 
-    if (stmts.length > 1) {
-      const [projectResult] = await db.batch(stmts)
-      return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
-    }
-
-    const result = await projectStmt.run()
-    return { inserted: (result.meta?.changes ?? 0) > 0 }
+    const [projectResult] = await db.batch(stmts)
+    return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
   })
 }
 
-/** Build the seeded settings blob, or null when there is nothing to seed.
- *  Absent keys stay absent — a caller that sends neither language gets no
- *  settings row at all, which is the pre-AQU-1223 behavior for every caller. */
-function seededSettings(
-  seed: CreateProjectInput["settingsSeed"],
-): Record<string, unknown> | null {
-  if (seed == null) return null
-  const settings: Record<string, unknown> = {}
-  if (seed.sourceLanguage !== undefined) settings.sourceLanguage = seed.sourceLanguage
-  if (seed.targetLanguage !== undefined) settings.targetLanguage = seed.targetLanguage
-  if (Object.keys(settings).length === 0) return null
-  return normalizeSettings(settings)
+/** Source lane plus each requested target. The first target's tag is its language. */
+function lanesForNewProject(input: CreateProjectInput): AskedLane[] {
+  const source = typeof input.settingsSeed?.sourceLanguage === "string"
+    ? input.settingsSeed.sourceLanguage.trim()
+    : ""
+  const lanes: AskedLane[] = [{ role: "source", language: source }]
+  const addTarget = (language: string, name?: string | null) => {
+    const trimmed = language.trim()
+    if (!trimmed) return
+    if (lanes.some((lane) => lane.role === "target" && isPrimaryRegistryLane(trimmed, lane.language))) return
+    lanes.push({
+      role: "target",
+      language: trimmed,
+      name: name?.trim() ? name.trim() : null,
+      legacyTag: trimmed,
+    })
+  }
+  if (typeof input.settingsSeed?.targetLanguage === "string") {
+    addTarget(input.settingsSeed.targetLanguage)
+  }
+  for (const target of input.targetLanes ?? []) addTarget(target.language, target.name)
+  return lanes
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -463,7 +446,10 @@ export async function updateProjectSettingsShared(
   const thresholdChanged = oldThreshold !== newThreshold
   // Lane ids are minted inside the attempt. The settings write is in the same
   // transaction, so a uq_lanes_id collision rolls the version change back too.
-  // The existing lane rows stop a stale targetLanes entry minting a lane (AQU-1585).
+  // Passing the existing lane rows stops a stale targetLanes entry minting a
+  // second lane for one that already exists (AQU-1585). A language named here
+  // that has no row yet still becomes a lane — PatchSettings is how the
+  // external API registers one until AQU-1615.
   const batchWithLanes = (head: AquillaStatement[]) =>
     retryingLaneIdCollision(() =>
       db.batch([

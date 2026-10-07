@@ -4,16 +4,23 @@
 // projects and Codex imports therefore have to create the rows *before* the
 // first cell write, or lane_id stays NULL until the backfill daemon runs.
 //
-// Call sites share this helper so create / settings PATCH / migrate-project /
-// migrate-settings / migrate-ingest cannot drift:
-//   * source lane + default target lane (`legacy_tag = ''`) always exist
-//   * extra target lanes come from `targetLanes` and from data tags
+// Call sites share this helper so create / migrate-project / migrate-settings /
+// migrate-ingest cannot drift:
+//   * it creates only the lanes the caller asked for
+//   * it does NOT invent a `legacy_tag ''` target lane — that tag is only the
+//     bridge for old events, created when those events (or an explicit ask)
+//     name it, and never deleted or rewritten
+//   * a new target lane's legacy tag is the language when that tag is free,
+//     never ''
 //   * INSERTs are idempotent (partial unique indexes from 0096)
 //   * a minted id that collides on uq_lanes_id is retried with a new id
-//   * a later named settings write may fill in a language that was blank, but
-//     never overwrites one the user has already set
-//   * a later named settings write may promote placeholder names, but never
-//     overwrites a human rename
+//   * a later ask may fill in a language that was blank, but never overwrites
+//     one the user has already set, and never changes legacy_tag
+//   * a later ask may retire a stored placeholder name, but never overwrites
+//     a human rename
+//
+// Settings writes do not call this. Lanes are created and edited only by lane
+// routes and by the create / seed / migrate callers below.
 //
 // Lives in db/shared so auth-worker and sync-worker apply the SAME writes.
 //
@@ -27,7 +34,6 @@
 
 import {
   BLANK_LANE_PLACEHOLDER,
-  planLanesForProject,
   SOURCE_LANE_PLACEHOLDER,
   type ProjectLaneInputs,
 } from "../../src/lib/lanes/backfill-plan"
@@ -58,7 +64,7 @@ const INSERT_SOURCE = `INSERT INTO lanes (id, project_id, role, language, name, 
      updated_at = now()`
 
 const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
-   VALUES (?, ?, 'target', ?, NULL, NULL, ?, ?)
+   VALUES (?, ?, 'target', ?, ?, ?, ?, ?)
    ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO UPDATE SET
      language = COALESCE(
        CASE
@@ -106,7 +112,14 @@ export function settingsToLaneInputs(
   }
 }
 
-/** Distinct target_lang tags carried by a batch of events (ingest / import). */
+/**
+ * Distinct target_lang tags carried by a batch of events (ingest / import).
+ *
+ * A target event that omits `targetLang` is the old default lane: those rows
+ * were stored as `target_lang ''`, so the ask includes `''`. An explicit tag,
+ * including an explicit `''`, is asked for as written. This is how old events
+ * keep their bridge without every new project growing a `''` lane.
+ */
 export function dataTargetTagsFromEvents(
   events: ReadonlyArray<{ kind: string; payload: unknown }>,
 ): string[] {
@@ -114,7 +127,7 @@ export function dataTargetTagsFromEvents(
   for (const e of events) {
     if (!e.kind.startsWith("target.cell.")) continue
     const lang = (e.payload as { targetLang?: unknown } | null | undefined)?.targetLang
-    if (typeof lang === "string") tags.add(lang)
+    tags.add(typeof lang === "string" ? lang : "")
   }
   return [...tags]
 }
@@ -248,50 +261,112 @@ export function isDefaultLaneUnderAnotherName(
   return isPrimaryRegistryLane(legacyTag, label)
 }
 
+/** One lane a caller asked to create. `legacy_tag` is never changed later. */
+export interface AskedLane {
+  role: "source" | "target"
+  /** Stored as typed. `''` when the caller has not named a language yet. */
+  language: string
+  /** Optional display override. Null means "display the language". */
+  name?: string | null
+  /** Optional BCP 47 override. Null means "derive on read". */
+  langCode?: string | null
+  /**
+   * Target lanes only. The immutable event key. `''` only when the caller
+   * asked for the old-event bridge. Omit it and the language string is the tag.
+   */
+  legacyTag?: string | null
+  /** Use this id when the legacy tag is the id itself. Otherwise a new id is minted. */
+  id?: string
+}
+
 /**
- * Statements that create (or promote-from-placeholder) the project's lanes.
+ * The lanes a settings blob and a set of data tags actually ask for.
+ *
+ * A source lane is always one of them. A `legacy_tag ''` target lane is
+ * included only when the data names it (old events). `targetLanguage` names
+ * that bridge when it is present, and otherwise becomes a target lane whose
+ * tag is the language itself — never `''`. Registry and data tags are added
+ * beside it. The primary language is not added a second time.
+ */
+export function lanesAskedFromSettings(
+  settings: LaneSettingsBlob | Record<string, unknown> | null | undefined,
+  dataTargetTags: string[] = [],
+): AskedLane[] {
+  const input: ProjectLaneInputs = settingsToLaneInputs(settings, dataTargetTags)
+  const sourceLanguage = (input.sourceLanguage ?? "").trim()
+  const targetLanguage = (input.targetLanguage ?? "").trim()
+  const asked: AskedLane[] = [{ role: "source", language: sourceLanguage }]
+  const tags = new Set<string>()
+  for (const tag of input.dataTargetTags) tags.add(tag)
+  const hasBridge = tags.has("")
+  if (hasBridge) {
+    asked.push({ role: "target", language: targetLanguage, legacyTag: "" })
+  } else if (targetLanguage) {
+    tags.add(targetLanguage)
+  }
+  for (const raw of input.registryTargetLanes) {
+    const tag = (raw ?? "").trim()
+    if (!tag) continue
+    if (hasBridge && isPrimaryRegistryLane(tag, targetLanguage)) continue
+    if (!hasBridge && targetLanguage && isPrimaryRegistryLane(tag, targetLanguage)) continue
+    tags.add(tag)
+  }
+  const ordered = [...tags].filter((tag) => tag !== "")
+  for (const tag of ordered) {
+    if (asked.some((lane) => lane.role === "target" && lane.legacyTag === tag)) continue
+    const language = isLaneId(tag) ? "" : tag
+    asked.push({ role: "target", language, legacyTag: tag })
+  }
+  return asked
+}
+
+/**
+ * Statements that create (or fill-from-blank) the project's lanes.
  * Callers that already have a batch should splice these in; otherwise use
  * {@link ensureProjectLanes}. Each call mints new ids — a batch that fails
  * on {@link LANE_ID_UNIQUE_INDEX} has to call this again inside
  * {@link retryingLaneIdCollision}.
+ *
+ * Pass `lanes` for an explicit ask (project create). Pass `settings` and
+ * `dataTargetTags` for migrate and seeds. With neither, the only lane is a
+ * source lane — a target lane is not invented.
  */
 export function ensureProjectLaneStmts(
   db: AquillaDb,
   projectId: string,
   opts?: {
+    lanes?: readonly AskedLane[]
     settings?: LaneSettingsBlob | Record<string, unknown> | null
     dataTargetTags?: string[]
     /**
-     * AQU-1585: the project's current lane rows, passed by a *settings write*
-     * (which has them already from `loadProjectSettings`). With them, a stale
-     * registry entry for the language the default lane already is cannot mint a
-     * duplicate lane — see {@link isDefaultLaneUnderAnotherName}. Omit them, as
-     * import and migration callers do, to plan lanes from the settings alone.
+     * When the caller already has the lane rows, a registry tag that only
+     * renames the `legacy_tag ''` bridge is not a new lane
+     * ({@link isDefaultLaneUnderAnotherName}).
      */
     existingLanes?: ReadonlyArray<ExistingLaneShape>
   },
 ): AquillaStatement[] {
-  const plan = planLanesForProject(
-    settingsToLaneInputs(opts?.settings, opts?.dataTargetTags ?? []),
-  )
+  const asked = opts?.lanes ?? lanesAskedFromSettings(opts?.settings, opts?.dataTargetTags ?? [])
   const existing = opts?.existingLanes
-  // Keep the plan's own indexes as positions, so dropping a stale registry
-  // entry does not renumber the lanes that survive it.
-  const planned = plan.map((row, i) => ({ row, position: i }))
+  const planned = asked.map((lane, position) => ({ lane, position }))
   const kept = existing
-    ? planned.filter(({ row }) => !isDefaultLaneUnderAnotherName(row.legacyTag, existing))
+    ? planned.filter(({ lane }) => !isDefaultLaneUnderAnotherName(lane.legacyTag ?? null, existing))
     : planned
-  return kept.map(({ row, position }) =>
-    row.role === "source"
-      ? db.prepare(INSERT_SOURCE).bind(newLaneId(), projectId, row.language, position)
-      : db.prepare(INSERT_TARGET).bind(
-          newLaneId(),
-          projectId,
-          isLaneId(row.language) ? "" : row.language,
-          row.legacyTag,
-          position,
-        ),
-  )
+  return kept.map(({ lane, position }) => {
+    if (lane.role === "source") {
+      return db.prepare(INSERT_SOURCE).bind(lane.id ?? newLaneId(), projectId, lane.language, position)
+    }
+    const legacyTag = lane.legacyTag ?? lane.language
+    return db.prepare(INSERT_TARGET).bind(
+      lane.id ?? newLaneId(),
+      projectId,
+      isLaneId(lane.language) ? "" : lane.language,
+      lane.name ?? null,
+      lane.langCode ?? null,
+      legacyTag,
+      position,
+    )
+  })
 }
 
 /** Load settings if the caller did not pass them, then apply the lane stmts. */
@@ -299,8 +374,10 @@ export async function ensureProjectLanes(
   db: AquillaDb,
   projectId: string,
   opts?: {
+    lanes?: readonly AskedLane[]
     settings?: LaneSettingsBlob | Record<string, unknown> | null
     dataTargetTags?: string[]
+    existingLanes?: ReadonlyArray<ExistingLaneShape>
   },
 ): Promise<void> {
   let settings = opts?.settings
@@ -313,8 +390,10 @@ export async function ensureProjectLanes(
   }
   await retryingLaneIdCollision(async () => {
     const stmts = ensureProjectLaneStmts(db, projectId, {
+      lanes: opts?.lanes,
       settings,
       dataTargetTags: opts?.dataTargetTags,
+      existingLanes: opts?.existingLanes,
     })
     if (stmts.length > 0) await db.batch(stmts)
   })
@@ -411,9 +490,10 @@ export interface LaneIdentityPatch {
 }
 
 /**
- * AQU-1592: edit one target lane's identity — language, optional display name,
- * optional code override. Source rows are not edited here. `legacy_tag` is
- * always left alone: it is the immutable event key.
+ * AQU-1592 / AQU-1594: edit one lane's identity — language, optional display
+ * name, optional code override. Source and target rows both take this; the
+ * languages screen is where either language is edited. `legacy_tag` is always
+ * left alone: it is the immutable event key, and this never inserts a row.
  *
  * The uniqueness check is on the DISPLAY name (`laneDisplayName`), not on the
  * stored `name`, because that is what people actually see: two lanes where one
@@ -433,7 +513,7 @@ export async function updateTargetLane(
   patch: LaneIdentityPatch,
 ): Promise<RenameLaneResult> {
   const lanes = await listProjectLanes(db, projectId)
-  const current = lanes.find((lane) => lane.id === laneId && lane.role === "target")
+  const current = lanes.find((lane) => lane.id === laneId)
   if (!current) return { status: "not_found" }
 
   // An untouched language keeps its stored value verbatim — including the NULL
@@ -451,19 +531,19 @@ export async function updateTargetLane(
   // set (it doesn't match what the old language would have derived) stays.
   const languageChanged = patch.language !== undefined && (language ?? "") !== previousLanguage
   if (languageChanged && patch.name === undefined) {
-    const derivedName = laneDisplayName({ role: "target", language: previousLanguage, name: null })
+    const derivedName = laneDisplayName({ role: current.role, language: previousLanguage, name: null })
     if ((name ?? "").trim() === derivedName) name = null
   }
 
   // A lane must still render as SOMETHING, so the language is required unless a
   // display name stands in for it. Both blank is the "empty" problem.
   const next: ProjectLaneRecord = { ...current, language, name }
-  const display = laneDisplayName({ role: "target", language, name })
+  const display = laneDisplayName({ role: current.role, language, name })
   const problem = laneNameProblem({
     laneId,
     name: (language ?? "").trim() || (name ?? "").trim() ? display : "",
     others: lanes
-      .filter((lane) => lane.role === "target")
+      .filter((lane) => lane.role === current.role)
       .map((lane) => ({ id: lane.id, name: laneDisplayName(lane) })),
   })
   if (problem) return { status: problem }
@@ -484,7 +564,7 @@ export async function updateTargetLane(
     .prepare(
       `UPDATE lanes
           SET language = ?, name = ?, lang_code = ?, updated_at = now()
-        WHERE project_id = ? AND id = ? AND role = 'target'`,
+        WHERE project_id = ? AND id = ?`,
     )
     .bind(language, name, langCode, projectId, laneId)
     .run()
@@ -622,6 +702,30 @@ export function ensureTargetLaneStmt(
        ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
     )
     .bind(newLaneId(), projectId, isLaneId(tag) ? "" : tag, tag, projectId)
+}
+
+/**
+ * The one `''` target lane a bare project (source lane, no target lane) needs
+ * so a default translation can resolve `lane_id`. The `NOT EXISTS` is in this
+ * statement: a project that already has any target lane — the `''` bridge or
+ * a tagged one — inserts nothing. `ON CONFLICT DO NOTHING` covers two writers
+ * racing to create the bridge. An existing row's `legacy_tag` is never rewritten.
+ */
+export function ensureBlankTargetBridgeStmt(
+  db: AquillaDb,
+  projectId: string,
+): AquillaStatement {
+  return db
+    .prepare(
+      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+       SELECT ?, ?, 'target', '', NULL, NULL, '',
+              COALESCE((SELECT MAX(position) FROM lanes WHERE project_id = ?), -1) + 1
+        WHERE NOT EXISTS (
+          SELECT 1 FROM lanes WHERE project_id = ? AND role = 'target'
+        )
+       ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
+    )
+    .bind(newLaneId(), projectId, projectId, projectId)
 }
 
 export type ArchiveLaneResult =

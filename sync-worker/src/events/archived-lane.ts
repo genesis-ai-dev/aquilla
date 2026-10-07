@@ -57,9 +57,13 @@ export function targetLaneRowsFor(
 
 /**
  * AQU-1532: true when the project has a target lane row whose legacy tag is
- * exactly `tag` — the same match the projection's lane_id lookup uses. The
- * default lane (`''`) always counts as present. Shares the per-request lane
- * list with the archived-lane check.
+ * exactly `tag` — the same match the projection's lane_id lookup uses.
+ * `''` is not refused as missing. A bare project has no target lane yet, and
+ * the cell-write batch creates that bridge before resolving lane_id
+ * (AQU-1594). A project that already has a target lane does not: the write
+ * reaches the cells insert and fails there (AQU-1615), rather than as a 422.
+ * A named tag still has to exist or the write is a 422.
+ * Shares the per-request lane list with the archived-lane check.
  */
 export async function targetLaneRowExists(
   db: AquillaDb,

@@ -432,8 +432,12 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
               {t("common.stop")}
             </Button>
           )}
+          {/* AQU-1774: the workbench toolbar has room for words, and this is
+              the surface people open to manage chats — so New chat is a
+              labelled button here and the chats menu says what it holds. */}
           <AgentChatOptions
             key={JSON.stringify([agent.projectId, agent.author])}
+            labelled
             onNewChat={beginNewChat}
             sessions={chatHistory.sessions}
             historyStatus={chatHistory.status}

@@ -340,6 +340,7 @@ const MatrixRow = memo(function MatrixRow({
           ].join(" ")}
         >
           <UsernameWithAvatar
+            userId={member.userId}
             username={member.username}
             nameClassName={isSelected ? "font-semibold text-primary" : undefined}
           />

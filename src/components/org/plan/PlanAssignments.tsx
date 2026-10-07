@@ -31,7 +31,7 @@ import { Plus } from "lucide-react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { UserChip } from "@/components/UserChip"
 import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fmtDeadlineDate } from "@/lib/format-date"
@@ -288,7 +288,6 @@ function PlanAssignmentRow({
   const t = useT()
   const readoutTips = usePlanReadoutTips()
   const { locale } = useI18n()
-  const name = a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId })
   // '' and a real tag are different lanes, so compare the values themselves
   // rather than falsiness — the default lane IS a lane (AQU-728).
   const otherLane = a.targetLang !== lane
@@ -366,7 +365,7 @@ function PlanAssignmentRow({
     <li className="flex flex-col gap-1" data-testid={`plan-assignment-${a.assignmentId}`}>
       <div className="flex min-w-0 items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-2">
-          <UsernameWithAvatar username={name} size="xs" nameClassName="text-[13px]" />
+          <UserChip userId={a.assigneeUserId} username={a.username} size="xs" nameClassName="text-[13px]" />
           {/* The chip only appears on the rows that need explaining, so a
               single-lane project never grows a column of identical tags. */}
           {otherLane && (

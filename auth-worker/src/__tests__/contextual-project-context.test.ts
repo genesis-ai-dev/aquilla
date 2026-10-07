@@ -4,12 +4,12 @@
 // server-side lint ever saw them. Autopilot could be punished for missing an
 // approved rendering it was never shown.
 //
-// Each test pins one of the three properties that makes the fix trustworthy:
-//   1. The any-of test ("use ANY approved rendering") is stated correctly.
-//      It cannot be expressed as a single-pattern lint rule, and the failure
-//      mode of getting it wrong is a check that silently never fires — the
-//      worst possible outcome for a check that exists to catch silent drift.
-//      Hit ids stay the client's, so findings remain attributable.
+// Each test pins one of the properties that make the fix trustworthy:
+//   1. The any-of test ("use ANY approved rendering") is stated correctly,
+//      because getting it wrong makes a check that silently never fires. The
+//      full verdict semantics are the editor's, pinned row by row in
+//      terminology-lint-parity.test.ts (AQU-1711). Hit ids stay the client's,
+//      so findings remain attributable.
 //   2. Term guidance is scoped to the span. A 900-entry termbase in a prompt
 //      buries the eight entries that matter for the passage in front of it.
 //   3. Readiness reports gaps honestly. A run with no context still produces

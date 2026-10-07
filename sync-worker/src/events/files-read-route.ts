@@ -293,11 +293,14 @@ export async function handleFilesReadRequest(
     "LEFT JOIN projects pr ON pr.id = q.id " +
     "LEFT JOIN org_settings os ON os.org_id = pr.org_id)"
   const joins =
-    // AQU-538: file_section_progress now materializes one row per target lane.
-    // The files list is a cross-project legacy surface — pin it to the default
-    // lane ('') so N=1 stays byte-identical and N>1 files don't fan out into
-    // one listing row per lane.
-    " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = ''" +
+    // AQU-538: file_section_progress materializes one row per target lane.
+    // The files list is one row per file. A project that still has the ''
+    // bridge stays pinned to it. A project with a single tagged lane (AQU-1594)
+    // uses that tag. Several tagged lanes and no bridge match nothing here, so
+    // the file is not repeated once per lane.
+    " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = (" +
+    "SELECT CASE WHEN bool_or(l.legacy_tag = '') THEN '' WHEN COUNT(*) = 1 THEN MIN(l.legacy_tag) ELSE NULL END" +
+    " FROM public.lanes l WHERE l.project_id = f.project_id AND l.role = 'target')" +
     " LEFT JOIN thr ON true" +
     " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true" +
     // AQU-1083: the structural share of the same buckets, for the subtraction.

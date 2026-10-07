@@ -390,6 +390,12 @@ describe('assignment.create — chapter scope follows the board (AQU-1493)', () 
 
   it("gives each chapter exactly the cells the board counts in it", async () => {
     const { db } = await makeTestDb({ cells: jonahChain() })
+    // The board reads the '' progress row, which is written only when that lane exists.
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+       VALUES ('bridge01', 'proj-1', 'target', '', 0)
+       ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
+    ).run()
     for (const stmt of fullProgressRecomputeStmts(db, 'proj-1', 'file-gen', 1)) await stmt.run()
     const board = await db
       .prepare(

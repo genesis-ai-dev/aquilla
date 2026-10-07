@@ -23,6 +23,7 @@ import type { AuthHonoEnv } from "../middleware/auth"
 import { JWTService } from "../auth/jwt"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import { ROLE } from "../types"
+import { ensureProjectLanes } from "../../../db/shared/lanes"
 
 const DEV_USERNAME = "dev"
 const DEV_EMAIL = "dev@local.test"
@@ -139,6 +140,14 @@ async function upsertProject(
     )
     .bind(projectId, name, orgId, createdBy, deadlineAt)
     .run()
+  // AQU-1594: every dev project has a source lane and one target lane. The
+  // tag is the language, not `''`. Idempotent, so a reseed keeps the rows.
+  await ensureProjectLanes(db, projectId, {
+    lanes: [
+      { role: "source", language: "English" },
+      { role: "target", language: "Spanish", legacyTag: "Spanish" },
+    ],
+  })
 }
 
 async function upsertOrgMember(
@@ -301,6 +310,12 @@ async function seedDev(db: AquillaDb): Promise<{
     .run()
 
   await upsertProjectMember(db, DEV_PROJECT_ID, userId, ROLE.OWNER, userId)
+  await ensureProjectLanes(db, DEV_PROJECT_ID, {
+    lanes: [
+      { role: "source", language: "English" },
+      { role: "target", language: "Spanish", legacyTag: "Spanish" },
+    ],
+  })
 
   // ── Extra collaborators + projects so the Members matrix is non-trivial ──
   const aliceId = await upsertUser(db, ALICE_USERNAME, ALICE_EMAIL, passwordHash)

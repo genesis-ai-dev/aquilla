@@ -70,7 +70,7 @@ async function credToken(tdb: TestDb, spec: CredSpec): Promise<string> {
 }
 
 async function seedProject(): Promise<TestDb> {
-  return makeTestDb({
+  const tdb = await makeTestDb({
     projects: [
       { id: PROJECT, name: 'P', created_by: 99, org_id: null },
       { id: OTHER_PROJECT, name: 'Q', created_by: 99, org_id: null },
@@ -90,6 +90,12 @@ async function seedProject(): Promise<TestDb> {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
+  return tdb
 }
 
 /** Stage one SetTranslation plan; returns the prepare response body. */
@@ -102,7 +108,7 @@ async function prepare(
   const req = new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ commands: [{ kind: 'SetTranslation', fileId: FILE, cellId, value }] }),
+    body: JSON.stringify({ commands: [{ kind: 'SetTranslation', fileId: FILE, cellId, laneId: 'deflane1', value }] }),
   })
   const res = (await handleExternalChangesetsRequest(req, env))!
   expect(res.status).toBe(200)

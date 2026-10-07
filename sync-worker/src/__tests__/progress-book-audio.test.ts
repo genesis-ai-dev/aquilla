@@ -39,7 +39,21 @@ function cell(c: CellSeed) {
   }
 }
 
-async function recompute(db: Parameters<typeof fullProgressRecomputeStmts>[0]) {
+type ProgressDb = Parameters<typeof fullProgressRecomputeStmts>[0]
+
+async function ensureBridge(db: ProgressDb) {
+  // Progress writes a '' row only when that lane exists. These fixtures were
+  // written against the old "always emit ''" recompute, so the bridge lane is
+  // created here and the assertions stay on that row.
+  await db.prepare(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('bridge01', ?, 'target', '', 0)
+     ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
+  ).bind(P).run()
+}
+
+async function recompute(db: ProgressDb) {
+  await ensureBridge(db)
   for (const stmt of fullProgressRecomputeStmts(db, P, F, TS)) await stmt.run()
 }
 
@@ -589,6 +603,7 @@ describe("pruning", () => {
     const full = await makeTestDb({ cells: seeds })
     await recompute(full.db)
     const incremental = await makeTestDb({ cells: seeds })
+    await ensureBridge(incremental.db)
     await sectionsProgressRecomputeStmt(incremental.db, P, F, TS).run()
 
     expect((await rows(full.db, "book")).map((b) => b.section_key))

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { handleCellsReadRequest, type CellsReadEnv } from "../events/cells-read-route"
+import { handleCellsReadRequest, resetChainCacheForTests, type CellsReadEnv } from "../events/cells-read-route"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { type CellRow } from "./helpers/in-memory-db"
@@ -239,6 +239,44 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     const body = (await res.json()) as { cells: Array<{ value: string }> }
     expect(body.cells.map((c) => c.value).sort()).toEqual(["default-lane", "fr-lane"])
+  })
+
+  it("AQU-1615: present empty lane is the blank bridge, not every target lane", async () => {
+    resetChainCacheForTests()
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "s1", side: "source", anchor_cell_id: null, event_id: "es1", value: "src-1" }),
+        makeCell({
+          cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1-blank", value: "blank-lane",
+          target_lang: "",
+        }),
+        makeCell({
+          cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1-sw", value: "sw-lane",
+          target_lang: "sw",
+        }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const read = async (search: string) => {
+      const res = (await handleCellsReadRequest(
+        new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells${search}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db),
+      ))!
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { cells: Array<{ side: string; value: string }> }
+      return body.cells.map((c) => c.value).sort()
+    }
+    try {
+      // Prime the all-lanes cache, then ask for the blank bridge. A shared
+      // cache slot would hand back the sw row.
+      expect(await read("")).toEqual(["blank-lane", "src-1", "sw-lane"])
+      expect(await read("?lane=")).toEqual(["blank-lane", "src-1"])
+      expect(await read("")).toEqual(["blank-lane", "src-1", "sw-lane"])
+    } finally {
+      resetChainCacheForTests()
+    }
   })
 
   it("rejects a lane value longer than 64 characters with 400", async () => {

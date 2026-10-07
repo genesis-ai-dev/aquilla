@@ -162,31 +162,36 @@ describe('PatchSettings — per-key floors', () => {
     expect(commitRes.status).toBe(200)
   })
 
-  it('language keys, including lanes, default to PROJECT_LEAD when unset (AQU-984)', async () => {
+  it('rejects the retired language keys before any lane row is created, even when the org would have lowered the floor (AQU-1615)', async () => {
     const env = makeEnv(tdb.db)
-    const contributor = await memberToken(tdb, 400)
-    const { res: deniedRes, body: denied } = await prepare(env, contributor.token, patchCmd([
-      { key: 'targetLanguage', value: 'de' },
-    ]))
-    expect(deniedRes.status).toBe(403)
-    expect(denied.error.code).toBe('permission_denied')
-    expect(denied.error.message).toMatch(/project_lead/)
-    expect(denied.error.details.requiredRole).toBe(500)
-
-    const lead = await memberToken(tdb, 500)
-    const { res, body } = await prepare(env, lead.token, patchCmd([
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
+      [ORG_ID, JSON.stringify({ languageEditMinRole: 500 })],
+    )
+    const maintainer = await memberToken(tdb, 600)
+    const before = await tdb.pg.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM lanes WHERE project_id = $1`,
+      [PROJECT],
+    )
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
       { key: 'targetLanguage', value: 'de' },
       { key: 'targetLanes', value: ['es'] },
     ]))
-    expect(res.status).toBe(200)
-    const { res: commitRes } = await commit(env, lead.token, body.changeset.id)
-    expect(commitRes.status).toBe(200)
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(body.error.message).toContain('are not settings')
+    expect(body.error.message).toContain('lanes')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+    const after = await tdb.pg.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM lanes WHERE project_id = $1`,
+      [PROJECT],
+    )
+    expect(after.rows[0].n).toBe(before.rows[0].n)
     const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
-    expect(stored.targetLanguage).toBe('de')
-    expect(stored.targetLanes).toEqual(['es'])
+    expect(stored.targetLanguage).toBe('fr')
   })
 
-  it('an explicit languageEditMinRole of 600 is kept, and the denial names maintainer (AQU-984)', async () => {
+  it('an explicit languageEditMinRole of 600 does not reopen the retired language keys (AQU-984 / AQU-1615)', async () => {
     const env = makeEnv(tdb.db)
     await tdb.pg.query(
       `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
@@ -196,10 +201,10 @@ describe('PatchSettings — per-key floors', () => {
     const { res, body } = await prepare(env, lead.token, patchCmd([
       { key: 'targetLanes', value: ['es'] },
     ]))
-    expect(res.status).toBe(403)
-    expect(body.error.code).toBe('permission_denied')
-    expect(body.error.message).toMatch(/maintainer/)
-    expect(body.error.details.requiredRole).toBe(600)
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(body.error.message).toContain('are not settings')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
   it('a lowered languageEditMinRole does not widen any other key (AQU-1086)', async () => {
@@ -211,7 +216,7 @@ describe('PatchSettings — per-key floors', () => {
     const lead = await memberToken(tdb, 500)
     // Mixed batch takes the max floor — the non-language key still needs 600.
     const { res: mixedRes } = await prepare(env, lead.token, patchCmd([
-      { key: 'targetLanguage', value: 'de' },
+      { key: 'systemPrompt', value: 'x' },
       { key: 'translationBrief', value: { l1Summary: 'x' } },
     ]))
     expect(mixedRes.status).toBe(403)
@@ -258,10 +263,10 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
   it('a wrong value type for a valid key is rejected, naming the expected type', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)
-    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'targetLanes', value: 'es' }]))
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'validationCount', value: 'es' }]))
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
-    expect(JSON.stringify(body.error.details)).toContain('string[]')
+    expect(JSON.stringify(body.error.details)).toContain('number')
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
@@ -483,7 +488,7 @@ describe('UpdateProjectSettings — policy guard re-check at commit (AQU-926)', 
       commands: [{
         kind: 'UpdateProjectSettings',
         projectId: PROJECT,
-        settings: { targetLanguage: 'de', terminology: { concepts: [] }, validationCount: 3 },
+        settings: { terminology: { concepts: [] }, validationCount: 3 },
         ifMatchVersion: 1,
       }],
     }), env))!
@@ -606,7 +611,7 @@ describe('PatchSettings — version guard', () => {
     const maintainer = await memberToken(tdb, 600)
     const { res, body } = await prepare(env, maintainer.token, [
       ...patchCmd([{ key: 'systemPrompt', value: 'b' }]),
-      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
+      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'deflane1', value: 'v' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

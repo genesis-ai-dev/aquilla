@@ -77,6 +77,13 @@ function chain(lines: Line[], file = F) {
 type Db = Parameters<typeof fullProgressRecomputeStmts>[0]
 
 async function recompute(db: Db, file = F) {
+  // A '' progress row is written only when that lane exists. Source-only
+  // fixtures still assert that row, so the bridge lane is created first.
+  await db.prepare(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('bridge01', ?, 'target', '', 0)
+     ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
+  ).bind(P).run()
   for (const stmt of fullProgressRecomputeStmts(db, P, file, TS)) await stmt.run()
 }
 

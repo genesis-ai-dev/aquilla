@@ -29,10 +29,11 @@ and applies before the next step reads the state it produced.
    first and pass it as ifMatchVersion (drift → plan_stale, re-read and stage
    again); one op per key (a duplicate key is validation_failed); floor
    MAINTAINER (600) for these keys. Register lanes BEFORE any lane-scoped
-   SetTranslation — prepare rejects an unregistered laneId. The primary
-   targetLanguage IS the default lane: omitting laneId and passing the primary
-   both write it. A regional lane beside it (fr-CA in a French project) is its
-   own lane and must be registered.
+   SetTranslation — prepare rejects an unregistered laneId.
+   Omitting laneId writes the former default lane (legacy_tag ''). A regional
+   lane beside it (fr-CA in a French project) is its own lane and must be
+   registered. When a draft or prompt needs a language, read lanes.language
+   for that lane — never the lane tag, and never these settings keys.
 
 3. Termbase seed. Read the concepts table first (docs('terminology')): a
    second term.create for an existing source term does not merge. Then:

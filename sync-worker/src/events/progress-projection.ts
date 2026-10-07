@@ -245,6 +245,24 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
 // summary column: no `UNION ALL` arm carries it. Each INSERT … SELECT below
 // resolves it inline (laneIdResolveFromColSql) right after the lane column, so
 // the column list and every SELECT agree on its position by construction.
+/**
+ * The lanes a recompute writes. One bind: projectId.
+ *
+ * Every target lane is included, even when this file has no target cells yet,
+ * so a source-only import still records progress for the lane the project was
+ * created with. `''` is included only when a target lane with that legacy tag
+ * exists — a manufactured blank row has a NULL lane_id, and the NOT NULL
+ * constraint rejects the insert (AQU-1594).
+ *
+ * `public.lanes` stays schema-qualified: this CTE is named `lanes`, and an
+ * unqualified reference would be recursive.
+ */
+const PROGRESS_LANES_CTE_SQL = `lanes AS (
+       SELECT legacy_tag AS lane
+         FROM public.lanes
+        WHERE project_id = ? AND role = 'target' AND legacy_tag IS NOT NULL
+     )`
+
 const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
        validator_histogram, structural_count, structural_filled_count,
        structural_validator_histogram, revision, updated_at,
@@ -259,9 +277,10 @@ const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, ta
  *
  * AQU-538: one row per target-language lane. The denominator (source rows) is
  * lane-independent, so every lane shares the same total_count; each lane's
- * filled_count / validator histogram derives from that lane's target rows. The
- * default lane ('') is ALWAYS produced (via the UNION) so N=1 projects keep a
- * byte-identical '' row even before any lane exists.
+ * filled_count / validator histogram derives from that lane's target rows.
+ * A `legacy_tag ''` row is written only when that lane exists. A project whose
+ * targets are tagged with their language (AQU-1594) gets one row per real
+ * lane, including on a source-only import that has no target cells yet.
  */
 export function fileProgressRecomputeStmt(
   db: AquillaDb,
@@ -270,12 +289,7 @@ export function fileProgressRecomputeStmt(
   updatedAt: number,
 ): AquillaStatement {
   return db.prepare(
-    `WITH lanes AS (
-       SELECT DISTINCT COALESCE(target_lang, '') AS lane
-         FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'target'
-       UNION SELECT ''
-     ), audio AS (
+    `WITH ${PROGRESS_LANES_CTE_SQL}, audio AS (
        ${AUDIO_CTE_SQL}
      ), paired AS (
        SELECT lanes.lane AS lane,
@@ -366,7 +380,7 @@ export function fileProgressRecomputeStmt(
      ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
   ).bind(
-    projectId, fileId,
+    projectId,
     projectId, fileId,
     projectId, fileId,
     projectId, fileId, projectId,
@@ -422,7 +436,7 @@ export function sectionsProgressRecomputeStmt(
   const affectedCte = affected ? `, affected AS (${affected})` : ''
 
   const binds: unknown[] = [
-    projectId, fileId,           // lanes
+    projectId,                   // target lane tags
     projectId, fileId,           // audio
     projectId, fileId,           // has_books
     projectId, fileId,           // paired
@@ -431,12 +445,7 @@ export function sectionsProgressRecomputeStmt(
   binds.push(projectId, fileId, projectId, projectId, fileId, projectId, updatedAt)
 
   return db.prepare(
-    `WITH lanes AS (
-       SELECT DISTINCT COALESCE(target_lang, '') AS lane
-         FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'target'
-       UNION SELECT ''
-     ), audio AS (
+    `WITH ${PROGRESS_LANES_CTE_SQL}, audio AS (
        ${AUDIO_CTE_SQL}
      ), has_books AS (
        ${HAS_BOOKS_CTE_SQL}
@@ -577,19 +586,16 @@ export function fullProgressRecomputeStmts(
     // joins those rows instead of walking the anchor chain again.
     db.prepare(planKeysRefreshSql()).bind(projectId, fileId, projectId, fileId),
     db.prepare(
-      // AQU-538: per-lane. `lanes` enumerates every target lane present (always
-      // incl. '') so each source cell is paired against that lane's target row;
-      // summaries/histograms group by lane and the upsert keys the 5-col PK.
+      // AQU-538: per-lane. `lanes` is the project's target rows (a `''` tag only
+      // when that bridge lane exists) so each source cell is paired against
+      // that lane's target row; summaries/histograms group by lane and the
+      // upsert keys the 5-col PK.
       //
       // AQU-1093/1096: `paired` additionally carries the cell's BOOK key, its
       // audio state, and its newest edit, so one pass over the file produces
       // file, section AND book rows. Grouping keys carry `scope` because a
       // book-only ref ("TIT") collides with its own section key.
-      `WITH lanes AS (
-         SELECT DISTINCT COALESCE(target_lang, '') AS lane
-           FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'
-         UNION SELECT ''
-       ), audio AS (
+      `WITH ${PROGRESS_LANES_CTE_SQL}, audio AS (
          ${AUDIO_CTE_SQL}
        ), has_books AS (
          ${HAS_BOOKS_CTE_SQL}
@@ -747,7 +753,7 @@ export function fullProgressRecomputeStmts(
        ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
          ${PROGRESS_UPSERT_SET_SQL}`,
     ).bind(
-      projectId, fileId,
+      projectId,
       projectId, fileId,
       projectId, fileId,
       projectId, fileId,

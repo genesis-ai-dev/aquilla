@@ -22,6 +22,7 @@ const STATIC_REASON_KEY: Partial<Record<RuleInfractionReason, MessageKey>> = {
   "builtin:empty-target": "rules.infraction.builtin.emptyTarget",
   "builtin:target-equals-source": "rules.infraction.builtin.targetEqualsSource",
   "builtin:number-integrity": "rules.infraction.builtin.numberIntegrity",
+  "builtin:number-integrity-extra": "rules.infraction.builtin.numberIntegrityExtra",
   "builtin:end-punctuation-mismatch": "rules.infraction.builtin.endPunctuationMismatch",
   "builtin:punctuation-integrity": "rules.infraction.builtin.punctuationIntegrity",
   "builtin:double-space": "rules.infraction.builtin.doubleSpace",

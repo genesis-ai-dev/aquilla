@@ -431,3 +431,44 @@ describe("Number integrity through Check file and the editor (AQU-1667)", () => 
     expect(editor.wrong).toEqual(result.ruleFindings[0].infractions)
   })
 })
+
+// ---------------------------------------------------------------------------
+// AQU-1761: Extra numbers, the other direction, end to end
+// ---------------------------------------------------------------------------
+
+describe("Extra numbers through Check file and the editor (AQU-1761)", () => {
+  const cells = [
+    cell("He fasted forty days.", "Il jeûna 40 jours.", { id: "added", cellLabel: "MAT 4:2" }),
+    cell("He fasted 40 days.", "Il jeûna 41 jours.", { id: "changed", cellLabel: "MAT 4:2" }),
+    cell("He fasted 40 days.", "Il jeûna 40 jours.", { id: "clean", cellLabel: "MAT 4:2" }),
+  ]
+
+  it("is on by default as a minor check, and flags only what the translation added", async () => {
+    const rules = resolveBuiltinRules(undefined).filter((r) => r.id === "builtin:number-integrity-extra")
+    expect(rules).toHaveLength(1)
+    expect(rules[0].enabled).toBe(true)
+    expect(rules[0].severity).toBe("minor")
+
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules, concepts: [] })
+    expect(result.ruleFindings).toHaveLength(1)
+    expect(result.ruleFindings[0].infractions.map((i) => [i.cellId, i.reason, i.spans])).toEqual([
+      ["added", "builtin:number-integrity-extra", [{ side: "target", start: 9, end: 11, matchedText: "40" }]],
+      ["changed", "builtin:number-integrity-extra", [{ side: "target", start: 9, end: 11, matchedText: "41" }]],
+    ])
+
+    // The editor runs the same call per cell.
+    expect(checkRulesForCell(cells[2], cells[2].fileId, rules)).toEqual([])
+    expect(checkRulesForCell(cells[0], cells[0].fileId, rules)).toEqual([result.ruleFindings[0].infractions[0]])
+  })
+
+  it("has its own switch and severity, apart from Number integrity", async () => {
+    const all = resolveBuiltinRules({ "number-integrity-extra": { enabled: false } })
+    expect(all.find((r) => r.id === "builtin:number-integrity-extra")!.enabled).toBe(false)
+    expect(all.find((r) => r.id === "builtin:number-integrity")!.enabled).toBe(true)
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: all, concepts: [] })
+    expect(result.ruleFindings.map((f) => f.rule.id)).not.toContain("builtin:number-integrity-extra")
+
+    const major = resolveBuiltinRules({ "number-integrity-extra": { enabled: true, severity: "major" } })
+    expect(major.find((r) => r.id === "builtin:number-integrity-extra")!.severity).toBe("major")
+  })
+})

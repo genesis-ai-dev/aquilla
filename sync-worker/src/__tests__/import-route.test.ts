@@ -365,8 +365,12 @@ describe('POST /import — server_seq is race-safe', () => {
     expect(await response?.json()).toEqual({ accepted: 0, fileId: FILE_ID })
     expect(await rows('events')).toHaveLength(eventCountBeforeCompletion)
     expect((await rows<any>('files'))[0].cell_count).toBe(5)
-    // Source cells only: no target lane, so completion writes no progress row.
-    expect(await rows('file_section_progress')).toHaveLength(0)
+    // Source cells only: no target lane, so completion writes only the source
+    // lane's row (AQU-1599) and mints no blank target lane (AQU-1594).
+    const lanes = await rows<{ id: string; role: string }>('lanes')
+    expect(lanes.map((lane) => lane.role)).toEqual(['source'])
+    expect((await rows<{ lane_id: string }>('file_section_progress')).map((r) => r.lane_id))
+      .toEqual(lanes.map((lane) => lane.id))
 
     // A dropped response can make the browser retry finalization. Repeating it
     // must not emit events or duplicate/corrupt the derived rows.
@@ -376,7 +380,7 @@ describe('POST /import — server_seq is race-safe', () => {
     )
     expect(retry?.status).toBe(200)
     expect(await rows('events')).toHaveLength(eventCountBeforeCompletion)
-    expect(await rows('file_section_progress')).toHaveLength(0)
+    expect(await rows('file_section_progress')).toHaveLength(1)
     expect((await rows<any>('files'))[0].cell_count).toBe(5)
   })
 

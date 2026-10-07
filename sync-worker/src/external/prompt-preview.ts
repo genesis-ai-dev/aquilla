@@ -328,27 +328,47 @@ export async function buildPromptPreview(
     }
   }
 
-  // This project's OWN concepts, from the sync-worker projection (the
-  // `terminology` settings key is gone — see useRules' localConcepts note).
-  // Termbase SUBSCRIPTIONS are intentionally not compiled in: the client
-  // passes `subscribedConcepts: undefined` today because the upstream
-  // termbase-read route does not exist yet (useSubscribedConcepts' SWARM-TODO),
-  // so including them here would make the preview diverge from the real call.
+  // The concepts the editor compiles (useRules): first those of the termbases
+  // this project subscribes to, then this project's OWN concepts from the
+  // sync-worker projection (the `terminology` settings key is gone — see
+  // useRules' localConcepts note).
+  //
+  // The subscribed read mirrors the editor's (useSubscribedConcepts, through
+  // auth-worker route #8; AQU-1721): subscriptions in the order the
+  // subscriptions list shows (priority, then age), and each termbase's active
+  // live concepts, oldest first. A subscription counts only while its termbase
+  // is published, not archived, and in this project's org. That is the gate
+  // canReadTermbase puts on route #8, and autopilot applies it too.
+  type ConceptRow = {
+    concept_id: string
+    source_term: string
+    renderings: unknown
+    status: string
+    case_sensitive: number
+  }
+  const subscribedRows = await db
+    .prepare(
+      "SELECT c.concept_id, c.source_term, c.renderings, c.status, c.case_sensitive " +
+        "FROM project_termbase_subscriptions s " +
+        "JOIN projects sub ON sub.id = s.project_id " +
+        "JOIN projects tb ON tb.id = s.termbase_project_id " +
+        "JOIN concepts c ON c.project_id = s.termbase_project_id " +
+        "WHERE s.project_id = ? AND s.termbase_project_id <> s.project_id " +
+        "AND tb.org_published_termbase = TRUE AND tb.archived_at IS NULL AND tb.org_id = sub.org_id " +
+        "AND c.deleted_at IS NULL AND c.status = 'active' " +
+        "ORDER BY s.priority ASC, s.created_at ASC, s.termbase_project_id, c.created_at ASC, c.concept_id",
+    )
+    .bind(projectId)
+    .all<ConceptRow>()
   const conceptRows = await db
     .prepare(
       "SELECT concept_id, source_term, renderings, status, case_sensitive " +
         "FROM concepts WHERE project_id = ? AND deleted_at IS NULL ORDER BY concept_id",
     )
     .bind(projectId)
-    .all<{
-      concept_id: string
-      source_term: string
-      renderings: unknown
-      status: string
-      case_sensitive: number
-    }>()
+    .all<ConceptRow>()
 
-  const concepts: CompiledConcept[] = conceptRows.results.map((row) => {
+  const concepts: CompiledConcept[] = [...subscribedRows.results, ...conceptRows.results].map((row) => {
     const parsed: unknown =
       typeof row.renderings === "string" ? safeJson(row.renderings) : row.renderings
     const renderings = Array.isArray(parsed)

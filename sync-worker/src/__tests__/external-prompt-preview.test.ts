@@ -401,6 +401,59 @@ describe("external prompt preview", () => {
       expect(body.parts.rules).toBe("")
     })
 
+    // AQU-1721: the editor compiles subscribed termbases ahead of the project's
+    // own concepts (useRules), so a preview without them would not match the
+    // real call. These run the same gate the editor's read (route #8) and
+    // autopilot apply.
+    async function insertConcept(id: string, projectId: string, status: string, rendering: string, createdAt = 1) {
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ($1, $2, 'covenant', $3, $4, 0, $5, $5)`,
+        [id, projectId, JSON.stringify([{ rendering, status: "preferred" }]), status, createdAt],
+      )
+    }
+    async function subscribe(termbaseProjectId: string, priority: number) {
+      await testDb.pg.query(
+        `INSERT INTO project_termbase_subscriptions (project_id, termbase_project_id, priority) VALUES ('proj-a', $1, $2)`,
+        [termbaseProjectId, priority],
+      )
+    }
+
+    it("compiles a subscribed termbase's active concepts ahead of the project's own (AQU-1721)", async () => {
+      await testDb.pg.query(`UPDATE projects SET org_published_termbase = TRUE WHERE id = 'proj-b'`)
+      await subscribe("proj-b", 0)
+      await insertConcept("up-later", "proj-b", "active", "pacte", 2)
+      await insertConcept("up-first", "proj-b", "active", "accord", 1)
+      await insertConcept("up-draft", "proj-b", "draft", "contrat")
+      await insertConcept("own", "proj-a", "active", "alliance")
+
+      const { body } = await preview(testDb, token)
+      // Subscribed first, each termbase oldest first; a draft compiles to nothing.
+      expect(body.parts.injectedTerms.map((t) => t.conceptId)).toEqual(["up-first", "up-later", "own"])
+      expect(body.parts.rules).toContain("accord")
+      expect(body.parts.rules).toContain("alliance")
+      expect(body.parts.rules).not.toContain("contrat")
+    })
+
+    it("leaves out an unpublished, trashed, deleted or other-org termbase (AQU-1721)", async () => {
+      await testDb.pg.query(`INSERT INTO organizations (id, name, owner_user_id) VALUES (20, 'Org B', 1)`)
+      await testDb.pg.query(
+        `INSERT INTO projects (id, name, org_id, created_by, org_published_termbase, archived_at) VALUES
+          ('tb-trashed', 'Trashed', 10, 1, TRUE, now()),
+          ('tb-other-org', 'Other org', 20, 1, TRUE, NULL)`,
+      )
+      // proj-b exists in the same org but is not published. tb-deleted has no
+      // project row: deleting a project cascades to none of these rows.
+      for (const [i, tb] of ["proj-b", "tb-trashed", "tb-other-org", "tb-deleted"].entries()) {
+        await subscribe(tb, i)
+        await insertConcept(`c-${tb}`, tb, "active", `r-${tb}`)
+      }
+
+      const { body } = await preview(testDb, token)
+      expect(body.parts.injectedTerms).toEqual([])
+      expect(body.parts.rules).toBe("")
+    })
+
     it("injects project rules from settings", async () => {
       await putSettings(testDb, "proj-a", {
         sourceLanguage: "English",

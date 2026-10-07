@@ -88,6 +88,7 @@ describe("AQU-1607 member scopes store lane ids", () => {
     const res = await putScopes("p-lanes", await jwtFor("owner"), [{ kind: "lane", value: "ln-mx" }])
     expect(res.status).toBe(200)
     expect(await storedLaneScopes("p-lanes", 2)).toEqual(["ln-mx"])
+    expect(await storedLaneGrants("p-lanes", 2)).toEqual(["ln-mx"])
   })
 
   it("converts the former default lane's '' tag to that lane's id", async () => {
@@ -120,6 +121,7 @@ describe("AQU-1607 member scopes store lane ids", () => {
     expect(await res.json()).toMatchObject({ ambiguous: ["Spanish"] })
     // The refused PUT left the previous scope alone — it is not a clear.
     expect(await storedLaneScopes("p-lanes", 2)).toEqual(["ln-mx"])
+    expect(await storedLaneGrants("p-lanes", 2)).toEqual(["ln-mx"])
   })
 
   it("refuses a value that names no lane of this project", async () => {
@@ -134,6 +136,9 @@ describe("AQU-1607 member scopes store lane ids", () => {
     expect((await putScopes("p-lanes", owner, [{ kind: "lane", value: "ln-mx" }])).status).toBe(200)
     expect((await putScopes("p-lanes", owner, [])).status).toBe(200)
     expect(await storedLaneScopes("p-lanes", 2)).toEqual([])
+    // No lane scopes means every current target lane, which is how the write
+    // wall treats an unscoped member. Source lanes are not grants.
+    expect(await storedLaneGrants("p-lanes", 2)).toEqual(["ln-main", "ln-mx", "ln-pe"])
   })
 })
 
@@ -143,6 +148,8 @@ describe("AQU-1607 member scopes on a project with no lane rows", () => {
     const res = await putScopes("p-bare", await jwtFor("owner"), [{ kind: "lane", value: "es" }])
     expect(res.status).toBe(200)
     expect(await storedLaneScopes("p-bare", 2)).toEqual(["es"])
+    // Nothing to point a grant at until lane rows exist.
+    expect(await storedLaneGrants("p-bare", 2)).toEqual([])
   })
 })
 

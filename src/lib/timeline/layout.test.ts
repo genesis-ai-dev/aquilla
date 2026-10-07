@@ -186,3 +186,34 @@ describe("dubbing layout — the footage's length is a floor on the track", () =
     expect(l.totalSec).toBe(0 + 2) // no media cells → empty programme
   })
 })
+
+describe("video-less subtitle import (AQU-1704)", () => {
+  // Three SRT cues, 0-3, 3-6, 6-9 s, each with a take: 1 s, 5 s, 2 s.
+  const cue = (id: string, start: number, end: number, ms: number): CellData => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return {
+      id, fileId: "f1", original: "line", translated: "", medium: "text", startTime: start, endTime: end,
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: ms } },
+    } as unknown as CellData
+  }
+  const cues = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+  const att = (c: CellData) => c.attachments?.[`audio-${c.id}-1700000000-take.webm`] as never
+
+  it("audio-first lays the takes end to end: slots at 0, 1 and 6 s", () => {
+    // The editor passes the subtitle lane as the programme source when the
+    // dialogue lane is empty.
+    const layout = buildTimelineLayout("audioFirst", cues, cues)
+    expect(layout.programme?.slots.map((s) => s.startSec)).toEqual([0, 1, 6])
+    expect(layout.programme?.totalSec).toBe(8)
+    expect(layout.targetGeom(cues[0], att(cues[0]))).toMatchObject({ start: 0, end: 1 })
+    expect(layout.targetGeom(cues[1], att(cues[1]))).toMatchObject({ start: 1, end: 6 })
+    expect(layout.targetGeom(cues[2], att(cues[2]))).toMatchObject({ start: 6, end: 8 })
+  })
+
+  it("dubbing keeps the cue slots", () => {
+    const layout = buildTimelineLayout("dubbing", cues, [])
+    expect(layout.programme).toBeNull()
+    expect(layout.targetGeom(cues[1], att(cues[1]))).toMatchObject({ start: 3 })
+  })
+})

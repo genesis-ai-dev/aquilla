@@ -22,7 +22,7 @@ const idleQueue: QueueForFile = {
   cellId: null,
   kind: "idle",
   errorMessage: null,
-  progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
+  progress: { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false },
 }
 
 const runningQueue: QueueForFile = {
@@ -32,7 +32,7 @@ const runningQueue: QueueForFile = {
   cellId: "c9",
   kind: "playing",
   errorMessage: null,
-  progress: { currentTime: 4, duration: 10, rate: 1.5, volume: 0.8 },
+  progress: { currentTime: 4, duration: 10, rate: 1.5, volume: 0.8, programmeClock: false },
 }
 
 const video = (over: Partial<VideoTransportInput> = {}): VideoTransportInput => ({
@@ -244,6 +244,14 @@ describe("virtualOwnsFile", () => {
   it("takes over when a linked film is not actually the transport", () => {
     expect(virtualOwnsFile(videoOwnsFile("https://cdn/x.m3u8", false, false), false, 640)).toBe(true)
   })
+
+  // AQU-1704: a video-less subtitle file in Free timing has no film and no
+  // source recording, which used to hand it to the virtual clock. That clock
+  // fires takes at their cue times, so the queue must own it instead.
+  it("is not the transport in Free timing, so the queue plays the programme", () => {
+    expect(virtualOwnsFile(false, false, 640, true)).toBe(false)
+    expect(virtualOwnsFile(false, false, 640, false)).toBe(true)
+  })
 })
 
 describe("selectTransportForFile — the virtual arm", () => {
@@ -254,7 +262,7 @@ describe("selectTransportForFile — the virtual arm", () => {
     expect(t.playing).toBe(true)
     expect(t.kind).toBe("playing")
     expect(t.cellId).toBe("cue-7")
-    expect(t.progress).toEqual({ currentTime: 12.5, duration: 640, rate: 1, volume: 1 })
+    expect(t.progress).toEqual({ currentTime: 12.5, duration: 640, rate: 1, volume: 1, programmeClock: false })
   })
 
   it("is idle before it takes the file", () => {

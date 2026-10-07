@@ -206,6 +206,9 @@ export async function linkProjectToSource(
     gate?: "head" | "validated"
     /** AQU-1559: the UPSTREAM file ids to follow; omit for the whole project. */
     fileIds?: string[]
+    /** AQU-1605: which of the upstream's lanes to consume (`lanes.id`). Omit for
+     *  its former default lane, which is what every link read before that slice. */
+    laneId?: string
   },
 ): Promise<{ seeded: boolean }> {
   const r = await fetch(

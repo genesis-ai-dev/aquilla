@@ -41,6 +41,8 @@ import {
   PROJECT_SETTINGS_VERSION_INITIAL,
 } from "@/lib/sync/project-settings"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
+import { InheritedSettingsChoice } from "@/components/ProjectSettings/InheritedSettingsChoice"
 import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { summarizeFileSelection } from "@/lib/sync/link-file-selection"
 import {
@@ -309,6 +311,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [filesFailed, setFilesFailed] = useState(false)
   const [filesAttempt, setFilesAttempt] = useState(0)
+  const [inheritReceive, setInheritReceive] = useState({ ...INHERIT_DEFAULTS })
+  const [inheritDetached, setInheritDetached] = useState<Partial<Record<keyof typeof INHERIT_DEFAULTS, boolean>>>({})
+  const inheritReceiveRef = useRef(inheritReceive)
+  inheritReceiveRef.current = inheritReceive
   const fileChoices = useMemo(() => upstreamFiles ?? [], [upstreamFiles])
   const { selectedCount, allSelected, nothingSelected } = useMemo(
     () => summarizeFileSelection(fileChoices, selectedFileIds),
@@ -434,6 +440,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               consumes: linkConsumes,
               ...(linkLaneId ? { laneId: linkLaneId } : {}),
               ...(pickedFileIds ? { fileIds: pickedFileIds } : {}),
+              inherit: inheritReceiveRef.current,
             })
             if (linkResult.seeded === false && linkMode === "live") {
               // AQU-1544: the retry's answer used to be dropped, so a failed
@@ -1087,6 +1094,20 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                   }
                                 />
                               )
+                            }}
+                          />
+                        ) : null}
+
+                        {showCorpusChoice && (chosenConsumes === "source" || chosenConsumes === "target") ? (
+                          <InheritedSettingsChoice
+                            title={t("projectSettings.inherit.linkTitle")}
+                            description={t("projectSettings.inherit.linkDescription")}
+                            receive={inheritReceive}
+                            detached={inheritDetached}
+                            disabled={locked}
+                            onChange={(next) => {
+                              setInheritReceive(next.receive)
+                              setInheritDetached(next.detached)
                             }}
                           />
                         ) : null}

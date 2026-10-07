@@ -30,7 +30,10 @@ import { UserError } from "@/lib/errors/user-error"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { isLinkSeedFailed, resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
 import { pickSelectOption } from "@/test-utils/select"
+import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
 import { LinkSourceSection } from "./LinkSourceSection"
+
+const inherit = { ...INHERIT_DEFAULTS }
 
 const linkProjectSource = vi.fn()
 const triggerLinkSync = vi.fn()
@@ -211,6 +214,7 @@ describe("LinkSourceSection", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
     // The server seeded inside the same call, so no client self-heal needed.
     expect(triggerLinkSync).not.toHaveBeenCalled()
@@ -518,6 +522,7 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
       // AQU-1605: the upstream lane the chain link consumes — pre-filled here,
       // since this upstream has one translation the caller may see.
       laneId: "lane-upstream-default",
+      inherit,
     })
   })
 
@@ -551,6 +556,7 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
         sourceProjectId: "proj-upstream",
         mode: "live",
         consumes: "source",
+        inherit,
       }),
     )
   })
@@ -641,6 +647,7 @@ describe("LinkSourceSection — which upstream translation (AQU-1605)", () => {
       mode: "live",
       consumes: "target",
       laneId: "lane-france",
+      inherit,
     })
   })
 
@@ -912,6 +919,7 @@ describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
       mode: "live",
       consumes: "source",
       fileIds: ["up-MAT", "up-MRK"],
+      inherit,
     })
   })
 
@@ -941,6 +949,7 @@ describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
   })
 
@@ -975,6 +984,7 @@ describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
   })
 
@@ -1075,6 +1085,7 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
     expect(fetchLinkFileMatches).not.toHaveBeenCalled()
   })
@@ -1118,6 +1129,7 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       mode: "live",
       consumes: "source",
       replaceFiles: [{ upstreamFileId: "up-MRK", fileId: "own-mrk" }],
+      inherit,
     })
   })
 
@@ -1192,6 +1204,7 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       mode: "live",
       consumes: "source",
       fileIds: ["up-MAT", "up-LUK"],
+      inherit,
     })
   })
 

@@ -2510,7 +2510,15 @@ export function ProjectOverview() {
                             files={project?.files ?? []}
                             jwt={jwt ?? ""}
                             author={session?.username ?? ""}
-                            targetLang={selectedLaneTag ?? ""}
+                            arrivedLane={showLaneTabs ? selectedLaneTag : null}
+                            laneTags={
+                              targetLaneRows.length > 0
+                                ? [...new Set(targetLaneRows.map((lane) => lane.legacyTag ?? ""))]
+                                : ["", ...(project?.targetLanes ?? [])]
+                            }
+                            laneLabels={autopilotLaneLabels}
+                            defaultLaneLabel={project?.targetLanguage ?? ""}
+                            laneRows={targetLaneRows}
                             roleLevel={project?.syncRole?.level ?? 0}
                             allowSelfAssignment={orgSettings.allowSelfAssignment}
                             assignmentMinRole={orgSettings.assignmentMinRole}

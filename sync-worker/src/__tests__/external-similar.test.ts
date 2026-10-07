@@ -23,7 +23,7 @@ interface SimilarRow {
   fileId: string
   sourceValue: string
   targetValue: string
-  targetLang: string
+  laneId: string
   score: number
 }
 
@@ -93,6 +93,10 @@ async function seedProject(testDb: TestDb) {
   )
   await testDb.pg.query(
     `INSERT INTO files (id, project_id, name, event_id) VALUES ('file-x', 'proj-a', 'Genesis', 'evt-file-1')`,
+  )
+  await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
   )
   for (const c of CELLS) {
     for (const side of ["source", "target"] as const) {
@@ -166,7 +170,7 @@ describe("external similarity search (AQU-1232)", () => {
     expect(near.fileId).toBe("file-x")
     expect(near.sourceValue).toBe("In the beginning God created the earth")
     expect(near.targetValue).toBe("Au commencement Dieu créa la terre")
-    expect(near.targetLang).toBe("")
+    expect(near.laneId).toBe("deflane1")
     expect(near.score).toBeGreaterThan(0)
     expect(near.score).toBeLessThanOrEqual(1)
   })
@@ -192,9 +196,9 @@ describe("external similarity search (AQU-1232)", () => {
       expect(Object.keys(row).sort()).toEqual([
         "cellId",
         "fileId",
+        "laneId",
         "score",
         "sourceValue",
-        "targetLang",
         "targetValue",
       ])
     }

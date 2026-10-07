@@ -73,6 +73,8 @@ interface ParseRequestBody {
   resultIndex?: number
   changesetId?: string
   autonomyMode?: string
+  /** Lane id for translations the file already carries. */
+  laneId?: string
 }
 
 /** Hand-validate the optional JSON body (no zod — matches commands.ts). */
@@ -80,7 +82,7 @@ function readBody(raw: unknown): { ok: true; body: ParseRequestBody } | { ok: fa
   if (raw === null || raw === undefined) return { ok: true, body: {} }
   if (typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, message: 'body must be a JSON object' }
   const b = raw as Record<string, unknown>
-  for (const k of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'changesetId', 'autonomyMode'] as const) {
+  for (const k of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'changesetId', 'autonomyMode', 'laneId'] as const) {
     if (b[k] !== undefined && typeof b[k] !== 'string') return { ok: false, message: `${k} must be a string when present` }
   }
   for (const k of ['stage', 'excludeFrontMatter'] as const) {
@@ -127,6 +129,7 @@ export async function handleParseArtifact(
     ...(body.fileType !== undefined ? { fileType: body.fileType } : {}),
     ...(body.resultIndex !== undefined ? { resultIndex: body.resultIndex } : {}),
     ...(body.excludeFrontMatter !== undefined ? { excludeFrontMatter: body.excludeFrontMatter } : {}),
+    ...(body.laneId !== undefined ? { laneId: body.laneId } : {}),
     // A preview may summarize a multi-book parse; staging must name the book.
     requireSingleResult: body.stage === true,
   })

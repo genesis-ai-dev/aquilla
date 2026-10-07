@@ -9,6 +9,10 @@
 // to fix ONE thing and re-prepare, not bisect a composite command by trial.
 
 import { resolveProjectTextDirection } from '../../../db/shared/text-direction'
+import { askedLanesFromSpecs, listProjectLanes } from '../../../db/shared/lanes'
+import { laneLanguage } from '../../../src/lib/lanes/lane-display'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { laneContextFrom, resolveTargetLaneId } from './external-lane'
 import { errorResponse } from './errors'
 import { stageAndRespond } from './stage'
 import { parseArtifactToCells } from './import-parse-core'
@@ -275,12 +279,23 @@ export async function prepareProjectSetup(
     if (allSatisfied) skipped(index, 'members', 'every named person already holds the proposed role')
   }
 
+  // ── lanes ────────────────────────────────────────────────────────────────
+  if (cmd.lanes && cmd.lanes.length > 0) {
+    const existing = await listProjectLanes(db, urlProjectId)
+    const asked = askedLanesFromSpecs(cmd.lanes, existing)
+    if (!asked.ok) return fieldError('validation_failed', 'lanes', asked.message)
+    cmd.plannedLanes = asked.lanes
+  }
+
   // ── steps: imports ───────────────────────────────────────────────────────
-  const registeredLanes = new Set(
-    Array.isArray(current.settings.targetLanes)
-      ? current.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
-      : [],
+  const { visible: visibleLaneIds } = await visibleTagsForMember(
+    db,
+    env.LANE_READ_WALL,
+    urlProjectId,
+    Number(cred.userId),
+    role.level,
   )
+  const laneCtx = laneContextFrom(current.lanes ?? [], current.settings, visibleLaneIds)
   const planNames = new Set<string>()
   let sourceCellsAdded = 0
   let filesCreated = 0
@@ -335,6 +350,7 @@ export async function prepareProjectSetup(
     const parsed = await parseArtifactToCells(env, urlProjectId, spec.artifactId, {
       ...(spec.fileType !== undefined ? { fileType: spec.fileType } : {}),
       ...(spec.resultIndex !== undefined ? { resultIndex: spec.resultIndex } : {}),
+      ...(spec.laneId !== undefined ? { laneId: spec.laneId } : {}),
       requireSingleResult: true,
     })
     if (!parsed.ok) return parsed.response
@@ -348,19 +364,23 @@ export async function prepareProjectSetup(
         { cells: cells.length, maxCells: PLAN_IMPORT_MAX_CELLS },
       )
     }
-    const unregistered = findUnregisteredLane(cells, registeredLanes)
-    if (unregistered !== null) {
-      return fieldError(
-        'validation_failed',
-        `imports[${i}].artifactId`,
-        `this artifact carries translations in unregistered lane "${unregistered}"; register it in settings.targetLanes first`,
-      )
+    const laneProblem = variantLaneProblem(cells, laneCtx)
+    if (laneProblem !== null) {
+      return fieldError('validation_failed', `imports[${i}].laneId`, laneProblem)
     }
 
     const resolvedSource = spec.sourceTextDirection
-      ?? resolveProjectTextDirection(settingsAfterPlan, 'source', spec.sourceLanguage ?? null)
+      ?? resolveProjectTextDirection(
+        settingsAfterPlan,
+        'source',
+        spec.sourceLanguage ?? languageForSetupSide(cmd, current, 'source'),
+      )
     const resolvedTarget = spec.targetTextDirection
-      ?? resolveProjectTextDirection(settingsAfterPlan, 'target', spec.targetLanguage ?? null)
+      ?? resolveProjectTextDirection(
+        settingsAfterPlan,
+        'target',
+        spec.targetLanguage ?? languageForSetupSide(cmd, current, 'target'),
+      )
     importDirections.push(`${spec.fileName}: source ${resolvedSource}, target ${resolvedTarget}`)
 
     steps.push({
@@ -375,6 +395,7 @@ export async function prepareProjectSetup(
       ...(spec.targetLanguage !== undefined ? { targetLanguage: spec.targetLanguage } : {}),
       ...(spec.sourceTextDirection !== undefined ? { sourceTextDirection: spec.sourceTextDirection } : {}),
       ...(spec.targetTextDirection !== undefined ? { targetTextDirection: spec.targetTextDirection } : {}),
+      ...(spec.laneId !== undefined ? { laneId: spec.laneId } : {}),
       cellCount: cells.length,
       // Minted per import (W1-B): a crash-retry re-posts IDENTICAL ids, so the
       // /events idempotency layer dedupes instead of creating a second file.
@@ -432,16 +453,36 @@ export async function prepareProjectSetup(
   })
 }
 
-/** The first variant lane a parse produced that the project cannot select, or
- *  null. Mirrors preparePlanImport's lane rule — committing data the workspace
- *  cannot show is worse than refusing the plan. */
-function findUnregisteredLane(
+/** Language the plan's lanes (or the lanes already on the project) name for one side.
+ *  Direction falls through this when the import does not name its own language.
+ *  The four retired settings keys are not read here except inside laneLanguage's
+ *  migration fallback, which is the only language resolver. */
+function languageForSetupSide(
+  cmd: ProjectSetupCommand,
+  current: Awaited<ReturnType<typeof loadProjectSettings>>,
+  side: 'source' | 'target',
+): string | null {
+  const planned = cmd.plannedLanes?.find((lane) => lane.role === side)
+  if (planned && planned.language.trim() !== '') return planned.language
+  const existing = (current.lanes ?? []).find((lane) => lane.role === side && !lane.archivedAt)
+  if (!existing) return null
+  const language = laneLanguage(existing, {
+    settings: current.settings,
+    role: side,
+    legacyTag: existing.legacyTag,
+  })
+  return language.trim() === '' ? null : language
+}
+
+/** The first variant whose lane id the caller may not write, or null. */
+function variantLaneProblem(
   cells: readonly PlanImportCell[],
-  registeredLanes: ReadonlySet<string>,
+  ctx: Parameters<typeof resolveTargetLaneId>[2],
 ): string | null {
   for (const cell of cells) {
     for (const variant of cell.variants ?? []) {
-      if (variant.laneId && !registeredLanes.has(variant.laneId)) return variant.laneId
+      const resolved = resolveTargetLaneId(variant.laneId, 'laneId', ctx)
+      if (!resolved.ok) return resolved.message
     }
   }
   return null

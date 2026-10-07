@@ -35,6 +35,7 @@ import {
   patchProjectSettingsShared,
 } from '../../../db/shared/projects'
 import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
+import { RETIRED_LANE_SETTINGS_KEYS, RETIRED_LANE_SETTINGS_MESSAGE } from './external-lane'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
 import { ROLE } from '../events/role-policy'
 
@@ -164,6 +165,10 @@ export function validatePatchSettingsCommand(
     }
     if (DANGEROUS_SETTINGS_KEYS.has(op.key)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].key "${op.key}" is a reserved key and cannot be used` })
+      return null
+    }
+    if ((RETIRED_LANE_SETTINGS_KEYS as readonly string[]).includes(op.key)) {
+      issues.push({ index, message: RETIRED_LANE_SETTINGS_MESSAGE })
       return null
     }
     if (!('value' in op)) {
@@ -444,6 +449,7 @@ export async function commitPatchSettings(
     ops: cmd.ops,
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    registerLanes: false,
   })
 
   if (result.status === 'conflict') {

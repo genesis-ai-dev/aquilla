@@ -18,10 +18,12 @@
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import {
+  askedLanesFromSpecs,
   ensureProjectLaneStmts,
   listProjectLanes,
   retryingLaneIdCollision,
   type AskedLane,
+  type ExternalLaneSpec,
   type ProjectLaneRecord,
 } from "./lanes"
 
@@ -64,6 +66,13 @@ export interface CreateProjectInput {
    * the language the user typed and an optional display name. Same batch.
    */
   targetLanes?: ReadonlyArray<{ language: string; name?: string | null }>
+  /**
+   * AQU-1615: explicit lanes from the external API (role, language, optional
+   * name, optional code). When set, these are the lanes — `settingsSeed` and
+   * `targetLanes` are not also applied, and no project-level language key is
+   * written. The app create path leaves this unset.
+   */
+  lanes?: readonly ExternalLaneSpec[]
 }
 
 /**
@@ -110,8 +119,9 @@ export async function createProjectShared(
       )
     }
 
+    const lanes = lanesForNewProject(input)
     stmts.push(
-      ...ensureProjectLaneStmts(db, input.projectId, { lanes: lanesForNewProject(input) }),
+      ...ensureProjectLaneStmts(db, input.projectId, { lanes }),
     )
 
     const [projectResult] = await db.batch(stmts)
@@ -121,6 +131,16 @@ export async function createProjectShared(
 
 /** Source lane plus each requested target. The first target's tag is its language. */
 function lanesForNewProject(input: CreateProjectInput): AskedLane[] {
+  if (input.lanes) {
+    const asked = askedLanesFromSpecs(input.lanes)
+    if (!asked.ok) throw new Error(asked.message)
+    // A project always has a source lane. An explicit list that names only
+    // targets still gets one, with no language, the same as an empty seed.
+    if (!asked.lanes.some((lane) => lane.role === "source")) {
+      return [{ role: "source", language: "" }, ...asked.lanes]
+    }
+    return asked.lanes
+  }
   const source = typeof input.settingsSeed?.sourceLanguage === "string"
     ? input.settingsSeed.sourceLanguage.trim()
     : ""
@@ -313,6 +333,13 @@ export interface UpdateProjectSettingsInput {
   ifMatchVersion: number
   /** Writer's user id (numeric, or its string form). */
   updatedBy: number | string
+  /**
+   * AQU-1615: the in-app settings write still registers lanes from the blob
+   * (AQU-1585). An external settings write passes false so a blob that still
+   * holds sourceLanguage / targetLanguage / targetLanes / archivedLanes cannot
+   * mint a lane. Default true.
+   */
+  registerLanes?: boolean
 }
 
 /**
@@ -343,6 +370,8 @@ export interface PatchProjectSettingsInput {
   ifMatchVersion: number
   /** Writer's user id (numeric, or its string form). */
   updatedBy: number | string
+  /** See {@link UpdateProjectSettingsInput.registerLanes}. Default true. */
+  registerLanes?: boolean
 }
 
 /**
@@ -369,6 +398,7 @@ export async function patchProjectSettingsShared(
     settings: merged,
     ifMatchVersion: input.ifMatchVersion,
     updatedBy: input.updatedBy,
+    registerLanes: input.registerLanes,
   })
 }
 
@@ -400,17 +430,20 @@ export async function updateProjectSettingsShared(
   // Lane ids are minted inside the attempt. The settings write is in the same
   // transaction, so a uq_lanes_id collision rolls the version change back too.
   // Passing the existing lane rows stops a stale targetLanes entry minting a
-  // second lane for one that already exists (AQU-1585). A language named here
-  // that has no row yet still becomes a lane — PatchSettings is how the
-  // external API registers one until AQU-1615.
+  // second lane for one that already exists (AQU-1585). The in-app path still
+  // registers lanes from the blob. External settings writes pass
+  // registerLanes: false (AQU-1615) so they never mint a lane.
+  const registerLanes = input.registerLanes !== false
   const batchWithLanes = (head: AquillaStatement[]) =>
     retryingLaneIdCollision(() =>
       db.batch([
         ...head,
-        ...ensureProjectLaneStmts(db, input.projectId, {
-          settings: normalizedSettings,
-          existingLanes: current.lanes ?? [],
-        }),
+        ...(registerLanes
+          ? ensureProjectLaneStmts(db, input.projectId, {
+              settings: normalizedSettings,
+              existingLanes: current.lanes ?? [],
+            })
+          : []),
       ]),
     )
 

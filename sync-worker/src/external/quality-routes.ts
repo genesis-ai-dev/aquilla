@@ -49,6 +49,7 @@ import { handleProgressReadRequest, type FileProgressResponse } from "../events/
 import { handleConceptsReadRequest, type ConceptRowOut } from "../events/concepts-read-route"
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { externalError } from "./errors"
+import { resolveExternalLaneParam } from "./external-lane"
 import { paginate, parsePageParams } from "./pagination"
 import { mintInternalToken } from "./read-routes"
 import {
@@ -191,7 +192,17 @@ async function handleQuality(
 
   const url = new URL(request.url)
   const fileIdFilter = url.searchParams.get("fileId")
-  const lane = url.searchParams.get("lane") ?? ""
+  const resolvedLane = await resolveExternalLaneParam(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(ctx.credential.userId),
+    ctx.role,
+    url.searchParams.get("lane"),
+    "lane",
+  )
+  if (!resolvedLane.ok) return externalError("validation_failed", resolvedLane.message, 400)
+  const lane = resolvedLane.lane.legacyTag ?? ""
   const { limit, offset } = parsePageParams(url)
 
   const scope = await resolveScopeFiles(env, ctx, projectId, fileIdFilter)
@@ -425,7 +436,17 @@ async function handleTermConsistency(
 
   const url = new URL(request.url)
   const fileIdFilter = url.searchParams.get("fileId")
-  const lane = url.searchParams.get("lane") ?? ""
+  const resolvedLane = await resolveExternalLaneParam(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(ctx.credential.userId),
+    ctx.role,
+    url.searchParams.get("lane"),
+    "lane",
+  )
+  if (!resolvedLane.ok) return externalError("validation_failed", resolvedLane.message, 400)
+  const lane = resolvedLane.lane.legacyTag ?? ""
   const onlyDrift = url.searchParams.get("onlyDrift") === "1"
   const { limit, offset } = parsePageParams(url)
 

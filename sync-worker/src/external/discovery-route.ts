@@ -66,7 +66,7 @@ function apiMap(): Record<string, unknown> {
       `3. GET ${EXTERNAL_ROOT}/projects/:projectId/files — list files; then .../files/:fileId/cells to read content.`,
       `3a. GET ${EXTERNAL_ROOT}/projects/:projectId — the project itself: settings plus the live settingsVersion a PatchSettings ifMatchVersion must match.`,
       `3b. GET ${EXTERNAL_ROOT}/commands/:kind — what a command kind takes, before you build one.`,
-      `4. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets with { "commands": [{ "kind": "SetTranslation", "fileId": "...", "cellId": "...", "value": "..." }] } — stages a plan, returns { changeset, digest, summary, approvalUrl }.`,
+      `4. GET ${EXTERNAL_ROOT}/projects/:projectId and copy a target lane's id from lanes[]. Then POST ${EXTERNAL_ROOT}/projects/:projectId/changesets with { "commands": [{ "kind": "SetTranslation", "fileId": "...", "cellId": "...", "laneId": "<that id>", "value": "..." }] } — stages a plan, returns { changeset, digest, summary, approvalUrl }. laneId is required; a language tag is not accepted.`,
       `5. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets/:id/commit — applies it (act mode). In ask mode this returns 428 confirmation_required: show the approvalUrl to a human, wait for their approval, then call commit again.`,
     ],
     endpoints: {
@@ -157,7 +157,7 @@ function apiMap(): Record<string, unknown> {
       workflow: [
         `1. POST ${EXTERNAL_ROOT}/projects/:projectId/artifacts with header "x-artifact-name: <filename>" and the raw file bytes as the body (max 25MB) → { artifactId }.`,
         `2. POST ${EXTERNAL_ROOT}/projects/:projectId/artifacts/:artifactId/parse (empty body) → PREVIEW: { fileName, fileType, totalCells, sampleCells, warnings, results }. Pass { "fileType": "..." } to override detection (required for po/properties/obs/sbv, which are not sniffable).`,
-        `3. Same route with { "stage": true } (plus optional fileName/sourceLanguage/targetLanguage/resultIndex) → stages a PlanImport changeset linking the artifact; returns the standard { changeset, digest, summary, approvalUrl }.`,
+        `3. Same route with { "stage": true } (plus optional fileName/sourceLanguage/targetLanguage/resultIndex, and laneId when the file already has translations) → stages a PlanImport changeset linking the artifact; returns the standard { changeset, digest, summary, approvalUrl }. laneId is a lane id from GET .../projects/:projectId, not a language tag.`,
         `4. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets/:id/commit as usual (ask mode: human approval at the approvalUrl first).`,
       ],
       limits: {
@@ -183,7 +183,7 @@ function apiMap(): Record<string, unknown> {
         'The other end of the import loop (AQU-858): pull a finished file back out in the format its consumer actually reads — USFM for Paratext, say — without a human clicking Export in the app. The export reconstructs the ORIGINAL artifact preserved at import time with the current translations substituted in; untranslated segments keep their source text so the file stays valid. The MCP tool export_file wraps the same route.',
       workflow: [
         `1. GET ${EXTERNAL_ROOT}/projects/:projectId/files — find the fileId.`,
-        `2. GET ${EXTERNAL_ROOT}/projects/:projectId/files/:fileId/export (add ?lane=<tag> for one target-language lane) → the file bytes, with Content-Disposition naming it.`,
+        `2. GET ${EXTERNAL_ROOT}/projects/:projectId/files/:fileId/export?lane=<lane id> → the file bytes, with Content-Disposition naming it. lane is required and is a lane id, not a language tag.`,
         '3. Check the fidelity headers before delivering (below), then hand the bytes to whatever consumes them.',
       ],
       fidelityHeaders: {
@@ -202,7 +202,7 @@ function apiMap(): Record<string, unknown> {
         'Project settings are read with GET .../projects/:projectId/settings and changed with the PatchSettings command — a FIELD-SCOPED write: keys you do not name are left byte-identical, so you can never clobber settings you have not read. Prefer it over UpdateProjectSettings (deprecated whole-blob replace).',
       workflow: [
         `1. GET ${EXTERNAL_ROOT}/projects/:projectId/settings → { projectId, settings, version, updatedAt }.`,
-        `2. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets with { "commands": [{ "kind": "PatchSettings", "projectId": "...", "ops": [{ "key": "targetLanes", "value": ["es", "pt"] }], "ifMatchVersion": <that version> }] } — one op per key (duplicates rejected); top-level keys only; each op replaces its key's value wholesale. JSON cannot carry undefined, so write null rather than deleting a key.`,
+        `2. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets with { "commands": [{ "kind": "PatchSettings", "projectId": "...", "ops": [{ "key": "systemPrompt", "value": "..." }], "ifMatchVersion": <that version> }] } — one op per key (duplicates rejected); top-level keys only; each op replaces its key's value wholesale. JSON cannot carry undefined, so write null rather than deleting a key. sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings — create lanes with CreateProject or ProjectSetup.`,
         '3. Commit as usual (ask mode: a human approves at the approvalUrl first). `ifMatchVersion` is re-checked at commit — a racing writer surfaces as plan_stale, so re-read and re-prepare.',
       ],
       rules:
@@ -210,12 +210,12 @@ function apiMap(): Record<string, unknown> {
     },
     multiLanguage: {
       note:
-        'A project can hold MULTIPLE target languages at once via target-language lanes. A lane is a language tag (e.g. "es", "pt") registered in the project settings array settings.targetLanes; every cell keeps one shared source plus one independent target per lane. Omitting the lane everywhere uses the default lane — single-language callers need no changes. Preconditions/drift are lane-scoped: edits to the same cell in different lanes never invalidate each other\'s changesets.',
+        'A project holds a source lane and any number of target lanes. Each lane has an id (lanes.id), a name, a language, and a role. Writes and reads that mean a target lane take that id as laneId (or ?lane= / ?targetLang=). A language tag is not a lane id and is not aliased. Omitting the id is validation_failed and names this discovery endpoint. GET .../projects/:projectId returns the lanes you may use; a lane you cannot see is absent, the same as one that does not exist. Preconditions/drift are lane-scoped: edits to the same cell in different lanes never invalidate each other\'s changesets.',
       workflow: [
-        `1. Register the lanes once: GET .../settings for the live version, then stage { "kind": "PatchSettings", "projectId": "...", "ops": [{ "key": "targetLanes", "value": ["es", "pt"] }], "ifMatchVersion": <that version> } — field-scoped, so the rest of the settings blob is untouched (see "settings" above).`,
-        '2. Write per lane: add "laneId": "es" (or "pt") to each SetTranslation command. An unregistered laneId is rejected at prepare with validation_failed. The project\'s primary targetLanguage IS the default lane: omitting laneId and passing the primary (any spelling) both write the default row. A regional lane beside the primary (fr-CA in a French project) is its own lane and must be registered.',
-        `3. Read per lane: GET .../files/:fileId/cells?lane=es returns source cells plus only that lane's target cells; omit lane for all lanes (each target row carries its targetLang).`,
-        '4. Importing a file can seed several lanes at once: each PlanImport cell takes "variants": [{ "laneId": "es", "content": "..." }, { "laneId": "pt", "content": "..." }].',
+        `1. Read the lanes: GET ${EXTERNAL_ROOT}/projects/:projectId → lanes: [{ id, name, language, role }]. Create them with CreateProject or ProjectSetup (lanes: [{ role, language, name?, code? }]). Do not write sourceLanguage, targetLanguage, targetLanes, or archivedLanes.`,
+        '2. Write per lane: "laneId" on SetTranslation, DraftCells, PlanImport variants, SplitCell targetOffsets, and the EmitEvents kinds that address one cell is that id. It is required. An unknown id, a tag, or a lane you cannot see is validation_failed with "lane does not exist".',
+        `3. Read per lane: GET .../files/:fileId/cells?lane=<id>, export and quality use the same ?lane=<id>, and prompt-preview uses ?targetLang=<id>. The value is the lane id. Cells come back with laneId.`,
+        '4. Importing a file can seed a lane: each PlanImport cell takes "variants": [{ "laneId": "<id>", "content": "..." }]. A bilingual parse passes the same id as laneId.',
       ],
     },
     mcp: {

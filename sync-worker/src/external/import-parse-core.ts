@@ -21,6 +21,7 @@
 // a space — and the preview shows exactly what commits.
 
 import { errorResponse } from './errors'
+import { laneIdRequiredMessage } from './external-lane'
 import { detectFormat, loadArtifact, type ArtifactRow } from './artifacts-route'
 import { PLAN_IMPORT_MAX_CELLS, type PlanImportCell } from './commands'
 import type { ExternalEnv } from './types'
@@ -138,7 +139,7 @@ function contentOnlyText(
  *  survives is counted into a `residual-markup` warning — it should be zero. */
 export function stringsToPlanImportCells(
   strings: TranslatableString[],
-  opts?: { contentOnly?: boolean },
+  opts?: { contentOnly?: boolean; laneId?: string },
 ): { cells: PlanImportCell[]; warnings: ParseWarning[] } {
   const warnings: ParseWarning[] = []
   const contentOnly = opts?.contentOnly === true
@@ -173,14 +174,12 @@ export function stringsToPlanImportCells(
       ...(s.speaker !== undefined ? { speaker: s.speaker } : {}),
       ...(s.paragraphStart ? { paragraphStart: true } : {}),
       ...(metadata !== undefined ? { metadata } : {}),
-      // Bilingual formats (csv/tsv, po, json with values) carry an existing
-      // translation — land it in the DEFAULT lane ('' — no lane registration
-      // needed), matching the browser's bilingual import.
+      // A translation lands on the lane id the caller named. '' is not a lane.
       ...(translated.trim() !== ''
         ? {
             variants: [
               {
-                laneId: '',
+                laneId: opts?.laneId ?? '',
                 content: translated,
                 ...(s.translatedHtml !== undefined ? { contentHtml: s.translatedHtml } : {}),
               },
@@ -323,6 +322,9 @@ export interface ParseArtifactOptions {
    *  caller that is about to CREATE a file — a silent "first book only" is the
    *  failure mode this guards. */
   requireSingleResult?: boolean
+  /** Lane id for translations the artifact already carries. Required when any
+   *  string has a translation. */
+  laneId?: string
 }
 
 /**
@@ -431,9 +433,19 @@ export async function parseArtifactToCells(
   }
 
   const chosen = results[opts.resultIndex ?? 0]
+  const hasTranslation = chosen.strings.some((s) => (s.translated ?? '').trim() !== '')
+  if (hasTranslation && !opts.laneId) {
+    return {
+      ok: false,
+      response: errorResponse('validation_failed', laneIdRequiredMessage('laneId')),
+    }
+  }
   // The `agent:usfm` import profile is content-only (sfm aliases to usfm in
   // resolveFileType, so one check covers both spellings).
-  const { cells, warnings } = stringsToPlanImportCells(chosen.strings, { contentOnly: fileType === 'usfm' })
+  const { cells, warnings } = stringsToPlanImportCells(chosen.strings, {
+    contentOnly: fileType === 'usfm',
+    ...(opts.laneId !== undefined ? { laneId: opts.laneId } : {}),
+  })
   if (cells.length > PLAN_IMPORT_MAX_CELLS) {
     warnings.push({
       code: 'over-cell-cap',

@@ -276,7 +276,11 @@ describe('ProjectSetup — one plan, one approval', () => {
       env,
       caller.token,
       setupCommand({
-        settings: { sourceLanguage: 'ru', targetLanguage: 'sty', contributeToGlobalTm: false },
+        lanes: [
+          { role: 'source', language: 'ru' },
+          { role: 'target', language: 'sty' },
+        ],
+        settings: { contributeToGlobalTm: false },
         brief: { parameters: { audience: 'Rural youth, 15–25' }, freeformNotes: 'Keep verse numbers.' },
         members: [
           { username: 'gulsifa', role: 600 },
@@ -289,12 +293,13 @@ describe('ProjectSetup — one plan, one approval', () => {
 
     // The approval page reads these four; none may be empty for a real plan.
     expect(body.summary.command).toBe('ProjectSetup')
-    expect(body.summary.settingsChanges).toMatchObject({
-      sourceLanguage: 'ru',
-      targetLanguage: 'sty',
+    const settingsChanges = body.summary.settingsChanges as Record<string, unknown>
+    expect(settingsChanges).toMatchObject({
       contributeToGlobalTm: 'false',
       'translationBrief.audience': 'Rural youth, 15–25',
     })
+    expect(settingsChanges.sourceLanguage).toBeUndefined()
+    expect(settingsChanges.targetLanguage).toBeUndefined()
     expect(body.summary.membershipChanges).toEqual([
       `Add gulsifa to ${PROJECT} as maintainer (600)`,
       `Add terciman to ${PROJECT} as contributor (400)`,
@@ -321,7 +326,7 @@ describe('ProjectSetup — one plan, one approval', () => {
     expect(receipt.command).toBe('ProjectSetup')
     expect(receipt.failedStep).toBeNull()
     expect(receipt.completedSteps.map((s) => s.kind)).toEqual([
-      'settings', 'policy', 'brief', 'members', 'import',
+      'policy', 'brief', 'members', 'import',
     ])
     expect(receipt.completedSteps.every((s) => s.status === 'applied')).toBe(true)
 
@@ -369,7 +374,7 @@ describe('ProjectSetup — one plan, one approval', () => {
     const env = makeEnv(tdb.db, bucket)
     const caller = await memberToken(700, 'act')
 
-    const { body } = await prepare(env, caller.token, setupCommand({ settings: { targetLanguage: 'fr' } }))
+    const { body } = await prepare(env, caller.token, setupCommand({ lanes: [{ role: 'target', language: 'fr' }] }))
     expect(body.changeset.autonomyMode).toBe('ask')
 
     // …and an unapproved commit is refused.
@@ -447,7 +452,7 @@ describe('ProjectSetup — the brief reaches the copilot (AQU-1323)', () => {
       env,
       caller.token,
       setupCommand({
-        settings: { targetLanguage: 'tt' },
+        lanes: [{ role: 'target', language: 'tt' }],
         brief: { parameters: { keyTerms: 'God → Алла; Holy Spirit → Иске Рух' } },
         imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
       }),
@@ -565,7 +570,11 @@ describe('ProjectSetup — the receipt reports the import text direction (AQU-14
       env,
       caller.token,
       setupCommand({
-        settings: { sourceLanguage: 'en', targetLanguage: 'Journey Arabic', targetTextDirection: 'rtl' },
+        lanes: [
+          { role: 'source', language: 'en' },
+          { role: 'target', language: 'Journey Arabic' },
+        ],
+        settings: { targetTextDirection: 'rtl' },
         imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
       }),
     )
@@ -581,7 +590,10 @@ describe('ProjectSetup — the receipt reports the import text direction (AQU-14
       env,
       caller.token,
       setupCommand({
-        settings: { sourceLanguage: 'en', targetLanguage: 'ar' },
+        lanes: [
+          { role: 'source', language: 'en' },
+          { role: 'target', language: 'ar' },
+        ],
         imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
       }),
     )
@@ -597,7 +609,7 @@ describe('ProjectSetup — the receipt reports the import text direction (AQU-14
       env,
       caller.token,
       setupCommand({
-        settings: { targetLanguage: 'ar' },
+        lanes: [{ role: 'target', language: 'ar' }],
         imports: [
           { artifactId: a, fileName: 'Acts', fileType: 'usfm' },
           // The odd file that runs against its project.
@@ -643,7 +655,7 @@ describe('ProjectSetup — prepare rejections name the field', () => {
     const { res, body } = await prepare(
       env,
       caller.token,
-      setupCommand({ project: { id: 'new-proj', name: 'New' }, settings: { targetLanguage: 'fr' } }),
+      setupCommand({ project: { id: 'new-proj', name: 'New' }, lanes: [{ role: 'target', language: 'fr' }] }),
     )
     expect(res.status).toBe(400)
     expect(body.error?.code).toBe('validation_failed')
@@ -749,7 +761,7 @@ describe('ProjectSetup — prepare rejections name the field', () => {
   it('refuses a caller below the plan floor', async () => {
     const env = makeEnv(tdb.db, bucket)
     const lead = await memberToken(500)
-    const { res, body } = await prepare(env, lead.token, setupCommand({ settings: { targetLanguage: 'fr' } }))
+    const { res, body } = await prepare(env, lead.token, setupCommand({ lanes: [{ role: 'target', language: 'fr' }] }))
     expect(res.status).toBe(403)
     expect(body.error?.code).toBe('permission_denied')
     expect(body.error?.details?.requiredRole).toBe(600)
@@ -767,7 +779,7 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
       env,
       caller.token,
       setupCommand({
-        settings: { targetLanguage: 'sty' },
+        lanes: [{ role: 'target', language: 'sty' }],
         brief: { parameters: { audience: 'Rural youth' } },
         members: [{ username: 'gulsifa', role: 600 }],
         imports: [{ artifactId, fileName: 'Acts', fileType: 'usfm' }],
@@ -791,7 +803,7 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     expect(partial.failedStep.kind).toBe('import')
     expect(
       partial.completedSteps.filter((s) => s.status === 'applied').map((s) => s.kind),
-    ).toEqual(['settings', 'brief', 'members'])
+    ).toEqual(['brief', 'members'])
     // The earlier steps STAY applied — rolling them back is worse than leaving them.
     const afterFailure = await storedSettings()
     expect(afterFailure.settings.targetLanguage).toBeUndefined()
@@ -828,7 +840,10 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     const { body } = await prepare(
       env,
       caller.token,
-      setupCommand({ settings: { targetLanguage: 'sty', validationCount: 3 } }),
+      setupCommand({
+        lanes: [{ role: 'target', language: 'sty' }],
+        settings: { validationCount: 3 },
+      }),
     )
     await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
 
@@ -863,7 +878,7 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     const caller = await memberToken(700)
     await patchProjectSettingsShared(tdb.db, {
       projectId: PROJECT,
-      ops: [{ key: 'targetLanguage', value: 'sty' }],
+      ops: [{ key: 'systemPrompt', value: 'Be plain.' }],
       ifMatchVersion: 1,
       updatedBy: 99,
     })
@@ -871,7 +886,7 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
     const { body } = await prepare(
       env,
       caller.token,
-      setupCommand({ settings: { targetLanguage: 'sty' }, brief: { parameters: { audience: 'Youth' } } }),
+      setupCommand({ settings: { systemPrompt: 'Be plain.' }, brief: { parameters: { audience: 'Youth' } } }),
     )
     const warnings = body.summary.warnings as { code: string; message: string }[]
     expect(warnings.some((w) => w.code === 'superseded_step' && w.message.includes('settings'))).toBe(true)

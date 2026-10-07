@@ -603,6 +603,15 @@ describe('PlanImport — commit', () => {
     )
     // A settings write creates the lane rows in production (AQU-1532).
     await ensureProjectLanes(tdb.db, PROJECT, { settings: { targetLanes: ['fr', 'arq'] } })
+    const laneRows = await tdb.pg.query<{ id: string; legacy_tag: string }>(
+      `SELECT id, legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target'`,
+      [PROJECT],
+    )
+    const laneIdFor = (tag: string) => {
+      const row = laneRows.rows.find((lane) => lane.legacy_tag === tag)
+      if (!row) throw new Error(`missing lane ${tag}`)
+      return row.id
+    }
 
     const prepRes = (await handleExternalChangesetsRequest(
       prepareReq(token, {
@@ -637,8 +646,8 @@ describe('PlanImport — commit', () => {
           address: { scheme: 'scripture', book: 'GEN', chapter: 1, verse: '1' },
           sourceLocator: { kind: 'recipe', recipeId: 'ai-verse-prefix', record: 3 },
           variants: [
-            { laneId: 'fr', languageTag: 'fr', content: 'Au commencement' },
-            { laneId: 'arq', languageTag: 'arq', content: 'فالبداية' },
+            { laneId: laneIdFor('fr'), languageTag: 'fr', content: 'Au commencement' },
+            { laneId: laneIdFor('arq'), languageTag: 'arq', content: 'فالبداية' },
           ],
         }],
       }),
@@ -711,7 +720,7 @@ describe('PlanImport — commit', () => {
       env,
     ))!
     expect(response.status).toBe(400)
-    expect(JSON.stringify(await response.json())).toMatch(/unregistered lane/)
+    expect(JSON.stringify(await response.json())).toMatch(/lane does not exist/)
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 

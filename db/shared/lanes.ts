@@ -54,13 +54,14 @@ import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 // stored PLACEHOLDER name (a derived value written before 0152) so the derived
 // display takes over — a name the user actually chose is never touched.
 const INSERT_SOURCE = `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
-   VALUES (?, ?, 'source', ?, NULL, NULL, NULL, ?)
+   VALUES (?, ?, 'source', ?, ?, ?, NULL, ?)
    ON CONFLICT (project_id) WHERE role = 'source' DO UPDATE SET
      language = COALESCE(NULLIF(lanes.language, ''), NULLIF(excluded.language, ''), lanes.language),
      name = CASE
        WHEN lanes.name IN ('${SOURCE_LANE_PLACEHOLDER}') THEN NULL
        ELSE lanes.name
      END,
+     lang_code = COALESCE(lanes.lang_code, excluded.lang_code),
      updated_at = now()`
 
 const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
@@ -279,6 +280,87 @@ export interface AskedLane {
   id?: string
 }
 
+/** One lane an external CreateProject or ProjectSetup asked to create. */
+export interface ExternalLaneSpec {
+  role: "source" | "target"
+  /** Freeform language, stored as typed. */
+  language: string
+  /** Optional display override. Blank means "display the language". */
+  name?: string | null
+  /** Optional BCP 47 override. Blank means "derive on read". */
+  code?: string | null
+}
+
+/**
+ * Turn external lane specs into the asks {@link ensureProjectLaneStmts} inserts.
+ *
+ * This is not a second creator. Each target is planned with
+ * {@link planNewTargetLane} (`targetLanguage` null, so the first lane of a
+ * language keeps that language as its `legacy_tag` and is never `''`), and the
+ * rows are inserted by the same statements project create already uses.
+ * A code override goes through {@link canonicalLanguageCodeOverride}.
+ */
+export function askedLanesFromSpecs(
+  specs: readonly ExternalLaneSpec[],
+  existing: readonly ExistingLaneIdentity[] = [],
+): { ok: true; lanes: AskedLane[] } | { ok: false; message: string } {
+  if (specs.filter((spec) => spec.role === "source").length > 1) {
+    return { ok: false, message: "a project has one source lane" }
+  }
+  const asked: AskedLane[] = []
+  const known: ExistingLaneIdentity[] = existing.map((lane) => ({ ...lane }))
+  for (const [index, spec] of specs.entries()) {
+    const language = spec.language.trim()
+    if (!language) return { ok: false, message: `lanes[${index}].language is required` }
+    const override = canonicalLanguageCodeOverride(spec.code)
+    if (!override.ok) {
+      return { ok: false, message: `lanes[${index}].code must be a well-formed BCP 47 tag` }
+    }
+    const name = spec.name?.trim() ? spec.name.trim() : null
+    if (spec.role === "source") {
+      asked.push({ role: "source", language, name, langCode: override.code })
+      continue
+    }
+    const laneId = newLaneId()
+    const plan = planNewTargetLane({
+      laneId,
+      name: name ?? "",
+      language,
+      code: spec.code,
+      // Null so this language is not treated as the former default lane.
+      // The first target's legacy_tag is the language, never ''.
+      targetLanguage: null,
+      existing: known,
+    })
+    if (!plan.ok) {
+      const problem =
+        plan.problem === "malformed_code"
+          ? `lanes[${index}].code must be a well-formed BCP 47 tag`
+          : plan.problem === "duplicate"
+            ? `lanes[${index}] duplicates another lane's name`
+            : plan.problem === "too_long"
+              ? `lanes[${index}].name is too long`
+              : `lanes[${index}].language is required`
+      return { ok: false, message: problem }
+    }
+    asked.push({
+      id: laneId,
+      role: "target",
+      language: plan.language,
+      name: plan.name,
+      langCode: plan.langCode,
+      legacyTag: plan.legacyTag,
+    })
+    known.push({
+      id: laneId,
+      name: plan.name,
+      language: plan.language,
+      legacyTag: plan.legacyTag,
+    })
+  }
+  return { ok: true, lanes: asked }
+}
+
 /**
  * The lanes a settings blob and a set of data tags actually ask for.
  *
@@ -354,7 +436,14 @@ export function ensureProjectLaneStmts(
     : planned
   return kept.map(({ lane, position }) => {
     if (lane.role === "source") {
-      return db.prepare(INSERT_SOURCE).bind(lane.id ?? newLaneId(), projectId, lane.language, position)
+      return db.prepare(INSERT_SOURCE).bind(
+        lane.id ?? newLaneId(),
+        projectId,
+        lane.language,
+        lane.name ?? null,
+        lane.langCode ?? null,
+        position,
+      )
     }
     const legacyTag = lane.legacyTag ?? lane.language
     return db.prepare(INSERT_TARGET).bind(

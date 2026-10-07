@@ -257,11 +257,12 @@ export interface StructurePlan {
   /** Rows to re-point, each with its pinned head and minted reorder id. */
   reanchor: { cellId: string; parentEventId: string; eventId: string }[]
   /** Target rows to drop (Delete, and Split with `targets: 'blank'`). */
-  targetDeletes?: { lane: string; eventId: string }[]
+  targetDeletes?: { lane: string; laneId?: string; eventId: string }[]
   /** Split with `targets: 'divide'`: per lane, the pinned target head, the two
    *  halves of the translation, and the minted commit ids for each. */
   targetSplits?: {
     lane: string
+    laneId?: string
     parentEventId: string
     headValue: string
     tailValue: string
@@ -400,6 +401,8 @@ export type ProjectSetupStep =
        *  project setting (then the language) decides at read time. */
       sourceTextDirection?: TextDirection
       targetTextDirection?: TextDirection
+      /** Lane id for translations this artifact already carries. */
+      laneId?: string
       /** Cell count from the prepare-time parse. Commit re-parses the (immutable)
        *  artifact and fails the step if the count moved — the approver approved
        *  a file of this size. */

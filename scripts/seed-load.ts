@@ -25,8 +25,10 @@ import { ensureBundle, readMeta } from "./seed-fetch"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const DEFAULT_LOCAL_PG_URL = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
-// Generated columns are recomputed by Postgres from their source fields and
-// must never be included in INSERT statements from a production bundle.
+// Never INSERT these. validation_count and value_tsv are still generated.
+// source_language, target_language, and target_lanes were generated until
+// 0156 dropped them; a bundle dumped before that drop still carries the
+// names, and the target schema no longer has the columns.
 const GENERATED_COLS = new Set([
   "source_language",
   "target_language",

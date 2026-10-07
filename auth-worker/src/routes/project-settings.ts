@@ -77,6 +77,7 @@ import {
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { AquillaDb } from "../../../db/shim/postgres"
+import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
 
 const projectSettings = new Hono<AuthHonoEnv>()
@@ -443,6 +444,8 @@ projectSettings.on(
       settings,
       ifMatchVersion,
       updatedBy: user.id,
+      blobs: c.env.SNAPSHOTS ?? null,
+      r2KeyPrefix: c.env.R2_KEY_PREFIX,
     })
 
     // AQU-1750: both bodies are filtered exactly like the GET. The client
@@ -466,8 +469,14 @@ projectSettings.on(
     const fresh = result.settings
     // Settings live in identity while connected editor clients listen to the
     // project sync DO. This is a best-effort acceleration: a missed frame is
-    // recovered by the existing focus/reconnect settings read.
-    const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
+    // recovered by the existing focus/reconnect settings read. Downstream
+    // projects the link just copied into get the same nudge.
+    const notifyPromise = Promise.all([
+      notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version),
+      ...(result.propagated ?? []).map((copy) =>
+        notifySyncWorkerOfProjectSettingsChange(c.env, copy.projectId, copy.version),
+      ),
+    ])
     try {
       c.executionCtx.waitUntil(notifyPromise)
     } catch {
@@ -576,8 +585,21 @@ projectSettings.post(
     if (denied) return c.json(denied, 403)
     const body = c.req.valid("json")
     const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-    const targetLanguage =
-      typeof current.settings.targetLanguage === "string" ? current.settings.targetLanguage : null
+    // Only a real `legacy_tag ''` row is the old default. A missing row must
+    // not borrow settings.targetLanguage — that would tag the new lane with
+    // its id instead of its language, which is how the first target of a new
+    // project used to become `''`.
+    const defaultLane = (current.lanes ?? []).find(
+      (lane) => lane.role === "target" && lane.legacyTag === "",
+    )
+    const resolvedDefault = defaultLane
+      ? laneLanguage(defaultLane, {
+          settings: current.settings,
+          role: "target",
+          legacyTag: "",
+        })
+      : ""
+    const targetLanguage = resolvedDefault || null
     let created: Awaited<ReturnType<typeof createTargetLane>>
     try {
       created = await createTargetLane(c.env.AQUILLA_PG, projectId, {
@@ -601,23 +623,9 @@ projectSettings.post(
       const error = created.problem === "duplicate" ? "duplicate_name" : created.problem
       return c.json({ error }, status)
     }
-    const synced = await mergeSettingsArray(
-      c.env.AQUILLA_PG,
-      projectId,
-      user.id,
-      "targetLanes",
-      created.legacyTag,
-      true,
-    )
-    if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
-    if (synced === "error") return c.json({ error: "write failed" }, 500)
+    // AQU-1594: the lane row is the registry. Do not mirror the tag into
+    // settings.targetLanes.
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-    const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
-    try {
-      c.executionCtx.waitUntil(notifyPromise)
-    } catch {
-      void notifyPromise
-    }
     const lane = fresh.lanes?.find((row) => row.id === created.laneId) ?? null
     return c.json({ lane }, 201)
   },

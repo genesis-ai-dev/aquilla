@@ -58,6 +58,10 @@ async function seedProject(testDb: TestDb) {
     `INSERT INTO files (id, project_id, name, event_id) VALUES ('file-x', 'proj-a', 'Genesis', 'evt-file-1')`,
   )
   await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+  )
+  await testDb.pg.query(
     `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count, last_editor)
      VALUES ('proj-a', 'file-x', 'cell-1', 'source', 'In the beginning', 'evt-1', 1000, 3, 'importer')`,
   )
@@ -103,7 +107,7 @@ async function read(
   return { status: res!.status, body: JSON.parse(raw) as { data: Array<Record<string, unknown>> }, raw }
 }
 
-const CELLS_PATH = "/api/v1/external/projects/proj-a/files/file-x/cells"
+const CELLS_PATH = "/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1"
 const HISTORY_PATH = "/api/v1/external/projects/proj-a/cells/cell-1/history"
 const ME_PATH = "/api/v1/external/me"
 
@@ -173,6 +177,10 @@ describe("AQU-1180 — agent-facing PII scrub", () => {
         `INSERT INTO files (id, project_id, name, event_id) VALUES ('file-y', 'proj-b', 'Exodus', 'evt-file-2')`,
       )
       await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+         VALUES ('deflane2', 'proj-b', 'target', '', 1)`,
+      )
+      await testDb.pg.query(
         `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count, last_editor)
          VALUES ('proj-b', 'file-y', 'cell-9', 'target', 'x', 'evt-9', 1000, 1, $1)`,
         [HUMAN],
@@ -180,7 +188,7 @@ describe("AQU-1180 — agent-facing PII scrub", () => {
       const token = await seedCredential(testDb, { id: CRED_DEFAULT, userId: 1, projectId: "proj-a" })
       const tokenB = await seedCredential(testDb, { id: CRED_PII, userId: 1, projectId: "proj-b" })
       const a = await read(testDb, CELLS_PATH, token)
-      const b = await read(testDb, "/api/v1/external/projects/proj-b/files/file-y/cells", tokenB)
+      const b = await read(testDb, "/api/v1/external/projects/proj-b/files/file-y/cells?lane=deflane2", tokenB)
       const idA = a.body.data.find((c) => c.side === "target")?.lastEditor
       const idB = b.body.data.find((c) => c.side === "target")?.lastEditor
       expect(idA).toMatch(/^u_[0-9a-f]{8}$/)

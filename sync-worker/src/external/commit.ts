@@ -88,7 +88,7 @@ import {
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
-import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
+import { stampStoredLaneId } from './external-lane'
 import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -548,18 +548,16 @@ export async function commitChangesetCore(
   const plannedSet = new Map(
     (cs.plannedIds?.setTranslation ?? []).map((p) => [laneCellKey(p.fileId, p.cellId, p.laneId), p.eventId]),
   )
-  // AQU-1532: a changeset staged before prepare canonicalized lane ids can
-  // still name the primary language; stamp it as the default lane.
-  const targetLanguage = [...commandByCell.values()].some((c) => c.laneId)
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
-    : null
+  // A current plan stores lanes.id. An older staged plan may still store a
+  // tag; stampStoredLaneId writes that tag as targetLang and does not alias it.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
   const clientTs = Date.now()
   for (const pre of cs.preconditions) {
-    const stored = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
-    if (!stored) continue
-    const cmd = withCanonicalLaneId(stored, targetLanguage)
+    const cmd = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
+    if (!cmd) continue
+    const laneStamp = stampStoredLaneId(cmd.laneId, laneRows)
     const ev: RawEvent<'target.cell.commit'> = {
       id: plannedSet.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId)) ?? uuidv7(),
       schemaVersion: 1,
@@ -572,9 +570,9 @@ export async function commitChangesetCore(
       payload: {
         value: cmd.value,
         ...(cmd.valueHtml !== undefined ? { valueHtml: cmd.valueHtml } : {}),
-        // AQU-538: stamp the lane so the projection lands the commit on its
-        // own (cell, target_lang) row and chain slot.
-        ...(cmd.laneId ? { targetLang: cmd.laneId } : {}),
+        // targetLang is the frozen event key (the lane's legacy_tag). laneId
+        // is lanes.id so resolveEventLane agrees.
+        ...laneStamp,
         // AQU-1186: a DraftCells expansion carries the copilot's provenance,
         // so the projection sets ai_drafted = 1 and the cell reads back as a
         // pending AI draft — identical to an in-app draft. Only the server
@@ -822,18 +820,15 @@ export async function applyPlanImport(
 
   // Explicit target variants reuse the same source unit and name their lane.
   // The source event id is both the first target-chain parent and the staleness
-  // pin, matching browser bilingual imports.
-  // AQU-1532: a variant naming the primary language writes the default lane.
-  const namesALane = compiled.units.some((unit) => (unit.cell.variants ?? []).some((v) => v.laneId))
-  const targetLanguage = namesALane
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
-    : null
+  // pin, matching browser bilingual imports. laneId on a current plan is
+  // lanes.id; an older staged tag is stamped as targetLang only.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   const targetEvents: RawEvent<'target.cell.commit'>[] = []
   compiled.units.forEach((unit, cellIndex) => {
     const sourceEvent = cellEvents[cellIndex]
     const planned = plannedImport?.cells[cellIndex]
     for (const [variantIndex, stored] of (unit.cell.variants ?? []).entries()) {
-      const variant = { ...stored, laneId: canonicalLaneId(stored.laneId, targetLanguage) }
+      const laneStamp = stampStoredLaneId(stored.laneId, laneRows)
       targetEvents.push({
         id: planned?.variantEventIds?.[variantIndex] ?? uuidv7(),
         schemaVersion: 1,
@@ -844,10 +839,10 @@ export async function applyPlanImport(
         parentId: sourceEvent.id,
         author: cred.username,
         payload: {
-          value: variant.content,
-          ...(variant.contentHtml !== undefined ? { valueHtml: variant.contentHtml } : {}),
+          value: stored.content,
+          ...(stored.contentHtml !== undefined ? { valueHtml: stored.contentHtml } : {}),
           sourceEventId: sourceEvent.id,
-          ...(variant.laneId ? { targetLang: variant.laneId } : {}),
+          ...laneStamp,
         },
         clientTs,
       })
@@ -1151,24 +1146,22 @@ async function commitCreateProject(
   const confirmationId = gate.confirmationId
 
   // Apply — MANDATORY writeCreatorMembership: true (see JSDoc above).
-  const { inserted } = await createProjectShared(db, {
-    projectId,
-    name: cmd.name,
-    orgId,
-    createdBy: cred.userId,
-    writeCreatorMembership: true,
-    // AQU-1223: the language pair rides the create instead of being dropped.
-    // Sent only when the command carried one, so a bare name+orgId create still
-    // writes no settings row at all.
-    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
-      ? {
-          settingsSeed: {
-            ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
-            ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
-          },
-        }
-      : {}),
-  })
+  let inserted: boolean
+  try {
+    const created = await createProjectShared(db, {
+      projectId,
+      name: cmd.name,
+      orgId,
+      createdBy: cred.userId,
+      writeCreatorMembership: true,
+      // Lanes become rows. The four project-level language keys are not written.
+      ...(cmd.lanes !== undefined ? { lanes: cmd.lanes } : {}),
+    })
+    inserted = created.inserted
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'could not create the project lanes'
+    return errorResponse('validation_failed', message)
+  }
 
   if (!inserted) {
     // The id already exists. Distinguish a genuine race (someone else claimed it
@@ -1567,6 +1560,9 @@ async function commitUpdateProjectSettings(
     settings: cmd.settings,
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    // The four language keys are rejected at validation. Do not let a leftover
+    // key on the stored blob mint a lane row (AQU-1615).
+    registerLanes: false,
   })
 
   if (result.status === 'conflict') {

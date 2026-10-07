@@ -12,6 +12,7 @@ import { getEffectiveOrgRole } from "../services/org-permissions"
 import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
 import { shipLog } from "../posthog-logs"
 import { indexKnowledgeDoc } from "../lib/knowledge/index-doc"
+import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
   createDoc,
@@ -216,7 +217,12 @@ function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
   )
 }
 
-async function handleUpload(
+/** The one upload implementation: extension allowlist → size cap → text
+ *  extraction → R2 put → row insert → async indexing. Exported so the
+ *  server-to-server route the Agent API bridges through (routes/
+ *  knowledge-internal.ts, AQU-1762) runs exactly this, rather than forking a
+ *  second uploader that would strand its docs at index_status 'pending'. */
+export async function handleUpload(
   c: Context<AuthHonoEnv>,
   scope: KnowledgeScopeRef,
   createdBy: string,
@@ -318,7 +324,22 @@ async function handleUpload(
 
   runIndexing(c, id)
 
+  // Snapshot before the copy. Indexing is already in flight, and awaiting the
+  // downstream copy yields long enough for that job to finish — the response
+  // would then say "ready" for a document the client was told was still pending.
   const doc = await getDocMeta(c.env.AQUILLA_PG, id)
+  if ("projectId" in scope) {
+    try {
+      await propagateKnowledgeDocs(c.env.AQUILLA_PG, scope.projectId, {
+        updatedBy: createdBy,
+        blobs: bucket,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("[inherited-settings] knowledge propagate failed:", err)
+    }
+  }
+
   return c.json({ doc }, 201)
 }
 
@@ -338,6 +359,17 @@ async function handleDelete(
   await deleteDoc(c.env.AQUILLA_PG, docId)
   const bucket = c.env.SNAPSHOTS
   if (bucket) await bucket.delete(meta.r2Key).catch(() => {})
+  if (meta.projectId) {
+    try {
+      await propagateKnowledgeDocs(c.env.AQUILLA_PG, meta.projectId, {
+        updatedBy: meta.createdBy,
+        blobs: bucket ?? null,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("[inherited-settings] knowledge propagate failed:", err)
+    }
+  }
   return c.json({ ok: true })
 }
 

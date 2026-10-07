@@ -61,6 +61,9 @@ import type {
   StructurePlan,
 } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { LANE_DOES_NOT_EXIST_REASON } from '../../../src/lib/lanes/archived-lane'
 
 /** One source-side row of a file's anchor chain. */
 interface ChainCell {
@@ -75,8 +78,17 @@ interface ChainCell {
   sequenceIndex: number | null
 }
 
+/** targetLang is the frozen tag. laneId is lanes.id when the row has one. */
+function targetLanePayload(lane: string, laneId?: string): Record<string, unknown> {
+  if (!laneId) return lane ? { targetLang: lane } : {}
+  return { targetLang: lane, laneId }
+}
+
 interface TargetRow {
+  /** Frozen event tag (`cells.target_lang`). */
   lane: string
+  /** `cells.lane_id`. Null only on a row written before lane ids were stamped. */
+  laneId: string | null
   eventId: string
   value: string
   valueHtml: string | null
@@ -172,13 +184,20 @@ async function loadTargets(
 ): Promise<TargetRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT target_lang, event_id, value, value_html FROM cells
+      `SELECT target_lang, lane_id, event_id, value, value_html FROM cells
         WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
     )
     .bind(projectId, fileId, cellId)
-    .all<{ target_lang: string | null; event_id: string; value: string; value_html: string | null }>()
+    .all<{
+      target_lang: string | null
+      lane_id: string | null
+      event_id: string
+      value: string
+      value_html: string | null
+    }>()
   return results.map((r) => ({
     lane: r.target_lang ?? '',
+    laneId: r.lane_id,
     eventId: r.event_id,
     value: r.value,
     valueHtml: r.value_html,
@@ -463,7 +482,11 @@ async function prepareDelete(
       parentEventId: s.eventId,
       eventId: uuidv7(),
     })),
-    targetDeletes: targets.map((t) => ({ lane: t.lane, eventId: uuidv7() })),
+    targetDeletes: targets.map((t) => ({
+      lane: t.lane,
+      ...(t.laneId ? { laneId: t.laneId } : {}),
+      eventId: uuidv7(),
+    })),
   }
 
   const summary: ChangesetSummary = {
@@ -547,44 +570,62 @@ async function prepareSplit(
   const targetDeletes: { lane: string; eventId: string }[] = []
 
   if (cmd.targets === 'divide') {
+    const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+    const { visible } = await visibleTagsForMember(
+      db,
+      env.LANE_READ_WALL,
+      projectId,
+      Number(cred.userId),
+      role?.level ?? 0,
+    )
+    const canSee = (laneId: string | null) =>
+      laneId != null && (visible === null || visible.has(laneId))
     const offsets = new Map<string, number>()
-    for (const entry of cmd.targetOffsets ?? []) offsets.set(entry.laneId ?? '', entry.offset)
-    for (const lane of offsets.keys()) {
-      if (!targets.some((t) => t.lane === lane)) {
+    for (const entry of cmd.targetOffsets ?? []) offsets.set(entry.laneId, entry.offset)
+    for (const laneId of offsets.keys()) {
+      const row = targets.find((t) => t.laneId === laneId)
+      if (!row || !canSee(row.laneId)) {
         return errorResponse(
           'validation_failed',
-          `SplitCell.targetOffsets names lane "${lane}", which has no translation on cell ${cmd.cellId}`,
+          `SplitCell.targetOffsets ${LANE_DOES_NOT_EXIST_REASON}`,
         )
       }
     }
     for (const t of targets) {
-      const offset = offsets.get(t.lane)
+      if (!canSee(t.laneId)) {
+        return errorResponse(
+          'validation_failed',
+          `SplitCell.targetOffsets ${LANE_DOES_NOT_EXIST_REASON}`,
+        )
+      }
+      const offset = t.laneId ? offsets.get(t.laneId) : undefined
       if (offset === undefined) {
         return errorResponse(
           'validation_failed',
-          `cell ${cmd.cellId} has a translation in ${t.lane ? `lane "${t.lane}"` : 'the default lane'} ` +
+          `cell ${cmd.cellId} has a translation in lane "${t.laneId}" ` +
             "but targetOffsets gives it no cut point; supply one, or use targets: 'blank'",
-          { fileId: cmd.fileId, cellId: cmd.cellId, lane: t.lane },
+          { fileId: cmd.fileId, cellId: cmd.cellId, laneId: t.laneId },
         )
       }
       if (offset > t.value.length) {
         return errorResponse(
           'validation_failed',
           `SplitCell.targetOffsets offset ${offset} is past the end of the translation in ` +
-            `${t.lane ? `lane "${t.lane}"` : 'the default lane'} (length ${t.value.length})`,
-          { lane: t.lane, targetLength: t.value.length },
+            `lane "${t.laneId}" (length ${t.value.length})`,
+          { laneId: t.laneId, targetLength: t.value.length },
         )
       }
       if (t.valueHtml != null && t.valueHtml.length > 0) {
         return errorResponse(
           'validation_failed',
-          `the translation in ${t.lane ? `lane "${t.lane}"` : 'the default lane'} carries structured HTML; ` +
+          `the translation in lane "${t.laneId}" carries structured HTML; ` +
             "SplitCell cuts plain text only — use targets: 'blank' and re-translate both halves",
-          { lane: t.lane, reason: 'structured_target_html' },
+          { laneId: t.laneId, reason: 'structured_target_html' },
         )
       }
       targetSplits.push({
         lane: t.lane,
+        ...(t.laneId ? { laneId: t.laneId } : {}),
         parentEventId: t.eventId,
         headValue: t.value.slice(0, offset),
         tailValue: t.value.slice(offset),
@@ -593,7 +634,13 @@ async function prepareSplit(
       })
     }
   } else {
-    for (const t of targets) targetDeletes.push({ lane: t.lane, eventId: uuidv7() })
+    for (const t of targets) {
+      targetDeletes.push({
+        lane: t.lane,
+        ...(t.laneId ? { laneId: t.laneId } : {}),
+        eventId: uuidv7(),
+      })
+    }
   }
 
   const successors = await loadSuccessors(db, projectId, cmd.fileId, cmd.cellId)
@@ -725,21 +772,27 @@ async function checkPins(
     ? []
     : await loadTargets(db, projectId, cmd.fileId, plan.cellId!)
   for (const split of plan.targetSplits ?? []) {
-    const live = liveTargets.find((t) => t.lane === split.lane)
-    if (!live) return stale(`the translation in lane "${split.lane}" no longer exists`)
+    const live = liveTargets.find((t) =>
+      split.laneId ? t.laneId === split.laneId : t.lane === split.lane,
+    )
+    const named = split.laneId ?? split.lane
+    if (!live) return stale(`the translation in lane "${named}" no longer exists`)
     if (live.eventId !== split.parentEventId) {
-      return stale(`the translation in lane "${split.lane}" changed since prepare`, { lane: split.lane })
+      return stale(`the translation in lane "${named}" changed since prepare`, { laneId: named })
     }
   }
   // A lane that gained a translation after prepare would survive a delete or a
   // 'blank' split untouched, contradicting the approved summary — and in the
   // delete case would orphan a target row whose source is gone.
   if (plan.kind !== 'InsertCell' && (plan.targetSplits?.length ?? 0) === 0) {
-    const planned = new Set((plan.targetDeletes ?? []).map((t) => t.lane))
+    const planned = new Set(
+      (plan.targetDeletes ?? []).map((t) => t.laneId ?? t.lane),
+    )
     for (const t of liveTargets) {
-      if (!planned.has(t.lane)) {
-        return stale(`cell ${plan.cellId} gained a translation in lane "${t.lane}" since prepare`, {
-          lane: t.lane,
+      const key = t.laneId ?? t.lane
+      if (!planned.has(key)) {
+        return stale(`cell ${plan.cellId} gained a translation in lane "${key}" since prepare`, {
+          laneId: key,
         })
       }
     }
@@ -837,7 +890,7 @@ export async function commitStructure(
     // parentId null is the trusted-tombstone shape for a target delete (it is
     // deliberately not chain-arbitrated), matching the workspace's remove-line.
     for (const t of plan.targetDeletes ?? []) {
-      push('target.cell.delete', t.eventId, plan.cellId!, null, t.lane ? { targetLang: t.lane } : {})
+      push('target.cell.delete', t.eventId, plan.cellId!, null, targetLanePayload(t.lane, t.laneId))
     }
     push('source.cell.delete', plan.deleteEventId!, plan.cellId!, plan.sourceParentEventId!, {})
   }
@@ -863,21 +916,22 @@ export async function commitStructure(
       })
     }
     for (const t of plan.targetDeletes ?? []) {
-      push('target.cell.delete', t.eventId, plan.cellId!, null, t.lane ? { targetLang: t.lane } : {})
+      push('target.cell.delete', t.eventId, plan.cellId!, null, targetLanePayload(t.lane, t.laneId))
     }
     for (const s of plan.targetSplits ?? []) {
       // The original keeps the head of its translation, re-pinned to the source
       // text it now holds; the new cell's first target commit chains on its
       // source create, exactly as a bilingual import's variants do.
+      const lanePayload = targetLanePayload(s.lane, s.laneId)
       push('target.cell.commit', s.headEventId, plan.cellId!, s.parentEventId, {
         value: s.headValue ?? '',
         sourceEventId: plan.commitEventId,
-        ...(s.lane ? { targetLang: s.lane } : {}),
+        ...lanePayload,
       })
       push('target.cell.commit', s.tailEventId, plan.newCellId!, plan.createEventId!, {
         value: s.tailValue ?? '',
         sourceEventId: plan.createEventId,
-        ...(s.lane ? { targetLang: s.lane } : {}),
+        ...lanePayload,
       })
     }
   }

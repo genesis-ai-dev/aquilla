@@ -72,11 +72,11 @@ describe('discovery root', () => {
     expect(body.privacy.note).toContain('AQU-1180')
     expect(body.orgScopedReads.maxProjectsPerSearch).toBe(10)
     expect(body.errors.codes.confirmation_required).toBeDefined()
-    // AQU-538: the map teaches the multi-target-language (lanes) workflow —
-    // register targetLanes, write SetTranslation.laneId, read ?lane=.
-    expect(body.multiLanguage.note).toContain('targetLanes')
+    // AQU-1615: the map teaches lane ids. A language tag is not an alias.
+    expect(body.multiLanguage.note).toContain('lane id')
+    expect(body.multiLanguage.note).not.toContain('targetLanes')
     expect(body.multiLanguage.workflow.join(' ')).toContain('laneId')
-    expect(body.multiLanguage.workflow.join(' ')).toContain('lane=es')
+    expect(body.multiLanguage.workflow.join(' ')).toContain('lane=<id>')
   })
 
   it('trailing slash also serves the map; non-GET is a JSON 405', async () => {

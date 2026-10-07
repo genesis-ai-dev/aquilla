@@ -38,6 +38,28 @@ let currentReasonCannotEdit: "offline" | "role" | null = "role"
 let currentCanEditLanguages = false
 let currentReasonCannotEditLanguages: "offline" | "role" | null = "role"
 let currentLanguageEditFloor = 600
+const languageLanes = [
+  {
+    id: "source-lane",
+    role: "source" as const,
+    language: "English",
+    name: null,
+    langCode: "en",
+    legacyTag: "",
+    position: 0,
+    archivedAt: null,
+  },
+  {
+    id: "target-lane",
+    role: "target" as const,
+    language: "French",
+    name: null,
+    langCode: "fr",
+    legacyTag: "French",
+    position: 1,
+    archivedAt: null,
+  },
+]
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -61,6 +83,10 @@ vi.mock("@/hooks/useProjectSettings", () => ({
     conflict: false,
     dismissConflict: vi.fn(),
     settings: {},
+    lanes: languageLanes,
+    renameLane: vi.fn().mockResolvedValue("ok"),
+    createLane: vi.fn().mockResolvedValue({ kind: "ok" }),
+    setLaneArchived: vi.fn().mockResolvedValue({ kind: "ok" }),
     hasFetched: true,
     isOnline: true,
     refresh: vi.fn(),
@@ -201,16 +227,17 @@ describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
   })
 })
 
-// AQU-1086 / AQU-984: language fields sit behind languageEditMinRole. The
-// unset default is Project lead, so a lead edits them. An org that stored
-// Maintainer still locks them, and the hint names that role.
+// AQU-1086 / AQU-984 / AQU-1594: the lane language fields sit behind
+// languageEditMinRole. The unset default is Project lead, so a lead edits them.
+// An org that stored Maintainer still locks them, and the hint names that role.
 describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-984)", () => {
-  it("project lead sees the language fields locked when the org stored Maintainer, naming Maintainers", async () => {
+  it("project lead sees the lane language fields locked when the org stored Maintainer, naming Maintainers", async () => {
     currentProject = makeProject({ syncRole: { level: 500, source: "member" } } as Partial<ProjectRecord>)
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     const source = screen.getByLabelText(/source language/i)
     expect(source).toBeDisabled()
     await expectTooltip(source, /Only Maintainers can modify/)
+    expect(screen.getByTestId("lane-language-target-lane")).toBeDisabled()
   })
 
   it("a contributor below the unset default sees the language fields locked, naming Project leads", async () => {
@@ -224,7 +251,7 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     await expectTooltip(source, /Only Project leads can modify/)
   })
 
-  it("project lead with the floor at 500 can edit the language fields", () => {
+  it("project lead with the floor at 500 can edit the lane language fields", () => {
     currentProject = makeProject({
       syncRole: { level: 500, source: "member" },
       languageEditMinRole: 500,
@@ -234,7 +261,7 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     currentLanguageEditFloor = 500
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/source language/i)).not.toBeDisabled()
-    expect(screen.getByLabelText(/target language/i)).not.toBeDisabled()
+    expect(screen.getByTestId("lane-language-target-lane")).not.toBeDisabled()
   })
 
   it("lowering the language floor does not unlock any other shared field", async () => {

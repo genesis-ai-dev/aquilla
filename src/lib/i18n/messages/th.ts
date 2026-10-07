@@ -4840,7 +4840,6 @@ export const th: Catalog = {
   "projectSettings.linkSource.clashWarningHeading": {"forms":{"other":"โปรเจกต์นี้มีไฟล์ชื่อเหล่านี้อยู่แล้ว:"},"countVar":"count"},
   "projectSettings.linkSource.clashWarningBody": {"forms":{"other":"ไฟล์เดิมของคุณจะคงไว้ตามเดิมพร้อมงานแปล สำเนาที่สะท้อนมาจะมาอยู่ควบคู่กันโดยยังไม่มีงานแปล ดังนั้นแต่ละชื่อเหล่านี้จะปรากฏสองครั้งในรายการไฟล์"},"countVar":"count"},
   "projectSettings.languages.defaultTargetLabel": "ภาษาปลายทางเริ่มต้น",
-  "projectSettings.languages.defaultTargetNote": "ช่องภาษาเริ่มต้น (ไม่มีชื่อ) เปลี่ยนได้ที่ข้อมูลโปรเจกต์ด้านบน",
   "projectSettings.languages.additionalLanesLabel": "ช่องภาษาปลายทางเพิ่มเติม",
   "projectSettings.languages.additionalLanesDescription": "ช่องภาษาปลายทางเพิ่มเติมสำหรับโปรเจกต์นี้ — เช่น รูปแบบภาษาถิ่น หรือฉบับร่างคู่ขนานของต้นฉบับเดียวกัน",
   "projectSettings.languages.laneNameLabel": "ชื่อเลน",

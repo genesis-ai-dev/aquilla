@@ -37,6 +37,8 @@ import { conceptToRegexSource } from "../../../../src/lib/terminology/match"
 import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
 import type { TermMatchOptions, TermMatchingSettings } from "../../../../src/lib/terminology/model"
 import { readProjectConcepts } from "../concepts-read"
+import type { LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
+import { languagesForLanes, loadLaneRows } from "../read-lane-language"
 
 // ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
 
@@ -103,6 +105,12 @@ export interface TermGuidance {
 export interface ProjectContext {
   sourceLanguage?: string
   targetLanguage?: string
+  /**
+   * Lane rows, so a run can resolve its own lane's language. Not a prompt
+   * field — the languages above are already resolved for the source lane and
+   * the former default lane.
+   */
+  lanes?: LaneLanguageRow[]
   /** Model-generated compression of the whole brief, when one exists. */
   projectBriefL1?: string
   /** The brief's structured answers — used verbatim when there is no L1. */
@@ -335,8 +343,6 @@ interface SettingsDb {
 
 interface SettingsRow {
   settings: unknown
-  source_language: string | null
-  target_language: string | null
 }
 
 function parseSettings(raw: unknown): Record<string, unknown> {
@@ -374,8 +380,7 @@ export async function loadProjectContext(
   try {
     row = await db
       .prepare(
-        `SELECT settings, source_language, target_language
-           FROM project_settings WHERE project_id = ?`,
+        `SELECT settings FROM project_settings WHERE project_id = ?`,
       )
       .bind(projectId)
       .first<SettingsRow>()
@@ -395,11 +400,21 @@ export async function loadProjectContext(
     ...(await loadLocalConcepts(db, projectId)),
     ...(await loadSubscribedConcepts(db, projectId)),
   ]
+  let lanes: LaneLanguageRow[] = []
+  try {
+    lanes = await loadLaneRows(db, projectId)
+  } catch {
+    lanes = []
+  }
+  const resolved = languagesForLanes(lanes, settings, "")
+  const sourceLanguage = resolved.sourceLanguage ?? ""
+  const targetLanguage = resolved.targetLanguage ?? ""
   const termMatching = parseTermMatching(settings.termMatching)
 
   return {
-    ...(asString(row.source_language) ? { sourceLanguage: asString(row.source_language) } : {}),
-    ...(asString(row.target_language) ? { targetLanguage: asString(row.target_language) } : {}),
+    ...(sourceLanguage ? { sourceLanguage } : {}),
+    ...(targetLanguage ? { targetLanguage } : {}),
+    lanes,
     ...(asString(briefObj.l1Summary) ? { projectBriefL1: asString(briefObj.l1Summary) } : {}),
     briefParameters: parseBriefParameters(briefObj.parameters),
     concepts,
@@ -446,7 +461,8 @@ export async function isRegisteredLaneId(
 
 /** Legacy-tag form of {@link isRegisteredLaneId}. Empty string is the
  *  project-default lane; named lanes must be in settings.targetLanes and not
- *  archived. Removed with the project-level lane lists (AQU-1595). */
+ *  archived. The tag is matched exactly: "es" is not the lane registered as
+ *  "Spanish". Removed with the project-level lane lists (AQU-1595). */
 export async function isRegisteredTargetLane(
   db: SettingsDb,
   projectId: string,

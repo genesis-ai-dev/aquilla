@@ -34,8 +34,10 @@ import {
   buildBulkSourceCellCreateStmt,
   buildBulkTargetCellCommitStmt,
   fileCountersRecomputeStmt,
+  laneOfEvent,
   type PersistedEvent,
 } from './event-projection'
+import { ensureBlankTargetBridgeStmt } from '../../../db/shared/lanes'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
@@ -178,7 +180,7 @@ interface ImportAudioAttachment {
   timings?: Array<{ word: string; t0: number; t1: number; start: number; end: number }>
   transcription?: string
   /** AQU-1565 follow-up: `'source'` for the shared programme audio a media
-   *  import attaches to every row. Absent is a dub, as before. The route is
+   *  import attaches to every row. Absent is also `'source'` (AQU-1594). The route is
    *  already Project Lead+ (source import), the same floor authorize.ts sets
    *  for a `role: 'source'` attach from the outbox. */
   role?: 'dub' | 'source'
@@ -512,6 +514,10 @@ export async function handleBulkImportRequest(
             audioId: attachment.audioId,
             url: attachment.url,
             slot: attachment.slot,
+            // The shared programme clip. It performs the source, so it belongs
+            // to the source lane — not to a '' target lane the project may
+            // not have (AQU-1594). An explicit role on the attachment wins.
+            role: attachment.role ?? 'source',
             ...(attachment.mimeType !== undefined ? { mimeType: attachment.mimeType } : {}),
             ...(attachment.voiceId !== undefined ? { voiceId: attachment.voiceId } : {}),
             ...(attachment.referenceAudioId !== undefined ? { referenceAudioId: attachment.referenceAudioId } : {}),
@@ -520,7 +526,6 @@ export async function handleBulkImportRequest(
             ...(attachment.trimEndMs !== undefined ? { trimEndMs: attachment.trimEndMs } : {}),
             ...(attachment.timings !== undefined ? { timings: attachment.timings } : {}),
             ...(attachment.transcription !== undefined ? { transcription: attachment.transcription } : {}),
-            ...(attachment.role !== undefined ? { role: attachment.role } : {}),
           },
           clientTs,
           serverTs: eventTs++,
@@ -818,6 +823,12 @@ export async function handleBulkImportRequest(
     // explicit completion request after every concurrent chunk settles.
     for (let i = 0; i < cellEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkSourceCellCreateStmt(db, cellEvents.slice(i, i + BULK_ROWS)))
+    }
+    // A default-lane target cell addresses ''. On a project with no target
+    // lane, create that bridge before the cell rows resolve lane_id, in this
+    // same batch. A project that already has any target lane inserts nothing.
+    if (targetEvents.some((event) => laneOfEvent(event.kind, event.payload) === '')) {
+      stmts.push(ensureBlankTargetBridgeStmt(db, body.projectId))
     }
     for (let i = 0; i < targetEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkTargetCellCommitStmt(db, targetEvents.slice(i, i + BULK_ROWS)))

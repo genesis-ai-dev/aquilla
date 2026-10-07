@@ -46,6 +46,7 @@ import {
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { isLaneArchived } from "@/components/project-lane-archive"
 import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
 import { laneChipLabel } from "./project-lanes"
 import { isHiddenTimelineFile } from "@/lib/parsers/types"
@@ -465,13 +466,11 @@ export function ProjectOverview() {
    * worse than not offering it.
    */
   const autopilotLanes = useMemo(() => {
-    const archived = new Set(
-      (project?.archivedLanes ?? []).map((lane) => lane.trim().toLowerCase()).filter(Boolean),
-    )
+    const archivedLanes = project?.archivedLanes ?? []
     return [
       "",
       ...extraRegistryLanes(project?.targetLanes, project?.targetLanguage).filter(
-        (lane) => !archived.has(lane.trim().toLowerCase()),
+        (lane) => !isLaneArchived(lane.trim(), archivedLanes),
       ),
     ]
   }, [project?.targetLanes, project?.targetLanguage, project?.archivedLanes])

@@ -4856,7 +4856,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.linkSource.clashWarningHeading": {"forms":{"other":"本專案已有以下名稱的檔案："},"countVar":"count"},
   "projectSettings.linkSource.clashWarningBody": {"forms":{"other":"你現有的檔案連同其譯文會原封不動地保留。鏡像的副本會以空白譯文並列傳入，因此這些名稱在檔案清單中各會出現兩次。"},"countVar":"count"},
   "projectSettings.languages.defaultTargetLabel": "預設目標語言",
-  "projectSettings.languages.defaultTargetNote": "預設的（未命名）語言軌。請在上方的「專案資訊」中變更。",
   "projectSettings.languages.additionalLanesLabel": "其他目標語言軌",
   "projectSettings.languages.additionalLanesDescription": "這個專案的額外目標語言軌 — 例如方言變體，或同一份來源的平行草稿。",
   "projectSettings.languages.laneNameLabel": "軌道名稱",

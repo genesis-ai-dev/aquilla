@@ -17,6 +17,8 @@ import { describe, it, expect } from "vitest"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
+import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import {
   scanTermConsistency,
   scanCapitalization,
@@ -380,5 +382,52 @@ describe("runDeterministicCheck", () => {
     expect(result.checkedCellCount).toBe(450)
     expect(result.termFindings[0].totalOccurrences).toBe(450)
     expect(result.termFindings[0].flaggedCells).toHaveLength(225)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-1667: Number integrity with Arabic-Indic / Persian digits, end to end
+// ---------------------------------------------------------------------------
+
+describe("Number integrity through Check file and the editor (AQU-1667)", () => {
+  it("accepts native digits and still flags a wrong number, with the source underline in place", async () => {
+    // The real built-in rule exactly as useRules hands it to both surfaces.
+    const rules = resolveBuiltinRules(undefined).filter((r) => r.id === "builtin:number-integrity")
+    expect(rules).toHaveLength(1)
+    expect(rules[0].enabled).toBe(true)
+
+    const cells = [
+      cell("Isaiah 40:25", "إشعياء ٤٠:٢٥", { id: "arabic", cellLabel: "ISA 40:25" }),
+      cell("Isaiah 40:25", "اشعیا ۴۰:۲۵", { id: "persian", cellLabel: "ISA 40:25" }),
+      cell("Isaiah 40:25", "یسعیاہ ۴٠:25", { id: "mixed", cellLabel: "ISA 40:25" }),
+      cell("Isaiah 40:25", "إشعياء ٤١:٢٥", { id: "wrong", cellLabel: "ISA 40:25" }),
+      cell("Isaiah 40:25", "Isaías 40:25", { id: "western", cellLabel: "ISA 40:25" }),
+    ]
+
+    // Check file.
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules, concepts: [] })
+    expect(result.ruleFindings).toHaveLength(1)
+    expect(result.ruleFindings[0].rule.id).toBe("builtin:number-integrity")
+    expect(result.ruleFindings[0].infractions).toEqual([
+      {
+        ruleId: "builtin:number-integrity",
+        cellId: "wrong",
+        fileId: "file-1",
+        reason: "builtin:number-integrity",
+        reasonParams: undefined,
+        spans: [{ side: "source", start: 7, end: 9, matchedText: "40" }],
+      },
+    ])
+    expect(result.totalFindingCount).toBe(1)
+
+    // Editor underline (useHealth runs this same call per cell).
+    const editor = Object.fromEntries(
+      cells.map((c) => [c.id, checkRulesForCell(c, c.fileId, rules)]),
+    )
+    expect(editor.arabic).toEqual([])
+    expect(editor.persian).toEqual([])
+    expect(editor.mixed).toEqual([])
+    expect(editor.western).toEqual([])
+    expect(editor.wrong).toEqual(result.ruleFindings[0].infractions)
   })
 })

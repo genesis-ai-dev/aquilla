@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest"
 import { fullProgressRecomputeStmts, sectionsProgressRecomputeStmt } from "../events/progress-projection"
 import { makeTestDb } from "./helpers/pg-test-db"
+import { progressRowsForLane } from "./helpers/progress-rows"
 
 const P = "proj-a"
 const F = "file-1"
@@ -39,19 +40,53 @@ function cell(c: CellSeed) {
   }
 }
 
+/**
+ * Give the fixture's project the default target lane a real one always has.
+ *
+ * Every create, settings write and migrate path runs ensureProjectLaneStmts
+ * (db/shared/lanes.ts), which makes the source lane and the `legacy_tag = ''`
+ * target lane together. The PGlite harness only mints the lanes the seeded
+ * ROWS imply, so a source-only fixture has no default lane at all — and since
+ * AQU-1599 the projection writes one row set per lane that EXISTS rather than
+ * manufacturing a '' one whether or not the project has one.
+ */
+async function ensureDefaultLane(db: Parameters<typeof fullProgressRecomputeStmts>[0]) {
+  await db
+    .prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position)
+       VALUES ('lane-default', ?, 'target', 'Default', '', 1)
+       ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
+    )
+    .bind(P)
+    .run()
+}
+
 async function recompute(db: Parameters<typeof fullProgressRecomputeStmts>[0]) {
+  await ensureDefaultLane(db)
   for (const stmt of fullProgressRecomputeStmts(db, P, F, TS)) await stmt.run()
 }
 
+/**
+ * One scope's rows, TARGET lanes only.
+ *
+ * AQU-1599 gave the source lane a progress row of its own — the
+ * lane-independent denominator, with no lane's translations on it — and it
+ * carries '' in `target_lang` just as the former default lane does. Reading
+ * the whole table here would hand `[0]` and `find(target_lang === '')` whichever
+ * of the two sorted first. These tests are about book/section grain and audio,
+ * so they read the lanes people translate in; the source lane's row is asserted
+ * where it is the subject (see the pruning test below).
+ */
 async function rows(db: { prepare: (s: string) => { bind: (...a: unknown[]) => { all: () => Promise<{ results: unknown[] }> } } }, scope: string) {
   const r = await db
     .prepare(
-      `SELECT section_key, target_lang, total_count, filled_count, audio_count,
-              audio_validated_count, last_edit_at,
-              validator_histogram, audio_validator_histogram
-         FROM file_section_progress
-        WHERE project_id = ? AND file_id = ? AND scope = ?
-        ORDER BY section_key, target_lang`,
+      `SELECT p.section_key, p.target_lang, p.total_count, p.filled_count, p.audio_count,
+              p.audio_validated_count, p.last_edit_at,
+              p.validator_histogram, p.audio_validator_histogram
+         FROM file_section_progress p
+         JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
+        WHERE p.project_id = ? AND p.file_id = ? AND p.scope = ? AND l.role = 'target'
+        ORDER BY p.section_key, p.target_lang`,
     )
     .bind(P, F, scope)
     .all()
@@ -260,6 +295,38 @@ describe("audio counts", () => {
     const byLane = new Map((await rows(db, "book")).map((r) => [r.target_lang, r]))
     expect(byLane.get("")!.audio_count).toBe(1)
     expect(byLane.get("fr")!.audio_count).toBe(0)
+  })
+
+  // The source lane's row also reads '' in `target_lang`, and a lane-less take
+  // reads as the '' tag. Joined on that, the source row picked up the default
+  // lane's dubs. It joins on the target-only `join_tag` and counts none.
+  it("puts no dub on the source lane's row", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "lnsrc000", project_id: P, role: "source", name: "Greek", lang_code: "el", legacy_tag: null },
+        { id: "ln000000", project_id: P, role: "target", name: "Swahili", lang_code: "sw", legacy_tag: "" },
+      ],
+      cells: [
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+        cell({ cell_id: "g1", side: "target", target_lang: "", value: "neno" }),
+      ],
+      cell_audio: [audioSeed({ selected: 1, validator_count: 1, lane_id: null })],
+    })
+    await recompute(db)
+    const r = await db
+      .prepare(
+        `SELECT l.role, p.audio_count, p.audio_validated_count
+           FROM file_section_progress p
+           JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
+          WHERE p.project_id = ? AND p.file_id = ? AND p.scope = 'book'`,
+      )
+      .bind(P, F)
+      .all<{ role: string; audio_count: number; audio_validated_count: number }>()
+    const byRole = new Map(r.results.map((row) => [row.role, row]))
+    expect(byRole.get("target")!.audio_count).toBe(1)
+    expect(byRole.get("target")!.audio_validated_count).toBe(1)
+    expect(byRole.get("source")!.audio_count).toBe(0)
+    expect(byRole.get("source")!.audio_validated_count).toBe(0)
   })
 
   it("counts validated audio only when the SELECTED take has a vote", async () => {
@@ -488,7 +555,7 @@ describe("per-unit activity", () => {
 
 describe("pruning", () => {
   it("prunes disappeared source keys across lanes without touching other files or file-level rows", async () => {
-    const { db } = await makeTestDb({
+    const { db, pg } = await makeTestDb({
       cells: [
         cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
         cell({ cell_id: "g2", canonical_ref: "GEN 2:1" }),
@@ -500,10 +567,14 @@ describe("pruning", () => {
     await recompute(db)
     // A different file can have the same keys. Its rows must never satisfy
     // this file's existence checks or be removed by this file's cleanup.
+    // lane_id comes along: it is part of the primary key, and without it the
+    // harness's lane trigger would resolve every copied row's '' tag to the
+    // same default target lane — collapsing the source lane's row onto the
+    // default lane's and violating the key.
     await db.prepare(`INSERT INTO file_section_progress
-      (project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+      (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
        validator_histogram, revision, updated_at)
-      SELECT project_id, 'other-file', scope, section_key, target_lang, total_count,
+      SELECT project_id, 'other-file', scope, section_key, target_lang, lane_id, total_count,
              filled_count, validator_histogram, revision, updated_at
         FROM file_section_progress WHERE project_id = ? AND file_id = ?`).bind(P, F).run()
     const readOther = async () => (await db.prepare(
@@ -518,6 +589,14 @@ describe("pruning", () => {
       .toEqual(["GEN 1", "MAT 1"].flatMap(key => ["", "es", "fr"].map(lane => [key, lane])))
     expect((await rows(db, "book")).map(({ section_key, target_lang }) => [section_key, target_lang]))
       .toEqual(["GEN", "MAT"].flatMap(key => ["", "es", "fr"].map(lane => [key, lane])))
+    // AQU-1599: the cleanup is keyed, not lane-scoped, so the SOURCE lane's
+    // rows for the vanished key go with the target lanes' — otherwise the row
+    // every total is read from would be the one left behind at a stale count.
+    const sourceKeys = await progressRowsForLane<{ scope: string; section_key: string }>(
+      pg, P, "source", { fileId: F },
+    )
+    expect(sourceKeys.filter((r) => r.scope !== "file").map((r) => [r.scope, r.section_key]))
+      .toEqual([["book", "GEN"], ["book", "MAT"], ["section", "GEN 1"], ["section", "MAT 1"]])
     expect(await readOther()).toEqual(otherBefore)
 
     const fileRows = await rows(db, "file")
@@ -589,6 +668,7 @@ describe("pruning", () => {
     const full = await makeTestDb({ cells: seeds })
     await recompute(full.db)
     const incremental = await makeTestDb({ cells: seeds })
+    await ensureDefaultLane(incremental.db)
     await sectionsProgressRecomputeStmt(incremental.db, P, F, TS).run()
 
     expect((await rows(full.db, "book")).map((b) => b.section_key))

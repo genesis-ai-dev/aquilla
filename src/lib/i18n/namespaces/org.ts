@@ -1123,6 +1123,25 @@ export const org = defineNamespace({
     "org.staffLanePopover.broaderAccessNote": "Need broader access? Leads see all languages.",
     "org.staffLanePopover.addAsLeadButton": "Add as lead (unscoped)",
 
+    // AQU-1030: one sentence for the grant the form will make, shared by every
+    // add/invite submit. {scope} is one of the scope.* phrases below.
+    "org.grantScope.sentence.person": "{name} will join as a {role} {scope}",
+    "org.grantScope.sentence.people": "{names} will join as {role} {scope}",
+    "org.grantScope.sentence.link": "Anyone with this link will join as a {role} {scope}",
+    "org.grantScope.sentence.unset": "They will join as a {role} {scope}",
+    "org.grantScope.scope.organization": "of the whole organization — every project",
+    "org.grantScope.scope.projectAllLanes": "on {project} — every lane",
+    "org.grantScope.scope.project": "on {project}",
+    "org.grantScope.scope.laneOnly": "on {project}, {lane} lane only",
+    "org.grantScope.scope.lanesOnly": "on {project}, {lanes} lanes only",
+    "org.grantScope.echo.organization": "every project",
+    "org.grantScope.echo.allLanes": "every lane",
+    "org.grantScope.echo.laneOnly": "{lane} lane only",
+    "org.grantScope.echo.lanesOnly": "{lanes} lanes only",
+    "org.grantScope.button": "{action} — {scope}",
+    "org.grantScope.thisProject": "this project",
+    "org.grantScope.action.addAsLead": "Add as lead",
+
     // -- ArchivedProjects: org-level archived-projects / recently-deleted-files admin page --
     // "Project" header → common.project (identical text)
     // "Archived" header + tooltip label → org.orgSidebar.archived (identical text)
@@ -2819,6 +2838,92 @@ export const org = defineNamespace({
       "org.staffLanePopover.addToLaneButton": {
         description: "Primary confirm button that grants the selected role scoped to the named lane.",
         placeholders: { lane: "The target language lane's display label — not translated." },
+      },
+      "org.grantScope.sentence.person": {
+        description:
+          "Live sentence above an add/invite submit button, and the success toast, when one person is named. States the role and the scope the click will grant.",
+        placeholders: {
+          name: "The person's username or email — not translated.",
+          role: "The role label already translated (singular), e.g. Contributor.",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated, including its leading 'on' or 'of'.",
+        },
+      },
+      "org.grantScope.sentence.people": {
+        description:
+          "Same live sentence and success toast when more than one person is staged. The role is the plural noun.",
+        placeholders: {
+          names: "The staged names joined in a list, e.g. 'Maria and Luis' — names are not translated.",
+          role: "The role label already translated (plural), e.g. Contributors.",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated.",
+        },
+      },
+      "org.grantScope.sentence.link": {
+        description:
+          "Live sentence and success toast for an invite link that is not bound to an email. The recipient is whoever opens the link.",
+        placeholders: {
+          role: "The role label already translated (singular).",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated.",
+        },
+      },
+      "org.grantScope.sentence.unset": {
+        description:
+          "Live sentence before a person has been chosen, so the scope is visible as soon as the form opens.",
+        placeholders: {
+          role: "The role label already translated (singular).",
+          scope: "The scope phrase from org.grantScope.scope.*, already translated.",
+        },
+      },
+      "org.grantScope.scope.organization": {
+        description:
+          "Scope phrase for an organization grant: the person joins the whole organization and therefore every project. Begins with 'of' so it reads after 'as a {role}'.",
+      },
+      "org.grantScope.scope.projectAllLanes": {
+        description:
+          "Scope phrase for a project grant with no lane restriction. Begins with 'on'. The em dash clause says the grant is not limited to one lane.",
+        placeholders: { project: "The project's display name — not translated." },
+      },
+      "org.grantScope.scope.project": {
+        description:
+          "Scope phrase when the grant is on one project but the lane list is not known yet, so the sentence does not claim every lane or one lane.",
+        placeholders: { project: "The project's display name — not translated." },
+      },
+      "org.grantScope.scope.laneOnly": {
+        description:
+          "Scope phrase for a grant limited to one lane of one project. 'lane only' is the restriction.",
+        placeholders: {
+          project: "The project's display name — not translated.",
+          lane: "The lane's display label — not translated.",
+        },
+      },
+      "org.grantScope.scope.lanesOnly": {
+        description:
+          "Scope phrase for a grant limited to more than one named lane of one project.",
+        placeholders: {
+          project: "The project's display name — not translated.",
+          lanes: "The lane labels already joined in a list, e.g. 'French and Spanish' — not translated.",
+        },
+      },
+      "org.grantScope.echo.organization": {
+        description: "Short scope echo appended to an organization invite or add button.",
+      },
+      "org.grantScope.echo.allLanes": {
+        description: "Short scope echo appended to a button that grants a whole project, every lane.",
+      },
+      "org.grantScope.echo.laneOnly": {
+        description: "Short scope echo appended to a button that grants one lane.",
+        placeholders: { lane: "The lane's display label — not translated." },
+      },
+      "org.grantScope.echo.lanesOnly": {
+        description: "Short scope echo appended to a button that grants several lanes.",
+        placeholders: { lanes: "The lane labels already joined in a list — not translated." },
+      },
+      "org.grantScope.button": {
+        description:
+          "Submit-button label. {action} is the existing verb (Add, Send invite, Create invite link) and {scope} is the short echo, so the button repeats what the sentence above it says.",
+        placeholders: {
+          action: "The already-translated verb for this form, without the scope.",
+          scope: "The short scope echo from org.grantScope.echo.*, already translated.",
+        },
       },
       "org.archivedProjects.viewsAriaLabel": {
         description:

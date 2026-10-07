@@ -1159,6 +1159,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.overviewLinkBoard": "Link a board",
     "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
     "projectSettings.monday.wizardDoneNeedsAttentionTitle": "Board linked — sync needs attention",
+    "projectSettings.monday.wizardLinkWarningsTitle": "The board is linked, but Monday reported a problem:",
     "projectSettings.monday.wizardRecommendation": plural({
       one: "Recommended: one item per {granularity}, with {mappedCount} progress column.",
       other: "Recommended: one item per {granularity}, with {mappedCount} progress columns.",
@@ -1994,6 +1995,12 @@ export const projectSettings = defineNamespace({
           granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
           mappedCount: "How many progress columns are mapped to project metrics.",
         },
+      },
+      "projectSettings.monday.wizardLinkWarningsTitle": {
+        description:
+          "Heading of a warning box on the last step of the Monday setup wizard, above " +
+          "a list of server messages (shown in English) about the link that was just " +
+          "saved, for example that Monday's change notifications could not be set up.",
       },
       "projectSettings.monday.wizardFindBoardManually": {
         description: "Fallback note in the Monday setup wizard when Monday returned no direct board URL, telling the user to find the board by name.",

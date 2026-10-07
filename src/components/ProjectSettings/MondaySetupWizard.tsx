@@ -65,8 +65,11 @@ interface Props {
   jwt: string | null
   /** Whether the org already holds a Monday connection. */
   orgConnected: boolean
-  /** A link was created — parent refreshes its own view. */
-  onLinked: (link: MondayBoardLink) => void
+  /**
+   * A link was created — parent refreshes its own view and keeps showing the
+   * server's link warnings (e.g. webhooks could not be created).
+   */
+  onLinked: (link: MondayBoardLink, warnings: string[]) => void
   /** The wizard's Undo removed the link it had just created. */
   onUnlinked: () => void
   /** OAuth completed in the other tab — parent refetches connection status. */
@@ -123,6 +126,8 @@ export function MondaySetupWizard({
   const [customizing, setCustomizing] = useState(false)
   const [linkedBoardName, setLinkedBoardName] = useState<string | null>(null)
   const [pushNotice, setPushNotice] = useState<{ ok: boolean; text: string } | null>(null)
+  /** Warnings the link route returned — the same ones the manual path shows. */
+  const [linkWarnings, setLinkWarnings] = useState<string[]>([])
   const [awaitingOAuth, setAwaitingOAuth] = useState(false)
 
   const aliveRef = useRef(true)
@@ -148,6 +153,7 @@ export function MondaySetupWizard({
     setLinkedBoardUrl(null)
     setCustomizing(false)
     setPushNotice(null)
+    setLinkWarnings([])
     setAwaitingOAuth(false)
   }, [open])
 
@@ -286,7 +292,8 @@ export function MondaySetupWizard({
       if (!aliveRef.current) return
       setLinkedBoardUrl(out.link.boardUrl ?? structure?.url ?? analysis.boardUrl ?? null)
       setLinkedBoardName(out.link.boardName ?? boardName ?? null)
-      onLinked(out.link)
+      setLinkWarnings(out.warnings)
+      onLinked(out.link, out.warnings)
 
       // Verify rather than assert: a link that pushes nothing is not "set up".
       try {
@@ -338,7 +345,7 @@ export function MondaySetupWizard({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
-            {stage === "done" ? (pushNotice?.ok ? "Monday.com is set up" : t("projectSettings.monday.wizardDoneNeedsAttentionTitle")) : "Set up Monday.com with AI"}
+            {stage === "done" ? (pushNotice?.ok && linkWarnings.length === 0 ? "Monday.com is set up" : t("projectSettings.monday.wizardDoneNeedsAttentionTitle")) : "Set up Monday.com with AI"}
           </DialogTitle>
           {stage === "intro" && (
             <DialogDescription>
@@ -538,6 +545,23 @@ export function MondaySetupWizard({
                   ? pushNotice.text
                   : `Linked, but the first push failed: ${pushNotice.text} You can retry with Sync now.`}
               </p>
+            )}
+            {linkWarnings.length > 0 && (
+              <div
+                role="alert"
+                data-testid="monday-wizard-link-warnings"
+                className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40"
+              >
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                  {t("projectSettings.monday.wizardLinkWarningsTitle")}
+                </p>
+                <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                  {linkWarnings.map((w) => (
+                    <li key={w}>· {w}</li>
+                  ))}
+                </ul>
+              </div>
             )}
             {boardUrl && (
               <a

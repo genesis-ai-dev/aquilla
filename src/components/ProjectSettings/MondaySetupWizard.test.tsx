@@ -173,6 +173,30 @@ describe("MondaySetupWizard", () => {
     expect(screen.getByText(/board column was deleted/i)).toBeTruthy()
   })
 
+  it("shows the server's link warnings, like the manual path, and hands them to the parent", async () => {
+    const webhookWarning =
+      "could not create Monday webhooks; board-structure changes will not be detected automatically"
+    mocked.putMondayLink.mockResolvedValue({ link: makeLink(), warnings: [webhookWarning] })
+    const { onLinked } = renderWizard()
+    await scanToReview()
+    fireEvent.click(screen.getByRole("button", { name: /apply and push/i }))
+
+    // The push itself succeeded, so without the warning the dialog would say
+    // "set up" while board changes are never detected.
+    await waitFor(() => expect(screen.getByTestId("monday-wizard-link-warnings")).toBeTruthy())
+    expect(screen.getByTestId("monday-wizard-link-warnings").textContent).toContain(webhookWarning)
+    expect(screen.queryByText("Monday.com is set up")).toBeNull()
+    expect(onLinked).toHaveBeenCalledWith(expect.objectContaining({ id: "l1" }), [webhookWarning])
+  })
+
+  it("claims nothing went wrong when the link route returned no warnings", async () => {
+    renderWizard()
+    await scanToReview()
+    fireEvent.click(screen.getByRole("button", { name: /apply and push/i }))
+    await waitFor(() => expect(screen.getByText("Monday.com is set up")).toBeTruthy())
+    expect(screen.queryByTestId("monday-wizard-link-warnings")).toBeNull()
+  })
+
   it("undo removes the link the wizard just created", async () => {
     mocked.deleteMondayLink.mockResolvedValue(undefined)
     const { onUnlinked } = renderWizard()

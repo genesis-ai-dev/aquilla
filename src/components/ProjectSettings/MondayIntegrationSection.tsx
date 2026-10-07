@@ -495,9 +495,9 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
         orgId={orgId}
         jwt={jwt}
         orgConnected={orgConnected}
-        onLinked={(next) => {
+        onLinked={(next, linkWarnings) => {
           setLink(next)
-          setWarnings([])
+          setWarnings(linkWarnings)
         }}
         onUnlinked={() => {
           setLink(null)

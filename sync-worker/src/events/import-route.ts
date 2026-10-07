@@ -473,6 +473,10 @@ export async function handleBulkImportRequest(
             audioId: attachment.audioId,
             url: attachment.url,
             slot: attachment.slot,
+            // The shared programme clip. It performs the source, so it belongs
+            // to the source lane — not to a '' target lane the project may
+            // not have (AQU-1594).
+            role: 'source',
             ...(attachment.mimeType !== undefined ? { mimeType: attachment.mimeType } : {}),
             ...(attachment.voiceId !== undefined ? { voiceId: attachment.voiceId } : {}),
             ...(attachment.referenceAudioId !== undefined ? { referenceAudioId: attachment.referenceAudioId } : {}),

@@ -12,19 +12,20 @@ QA tests the published preview; its green check proves compilation only.
 
 ### What actually gates a pull request (AQU-1350)
 
-A pull request merges to `dev` when `ci.yml` is green, the label is not `on hold`,
-the base is `dev`, and the pull request is not stacked on an open parent. The
-Grok bot (or a Claude automation) is the merger. GitHub Actions does not click
-merge, and GitHub auto-merge is not used: it cannot read `on hold` or a stacked
-parent. The preview walk does not block the merge. `FAIL`, `FLAKY`, and `BLOCKED`
-still merge. The walk comment is read later, by `scripts/release-plan.mjs`, which
-holds a cut unless the walk is `PASS` or `none`.
+A pull request merges to `dev` when the bot walk is **PASS** at its head sha,
+`ci.yml` is green, the label is not `on hold`, the base is `dev`, and the
+pull request is not stacked on an open parent. The Grok bot (or a Claude
+automation) is the merger. GitHub Actions does not click merge, and GitHub
+auto-merge is not used: it cannot read `on hold` or a stacked parent. A
+`FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk again.
+The same comment is read later, by `scripts/release-plan.mjs`, which holds a
+cut unless the walk is `PASS` or `none`.
 
 | Surface | Trigger | What it proves |
 | --- | --- | --- |
 | `Workers Builds: aquilla-web-preview` | every PR | compilation and the preview deploy. Still a required check. It does not run unit tests, lint, or the secret scan. |
 | `.github/workflows/ci.yml` | every pull request to `dev`, and `workflow_dispatch` | lint, `i18n:check`, the secret scan, unit tests, worker tests, and `pnpm neon:check`. Required on `dev` once a run there is green. Typecheck, the Vite build, Tauri, and the IDML browser suite stay on `workflow_dispatch`. |
-| Grok walk | comment on the PR, not a check | the click-through. Not a merge input. |
+| Grok walk | comment on the PR, not a check | `PASS` at the head sha is required to merge. `FLAKY` and `BLOCKED` do not merge. |
 | Smart Jev (`<!-- aquilla-smart-tests -->`) | one Hetzner run of the release branch's current HEAD, after any pile-on | a `FAIL` means that HEAD does not deploy. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. It does not run on pull requests. |
 | Adversarial Jev | 09:00 UTC nightly against deployed `dev`, plus `workflow_dispatch` | files Linear tickets. It does not affect the cut or the deploy, and it does not run on pull requests. |
 | `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |

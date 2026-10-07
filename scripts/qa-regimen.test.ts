@@ -8,13 +8,15 @@ const regimen = readFileSync(path.join(root, "e2e/journeys/QA-BOT-REGIMEN.md"), 
 const deploy = readFileSync(path.join(root, "e2e/journeys/DEPLOY-BOT.md"), "utf8")
 
 describe("the merge rule the bots follow", () => {
-  it("merges on ci.yml, not on the walk", () => {
+  it("merges when the walk is PASS and ci.yml is green", () => {
+    expect(regimen).toContain("is **PASS** for that sha")
     expect(regimen).toContain("The `ci.yml` jobs are green")
     expect(regimen).toContain("does not have the label `on hold`")
     expect(regimen).toContain("The base is `dev`")
     expect(regimen).toContain("not stacked on an open parent")
-    expect(regimen).toContain("`FAIL`, `FLAKY`, and `BLOCKED` still merge")
-    expect(regimen).not.toContain("is **PASS** for that sha")
+    expect(regimen).toContain("Inconclusive is a checker bug, not QA work.")
+    expect(regimen).not.toContain("`FAIL`, `FLAKY`, and `BLOCKED` still merge")
+    expect(regimen).not.toContain("The walk is not an input")
     expect(regimen).toContain("GitHub Actions does not click merge")
     expect(regimen).toContain("`enforce_admins` is false")
   })

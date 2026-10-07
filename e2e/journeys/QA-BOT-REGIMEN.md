@@ -14,7 +14,7 @@ deploy commands, calver tags).
 ## The line
 
 ```
-PR ──ci green, not on hold, base dev, not stacked──▶ dev
+PR ──walk PASS, ci green, not on hold, base dev, not stacked──▶ dev
         │
         ├─ each day, adversarial Jev attacks deployed dev and files Linear tickets
         │
@@ -24,19 +24,22 @@ PR ──ci green, not on hold, base dev, not stacked──▶ dev
 
 | Stage | Who acts | Gate |
 | --- | --- | --- |
-| PR → `dev` | Grok bot, or a Claude automation | `ci.yml` green, label is not `on hold`, base is `dev`, not stacked on an open parent. The walk is not an input. |
+| PR → `dev` | Grok bot, or a Claude automation | Walk `PASS` at the head sha, `ci.yml` green, label is not `on hold`, base is `dev`, not stacked on an open parent. |
 | `dev` → release branch | Deploy bot | `node scripts/release-plan.mjs` says `cut: true`. |
 | Release HEAD → deploy | A person, after smart Jev | A smart-Jev `FAIL` holds that HEAD. `PASS`, inconclusive, and harness unavailable do not. |
 | Release → prod | Kieran or Matthew | Always a person — see "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
 
-## 1. Pull request: merge on ci.yml
+## 1. Pull request: walk PASS, then ci.yml
 
 GitHub Actions does not click merge. GitHub's auto-merge checkbox cannot read
 the `on hold` label or a stacked parent, so it is not the merger.
 
 The Grok bot (or a Claude automation) may merge a pull request into `dev` when
-all of these hold:
+all of these hold at the pull request's **current head sha**:
 
+- The bot walk comment ([PR-BOT.md](PR-BOT.md)) is **PASS** for that sha.
+- The review agent has no unresolved finding it could prove (a failing test, a
+  reproduced bug). Unproven suspicions do not block.
 - The `ci.yml` jobs are green: lint (including `i18n:check` and the secret
   scan), unit tests, worker tests, and `pnpm neon:check`.
 - The pull request does not have the label `on hold`.
@@ -44,15 +47,21 @@ all of these hold:
 - The pull request is not stacked on an open parent. A base that is another
   open pull request's head is stacked; leave it open.
 
-The preview walk does not block the merge. `FAIL`, `FLAKY`, and `BLOCKED` still merge. The walk comment stays on the pull request. `scripts/release-plan.mjs`
-reads it later and holds a cut unless the walk is `PASS` or `none`.
+Evidence is pinned to the sha. A push after the walk makes the evidence stale;
+walk again before merging. A push after `ci.yml` makes that run stale too; wait
+for the new run.
+
+**Inconclusive is a checker bug, not QA work.** A `FLAKY` or `BLOCKED` walk means
+the bot could not prove the effect. Fix the journey's outcome check (read the
+API or the DOM state directly) so the next walk is conclusive. Do not hand the
+item to a human to "just look at it", and do not merge it.
+
+`scripts/release-plan.mjs` reads the same walk comment later and holds a cut
+unless the walk is `PASS` or `none`.
 
 Branch protection on `dev` requires those `ci.yml` jobs. The Cloudflare preview
 can stay required. Admins are exempt today (`enforce_admins` is false). The
 trial only works if that account does not merge around a red check.
-
-A push after the checks ran makes them stale. Wait for the new `ci.yml` run.
-The walk is not re-run for the merge.
 
 ## 2. Cutting a release: one in flight, no ceiling
 

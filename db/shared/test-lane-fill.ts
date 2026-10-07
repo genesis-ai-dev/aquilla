@@ -13,6 +13,10 @@
 //
 // SECURITY DEFINER so a test that SET ROLE app_runtime can still mint the
 // lane. The row's own RLS check still runs after the trigger.
+//
+// A minted target lane stores no name. `laneLanguage` reads a stored name as
+// the language the model is told (AQU-1592), so the old 'Default' placeholder
+// was sent to the model in place of the project target.
 
 const LANE_TABLES = [
   "cells",
@@ -82,7 +86,7 @@ BEGIN
       v_id,
       NEW.project_id,
       v_role,
-      CASE WHEN v_role = 'source' THEN 'Source' ELSE COALESCE(NULLIF(v_tag, ''), 'Default') END,
+      CASE WHEN v_role = 'source' THEN 'Source' ELSE NULL END,
       CASE WHEN v_role = 'target' AND v_tag IS NOT NULL AND v_tag <> '' THEN v_tag ELSE NULL END,
       CASE WHEN v_role = 'source' THEN NULL ELSE v_tag END,
       0

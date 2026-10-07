@@ -7,10 +7,12 @@ import { SettingsBlock, SettingsGroup, SettingsRow } from '@/components/ui/page'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getBillingOffers, type BillingOffers as Offers } from '@/lib/sync/billing'
+import { useT } from '@/lib/i18n/I18nProvider'
 
 export function BillingOffers({ jwt, orgId, changingPlan = false, currentInterval }: {
   jwt: string; orgId: number; changingPlan?: boolean; currentInterval?: 'month' | 'year'
 }) {
+  const t = useT()
   const [result, setResult] = useState<{ orgId: number; jwt: string; data: Offers } | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   const [selected, setSelected] = useState<{ orgId: number; jwt: string; selection: BillingPlanSelection } | null>(null)
@@ -35,18 +37,17 @@ export function BillingOffers({ jwt, orgId, changingPlan = false, currentInterva
 
   const Review = changingPlan ? BillingChangeReview : BillingPlanReview
   return (
-    <SettingsGroup label="Compare new plans">
+    <SettingsGroup label={t('billing.offers.title')}>
       <SettingsBlock>
         <p className="text-sm text-muted-foreground">
-          Compare personal and shared team capacity. Paid checkout is coming soon.
-          Your current workspace plan stays unchanged.
+          {t('billing.offers.intro')}
         </p>
       </SettingsBlock>
       <Tabs defaultValue="team" onValueChange={() => setSelected(null)}>
         <SettingsBlock className="flex flex-wrap items-center gap-3">
-          <TabsList aria-label="Plan audience">
-            <TabsTrigger value="personal">Individual</TabsTrigger>
-            <TabsTrigger value="team">Team &amp; Enterprise</TabsTrigger>
+          <TabsList aria-label={t('billing.offers.audienceAria')}>
+            <TabsTrigger value="personal">{t('billing.offers.individual')}</TabsTrigger>
+            <TabsTrigger value="team">{t('billing.offers.team')}</TabsTrigger>
           </TabsList>
           <Select value={interval} onValueChange={value => {
             if (value === 'month' || value === 'year') {
@@ -54,13 +55,13 @@ export function BillingOffers({ jwt, orgId, changingPlan = false, currentInterva
               setSelected(null)
             }
           }}>
-            <SelectTrigger aria-label="Plan billing period">
-              <SelectValue>{interval === 'year' ? 'Annual' : 'Monthly'}</SelectValue>
+            <SelectTrigger aria-label={t('billing.offers.intervalAria')}>
+              <SelectValue>{interval === 'year' ? t('billing.offers.annual') : t('billing.offers.monthly')}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="year">Annual</SelectItem>
-                <SelectItem value="month">Monthly</SelectItem>
+                <SelectItem value="year">{t('billing.offers.annual')}</SelectItem>
+                <SelectItem value="month">{t('billing.offers.monthly')}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -68,31 +69,31 @@ export function BillingOffers({ jwt, orgId, changingPlan = false, currentInterva
         {(['personal', 'team'] as const).map(scope => (
           <TabsContent key={scope} value={scope}>
             <div className="flex flex-col">
-              {scope === 'personal' && <SettingsRow label="Free" description="Explore Aquilla with basic AI assistance. No card required." />}
-              {!data && !unavailable ? <SettingsBlock><p role="status">Loading plan prices…</p></SettingsBlock> : null}
+              {scope === 'personal' && <SettingsRow label={t('billing.plan.free')} description={t('billing.offers.freeDescription')} />}
+              {!data && !unavailable ? <SettingsBlock><p role="status">{t('billing.offers.loading')}</p></SettingsBlock> : null}
               {unavailable || data?.available === false ? (
-                <SettingsBlock><p role="status">Plan prices are temporarily unavailable. Your current plan and access are unchanged.</p></SettingsBlock>
+                <SettingsBlock><p role="status">{t('billing.offers.unavailable')}</p></SettingsBlock>
               ) : null}
               {data?.available && data.offers.filter(offer => offer.scope === scope && offer.interval === interval).map(offer => (
                 <SettingsRow
                   key={offer.offer}
                   label={offer.label}
-                  description={`${offer.capacityLabel} capacity${scope === 'team' ? ', shared across your team' : ' for your personal workspace'}.`}
+                  description={t(scope === 'team' ? 'billing.offers.teamCapacity' : 'billing.offers.personalCapacity', { capacity: offer.capacityLabel })}
                   control={
                     <div className="flex flex-col items-end gap-2">
-                      <span>{money(offer.monthlyEquivalent, offer.currency)}/month</span>
+                      <span>{t('billing.offers.perMonth', { amount: money(offer.monthlyEquivalent, offer.currency) })}</span>
                       <span className="text-sm text-muted-foreground">
-                        {interval === 'year' ? `${money(offer.totalAmount, offer.currency)} billed annually` : 'Billed monthly'}
+                        {interval === 'year' ? t('billing.offers.billedAnnually', { amount: money(offer.totalAmount, offer.currency) }) : t('billing.offers.billedMonthly')}
                       </span>
                       <Button variant="outline" onClick={() => setSelected({ orgId, jwt,
                         selection: { offer: offer.offer, interval, quantity: 1 },
-                      })}>Review {offer.label}</Button>
+                      })}>{t('billing.offers.review', { plan: offer.label })}</Button>
                     </div>
                   }
                 />
               ))}
-              {scope === 'team' && <SettingsRow label="Enterprise" description="An agreed plan for organization-wide rollout and support." control={
-                <a className="text-sm underline" href="https://aquilla.app/90-day-rollout">Discuss your rollout</a>
+              {scope === 'team' && <SettingsRow label={t('billing.plan.enterprise')} description={t('billing.offers.enterpriseDescription')} control={
+                <a className="text-sm underline" href="https://aquilla.app/90-day-rollout">{t('billing.offers.discussRollout')}</a>
               } />}
             </div>
           </TabsContent>
@@ -105,9 +106,7 @@ export function BillingOffers({ jwt, orgId, changingPlan = false, currentInterva
       />}
       <SettingsBlock>
         <p className="text-sm text-muted-foreground">
-          New plans reset AI capacity every seven days, with no rollover.
-          Monthly or annual billing does not change usage resets.
-          Usage varies with the work performed.
+          {t('billing.offers.resetNote')}
         </p>
       </SettingsBlock>
     </SettingsGroup>

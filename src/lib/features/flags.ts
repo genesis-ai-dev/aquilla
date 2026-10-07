@@ -92,6 +92,15 @@ export const FLAGS: Record<string, FeatureFlagDefinition> = {
     // ever offered to someone who switched this on.
     default: false,
   },
+  bibleData: {
+    labelKey: "bibleData.experiment.label",
+    descriptionKey: "bibleData.experiment.description",
+    // AQU-1685: off until someone opts in on their device. Every Bible data
+    // surface (the enrichment rows in the Bible data card, Voices, Who's Who,
+    // the Context tab, Bible data checks) reads it through
+    // src/lib/bible-data/experiment.ts, and shows only while a Bible is open.
+    default: false,
+  },
 }
 
 /**

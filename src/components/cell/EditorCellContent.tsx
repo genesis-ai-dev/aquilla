@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react"
+import { useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
@@ -16,6 +16,8 @@ import {
   type UsfmNoteSegment,
 } from "@/lib/parsers/usfm-display"
 import { decorateTermsInHtml } from "@/lib/richtext/terminology-html"
+import { decorateRuleRangesInHtml, RULE_RANGE_ATTR } from "@/lib/richtext/rule-ranges-html"
+import type { RangeHighlight } from "@/lib/richtext/rule-ranges"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -93,6 +95,9 @@ export function SanitizedRichHtml({
   idmlParagraphStyleId,
   concepts,
   termMatching,
+  ranges,
+  rangeText,
+  onRangeClick,
 }: {
   html: string
   idmlStyleCatalog?: IdmlStyleCatalog
@@ -110,6 +115,16 @@ export function SanitizedRichHtml({
    * source cell highlights the same occurrences the plain-text path does.
    */
   termMatching?: TermMatchingSettings
+  /**
+   * AQU-1757: the checks' findings on this cell, as offsets into `rangeText`
+   * (the plain source text the checks read). Drawn with the same underlines
+   * as the plain-text path; a finding that can't be placed exactly on the
+   * markup's text is left undrawn rather than drawn in the wrong place.
+   */
+  ranges?: RangeHighlight[]
+  rangeText?: string
+  /** Opens a finding, as `HighlightedText`'s `onRangeClick` does. */
+  onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
 }) {
   const t = useT()
   const safeHtml = useMemo(
@@ -118,19 +133,48 @@ export function SanitizedRichHtml({
         ? prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId)
         : sanitizeSourceDisplayHtml(html)
       // Strictly after sanitizing — the source sanitizer drops data-* attrs.
-      return decorateTermsInHtml(sanitized, concepts, {
+      const withTerms = decorateTermsInHtml(sanitized, concepts, {
         label: (term) => t("editor.term.managed", { term }),
         termMatching,
       })
+      // After the terms, so a finding on a key term sits inside its chip and,
+      // being innermost, owns the click: the plain path's rule.
+      return rangeText === undefined
+        ? withTerms
+        : decorateRuleRangesInHtml(withTerms, rangeText, ranges, { clickable: Boolean(onRangeClick) })
     },
-    [concepts, html, idmlParagraphStyleId, idmlStyleCatalog, t, termMatching],
+    [concepts, html, idmlParagraphStyleId, idmlStyleCatalog, onRangeClick, rangeText, ranges, t, termMatching],
   )
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
+
+  // The innermost highlight under the pointer decides: a finding opens its
+  // rule card here; a key-term chip is left to bubble to the caller's
+  // delegated term handler, exactly as before.
+  const findingAt = (target: EventTarget, host: HTMLElement): HTMLElement | null => {
+    const hit = (target as HTMLElement).closest?.<HTMLElement>(`[${RULE_RANGE_ATTR}], [data-source-term]`)
+    return hit && host.contains(hit) && hit.hasAttribute(RULE_RANGE_ATTR) ? hit : null
+  }
+  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
+    const hit = onRangeClick && findingAt(event.target, event.currentTarget)
+    if (!hit) return
+    event.stopPropagation()
+    onRangeClick(hit.getAttribute("data-rule-id") ?? "", hit)
+  }
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return
+    const hit = onRangeClick && findingAt(event.target, event.currentTarget)
+    if (!hit) return
+    event.preventDefault()
+    event.stopPropagation()
+    onRangeClick(hit.getAttribute("data-rule-id") ?? "", hit)
+  }
 
   return (
     <div
       data-ph-mask
       dangerouslySetInnerHTML={innerHtml}
+      onClick={onRangeClick ? handleClick : undefined}
+      onKeyDown={onRangeClick ? handleKeyDown : undefined}
     />
   )
 }

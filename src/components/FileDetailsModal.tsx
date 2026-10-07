@@ -69,8 +69,11 @@ export function FileDetailsModal({
                 ? t("fileDetails.orderingTimeline")
                 : t("fileDetails.orderingSequence")}
             </DetailRow>
-            {file.sourceLanguage && (
-              <DetailRow label={t("fileDetails.sourceLanguage")}>{file.sourceLanguage}</DetailRow>
+            {file.declaredSourceLanguage && (
+              <DetailRow label={t("fileDetails.sourceLanguage")}>{file.declaredSourceLanguage}</DetailRow>
+            )}
+            {file.declaredTargetLanguage && (
+              <DetailRow label={t("fileDetails.targetLanguage")}>{file.declaredTargetLanguage}</DetailRow>
             )}
             <DetailRow label={t("fileDetails.imported")}>
               <DateTooltip value={file.createdAt} label={t("fileDetails.imported")} />

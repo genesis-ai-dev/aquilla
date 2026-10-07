@@ -3,6 +3,7 @@ import { createStorePromise, type Store } from "@livestore/livestore"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { events, schema } from "./schema"
 import { isProjectOfflineReady, readOfflineFileCells, subscribeToOfflineFileCells } from "./offline-reads"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 let store: Store<typeof schema>
 
@@ -181,7 +182,7 @@ describe("subscribeToOfflineFileCells", () => {
     onChange.mockClear() // LiveStore subscriptions fire once immediately with the initial value
 
     seedCell({ fileId: "file1", cellId: "c1", side: "source", value: "hi", sequenceIndex: 0 })
-    await vi.waitFor(() => expect(onChange).toHaveBeenCalled())
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
 
     unsubscribe()
     onChange.mockClear()

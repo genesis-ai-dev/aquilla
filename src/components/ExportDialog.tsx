@@ -20,7 +20,7 @@
 // a "Voice" filter appears letting users export only one voice's cells across
 // all camera angles.
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
@@ -89,6 +89,12 @@ import {
   type SubtitleTarget,
 } from "@/lib/export/export-dialog-memory"
 import type { CellData } from "@/hooks/useCells"
+import { partnerIdmlExportOptionsFor } from "@/lib/partners/registry"
+import type {
+  PartnerIdmlExportOption,
+  PartnerIdmlExportPanelProps,
+  PartnerIdmlExportTransform,
+} from "@/lib/partners/types"
 import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { isSubtitleImportFile } from "@/lib/parsers/types"
@@ -394,6 +400,41 @@ interface ExportDialogProps {
   outstandingInfractionCount?: number
 }
 
+function profileIdFromCells(cells: readonly CellData[]): string | null {
+  for (const cell of cells) {
+    const metadata = cell.metadata
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) continue
+    const profileId = (metadata as { aquillaImport?: { profileId?: unknown } }).aquillaImport?.profileId
+    if (typeof profileId === "string" && profileId.length > 0) return profileId
+  }
+  return null
+}
+
+function idmlBlob(bytes: Uint8Array, type: string): Blob {
+  return new Blob(
+    [bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer],
+    { type },
+  )
+}
+
+function LazyPartnerIdmlExportPanel({
+  option,
+  ...props
+}: { option: PartnerIdmlExportOption } & PartnerIdmlExportPanelProps) {
+  const [Panel, setPanel] = useState<ComponentType<PartnerIdmlExportPanelProps> | null>(null)
+  useEffect(() => {
+    let live = true
+    void option.panel().then((mod) => {
+      if (live) setPanel(() => mod.default)
+    })
+    return () => {
+      live = false
+    }
+  }, [option])
+  if (!Panel) return null
+  return <Panel {...props} />
+}
+
 export function ExportDialog({
   open,
   onOpenChange,
@@ -634,6 +675,23 @@ export function ExportDialog({
   useEffect(() => {
     setFormat(nativeFormatId ?? "tsv")
   }, [activeFileId, nativeFormatId])
+
+  const activeProfileId = useMemo(() => profileIdFromCells(cells), [cells])
+  const idmlExportOptions = useMemo(
+    () => partnerIdmlExportOptionsFor(activeProfileId),
+    [activeProfileId],
+  )
+  const [idmlTransform, setIdmlTransform] = useState<PartnerIdmlExportTransform | null>(null)
+  const onIdmlTransformChange = useCallback((next: PartnerIdmlExportTransform | null) => {
+    setIdmlTransform(next)
+  }, [])
+  const loadSourcePackage = useCallback(async () => {
+    if (!activeFileId) throw new Error("Choose a file before checking Bible Swap compatibility.")
+    const bytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
+    return new Uint8Array(bytes)
+  }, [activeFileId, projectId, getToken, targetLang])
+  const showIdmlExportOptions = idmlExportOptions.length > 0
+    && (nativeFormatId === "idml" || format === "idml")
 
   // audio-by-character, vtt, docx, pptx, and plain-text-dump only support file scope.
   /**
@@ -1266,14 +1324,23 @@ export function ExportDialog({
           diagnostics: result.diagnostics,
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
-        downloadBlob(result.blob, `${baseName}.idml`)
         const fileName = `${baseName}.idml`
-        setStatus({
-          kind: "ok",
-          msg: result.report.translated === 0
-            ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
-            : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated }),
-        })
+        let blob = result.blob
+        let msg = result.report.translated === 0
+          ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
+          : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated })
+        if (idmlTransform) {
+          setStatus({ kind: "busy", msg: idmlTransform.busyMessage })
+          try {
+            const swapped = await idmlTransform.apply(new Uint8Array(await result.blob.arrayBuffer()))
+            blob = idmlBlob(swapped.bytes, result.blob.type)
+            msg = swapped.statusMessage
+          } catch (err) {
+            msg = idmlTransform.failureMessage(err instanceof Error ? err.message : String(err))
+          }
+        }
+        downloadBlob(blob, fileName)
+        setStatus({ kind: "ok", msg })
       } else if (fmt === "audio-by-character") {
         // A TOAST, not just the dialog's own line (Sam, 2026-08-18). This is
         // the one export that takes real time — every take is fetched, decoded
@@ -2230,6 +2297,21 @@ export function ExportDialog({
               {structuralNote && ` ${t(structuralNote)}`}
               {hiddenNote && ` ${t(hiddenNote)}`}
             </p>
+          </div>
+        )}
+
+        {showIdmlExportOptions && (
+          <div className="flex flex-col gap-3">
+            {idmlExportOptions.map((option) => (
+              <LazyPartnerIdmlExportPanel
+                key={`${option.id}:${activeFileId ?? ""}`}
+                option={option}
+                disabled={isBusy}
+                fileName={activeFileName}
+                loadSourcePackage={loadSourcePackage}
+                onTransformChange={onIdmlTransformChange}
+              />
+            ))}
           </div>
         )}
 

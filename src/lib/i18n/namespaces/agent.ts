@@ -269,6 +269,17 @@ export const agent = defineNamespace({
     "agent.chatOptions.untitledChat": "Untitled chat",
     "agent.chatOptions.openChat": "{title} — open now",
 
+    // ── Floating AI mini-chat (AgentMiniChat, AQU-1651) ─────────────────
+    // The frame around the SAME conversation the dock and the workbench show.
+    // "Close" dismisses the window only — never say or imply it ends, clears
+    // or deletes the thread, which stays on the server under Previous chats.
+    "agent.miniChat.title": "Ask AI",
+    "agent.miniChat.windowLabel": "AI mini-chat",
+    "agent.miniChat.expand": "Open in full AI chat",
+    "agent.miniChat.minimize": "Minimize chat",
+    "agent.miniChat.restore": "Reopen AI chat",
+    "agent.miniChat.close": "Close chat window",
+
     // ── NEW: v3 agent modes (autonomy dial + react loop + next passage) ───
     // The agent's autonomy is a dial, not an on/off: two independent loops
     // (initiative, react) plus a scope bound. Wording discipline for this
@@ -918,7 +929,9 @@ export const agent = defineNamespace({
           "Line on a staged changeset naming the person it has been routed to for " +
           "review. Routing is an expectation, not a decision: the changeset is still " +
           "waiting for a human to approve or reject it.",
-        placeholders: { user: "Display name of the assigned reviewer, or their user id when no name is known." },
+        placeholders: {
+          user: "The person chip for the assigned reviewer: their username, or the anonymous label when they have none. Not a raw user id.",
+        },
       },
       "agent.changeset.heldCount": {
         description:
@@ -1304,6 +1317,41 @@ export const agent = defineNamespace({
       "agent.chatOptions.openChat": {
         description: "Label for the chat already on screen, listed so the user can see where they are but not re-openable onto itself.",
         placeholders: { title: "The chat's own title, or the localized Untitled chat placeholder." },
+      },
+      "agent.miniChat.title": {
+        description:
+          "Fallback heading in the floating mini-chat's title bar, used until " +
+          "the thread has a title of its own. Matches the editor's 'Ask AI' " +
+          "selection action, which is what opens the window.",
+        maxLength: 20,
+      },
+      "agent.miniChat.windowLabel": {
+        description:
+          "Accessible name of the floating chat window itself (a non-modal " +
+          "dialog over the translation view).",
+      },
+      "agent.miniChat.expand": {
+        description:
+          "Tooltip/accessible name for the button that moves the CURRENT " +
+          "thread into the full AI chat surface for longer work. Nothing is " +
+          "lost or started over.",
+      },
+      "agent.miniChat.minimize": {
+        description:
+          "Tooltip/accessible name for the button that collapses the floating " +
+          "chat window to a small bar.",
+      },
+      "agent.miniChat.restore": {
+        description:
+          "Accessible name for the collapsed bar, which reopens the chat " +
+          "window when clicked.",
+      },
+      "agent.miniChat.close": {
+        description:
+          "Tooltip/accessible name for the button that dismisses the floating " +
+          "chat window. It closes the WINDOW only — the conversation is kept " +
+          "and can be reopened under Previous chats. Do not translate it as " +
+          "ending, clearing or deleting the chat.",
       },
       "agent.team.openQuestionAriaLabel": {
         description:

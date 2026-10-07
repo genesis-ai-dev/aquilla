@@ -5,7 +5,7 @@
 // Tab/Esc accept/reject step. The streaming preview is shown only while
 // generating.
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useRef } from "react"
 
 /** AQU-1025: examples/previews/errors/completing are per (cell, lane). The
  *  source cell id is shared across lanes, so a cell-id-only map kept showing
@@ -108,6 +108,9 @@ function toGroupingCell(cell: CellData): GroupingCell {
 // temperature (unless the project is already hotter) so the new candidate
 // differs. Scoped to regenerate only — first-draft generation is unchanged.
 const REGENERATE_TEMPERATURE = 0.8
+
+/** How long a focus-time few-shot prefetch stays usable by a draft (AQU-617). */
+const EVIDENCE_PREFETCH_TTL_MS = 30_000
 
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
@@ -290,9 +293,32 @@ export function useCompletion(
     () => typeof allCells === "function" ? allCells() : allCells ?? [],
     [allCells],
   )
-  const prepareSingleEvidence = useCallback(async (cell: CellData): Promise<PreparedSingleEvidence> => {
+  // AQU-617: few-shot retrieval is the one round trip a sparkle pays before
+  // generation can start. The editor starts it when a cell is focused; a draft
+  // of the same cell, source and lane soon after reuses that in-flight result
+  // once, so a regenerate still retrieves fresh.
+  const prefetchedSearch = useRef<{ key: string; search: SearchFn; at: number; result: Promise<ScoredPair[]> } | null>(null)
+  const searchKey = useCallback((cell: CellData) => {
     const sourceText = effectiveSourceText(cell)
     const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
+    return { sourceText, topK, key: `${cell.id}\u0000${topK}\u0000${sourceText}` }
+  }, [effectiveSettings.top_k])
+  const prefetchSingleEvidence = useCallback((cell: CellData) => {
+    const { sourceText, topK, key } = searchKey(cell)
+    const held = prefetchedSearch.current
+    if (held && held.key === key && held.search === search && Date.now() - held.at < EVIDENCE_PREFETCH_TTL_MS) return
+    const result = search(sourceText, topK, cell.id)
+    result.catch(() => {}) // a failure surfaces when a draft consumes it
+    prefetchedSearch.current = { key, search, at: Date.now(), result }
+  }, [search, searchKey])
+
+  const prepareSingleEvidence = useCallback(async (cell: CellData): Promise<PreparedSingleEvidence> => {
+    const { sourceText, topK, key } = searchKey(cell)
+    const held = prefetchedSearch.current
+    const prefetched = held && held.key === key && held.search === search && Date.now() - held.at < EVIDENCE_PREFETCH_TTL_MS
+      ? held.result
+      : null
+    if (prefetched) prefetchedSearch.current = null
     let found: ScoredPair[] = []
     try {
       // AQU-153: branching search ranks SOURCE cells, so an untranslated cell
@@ -300,7 +326,7 @@ export function useCompletion(
       // retrieval boundary, so the evidence panel's count and the prompt pool
       // both mean "real source→target pairs" rather than trusting whatever
       // filter the retriever was asked for.
-      found = retainTranslationPairs(await search(sourceText, topK, cell.id))
+      found = retainTranslationPairs(await (prefetched ?? search(sourceText, topK, cell.id)))
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -323,7 +349,7 @@ export function useCompletion(
       precedingContext,
       snapshot: measureTranslationEvidence(sourceText, approvedExamples),
     }
-  }, [draftContext.precedingTargetCells, effectiveSettings.top_k, getAllCells, search])
+  }, [draftContext.precedingTargetCells, getAllCells, search, searchKey])
 
   const draftProvenance = useCallback((
     mode: AiDraftProvenance["mode"],
@@ -1324,5 +1350,5 @@ export function useCompletion(
   const completingForLane = useMemo(() => sliceCompletionLaneMap(completing, lane), [completing, lane])
   const errorsForLane = useMemo(() => sliceCompletionLaneMap(errors, lane), [errors, lane])
 
-  return { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
+  return { completeSingle, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
 }

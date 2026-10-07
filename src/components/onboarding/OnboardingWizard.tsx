@@ -183,8 +183,8 @@ export function OnboardingWizard() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-4" aria-label={t("onboarding.wizard.setupAriaLabel")}>
       <div className="w-full max-w-md">
-        {billingNext && <p className="mb-4 text-sm text-muted-foreground">Your selected plan and billing interval will be reviewed after setup. No purchase occurs during setup.</p>}
-        {billingIntent.kind === "invalid" && <p role="alert">This plan selection is unavailable. You can finish setup and choose a plan later.</p>}
+        {billingNext && <p className="mb-4 text-sm text-muted-foreground">{t("onboarding.wizard.billingAfterSetup")}</p>}
+        {billingIntent.kind === "invalid" && <p role="alert">{t("onboarding.wizard.billingInvalid")}</p>}
         {/* Step indicator */}
         <div
           className="mb-8 flex justify-center gap-2"

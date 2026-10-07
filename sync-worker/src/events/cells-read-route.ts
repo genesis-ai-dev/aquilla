@@ -74,7 +74,7 @@ import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
-import { grantedLaneIds, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
+import { grantedLaneIds, scopeReadClause, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -706,7 +706,11 @@ export async function handleCellsReadRequest(
   // is already verified above; 600+ and platform stay unrestricted (token "").
   const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
   const laneIds = await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes)
-  const visibility = laneIds === null ? "" : visibilityCacheToken(new Set(laneIds))
+  // Wall off: a scoped member still only reads their lanes. The token keeps
+  // their cached body off an unscoped member's ETag.
+  const scopeClause = await scopeReadClause(env.AQUILLA_PG, projectId, auth.claims, laneIds)
+  const visibility =
+    (laneIds === null ? "" : visibilityCacheToken(new Set(laneIds))) + (scopeClause?.token ?? "")
 
   const qSince = url.searchParams.get("since")
   let since: number | null = null
@@ -867,6 +871,10 @@ export async function handleCellsReadRequest(
           deltaParts.push(deltaWall.sql)
           deltaBinds.push(...deltaWall.binds)
         }
+        if (scopeClause) {
+          deltaParts.push(scopeClause.sql)
+          deltaBinds.push(...scopeClause.binds)
+        }
         const deltaRes = await env.AQUILLA_PG.prepare(deltaParts.join(" "))
           .bind(...deltaBinds)
           .all<CellRowRaw>()
@@ -954,6 +962,10 @@ export async function handleCellsReadRequest(
   if (wall) {
     parts.push(wall.sql)
     binds.push(...wall.binds)
+  }
+  if (scopeClause) {
+    parts.push(scopeClause.sql)
+    binds.push(...scopeClause.binds)
   }
   const sql = parts.join(" ")
 

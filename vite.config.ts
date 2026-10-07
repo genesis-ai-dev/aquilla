@@ -222,6 +222,13 @@ export default defineConfig(({ mode }) => ({
           name: "app",
           environment: "happy-dom",
           setupFiles: ["./src/test-setup.ts"],
+          // Stall watchdogs, not speed limits (AGENTS.md rule 15, AQU-1749). A
+          // passing test is unaffected; a stalled one fails after a minute.
+          // Each wait inside a test has 10 s (STALL_WATCHDOG_MS,
+          // src/test-utils/timeouts.ts), so these ceilings stay above the sum
+          // of a test's waits.
+          testTimeout: 60_000,
+          hookTimeout: 60_000,
           passWithNoTests: false,
           exclude: [
             "**/node_modules/**",

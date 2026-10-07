@@ -1,11 +1,23 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { fmtDeadlineDate } from "@/lib/format-date"
+
+// Keep the overview suite's project-member reads local.
+vi.mock("@/lib/frontier/members", async (importActual) => ({
+  ...await importActual<typeof import("@/lib/frontier/members")>(),
+  fetchProjectRoster: vi.fn(async () => ({ kind: "ok", members: [] })),
+}))
+
+const mondayLink = vi.fn(async (..._args: unknown[]) => ({ linked: false, orgConnected: false }))
+vi.mock("@/lib/monday/api", () => ({
+  fetchMondayLink: (...args: unknown[]) => mondayLink(...args),
+  fetchMondayBoardStructure: vi.fn(),
+}))
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (importActual) => {
@@ -303,6 +315,7 @@ function renderOverview() {
 }
 
 beforeEach(async () => {
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: false })
   localStorage.clear()
   _deadlineStatusResult = null
   // Some AQU-474 tests override this to simulate a user with no orgs;
@@ -2057,6 +2070,104 @@ describe("plan board on the overview", () => {
     renderOverview()
     expect(await screen.findByTestId("plan-empty")).toBeInTheDocument()
   })
+
+  it("reads every count again when the project's settings change, without a reload (AQU-1493)", async () => {
+    // Settings open as a modal OVER this page, so closing them is no remount.
+    // Leaving headings out turned Ruth's chapter tiles complete but left the
+    // row on 94% and an open chapter card listing blank headings.
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([])
+    const ruth = (counts: Record<string, number>) => planUnit({
+      fileId: "f1", fileName: "Ruth", sectionKey: "RUT", ...counts,
+    })
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1,
+      units: [ruth({ totalCount: 93, filledCount: 87, validatedCount: 87 })],
+    })
+    getFileProgress.mockResolvedValue({
+      fileId: "f1", revision: 1, validationCount: 1,
+      file: { key: "", totalCount: 93, filledCount: 87, validatedCount: 87 },
+      sections: [{ key: "RUT 1", totalCount: 25, filledCount: 22, validatedCount: 22 }],
+    })
+    getFileSectionProgress.mockResolvedValue({
+      verses: [
+        { cellId: "h1", ref: "", filled: false, validated: false, structural: true },
+        { cellId: "v1", ref: "RUT 1:1", filled: true, validated: true },
+      ],
+    })
+    renderOverview()
+
+    const row = await screen.findByTestId("plan-row-f1-RUT")
+    await waitFor(() => expect(row).toHaveTextContent("94%"))
+    fireEvent.click(row)
+    fireEvent.click(await screen.findByTestId("plan-tile-RUT 1"))
+    await waitFor(() => expect(screen.getByTestId("plan-verse-chip-h1")).toBeInTheDocument())
+    const planReads = fetchProjectPlan.mock.calls.length
+    const progressReads = getFileProgress.mock.calls.length
+
+    // "Leave them out": the server now answers without the headings.
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1,
+      units: [ruth({ totalCount: 85, filledCount: 85, validatedCount: 85 })],
+    })
+    getFileProgress.mockResolvedValue({
+      fileId: "f1", revision: 1, validationCount: 1,
+      file: { key: "", totalCount: 85, filledCount: 85, validatedCount: 85 },
+      sections: [{ key: "RUT 1", totalCount: 22, filledCount: 22, validatedCount: 22 }],
+    })
+    getFileSectionProgress.mockResolvedValue({
+      verses: [{ cellId: "v1", ref: "RUT 1:1", filled: true, validated: true }],
+    })
+    // What the settings modal broadcasts once its write lands.
+    act(() => {
+      window.dispatchEvent(new CustomEvent("aquilla:project-settings-updated", {
+        detail: { projectId: "p1", version: 2, origin: "settings-modal" },
+      }))
+    })
+
+    await waitFor(() => expect(fetchProjectPlan.mock.calls.length).toBeGreaterThan(planReads))
+    await waitFor(() => expect(screen.getByTestId("plan-row-f1-RUT")).toHaveTextContent("100%"))
+    expect(screen.getByTestId("plan-row-f1-RUT")).toHaveTextContent("85 cells")
+    // The side panel's tiles and the chapter card still open beneath them.
+    expect(getFileProgress.mock.calls.length).toBeGreaterThan(progressReads)
+    await waitFor(() => expect(screen.queryByTestId("plan-verse-chip-h1")).toBeNull())
+    expect(screen.getByTestId("plan-chapter-detail")).toBeInTheDocument()
+  })
+
+  it("ignores a settings change to another project", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    renderOverview()
+    await screen.findByTestId("plan-row-f1-")
+    await waitFor(() => expect(fetchProjectPlan).toHaveBeenCalled())
+    const planReads = fetchProjectPlan.mock.calls.length
+    act(() => {
+      window.dispatchEvent(new CustomEvent("aquilla:project-settings-updated", {
+        detail: { projectId: "someone-else" },
+      }))
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(fetchProjectPlan.mock.calls.length).toBe(planReads)
+  })
+})
+
+it("AQU-1208: the overview exposes Monday setup for a connected project", async () => {
+  useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: true })
+  renderOverview()
+  expect(await screen.findByRole("link", { name: "Link a board" })).toHaveAttribute("href", "/project/p1/settings/integrations")
+  expect(mondayLink).toHaveBeenCalledWith("jwt", "p1")
+})
+
+it("AQU-1208: the overview hides the Monday card below maintainer", () => {
+  useProject.mockReturnValue({ project: projectRecord({ level: 500 }), status: "ready", refresh })
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: true })
+  renderOverview()
+  expect(screen.queryByLabelText("Monday.com")).toBeNull()
+  expect(mondayLink).not.toHaveBeenCalled()
 })
 
 // AQU-656: original-blob downloads. The files card they used to hang off was

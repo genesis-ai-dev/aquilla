@@ -15,7 +15,7 @@ import { weeklyUsageActive } from '../lib/billing/usage-mode'
 //   3. Forward to OpenRouter with OPENROUTER_API_KEY.
 //   4. Pass the response through unchanged (streaming or JSON).
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Env, Variables, AuthUser } from "../types"
@@ -28,6 +28,7 @@ import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { openRouterExtras } from "../lib/llm-vendor"
+import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   AB_OUTCOMES,
@@ -132,6 +133,33 @@ async function resolveChatOrgId(
   }
 }
 
+/**
+ * AQU-617: bookkeeping writes for a streamed reply run after the Response is
+ * returned, so they never sit between the provider's first token and the
+ * user's. The request-scoped shim closes as soon as the Response returns, so
+ * this opens its own connection (same as contextual's selfTickLoop). Ledger
+ * writes were already best-effort; a failure here is logged, never surfaced.
+ */
+function afterResponse(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  work: (db: AquillaDb) => Promise<void>,
+): void {
+  const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
+  const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
+  detach(c, work(db).finally(() => shim?.close()))
+}
+
+/** Keep a best-effort task alive past the response; failures are logged only. */
+function detach(c: Context<{ Bindings: Env; Variables: Variables }>, work: Promise<void>): void {
+  const task = work.catch((err: unknown) => console.error("[chat] post-response write failed", err))
+  // Hono throws on executionCtx without one (vitest); fall back to detached.
+  try {
+    c.executionCtx.waitUntil(task)
+  } catch {
+    void task
+  }
+}
+
 function buildOpenRouterBody(request: ChatRequest, model: string, env: Env): string {
   const messages = request.messages.map((m) => ({
     role: m.role,
@@ -171,6 +199,9 @@ chat.post(
 
     // Volumetric floor: unlike the guards below, this actually blocks (see
     // comment at CHAT_MAX_PER_USER_PER_WINDOW).
+    // AQU-617: the org lookup is read-only and never throws, so it runs
+    // alongside the rate-limit and guard round trips instead of after them.
+    const orgIdLookup = resolveChatOrgId(c.env, user, request.projectId)
     const rateLimitIdentifier = `user:${user.id}`
     const recentChatCalls = await countRecentRateLimitEvents(
       c.env.AQUILLA_PG,
@@ -180,10 +211,16 @@ chat.post(
     if (recentChatCalls >= CHAT_MAX_PER_USER_PER_WINDOW) {
       return c.json({ error: "rate_limited", message: "Too many chat requests, slow down." }, 429)
     }
-    await recordRateLimitEvent(c.env.AQUILLA_PG, "chat_completions", rateLimitIdentifier)
 
     // AI guard: model allowlist + per-user/global daily budget (AQU-265).
-    const guard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
+    // The rate-limit row was always written before the guard ran, pass or
+    // fail, so the two can share a round trip.
+    const [, guard] = await Promise.all([
+      recordRateLimitEvent(c.env.AQUILLA_PG, "chat_completions", rateLimitIdentifier),
+      // Log-only budget counting is a single upsert issued now; the request
+      // shim drains in-flight queries before it closes, so it can ride along.
+      runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env, (work) => detach(c, work(c.env.AQUILLA_PG))),
+    ])
     if (!guard.ok) {
       return c.json(guard.body, guard.status)
     }
@@ -192,7 +229,7 @@ chat.post(
     // project context bills that project's org; project-less chat falls back
     // to org 0 as before. The guard uses the same org so chat respects the
     // org's caps once an admin turns enforcement on (log-only by default).
-    const orgId = await resolveChatOrgId(c.env, user, request.projectId)
+    const orgId = await orgIdLookup
     let usage: ChatUsage | undefined
     const weekly = weeklyUsageActive(c.env, c.req.url)
     if (weekly === 'unavailable') return c.json({ error: 'usage_rehearsal_unavailable' }, 503)
@@ -207,14 +244,16 @@ chat.post(
     }
     // Legacy credit/word guards are retired once the weekly ledger meters this call.
     if (!usage) {
-      const chatCreditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
+      const [chatCreditCheck, chatWordCheck] = await Promise.all([
+        creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm"),
+        wordGuard(c.env.AQUILLA_PG, orgId),
+      ])
       if (!chatCreditCheck.ok) {
         return c.json(
           { error: "credit_cap_exceeded", reason: chatCreditCheck.reason, message: "LLM credit cap reached. Contact your org admin." },
           429,
         )
       }
-      const chatWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
       if (!chatWordCheck.ok) {
         return c.json(wordCapBody(chatWordCheck.reason), 429)
       }
@@ -251,12 +290,11 @@ chat.post(
 
       // Log the A/B assignment now that we know whether upstream succeeded.
       // Failed requests count against the serving arm's error rate.
-      if (ab) {
-        await recordAbEvent(c.env.AQUILLA_PG, ab, user.id, {
-          error: !upstream.ok,
-          latencyMs,
-        })
+      const logAb = async (db: AquillaDb) => {
+        if (ab) await recordAbEvent(db, ab, user.id, { error: !upstream.ok, latencyMs })
       }
+      const streamed = upstream.ok && request.stream
+      if (!streamed) await logAb(c.env.AQUILLA_PG)
 
       if (!upstream.ok) {
         // [Pen test] API security & data exposure (2026-08-13): the raw
@@ -291,11 +329,15 @@ chat.post(
         // Streaming: pass body through unchanged. We can't inspect the usage
         // object from a streaming response without buffering it (defeats the
         // point). Record a flat 1¢ fallback estimate so the ledger always has
-        // a row — this is the cheap/low-priority rail.
-        if (!usage) {
-          await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", 1, 1)
-          await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", chatWords)
-        }
+        // a row — this is the cheap/low-priority rail. Written after the
+        // Response so the first token isn't held behind them (AQU-617).
+        afterResponse(c, async (db) => {
+          await logAb(db)
+          if (!usage) {
+            await recordCredit(db, orgId, user.id, "llm", 1, 1)
+            await recordWords(db, orgId, user.id, "llm", chatWords)
+          }
+        })
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",

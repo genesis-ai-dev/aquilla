@@ -113,6 +113,7 @@ import { activeWordRange, findActiveTimingIndex } from "@/lib/audio/timings"
 import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
+import { startRowFlash } from "@/lib/editor/row-flash"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -259,6 +260,8 @@ import {
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import { isFlagEnabled } from "@/lib/features/flags"
+import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
 import {
   useCellPresence,
   type CellPresencePeer,
@@ -275,6 +278,8 @@ import {
 //   window.__perfDumpRowRenders()   → console.table of the same
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
+/** How long focus must rest on an empty cell before its draft retrieval starts (AQU-617). */
+const COMPLETION_PREFETCH_DWELL_MS = 300
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
@@ -403,6 +408,8 @@ export function applyRowOverlays(
     audioEntry?: CellAudioEntry
     backtranslation?: BacktranslationRecord
     projectId?: string | null
+    /** Legacy tag of the lane on screen. '' is the default lane. */
+    lane?: string
   },
 ): CellData {
   let next = cell
@@ -453,7 +460,7 @@ export function applyRowOverlays(
     }
   }
 
-  return overlayBacktranslation(next, options.backtranslation, options.projectId)
+  return overlayBacktranslation(next, options.backtranslation, options.projectId, options.lane ?? "")
 }
 
 function areNumberArraysEqual(a: number[], b: number[]): boolean {
@@ -868,6 +875,9 @@ interface EditorTableProps {
    *  user around the file. Omit to keep errors sticky (legacy callers). */
   onClearCellErrors?: (cellId: string) => void
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
+  /** AQU-617: start a draft's few-shot retrieval early, when an empty cell is
+   *  focused, so a Draft click goes straight to generation. */
+  onPrefetchCompletion?: (cell: CellData) => void
   onCompleteBatch: (cells: CellData[]) => void
   /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
    *  `cellId` as one model call. Omit to keep the rail button hidden
@@ -1026,7 +1036,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
-  onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
+  onCompleteSingle, onPrefetchCompletion, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
@@ -1425,6 +1435,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     setActiveEditorCellId(null)
   }, [activeEditorCellId, displayCellIds])
 
+  // AQU-617: once focus settles on an empty cell, start its draft retrieval.
+  // The dwell keeps arrowing through rows from firing a search per row.
+  useEffect(() => {
+    if (!activeEditorCellId || !onPrefetchCompletion || !isCompletionAvailable) return
+    const timer = setTimeout(() => {
+      const cell = cellStore.getCellView(activeEditorCellId)
+      if (cell && !cell.translated.trim()) onPrefetchCompletion(cell)
+    }, COMPLETION_PREFETCH_DWELL_MS)
+    return () => clearTimeout(timer)
+  }, [activeEditorCellId, cellStore, onPrefetchCompletion, isCompletionAvailable])
+
   // AQU-669: drop the focus pin if its cell scrolls out of the list / lane —
   // a pin can't belong to a row that no longer renders.
   useEffect(() => {
@@ -1620,17 +1641,25 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor, programmaticListScroll])
 
   // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
-  // both defer to the next frame (the list may still be scrolling, so the DOM
-  // node may not exist yet).
+  // both go through here.
+  //
+  // AQU-1493: through `startRowFlash`, which waits until the row is actually
+  // on screen and paints the pulse as an attribute React does not own. The old
+  // body added a CLASS one frame after the scroll, so a row whose className
+  // React rewrote a moment later (the row strip arriving with the line-editing
+  // permission) lost its pulse after ~30ms, and a row far down the file pulsed
+  // off screen while the list was still settling. See lib/editor/row-flash.ts.
+  // One pulse at a time: a new one takes the last one off its row.
+  //
+  // Deliberately NOT cancelled on unmount. A pulse ends by itself (a bounded
+  // wait, then 1.8s), and an unmount cleanup is exactly what StrictMode
+  // replays on a freshly mounted table — right after the workspace's
+  // deep-link effect has asked for the pulse, so every link that opened the
+  // editor lost its pulse in dev.
+  const rowFlashCancelRef = useRef<(() => void) | null>(null)
   const flashCellDom = useCallback((cellId: string) => {
-    requestAnimationFrame(() => {
-      const root = getListQueryRoot()
-      if (!root) return
-      const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
-      if (!el) return
-      el.classList.add("codex-search-flash")
-      window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
-    })
+    rowFlashCancelRef.current?.()
+    rowFlashCancelRef.current = startRowFlash(getListQueryRoot, cellId)
   }, [getListQueryRoot])
 
   // AQU-646 round 8: two short beats on a set of rows, with NO selection — the
@@ -2410,6 +2439,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         audioEntry={audioEntry}
         backtranslation={backtranslation}
         projectId={project.id}
+        lane={activeLane}
       >
         {(cell) => {
           const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
@@ -2817,7 +2847,35 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
   }
 
+  // Smart edits (flag `smartEdits`): one passage request around the active
+  // cell; rows read their own suggestions through SmartEditsProvider.
+  const smartEditsContext = useSmartEditsPassage({
+    enabled: isFlagEnabled(project, "smartEdits"),
+    llmEnabled: isFlagEnabled(project, "smartEditsLlm"),
+    harmonizerEnabled: isFlagEnabled(project, "harmonizer"),
+    projectId: project.id,
+    lane: activeLane,
+    cellIds: displayCellIds,
+    activeCellId: activeEditorCellId,
+    activeText: readAtVersion(cellStoreVersion, () =>
+      activeEditorCellId ? cellStore.getCellView(activeEditorCellId)?.translated : undefined),
+    getCell: (id) => {
+      const view = cellStore.getCellView(id)
+      return view
+        ? {
+            fileId: view.fileId,
+            cellId: id,
+            source: effectiveSourceText(view),
+            target: view.translated,
+            ...(view.context ? { ref: view.context } : {}),
+            validated: view.status === "validated",
+          }
+        : null
+    },
+  })
+
   return (
+    <SmartEditsProvider value={smartEditsContext}>
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       {showStripNav && stripNavSlot
         ? createPortal(
@@ -3056,6 +3114,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div className="flex-1" />
       )}
     </div>
+    </SmartEditsProvider>
   )
 })
 
@@ -3534,6 +3593,7 @@ interface CellStoreRowProps {
   audioEntry?: CellAudioEntry
   backtranslation?: BacktranslationRecord
   projectId?: string | null
+  lane?: string
   children: (cell: CellData) => React.ReactNode
 }
 
@@ -3543,13 +3603,14 @@ function CellStoreRow({
   audioEntry,
   backtranslation,
   projectId,
+  lane,
   children,
 }: CellStoreRowProps) {
   const cell = useCellView(cellStore, cellId)
   const hydratedCell = useMemo(() => {
     if (!cell) return null
-    return applyRowOverlays(cell, { audioEntry, backtranslation, projectId })
-  }, [audioEntry, backtranslation, cell, projectId])
+    return applyRowOverlays(cell, { audioEntry, backtranslation, projectId, lane })
+  }, [audioEntry, backtranslation, cell, lane, projectId])
 
   if (!hydratedCell) return null
   return <>{children(hydratedCell)}</>
@@ -5300,6 +5361,7 @@ function EditorRow({
    *  (Sam, 2026-08-25: nothing is left silent) but only one can be heard. */
   const audioHome = audioHomes?.[0] ?? null
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
+  const { suggestions: smartEdits, feedback: onSmartEditFeedback, askLlm: onAskLlmEdits } = useSmartEditsForCell(cell.id, visibleTranslated)
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
   const idmlConfiguration = useMemo(
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
@@ -7779,6 +7841,9 @@ function EditorRow({
                     onRuleClick={openInlineRule}
                     onRuleHover={handleRuleHover}
                     onLiveTextChange={setLiveTargetText}
+                    smartEdits={smartEdits}
+                    onSmartEditFeedback={onSmartEditFeedback}
+                    onAskLlmEdits={onAskLlmEdits}
                     audioTimings={highlightTimings}
                     audioCurrentTime={highlightTime ?? (hasAudio ? audioController.currentTime : undefined)}
                     onSeekToTime={hasAudio ? audioController.seek : undefined}

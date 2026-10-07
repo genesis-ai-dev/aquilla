@@ -10,7 +10,7 @@ import type {
   BuiltinCheckId,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
-import type { LivingMemoryEntry } from "@/lib/parsers/types"
+import type { CellUnit, LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
@@ -282,6 +282,14 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. `paragraph`
+   *  emits one cell per non-empty paragraph with no sentence split and no
+   *  length cap — the unit a dubbing/podcast project generates one voice clip
+   *  for. Absent/`sentence` (the default) keeps the segmenting behaviour that
+   *  suits subtitle and document work. Formats whose cell identity comes from
+   *  the format itself (USFM verses, subtitle cues, key/value resources) are
+   *  unaffected. */
+  importCellUnit?: CellUnit
   /** Typing " or ' in the translation editor produces curly quotes in the
    *  target language's style (src/lib/richtext/smart-quotes.ts). Absent/false
    *  (the default) leaves straight quotes alone. */

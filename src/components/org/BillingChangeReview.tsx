@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { useT } from '@/lib/i18n/I18nProvider'
+import { RichMessage } from '@/lib/i18n/RichMessage'
 import { billingOfferLabels } from '../../../db/shared/billing-offers'
 import type { BillingPlanSelection } from '@/lib/sync/billing-review'
 import { getBillingChangeReview, type BillingChangeReview as Review } from '@/lib/sync/billing-change-review'
@@ -8,6 +10,7 @@ import { getBillingChangeReview, type BillingChangeReview as Review } from '@/li
 export function BillingChangeReview({ jwt, orgId, selection, onDismiss }: {
   jwt: string; orgId: number; selection: BillingPlanSelection; onDismiss: () => void
 }) {
+  const t = useT()
   const region = useRef<HTMLElement>(null)
   const [review, setReview] = useState<Review | null>(null)
   const [failed, setFailed] = useState(false)
@@ -25,30 +28,30 @@ export function BillingChangeReview({ jwt, orgId, selection, onDismiss }: {
   const money = (amount: number) => new Intl.NumberFormat(undefined, {
     style: 'currency', currency: 'USD',
   }).format(amount / 100)
-  return <section ref={region} tabIndex={-1} aria-label="Review plan change" aria-live="polite" className="px-4 py-3">
-    <p className="text-sm font-medium text-foreground">Review plan change</p>
+  return <section ref={region} tabIndex={-1} aria-label={t('billing.change.title')} aria-live="polite" className="px-4 py-3">
+    <p className="text-sm font-medium text-foreground">{t('billing.change.title')}</p>
     <div className="mt-2 flex flex-col gap-3">
-        {!review && !failed && <p role="status">Checking the subscription and change amount…</p>}
+        {!review && !failed && <p role="status">{t('billing.change.loading')}</p>}
       {failed && <>
-        <p role="alert">Plan change review is unavailable. Your current plan stays unchanged.</p>
-        <Button variant="outline" onClick={() => setAttempt(value => value + 1)}>Try change review again</Button>
+        <p role="alert">{t('billing.change.unavailable')}</p>
+        <Button variant="outline" onClick={() => setAttempt(value => value + 1)}>{t('billing.change.retry')}</Button>
       </>}
       {review && <>
-        <p>Workspace: <strong>{review.workspace.name ?? 'Current workspace'}</strong></p>
+        <p>{t('billing.review.workspaceLabel')} <strong>{review.workspace.name ?? t('billing.review.currentWorkspace')}</strong></p>
         <p>{billingOfferLabels[review.currentOffer]} → <strong>{review.target.label}</strong></p>
-        <p>{money(review.target.totalAmount)} billed {review.target.interval === 'year' ? 'annually' : 'monthly'}.</p>
+        <p>{t(review.target.interval === 'year' ? 'billing.review.annual' : 'billing.review.monthly', { amount: money(review.target.totalAmount) })}</p>
         {review.direction === 'upgrade' ? <>
-          <p>Prorated charge due now: <strong>{money(review.amountDueNow)}</strong>.</p>
-          <p>The higher cap starts after successful payment. Your usage this week stays counted.</p>
+          <p><RichMessage k="billing.change.dueNow" values={{ amount: <strong>{money(review.amountDueNow)}</strong> }} /></p>
+          <p>{t('billing.change.upgradeHelp')}</p>
         </> : <>
-          <p>No charge now. The lower plan starts at the next billing cycle, {new Date(review.effectiveAt).toLocaleString()}.</p>
-          <p>Your current plan and cap continue until then. Your usage week does not restart when the lower cap takes effect.</p>
+          <p>{t('billing.change.downgradeStarts', { date: new Date(review.effectiveAt).toLocaleString() })}</p>
+          <p>{t('billing.change.downgradeHelp')}</p>
         </>}
-        <p>Weekly usage resets {new Date(review.usagePeriodEnd).toLocaleString()}.</p>
-        <p>This review expires {new Date(review.expiresAt).toLocaleString()}. Reviewing does not change your plan.</p>
-        <Button disabled>Plan changes coming soon</Button>
+        <p>{t('billing.change.usageResets', { date: new Date(review.usagePeriodEnd).toLocaleString() })}</p>
+        <p>{t('billing.change.expires', { date: new Date(review.expiresAt).toLocaleString() })}</p>
+        <Button disabled>{t('billing.change.comingSoon')}</Button>
       </>}
-      <Button variant="ghost" onClick={onDismiss}>Close change review</Button>
+      <Button variant="ghost" onClick={onDismiss}>{t('billing.change.close')}</Button>
     </div>
   </section>
 }

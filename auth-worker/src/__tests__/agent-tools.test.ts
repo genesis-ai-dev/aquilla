@@ -14,6 +14,8 @@ import { executeRead, resolveScope } from "../lib/agent/tools/read"
 import { executeExamples, orTsquery } from "../lib/agent/tools/examples"
 import { executeSearch } from "../lib/agent/tools/search"
 import { executeDraft } from "../lib/agent/tools/draft"
+import { _test as agentRouteTest } from "../routes/agent"
+import { migrateProjectConcepts } from "../../../sync-worker/src/events/migrate-concepts"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
 const FILE = "22222222-2222-4222-8222-222222222222"
@@ -207,6 +209,92 @@ describe("read filter:'flagged' — rule violations for the QA sweep", () => {
       .run()
     const afterWaive = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx())
     expect(afterWaive.data?.cells).toEqual([])
+  })
+
+  // AQU-609: a lane-pinned rule applies only in its own lane. The test above
+  // runs in the default lane, so it still passes if read.ts hands rulesForLane
+  // '' instead of ctx.lane. This one runs in lane "es".
+  it("applies a rule pinned to the run's lane, never one pinned to another lane", async () => {
+    await seedWorld()
+    for (const c of CELLS) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'target', 'es', ?, ?, ?, 0)`,
+      )
+        .bind(PROJECT, FILE, cellId(c.id), c.target, c.ref, crypto.randomUUID())
+        .run()
+    }
+    const rules = [
+      { id: "rule-es-only", name: "Avoid enseñaba", scope: "lane", lane: "es", enabled: true, check: { type: "target-forbids", targetPattern: "enseñaba" } },
+      // c1 says "comenzó": it shows up if the French lane's rule leaks in.
+      { id: "rule-fr-only", name: "Avoid comenzó", scope: "lane", lane: "fr", enabled: true, check: { type: "target-forbids", targetPattern: "comenzó" } },
+    ]
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(PROJECT, JSON.stringify({ rules }))
+      .run()
+
+    const flagged = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx("es"))
+    expect(flagged.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
+    expect(flagged.text).toContain("rule-es-only")
+    expect(flagged.text).not.toContain("rule-fr-only")
+  })
+})
+
+// AQU-1727: `flagged` shipped dead. The read schema offered it and the QA-sweep
+// playbook told the agent to use it, but it never matched a cell. To the agent,
+// an empty read looks like a clean file ("0 of N cells match"), so it cannot
+// tell a dead filter from a done one. This test runs every filter the schema
+// offers against a file with one cell of each kind. If you add a filter, add a
+// cell here that it matches. If a filter can never match a cell, do not offer it.
+describe("read filters — every filter the schema offers can return a cell", () => {
+  function advertisedReadFilters(): string[] {
+    const read = agentRouteTest
+      .buildTools(false)
+      .map((t) => (t.function ?? {}) as { name?: string; parameters?: { properties?: { filter?: { enum?: string[] } } } })
+      .find((f) => f.name === "read")
+    return read?.parameters?.properties?.filter?.enum ?? []
+  }
+
+  it("returns cells for every advertised filter, and only cells with that status", async () => {
+    await seedWorld()
+    // MRK 4 becomes: c1 validated, c2 drafted (and breaks a rule), c3 untranslated, c10 stale.
+    await env.AQUILLA_PG.prepare(
+      `UPDATE cells SET ai_drafted = 1 WHERE project_id = ? AND cell_id = ? AND side = 'target'`,
+    )
+      .bind(PROJECT, cellId("c2"))
+      .run()
+    // Stale: c10's translation was made against an older revision of its source.
+    await env.AQUILLA_PG.prepare(
+      `UPDATE cells SET value = 'Y cuando estuvo solo', source_event_id = ?
+       WHERE project_id = ? AND cell_id = ? AND side = 'target'`,
+    )
+      .bind(crypto.randomUUID(), PROJECT, cellId("c10"))
+      .run()
+    const rules = [
+      { id: "rule-ensenaba", name: "Avoid enseñaba", scope: "project", enabled: true, check: { type: "target-forbids", targetPattern: "enseñaba" } },
+    ]
+    await env.AQUILLA_PG.prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+      .bind(PROJECT, JSON.stringify({ rules }))
+      .run()
+
+    const filters = advertisedReadFilters()
+    // An empty list would make this test check nothing.
+    expect(filters.length).toBeGreaterThan(0)
+
+    const dead: string[] = []
+    for (const filter of filters) {
+      const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter }, toolCtx())
+      const statuses = out.data?.cells?.map((c) => c.status) ?? []
+      const works =
+        filter === "all"
+          ? out.ok && statuses.length === CELLS.length
+          : out.ok && statuses.length > 0 && statuses.every((s) => s === filter)
+      if (!works) dead.push(`${filter}: ${out.ok ? `[${statuses.join(", ")}]` : out.text}`)
+    }
+    expect(dead).toEqual([])
   })
 })
 
@@ -630,6 +718,121 @@ describe("executeSearch", () => {
     expect(out.data?.hits?.[0]).toMatchObject({ side: "source", ref: "MRK 4:3" })
     const none = await executeSearch(env.AQUILLA_PG, { q: "sower", side: "target" }, toolCtx())
     expect(none.data?.hits).toHaveLength(0)
+  })
+})
+
+// AQU-1714: side "terms" read `settings.terminology.concepts`. No writer ever
+// produced that path (the legacy key held a bare Concept[]), and since
+// 2026-09-04 the termbase lives in the `concepts` table, whose migration
+// deletes the key. So the search never found a term, and the agent could tell
+// a user that the team had not decided a term it had decided.
+describe("executeSearch side: terms (AQU-1714)", () => {
+  const GRACE = "44444444-4444-4444-8444-000000000001"
+
+  async function termSnippets(q: string): Promise<string[]> {
+    const out = await executeSearch(env.AQUILLA_PG, { q, side: "terms" }, toolCtx())
+    expect(out.ok).toBe(true)
+    return out.data?.hits?.map((h) => h.snippet) ?? []
+  }
+
+  /** One `concepts` row, written the way the term.* projection writes it. */
+  async function seedConcept(row: {
+    id: string
+    term: string
+    rendering: string
+    status: string
+    createdAt: number
+    deletedAt?: number
+  }) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?)`,
+    )
+      .bind(
+        row.id,
+        PROJECT,
+        row.term,
+        JSON.stringify([{ rendering: row.rendering, status: "preferred" }]),
+        row.status,
+        row.createdAt,
+        row.createdAt,
+        row.deletedAt ?? null,
+      )
+      .run()
+  }
+
+  /** The legacy termbase: a bare Concept[] under the `terminology` key. */
+  async function seedLegacyTermbase(concepts: unknown[]) {
+    await env.AQUILLA_PG.prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+      .bind(PROJECT, JSON.stringify({ targetLanguage: "es", terminology: concepts }))
+      .run()
+  }
+
+  it("finds the same term before and after the concepts migration deletes the settings key", async () => {
+    await seedWorld()
+    await seedLegacyTermbase([
+      {
+        id: GRACE,
+        sourceTerm: "grace",
+        renderings: [
+          { rendering: "gracia", status: "preferred" },
+          { rendering: "suerte", status: "forbidden" },
+        ],
+        notes: "Unearned favour, never luck",
+        status: "active",
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    ])
+    const grace = "[active] grace → gracia (preferred), suerte (forbidden) — Unearned favour, never luck"
+
+    // Not migrated yet: the legacy array is the whole termbase, as in the editor.
+    expect(await termSnippets("grace")).toEqual([grace])
+
+    // The real migration copies the term into `concepts` and deletes the key.
+    await migrateProjectConcepts(env.AQUILLA_PG, PROJECT)
+    const row = await env.AQUILLA_PG.prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+      .bind(PROJECT)
+      .first<{ settings: string }>()
+    expect(JSON.parse(row?.settings ?? "{}")).not.toHaveProperty("terminology")
+
+    expect(await termSnippets("grace")).toEqual([grace])
+    expect(await termSnippets("GRACIA")).toEqual([grace]) // a rendering, in any case
+    expect(await termSnippets("favour")).toEqual([grace]) // the notes
+    // A rendering status is a label, not text the team wrote.
+    expect(await termSnippets("preferred")).toEqual([])
+  })
+
+  it("finds draft and deprecated terms, marked as not enforced, but never a deleted term", async () => {
+    await seedWorld()
+    await seedConcept({ id: "c-old", term: "old covenant", rendering: "antiguo pacto", status: "deprecated", createdAt: 1 })
+    await seedConcept({ id: "c-cov", term: "covenant", rendering: "pacto", status: "active", createdAt: 2 })
+    await seedConcept({ id: "c-new", term: "new covenant", rendering: "nuevo pacto", status: "draft", createdAt: 3 })
+    await seedConcept({ id: "c-meal", term: "covenant meal", rendering: "comida del pacto", status: "active", createdAt: 4, deletedAt: 5 })
+
+    expect(await termSnippets("covenant")).toEqual([
+      "[deprecated, not enforced] old covenant → antiguo pacto (preferred)",
+      "[active] covenant → pacto (preferred)",
+      "[draft, not enforced] new covenant → nuevo pacto (preferred)",
+    ])
+  })
+
+  it("ignores a leftover settings key once the table has live terms, so a deleted term stays deleted", async () => {
+    await seedWorld()
+    await seedConcept({ id: "c-grace", term: "grace", rendering: "gracia", status: "active", createdAt: 1 })
+    await seedConcept({ id: "c-mercy", term: "mercy", rendering: "misericordia", status: "active", createdAt: 2, deletedAt: 3 })
+    // For example, a migration that stopped before it deleted the key.
+    await seedLegacyTermbase([
+      {
+        id: "c-mercy",
+        sourceTerm: "mercy",
+        renderings: [{ rendering: "misericordia", status: "preferred" }],
+        status: "active",
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    ])
+
+    expect(await termSnippets("mercy")).toEqual([])
+    expect(await termSnippets("grace")).toEqual(["[active] grace → gracia (preferred)"])
   })
 })
 

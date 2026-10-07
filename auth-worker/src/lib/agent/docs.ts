@@ -86,16 +86,30 @@ comments on judgment calls, not mechanical rules.`
 
 const TERMINOLOGY = `# Terminology cookbook — the termbase and how to honour it
 
-Concepts live in project_settings as JSON (key 'terminology'), not a table:
-SELECT jsonb_array_length(settings::jsonb -> 'terminology' -> 'concepts') AS n
-FROM project_settings WHERE project_id = :project
+Concepts live in the concepts table, one row per concept. The old
+project_settings 'terminology' key is retired; migrated projects do not have it.
+SELECT status, count(*) AS n FROM concepts
+WHERE project_id = :project AND deleted_at IS NULL GROUP BY status
 
-Pull the concepts (each has a gloss/renderings the project standardised on):
-SELECT jsonb_array_elements(settings::jsonb -> 'terminology' -> 'concepts') AS concept
-FROM project_settings WHERE project_id = :project
+Pull the concepts that bind (renderings is [{rendering, status}], with status
+'preferred' | 'admitted' | 'forbidden'):
+SELECT concept_id, source_term, renderings, notes FROM concepts
+WHERE project_id = :project AND deleted_at IS NULL AND status = 'active'
+  AND source_term ILIKE '%word%'
+ORDER BY created_at
 LIMIT 50
-NEVER dump the whole termbase into an answer — select, then mention only the
-top concepts matched against the text you are working on.
+Or search({q:'word', side:'terms'}). Only 'active' concepts bind; 'draft' ones
+are suggestions that wait for approval. NEVER dump the whole termbase into an
+answer — select, then mention only the concepts matched against the text you
+are working on.
+
+Add or change a concept with term.* events (describe_command({kind:'EmitEvents'})
+for the shapes), never with a PatchSettings op on 'terminology':
+propose_command({commands:[{kind:'EmitEvents', events:[{kind:'term.create',
+  payload:{sourceTerm:'covenant', renderings:[{rendering:'…', status:'preferred'}],
+  status:'draft'}}]}]})
+Query the table first: a second term.create for an existing source_term does
+not merge. Change an existing concept with term.update {conceptId, …}.
 
 Where a term surfaces in the target text (inflection-tolerant via prefix
 matching with :* in tsquery):
@@ -142,8 +156,14 @@ states are distinct: ai_drafted (machine suggestion, unendorsed) → human-edite
 Never stage a validation on the user's behalf to "fix" this — see the emit note
 below; only the human's own review validates a cell.
 
-The project's validation threshold (how many validators a cell needs):
-SELECT COALESCE(settings::jsonb ->> 'validationCountThreshold', '1') AS threshold
+The project's validation thresholds. threshold is how many validators a cell's
+text needs (the validationCount setting); audio_threshold is how many a recorded
+take needs (validationCountAudio). Both read as 1 when unset and cap at 15, as
+the app does. No row means the project has no settings yet, so both are 1:
+SELECT GREATEST(1, LEAST(15, COALESCE(CASE WHEN validation_count ~ '^[0-9]+$'
+         THEN validation_count::int END, 1))) AS threshold,
+       GREATEST(1, LEAST(15, COALESCE(CASE WHEN validation_count_audio ~ '^[0-9]+$'
+         THEN validation_count_audio::int END, 1))) AS audio_threshold
 FROM project_settings WHERE project_id = :project
 
 Who has validated a cell:
@@ -228,7 +248,9 @@ FROM assignment_cells ac JOIN cells c
   ON c.project_id = :project AND c.file_id = ac.file_id
  AND c.cell_id = ac.cell_id AND c.side = 'target'
 WHERE ac.assignment_id = '#e1'
-(assignment_id values come back from the first query; aliases work.)
+(assignment_id values come back from the first query; aliases work. assignment_cells
+is the snapshot taken when the assignment was created, so for a book or chapter
+assignment this total is a floor — it misses lines added to the file since.)
 
 Members you can assign to:
 SELECT pm.user_id, pm.role_level

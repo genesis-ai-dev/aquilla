@@ -17,6 +17,7 @@ not a micro-spec farm.
 | Projects | Create project, appears on dashboard | `e2e/specs/projects/create.smoke.spec.ts` |
 | Projects | Open / delete / restore from trash | `e2e/specs/projects/project-trash.smoke.spec.ts` |
 | Projects | App shell still routes | `e2e/specs/projects/route-health.smoke.spec.ts` |
+| Projects | Monday organization handoff, project overview shortcuts, project organization scope, recommended setup, and board destinations (AQU-1208; covered in RTL; worker integration covers metadata persistence) | `src/components/ProjectSettings/MondayIntegrationSection.test.tsx`, `src/components/ProjectSettings/MondaySetupWizard.test.tsx`, `src/components/ProjectSettings.subMenuIA.test.tsx`, `src/pages/settings/OrgSettingsMonday.test.tsx`, `src/components/org/ProjectMondayCard.test.tsx`, `src/components/org/ProjectOverview.test.tsx` |
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
@@ -55,7 +56,7 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Smart journeys (adaptive navigation, independent outcomes)
 
@@ -364,6 +365,16 @@ UI chrome that used to be one smoke file per click is covered under
   is an empty state in a single component, nothing is lost if it breaks, and the
   picture-only import journey it follows is already walked by
   `e2e/specs/editor/import-and-edit.smoke.spec.ts` (row 31).
+- AQU-1702 file sidebar cross-group drag: dropping a file on another corpus group
+  moves it there (group marker + slot in the new group, as one call), the group under
+  the pointer shows the ring and the insertion line, and the one drop the sidebar
+  cannot express — a Bible book sent to Ungrouped, which the book-code fallback would
+  pull straight back — says why and writes nothing. "Move to corpus…" is the same
+  move without a drag. Covered in RTL (`ExpandableFileList.reorder.test.tsx`), with
+  the rule in `lib/sidebar/file-regroup.test.ts` and the numbers in
+  `lib/sidebar/file-sort-index.test.ts`. No smoke, same reasoning as AQU-1569: it is
+  sidebar chrome in one component, and the events it writes (`file.corpus.set`,
+  `file.reorder`) are already exercised by the worker projection tests.
 - AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
   Project Lead, including on a DCS-pinned project where a refusal reason exists),

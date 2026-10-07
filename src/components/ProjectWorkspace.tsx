@@ -189,7 +189,7 @@ import {
   virtualClockController,
   virtualClockPause,
   virtualClockPlay,
-  virtualClockSeek,
+  virtualClockSeekFromTimeline,
 } from "@/lib/timeline/virtual-clock"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -11657,15 +11657,21 @@ export function ProjectWorkspace() {
     // editor's LOCAL clock and nothing else. Paused, that looked like it
     // worked until play snapped the head back; playing, the next tick
     // overwrote it within 50ms. One desync, many symptoms.
+    //
+    // AQU-1118: "Play from this cue" (`play`) also starts the clock here, so
+    // the button means "play from here" on a film-less file as on a linked
+    // video. Never while the recorder is open.
     if (virtualIsTransport) {
-      virtualClockSeek(Math.max(0, sec))
+      virtualClockSeekFromTimeline(sec, { play: opts?.play, recorderOpen: recordingCellId !== null })
       return
     }
     // AQU-1117: "and start playing" is stamped ONLY where the picture is the
     // transport. This is the one expression that decides it, for the same
     // reason `videoIsTransport` itself is written once: the queue arrangement
     // would get a second driver fighting it for the element, and the virtual
-    // arrangement returned above — play parity there is AQU-1118's slice.
+    // arrangement returned above (AQU-1118). The queue arrangement never
+    // reaches "Play from this cue": that button renders only on caption files,
+    // whose rows are never file-timed audio.
     const play = opts?.play === true && videoIsTransport
     setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1, play }))
     // AQU-646 stage 5: A SCRUB MOVES THE PICTURE AND NOTHING ELSE (Sam).
@@ -11713,7 +11719,7 @@ export function ProjectWorkspace() {
       sec,
       { play: false },
     )
-  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport, virtualIsTransport])
+  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
 
   /** AQU-1117: "Play from this cue" — the same routing as an ordinary seek,
    *  with the start riding along on the stamp so the film begins at the cue

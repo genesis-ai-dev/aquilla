@@ -239,6 +239,14 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * AQU-1686: one explicit switch per Bible data enrichment
+   * (db/shared/bible-enrichments.ts). A missing id means that enrichment's
+   * default, and `bibleResourcesEnabled` off turns every one of them off.
+   * Maintainer floor, like the rest of the blob. Read server-side through the
+   * `bible_enrichments` generated column (auth-worker/src/lib/aquifer/gate.ts).
+   */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.

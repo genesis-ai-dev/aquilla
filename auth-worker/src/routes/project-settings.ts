@@ -78,6 +78,7 @@ import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shar
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
+import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -398,6 +399,24 @@ projectSettings.on(
     const rawCountStructural = (body.settings as Record<string, unknown>)[COUNT_STRUCTURAL_KEY]
     if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
       return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)
+    }
+
+    // AQU-1686: `bibleEnrichments` holds only known enrichment ids with boolean
+    // values, the rule the Agent API already applies. Without it this route
+    // stored anything ({voices: "off"} went in with 200), and the settings card
+    // showed a stored string as a switch that is on. The client sends the whole
+    // settings object on every save, so a value already stored is let through
+    // unchanged: a project carrying an older bad value can still save the rest.
+    const rawEnrichments = (body.settings as Record<string, unknown>).bibleEnrichments
+    if (rawEnrichments !== undefined) {
+      const problem = validateSettingsKeyValue("bibleEnrichments", rawEnrichments)
+      if (problem) {
+        const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+        const before = stored.settings.bibleEnrichments
+        if (JSON.stringify(before) !== JSON.stringify(rawEnrichments)) {
+          return c.json({ error: problem }, 400)
+        }
+      }
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

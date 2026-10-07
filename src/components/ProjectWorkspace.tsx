@@ -100,7 +100,8 @@ import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCac
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileHasSections, fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { isBibleOpen } from "@/lib/bible-data/experiment"
 import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -7144,7 +7145,7 @@ export function ProjectWorkspace() {
   // actually shown for the active file — the same gate the render sites use.
   // The AQU-461 verse-resources panel renders under a subset of that gate,
   // so the same subscription serves both.
-  const parallelBiblesPanelActive = centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+  const parallelBiblesPanelActive = isBibleOpen(centerSurface, activeFile)
   const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).

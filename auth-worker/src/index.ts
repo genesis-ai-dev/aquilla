@@ -111,6 +111,7 @@ import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
+import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
@@ -400,6 +401,11 @@ app.route("/api/v1/ai/agent", aiDraftInternalRoutes)
 // AQU-1282: server-to-server L1 brief-summary render for the external Agent
 // API's RegenerateBriefSummary / SetBrief auto-render. Shared-secret only.
 app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
+// AQU-1762: server-to-server knowledge-base upload / list for the external Agent
+// API's /api/v1/external/projects/:projectId/knowledge routes. Shared-secret
+// only (sync-worker → here); runs the same uploader, extraction and indexing the
+// in-app route does (routes/knowledge-internal.ts).
+app.route("/api/v2/internal", knowledgeInternalRoutes)
 // AQU-1386: seam classification for meaning-unit drafting. Session-authed;
 // batches a window of cell boundaries into one Jev decision call and falls back
 // to punctuation whenever the model is unavailable or unconfident.

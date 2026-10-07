@@ -217,7 +217,12 @@ function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
   )
 }
 
-async function handleUpload(
+/** The one upload implementation: extension allowlist → size cap → text
+ *  extraction → R2 put → row insert → async indexing. Exported so the
+ *  server-to-server route the Agent API bridges through (routes/
+ *  knowledge-internal.ts, AQU-1762) runs exactly this, rather than forking a
+ *  second uploader that would strand its docs at index_status 'pending'. */
+export async function handleUpload(
   c: Context<AuthHonoEnv>,
   scope: KnowledgeScopeRef,
   createdBy: string,

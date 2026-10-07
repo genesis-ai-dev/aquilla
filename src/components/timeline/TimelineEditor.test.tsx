@@ -747,7 +747,9 @@ describe("TimelineEditor", () => {
     let row: HTMLElement | null = pill.parentElement
     while (row && !row.contains(screen.getByTestId("tl-speaker-source"))) row = row.parentElement
     expect(row).not.toBeNull()
-    expect(row).not.toContainElement(screen.getByTestId("tl-speaker-target"))
+    // (Target audio has no takes here, so since AQU-1682 it shows no speaker;
+    // tell the rows apart by name.)
+    expect(row).not.toHaveTextContent("Target audio")
     // ...in place of the sublabel, so the name is untouched.
     expect(row).toHaveTextContent("Source audio")
     expect(row).not.toHaveTextContent("original speech")

@@ -44,6 +44,15 @@ export const workspace = defineNamespace({
     // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
+    // Tauri desktop: a downloaded app update, held until the offline queue has
+    // reached the server (src/components/DesktopUpdatePrompt.tsx).
+    "workspace.update.readyToast": "Aquilla {version} is ready to install.",
+    "workspace.update.restartToUpdate": "Restart to update",
+    "workspace.update.stuckToast": plural({
+      one: "Aquilla {version} is ready, but {count} change hasn't reached the server yet. If you update now, it stays saved on this device and sends after the restart.",
+      other: "Aquilla {version} is ready, but {count} changes haven't reached the server yet. If you update now, they stay saved on this device and send after the restart.",
+    }),
+    "workspace.update.updateAnyway": "Update anyway",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -550,6 +559,39 @@ export const workspace = defineNamespace({
         description:
           "Action button on the 'changes aren't being saved' toast; quits and " +
           "relaunches the desktop app. Short imperative.",
+      },
+      "workspace.update.readyToast": {
+        description:
+          "Title of a persistent toast in the Tauri desktop app when a new app " +
+          "version has been downloaded and every offline change has reached the " +
+          "server. Paired with a 'Restart to update' action " +
+          "(workspace.update.restartToUpdate). Full sentence with a period.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+        },
+      },
+      "workspace.update.restartToUpdate": {
+        description:
+          "Action button on the 'update ready' toast; quits the desktop app, " +
+          "installs the update and relaunches. Short imperative.",
+      },
+      "workspace.update.stuckToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when a " +
+          "new app version is downloaded but some changes made on this device " +
+          "still haven't been sent to the server. Reassures that updating keeps " +
+          "them. Paired with an 'Update anyway' action " +
+          "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
+          "'sync' jargon.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+          count: "How many changes haven't been sent yet.",
+        },
+      },
+      "workspace.update.updateAnyway": {
+        description:
+          "Action button on the 'changes not sent yet' update toast; installs " +
+          "the update and relaunches without waiting. Short imperative.",
       },
       "workspace.projectCard.deletedBy": {
         description:

@@ -1,6 +1,16 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
 /**
+ * Bumped whenever the offline events change — a new event, or a new shape for
+ * an existing one. Each generation's eventlog is frozen as a fixture
+ * (src/lib/offline/__fixtures__/eventlog-gen<N>.json) that every later build
+ * must still replay with its queued edits intact: a device can carry unsent
+ * edits across an app update. eventlog-compat.test.ts fails until a schema
+ * change comes with a bump and a new fixture (`pnpm offline:fixture`).
+ */
+export const OFFLINE_DATA_GENERATION = 1
+
+/**
  * AQU-1614: prefix for a lane key derived from a lane's legacy tag rather than
  * its `lanes.id`. The cells read API sends `laneId` only once AQU-1616's
  * backfill has populated `cells.lane_id` (it is nullable until then — see

@@ -1,0 +1,142 @@
+import { useEffect, useState } from "react"
+import { toast } from "@/components/ui/toast"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { useConnectivity } from "@/lib/offline/connectivity"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { tables } from "@/lib/offline/schema"
+import {
+  EMPTY_QUEUE,
+  evaluateUpdateGate,
+  readOfflineQueue,
+  UPDATE_DRAIN_GRACE_MS,
+  type OfflineQueueSnapshot,
+} from "@/lib/offline/update-gate"
+
+const UPDATE_TOAST_ID = "desktop-update"
+const RECHECK_MS = 6 * 60 * 60_000
+
+/** src-tauri/src/app_update.rs `DownloadedUpdate`. */
+export interface DownloadedUpdate {
+  version: string
+  notes: string | null
+}
+
+export interface DesktopUpdateCommands {
+  download: () => Promise<DownloadedUpdate | null>
+  install: () => Promise<void>
+}
+
+// Dynamically imported so the browser SPA never pulls @tauri-apps/api into
+// its bundle — same convention as OfflineShutdownGuard.tsx.
+const tauriCommands: DesktopUpdateCommands = {
+  download: async () => {
+    const { invoke } = await import("@tauri-apps/api/core")
+    return invoke<DownloadedUpdate | null>("download_app_update")
+  },
+  install: async () => {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("install_app_update")
+  },
+}
+
+type Props = {
+  commands?: DesktopUpdateCommands
+  recheckMs?: number
+  graceMs?: number
+}
+
+/**
+ * Invisible mount: checks for a desktop update while online, downloads it,
+ * and offers to install only once the offline queue has reached the server
+ * (src/lib/offline/update-gate.ts for why). If the queue isn't draining it
+ * offers "Update anyway" instead — the rows stay in the local store.
+ * Installing runs the same save handshake as a quit
+ * (src-tauri/src/app_update.rs).
+ *
+ * Rendered alongside the other invisible offline mounts in App.tsx.
+ */
+export function DesktopUpdatePrompt({
+  commands = tauriCommands,
+  recheckMs = RECHECK_MS,
+  graceMs = UPDATE_DRAIN_GRACE_MS,
+}: Props): null {
+  const t = useT()
+  const online = useConnectivity()
+  const { store } = useOfflineStore()
+  const [update, setUpdate] = useState<DownloadedUpdate | null>(null)
+  const [queue, setQueue] = useState<OfflineQueueSnapshot>(EMPTY_QUEUE)
+  const [graceOver, setGraceOver] = useState(false)
+
+  useEffect(() => {
+    if (!isTauriRuntime() || online !== true || update) return
+    let cancelled = false
+    const check = () => {
+      commands
+        .download()
+        .then((found) => {
+          if (!cancelled && found) setUpdate(found)
+        })
+        .catch((error: unknown) => console.warn("[update] check failed", error))
+    }
+    check()
+    const timer = setInterval(check, recheckMs)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [commands, online, update, recheckMs])
+
+  useEffect(() => {
+    if (!store) return
+    const recheck = () => {
+      const next = readOfflineQueue(store)
+      setQueue(next)
+      // A fresh backlog after a drain gets its own full grace period.
+      if (next.count === 0) setGraceOver(false)
+    }
+    recheck()
+    return store.subscribe(tables.eventQueue.select(), recheck)
+  }, [store])
+
+  const pending = queue.count > 0
+  useEffect(() => {
+    if (!update || !pending) return
+    const timer = setTimeout(() => setGraceOver(true), graceMs)
+    return () => clearTimeout(timer)
+  }, [update, pending, graceMs])
+
+  const gate = evaluateUpdateGate(store ? queue : EMPTY_QUEUE, graceOver)
+  const gateKind = gate.kind
+  const count = gate.kind === "clear" ? 0 : gate.count
+
+  useEffect(() => {
+    if (!update) return
+    if (gateKind === "sending") {
+      toast.close(UPDATE_TOAST_ID)
+      return
+    }
+    const install = () => {
+      commands.install().catch((error: unknown) => {
+        console.warn("[update] install failed", error)
+        // Most likely the downloaded update is gone; fetch it again.
+        setUpdate(null)
+      })
+    }
+    toast.add({
+      id: UPDATE_TOAST_ID,
+      type: gateKind === "clear" ? "info" : "warning",
+      timeout: 0,
+      title:
+        gateKind === "clear"
+          ? t("workspace.update.readyToast", { version: update.version })
+          : t("workspace.update.stuckToast", { version: update.version, count }),
+      actionProps: {
+        children: gateKind === "clear" ? t("workspace.update.restartToUpdate") : t("workspace.update.updateAnyway"),
+        onClick: install,
+      },
+    })
+  }, [commands, update, gateKind, count, t])
+
+  return null
+}

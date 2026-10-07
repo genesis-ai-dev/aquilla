@@ -134,6 +134,7 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     expect(screen.queryByRole("link", { name: "Archived" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Access audit" })).not.toBeInTheDocument()
   })
 })
 
@@ -177,6 +178,7 @@ describe("OrgSidebar Data egress entry (AQU-907)", () => {
 
     expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
     expect(screen.queryByRole("link", { name: "Organization settings" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Access audit" })).not.toBeInTheDocument()
   })
 
   it("hides the entry when the egress policy excludes the caller", async () => {
@@ -241,6 +243,7 @@ describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
     renderSidebar("/orgs/1")
 
     expect(await screen.findByRole("link", { name: "Members" })).toHaveAttribute("href", "/orgs/1/members")
+    expect(screen.getByRole("link", { name: "Access audit" })).toHaveAttribute("href", "/orgs/1/access-audit")
   })
 })
 

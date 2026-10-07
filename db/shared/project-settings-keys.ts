@@ -161,6 +161,8 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   bibleEnrichments: { kind: 'object', booleanFlags: BIBLE_ENRICHMENT_IDS },
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },
+  // AQU-1720: what one imported cell is for docx/txt/md uploads.
+  importCellUnit: { kind: 'enum', values: ['sentence', 'paragraph'] },
   smartQuotes: { kind: 'boolean' },
 
   // Structured blobs

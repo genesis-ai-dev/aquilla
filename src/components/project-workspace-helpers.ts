@@ -8,6 +8,7 @@ import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glos
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { Concept } from "@/lib/terminology/types"
 import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 
 /**
@@ -384,4 +385,44 @@ export function runAfterPushedLinkSync(
   void targets.refreshAllFilesProgress().catch(() => {
     // The next normal sidebar refresh retries a transient failure.
   })
+}
+
+/**
+ * AQU-1721: which concepts each workspace surface reads. The editor surfaces
+ * (source highlights, the term-lookup popover, Check file) apply the termbases
+ * this project subscribes to ahead of its own concepts, in the order `useRules`
+ * compiles them. The glossary edits this project's own termbase, so it gets
+ * only those. A glossary edit is a `term.*` event keyed by concept id under
+ * this project's id: the server would drop one for an upstream concept while
+ * the glossary showed it saved.
+ *
+ * With no subscriptions, `editor` is `local` itself, so the editor record keeps
+ * its identity and the common case allocates nothing.
+ */
+export function workspaceTerminology(
+  local: Concept[],
+  subscribed: Concept[],
+): { editor: Concept[]; glossary: Concept[] } {
+  return {
+    editor: subscribed.length === 0 ? local : [...subscribed, ...local],
+    glossary: local,
+  }
+}
+
+/**
+ * AQU-1752: timeline Space and "Play from this cue" wait for the file's
+ * audio-attachment read.
+ *
+ * A media cell counts as file-timed only once its source clip is merged in.
+ * Until the timeline's `useFileAudioAttachments` reports `hasLoaded`, the
+ * picture or the virtual clock looks like it owns the file, and a press
+ * starts that engine. When the read lands, ownership can flip to the queue
+ * and the clock that already started is torn down, so nothing sounds.
+ *
+ * The press is dropped. Nothing is handed to the queue when the clip
+ * arrives; the next press goes to whichever engine the read says owns the
+ * file.
+ */
+export function timelinePlayReady(audioHasLoaded: boolean): boolean {
+  return audioHasLoaded
 }

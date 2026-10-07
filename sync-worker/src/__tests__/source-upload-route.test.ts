@@ -250,6 +250,14 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
       projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
       files: [{ id: "f1", project_id: "p1", name: "Genesis", event_id: "ev1" }],
     })
+    // AQU-1611: the upsert now arbitrates on lane_id, so the lanes the header
+    // names have to exist for the writer's resolver to find them.
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('lane-src', 'p1', 'source', 'Source', NULL, NULL, 0),
+              ('lane-dflt', 'p1', 'target', 'Default', NULL, '', 1),
+              ('lane-frca', 'p1', 'target', 'French (CA)', 'fr-CA', 'fr-CA', 2)`,
+    ).run()
     await db.prepare(
       `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
        VALUES ('f1', 'p1', 'usfm', NULL, 'source-key', 12, 1)`,
@@ -273,13 +281,62 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
 
     expect(response?.status).toBe(200)
     const binding = await db.prepare(
-      `SELECT binding_role, target_lang FROM artifact_bindings WHERE artifact_id::text = ?`,
-    ).bind(artifactId).first<{ binding_role: string; target_lang: string }>()
-    expect(binding).toEqual({ binding_role: "target", target_lang: "fr-CA" })
+      `SELECT binding_role, target_lang, lane_id FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ binding_role: string; target_lang: string; lane_id: string }>()
+    // AQU-1611: the tag is still written during the expand step, but lane_id is
+    // what identifies the row and what the upsert arbitrates on.
+    expect(binding).toEqual({ binding_role: "target", target_lang: "fr-CA", lane_id: "lane-frca" })
     const sourceSidecar = await db.prepare(
       `SELECT format, r2_key FROM file_source_blobs WHERE file_id = 'f1'`,
     ).first<{ format: string; r2_key: string }>()
     expect(sourceSidecar).toEqual({ format: "usfm", r2_key: "source-key" })
+
+    // AQU-1611: re-uploading the same artifact against the same lane updates
+    // that one binding. The arbiter is lane_id, so this is what proves the
+    // lane-keyed UNIQUE is the one resolving the conflict.
+    const again = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "xlsx",
+          "X-Artifact-Id": artifactId,
+          "X-Artifact-Binding-Role": "target",
+          "X-Artifact-Target-Lang": "fr-CA",
+        },
+        body: new Uint8Array([0x50, 0x4b, 1]),
+      },
+    ), { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+    expect(again?.status).toBe(200)
+    const bindings = await db.prepare(
+      `SELECT count(*)::int AS n FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ n: number }>()
+    expect(bindings?.n).toBe(1)
+
+    // Before migration 0134 the lane unique is absent and the tag unique is
+    // the conflict target. A second write still updates the one row.
+    await db.prepare(
+      "ALTER TABLE artifact_bindings DROP CONSTRAINT artifact_bindings_lane_member_key",
+    ).run()
+    const beforeMigration = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "xlsx",
+          "X-Artifact-Id": artifactId,
+          "X-Artifact-Binding-Role": "target",
+          "X-Artifact-Target-Lang": "fr-CA",
+        },
+        body: new Uint8Array([0x50, 0x4b, 1]),
+      },
+    ), { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+    expect(beforeMigration?.status).toBe(200)
+    expect((await db.prepare(
+      `SELECT count(*)::int AS n FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ n: number }>())?.n).toBe(1)
   })
 
   it("replaces the round-trip sidecar for an explicitly selected target skeleton", async () => {
@@ -408,6 +465,34 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
       `SELECT format, r2_key FROM file_source_blobs WHERE file_id = 'f1'`,
     ).first<{ format: string; r2_key: string }>()
     expect(sidecar).toEqual({ format: "usfm", r2_key: "existing-usfm-key" })
+
+    const bindingBody = JSON.stringify({
+      artifactId,
+      bindingRole: "support",
+      memberPath: "My Project/02EXO.SFM",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+    })
+    const postBinding = () => handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f2/source-bindings",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${secondToken}`, "Content-Type": "application/json" },
+        body: bindingBody,
+      },
+    ), env)
+    const bindingCount = () => db.prepare(
+      `SELECT count(*)::int AS n FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ n: number }>()
+
+    expect((await postBinding())?.status).toBe(200)
+    expect((await bindingCount())?.n).toBe(2)
+    await db.prepare(
+      "ALTER TABLE artifact_bindings DROP CONSTRAINT artifact_bindings_lane_member_key",
+    ).run()
+    expect((await postBinding())?.status).toBe(200)
+    expect((await bindingCount())?.n).toBe(2)
   })
 
   it("does not allow an artifact to be bound to a file in another project", async () => {

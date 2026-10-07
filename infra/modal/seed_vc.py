@@ -300,7 +300,11 @@ def web():
         x_auth_token: str = Header(default=""),
     ):
         expected = os.environ.get("SEED_VC_TOKEN", "")
-        if not expected or not hmac.compare_digest(x_auth_token, expected):
+        # Compare bytes: compare_digest raises TypeError on non-ASCII str,
+        # which would surface as a 500 instead of a 401.
+        if not expected or not hmac.compare_digest(
+            x_auth_token.encode(), expected.encode()
+        ):
             raise HTTPException(status_code=401, detail="unauthorized")
         wav = SeedVC().convert.remote(
             await source.read(),

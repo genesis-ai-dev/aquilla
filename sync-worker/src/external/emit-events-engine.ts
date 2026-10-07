@@ -58,6 +58,7 @@ import type {
   TestimonySummaryEntry,
 } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 
 /** Kinds whose payload pins the live target head (and source, for repin). */
 const PIN_KINDS = new Set([
@@ -281,7 +282,9 @@ export async function prepareEmitEvents(
       .filter((lane) => lane.role === 'target')
       .map((lane) => ({
         id: lane.id,
-        name: lane.name,
+        // AQU-1592: name the lane the way the screen does — the name when one
+        // was set, else the language.
+        name: laneDisplayName(lane),
         legacyTag: lane.legacyTag,
         archivedAt: lane.archivedAt,
       }))

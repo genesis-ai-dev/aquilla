@@ -148,14 +148,17 @@ const sourceSchema = z.union([
 // RuleCheck union (src/lib/parsers/types.ts) — `builtin` ids are validated
 // structurally, not against the client's builtin list, so the server never
 // lags a client-side addition.
+// Rule patterns are raw regexes run server-side by lint.ts; bound their size.
+const MAX_PATTERN_LEN = 1000
+
 const checkSpecSchema = z.union([
   z.object({
     type: z.literal("source-requires-target"),
-    sourcePattern: z.string(),
-    targetPattern: z.string(),
+    sourcePattern: z.string().max(MAX_PATTERN_LEN),
+    targetPattern: z.string().max(MAX_PATTERN_LEN),
   }),
-  z.object({ type: z.literal("target-forbids"), targetPattern: z.string() }),
-  z.object({ type: z.literal("source-target-match"), pattern: z.string() }),
+  z.object({ type: z.literal("target-forbids"), targetPattern: z.string().max(MAX_PATTERN_LEN) }),
+  z.object({ type: z.literal("source-target-match"), pattern: z.string().max(MAX_PATTERN_LEN) }),
   z.object({ type: z.literal("builtin"), checkId: z.string().min(1) }),
 ])
 

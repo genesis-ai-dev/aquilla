@@ -13,6 +13,7 @@
 // reports `invalid_state` instead of silently clobbering.
 
 import type { AquillaDb } from "../shim/postgres"
+import { wireLegacyTagSql } from "./lane-sql"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
 import { laneRef, liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
 
@@ -416,7 +417,7 @@ function rowToRun(r: RunRow): ContextualRun {
   }
 }
 
-const RUN_COLS = `id, project_id, file_id, target_lang, lane_id, status, initiated_by, role_snapshot,
+const RUN_COLS = `id, project_id, file_id, ${wireLegacyTagSql("contextual_runs")} AS target_lang, lane_id, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
   last_error, steering_cursor, blocked_on_decision_id, span_allowance, park_reason,
   anchor_cell_id, scope_group, created_at, updated_at`
@@ -487,7 +488,7 @@ function rowToDraft(r: DraftRow): ContextualDraft {
   }
 }
 
-const DRAFT_COLS = `id, run_id, project_id, file_id, cell_id, target_lang, lane_id, scene_brief_id, text,
+const DRAFT_COLS = `id, run_id, project_id, file_id, cell_id, ${wireLegacyTagSql("contextual_drafts")} AS target_lang, lane_id, scene_brief_id, text,
   verdicts, provenance, status, created_at, reviewed_at, reviewed_by`
 
 interface RunEventRow {
@@ -1751,7 +1752,7 @@ export async function listDraftsByRun(
           .bind(projectId, runId)
       : db
           .prepare(
-            `SELECT ${DRAFT_COLS}
+            `SELECT *
                FROM (
                  SELECT ${DRAFT_COLS} FROM contextual_drafts
                   WHERE project_id = ? AND run_id = ?
@@ -1809,7 +1810,7 @@ export async function listDraftPageByRun(
   )
   const { results } = await db
     .prepare(
-      `SELECT ${DRAFT_COLS}
+      `SELECT *
          FROM (
            SELECT ${DRAFT_COLS} FROM contextual_drafts
             WHERE ${where.join(" AND ")}
@@ -2322,7 +2323,7 @@ export async function getProjectAutopilotSummary(
     .prepare(
       `WITH newest AS (
          SELECT DISTINCT ON (file_id, lane_id)
-                id, file_id, target_lang, lane_id, status, done_spans, total_spans, failed_spans,
+                id, file_id, ${wireLegacyTagSql("contextual_runs")} AS target_lang, lane_id, status, done_spans, total_spans, failed_spans,
                 units_spent, last_error, park_reason, updated_at
           FROM contextual_runs
          WHERE project_id = ?

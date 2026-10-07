@@ -13,8 +13,9 @@
 // quality bar) sat unused in the same settings blob.
 //
 // The brief and the rules are read from ONE `project_settings` row. The
-// project's own key terms come from the `concepts` table, where the editor
-// reads them (AQU-1710). Terminology hits reuse the client's compiled rule ids
+// project's own key terms, and those of the termbases it subscribes to, come
+// from the `concepts` table, where the editor reads them (AQU-1710, AQU-1715;
+// lib/concepts-read.ts). Terminology hits reuse the client's compiled rule ids
 // (`term:<conceptId>:…`), so a server-side finding and the browser's
 // violations inbox point at the same concept rather than at two definitions
 // that drift.
@@ -22,6 +23,7 @@
 import { termToRegexSource, type LintHit, type LintRule } from "../agent/lint"
 import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
 import type { TermMatchOptions } from "../../../../src/lib/terminology/model"
+import { readProjectConcepts } from "../concepts-read"
 
 // ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
 
@@ -345,7 +347,7 @@ export async function loadProjectContext(
       : {}
 
   const concepts = [
-    ...(await loadLocalConcepts(db, projectId, settings.terminology)),
+    ...(await loadLocalConcepts(db, projectId)),
     ...(await loadSubscribedConcepts(db, projectId)),
   ]
 
@@ -388,26 +390,6 @@ export async function isRegisteredTargetLane(
   }
 }
 
-interface ConceptRow {
-  concept_id: string
-  source_term: string
-  renderings: unknown
-  notes: string | null
-  status: string
-  case_sensitive: number
-  match_options: unknown
-}
-
-/** A JSONB column can arrive parsed or as text, depending on the driver. */
-function jsonColumn(raw: unknown): unknown {
-  if (typeof raw !== "string") return raw
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    return undefined
-  }
-}
-
 /**
  * The project's own concepts, read where the editor reads them (AQU-1710): the
  * live rows of the `concepts` projection. `term.*` events have written there
@@ -416,20 +398,11 @@ function jsonColumn(raw: unknown): unknown {
  * migrated project an empty termbase. As in the editor's read route
  * (sync-worker/src/events/concepts-read-route.ts), the key is a fallback only
  * when the table has no live rows, so a leftover blob never adds to the table.
+ * Subscribed termbases go through the same read (readProjectConcepts, AQU-1715).
  */
-async function loadLocalConcepts(db: SettingsDb, projectId: string, blob: unknown): Promise<Concept[]> {
-  let rows: ConceptRow[]
+async function loadLocalConcepts(db: SettingsDb, projectId: string): Promise<Concept[]> {
   try {
-    const { results } = await db
-      .prepare(
-        `SELECT concept_id, source_term, renderings, notes, status, case_sensitive, match_options
-           FROM concepts
-          WHERE project_id = ? AND deleted_at IS NULL
-          ORDER BY created_at ASC`,
-      )
-      .bind(projectId)
-      .all<ConceptRow>()
-    rows = results
+    return parseConcepts(await readProjectConcepts(db, projectId))
   } catch (err) {
     // Draft without terms rather than fail the run, but say so: a silently
     // empty termbase is the failure this read exists to end.
@@ -439,36 +412,37 @@ async function loadLocalConcepts(db: SettingsDb, projectId: string, blob: unknow
     )
     return []
   }
-  if (rows.length === 0) return parseConcepts(blob)
-  return parseConcepts(
-    rows.map((r) => ({
-      id: r.concept_id,
-      sourceTerm: r.source_term,
-      renderings: jsonColumn(r.renderings),
-      notes: r.notes,
-      status: r.status,
-      caseSensitive: r.case_sensitive === 1,
-      match: jsonColumn(r.match_options),
-    })),
-  )
 }
 
 /** Concepts from termbases this project subscribes to, in priority order.
  *  An org that publishes one shared termbase expects it to bind everywhere. */
 async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promise<Concept[]> {
   try {
+    // The order the subscriptions list shows: priority, then age.
     const { results } = await db
       .prepare(
-        `SELECT ps.settings
-           FROM project_termbase_subscriptions s
-           JOIN project_settings ps ON ps.project_id = s.termbase_project_id
-          WHERE s.project_id = ?
-          ORDER BY s.priority ASC`,
+        `SELECT termbase_project_id
+           FROM project_termbase_subscriptions
+          WHERE project_id = ?
+          ORDER BY priority ASC, created_at ASC`,
       )
       .bind(projectId)
-      .all<{ settings: unknown }>()
-    return results.flatMap((r) => parseConcepts(parseSettings(r.settings).terminology))
-  } catch {
+      .all<{ termbase_project_id: string }>()
+    // Each termbase is read as the editor reads it, through the same function
+    // as the subscription route (AQU-1715): its live `concepts` rows, and its
+    // settings blob only while it has none. Reading only the blob gave
+    // subscribers nothing once the termbase was migrated.
+    const termbases = await Promise.all(
+      results.map((r) => readProjectConcepts(db, r.termbase_project_id)),
+    )
+    return termbases.flatMap((concepts) => parseConcepts(concepts))
+  } catch (err) {
+    // Draft without them rather than fail the run, but say so: a silently
+    // empty termbase is the failure this read exists to end.
+    console.warn(
+      `[contextual] subscribed termbase read failed for project ${projectId}; drafting without its subscribed key terms:`,
+      err instanceof Error ? err.message : err,
+    )
     return []
   }
 }

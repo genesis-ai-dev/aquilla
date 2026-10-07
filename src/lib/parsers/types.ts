@@ -504,14 +504,19 @@ export interface ProjectRecord {
    */
   archivedLanes?: string[]
   /**
-   * AQU-1418: lane rows. The screen shows `name`. Selection and cell storage
-   * still use `legacyTag` ('' is the default target lane). Absent until the
-   * settings read returns them.
+   * AQU-1418: lane rows. Selection and cell storage still use `legacyTag` ('' is
+   * the default target lane). Absent until the settings read returns them.
+   *
+   * AQU-1592: read the display name and the language code through
+   * `laneDisplayName` / `laneLanguageCode` (src/lib/lanes/lane-display.ts) — a
+   * lane stores only what the user typed, so `name` is null when it just shows
+   * its `language`, and `langCode` is null when the code is derived.
    */
   lanes?: {
     id: string
     role: "source" | "target"
-    name: string
+    language?: string | null
+    name: string | null
     langCode: string | null
     legacyTag: string | null
     position: number

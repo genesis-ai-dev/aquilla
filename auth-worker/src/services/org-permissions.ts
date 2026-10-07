@@ -13,6 +13,7 @@ import {
 } from "../../../db/shared/counted-files"
 import { orgPathContribution } from "../../../db/shared/project-roles"
 import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
 import {
   loadLaneGrantsForProjects,
   loadTargetLaneIdentitiesForProjects,
@@ -1440,7 +1441,7 @@ async function fetchPortfolioLanes(
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
     env.AQUILLA_PG.prepare(
-      `SELECT l.project_id AS project_id, l.id AS id, l.name AS name,
+      `SELECT l.project_id AS project_id, l.id AS id, ${laneDisplayNameSql("l")} AS name,
               l.legacy_tag AS legacy_tag, l.position AS position,
               l.archived_at AS archived_at
          FROM lanes l

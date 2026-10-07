@@ -424,6 +424,8 @@ projectSettings.on(
       settings,
       ifMatchVersion,
       updatedBy: user.id,
+      blobs: c.env.SNAPSHOTS ?? null,
+      r2KeyPrefix: c.env.R2_KEY_PREFIX,
     })
 
     // AQU-1750: both bodies are filtered exactly like the GET. The client
@@ -447,8 +449,14 @@ projectSettings.on(
     const fresh = result.settings
     // Settings live in identity while connected editor clients listen to the
     // project sync DO. This is a best-effort acceleration: a missed frame is
-    // recovered by the existing focus/reconnect settings read.
-    const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
+    // recovered by the existing focus/reconnect settings read. Downstream
+    // projects the link just copied into get the same nudge.
+    const notifyPromise = Promise.all([
+      notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version),
+      ...(result.propagated ?? []).map((copy) =>
+        notifySyncWorkerOfProjectSettingsChange(c.env, copy.projectId, copy.version),
+      ),
+    ])
     try {
       c.executionCtx.waitUntil(notifyPromise)
     } catch {

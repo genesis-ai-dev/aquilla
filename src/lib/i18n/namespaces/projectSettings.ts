@@ -125,6 +125,22 @@ export const projectSettings = defineNamespace({
       "targets, e.g. French → Chaluba).",
     "projectSettings.create.validationLinkConsumesRequired":
       "Choose which corpus should become this project's source",
+    // ── AQU-1605: which of the upstream's lanes a chain link consumes. Only
+    // asked for "One of its Targets" — the sibling case consumes the upstream's
+    // one source lane, so there is nothing to choose. Offered only for the lanes
+    // the user may see, and pre-filled when that is a single lane.
+    "projectSettings.create.upstreamLaneLabel": "Which of its translations?",
+    "projectSettings.create.upstreamLanePlaceholder": "Choose a translation…",
+    "projectSettings.create.upstreamLaneUnnamed": "Untitled lane",
+    "projectSettings.create.upstreamLaneLoading": "Loading translations…",
+    "projectSettings.create.upstreamLaneNone":
+      "This project has no translation you can use as a source. Choose its source " +
+      "instead, or ask for access to one of its translations.",
+    "projectSettings.create.upstreamLaneLoadError":
+      "Couldn't load this project's translations.",
+    "projectSettings.create.upstreamLaneRetry": "Try again",
+    "projectSettings.create.validationUpstreamLaneRequired":
+      "Choose which of the upstream project's translations to use",
     // ── AQU-1561: which of the upstream's files the new project brings in.
     // Same question the Source & sync link flow asks, so the list itself reuses
     // `projectSettings.linkSource.selectAllFiles` / `fileClashBadge` — only the
@@ -677,6 +693,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.consumesTranslations": "consumes translations",
     "projectSettings.sourceLink.consumesSource": "consumes source",
     "projectSettings.sourceLink.gateLabel": "gate: {value}",
+    // AQU-1605: which of the upstream's translations the link consumes.
+    "projectSettings.sourceLink.laneLabel": "translation: {value}",
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
@@ -1169,6 +1187,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.termMatching.preset.arabic": "Arabic",
     "projectSettings.termMatching.preset.swahili": "Swahili",
     "projectSettings.termMatching.preset.turkish": "Turkish",
+
+    // ── AQU-1075: settings copied from the upstream project ──
+    "projectSettings.inherit.title": "Settings from {upstream}",
+    "projectSettings.inherit.description":
+      "This project keeps a copy of what you turn on. When {upstream} saves one of them, the copy updates, and so does the next project in the chain. Detach a field to keep your own.",
+    "projectSettings.inherit.linkTitle": "Copy these from the upstream project",
+    "projectSettings.inherit.linkDescription":
+      "Turn on what this project should receive. You can detach any of them later in its settings.",
+    "projectSettings.inherit.field.translationBrief": "Translation brief",
+    "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
+    "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
+    "projectSettings.inherit.field.workflowPolicyDetail":
+      "Validation count and role floors, self-validation, autopilot and agent mode, structural-cell counting, and check penalties.",
+    "projectSettings.inherit.field.livingMemory": "Living-memory notes",
+    "projectSettings.inherit.field.smartQuotes": "Smart quotes",
+    "projectSettings.inherit.field.systemPrompt": "AI instructions",
+    "projectSettings.inherit.fromUpstream": "from {upstream}",
+    "projectSettings.inherit.detach": "Detach",
   },
   context: {
     _context: {
@@ -1741,6 +1777,16 @@ export const projectSettings = defineNamespace({
         description: "Small badge on the Source link card naming the sync gate for a chain (consumes-target) link.",
         placeholders: {
           value: "The rendered projectSettings.sourceLink.gateValidatedOnly or gateEveryCommit string — insert exactly as given.",
+        },
+      },
+      "projectSettings.sourceLink.laneLabel": {
+        description:
+          "Small badge naming WHICH of the upstream project's translations a chain " +
+          "(consumes-target) link reads — shown beside the corpus and gate badges on " +
+          "the confirm step of the linking flow. 'translation' here means one of the " +
+          "upstream's target languages, not the act of translating.",
+        placeholders: {
+          value: "The lane's own name as the upstream project set it (a language name such as 'Quebec French'), inserted as given and never translated.",
         },
       },
       "projectSettings.sourceLink.scopeSomeFiles": {
@@ -2321,6 +2367,62 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.termMatching.preset.turkish": {
         description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.inherit.title": {
+        description:
+          "Heading of the inherited-settings card in Project Settings, shown only when this project is linked to an upstream. Names the upstream.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.description": {
+        description:
+          "Explanation under that heading: turned-on fields are copies that update when the upstream saves, including further down a chain, and Detach keeps a local copy.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.linkTitle": {
+        description:
+          "Heading of the same choice on the link confirm step, before the link exists. The checkboxes under it are what this new link will copy.",
+      },
+      "projectSettings.inherit.linkDescription": {
+        description:
+          "One sentence under that heading: the choice can be changed later, per field, from the downstream project's settings.",
+      },
+      "projectSettings.inherit.field.translationBrief": {
+        description: "Checkbox label. The translation brief is copied from the upstream when this is on.",
+      },
+      "projectSettings.inherit.field.knowledgeDocs": {
+        description: "Checkbox label. The upstream project's knowledge-base documents are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicy": {
+        description:
+          "Checkbox label. Validation counts, role floors, self-validation, autopilot, agent mode, structural-cell counting, and check penalties are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicyDetail": {
+        description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",
+      },
+      "projectSettings.inherit.field.livingMemory": {
+        description: "Checkbox label. Living-memory notes are copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.smartQuotes": {
+        description: "Checkbox label. The smart-quotes switch is copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.systemPrompt": {
+        description:
+          "Checkbox label. AI instructions (the system prompt) are copied when this is on. Off by default, because those instructions usually name the language pair.",
+      },
+      "projectSettings.inherit.fromUpstream": {
+        description:
+          "Shown beside a field that is still being copied, both in the inherited-settings card and next to the field itself.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.detach": {
+        description:
+          "Button beside a field that is still being copied. Stops future updates of that field and keeps the current copy.",
       },
     },
   },

@@ -188,6 +188,16 @@ CREATE TABLE projects (
     -- history up to the cursor, then moves them into source_link_file_ids and
     -- clears this, in one statement.
     source_link_backfill TEXT,
+    -- AQU-1605: which UPSTREAM LANE this link consumes (migration 0138), by
+    -- `lanes.id` (globally unique since AQU-1606). NULL = the upstream's
+    -- `legacy_tag = ''` lane, which is what every link consumed before this
+    -- slice, so a row that predates AQU-1616's backfill keeps today's
+    -- behaviour. For `source_link_consumes = 'target'` it selects which of the
+    -- upstream's translations become this project's source; for 'source' it
+    -- records the upstream's source lane and changes no query (source rows all
+    -- store `target_lang = ''`). No FK: the lane belongs to another project and
+    -- an unresolvable one fails the fold closed rather than the write.
+    source_link_lane_id  TEXT,
     -- AQU-1679: files of THIS project that stand in for upstream files
     -- (migration 0140). NULL = none. A JSON object {"files": {<upstream file
     -- id>: <this project's file id>…}, "pending": [<upstream file id>…]}: the

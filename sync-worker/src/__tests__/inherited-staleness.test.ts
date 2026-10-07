@@ -13,7 +13,8 @@
 //     staleness)
 
 import { describe, it, expect } from "vitest"
-import { mirrorSync, deterministicDownstreamFileId } from "../events/link-sync"
+import { computeUpstreamStaleCellIds } from "../events/inherited-staleness"
+import { mirrorSync, deterministicDownstreamFileId, laneRelevantHeadSeq } from "../events/link-sync"
 import { handleStaleSourceRequest } from "../events/stale-source-route"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
@@ -320,6 +321,113 @@ describe("inherited staleness — cycle safety", () => {
       const res = await handleStaleSourceRequest(req, { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET })
       expect(res).not.toBeNull()
       expect((res as Response).status).toBe(200)
+    } finally {
+      await t.close()
+    }
+  })
+})
+
+describe("inherited staleness — the consumed lane only (AQU-1644)", () => {
+  it("edits on lane A do not flag a downstream that follows lane B", async () => {
+    const t = await makeTestDb()
+    const root = "proj-1644-root"
+    const upstream = "proj-1644-up"
+    const downstream = "proj-1644-down"
+    const file = "file-1644"
+    const cell = "cell-1644"
+    try {
+      // AQU-1683: a file linked straight to a project with no live link of its
+      // own inherits nothing. The upstream follows a root so the walk runs,
+      // and the lane filter is what keeps lane A's edit off this downstream.
+      await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Root', 1)`, [root])
+      await t.pg.query(
+        `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode,
+                               source_link_consumes, source_link_cursor)
+         VALUES ($1, 'Upstream', 1, $2, 'live', 'source', 0)`,
+        [upstream, root],
+      )
+      await emit(t, upstream, "file.create", { fileId: file, payload: { name: "Ep", fileType: "codex" } })
+      await emit(t, upstream, "source.cell.create", {
+        fileId: file,
+        cellId: cell,
+        payload: { cellId: cell, value: "source line", anchorCellId: null },
+      })
+      // Lane B first, then lane A, so an unfiltered read that keeps the last
+      // row would compare the downstream's pin to A's head.
+      await emit(t, upstream, "target.cell.commit", {
+        fileId: file,
+        cellId: cell,
+        payload: { value: "lane B text", targetLang: "French" },
+      })
+      await emit(t, upstream, "target.cell.commit", {
+        fileId: file,
+        cellId: cell,
+        payload: { value: "lane A text", targetLang: "Zulu" },
+      })
+      const french = await t.pg.query<{ id: string }>(
+        `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = 'French'`,
+        [upstream],
+      )
+      const frenchId = french.rows[0]?.id
+      expect(frenchId).toBeTruthy()
+
+      await t.pg.query(
+        `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode,
+                               source_link_consumes, source_link_gate, source_link_cursor, source_link_lane_id)
+         VALUES ($1, 'Downstream', 1, $2, 'live', 'target', 'head', 0, $3)`,
+        [downstream, upstream, frenchId],
+      )
+      await mirrorSync(t.db, downstream)
+      const downFile = deterministicDownstreamFileId(downstream, file)
+
+      await emit(t, upstream, "target.cell.commit", {
+        fileId: file,
+        cellId: cell,
+        payload: { value: "lane A text, revised", targetLang: "Zulu" },
+      })
+
+      const afterA = await computeUpstreamStaleCellIds({ AQUILLA_PG: t.db }, downstream, downFile, [cell])
+      expect(afterA.upstreamStaleCellIds).toEqual([])
+      expect(afterA.ancestorBehind).toBe(false)
+
+      const cursor = await t.pg.query<{ source_link_cursor: string }>(
+        `SELECT source_link_cursor FROM projects WHERE id = $1`,
+        [downstream],
+      )
+      const at = Number(cursor.rows[0]?.source_link_cursor ?? 0)
+      const frenchLane = { id: frenchId!, tag: "French" }
+      const frenchHead = await laneRelevantHeadSeq(t.db, upstream, "target", frenchLane)
+      const anyHead = await laneRelevantHeadSeq(t.db, upstream, "target")
+      expect(frenchHead).toBeLessThanOrEqual(at)
+      expect(anyHead).toBeGreaterThan(at)
+
+      const staleSource = async () => {
+        const res = await handleStaleSourceRequest(
+          new Request(`https://sync.test/api/v1/projects/${downstream}/files/${file}/stale-source`, {
+            headers: { Authorization: `Bearer ${await makeToken(downstream, file)}` },
+          }),
+          { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET },
+        )
+        return (await (res as Response).json()) as { behindSeq: unknown }
+      }
+      expect((await staleSource()).behindSeq).toBeNull()
+
+      // An event that names its lane is matched by id, whatever its tag says.
+      await emit(t, upstream, "target.cell.commit", {
+        fileId: file,
+        cellId: cell,
+        payload: { value: "lane B by id", targetLang: "Zulu", laneId: frenchId },
+      })
+      expect(await laneRelevantHeadSeq(t.db, upstream, "target", frenchLane)).toBeGreaterThan(at)
+      expect((await staleSource()).behindSeq).not.toBeNull()
+
+      await emit(t, upstream, "target.cell.commit", {
+        fileId: file,
+        cellId: cell,
+        payload: { value: "lane B text, revised", targetLang: "French" },
+      })
+      const afterB = await computeUpstreamStaleCellIds({ AQUILLA_PG: t.db }, downstream, downFile, [cell])
+      expect(afterB.upstreamStaleCellIds).toEqual([cell])
     } finally {
       await t.close()
     }

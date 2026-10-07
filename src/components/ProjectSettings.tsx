@@ -50,6 +50,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DisabledFieldTooltip, PermissionLockHint } from "./ProjectSettings/DisabledFieldTooltip"
+import {
+  InheritedFieldNote,
+  InheritedSettingsSection,
+  useUpstreamProjectName,
+} from "./ProjectSettings/InheritedSettingsChoice"
+import { parseInheritedFromLink, type InheritFieldId } from "@/lib/sync/inherited-settings"
 import { PrivilegedMembersDialog } from "./ProjectSettings/PrivilegedMembersDialog"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
@@ -478,6 +484,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     languageEditMinRole: project?.languageEditMinRole,
     roleTelemetry,
   })
+
+  const inheritedConfig = useMemo(
+    () => parseInheritedFromLink(sharedSettingsBlob?.inheritedFromLink),
+    [sharedSettingsBlob],
+  )
+  const inheritedUpstreamName = useUpstreamProjectName(project?.sourceProjectId ?? null)
+  const detachInherited = useCallback(
+    (field: InheritFieldId) => {
+      if (!inheritedConfig) return
+      void patchShared({
+        inheritedFromLink: {
+          ...inheritedConfig,
+          receive: { ...inheritedConfig.receive, [field]: false },
+          detached: { ...inheritedConfig.detached, [field]: true },
+        },
+      })
+    },
+    [inheritedConfig, patchShared],
+  )
 
   // Org context for the termbase-sharing section. The user's org; the section's
   // server calls re-validate org-membership / org-ownership, so a mismatch just
@@ -1408,6 +1433,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // is ever visible, keyed off whether this project already has an upstream.
     { id: "section-link-source", label: "Link source", keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
+    { id: "section-inherited-settings", label: "Inherited settings", keywords: ["inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
@@ -1511,6 +1537,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       sectionIds: [
         "section-link-source",
         "section-source-link",
+        "section-inherited-settings",
         "section-upstream-changes",
         "section-dcs-upstream",
         "section-git-sync",
@@ -1927,6 +1954,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}
+        {searchGroupLabel("section-inherited-settings")}
+        {hasSourceLink && project?.sourceProjectId && sectionsToRender.some((s) => s.id === "section-inherited-settings") && (
+          <div id="section-inherited-settings">
+            <InheritedSettingsSection
+              sourceProjectId={project.sourceProjectId}
+              settings={sharedSettingsBlob}
+              canEdit={canEditShared}
+              onPatch={patchShared}
+            />
+          </div>
+        )}
         {searchGroupLabel("section-upstream-changes")}
         {hasLiveSourceLink && sectionsToRender.some((s) => s.id === "section-upstream-changes") && (
           <UpstreamChangesPanel
@@ -2013,7 +2051,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               />
               <SettingsRow
                 label={<label htmlFor="smart-quotes">{t("projectSettings.info.smartQuotesLabel")}</label>}
-                description={t("projectSettings.info.smartQuotesDescription")}
+                description={
+                  <>
+                    {t("projectSettings.info.smartQuotesDescription")}
+                    <InheritedFieldNote
+                      field="smartQuotes"
+                      upstreamName={inheritedUpstreamName}
+                      config={inheritedConfig}
+                      canEdit={canEditShared}
+                      onDetach={detachInherited}
+                    />
+                  </>
+                }
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                     <Switch
@@ -2737,6 +2786,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-validation" className="flex flex-col gap-12">
             <ValidationSettingsSection
               projectId={id}
+              notice={
+                <InheritedFieldNote
+                  field="workflowPolicy"
+                  upstreamName={inheritedUpstreamName}
+                  config={inheritedConfig}
+                  canEdit={canEditShared}
+                  onDetach={detachInherited}
+                />
+              }
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
               validationRoleFloor={validationRoleFloor}

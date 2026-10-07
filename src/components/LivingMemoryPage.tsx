@@ -15,7 +15,7 @@
  * optimistic-overlay note below).
  */
 
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import type { ComponentType } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -42,6 +42,11 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { KnowledgeBaseSurface } from "@/components/knowledge/KnowledgeBaseSurface"
+import {
+  InheritedFieldNote,
+  useUpstreamProjectName,
+} from "@/components/ProjectSettings/InheritedSettingsChoice"
+import { parseInheritedFromLink, type InheritFieldId } from "@/lib/sync/inherited-settings"
 import { RulesSettingsSection } from "@/components/ProjectSettings/RulesSection"
 import { briefStatus } from "@/lib/brief/brief"
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
@@ -210,6 +215,33 @@ export function LivingMemoryPage({
   const author = session?.username ?? "unknown"
 
   const brief = settings.translationBrief ?? project?.translationBrief
+  const inheritedConfig = useMemo(
+    () => parseInheritedFromLink(settings?.inheritedFromLink),
+    [settings],
+  )
+  const inheritedUpstreamName = useUpstreamProjectName(project?.sourceProjectId ?? null)
+  const detachInherited = useCallback(
+    (field: InheritFieldId) => {
+      if (!inheritedConfig) return
+      void patchSettings({
+        inheritedFromLink: {
+          ...inheritedConfig,
+          receive: { ...inheritedConfig.receive, [field]: false },
+          detached: { ...inheritedConfig.detached, [field]: true },
+        },
+      })
+    },
+    [inheritedConfig, patchSettings],
+  )
+  const inheritedNote = (field: InheritFieldId) => (
+    <InheritedFieldNote
+      field={field}
+      upstreamName={inheritedUpstreamName}
+      config={inheritedConfig}
+      canEdit={canEdit}
+      onDetach={detachInherited}
+    />
+  )
   // completionSettings comes from the overlaid project record (device-local
   // apiKey + server-side voice profiles merged in overlayDeviceLocalSettings /
   // overlaySettings). Undefined while the record hydrates, and for a project
@@ -375,6 +407,8 @@ export function LivingMemoryPage({
     switch (id) {
       case "brief":
         return (
+          <>
+          {inheritedNote("translationBrief")}
           <BriefPane
             brief={brief}
             canEdit={entriesReady && canEdit}
@@ -383,10 +417,12 @@ export function LivingMemoryPage({
             session={session ?? null}
             patch={patchSettings}
           />
+          </>
         )
       case "instructions":
         return (
           <>
+            {inheritedNote("livingMemory")}
             <AuthoredEntriesSection
               title={t("terminology.livingMemory.instructionsTitle")}
               description={t("terminology.livingMemory.instructionsDescription")}
@@ -400,6 +436,7 @@ export function LivingMemoryPage({
               onUpdate={handleUpdate}
               onDelete={handleDelete}
             />
+            {inheritedNote("systemPrompt")}
             <PredictionPromptSection
               stored={settings.systemPrompt}
               canEdit={entriesReady && canEdit}
@@ -460,6 +497,8 @@ export function LivingMemoryPage({
         )
       case "knowledge":
         return projectId ? (
+          <>
+          {inheritedNote("knowledgeDocs")}
           <KnowledgeBaseSurface
             scope={{ kind: "project", id: projectId }}
             jwt={session?.jwt ?? null}
@@ -472,6 +511,7 @@ export function LivingMemoryPage({
               },
             }}
           />
+          </>
         ) : null
       case "examples":
         return (

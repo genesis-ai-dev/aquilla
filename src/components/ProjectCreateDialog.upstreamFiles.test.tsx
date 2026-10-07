@@ -72,7 +72,15 @@ vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
 // The one seam this slice adds to the dialog: the chosen upstream's file list.
 vi.mock("@/lib/sync/link-source-preview", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/link-source-preview")>()
-  return { ...actual, loadUpstreamFileChoices: vi.fn() }
+  return {
+    ...actual,
+    loadUpstreamFileChoices: vi.fn(),
+    // AQU-1605: the chain case also asks which of the upstream's translations to
+    // read. One lane, so it is pre-filled — these cases are about the FILE
+    // selection, and the lane choice is pinned in
+    // ProjectCreateDialog.upstreamLane.test.tsx.
+    loadUpstreamLaneChoices: vi.fn().mockResolvedValue([{ id: "lane-a-1", label: "French" }]),
+  }
 })
 
 import { linkProjectSource } from "@/lib/sync/archive"
@@ -218,11 +226,15 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
     await user.click(await screen.findByRole("checkbox", { name: "MAT" }))
 
     fireEvent.click(screen.getByRole("radio", { name: /^One of its Targets/i }))
+    await screen.findByRole("combobox", { name: /Which of its translations\?/i })
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
 
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     const [, , input] = mockLink.mock.calls[0]!
     expect(input.consumes).toBe("target")
+    // AQU-1605: the upstream's one translation, pre-filled — the selection the
+    // case is about rides alongside it, not instead of it.
+    expect(input.laneId).toBe("lane-a-1")
     expect(input.fileIds).toEqual(["a-mrk", "a-luk"])
   })
 

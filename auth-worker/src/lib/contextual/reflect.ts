@@ -26,7 +26,8 @@ import {
   type ContextualRunReflection,
 } from "../../../../db/shared/contextual-runs"
 import type { AquillaDb } from "../../../../db/shim/postgres"
-import { loadProjectContext, targetLanguageForTag } from "./project-context"
+import { modelLanguageForLane } from "../../../../db/shared/lane-language"
+import { loadProjectContext } from "./project-context"
 import { chargeBudget, createRunBudget, type LlmCall } from "./types"
 
 /** Passages of new work a reflection needs. One passage is the fresh-run
@@ -348,7 +349,12 @@ export async function loadReflectionKnown(
         .join(", ")
       return renderings ? `${concept.sourceTerm} → ${renderings}` : concept.sourceTerm
     })
-  const targetLanguage = targetLanguageForTag(run.targetLang, ctx.lanes, ctx.targetLanguage)
+  const targetLanguage = await modelLanguageForLane(
+    db,
+    run.projectId,
+    { laneId: run.laneId, tag: run.targetLang },
+    ctx.targetLanguage,
+  )
   return {
     known: {
       ...(targetLanguage ? { targetLanguage } : {}),

@@ -33,7 +33,7 @@ export const TERM_HIGHLIGHT_CLASS = "term-chip-host terminology-highlight"
 /** Tags that end a line of text, so a term may not match across one. */
 const BLOCK_TAGS = new Set(["P", "BR", "DIV", "LI", "TR", "TD", "BLOCKQUOTE"])
 
-interface TextEntry {
+export interface TextEntry {
   node: Text
   /** Offset of this node's text within the flattened document text. */
   start: number
@@ -53,7 +53,7 @@ interface TermMatch {
  * the matcher's word-boundary lookarounds stop a term from spanning two
  * paragraphs, while an inline boundary (`<b>Holy</b> Spirit`) stays matchable.
  */
-function collectText(root: HTMLElement): { text: string; entries: TextEntry[] } {
+export function collectText(root: HTMLElement): { text: string; entries: TextEntry[] } {
   const entries: TextEntry[] = []
   let text = ""
 

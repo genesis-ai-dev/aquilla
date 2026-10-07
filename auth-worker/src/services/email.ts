@@ -66,6 +66,17 @@ function escapeHtml(value: string): string {
 }
 
 /**
+ * Subjects interpolate user-controlled names (username, project/org name,
+ * public form fields). Collapse CR/LF and other control chars so a name can
+ * never inject headers (Bcc:, etc.) regardless of the mail transport's own
+ * validation. Mirrors sync-worker/src/notification-email.ts.
+ */
+export function oneLine(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim()
+}
+
+/**
  * Build the project-invite email (subject + HTML + text). Pure and exported so
  * the invite-context copy can be unit-tested without an EMAIL binding.
  */
@@ -117,7 +128,7 @@ export function buildProjectInviteEmail(
     ? `${inviter} invited you to ${scope}. Accept: ${joinUrl}`
     : `You've been invited to ${scope}. Accept: ${joinUrl}`
 
-  return { subject, html, text }
+  return { subject: oneLine(subject), html, text }
 }
 
 function buildWelcomeHtml(
@@ -308,7 +319,7 @@ export function buildOrgInviteEmail(
     ? `${inviter} invited you to join ${orgName} on Aquilla. Join: ${joinUrl}`
     : `You've been invited to join ${orgName} on Aquilla. Join: ${joinUrl}`
 
-  return { subject, html, text }
+  return { subject: oneLine(subject), html, text }
 }
 
 /**
@@ -408,7 +419,7 @@ export function buildBookCallEmail(
     (message ? `\nMessage:\n${message}\n` : "") +
     `\nReply to this email to respond directly.`
 
-  return { subject, html, text }
+  return { subject: oneLine(subject), html, text }
 }
 
 /**
@@ -516,7 +527,7 @@ export function buildNewsletterRequestEmail(
     `send a one-line welcome (Reply-To is their address). To decline: reply\n` +
     `politely or archive.`
 
-  return { subject, html, text }
+  return { subject: oneLine(subject), html, text }
 }
 
 /**
@@ -648,7 +659,7 @@ export async function sendRetentionReportEmail(
   const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
   const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
   try {
-    await env.EMAIL.send({ from, replyTo, to, subject: report.subject, html: report.html, text: report.text })
+    await env.EMAIL.send({ from, replyTo, to, subject: oneLine(report.subject), html: report.html, text: report.text })
     return true
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

@@ -25,6 +25,7 @@ import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
+import { assignDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { usableSortIndex } from './sort-index'
 import { commentAuthorLabel } from './comment-authorship'
 import {
@@ -36,6 +37,8 @@ import {
   backtranslationLaneMatchSql,
   laneIdResolveBinds,
   laneIdResolveSql,
+  targetLaneDualReadBinds,
+  targetLaneDualReadSql,
 } from './lane-id-sql'
 import { eventLaneTag } from '../../../src/lib/lanes/event-lane'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
@@ -998,8 +1001,11 @@ export function buildEventProjectionStmts(
         // must not resolve a proposal either. `draft.created_at <= serverTs`
         // is the rebuild causality boundary: replaying a historical commit may
         // rebuild the cell head, but it can never review a proposal staged
-        // later. Drafts carry their own `target_lang` (copied from the owning
-        // run at insert) so a French commit cannot apply a Spanish proposal.
+        // later. Drafts carry their own lane (copied from the owning run at
+        // insert) so a French commit cannot apply a Spanish proposal — matched
+        // on `lane_id`, not on the tag (AQU-1610): two lanes agree on the tag
+        // whenever one has no `legacy_tag` or was retagged since, and then one
+        // lane's commit resolved the other lane's proposal.
         // Text equality is exact; normalizing whitespace here would claim a
         // proposal was applied when the committed artifact differs byte-for-
         // byte. The partial live-draft index permits at most one reconciled row
@@ -1020,7 +1026,7 @@ export function buildEventProjectionStmts(
                     AND draft.cell_id = ?
                     AND draft.created_at <= to_timestamp(?::double precision / 1000.0)
                     AND draft.status = 'proposed'
-                    AND draft.target_lang = ?
+                    AND ${targetLaneDualReadSql('draft')}
                     AND EXISTS (
                       SELECT 1
                         FROM cells AS projected
@@ -1028,7 +1034,7 @@ export function buildEventProjectionStmts(
                          AND projected.file_id = ?
                          AND projected.cell_id = ?
                          AND projected.side = 'target'
-                         AND projected.target_lang = ?
+                         AND ${targetLaneDualReadSql('projected')}
                          AND projected.event_id = ?
                     )
                  RETURNING draft.id, draft.run_id, draft.project_id,
@@ -1062,11 +1068,11 @@ export function buildEventProjectionStmts(
               event.fileId,
               event.cellId,
               event.serverTs,
-              lane,
+              ...targetLaneDualReadBinds(event.projectId, lane),
               event.projectId,
               event.fileId,
               event.cellId,
-              lane,
+              ...targetLaneDualReadBinds(event.projectId, lane),
               event.id,
               event.id,
               event.serverTs,
@@ -2200,8 +2206,9 @@ case 'cell.audio.attach': {
       const langMeta: Record<string, unknown> = p.projectionMeta
         ? { ...p.projectionMeta }
         : {}
-      if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
-      if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
+      // AQU-1596: stored as the file's *declared* languages (import
+      // information), not as the lane's language. Payload names are history.
+      assignDeclaredLanguages(langMeta, p.sourceLanguage, p.targetLanguage)
       if (p.sourceTextDirection) langMeta.sourceTextDirection = p.sourceTextDirection
       if (p.targetTextDirection) langMeta.targetTextDirection = p.targetTextDirection
       // Timeline-segment-model: the file's order lens lives in meta (JSON),
@@ -2888,6 +2895,10 @@ case 'cell.audio.attach': {
 
     case 'source.cell.mirror': {
       // AQU-476: advance a downstream source cell to match the upstream.
+      // `upstream.laneId` names the UPSTREAM lane the text came from. The row
+      // written here is this project's source lane (`laneIdResolveSql('source')`);
+      // filing it under the payload's lane id would attach the mirror to a lane
+      // that belongs to the other project.
       // UPSERT (the target.cell.commit INSERT…ON CONFLICT shape), NOT the
       // UPDATE-only source.cell.commit shape — mirrors routinely hit cells
       // with no local row yet (new upstream cells post-seed, first-ever

@@ -9,6 +9,7 @@ import DOMPurify from "dompurify"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { UserChip } from "@/components/UserChip"
 import {
   ownerScopedLocalStorageKey,
   subscribeClientLocalStorageOwner,
@@ -181,7 +182,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
         {thread.messages.map((m) => (
           <li key={m.id} className="bg-muted rounded-lg p-2">
             <div className="flex items-baseline gap-1.5 text-xs">
-              <span className="font-medium">{m.author}</span>
+              <UserChip username={m.author} size="xs" nameClassName="text-xs font-medium" />
               <span className="text-muted-foreground">
                 <DateTooltip value={m.timestamp} label={t("common.date.posted")} />
               </span>

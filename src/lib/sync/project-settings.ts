@@ -10,8 +10,9 @@ import type {
   BuiltinCheckId,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
-import type { LivingMemoryEntry } from "@/lib/parsers/types"
+import type { CellUnit, LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
+import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
 
@@ -238,6 +239,14 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * AQU-1686: one explicit switch per Bible data enrichment
+   * (db/shared/bible-enrichments.ts). A missing id means that enrichment's
+   * default, and `bibleResourcesEnabled` off turns every one of them off.
+   * Maintainer floor, like the rest of the blob. Read server-side through the
+   * `bible_enrichments` generated column (auth-worker/src/lib/aquifer/gate.ts).
+   */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.
@@ -282,6 +291,14 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. `paragraph`
+   *  emits one cell per non-empty paragraph with no sentence split and no
+   *  length cap — the unit a dubbing/podcast project generates one voice clip
+   *  for. Absent/`sentence` (the default) keeps the segmenting behaviour that
+   *  suits subtitle and document work. Formats whose cell identity comes from
+   *  the format itself (USFM verses, subtitle cues, key/value resources) are
+   *  unaffected. */
+  importCellUnit?: CellUnit
   /** Typing " or ' in the translation editor produces curly quotes in the
    *  target language's style (src/lib/richtext/smart-quotes.ts). Absent/false
    *  (the default) leaves straight quotes alone. */
@@ -334,6 +351,12 @@ export interface ProjectWideSettings {
    * whole map: writers must send the full merged object.
    */
   fileGenres?: Record<string, string>
+  /**
+   * AQU-1075: which settings this project copies from its upstream, and which
+   * of those the maintainer has detached. Absent on a project that has not
+   * been offered the choice. The server owns `knowledgeDocCopies`.
+   */
+  inheritedFromLink?: InheritedFromLink
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */

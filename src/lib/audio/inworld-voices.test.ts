@@ -23,6 +23,13 @@ describe("projectTargetLaneLanguages", () => {
       targetLanes: ["EN", "es"],
     })).toEqual(["en", "es"])
   })
+
+  it("keeps two lanes that share a language", () => {
+    expect(projectTargetLaneLanguages({
+      targetLanguage: "Spanish",
+      targetLanes: ["es"],
+    })).toEqual(["Spanish", "es"])
+  })
 })
 
 describe("showVoiceLanguageBadge", () => {

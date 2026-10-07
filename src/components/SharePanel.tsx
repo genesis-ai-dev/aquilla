@@ -38,6 +38,9 @@ import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers } from "@/lib/frontier/members"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { toUserFacingError } from "@/lib/errors/user-error"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
+import { toast } from "@/components/ui/toast"
+import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
 import {
   MembersPanel,
   type MembersPanelMember,
@@ -58,6 +61,8 @@ interface SharePanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
+  /** Display name for the grant sentence. Falls back to "this project" while loading. */
+  projectName?: string | null
   /** Fires after a server invite is successfully minted so the parent can
    * refresh any "you have outstanding shares" UI (onboarding checklist). */
   onSharesChanged?: () => void
@@ -71,7 +76,7 @@ const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
 
 type Tab = "members" | "link"
 
-export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: SharePanelProps) {
+export function SharePanel({ open, onOpenChange, projectId, projectName, onSharesChanged }: SharePanelProps) {
   const t = useT()
   const [tab, setTab] = useState<Tab>("members")
 
@@ -109,10 +114,11 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
 
         <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1.5 pb-1.5">
           {tab === "members" ? (
-            <MembersTab projectId={projectId} />
+            <MembersTab projectId={projectId} projectName={projectName} />
           ) : (
             <InviteLinkTab
               projectId={projectId}
+              projectName={projectName}
               onSharesChanged={onSharesChanged}
             />
           )}
@@ -122,7 +128,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
   )
 }
 
-function MembersTab({ projectId }: { projectId: string }) {
+function MembersTab({ projectId, projectName }: { projectId: string; projectName?: string | null }) {
   const t = useT()
   // FrontierSession has no userId — server enforces self-grant rejection so we
   // pass null and skip the local self-block.
@@ -406,6 +412,11 @@ function MembersTab({ projectId }: { projectId: string }) {
           scopeConfig={scopeConfig}
           suggestions={suggestions}
           emptySuggestionsHint={t("projectSettings.share.emptySuggestionsHint")}
+          grantScope={{
+            kind: "project",
+            projectName: grantProjectName(t, projectName),
+            lanes: "all",
+          }}
         />
       )}
     </div>
@@ -414,6 +425,7 @@ function MembersTab({ projectId }: { projectId: string }) {
 
 interface InviteLinkTabProps {
   projectId: string
+  projectName?: string | null
   onSharesChanged?: () => void
 }
 
@@ -430,8 +442,8 @@ const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
 ]
 const DEFAULT_EXPIRY_DAYS = 30
 
-function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
-  const t = useT()
+function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTabProps) {
+  const { t, locale } = useI18n()
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
@@ -443,6 +455,17 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
   const [serverError, setServerError] = useState<string | null>(null)
   // Bump this to trigger the active-invites list to re-fetch after a new invite is created.
   const [inviteListVersion, setInviteListVersion] = useState(0)
+  const inviteCopy = describeGrant(t, {
+    link: inviteEmail.trim().length === 0,
+    names: inviteEmail.trim() ? [inviteEmail.trim()] : [],
+    roleLevel: inviteRole,
+    scope: {
+      kind: "project",
+      projectName: grantProjectName(t, projectName),
+      lanes: "all",
+    },
+    locale,
+  })
 
   async function handleCreate() {
     setEmailError(null)
@@ -481,6 +504,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
       setIssuedUrl(url)
+      toast.add({ type: "success", title: inviteCopy.sentence })
       posthog.capture(INVITE_SENT, {
         project_id: projectId,
         role: inviteRole,
@@ -622,12 +646,15 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
               <span>{serverError}</span>
             </p>
           )}
+          <GrantScopeNotice sentence={inviteCopy.sentence} />
           <Button
             onClick={handleCreate}
             disabled={busy || !session?.jwt}
             className="w-full"
           >
-            {busy ? t("common.creating") : t("projectSettings.share.createInviteLinkButton")}
+            {busy
+              ? t("common.creating")
+              : grantButtonLabel(t, t("projectSettings.share.createInviteLinkButton"), inviteCopy.scopeEcho)}
           </Button>
         </div>
       )}

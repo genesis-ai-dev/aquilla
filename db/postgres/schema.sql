@@ -188,6 +188,16 @@ CREATE TABLE projects (
     -- history up to the cursor, then moves them into source_link_file_ids and
     -- clears this, in one statement.
     source_link_backfill TEXT,
+    -- AQU-1605: which UPSTREAM LANE this link consumes (migration 0138), by
+    -- `lanes.id` (globally unique since AQU-1606). NULL = the upstream's
+    -- `legacy_tag = ''` lane, which is what every link consumed before this
+    -- slice, so a row that predates AQU-1616's backfill keeps today's
+    -- behaviour. For `source_link_consumes = 'target'` it selects which of the
+    -- upstream's translations become this project's source; for 'source' it
+    -- records the upstream's source lane and changes no query (source rows all
+    -- store `target_lang = ''`). No FK: the lane belongs to another project and
+    -- an unresolvable one fails the fold closed rather than the write.
+    source_link_lane_id  TEXT,
     -- AQU-1679: files of THIS project that stand in for upstream files
     -- (migration 0140). NULL = none. A JSON object {"files": {<upstream file
     -- id>: <this project's file id>…}, "pending": [<upstream file id>…]}: the
@@ -302,7 +312,19 @@ CREATE TABLE project_settings (
     -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
     -- absent/false/garbage all collapse to the documented default (off).
     agent_react BOOLEAN
-      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED,
+    -- 0150 (AQU-1686): the Bible data switches the server reads — the aquifer
+    -- gate on every Bible request and agent run, and autopilot per run. NULL
+    -- means no explicit choice, which the gate derives from scripture files
+    -- (AQU-460). Reads `->>` as the gate always did, so "true"/"false" strings
+    -- count too. Keep the expression on one line: the dev-stack schema
+    -- reconciler (scripts/dev-stack-schema-parser.ts) drops lines nested in a
+    -- column's parentheses, and a truncated ALTER breaks every local boot.
+    bible_resources_enabled BOOLEAN
+      GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
+    -- One boolean per Bible data enrichment; readers validate it
+    -- (db/shared/bible-enrichments.ts readBibleEnrichments).
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -1557,6 +1579,13 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     recipe          JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- AQU-1611 expand step: the lane, not its language tag, is the row's
+    -- identity, so upserts arbitrate on this one. Equivalent to the tag-keyed
+    -- UNIQUE below (tag <-> lane is 1:1 within a project), which stays until a
+    -- later release drops target_lang — a column drop in this release would
+    -- break the still-live previous Workers between migrate and deploy.
+    CONSTRAINT artifact_bindings_lane_member_key
+      UNIQUE (artifact_id, file_id, binding_role, lane_id, member_path),
     UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path),
     CONSTRAINT artifact_bindings_artifact_project_fkey
       FOREIGN KEY (artifact_id, project_id)
@@ -1745,7 +1774,7 @@ CREATE TABLE IF NOT EXISTS scene_briefs (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS scene_briefs_live
-  ON scene_briefs(project_id, file_id, start_cell_id, end_cell_id, target_lang)
+  ON scene_briefs(project_id, file_id, start_cell_id, end_cell_id, lane_id)
   WHERE status='approved';
 CREATE INDEX IF NOT EXISTS scene_briefs_lookup
   ON scene_briefs(project_id, file_id, start_cell_id);
@@ -1833,7 +1862,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
 -- One ACTIVE run per (project, file, lane). Partial UNIQUE both serves the
 -- pill's hydrate lookup and enforces createRun's refuse-double-active.
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_runs_active
-  ON contextual_runs(project_id, file_id, target_lang)
+  ON contextual_runs(project_id, file_id, lane_id)
   WHERE status IN ('running','pausing','paused','parked','waiting');
 -- Stranded-run sweeper: 'running' with a quiet heartbeat (dead driver) or
 -- 'parked' with spans still on the cursor (loop hit its wave cap).
@@ -1846,7 +1875,7 @@ CREATE INDEX IF NOT EXISTS contextual_runs_scope_group
 CREATE INDEX IF NOT EXISTS contextual_runs_project_time
   ON contextual_runs(project_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time
-  ON contextual_runs(project_id, file_id, target_lang, created_at DESC, id DESC);
+  ON contextual_runs(project_id, file_id, lane_id, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS contextual_steering (
   id text PRIMARY KEY,                  -- uuidv7
@@ -1884,7 +1913,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
 -- first (same batch) so this index never conflicts. Sibling languages on the
 -- same cell keep independent review queues (0075).
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_drafts_live
-  ON contextual_drafts(project_id, file_id, cell_id, target_lang)
+  ON contextual_drafts(project_id, file_id, cell_id, lane_id)
   WHERE status = 'proposed';
 CREATE INDEX IF NOT EXISTS contextual_drafts_run
   ON contextual_drafts(run_id, status);

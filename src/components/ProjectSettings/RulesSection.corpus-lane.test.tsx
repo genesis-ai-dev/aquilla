@@ -70,6 +70,10 @@ vi.mock("@/lib/sync/outbox-flush", async (orig) => ({
 vi.mock("@/hooks/useConcepts", () => ({
   useConcepts: () => ({ concepts: [], error: undefined }),
 }))
+// AQU-1721: the pane also reads subscribed termbases; none in these tests.
+vi.mock("@/hooks/useSubscribedConcepts", () => ({
+  useSubscribedConcepts: () => ({ concepts: [], error: null }),
+}))
 
 import { RulesSettingsSection } from "./RulesSection"
 

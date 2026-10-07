@@ -66,6 +66,7 @@ function jsonResponse(body: object, status = 200): Response {
 }
 
 import type { TokenMintResult } from "./outbox-flush"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const TOKEN_FN = async (): Promise<TokenMintResult> => ({ token: "tok", status: 200 })
 const NULL_TOKEN_FN = async (): Promise<TokenMintResult> => ({ token: null, status: null })
@@ -128,7 +129,7 @@ describe("flushOutboxBatch", () => {
       getTokenForFile: mint,
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     setActiveOutboxOwner("bob")
     resolveMint({ token: "alice-token", status: 200 })
 
@@ -181,7 +182,7 @@ describe("flushOutboxBatch", () => {
       },
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce(), { timeout: STALL_WATCHDOG_MS })
     currentJwt = "alice-jwt-2"
     resolveMint({ token: "token-from-jwt-1", status: 200 })
 

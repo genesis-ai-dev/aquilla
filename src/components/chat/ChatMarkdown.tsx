@@ -56,6 +56,15 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   )
 }
 
+function ImagePlaceholder({ alt }: { alt?: string }) {
+  const t = useT()
+  return (
+    <span className="text-muted-foreground">
+      {alt ? t("workspace.chatMarkdown.imageAlt", { alt }) : t("workspace.chatMarkdown.image")}
+    </span>
+  )
+}
+
 const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="my-1.5 list-disc space-y-0.5 ps-5">{children}</ul>,
@@ -68,7 +77,7 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   // Never auto-load remote images: a prompt-injected model could encode data
   // read from the project into an attacker-controlled image URL (zero-click
   // exfiltration). Render the alt text instead.
-  img: ({ alt }) => <span className="text-muted-foreground">{alt ? `[image: ${alt}]` : "[image]"}</span>,
+  img: ({ alt }) => <ImagePlaceholder alt={alt} />,
   a: ({ href, children }) => (
     <a
       href={href && /^(https?:|mailto:)/i.test(href) ? href : undefined}

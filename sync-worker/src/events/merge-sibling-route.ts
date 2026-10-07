@@ -49,6 +49,7 @@ import {
   listProjectLanes,
   retryingLaneIdCollision,
 } from '../../../db/shared/lanes'
+import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import {
   chooseDonorLane,
   donorLaneRefusalMessage,
@@ -151,7 +152,7 @@ export async function mergeSibling(
     .filter((row) => row.role === 'target')
     .map((row) => ({
       id: row.id,
-      name: row.name,
+      name: laneDisplayName(row),
       legacyTag: row.legacyTag,
       archivedAt: row.archivedAt,
     }))

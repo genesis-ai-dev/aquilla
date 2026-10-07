@@ -58,6 +58,8 @@ interface Props {
   timelineDurationSec?: number
   /** The line the virtual playhead is on. Null on every other arrangement. */
   virtualSoundingCellId?: string | null
+  /** AQU-1704: the file is in Free timing, so the queue plays it (see `virtualOwnsFile`). */
+  freeTiming?: boolean
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
   /** AQU-1591: the active target-language lane. The bar plays this lane's takes
@@ -75,7 +77,7 @@ function fmtTime(s: number): string {
 
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
-  videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, below,
+  videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, freeTiming = false, below,
   lane,
 }: Props) {
   const t = useT()
@@ -110,6 +112,7 @@ export function VoicePlaybackBar({
     paneOnScreen: videoPaneOnScreen,
     timelineDurationSec,
     virtualSoundingCellId,
+    freeTiming,
   })
   const videoController = useVideoController()
   // AQU-646 stage 3h: "not the queue", rather than "the video".

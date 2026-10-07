@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
+import { t } from "@/lib/i18n/standalone"
 import { extractSrtStrings } from "@/lib/parsers/subtitle"
 import { ImportTimelineTextDialog } from "./ImportTimelineTextDialog"
 
@@ -40,7 +41,7 @@ describe("attaching a caption track", () => {
       onConfirm={confirm} onCancel={() => {}} />)
     await choose()
     fireEvent.change(screen.getByLabelText("Destination track"), { target: { value: "source-subtitles" } })
-    expect(screen.getByText("4 segments currently in this track will be overwritten.")).toBeInTheDocument()
+    expect(screen.getByText(t("importExport.captionTrack.overwrite", { count: 4 }))).toHaveTextContent(/\b4\b/)
     const submit = screen.getByRole("button", { name: "Overwrite caption track" })
     expect(submit).toBeDisabled()
     fireEvent.click(screen.getByRole("checkbox", { name: "Overwrite the existing content in this track" }))

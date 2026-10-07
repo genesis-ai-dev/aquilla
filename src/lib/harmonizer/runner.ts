@@ -9,13 +9,24 @@
 import { quotationCheck } from "./quotes"
 import { referenceCheck } from "./reference"
 import { sentenceCheck } from "./sentence"
-import type { HarmonizerCell, HarmonizerFinding, HarmonizerQuestion, HarmonyCheck } from "./types"
+import type { FindingOptions, HarmonizerCell, HarmonizerFinding, HarmonizerQuestion, HarmonyCheck } from "./types"
 
 /** Registered checks. Order is the order findings are reported in. */
 export const CHECKS: readonly HarmonyCheck<unknown>[] = [
   quotationCheck as HarmonyCheck<unknown>,
-  referenceCheck as HarmonyCheck<unknown>,
   sentenceCheck as HarmonyCheck<unknown>,
+]
+
+/**
+ * Built but NOT registered. textual.reference failed the harmonizer eval
+ * (BSB + Macula, typesafe/jev-1.13, 2026-10-05): Jev's "would a reader identify
+ * the subject" answer separates damaged from original verses only weakly
+ * (mean 0.72 vs 0.83, never below 0.5), so every cut-off is either silent or
+ * flags ~0.6 clean boundaries per passage. Kept for the redesign in
+ * docs/HARMONIZER.md (§ Participant reference) and for the eval to re-measure.
+ */
+export const UNREGISTERED_CHECKS: readonly HarmonyCheck<unknown>[] = [
+  referenceCheck as HarmonyCheck<unknown>,
 ]
 
 export interface HarmonizerJevRequest {
@@ -70,8 +81,9 @@ export function harmonizerFindings(
   run: PlannedRun,
   cells: readonly HarmonizerCell[],
   body: unknown,
+  opts?: FindingOptions,
 ): HarmonizerFinding[] {
   const answers = (body as { answers?: Record<string, unknown> } | null)?.answers
   if (!answers || typeof answers !== "object") return []
-  return run.plans.flatMap(({ check, plan, prefix }) => check.findings(plan, cells, answers, prefix))
+  return run.plans.flatMap(({ check, plan, prefix }) => check.findings(plan, cells, answers, prefix, opts))
 }

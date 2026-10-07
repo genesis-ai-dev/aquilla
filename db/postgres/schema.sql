@@ -302,7 +302,19 @@ CREATE TABLE project_settings (
     -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
     -- absent/false/garbage all collapse to the documented default (off).
     agent_react BOOLEAN
-      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED,
+    -- 0150 (AQU-1686): the Bible data switches the server reads — the aquifer
+    -- gate on every Bible request and agent run, and autopilot per run. NULL
+    -- means no explicit choice, which the gate derives from scripture files
+    -- (AQU-460). Reads `->>` as the gate always did, so "true"/"false" strings
+    -- count too. Keep the expression on one line: the dev-stack schema
+    -- reconciler (scripts/dev-stack-schema-parser.ts) drops lines nested in a
+    -- column's parentheses, and a truncated ALTER breaks every local boot.
+    bible_resources_enabled BOOLEAN
+      GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
+    -- One boolean per Bible data enrichment; readers validate it
+    -- (db/shared/bible-enrichments.ts readBibleEnrichments).
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -1367,12 +1379,27 @@ CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
 -- legacy_tag is the immutable cutover target_lang ('' for default, NULL for
 -- source) that makes rename-safe replay resolve history by tag, never by name.
 -- position / archived_at are additive (display order / soft-archive).
+--
+-- AQU-1592 — identity is "store only what the user typed":
+--   * language  — the freeform language the maintainer typed, never derived.
+--                 What the AI is told and what "same language?" comparisons
+--                 read. Nullable only until the AQU-1616 backfill fills the
+--                 rows that predate 0152 (readers fall back to `name`).
+--   * name      — OPTIONAL display override; NOT unique (the UI disambiguates).
+--                 NULL means "display the language"; the "Source" / "Untitled
+--                 lane" placeholders are derived at read time, never stored.
+--   * lang_code — OPTIONAL BCP 47 override of the code derived from `language`
+--                 ("Advanced" disclosure). NULL means derive at read time; the
+--                 derived value is never written back.
+-- Readers must go through laneDisplayName / laneLanguageCode
+-- (src/lib/lanes/lane-display.ts) rather than touching these columns directly.
 CREATE TABLE IF NOT EXISTS lanes (
     id          TEXT        NOT NULL,   -- opaque 8-hex, globally unique, app-generated (see src/lib/lanes/lane-id.ts)
     project_id  TEXT        NOT NULL,
     role        TEXT        NOT NULL CHECK (role IN ('source', 'target')),
-    name        TEXT        NOT NULL,
-    lang_code   TEXT,
+    language    TEXT,                   -- 0152: freeform, required for new rows
+    name        TEXT,                   -- 0152: nullable display override
+    lang_code   TEXT,                   -- 0152: nullable BCP 47 override
     legacy_tag  TEXT,
     position    INTEGER     NOT NULL DEFAULT 0,   -- stable display order
     archived_at TIMESTAMPTZ,
@@ -1542,6 +1569,13 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     recipe          JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- AQU-1611 expand step: the lane, not its language tag, is the row's
+    -- identity, so upserts arbitrate on this one. Equivalent to the tag-keyed
+    -- UNIQUE below (tag <-> lane is 1:1 within a project), which stays until a
+    -- later release drops target_lang — a column drop in this release would
+    -- break the still-live previous Workers between migrate and deploy.
+    CONSTRAINT artifact_bindings_lane_member_key
+      UNIQUE (artifact_id, file_id, binding_role, lane_id, member_path),
     UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path),
     CONSTRAINT artifact_bindings_artifact_project_fkey
       FOREIGN KEY (artifact_id, project_id)

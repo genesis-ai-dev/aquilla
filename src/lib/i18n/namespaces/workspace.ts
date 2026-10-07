@@ -395,6 +395,8 @@ export const workspace = defineNamespace({
 
     // -- chat/ChatMarkdown --
     "workspace.chatMarkdown.copyCode": "Copy code",
+    "workspace.chatMarkdown.image": "[image]",
+    "workspace.chatMarkdown.imageAlt": "[image: {alt}]",
 
     // -- onboarding/steps/OrgStep --
     "workspace.orgStep.emailsPlaceholder": "alex@example.com, sam@example.com",
@@ -1735,6 +1737,23 @@ export const workspace = defineNamespace({
         description:
           "Tooltip and accessible name for the small copy button that " +
           "appears on hover over a fenced code block in an assistant chat message.",
+      },
+
+      "workspace.chatMarkdown.image": {
+        description:
+          "Muted stand-in text shown where an assistant chat message contains an image " +
+          "without a description. Remote images are never loaded, so this replaces the " +
+          "picture. Keep the square brackets.",
+      },
+
+      "workspace.chatMarkdown.imageAlt": {
+        description:
+          "Muted stand-in text shown where an assistant chat message contains an image, " +
+          "followed by the image's description. Remote images are never loaded, so this " +
+          "replaces the picture. Keep the square brackets.",
+        placeholders: {
+          alt: "The image's description (alt text) written by the AI assistant, in whatever language it used. Not translated.",
+        },
       },
 
       "workspace.orgStep.emailsPlaceholder": {

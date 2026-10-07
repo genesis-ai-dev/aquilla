@@ -6,6 +6,7 @@
 //
 // Auth: same exportMinRole floor as export/bundle (AQU-253).
 
+import { attachmentDisposition } from "./content-disposition"
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
@@ -117,7 +118,7 @@ export async function handleOriginalsBundleRequest(
       status: 200,
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${zipName.replace(/"/g, "")}"`,
+        "Content-Disposition": attachmentDisposition(zipName),
         "X-Content-Type-Options": "nosniff",
       },
     }),

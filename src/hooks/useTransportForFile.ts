@@ -56,6 +56,8 @@ export interface UseTransportForFileArgs {
    * on screen. Absent reads as `"recording"`, which is the old rule exactly.
    */
   playbackSource?: PlaybackSource
+  /** AQU-1704: Free timing is the queue's, never the virtual clock's. See `virtualOwnsFile`. */
+  freeTiming?: boolean
 }
 
 /**
@@ -73,6 +75,7 @@ export function useTransportForFile({
   timelineDurationSec = 0,
   virtualSoundingCellId = null,
   playbackSource = "recording",
+  freeTiming = false,
 }: UseTransportForFileArgs): TransportForFile {
   const queue = useQueueForFile(cellIds)
   const currentSec = useVideoClockSec()
@@ -101,7 +104,7 @@ export function useTransportForFile({
   // off screen and "the video's own sound" chosen there is still a real
   // recording to play, and the queue is the right player for it. A silent
   // virtual playhead would not be.
-  const ownedByVirtual = virtualOwnsFile(ownedByVideo, anyCellClockIsFileTime, timelineDurationSec)
+  const ownedByVirtual = virtualOwnsFile(ownedByVideo, anyCellClockIsFileTime, timelineDurationSec, freeTiming)
 
   return useMemo(
     () =>

@@ -275,14 +275,13 @@ export async function buildPromptPreview(
   const draftContext = objectSetting(settings, "draftContext")
 
   const sourceLanguage = stringSetting(settings, "sourceLanguage")
-  // The default lane inherits the project target language; any other lane has
-  // its own, and that language lives on the LANE ROW (AQU-1586) — mirroring
-  // resolveActiveTargetLanguage in project-workspace-lane-target.ts. `targetLang`
-  // is the lane's `legacy_tag`, an event key that `planNewTargetLane` sets to
-  // the opaque lane id whenever a sibling already holds the language string, so
-  // using it directly told the model to translate "into a3f09c1e".
+  // Every lane's language lives on the row, including the default lane whose
+  // tag is '' (AQU-1592). `targetLang` is that tag — an event key `planNewTargetLane`
+  // sets to the opaque lane id when a sibling already holds the language — so
+  // using it directly told the model to translate "into a3f09c1e". The project
+  // setting is only the fallback when the row records no language.
   const targetLanguage =
-    (targetLang ? await laneLanguage(db, projectId, targetLang) : null) ||
+    (await laneLanguage(db, projectId, targetLang)) ||
     stringSetting(settings, "targetLanguage")
 
   // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
@@ -326,27 +325,47 @@ export async function buildPromptPreview(
     }
   }
 
-  // This project's OWN concepts, from the sync-worker projection (the
-  // `terminology` settings key is gone — see useRules' localConcepts note).
-  // Termbase SUBSCRIPTIONS are intentionally not compiled in: the client
-  // passes `subscribedConcepts: undefined` today because the upstream
-  // termbase-read route does not exist yet (useSubscribedConcepts' SWARM-TODO),
-  // so including them here would make the preview diverge from the real call.
+  // The concepts the editor compiles (useRules): first those of the termbases
+  // this project subscribes to, then this project's OWN concepts from the
+  // sync-worker projection (the `terminology` settings key is gone — see
+  // useRules' localConcepts note).
+  //
+  // The subscribed read mirrors the editor's (useSubscribedConcepts, through
+  // auth-worker route #8; AQU-1721): subscriptions in the order the
+  // subscriptions list shows (priority, then age), and each termbase's active
+  // live concepts, oldest first. A subscription counts only while its termbase
+  // is published, not archived, and in this project's org. That is the gate
+  // canReadTermbase puts on route #8, and autopilot applies it too.
+  type ConceptRow = {
+    concept_id: string
+    source_term: string
+    renderings: unknown
+    status: string
+    case_sensitive: number
+  }
+  const subscribedRows = await db
+    .prepare(
+      "SELECT c.concept_id, c.source_term, c.renderings, c.status, c.case_sensitive " +
+        "FROM project_termbase_subscriptions s " +
+        "JOIN projects sub ON sub.id = s.project_id " +
+        "JOIN projects tb ON tb.id = s.termbase_project_id " +
+        "JOIN concepts c ON c.project_id = s.termbase_project_id " +
+        "WHERE s.project_id = ? AND s.termbase_project_id <> s.project_id " +
+        "AND tb.org_published_termbase = TRUE AND tb.archived_at IS NULL AND tb.org_id = sub.org_id " +
+        "AND c.deleted_at IS NULL AND c.status = 'active' " +
+        "ORDER BY s.priority ASC, s.created_at ASC, s.termbase_project_id, c.created_at ASC, c.concept_id",
+    )
+    .bind(projectId)
+    .all<ConceptRow>()
   const conceptRows = await db
     .prepare(
       "SELECT concept_id, source_term, renderings, status, case_sensitive " +
         "FROM concepts WHERE project_id = ? AND deleted_at IS NULL ORDER BY concept_id",
     )
     .bind(projectId)
-    .all<{
-      concept_id: string
-      source_term: string
-      renderings: unknown
-      status: string
-      case_sensitive: number
-    }>()
+    .all<ConceptRow>()
 
-  const concepts: CompiledConcept[] = conceptRows.results.map((row) => {
+  const concepts: CompiledConcept[] = [...subscribedRows.results, ...conceptRows.results].map((row) => {
     const parsed: unknown =
       typeof row.renderings === "string" ? safeJson(row.renderings) : row.renderings
     const renderings = Array.isArray(parsed)

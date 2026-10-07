@@ -1597,7 +1597,17 @@ export function TimelineEditor({
     () => (queue.cellId != null ? cells.find((c) => c.id === queue.cellId) : undefined),
     [cells, queue.cellId],
   )
-  const queueClockIsFile = queueClockIsFileTime(queueSoundingCell)
+  // AQU-1747: ...and in FREE TIMING the x-axis is not the file at all — it is
+  // the programme, the verses laid end to end. There a shared source clip's
+  // file position is the wrong number, and the right one (the programme second
+  // the transport publishes) was never read, so a video-less subtitle file
+  // played its takes back to back while the playhead sat on 0:00. So: ask each
+  // mode for the clock IT draws, and accept nothing else. `programmeClock`
+  // carries the same guarantee for the programme that `queueClockIsFileTime`
+  // does for the file — a per-take clock satisfies neither.
+  const queueClockOnTimeline = audioFirst
+    ? queueProgress.programmeClock
+    : queueClockIsFileTime(queueSoundingCell)
   /**
    * AQU-646 stage 5: where the hand is, while the playhead is being dragged.
    *
@@ -1624,9 +1634,9 @@ export function TimelineEditor({
   useEffect(() => () => { if (scrubSendRef.current.timer) clearTimeout(scrubSendRef.current.timer) }, [])
   useEffect(() => {
     if (scrubbingRef.current) return
-    if (queueActive && queueClockIsFile) clock.setCurrentSec(queueProgress.currentTime)
+    if (queueActive && queueClockOnTimeline) clock.setCurrentSec(queueProgress.currentTime)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
-  }, [queueActive, queueClockIsFile, queueProgress.currentTime])
+  }, [queueActive, queueClockOnTimeline, queueProgress.currentTime])
   // The other driver: a file with a linked video but NO audio can never start
   // the queue, so the video plays itself and owns the playhead. Strictly gated
   // on the queue being idle, so the two writers can never overlap — which is
@@ -1664,7 +1674,7 @@ export function TimelineEditor({
   // from its last anchor while `playing`, so leaving it running against a
   // position nobody updates draws steady, confident, wrong motion.
   const transportPlaying = queueActive
-    ? queuePlaying && queueClockIsFile
+    ? queuePlaying && queueClockOnTimeline
     : videoClockSec != null
       ? videoPlaying
       : virtualPlaying
@@ -1897,8 +1907,16 @@ export function TimelineEditor({
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
   const layout = useMemo<TimelineLayout>(
-    () => buildTimelineLayout(timingMode, cells, dialogue, subtitleFileWithFootage ? videoDurationSec : null),
-    [timingMode, cells, dialogue, subtitleFileWithFootage, videoDurationSec],
+    () =>
+      buildTimelineLayout(
+        timingMode,
+        cells,
+        // AQU-1704: Free timing on a video-less subtitle import. No media cells,
+        // so the cues are the verses; export stitches them the same way.
+        dialogue.length > 0 ? dialogue : subtitle,
+        subtitleFileWithFootage ? videoDurationSec : null,
+      ),
+    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec],
   )
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that

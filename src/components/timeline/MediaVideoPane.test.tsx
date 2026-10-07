@@ -19,7 +19,7 @@ let mockQueue: QueueForFile = {
   cellId: null,
   kind: "idle",
   errorMessage: null,
-  progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
+  progress: { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false },
 }
 let mockAudibility: { source: boolean; target: boolean } = { source: true, target: true }
 vi.mock("@/lib/audio/play-queue", () => ({
@@ -118,7 +118,7 @@ describe("MediaVideoPane", () => {
       cellId: null,
       kind: "idle",
       errorMessage: null,
-      progress: { currentTime: 0, duration: 0, rate: 1, volume: 1 },
+      progress: { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false },
     }
     mockAudibility = { source: true, target: true }
   })

@@ -106,6 +106,7 @@ export type BuiltinCheckId =
   | "repeated-word"
   | "unpaired-symbols"
   | "abbreviation-mismatch"
+  | "footnote-quote-mismatch"
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean

@@ -3224,9 +3224,24 @@ export function ProjectWorkspace() {
   // the file row, so refresh the project (not just cells). `file.video.set`
   // needs contributor access and the emit THROWS on refusal, so surface that
   // rather than letting the dialog close on a write that never happened.
+  //
+  // AQU-1748: linking or clearing footage can flip the file's RESOLVED timing
+  // mode as a side effect (a subtitle import with a video is always Original
+  // timing; clearing it brings back the file's own mode). Register that as our
+  // own write, or useTimingModeAck reads it as a collaborator's change and
+  // blames "someone with settings access" for the user's own click. `timingAck`
+  // is declared far below this callback, so it is reached through a ref that
+  // is assigned right after the hook runs.
+  const timingAckOwnWriteRef = useRef<{ note(mode: AudioTimingMode): void; clear(): void } | null>(null)
   const applyLinkVideo = useCallback(
     async (url: string | null) => {
       if (!project?.id || !activeFileId) return
+      const nextMode = resolveFileTimingMode(
+        activeFile ? { ...activeFile, coreMediaUrl: url } : null,
+        project,
+      )
+      const modeWillChange = nextMode !== resolveFileTimingMode(activeFile, project)
+      if (modeWillChange) timingAckOwnWriteRef.current?.note(nextMode)
       try {
         await emitFileVideoSet({
           projectId: project.id,
@@ -3237,6 +3252,8 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         refresh()
       } catch (e) {
+        // The write never landed: withdraw the intent, as applyTimingMode does.
+        if (modeWillChange) timingAckOwnWriteRef.current?.clear()
         const level = project.syncRole?.level ?? null
         toast.add({ type: "error", title: canPerform("file.video.set", level)
             ? e instanceof Error
@@ -3245,7 +3262,7 @@ export function ProjectWorkspace() {
             : denialMessage(t, ROLE.CONTRIBUTOR, level) })
       }
     },
-    [project, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane],
+    [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane],
   )
   // Flow B (2026-08-05): linking a video while in Free timing prompts to
   // switch back (declinable, with the video-stays-hidden warning). NOTE the
@@ -10868,6 +10885,7 @@ export function ProjectWorkspace() {
       lens === "audio" &&
       recordingCellId === null,
   })
+  timingAckOwnWriteRef.current = { note: timingAck.noteOwnWrite, clear: timingAck.clearOwnWrite }
   // Apply THIS FILE's mode: register the change as our own first (so the
   // changer never gets the "timing mode changed" modal for their own click),
   // then emit + flush + refresh — the same shape as applyLinkVideo, and the

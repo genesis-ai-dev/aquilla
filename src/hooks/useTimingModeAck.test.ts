@@ -118,6 +118,39 @@ describe("useTimingModeAck", () => {
     expect(h.result.current.ack).toBeNull()
   })
 
+  // AQU-1748: linking or clearing a video flips the RESOLVED mode as a side
+  // effect, and ProjectWorkspace registers it through noteOwnWrite first.
+  it("own link (Free timing -> Original timing) raises no modal", () => {
+    const h = mount({ timingMode: "audioFirst", eligible: true })
+    act(() => h.result.current.noteOwnWrite("dubbing"))
+    h.rerender({ timingMode: "dubbing", fileId: "f1", eligible: true })
+    expect(h.result.current.ack).toBeNull()
+  })
+
+  it("own clear (Original timing -> Free timing) raises no modal", () => {
+    const h = mount({ timingMode: "dubbing", eligible: true })
+    act(() => h.result.current.noteOwnWrite("audioFirst"))
+    h.rerender({ timingMode: "audioFirst", fileId: "f1", eligible: true })
+    expect(h.result.current.ack).toBeNull()
+  })
+
+  it("a remote resolved-mode change after an own link still raises the modal", () => {
+    const h = mount({ timingMode: "audioFirst", eligible: true })
+    act(() => h.result.current.noteOwnWrite("dubbing"))
+    h.rerender({ timingMode: "dubbing", fileId: "f1", eligible: true })
+    h.rerender({ timingMode: "audioFirst", fileId: "f1", eligible: true }) // a collaborator clears the video
+    expect(h.result.current.ack).toEqual({ from: "dubbing", to: "audioFirst" })
+  })
+
+  it("a failed link leaves no stale intent: clearOwnWrite re-baselines, a later remote change surfaces", () => {
+    const h = mount({ timingMode: "audioFirst", eligible: true })
+    act(() => h.result.current.noteOwnWrite("dubbing"))
+    act(() => h.result.current.clearOwnWrite()) // file.video.set refused
+    expect(h.result.current.ack).toBeNull()
+    h.rerender({ timingMode: "dubbing", fileId: "f1", eligible: true }) // someone else's link
+    expect(h.result.current.ack).toEqual({ from: "audioFirst", to: "dubbing" })
+  })
+
   it("an open modal about a file that goes away closes as moot", () => {
     const h = mount({ timingMode: "dubbing", eligible: true })
     h.rerender({ timingMode: "audioFirst", fileId: "f1", eligible: true })

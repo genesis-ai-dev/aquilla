@@ -748,7 +748,7 @@ export function GlossaryEditor({
           <Button
             variant="outline"
             disabled={!canManage}
-            onClick={() => downloadBlob(exportConceptsTbx(concepts, project?.lanes), "glossary.tbx", "application/xml")}
+            onClick={() => downloadBlob(exportConceptsTbx(visibleConcepts, project?.lanes), "glossary.tbx", "application/xml")}
           >
             <Download data-icon="inline-start" /> {t("terminology.editor.exportTbx")}
           </Button>

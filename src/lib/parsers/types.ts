@@ -100,6 +100,7 @@ export type BuiltinCheckId =
   | "target-equals-source"
   | "placeholder-integrity"
   | "number-integrity"
+  | "number-integrity-extra"
   | "end-punctuation-mismatch"
   | "punctuation-integrity"
   | "double-space"

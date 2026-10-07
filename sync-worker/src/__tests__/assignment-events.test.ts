@@ -390,18 +390,16 @@ describe('assignment.create — chapter scope follows the board (AQU-1493)', () 
 
   it("gives each chapter exactly the cells the board counts in it", async () => {
     const { db } = await makeTestDb({ cells: jonahChain() })
-    // The board reads the '' progress row, which is written only when that lane exists.
-    await db.prepare(
-      `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
-       VALUES ('bridge01', 'proj-1', 'target', '', 0)
-       ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
-    ).run()
     for (const stmt of fullProgressRecomputeStmts(db, 'proj-1', 'file-gen', 1)) await stmt.run()
+    // The board's totals are lane-independent and live on the source lane's
+    // row (AQU-1599, laneIndependentProgressSql). `target_lang = ''` would
+    // match that row and a '' target lane's row both.
     const board = await db
       .prepare(
-        `SELECT section_key, total_count FROM file_section_progress
-          WHERE project_id = 'proj-1' AND file_id = 'file-gen' AND scope = 'section' AND target_lang = ''
-          ORDER BY section_key`,
+        `SELECT d.section_key, d.total_count FROM file_section_progress d
+           JOIN lanes l ON l.project_id = d.project_id AND l.id = d.lane_id AND l.role = 'source'
+          WHERE d.project_id = 'proj-1' AND d.file_id = 'file-gen' AND d.scope = 'section'
+          ORDER BY d.section_key`,
       )
       .all<{ section_key: string; total_count: number }>()
     const rows = board.results ?? []

@@ -76,7 +76,10 @@ it('retains the running daemon POST contract, renamed title and lane initializat
   const next = projectIdFor('124', 'gitlab')
   expect((await post(next))?.status).toBe(200)
   expect((await post(next))?.status).toBe(200)
+  // The source lane only, once despite two POSTs. A target lane is not
+  // invented: the migrated target cells create the '' bridge on demand
+  // (AQU-1594, ensureBlankTargetBridgeStmt in the import and cell handlers).
   expect((await t.db.prepare('SELECT role FROM lanes WHERE project_id=? ORDER BY role').bind(next).all()).results)
-    .toEqual([{ role: 'source' }, { role: 'target' }])
+    .toEqual([{ role: 'source' }])
   expect((await get({ gitlabId: '124', projectId: next }))?.status).toBe(200)
 })

@@ -1392,10 +1392,11 @@ export async function resolveUpstreamLinkLane(
   const role = consumes === "target" ? "target" : "source"
   if (!laneId) {
     // Fixtures and any project the lane backfill has not reached have no
-    // `lanes` rows. A new link still has to store an id, so mint the standard
-    // source lane and '' target lane first. A project that already has lanes
-    // is left alone — `ensureProjectLanes` would also insert the '' target
-    // lane, which is a different choice than the ones already there.
+    // `lanes` rows. A new link still has to store an id, so mint the lanes the
+    // project's settings describe first: a source lane, and a target lane only
+    // when a target language or tagged data says there is one (AQU-1594 never
+    // invents one). A project that already has lanes is left alone — that
+    // could add a lane beside the ones already chosen.
     const anyLane = await env.AQUILLA_PG.prepare(
       `SELECT 1 AS present FROM lanes WHERE project_id = ? LIMIT 1`,
     )

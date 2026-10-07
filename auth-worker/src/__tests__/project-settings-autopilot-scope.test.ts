@@ -129,11 +129,13 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
   })
 
   it("403s a lead's write that changes only a non-autopilot key", async () => {
-    // Sanity: the carve-out did not lower the floor for everything else.
+    // Sanity: the carve-out did not lower the floor for everything else. The
+    // key is AI config, which stays at maintainer; a language key would not
+    // do, because languages have their own lead floor by default (AQU-984).
     await seed()
-    const res = await patchProjectSettings("dan", { sourceLanguage: "fr" })
+    const res = await patchProjectSettings("dan", { sourceLanguage: "en", systemPrompt: "x" })
     expect(res.status).toBe(403)
-    expect((await storedSettings()).sourceLanguage).toBe("en")
+    expect((await storedSettings()).systemPrompt).toBeUndefined()
   })
 
   it("keys off the DIFF — a lead echoing an unchanged opt-in changes nothing and is not admitted extra access", async () => {
@@ -142,10 +144,11 @@ describe("project-settings autopilot carve-out (AQU-1246)", () => {
     // still judged on that other key.
     await seed('{"sourceLanguage":"en","autopilotEnabled":true}')
     const res = await patchProjectSettings("dan", {
-      sourceLanguage: "fr",
+      sourceLanguage: "en",
+      systemPrompt: "x", // maintainer-floor key (see above)
       autopilotEnabled: true, // echoed, unchanged
     })
     expect(res.status).toBe(403)
-    expect((await storedSettings()).sourceLanguage).toBe("en")
+    expect((await storedSettings()).systemPrompt).toBeUndefined()
   })
 })

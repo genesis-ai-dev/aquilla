@@ -1151,17 +1151,21 @@ describe('file progress follows the lanes that exist (AQU-1594)', () => {
       `SELECT scope, target_lang, lane_id, total_count, filled_count
          FROM file_section_progress
         WHERE project_id = $1 AND scope = 'file'
-        ORDER BY target_lang`,
+        ORDER BY lane_id`,
       [P],
     )
   }
 
+  // The source lane has its own row (AQU-1599), and it carries '' because its
+  // legacy_tag is NULL. Every row is keyed by a lane the project has, so a
+  // manufactured blank tag would show up here as a row with no such lane.
   it('writes the sw lane, with a lane id, and does not insert a blank tag', async () => {
     const { rows } = await recompute([
       { id: 'srcsw001', project_id: P, role: 'source', legacy_tag: null },
       { id: 'tgtsw001', project_id: P, role: 'target', language: 'sw', legacy_tag: 'sw' },
     ])
     expect(rows).toEqual([
+      { scope: 'file', target_lang: '', lane_id: 'srcsw001', total_count: 1, filled_count: 0 },
       { scope: 'file', target_lang: 'sw', lane_id: 'tgtsw001', total_count: 1, filled_count: 0 },
     ])
   })
@@ -1172,6 +1176,7 @@ describe('file progress follows the lanes that exist (AQU-1594)', () => {
       { id: 'tgtblank', project_id: P, role: 'target', language: 'sw', legacy_tag: '' },
     ])
     expect(rows).toEqual([
+      { scope: 'file', target_lang: '', lane_id: 'srcblank', total_count: 1, filled_count: 0 },
       { scope: 'file', target_lang: '', lane_id: 'tgtblank', total_count: 1, filled_count: 0 },
     ])
   })

@@ -677,7 +677,9 @@ describe('changesets — commit replay (crash-retry idempotency)', () => {
 //   3. preconditions are lane-scoped — a sibling-lane write never stales a plan
 
 describe('changesets — target-language lanes', () => {
-  const laneRowId: Record<string, string> = { es: 'eslane01', fr: 'frlane01', pt: 'ptlane01' }
+  const laneRowId: Record<string, string> = {
+    es: 'eslane01', fr: 'frlane01', pt: 'ptlane01', Spanish: 'spanish1',
+  }
 
   /** `withRows: false` for tests that seed their own lane rows (fixed ids). */
   async function registerLanes(lanes: string[], { withRows = true } = {}): Promise<void> {
@@ -706,8 +708,9 @@ describe('changesets — target-language lanes', () => {
     const { res, body } = await prepare(env, token, [
       { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
     ])
+    // A code is not a lane id (AQU-1615), so it cannot resolve to the Spanish lane.
     expect(res.status).toBe(400)
-    expect(body.error.message).toContain('unregistered lane "es"')
+    expect(body.error.message).toContain('lane does not exist')
   })
 
   it('rejects a SetTranslation naming an unregistered lane at prepare', async () => {

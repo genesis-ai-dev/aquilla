@@ -44,7 +44,11 @@ describe("ProjectHandedOut", () => {
     render(<ProjectHandedOut projectId="p" jwt="j" author="carol" />)
     expect(await screen.findByText("Handed out by you")).toBeTruthy()
     expect(screen.getByText("Genesis 1")).toBeTruthy()
-    expect(screen.getByText("To bob")).toBeTruthy()
+    // AQU-1411: the assignee is a user chip inside "To {username}", so the
+    // sentence spans elements.
+    const assignee = screen.getByText("bob")
+    expect(assignee.closest("[data-slot=user-chip]")).not.toBeNull()
+    expect(assignee.closest("p")?.textContent).toMatch(/^To /)
     expect(screen.getByText("Spanish")).toBeTruthy()
   })
 

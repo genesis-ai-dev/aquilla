@@ -29,6 +29,13 @@ describe("POST /:projectId/link-source — 3-hop cycle rejection", () => {
     await seedProjectWithLead("proj-a-english", "English", 1)
     await seedProjectWithLead("proj-b-french", "French", 1)
     await seedProjectWithLead("proj-c-chaluba", "Chaluba", 1)
+    // C consumes B's TARGET, so B needs a target lane. A project with no
+    // recorded target language has none, and none is invented (AQU-1594).
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position)
+       VALUES ('lane-477-b-source', 'proj-b-french', 'source', 'English', NULL, 0),
+              ('lane-477-b-french', 'proj-b-french', 'target', 'French', 'French', 1)`,
+    ).run()
 
     const jwt = await jwtFor("lead")
 

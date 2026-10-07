@@ -184,12 +184,9 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
     expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("Maintainer")
   })
 
-  it("sourceLanguage / targetLanguage", () => {
-    currentSettings = { sourceLanguage: "Greek", targetLanguage: "Tok Pisin" }
-    renderSettings("general")
-    expect(screen.getByDisplayValue("Greek")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("Tok Pisin")).toBeInTheDocument()
-  })
+  // sourceLanguage / targetLanguage are no longer blob-backed: languages are
+  // lane rows, and the blob keys must NOT fill the lane editors (AQU-1594).
+  // Their read-back is ProjectSettings.languageHydration.test.tsx.
 
   it("timingLocked (absent means locked, so a stored false must show unlocked)", () => {
     currentSettings = { timingLocked: false }
@@ -305,41 +302,45 @@ describe("ProjectSettings — the re-sync does not stomp an in-progress edit", (
 })
 
 describe("ProjectSettings — a settings GET that lands after a successful save", () => {
-  it("does not mark the form dirty or revert the saved source language (AQU-1744)", async () => {
+  // These used the source language until AQU-1594 moved languages onto the
+  // lane. The fix is per blob-backed key, so any such key on General serves.
+  const frontMatter = () => screen.getByRole("switch", { name: "Exclude USFM front matter" })
+
+  it("does not mark the form dirty or revert the saved blob value (AQU-1744)", async () => {
     const user = userEvent.setup()
     currentHasFetched = false
     const view = renderSettings("general")
 
     const renamed = "Blob Readback Test Project renamed"
     fireEvent.change(screen.getByLabelText("Project title"), { target: { value: renamed } })
-    fireEvent.change(screen.getByLabelText("Source Language"), { target: { value: "English (US)" } })
-    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    await user.click(frontMatter())
+    expect(frontMatter()).toBeChecked()
 
     await user.click(screen.getByRole("button", { name: /save changes/i }))
-    expect(await screen.findByText(/Saved: project title, source language/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Saved: project title, USFM front matter/i)).toBeInTheDocument()
     expect(screen.queryByText("Unsaved changes")).toBeNull()
 
-    // The GET resolves after the save, with a stale blob: source language is
-    // still the pre-edit empty value, and another blob-backed field differs
-    // from the seeded default.
-    currentSettings = { sourceLanguage: "", smartQuotes: true }
+    // The GET resolves after the save, with a stale blob: front matter is
+    // still the pre-edit value, and another blob-backed field differs from
+    // the seeded default.
+    currentSettings = { importExcludeFrontMatter: false, smartQuotes: true }
     currentHasFetched = true
     view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
 
     expect(screen.queryByText("Unsaved changes")).toBeNull()
-    expect(screen.getByText(/Saved: project title, source language/i)).toBeInTheDocument()
-    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    expect(screen.getByText(/Saved: project title, USFM front matter/i)).toBeInTheDocument()
+    expect(frontMatter()).toBeChecked()
     // The untouched field still adopts the server value, and that is not an edit.
     expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
   })
 
-  it("keeps the saved source language when the stale GET resolves during the save (AQU-1744)", async () => {
+  it("keeps the saved blob value when the stale GET resolves during the save (AQU-1744)", async () => {
     const user = userEvent.setup()
     currentHasFetched = false
     const view = renderSettings("general")
 
     fireEvent.change(screen.getByLabelText("Project title"), { target: { value: "Blob Readback Test Project renamed" } })
-    fireEvent.change(screen.getByLabelText("Source Language"), { target: { value: "English (US)" } })
+    await user.click(frontMatter())
 
     let resolvePatch: (value: { kind: "ok" }) => void = () => {}
     patchSpy.mockImplementation(() => new Promise((resolve) => { resolvePatch = resolve }))
@@ -347,17 +348,17 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     await vi.waitFor(() => expect(patchSpy).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
 
     // The GET was in flight before the PATCH. It still has the pre-edit
-    // source language, plus a blob field the user never touched.
-    currentSettings = { sourceLanguage: "", smartQuotes: true }
+    // front-matter value, plus a blob field the user never touched.
+    currentSettings = { importExcludeFrontMatter: false, smartQuotes: true }
     currentHasFetched = true
     view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
 
     resolvePatch({ kind: "ok" })
     await clickDone
 
-    expect(await screen.findByText(/Saved: project title, source language/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Saved: project title, USFM front matter/i)).toBeInTheDocument()
     expect(screen.queryByText("Unsaved changes")).toBeNull()
-    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    expect(frontMatter()).toBeChecked()
     expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
   })
 })

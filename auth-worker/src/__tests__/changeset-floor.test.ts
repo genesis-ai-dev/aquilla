@@ -114,9 +114,10 @@ describe("requiredRoleForChangeset", () => {
 
   it("uses MAINTAINER for a non-terminology settings patch", async () => {
     const p = await seedProject(null)
+    // Not a language key: those default to project lead (AQU-984).
     expect(
       await floor(p, [
-        { kind: "PatchSettings", projectId: "proj-1", ifMatchVersion: 1, ops: [{ key: "targetLanes", value: [] }] },
+        { kind: "PatchSettings", projectId: "proj-1", ifMatchVersion: 1, ops: [{ key: "systemPrompt", value: "x" }] },
       ]),
     ).toBe(600)
   })

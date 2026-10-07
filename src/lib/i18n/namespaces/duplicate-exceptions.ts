@@ -582,6 +582,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "link and snapshots its data. A casual toggle and a one-way destructive " +
     "operation carry very different weight, and many languages would render " +
     "'detach' with a stronger verb for the latter.",
+  "projectSettings.inherit.detach":
+    "One-click button beside a single setting the project is still copying " +
+    "from its upstream: it stops future copies of that one field and keeps " +
+    "the current value, with no confirmation. projectSettings.sourceLink." +
+    "detachConfirmButton confirms a typed, irreversible dialog that severs the " +
+    "project's whole live source link. Same reasoning as org.teamDetail." +
+    "detachButton above: a light per-field choice and a one-way destructive " +
+    "operation carry different weight, and many languages use a stronger verb " +
+    "for the latter.",
   "terminology.editor.errorImportFailed":
     "Failure notice for importing TERMS into the project termbase — a glossary " +
     "operation. importExport.errors.importFailed reports a failed SOURCE-DOCUMENT " +

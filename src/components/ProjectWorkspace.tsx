@@ -14343,6 +14343,7 @@ export function ProjectWorkspace() {
           username={currentUsername}
           getToken={getTokenForFile}
           sourceLanguage={activeSourceLanguage ?? ""} targetLanguage={activeLaneTargetLanguage ?? ""}
+          lanes={project.lanes}
           targetLang={activeLane}
           identityToken={frontierSession?.jwt}
           onImported={handleImported}

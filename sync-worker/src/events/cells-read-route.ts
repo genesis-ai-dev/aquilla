@@ -72,7 +72,7 @@ import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
-import { grantedLaneIds, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
+import { grantedLaneIds, scopeReadClause, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -494,7 +494,9 @@ function chainCacheKey(
   laneFilter: string | null,
   paired: boolean,
 ): string {
-  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneFilter ?? ""} ${paired}`
+  // `null` (every target lane) must not share a slot with `''` (the blank bridge).
+  const laneKey = laneFilter === null ? "*" : `=${laneFilter}`
+  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneKey} ${paired}`
 }
 
 /** Keep every side/lane of a cell together, even across a page boundary. */
@@ -718,18 +720,25 @@ export async function handleCellsReadRequest(
   const paired = url.searchParams.get("paired") === "1" && sideFilter === null
 
   // AQU-538: optional lane filter — target rows only; source rows are always
-  // included (the shared-source invariant). Absent = all lanes (unchanged).
+  // included (the shared-source invariant). Absent (`null`) means every target
+  // lane. Present and empty (`''`) is the blank bridge, the target lane whose
+  // legacy_tag is `''`. The in-app client omits the param when it wants every
+  // lane, so those two must stay distinct.
   const qLane = url.searchParams.get("lane")
   if (qLane !== null && qLane.length > 64) {
     return new Response("invalid lane: must be 64 characters or fewer", { status: 400 })
   }
-  const laneFilter = qLane && qLane.length > 0 ? qLane : null
+  const laneFilter = qLane
   // AQU-730: when the wall is on, "no lane param" is no longer "every target
   // lane". Below Maintainer the response is cut to granted lanes. The token
   // is already verified above; 600+ and platform stay unrestricted (token "").
   const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
   const laneIds = await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes)
-  const visibility = laneIds === null ? "" : visibilityCacheToken(new Set(laneIds))
+  // Wall off: a scoped member still only reads their lanes. The token keeps
+  // their cached body off an unscoped member's ETag.
+  const scopeClause = await scopeReadClause(env.AQUILLA_PG, projectId, auth.claims, laneIds)
+  const visibility =
+    (laneIds === null ? "" : visibilityCacheToken(new Set(laneIds))) + (scopeClause?.token ?? "")
 
   const qSince = url.searchParams.get("since")
   let since: number | null = null
@@ -891,6 +900,10 @@ export async function handleCellsReadRequest(
           deltaParts.push(deltaWall.sql)
           deltaBinds.push(...deltaWall.binds)
         }
+        if (scopeClause) {
+          deltaParts.push(scopeClause.sql)
+          deltaBinds.push(...scopeClause.binds)
+        }
         const deltaRes = await env.AQUILLA_PG.prepare(deltaParts.join(" "))
           .bind(...deltaBinds)
           .all<CellRowRaw>()
@@ -979,6 +992,10 @@ export async function handleCellsReadRequest(
   if (wall) {
     parts.push(wall.sql)
     binds.push(...wall.binds)
+  }
+  if (scopeClause) {
+    parts.push(scopeClause.sql)
+    binds.push(...scopeClause.binds)
   }
   const sql = parts.join(" ")
 

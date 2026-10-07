@@ -12,6 +12,7 @@
 // adapter.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { IncomingMessage, OutgoingMessage } from "./whisper-worker"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const transformers = vi.hoisted(() => ({
   pipeline: vi.fn(),
@@ -76,7 +77,7 @@ async function startWorker() {
         const reply = posted.find((m) => m.requestId === msg.requestId && m.type !== "progress")
         if (!reply) throw new Error(`no reply to ${msg.requestId} yet`)
         return reply
-      })
+      }, { timeout: STALL_WATCHDOG_MS })
     },
   }
 }

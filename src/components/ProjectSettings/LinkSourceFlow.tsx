@@ -109,6 +109,8 @@ import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { useReplaceFileChoices } from "@/hooks/useReplaceFileChoices"
 import { ROLE } from "@/lib/frontier/roles"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import { INHERIT_DEFAULTS, type InheritFieldId } from "@/lib/sync/inherited-settings"
+import { InheritedSettingsChoice } from "@/components/ProjectSettings/InheritedSettingsChoice"
 import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
 import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import {
@@ -185,6 +187,8 @@ export function LinkSourceFlow({
   // of upstream (the question is about the corpus, not the project), and reset
   // after a successful link so a re-link following a Detach asks again.
   const [consumes, setConsumes] = useState<LinkConsumes>("")
+  const [inheritReceive, setInheritReceive] = useState({ ...INHERIT_DEFAULTS })
+  const [inheritDetached, setInheritDetached] = useState<Partial<Record<InheritFieldId, boolean>>>({})
   // AQU-1605: which of the upstream's translations this chain link consumes.
   // Only asked for consumes='target'; reset whenever the upstream or the corpus
   // answer changes, so a lane picked for one upstream can never be sent with
@@ -375,6 +379,7 @@ export function LinkSourceFlow({
         // upstream's source lane, which is not a choice and is left to the
         // server to record.
         ...(consumes === "target" && laneId ? { laneId } : {}),
+        inherit: inheritReceive,
         // AQU-1559: every file left checked means "follow the whole project" —
         // the request omits the list entirely, so the upstream's later files
         // keep arriving, exactly as before this slice. A subset sends the picked
@@ -602,6 +607,17 @@ export function LinkSourceFlow({
             </Badge>
           )}
         </div>
+        <InheritedSettingsChoice
+          title={t("projectSettings.inherit.linkTitle")}
+          description={t("projectSettings.inherit.linkDescription")}
+          receive={inheritReceive}
+          detached={inheritDetached}
+          disabled={linking}
+          onChange={(next) => {
+            setInheritReceive(next.receive)
+            setInheritDetached(next.detached)
+          }}
+        />
         <p className="text-xs text-muted-foreground">
           {replacing.length > 0
             ? t("projectSettings.linkSource.additiveNoteReplacing")

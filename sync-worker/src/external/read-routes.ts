@@ -60,6 +60,7 @@
 // with codes from external/errors.ts.
 
 import { externalError } from "./errors"
+import { resolveExternalLaneParam } from "./external-lane"
 import { listProjectsForCredential } from "./projects-list"
 import { assertOrgInCredentialScope, handleExternalOrgReadRequest } from "./org-read-routes"
 import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search-reads"
@@ -299,12 +300,25 @@ async function handleExternalFileCells(
     if (limited) return limited
   }
 
-  // since/limit/cursor (and the cellIds fast-path param and the AQU-538
-  // lane=<tag> target-lane filter) are supported natively by the internal
-  // cells route — forward the querystring as-is.
+  // ?lane= is a lane id. The internal cells route still filters by the frozen tag.
+  if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
+  const cellUrl = new URL(request.url)
+  const lane = await resolveExternalLaneParam(
+    env.AQUILLA_PG,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    cellUrl.searchParams.get("lane"),
+    "lane",
+  )
+  if (!lane.ok) return externalError("validation_failed", lane.message, 400)
+  cellUrl.searchParams.set("lane", lane.lane.legacyTag ?? "")
+
   const token = await mintInternalToken(env, authed.ctx, projectId, fileId)
   const internalUrl = new URL(request.url)
   internalUrl.pathname = `/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/cells`
+  internalUrl.search = cellUrl.search
   const internalRes = await handleCellsReadRequest(
     new Request(internalUrl.toString(), { headers: { Authorization: `Bearer ${token}` } }),
     env,
@@ -513,7 +527,28 @@ async function handleExternalPromptPreview(
     const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
     if (limited) return limited
   }
-  return handlePromptPreview(request, { AQUILLA_PG: env.AQUILLA_PG }, projectId, cellId)
+  if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
+  const previewUrl = new URL(request.url)
+  const targetLane = await resolveExternalLaneParam(
+    env.AQUILLA_PG,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    previewUrl.searchParams.get("targetLang"),
+    "targetLang",
+  )
+  if (!targetLane.ok) return externalError("validation_failed", targetLane.message, 400)
+  previewUrl.searchParams.set("targetLang", targetLane.lane.legacyTag ?? "")
+  const preview = await handlePromptPreview(
+    new Request(previewUrl.toString(), request),
+    { AQUILLA_PG: env.AQUILLA_PG },
+    projectId,
+    cellId,
+  )
+  if (!preview.ok) return preview
+  const body = (await preview.json()) as Record<string, unknown>
+  return Response.json({ ...body, laneId: targetLane.lane.id })
 }
 
 // ---------------------------------------------------------------------------

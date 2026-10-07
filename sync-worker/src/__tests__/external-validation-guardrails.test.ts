@@ -75,11 +75,22 @@ async function memberToken(
 }
 
 async function prepare(env: ReturnType<typeof makeEnv>, token: string, events: unknown[]) {
+  const stamped = events.map((event) => {
+    if (!event || typeof event !== 'object') return event
+    const row = event as { kind?: string; laneId?: string }
+    if (
+      (row.kind === 'cell.validate' || row.kind === 'cell.unvalidate' || row.kind === 'cell.backtranslation.set' || row.kind === 'target.cell.repin')
+      && row.laneId === undefined
+    ) {
+      return { ...row, laneId: 'deflane1' }
+    }
+    return event
+  })
   const res = (await handleExternalChangesetsRequest(
     new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commands: [{ kind: 'EmitEvents', events }] }),
+      body: JSON.stringify({ commands: [{ kind: 'EmitEvents', events: stamped }] }),
     }),
     env,
   ))!
@@ -226,6 +237,11 @@ beforeEach(async () => {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
 })
 
 // ── Guardrail 1: no validation-laundering of AI drafts ────────────────────
@@ -383,8 +399,8 @@ describe('AQU-1184 — explicit cell lists only', () => {
     })
     // …but a count alone is not an approvable plan: each cell is named with its text.
     expect(body.summary.testimony).toEqual([
-      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-1', text: 'En el principio', truncated: false },
-      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-2', text: 'creó Dios', truncated: false },
+      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', text: 'En el principio', truncated: false },
+      { kind: 'cell.validate', fileId: FILE, cellId: 'cell-2', laneId: 'deflane1', text: 'creó Dios', truncated: false },
     ])
     // Comments are not testimony — they do not appear in that section.
     expect(body.summary.testimony).toHaveLength(2)

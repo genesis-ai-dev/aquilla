@@ -96,6 +96,16 @@ describe("LanguagesSection", () => {
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ targetLanes: ["fr-CA", "fr-BE"] }))
   })
 
+  it("creates a lane row for a cloud project that has none yet", async () => {
+    const onCreateLane = vi.fn(async () => "ok" as const)
+    const { patch } = renderSection({ targetLanes: [], laneRecords: [], onCreateLane })
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "es" } })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    // AQU-1592: the name is sent only when the user typed one.
+    await waitFor(() => expect(onCreateLane).toHaveBeenCalledWith({ name: "", language: "es", code: null }))
+    expect(patch).not.toHaveBeenCalled()
+  })
+
   it("saves a valid new lane via patch with the appended array", async () => {
     const { patch } = renderSection({ targetLanes: ["fr-CA"] })
     fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "fr-BE" } })
@@ -493,6 +503,43 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
       expect(onRenameLane).toHaveBeenCalledWith("lane-yo", { code: "not a tag!" }),
     )
     expect(screen.getByText(/not a valid language code/i)).toBeTruthy()
+  })
+
+  it("creates the first target from a source-only project without patching settings", async () => {
+    const source: ProjectLaneView = {
+      id: "lane-source",
+      role: "source",
+      language: "English",
+      name: null,
+      langCode: null,
+      legacyTag: null,
+      position: 0,
+      archivedAt: null,
+    }
+    const patch = vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))
+    const onCreateLane = vi.fn(async () => "ok" as const)
+    render(
+      <LanguagesSection
+        defaultTargetLanguage="Spanish"
+        targetLanes={[]}
+        canEdit
+        disabledTooltip={null}
+        patch={patch}
+        laneRecords={[source]}
+        onRenameLane={vi.fn(async () => "ok" as const)}
+        onCreateLane={onCreateLane}
+        onSetLaneArchived={vi.fn(async () => true)}
+      />,
+    )
+    expect(screen.queryByText("Spanish")).toBeNull()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "French" },
+    })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() =>
+      expect(onCreateLane).toHaveBeenCalledWith({ name: "", language: "French", code: null }),
+    )
+    expect(patch).not.toHaveBeenCalled()
   })
 
   it("creates a lane from a language alone, submitting no name", async () => {

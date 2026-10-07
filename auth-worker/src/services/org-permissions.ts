@@ -2721,33 +2721,31 @@ export async function getProjectRosterViewMinRole(env: Env, orgId: number): Prom
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// AQU-1086: configurable project-language edit floor
+// AQU-1086 / AQU-984: configurable project-language edit floor
 //
 // Second write-gating permission-policy key, built on exactly the same
 // org_settings plumbing as termbaseEditMinRole above. It answers "who may
-// change a project's source/target language and its extra target lanes" —
-// Project managers (project_lead 500) running day-to-day projects hit wrong
-// or reset languages and today must escalate to a Maintainer for a routine
-// correction.
+// change a project's source/target language and its extra target lanes."
 //
-// The default is MAINTAINER (600), i.e. today's behaviour byte-for-byte: an
-// org opts in by lowering the floor to PROJECT_LEAD. This is the opposite
-// choice from the termbase floor (which defaults to 500 to close a
-// pre-existing client/server divergence) and matches the read floors —
-// other partners deliberately keep languages maintainer-only.
+// The default is PROJECT_LEAD (500) when the key is absent or not a role-ladder
+// number (AQU-984). extractRoleFloor is what tells "never set" from an explicit
+// choice: a stored finite number in 100..700 is that org's choice and is kept,
+// including an explicit Maintainer (600). Only a missing or invalid key uses
+// this default.
 //
-// Scope is the language keys ONLY. Lowering this floor must never widen
-// write access to AI config, validation, health, timeline, or anything else
-// in the settings blob — enforcement is the language-scoped carve-out in
-// routes/project-settings.ts, which keys off the CHANGED keys of a write.
+// Scope is the language keys ONLY, lanes included. Changing this default must
+// never widen write access to AI config, validation, health, timeline, or
+// anything else in the settings blob — enforcement is the language-scoped
+// carve-out in routes/project-settings.ts, which keys off the CHANGED keys
+// of a write.
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Default floor for editing a project's languages when the org hasn't set one. */
-export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = 600 // ROLE.MAINTAINER
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
 
 /**
  * Resolve the effective language-edit floor for an org (falls back to the
- * MAINTAINER default when the org hasn't configured one, or configured a
+ * PROJECT_LEAD default when the org hasn't configured one, or configured a
  * value outside the role ladder).
  */
 export async function getLanguageEditMinRole(env: Env, orgId: number): Promise<number> {
@@ -2758,7 +2756,7 @@ export async function getLanguageEditMinRole(env: Env, orgId: number): Promise<n
 /**
  * Resolve the language-edit floor that applies to a project, via its org.
  * Projects with no org (personal / not-yet-attached) fall back to the same
- * MAINTAINER default — there is no org policy to consult.
+ * PROJECT_LEAD default — there is no org policy to consult.
  */
 export async function getLanguageEditMinRoleForProject(
   env: Env,

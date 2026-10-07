@@ -189,7 +189,7 @@ describe('membership — validation', () => {
     const { token } = await seedMaintainerCaller()
     const { res, body } = await prepare(token, [
       { kind: 'InviteMember', projectId: PROJECT, username: TARGET.name, role: ROLE.CONTRIBUTOR },
-      { kind: 'SetTranslation', fileId: 'f1', cellId: 'c1', value: 'x' },
+      { kind: 'SetTranslation', fileId: 'f1', cellId: 'c1', laneId: 'deflane1', value: 'x' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

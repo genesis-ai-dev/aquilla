@@ -45,7 +45,15 @@ Provide an accessible video URL in the submission portal. Do not record secrets.
 ## Submission
 
 - Verify publisher identity and domain ownership through the portal challenge.
-  Add the supplied plaintext challenge only after receiving its actual value.
+  The identity Worker serves `https://api.aquilla.app/.well-known/openai-apps-challenge`
+  from the `OPENAI_APPS_CHALLENGE` secret (404 until set). Once the portal
+  issues the token, set it without a deploy and confirm the body. It is not a
+  `requiredSecrets` entry (deploy verification would fail while it is unset),
+  so `secrets:rotate` refuses it; use Wrangler from `auth-worker/`:
+  `printf %s "$TOKEN" | npx wrangler secret put OPENAI_APPS_CHALLENGE --env production`
+  then `curl https://api.aquilla.app/.well-known/openai-apps-challenge`.
+- Build the ZIP from `plugins/aquilla/` with the manifest at the archive root:
+  `cd plugins/aquilla && zip -qrX ../../aquilla-chatgpt-plugin.zip .codex-plugin .mcp.json skills assets README.md`.
 - Upload the package and verify all required metadata fields in the portal.
 - Run the MCP scan. Rescan after deploying tool schema or annotation changes.
 - Supply reviewer credentials, instructions and the walkthrough video separately.

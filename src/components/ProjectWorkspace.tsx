@@ -34,6 +34,7 @@ import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 // AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
 // link and the first-position fallback that replaces the old `''` one.
 import {
@@ -2227,20 +2228,17 @@ export function ProjectWorkspace() {
     project,
     laneRows,
   )
-  // Lane rows win when the project has them: order is `position`, the label
-  // is `name`, and the value the editor stores is still `legacyTag` ('' for
-  // the default lane) because cell rows are keyed by that tag.
-  const availableLanes = useMemo(() => {
-    if (laneRows.length === 0) {
-      return ["", ...targetLanes.filter((l) => !languagesEqual(l, activeTargetLanguage))]
-    }
-    const tags = [...laneRows]
-      .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
-      .map((lane) => lane.legacyTag ?? "")
-    const unique = [...new Set(tags)]
-    if (!unique.includes("")) unique.unshift("")
-    return unique
-  }, [laneRows, targetLanes, activeTargetLanguage])
+  // Lane rows are the switcher. Order is position, and the value stored is
+  // legacyTag. '' is offered only when a row has that tag. Inventing a blank
+  // entry beside a tagged target shows that language twice (AQU-1776).
+  const availableLanes = useMemo(
+    () =>
+      switcherLaneTags(laneRows, [
+        "",
+        ...targetLanes.filter((l) => !languagesEqual(l, activeTargetLanguage)),
+      ]),
+    [laneRows, targetLanes, activeTargetLanguage],
+  )
   const archivedLaneTags = useMemo(() => {
     if (laneRows.length === 0) return project?.archivedLanes
     return laneRows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? "")

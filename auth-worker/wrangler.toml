@@ -274,6 +274,10 @@ SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 # MCP OAuth issuer (routes/mcp-oauth.ts). Must equal the sync worker's
 # AUTH_WORKER_URL, which its protected-resource metadata names.
 MCP_OAUTH_ISSUER = "https://api.aquilla.app/identity"
+# This worker's own public base (routes/monday.ts builds the Monday webhook
+# address from it). The identity API host, NOT BASE_URL: the website answers
+# a webhook POST with 405 and Monday then refuses to create the webhook.
+BASE_URL_API = "https://api.aquilla.app/identity"
 DEFAULT_LLM_MODEL = "openai/gpt-5.6-luna"
 ENVIRONMENT = "production"
 # AQU-730 read wall. Deploy this only after neon-backfill-lanes --apply has
@@ -386,6 +390,8 @@ BASE_URL = "https://dev.aquilla.app"
 # MCP OAuth issuer (routes/mcp-oauth.ts). Must equal the sync worker's
 # AUTH_WORKER_URL, which its protected-resource metadata names.
 MCP_OAUTH_ISSUER = "https://api.dev.aquilla.app/identity"
+# This worker's own public base (Monday webhook address); see production.
+BASE_URL_API = "https://api.dev.aquilla.app/identity"
 # Stripe SANDBOX billing on the dev deployment (AQU-837). The gate also
 # requires ENVIRONMENT=development and an sk_test_/rk_test_ secret, so these
 # two vars cannot enable anything on production even if copied there.

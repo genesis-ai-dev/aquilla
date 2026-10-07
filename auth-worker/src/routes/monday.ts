@@ -73,9 +73,16 @@ const monday = new Hono<AuthHonoEnv>()
 
 const MANAGE_MIN_ROLE = ROLE.MAINTAINER
 
-/** API-facing base for webhook URLs (contract: BASE_URL_API || BASE_URL). */
-const apiBase = (env: Env): string =>
-  (env.BASE_URL_API || env.BASE_URL || "").replace(/\/$/, "")
+/**
+ * Public base of THIS worker, for the webhook URL Monday calls back. It must
+ * be the identity API host (api.<host>/identity), never BASE_URL: that is the
+ * website, which answers a webhook POST with 405, so Monday refuses to create
+ * the webhook. Falls back to MCP_OAUTH_ISSUER (the same identity API base in
+ * every deployed env), then to the request origin (right for local dev, where
+ * the worker is reached directly with no /identity prefix).
+ */
+const apiBase = (env: Env, requestUrl: string): string =>
+  (env.BASE_URL_API || env.MCP_OAUTH_ISSUER || new URL(requestUrl).origin).replace(/\/+$/, "")
 
 /**
  * OAuth redirect URI — must EXACTLY match the redirect URL registered in the
@@ -491,7 +498,7 @@ monday.put(
         webhookIds = await createBoardWebhooks(
           token,
           body.boardId,
-          `${apiBase(c.env)}/api/v2/monday/webhook`,
+          `${apiBase(c.env, c.req.url)}/api/v2/monday/webhook`,
         )
       } catch (err) {
         console.warn("[monday] webhook creation failed (link still saved):", err)

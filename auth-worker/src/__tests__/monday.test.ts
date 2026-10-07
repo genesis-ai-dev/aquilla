@@ -496,6 +496,61 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
     expect(row).not.toBeNull()
   })
 
+  // Monday POSTs a challenge to the webhook address before it creates the
+  // webhook. The website (BASE_URL) answers that POST with 405, so the address
+  // must be the identity API host this worker is mounted on.
+  const linkCreatingWebhooks = async (envOverrides: Record<string, string | undefined>) => {
+    await seedOrgProject()
+    await seedConnection()
+    const webhookUrls: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("settings_str")) {
+        return jsonResponse({
+          data: { boards: [{ name: "Ruth Board", columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }], groups: [] }] },
+        })
+      }
+      if (body.includes("create_webhook")) {
+        const query = (JSON.parse(body) as { query: string }).query
+        webhookUrls.push(/url: "([^"]+)"/.exec(query)?.[1] ?? "")
+        return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      }
+      return null
+    })
+    const res = await app.request(
+      "/api/v2/monday/projects/proj-1/link",
+      {
+        method: "PUT",
+        headers: authHeader(await jwtFor("anna")),
+        body: JSON.stringify({ boardId: "board-9", config: baseConfig }),
+      },
+      { ...menv, BASE_URL: "https://dev.aquilla.app", ...envOverrides },
+    )
+    expect(res.status).toBe(200)
+    expect((await res.json()) as { warnings: string[] }).toMatchObject({ warnings: [] })
+    expect(webhookUrls.length).toBeGreaterThan(0)
+    return webhookUrls
+  }
+
+  it("points the webhooks at the identity API host, not the website", async () => {
+    const urls = await linkCreatingWebhooks({ BASE_URL_API: "https://api.dev.aquilla.app/identity/" })
+    expect(new Set(urls)).toEqual(new Set(["https://api.dev.aquilla.app/identity/api/v2/monday/webhook"]))
+  })
+
+  it("without BASE_URL_API, derives the API host from MCP_OAUTH_ISSUER, never BASE_URL", async () => {
+    const urls = await linkCreatingWebhooks({
+      BASE_URL_API: undefined,
+      MCP_OAUTH_ISSUER: "https://api.dev.aquilla.app/identity",
+    })
+    expect(new Set(urls)).toEqual(new Set(["https://api.dev.aquilla.app/identity/api/v2/monday/webhook"]))
+  })
+
+  it("with neither set, uses the address the worker itself was reached on", async () => {
+    const urls = await linkCreatingWebhooks({ BASE_URL_API: undefined, MCP_OAUTH_ISSUER: undefined })
+    expect(urls.every((u) => !u.startsWith("https://dev.aquilla.app"))).toBe(true)
+    expect(new Set(urls)).toEqual(new Set(["http://localhost/api/v2/monday/webhook"]))
+  })
+
   it("409s when the org has no Monday connection", async () => {
     await seedOrgProject()
     const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", {

@@ -1152,7 +1152,8 @@ async function processSpan(
           drafts: fresh.map((c) => ({
             cellId: c.cellId,
             text: c.text,
-            verdicts: withBibleVerdicts(verdictsByCell.get(c.cellId) ?? {}, rechecks.get(c.cellId) ?? null),
+            // AQU-1701: a finding's own evidence (bkp:C1) replaces its "flag".
+            verdicts: withBibleVerdicts({ ...verdictsByCell.get(c.cellId), ...c.values }, rechecks.get(c.cellId) ?? null),
             provenance: {
               spanId: draft.spanId,
               spanLabel: label,

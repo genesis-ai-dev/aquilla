@@ -8,8 +8,11 @@
 // ACTIVE one carries its constraint.
 
 import { describe, expect, it } from "vitest"
+import { decodeBibleParams } from "../../../../db/shared/bible-checks/params"
 import { runSpan, type RunSpanDeps } from "./pipeline"
 import { spanBible, type SpanBible } from "./bible-span"
+import { bibleCodeSeverity } from "./bible-gates"
+import { fallbackTriage } from "./triage"
 import { lintSpanDraft } from "./lint-node"
 import { jhn4BibleData, jhn4Pairs } from "./bible-test-helpers"
 import { construalJson, draftJson, scriptedLlm, voteJson } from "./test-helpers"
@@ -134,6 +137,8 @@ describe("Jev answers and repair", () => {
     // Recorded for the metrics, with its certainty.
     expect(report.bible?.judgments).toEqual([
       { cellId: "c9", check: "negation", outcome: "fail", mode: "shadow", decidedBy: "jev", certainty: 0.9 },
+      // AQU-1701: C1 then asks JHN 4:9's Translation Question of the final draft; with no Jev side it abstains.
+      { cellId: "c9", check: "tq", outcome: "abstain", mode: "shadow", decidedBy: "fallback", certainty: 0 },
     ])
   })
 
@@ -151,5 +156,59 @@ describe("Jev answers and repair", () => {
     expect(drafts).toHaveLength(2)
     expect(drafts[1].user).toContain('Keep the negation: the source says "not".')
     expect(staged[0].cells[0].findings).toEqual(["bkp:M3", "redrafted"])
+  })
+})
+
+// AQU-1701: C1 runs once the span's drafting is settled, on the FINAL text.
+// WHY: a Translation Question's answer is not a constraint a drafter can
+// satisfy blindly, so a "no" is a finding for a person to review — it must
+// never cost a redraft. In shadow it must not even reach the reviewer.
+describe("C1 — Translation Questions after drafting", () => {
+  const sayNo = (modes?: { tq: "active" }) => {
+    const calls: string[][] = []
+    const judge = {
+      cache: new Map<string, number>(),
+      ...(modes ? { modes } : {}),
+      decide: async (input: { questions: Record<string, unknown> }) => {
+        calls.push(Object.keys(input.questions))
+        const answers = Object.fromEntries(Object.keys(input.questions).map((k) => [k, { kind: "noul" as const, p: 0.05 }]))
+        return { answers, decidedBy: "model" as const, model: "typesafe/jev-1.13", usage: null }
+      },
+    }
+    return { judge, calls }
+  }
+  const script = () =>
+    scriptedLlm([construalJson({ closed: true }), "The woman asks Jesus for water.", draftJson([{ i: 1, t: CORRECT_4_9 }]), voteJson(true)])
+
+  it("a SHADOW 'no' adds no finding and no redraft, and is recorded for maintainers", async () => {
+    const { judge, calls: jevCalls } = sayNo()
+    const { llm, calls } = script()
+    const data = await jhn4BibleData()
+    const { deps: d, staged } = await deps(spanBible(data, { pairs: jhn4Pairs(), spanId: "span-c9", judge }), llm)
+    const report = await runSpan(d)
+    expect(calls.filter(isDraft)).toHaveLength(1)
+    // The span's questions, then C1's: JHN 4:9's Translation Question, once its draft is final.
+    expect(jevCalls.at(-1)).toEqual(["q0"])
+    expect(staged[0].cells[0]).toEqual({ cellId: "c9", text: CORRECT_4_9, findings: [] })
+    expect(report.bible?.judgments).toContainEqual({ cellId: "c9", check: "tq", outcome: "fail", mode: "shadow", decidedBy: "jev", certainty: 0.9 })
+  })
+
+  it("an ACTIVE 'no' is a bkp:C1 finding with the question and its answer on the staged draft — never a redraft", async () => {
+    const { judge } = sayNo({ tq: "active" })
+    const { llm, calls } = script()
+    const data = await jhn4BibleData()
+    const { deps: d, staged } = await deps(spanBible(data, { pairs: jhn4Pairs(), spanId: "span-c9", judge }), llm)
+    await runSpan(d)
+    expect(calls.filter(isDraft)).toHaveLength(1)
+    const [cell] = staged[0].cells
+    expect(cell.findings).toEqual(["bkp:C1"])
+    expect(decodeBibleParams(cell.values?.["bkp:C1"])).toMatchObject({
+      tq: "tq:172802",
+      refs: "JHN 4:9",
+      answer: "She was surprised because Jews had no dealings with the Samaritans.",
+    })
+    // Info: a finding for review that never sends the draft to a person on its own.
+    expect(bibleCodeSeverity("bkp:C1")).toBe("info")
+    expect(fallbackTriage(["bkp:C1"]).triage).toBe("advisory")
   })
 })

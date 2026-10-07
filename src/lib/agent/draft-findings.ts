@@ -58,6 +58,17 @@ export function findingsFromVerdicts(verdicts: Record<string, string> | null | u
   }
 }
 
+/**
+ * AQU-1701: a "Check with Bible data" finding (auth-worker
+ * contextual/bible-check-mode.ts: a code and its params, not encoded) as a
+ * DraftFinding, so it gets the same label and evidence as a draft's.
+ */
+export function findingFromCheck(finding: { code: string; params?: Readonly<Record<string, string>> }): DraftFinding | null {
+  const parsed = parseCode(finding.code, undefined)
+  if (!parsed) return null
+  return parsed.kind === "bkp" && finding.params && Object.keys(finding.params).length > 0 ? { ...parsed, params: { ...finding.params } } : parsed
+}
+
 export function summarizeFindings(drafts: DraftFindings[]): { flagged: number; needsHuman: number; clean: number } {
   let flagged = 0
   let needsHuman = 0

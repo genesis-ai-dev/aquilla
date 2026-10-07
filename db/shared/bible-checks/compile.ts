@@ -324,6 +324,7 @@ export function compileCellExpectation(
           return range ? index.runs[range.first].from.slice(0, 9) : null
         },
         speeches: speeches.flatMap((s) => index.speeches.get(s.id) ?? []),
+        ...(structureLayer?.segments ? { segments: structureLayer.segments } : {}),
       })
     : null
 

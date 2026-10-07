@@ -92,6 +92,30 @@ describe("RunChecks", () => {
     expect(within(needs).queryByText(/OpenText speech/)).toBeNull()
   })
 
+  // AQU-1701: a Translation Question the draft may not answer is advisory
+  // (info): the reviewer sees the answer it may not give and the question.
+  it("shows a comprehension (C1) finding as advisory, with the answer and the question", () => {
+    experiment.on = true
+    const verdicts = {
+      "bkp:C1": encodeBibleParams({
+        kind: "answer-missing", evidence: "translation-question", tq: "tq:172802", refs: "JHN 4:9",
+        question: "Why was the Samaritan woman suprised that Jesus would talk to her?",
+        answer: "She was surprised because Jews had no dealings with the Samaritans.",
+      }),
+      _triage: "advisory",
+      _severity: "2",
+    }
+    view([{ draftId: "d-9", runId: "run-1", cellId: "c9", text: "text c9", spanLabel: "JHN 4:9", review: findingsFromVerdicts(verdicts) }])
+    const advisory = screen.getByTestId("checks-advisory")
+    expect(within(advisory).getByText("Bible data: Comprehension")).toBeInTheDocument()
+    expect(
+      within(advisory).getByText("Comprehension: the translation may not say that “She was surprised because Jews had no dealings with the Samaritans.”"),
+    ).toBeInTheDocument()
+    expect(
+      within(advisory).getByText("Translation Question (JHN 4:9): Why was the Samaritan woman suprised that Jesus would talk to her?"),
+    ).toBeInTheDocument()
+  })
+
   it("says so plainly when every pending draft passed cleanly", () => {
     view([draft("c", null)])
     expect(screen.getByText("No findings. Every pending draft passed its checks cleanly.")).toBeInTheDocument()

@@ -14,22 +14,27 @@
 // staged drafts), and a check needs none of that. It is a bounded,
 // synchronous pass over at most MAX_CHECK_CELLS cells per call, continued
 // with `startAfter`.
+//
+// AQU-1701: it also asks the Translation Questions (C1) whose verses are all
+// translated — an automated community check. A TQ belongs to the call that
+// checks its first verse, so one that spans two calls is asked once.
 
 import { statusOf, type CellPair } from "../agent/tools/select-cells"
 import { bibleReasonParams } from "../../../../db/shared/bible-checks/params"
 import { bibleFindings } from "./bible-gates"
 import type { BibleRunData } from "./bible-run"
 import type { BibleJudgeDeps } from "./bible-span"
+import { judgeComprehension } from "./judge-comprehension"
 import { activeFailures, BIBLE_QA_CODES, judgeExpectations, type Judgment } from "./judge-expectations"
 
-/** Cells one call checks. About ten Jev calls at most, so the request stays short. */
+/** Cells one call checks. About ten Jev calls at most, plus one per chapter for C1, so the request stays short. */
 export const MAX_CHECK_CELLS = 120
 /** Cells per Jev call: one batched decide() each, like one span. */
 export const CHECK_CELLS_PER_JEV_CALL = 12
 
 export interface CheckModeFinding {
   code: `bkp:${string}`
-  /** The finding's reason and pack evidence (code findings only), as the review chips read them. */
+  /** The finding's reason and evidence (code findings, and C1's question and answer), as the review chips read them. */
   params?: Record<string, string>
 }
 
@@ -45,7 +50,7 @@ export interface CheckModeResult {
   checked: number
   /** Only the cells with findings. */
   cells: CheckModeCell[]
-  /** Every judgment, shadow ones included — the route is maintainer-only. */
+  /** Every judgment, shadow ones included — the route is maintainer-only. AQU-1701: C1's carry their `tq` and `refs`. */
   judgments: Judgment[]
   jevCalls: number
   /** The last cell checked, when more remain: pass it as `startAfter` to continue. */
@@ -84,6 +89,7 @@ export async function checkTranslatedCells(input: {
   if (data.checks) {
     const decide: BibleJudgeDeps["decide"] =
       input.judge?.decide ?? (async (q) => ({ answers: q.fallback(), decidedBy: "heuristic", reason: "disabled", model: null, usage: null }))
+    const cache = input.judge?.cache ?? new Map<string, number>()
     for (const [index, group] of chunks(batch, CHECK_CELLS_PER_JEV_CALL).entries()) {
       const result = await judgeExpectations(
         group.map((p) => ({
@@ -99,8 +105,9 @@ export async function checkTranslatedCells(input: {
           profile: data.profile,
           packVersion: data.packVersion,
           decide,
-          cache: input.judge?.cache ?? new Map(),
+          cache,
           ...(input.judge?.record ? { record: input.judge.record } : {}),
+          ...(input.judge?.modes ? { modes: input.judge.modes } : {}),
         },
         `check:${index}`,
       )
@@ -111,6 +118,34 @@ export async function checkTranslatedCells(input: {
         list.push({ code: BIBLE_QA_CODES[failure.check] })
         findings.set(failure.cellId, list)
       }
+    }
+
+    // C1 over the whole file's translated text, for the questions whose first verse this call checks.
+    const comprehension = await judgeComprehension(
+      {
+        questions: data.questions,
+        cells: translated.flatMap((p) => {
+          const refs = data.expectations.get(p.cellId)?.refs
+          return refs ? [{ cellId: p.cellId, refs, text: p.target }] : []
+        }),
+        checked: new Set(batch.map((p) => p.cellId)),
+        owner: "first-verse",
+        traceSpanId: "check:tq",
+      },
+      {
+        packVersion: data.packVersion,
+        decide,
+        cache,
+        ...(input.judge?.record ? { record: input.judge.record } : {}),
+        ...(input.judge?.modes?.tq ? { mode: input.judge.modes.tq } : {}),
+      },
+    )
+    jevCalls += comprehension.jevCalls
+    judgments.push(...comprehension.judgments)
+    for (const finding of comprehension.findings) {
+      const list = findings.get(finding.cellId) ?? []
+      list.push({ code: finding.code, params: finding.params })
+      findings.set(finding.cellId, list)
     }
   }
 

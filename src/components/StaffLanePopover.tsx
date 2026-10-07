@@ -39,7 +39,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Spinner } from "@/components/ui/spinner"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { RoleSelect } from "@/components/RoleSelect"
-import { ROLE, roleName, roleDisplayLabel, roleDescription } from "@/lib/frontier/roles"
+import { ROLE, roleName, roleDescription } from "@/lib/frontier/roles"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -48,6 +48,9 @@ import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
+import { toast } from "@/components/ui/toast"
+import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
 
 /** Pinned contract — wave-B agents import this exactly. */
 export interface StaffLanePopoverProps {
@@ -61,6 +64,8 @@ export interface StaffLanePopoverProps {
    */
   laneId?: string | null
   laneLabel: string
+  /** Project display name for the grant sentence. Omitted → "this project". */
+  projectName?: string | null
   orgId: number | null
   trigger?: ReactNode
   onDone?: () => void
@@ -100,6 +105,7 @@ export function StaffLanePopover({
   lane,
   laneId,
   laneLabel,
+  projectName,
   orgId,
   trigger,
   onDone,
@@ -107,7 +113,7 @@ export function StaffLanePopover({
   onOpenChange,
   anchorOnly = false,
 }: StaffLanePopoverProps) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const location = useLocation()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -215,7 +221,18 @@ export function StaffLanePopover({
       }
       await refreshProjectMembers()
       setPhase("done")
-      setMessage(`${selected.username} is now ${roleDisplayLabel(role)} on ${laneLabel}.`)
+      const sentence = describeGrant(t, {
+        names: [selected.username],
+        roleLevel: role,
+        scope: {
+          kind: "project",
+          projectName: grantProjectName(t, projectName),
+          lanes: [laneLabel],
+        },
+        locale,
+      }).sentence
+      setMessage(sentence)
+      toast.add({ type: "success", title: sentence })
       onDone?.()
     } catch (err) {
       setPhase("error")
@@ -233,7 +250,18 @@ export function StaffLanePopover({
       await ensureMembership(selected.userId, selected.username, ROLE.PROJECT_LEAD)
       await refreshProjectMembers()
       setPhase("done")
-      setMessage(`${selected.username} is now a lead — leads see every language, unscoped.`)
+      const sentence = describeGrant(t, {
+        names: [selected.username],
+        roleLevel: ROLE.PROJECT_LEAD,
+        scope: {
+          kind: "project",
+          projectName: grantProjectName(t, projectName),
+          lanes: "all",
+        },
+        locale,
+      }).sentence
+      setMessage(sentence)
+      toast.add({ type: "success", title: sentence })
       onDone?.()
     } catch (err) {
       setPhase("error")
@@ -392,9 +420,34 @@ export function StaffLanePopover({
               aria-label={t("common.roleLabel")}
             />
 
+            <GrantScopeNotice
+              sentence={describeGrant(t, {
+                names: [selected.username],
+                roleLevel: role,
+                scope: {
+                  kind: "project",
+                  projectName: grantProjectName(t, projectName),
+                  lanes: [laneLabel],
+                },
+                locale,
+              }).sentence}
+            />
             <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt}>
               {busy && <Spinner className="me-1.5 size-3.5" />}
-              {t("org.staffLanePopover.addToLaneButton", { lane: laneLabel })}
+              {grantButtonLabel(
+                t,
+                t("common.add"),
+                describeGrant(t, {
+                  names: [selected.username],
+                  roleLevel: role,
+                  scope: {
+                    kind: "project",
+                    projectName: grantProjectName(t, projectName),
+                    lanes: [laneLabel],
+                  },
+                  locale,
+                }).scopeEcho,
+              )}
             </Button>
 
             <div className="rounded border border-dashed p-2 text-[11px] text-muted-foreground">
@@ -405,12 +458,25 @@ export function StaffLanePopover({
                 onClick={handleAddAsLead}
                 disabled={busy || !jwt}
               >
-                {t("org.staffLanePopover.addAsLeadButton")}
+                {grantButtonLabel(
+                  t,
+                  t("org.grantScope.action.addAsLead"),
+                  describeGrant(t, {
+                    names: [selected.username],
+                    roleLevel: ROLE.PROJECT_LEAD,
+                    scope: {
+                      kind: "project",
+                      projectName: grantProjectName(t, projectName),
+                      lanes: "all",
+                    },
+                    locale,
+                  }).scopeEcho,
+                )}
               </button>
             </div>
 
             {phase === "done" && message && (
-              <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{message}</p>
+              <p data-testid="grant-scope-result" className="text-[11px] text-emerald-600 dark:text-emerald-400">{message}</p>
             )}
             {phase === "error" && errorMsg && (
               <p className="text-[11px] text-destructive">{errorMsg}</p>

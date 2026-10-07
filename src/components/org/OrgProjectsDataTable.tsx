@@ -713,6 +713,7 @@ export function OrgProjectsDataTable({
                 expanded.has(p.id) ? (
                   <ProjectLaneSubRows
                     projectId={p.id}
+                    projectName={p.name}
                     lanes={displayLanes(p)}
                     defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                     colSpan={colSpan}

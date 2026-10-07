@@ -360,12 +360,14 @@ const MatrixRow = memo(function MatrixRow({
           : { label: "", badge: "" }
         const scopesForCell = memberScopes?.get(p.id)
         return (
-          <MembersMatrixCellEditor
+            <MembersMatrixCellEditor
             key={p.id}
             cell={cell}
             userId={member.userId}
             username={member.username}
             projectId={p.id}
+            projectName={p.name}
+            grantLanes={cell ? grantLanesForCell(scopesForCell) : "all"}
             onMutated={onMutated}
             cellClassName={palette}
             sourceHint={sourceHint}
@@ -394,6 +396,16 @@ const MatrixRow = memo(function MatrixRow({
     </TableRow>
   )
 })
+
+/** Lane labels for the grant sentence. Unknown until the row-hover fetch lands. */
+function grantLanesForCell(
+  view: { scopes: MemberScope[]; laneNames: Record<string, string> } | undefined,
+): "all" | "unknown" | string[] {
+  if (!view) return "unknown"
+  const lanes = view.scopes.filter((scope) => scope.kind === "lane")
+  if (lanes.length === 0) return "all"
+  return lanes.map((scope) => laneScopeLabel(scope.value, view.laneNames) || "default")
+}
 
 /**
  * Compact chip row for a member's lane/file scopes on one project. Empty

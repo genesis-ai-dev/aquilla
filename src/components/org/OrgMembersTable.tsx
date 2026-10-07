@@ -353,6 +353,7 @@ export function OrgMembersTable({
                 <MemberMultiAddRow
                   roleOptions={ORG_ROLE_OPTIONS}
                   defaultRole={ROLE.CONTRIBUTOR}
+                  grantScope={{ kind: "organization" }}
                   scopedUserSearch={false}
                   excludedUserIds={members.map((m) => m.userId)}
                   onAdd={async (usernames, role) => {

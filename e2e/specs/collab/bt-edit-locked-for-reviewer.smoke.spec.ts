@@ -24,6 +24,7 @@ async function hasPersistedBacktranslation(
   projectId: string,
   fileId: string,
   cellId: string,
+  lane: string,
 ): Promise<boolean> {
   try {
     const tokenRes = await fetch(`${FRONTIER_BASE}/api/v2/sync-token`, {
@@ -40,7 +41,8 @@ async function hasPersistedBacktranslation(
 
     const btRes = await fetch(
       `${syncWorkerOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
-        `/files/${encodeURIComponent(fileId)}/backtranslations?cellIds=${encodeURIComponent(cellId)}`,
+        `/files/${encodeURIComponent(fileId)}/backtranslations?cellIds=${encodeURIComponent(cellId)}` +
+        `&lane=${encodeURIComponent(lane)}`,
       { headers: { Authorization: `Bearer ${token}` } },
     )
     if (!btRes.ok) return false
@@ -127,7 +129,9 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   // `cell.backtranslation.set` event drains via the outbox flusher (~5s).
   await expect(aliceBtPanel).toContainText("Traducción de prueba", { timeout: 15_000 })
   await expect.poll(
-    () => hasPersistedBacktranslation(aliceSession.jwt, projectId!, fileId!, firstCellId!),
+    // AQU-1594: the project's first target lane is tagged "fr", not '', and a
+    // read that names no lane reads the '' lane. Name it, as the workspace does.
+    () => hasPersistedBacktranslation(aliceSession.jwt, projectId!, fileId!, firstCellId!, "fr"),
     { timeout: 30_000 },
   ).toBe(true)
 

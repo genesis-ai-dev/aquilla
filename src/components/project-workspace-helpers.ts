@@ -385,3 +385,21 @@ export function runAfterPushedLinkSync(
     // The next normal sidebar refresh retries a transient failure.
   })
 }
+
+/**
+ * AQU-1752: timeline Space and "Play from this cue" wait for the file's
+ * audio-attachment read.
+ *
+ * A media cell counts as file-timed only once its source clip is merged in.
+ * Until the timeline's `useFileAudioAttachments` reports `hasLoaded`, the
+ * picture or the virtual clock looks like it owns the file, and a press
+ * starts that engine. When the read lands, ownership can flip to the queue
+ * and the clock that already started is torn down, so nothing sounds.
+ *
+ * The press is dropped. Nothing is handed to the queue when the clip
+ * arrives; the next press goes to whichever engine the read says owns the
+ * file.
+ */
+export function timelinePlayReady(audioHasLoaded: boolean): boolean {
+  return audioHasLoaded
+}

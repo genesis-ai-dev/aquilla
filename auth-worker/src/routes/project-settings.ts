@@ -395,12 +395,18 @@ projectSettings.on(
     // AQU-1692: the voice index reads these corrections. A malformed one is
     // refused here, because this route checks no other key's shape and the
     // agent path (validateSettingsKeyValue) already refuses it. Null clears.
+    // The client sends the whole settings object on every save, so a value
+    // already stored is let through unchanged: a project carrying an older bad
+    // value can still save the rest (the same rule as bibleEnrichments, AQU-1686).
     const rawVoiceOverrides = (body.settings as Record<string, unknown>).bibleVoiceOverrides
     if (rawVoiceOverrides != null && !isBibleVoiceOverrides(rawVoiceOverrides)) {
-      return c.json(
-        { error: "bibleVoiceOverrides must map speech ids to { speaker?, addressee?, note, by, at }" },
-        400,
-      )
+      const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+      if (JSON.stringify(stored.settings.bibleVoiceOverrides) !== JSON.stringify(rawVoiceOverrides)) {
+        return c.json(
+          { error: "bibleVoiceOverrides must map speech ids to { speaker?, addressee?, note, by, at }" },
+          400,
+        )
+      }
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

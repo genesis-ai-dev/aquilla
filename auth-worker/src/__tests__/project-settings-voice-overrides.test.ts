@@ -77,4 +77,22 @@ describe("bibleVoiceOverrides on the settings route", () => {
     expect((await res.json() as { error: string }).error).toMatch(/bibleVoiceOverrides/)
     expect((await stored()).bibleVoiceOverrides).toBeUndefined()
   })
+
+  // The SPA sends the whole settings blob on every save, so a bad map stored
+  // before this check (a direct DB edit, an older rule) must not block every
+  // later save of the project. Only a NEW or CHANGED bad map is refused.
+  it("lets an unchanged bad stored map ride along, and still refuses a changed one", async () => {
+    await seed()
+    const bad = { "sp:a-b": { speaker: "person:Jesus", by: "mara", at: "2026-10-06T12:00:00Z" } }
+    await env.AQUILLA_PG.prepare("UPDATE project_settings SET settings = $1 WHERE project_id = 'p1'")
+      .bind(JSON.stringify({ bibleVoiceOverrides: bad }))
+      .run()
+    const changed = await patchProject(await jwtFor("mara"), {
+      bibleVoiceOverrides: { ...bad, "sp:c-d": { speaker: 5 } },
+    })
+    expect(changed.status).toBe(400)
+    const same = await patchProject(await jwtFor("mara"), { bibleVoiceOverrides: bad, ttsEnabled: true })
+    expect(same.status).toBe(200)
+    expect(await stored()).toMatchObject({ bibleVoiceOverrides: bad, ttsEnabled: true })
+  })
 })

@@ -1,6 +1,7 @@
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
+import { readBibleEnrichments } from "../../db/shared/bible-enrichments"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -77,8 +78,14 @@ export function overlaySettings(
   assign("autopilotEnabled", settings.autopilotEnabled)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   // AQU-1686: must reach the workspace, or the pack client loads layers for
-  // enrichments the project switched off.
-  assign("bibleEnrichments", settings.bibleEnrichments)
+  // enrichments the project switched off. Validated on the way in, the same
+  // way the server reads it: an unknown id or a value that is not a boolean
+  // counts as unset, so a hand-edited {voices: "off"} no longer shows as a
+  // switch that is on.
+  assign(
+    "bibleEnrichments",
+    settings.bibleEnrichments == null ? settings.bibleEnrichments : readBibleEnrichments(settings.bibleEnrichments),
+  )
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.

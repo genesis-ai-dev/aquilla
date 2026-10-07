@@ -451,6 +451,16 @@ describe("external quality reads (AQU-1231)", () => {
               ('proj-a', 'file-x', 'dual-tag', 'target', 'es', NULL, 'la gracia dual-tag', 'evt-t-dual-tag', 2000, 3),
               ('proj-a', 'file-x', 'dual-fr', 'target', 'fr', NULL, 'grâce', 'evt-t-dual-fr', 2000, 1)`,
     )
+    // Renderings belong to one lane. This scan is the Spanish lane, so the
+    // concept's approved renderings have to name it; an unstamped rendering
+    // belongs to the legacy_tag '' lane and must not satisfy this check.
+    await testDb.pg.query(
+      `UPDATE concepts SET renderings = $1::jsonb WHERE concept_id = 'concept-grace'`,
+      [JSON.stringify([
+        { rendering: "gracia", status: "preferred", laneId: "lane-tgt-es" },
+        { rendering: "favor", status: "admitted", laneId: "lane-tgt-es" },
+      ])],
+    )
 
     const res = await handleExternalQualityRequest(
       req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x&lane=es", tokenA),

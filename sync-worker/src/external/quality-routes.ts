@@ -44,6 +44,7 @@
 // to another project gets `scope_denied` 403.
 
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
+import { applyRenderingLaneScope, renderingLaneScope } from "../events/rendering-lane-scope"
 import { handleHealthRollupRequest } from "../events/health-rollup-route"
 import { handleProgressReadRequest, type FileProgressResponse } from "../events/progress-read-route"
 import { handleConceptsReadRequest, type ConceptRowOut } from "../events/concepts-read-route"
@@ -442,7 +443,12 @@ async function handleTermConsistency(
     lane,
   )
 
-  const findings: ExternalTermConsistencyFinding[] = scanTermConsistency(cells, concepts.concepts)
+  const renderingScope = await renderingLaneScope(db, projectId, lane)
+  const laneConcepts = concepts.concepts.map((concept) => ({
+    ...concept,
+    renderings: applyRenderingLaneScope(concept.renderings, renderingScope),
+  }))
+  const findings: ExternalTermConsistencyFinding[] = scanTermConsistency(cells, laneConcepts)
     .map((f) => ({ ...f, consistencyPercent: percent(f.consistentCount, f.totalOccurrences) }))
     .filter((f) => !onlyDrift || f.flaggedCells.length > 0)
 

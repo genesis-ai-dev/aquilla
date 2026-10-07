@@ -346,6 +346,8 @@ export function validateEmitEventsCommand(
 interface TermRendering {
   rendering: string
   status: 'preferred' | 'admitted' | 'forbidden'
+  /** `lanes.id`. Empty is omitted; a non-string is rejected. */
+  laneId?: string
 }
 
 const RENDERING_STATUSES: ReadonlySet<string> = new Set(['preferred', 'admitted', 'forbidden'])
@@ -466,7 +468,16 @@ function validateRenderings(
       bad(`renderings[${i}].status must be 'preferred', 'admitted' or 'forbidden'`)
       return null
     }
-    out.push({ rendering: raw.rendering, status: raw.status as TermRendering['status'] })
+    const laneId = raw.laneId
+    if (laneId !== undefined && laneId !== '') {
+      if (typeof laneId !== 'string') {
+        bad(`renderings[${i}].laneId must be a string`)
+        return null
+      }
+      out.push({ rendering: raw.rendering, status: raw.status as TermRendering['status'], laneId })
+    } else {
+      out.push({ rendering: raw.rendering, status: raw.status as TermRendering['status'] })
+    }
   }
   return out
 }

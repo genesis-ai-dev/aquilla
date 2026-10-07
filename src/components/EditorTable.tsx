@@ -212,6 +212,7 @@ import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { findConceptMatches } from "@/lib/terminology/match"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
@@ -5491,7 +5492,11 @@ function EditorRow({
   const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
-  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+  const terminologyConcepts = conceptsForLaneTag(
+    project.terminology ?? EMPTY_CONCEPTS,
+    activeLane,
+    project.lanes ?? [],
+  )
   const showTargetKeyTermHighlights =
     targetKeyTermHighlightMode === "always" ||
     (targetKeyTermHighlightMode === "focused" && isRowFocused)

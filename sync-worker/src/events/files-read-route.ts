@@ -20,6 +20,7 @@ import { verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { resolveCorpusMarker } from "./corpus-marker"
 import { usableSortIndex } from "./sort-index"
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { sourceLaneIdSql, targetLaneIdSql } from "../../../db/shared/lane-sql"
 import { notHiddenFileSql } from "../../../db/shared/counted-files"
 import { legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
@@ -65,8 +66,12 @@ interface FileSummary {
    *  ordinary files. */
   anchorFileId: string | null
   eventId: string
-  sourceLanguage: string | null
-  targetLanguage: string | null
+  /** AQU-1596: what the file's header *claimed*, as import information. Never
+   *  a lane's language — a Macula file declares `hbo`, and a translation
+   *  imported into the French lane may declare Spanish. Surfaces that show a
+   *  language to a user read it off the lane, not off here. */
+  declaredSourceLanguage: string | null
+  declaredTargetLanguage: string | null
   sourceTextDirection: 'ltr' | 'rtl' | null
   targetTextDirection: 'ltr' | 'rtl' | null
   /** Timeline-segment-model order lens, read from meta. Null ⇒ client treats
@@ -133,10 +138,6 @@ function normalizeTimebase(raw: unknown): FileSummary['audioVttTimebase'] {
 
 function mapRow(row: FileRowRaw): FileSummary {
   let meta: {
-    source_language?: string
-    target_language?: string
-    sourceLanguage?: string
-    targetLanguage?: string
     source_text_direction?: string
     target_text_direction?: string
     sourceTextDirection?: string
@@ -164,8 +165,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     kind: row.kind,
     anchorFileId: row.anchor_file_id,
     eventId: row.event_id,
-    sourceLanguage: meta.source_language ?? meta.sourceLanguage ?? null,
-    targetLanguage: meta.target_language ?? meta.targetLanguage ?? null,
+    ...readDeclaredLanguages(meta),
     sourceTextDirection: normalizeTextDirection(meta.source_text_direction ?? meta.sourceTextDirection),
     targetTextDirection: normalizeTextDirection(meta.target_text_direction ?? meta.targetTextDirection),
     orderedBy: meta.orderedBy ?? null,

@@ -91,8 +91,9 @@ project_settings 'terminology' key is retired; migrated projects do not have it.
 SELECT status, count(*) AS n FROM concepts
 WHERE project_id = :project AND deleted_at IS NULL GROUP BY status
 
-Pull the concepts that bind (renderings is [{rendering, status}], with status
-'preferred' | 'admitted' | 'forbidden'):
+Pull the concepts that bind (renderings is [{rendering, status, laneId?}], with
+status 'preferred' | 'admitted' | 'forbidden'). laneId is lanes.id; omit it and
+the rendering belongs to the target lane whose legacy_tag is '':
 SELECT concept_id, source_term, renderings, notes FROM concepts
 WHERE project_id = :project AND deleted_at IS NULL AND status = 'active'
   AND source_term ILIKE '%word%'
@@ -106,7 +107,7 @@ are working on.
 Add or change a concept with term.* events (describe_command({kind:'EmitEvents'})
 for the shapes), never with a PatchSettings op on 'terminology':
 propose_command({commands:[{kind:'EmitEvents', events:[{kind:'term.create',
-  payload:{sourceTerm:'covenant', renderings:[{rendering:'…', status:'preferred'}],
+  payload:{sourceTerm:'covenant', renderings:[{rendering:'…', status:'preferred', laneId:'…'}],
   status:'draft'}}]}]})
 Query the table first: a second term.create for an existing source_term does
 not merge. Change an existing concept with term.update {conceptId, …}.

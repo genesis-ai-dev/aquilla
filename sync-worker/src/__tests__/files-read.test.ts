@@ -63,6 +63,31 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.files[0].cellCount).toBe(1213)
   })
 
+  it("uses the '' progress row when the source lane has no progress row yet", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "srclane1", project_id: "proj-a", role: "source", name: "English", legacy_tag: null },
+        { id: "deflane1", project_id: "proj-a", role: "target", name: "Spanish", legacy_tag: "" },
+      ],
+      files: [{
+        id: "file-old", project_id: "proj-a", name: "Genesis",
+        cell_count: 1, filled_count: 0, approved_count: 0,
+      }],
+      file_section_progress: [{
+        project_id: "proj-a", file_id: "file-old", scope: "file", section_key: "",
+        lane_id: "deflane1", target_lang: "", total_count: 42, filled_count: 7,
+        validator_histogram: {}, revision: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-old" })
+    const res = (await handleFilesReadRequest(new Request("https://w/api/v1/projects/proj-a/files", {
+      headers: { Authorization: `Bearer ${token}` },
+    }), envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { files: Array<{ cellCount: number; filledCount: number }> }
+    expect(body.files[0]).toMatchObject({ cellCount: 42, filledCount: 7 })
+  })
+
   it("uses the single tagged lane when the project has no blank bridge", async () => {
     const { db } = await makeTestDb({
       lanes: [

@@ -39,6 +39,7 @@ import type { TermMatchOptions, TermMatchingSettings } from "../../../../src/lib
 import { readProjectConcepts } from "../concepts-read"
 import { laneLanguageForTag, type LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
 import { languagesForLanes, loadLaneRows } from "../read-lane-language"
+import { conceptsForLane } from "../../../../src/lib/terminology/rendering-lane"
 
 // ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
 
@@ -47,6 +48,8 @@ export type RenderingStatus = "preferred" | "admitted" | "forbidden"
 export interface TermRendering {
   rendering: string
   status: RenderingStatus
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 export interface Concept {
@@ -145,7 +148,12 @@ function parseConcepts(raw: unknown): Concept[] {
         const rr = r as Record<string, unknown>
         if (typeof rr.rendering !== "string" || !rr.rendering.trim()) continue
         if (rr.status !== "preferred" && rr.status !== "admitted" && rr.status !== "forbidden") continue
-        renderings.push({ rendering: rr.rendering.trim(), status: rr.status })
+        const laneId = typeof rr.laneId === "string" && rr.laneId !== "" ? rr.laneId : undefined
+        renderings.push({
+          rendering: rr.rendering.trim(),
+          status: rr.status,
+          ...(laneId ? { laneId } : {}),
+        })
       }
     }
     const match = coerceMatchOptions(c.match)
@@ -385,6 +393,7 @@ function parseSettings(raw: unknown): Record<string, unknown> {
 export async function loadProjectContext(
   db: SettingsDb,
   projectId: string,
+  lane?: { laneId?: string | null; targetLang?: string | null },
 ): Promise<ProjectContext> {
   const empty: ProjectContext = {
     briefParameters: {},
@@ -411,10 +420,11 @@ export async function loadProjectContext(
       ? (brief as Record<string, unknown>)
       : {}
 
-  const concepts = [
+  const loaded = [
     ...(await loadLocalConcepts(db, projectId)),
     ...(await loadSubscribedConcepts(db, projectId)),
   ]
+  const concepts = lane ? await conceptsForRequestedLane(db, projectId, loaded, lane) : loaded
   const termMatching = parseTermMatching(settings.termMatching)
   let lanes: LaneLanguageRow[] = []
   try {
@@ -438,14 +448,82 @@ export async function loadProjectContext(
   }
 }
 
+async function targetLaneId(
+  db: SettingsDb,
+  projectId: string,
+  ref: { laneId?: string | null; targetLang?: string | null },
+): Promise<string | null> {
+  const id = (ref.laneId ?? "").trim()
+  if (id) {
+    const row = await db
+      .prepare(`SELECT id FROM lanes WHERE project_id = ? AND id = ? AND role = 'target'`)
+      .bind(projectId, id)
+      .first<{ id: string }>()
+    return row?.id ?? null
+  }
+  const row = await db
+    .prepare(
+      `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`,
+    )
+    .bind(projectId, ref.targetLang ?? "")
+    .first<{ id: string }>()
+  return row?.id ?? null
+}
+
+/** Same rule as renderingLaneId. No `''` row: leave the list alone. */
+async function conceptsForRequestedLane(
+  db: SettingsDb,
+  projectId: string,
+  concepts: Concept[],
+  lane: { laneId?: string | null; targetLang?: string | null },
+): Promise<Concept[]> {
+  const emptyId = await targetLaneId(db, projectId, { targetLang: "" })
+  if (!emptyId) return concepts
+  const activeId = await targetLaneId(db, projectId, lane)
+  if (!activeId) return concepts.map((concept) => ({ ...concept, renderings: [] }))
+  return conceptsForLane(concepts, activeId, emptyId)
+}
+
 function stringList(raw: unknown): string[] {
   return Array.isArray(raw)
     ? raw.filter((item): item is string => typeof item === "string" && item.trim() !== "")
     : []
 }
 
-/** Empty string is always the project-default lane. Named lanes must be
- *  registered in settings.targetLanes and not archived. */
+/**
+ * Is this lane one the project may draft into?
+ *
+ * AQU-1610: a lane id is checked against the `lanes` table — the lane's own
+ * row, archived or not — which is the only identity that cannot name two
+ * lanes at once. A legacy TAG still falls back to the settings rule
+ * (`settings.targetLanes` minus `archivedLanes`, with `''` the project-default
+ * lane) because older clients send tags and the project-level lists are
+ * AQU-1595's to remove, not this ticket's.
+ */
+export async function isRegisteredLaneId(
+  db: SettingsDb,
+  projectId: string,
+  laneId: string,
+): Promise<boolean> {
+  if (!laneId) return false
+  try {
+    const row = await db
+      .prepare(
+        `SELECT 1 AS ok FROM lanes
+          WHERE project_id = ? AND id = ? AND role = 'target' AND archived_at IS NULL`,
+      )
+      .bind(projectId, laneId)
+      .first<{ ok: number }>()
+    return row != null
+  } catch {
+    return false
+  }
+}
+
+/** Legacy-tag form of {@link isRegisteredLaneId}. Empty string is the
+ *  project-default lane; named lanes must be in settings.targetLanes and not
+ *  archived. The tag is matched exactly: "es" is not the lane registered as
+ *  "Spanish". Removed with the project-level lane lists (AQU-1595). */
 export async function isRegisteredTargetLane(
   db: SettingsDb,
   projectId: string,

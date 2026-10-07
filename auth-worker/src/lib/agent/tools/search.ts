@@ -7,6 +7,8 @@
 
 import { readProjectConcepts, type StoredConcept } from "../../concepts-read"
 import { AliasMap } from "../compress"
+import { resolveLane, resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { renderingsForLane } from "../../../../../src/lib/terminology/rendering-lane"
 import { notHiddenSql } from "../../hidden-cells-scope"
 import { clip } from "./read"
 import type { SearchHit, ToolOutcome } from "./types"
@@ -21,7 +23,9 @@ export interface SearchArgs {
 export interface SearchContext {
   projectId: string
   focusedFileId?: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
 }
@@ -55,20 +59,21 @@ async function searchCells(
     "value_tsv @@ websearch_to_tsquery('simple', ?)",
     notHiddenSql(),
   ]
+  const { laneId } = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
   const binds: unknown[] = [ctx.projectId, q]
   if (side !== "both") {
     conditions.push("side = ?")
     binds.push(side)
   }
   if (side === "target") {
-    conditions.push("target_lang = ?")
-    binds.push(ctx.lane)
+    conditions.push("lane_id = ?")
+    binds.push(laneId)
   } else if (side === "both") {
-    // Source rows are stored once at target_lang = '', so only target rows are
-    // scoped to the lane. A bare target_lang filter would drop every source hit
-    // in any non-default lane.
-    conditions.push("(side = 'source' OR target_lang = ?)")
-    binds.push(ctx.lane)
+    // A source row belongs to the SOURCE lane, so only target rows are scoped
+    // here — a bare lane filter would drop every source hit in any lane but
+    // the one being searched.
+    conditions.push("(side = 'source' OR lane_id = ?)")
+    binds.push(laneId)
   }
   if (fileId) {
     conditions.push("file_id = ?")
@@ -150,11 +155,19 @@ function termSnippet(t: StoredConcept): string {
 async function searchTerms(db: AquillaDb, q: string, ctx: SearchContext, limit: number): Promise<SearchHit[]> {
   const needle = q.toLowerCase()
   const hits: SearchHit[] = []
+  const empty = await resolveLane(db, ctx.projectId, { targetLang: "" })
+  const active = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
   for (const term of await readProjectConcepts(db, ctx.projectId)) {
+    const renderings = !empty.laneId
+      ? term.renderings
+      : !active.laneId
+        ? []
+        : renderingsForLane(term.renderings, active.laneId, empty.laneId)
+    const visible = renderings === term.renderings ? term : { ...term, renderings }
     if (hits.length >= limit) break
-    const text = [term.sourceTerm, ...term.renderings.map((r) => r.rendering), term.notes ?? ""]
+    const text = [visible.sourceTerm, ...visible.renderings.map((r) => r.rendering), visible.notes ?? ""]
     if (text.some((s) => s.toLowerCase().includes(needle))) {
-      hits.push({ cellId: "", side: "terms", snippet: termSnippet(term).slice(0, 200) })
+      hits.push({ cellId: "", side: "terms", snippet: termSnippet(visible).slice(0, 200) })
     }
   }
   return hits

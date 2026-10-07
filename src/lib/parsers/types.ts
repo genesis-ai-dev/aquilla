@@ -819,9 +819,17 @@ export interface FileReference {
    * mutates cell data — it only chooses the sort key. Fully reversible.
    */
   orderedBy?: OrderedBy
-  /** Optional file-level language hints from import metadata. */
-  sourceLanguage?: string
-  targetLanguage?: string
+  /**
+   * AQU-1596: the languages this file's header *declared* at import. Import
+   * information about the file, not the language of any lane — a Macula file
+   * declares the corpus code `hbo`, and a file declaring Spanish may have been
+   * imported into the French lane. Nothing resolves a lane's or project's
+   * language from these (see `resolveActiveSourceLanguage` / AQU-848 and
+   * `resolveActiveTargetLanguage` / AQU-583); the one surface that shows them
+   * is the file-details modal, which labels them as declared.
+   */
+  declaredSourceLanguage?: string
+  declaredTargetLanguage?: string
   /** Optional file-level text direction hints from import metadata. */
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"

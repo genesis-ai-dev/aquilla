@@ -22,6 +22,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect, vi } from "vitest"
 import {
+  isRegisteredTargetLane,
   loadProjectContext,
   lintTerminology,
   termGuidanceForSpan,
@@ -511,6 +512,15 @@ describe("computeContextReadiness", () => {
 // parsing dropped those fields or the tick-side filter mismatched the client
 // predicate, a French-only rule would either lint every lane's drafts (false
 // violations) or none (silent non-enforcement).
+describe("isRegisteredTargetLane", () => {
+  it("matches the registered tag exactly, not the language", async () => {
+    await seedSettings("proj-ctx-reg", { targetLanes: ["Spanish"], archivedLanes: [] })
+    expect(await isRegisteredTargetLane(db, "proj-ctx-reg", "Spanish")).toBe(true)
+    expect(await isRegisteredTargetLane(db, "proj-ctx-reg", "es")).toBe(false)
+    expect(await isRegisteredTargetLane(db, "proj-ctx-reg", "")).toBe(true)
+  })
+})
+
 describe("lane-scoped authored rules (AQU-609)", () => {
   it("passes scope/lane through loadProjectContext and rulesForLane filters by run lane", async () => {
     await seedSettings("proj-ctx-lanes", {

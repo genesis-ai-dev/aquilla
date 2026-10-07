@@ -698,6 +698,18 @@ describe('changesets — target-language lanes', () => {
     }
   }
 
+  it('does not retarget a code onto a lane whose name is that language', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['Spanish'])
+
+    const { res, body } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.message).toContain('unregistered lane "es"')
+  })
+
   it('rejects a SetTranslation naming an unregistered lane at prepare', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb, contributorCred())

@@ -25,6 +25,7 @@ import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
+import { assignDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { usableSortIndex } from './sort-index'
 import { commentAuthorLabel } from './comment-authorship'
 import {
@@ -36,6 +37,8 @@ import {
   backtranslationLaneMatchSql,
   laneIdResolveBinds,
   laneIdResolveSql,
+  targetLaneDualReadBinds,
+  targetLaneDualReadSql,
 } from './lane-id-sql'
 import { eventLaneTag } from '../../../src/lib/lanes/event-lane'
 import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
@@ -586,6 +589,30 @@ export function coerceIntegerMsPayload(event: PersistedEvent): PersistedEvent {
   return fixed === null ? event : { ...event, payload: fixed }
 }
 
+/**
+ * Stamp a missing rendering `laneId` with the project's target lane whose
+ * `legacy_tag` is `''`. Same rule as `renderingLaneId` in
+ * src/lib/terminology/rendering-lane.ts: a non-empty laneId is kept, and
+ * when that lane row does not exist yet the rendering is stored unchanged.
+ *
+ * Two binds, in order: the renderings JSON text, then `project_id`.
+ * `jsonb_agg` of an empty array is NULL, so the COALESCE keeps `[]`.
+ */
+const STAMP_RENDERINGS_SQL = `(SELECT COALESCE(jsonb_agg(
+    CASE
+      WHEN COALESCE(elem->>'laneId', '') <> '' THEN elem
+      WHEN empty_lane.id IS NULL THEN elem
+      ELSE jsonb_set(elem, '{laneId}', to_jsonb(empty_lane.id), true)
+    END
+    ORDER BY ord
+  ), '[]'::jsonb)
+  FROM jsonb_array_elements(?::text::jsonb) WITH ORDINALITY AS rendering_elem(elem, ord)
+  LEFT JOIN LATERAL (
+    SELECT id FROM lanes
+    WHERE project_id = ? AND role = 'target' AND legacy_tag = ''
+    LIMIT 1
+  ) empty_lane ON TRUE)`
+
 export function buildEventProjectionStmts(
   db: AquillaDb,
   rawEvent: PersistedEvent,
@@ -998,8 +1025,11 @@ export function buildEventProjectionStmts(
         // must not resolve a proposal either. `draft.created_at <= serverTs`
         // is the rebuild causality boundary: replaying a historical commit may
         // rebuild the cell head, but it can never review a proposal staged
-        // later. Drafts carry their own `target_lang` (copied from the owning
-        // run at insert) so a French commit cannot apply a Spanish proposal.
+        // later. Drafts carry their own lane (copied from the owning run at
+        // insert) so a French commit cannot apply a Spanish proposal — matched
+        // on `lane_id`, not on the tag (AQU-1610): two lanes agree on the tag
+        // whenever one has no `legacy_tag` or was retagged since, and then one
+        // lane's commit resolved the other lane's proposal.
         // Text equality is exact; normalizing whitespace here would claim a
         // proposal was applied when the committed artifact differs byte-for-
         // byte. The partial live-draft index permits at most one reconciled row
@@ -1020,7 +1050,7 @@ export function buildEventProjectionStmts(
                     AND draft.cell_id = ?
                     AND draft.created_at <= to_timestamp(?::double precision / 1000.0)
                     AND draft.status = 'proposed'
-                    AND draft.target_lang = ?
+                    AND ${targetLaneDualReadSql('draft')}
                     AND EXISTS (
                       SELECT 1
                         FROM cells AS projected
@@ -1028,7 +1058,7 @@ export function buildEventProjectionStmts(
                          AND projected.file_id = ?
                          AND projected.cell_id = ?
                          AND projected.side = 'target'
-                         AND projected.target_lang = ?
+                         AND ${targetLaneDualReadSql('projected')}
                          AND projected.event_id = ?
                     )
                  RETURNING draft.id, draft.run_id, draft.project_id,
@@ -1062,11 +1092,11 @@ export function buildEventProjectionStmts(
               event.fileId,
               event.cellId,
               event.serverTs,
-              lane,
+              ...targetLaneDualReadBinds(event.projectId, lane),
               event.projectId,
               event.fileId,
               event.cellId,
-              lane,
+              ...targetLaneDualReadBinds(event.projectId, lane),
               event.id,
               event.id,
               event.serverTs,
@@ -2200,8 +2230,9 @@ case 'cell.audio.attach': {
       const langMeta: Record<string, unknown> = p.projectionMeta
         ? { ...p.projectionMeta }
         : {}
-      if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
-      if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
+      // AQU-1596: stored as the file's *declared* languages (import
+      // information), not as the lane's language. Payload names are history.
+      assignDeclaredLanguages(langMeta, p.sourceLanguage, p.targetLanguage)
       if (p.sourceTextDirection) langMeta.sourceTextDirection = p.sourceTextDirection
       if (p.targetTextDirection) langMeta.targetTextDirection = p.targetTextDirection
       // Timeline-segment-model: the file's order lens lives in meta (JSON),
@@ -2340,7 +2371,7 @@ case 'cell.audio.attach': {
             `INSERT INTO concepts (
               concept_id, project_id, source_term, renderings, notes,
               status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
+            ) VALUES (?, ?, ?, ${STAMP_RENDERINGS_SQL}, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
             ON CONFLICT(concept_id) DO NOTHING`,
           )
           .bind(
@@ -2348,6 +2379,7 @@ case 'cell.audio.attach': {
             event.projectId,
             p.sourceTerm,
             JSON.stringify(p.renderings ?? []),
+            event.projectId,
             p.notes ?? null,
             p.status,
             p.caseSensitive ? 1 : 0,
@@ -2368,12 +2400,21 @@ case 'cell.audio.attach': {
       // table exists at all. `renderings` is the deliberate exception: a
       // rendering list has no per-item identity to merge on, so it replaces
       // wholesale when present and is left untouched when absent.
+      // Absent renderings bind a single NULL into COALESCE so the column is
+      // left alone. Present renderings are stamped; that expression is never
+      // NULL (an empty list becomes '[]'), so it replaces the column.
+      const renderingsSql = p.renderings === undefined
+        ? 'COALESCE(?::text::jsonb, renderings)'
+        : STAMP_RENDERINGS_SQL
+      const renderingBinds = p.renderings === undefined
+        ? [null]
+        : [JSON.stringify(p.renderings), event.projectId]
       stmts.push(
         db
           .prepare(
             `UPDATE concepts SET
                source_term    = COALESCE(?, source_term),
-               renderings     = COALESCE(?::text::jsonb, renderings),
+               renderings     = ${renderingsSql},
                notes          = COALESCE(?, notes),
                case_sensitive = COALESCE(?, case_sensitive),
                match_options  = COALESCE(?::text::jsonb, match_options),
@@ -2382,7 +2423,7 @@ case 'cell.audio.attach': {
           )
           .bind(
             p.sourceTerm ?? null,
-            p.renderings === undefined ? null : JSON.stringify(p.renderings),
+            ...renderingBinds,
             p.notes ?? null,
             p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
             p.match === undefined ? null : JSON.stringify(p.match),

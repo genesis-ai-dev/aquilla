@@ -20,6 +20,8 @@ import { verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { resolveCorpusMarker } from "./corpus-marker"
 import { usableSortIndex } from "./sort-index"
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { sourceLaneIdSql } from "../../../db/shared/lane-sql"
+import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { notHiddenFileSql } from "../../../db/shared/counted-files"
 import { legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
 import { visibleLanesForRead } from "./lane-read-wall"
@@ -64,8 +66,12 @@ interface FileSummary {
    *  ordinary files. */
   anchorFileId: string | null
   eventId: string
-  sourceLanguage: string | null
-  targetLanguage: string | null
+  /** AQU-1596: what the file's header *claimed*, as import information. Never
+   *  a lane's language — a Macula file declares `hbo`, and a translation
+   *  imported into the French lane may declare Spanish. Surfaces that show a
+   *  language to a user read it off the lane, not off here. */
+  declaredSourceLanguage: string | null
+  declaredTargetLanguage: string | null
   sourceTextDirection: 'ltr' | 'rtl' | null
   targetTextDirection: 'ltr' | 'rtl' | null
   /** Timeline-segment-model order lens, read from meta. Null ⇒ client treats
@@ -132,10 +138,6 @@ function normalizeTimebase(raw: unknown): FileSummary['audioVttTimebase'] {
 
 function mapRow(row: FileRowRaw): FileSummary {
   let meta: {
-    source_language?: string
-    target_language?: string
-    sourceLanguage?: string
-    targetLanguage?: string
     source_text_direction?: string
     target_text_direction?: string
     sourceTextDirection?: string
@@ -163,8 +165,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     kind: row.kind,
     anchorFileId: row.anchor_file_id,
     eventId: row.event_id,
-    sourceLanguage: meta.source_language ?? meta.sourceLanguage ?? null,
-    targetLanguage: meta.target_language ?? meta.targetLanguage ?? null,
+    ...readDeclaredLanguages(meta),
     sourceTextDirection: normalizeTextDirection(meta.source_text_direction ?? meta.sourceTextDirection),
     targetTextDirection: normalizeTextDirection(meta.target_text_direction ?? meta.targetTextDirection),
     orderedBy: meta.orderedBy ?? null,
@@ -264,7 +265,17 @@ export async function handleFilesReadRequest(
     // GREATEST(0, …) throughout: a file backfilled before its projection row
     // existed can carry a structural count without a matching total, and a
     // negative denominator would render as a nonsense percentage.
-    `GREATEST(0, COALESCE(p.total_count, f.cell_count) - ${less("COALESCE(p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
+    // AQU-1599: the denominator and its structural share are facts about the
+    // SOURCE text, so they come off the source lane's row (`ps`). They used to
+    // ride the `target_lang = ''` row beside the counters below, which made
+    // every file in the list read 0 of 0 the moment that lane was archived.
+    //
+    // `p` sits between `ps` and the files counter because a row projected
+    // before AQU-1599 has no source-lane sibling until AQU-1616's recompute
+    // gives it one, and every lane's row carried the same denominator then —
+    // so the pinned lane's row still answers correctly, and the stale
+    // `files.cell_count` stays the last resort it has always been.
+    `GREATEST(0, COALESCE(ps.total_count, p.total_count, f.cell_count) - ${less("COALESCE(ps.structural_count, p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
     `CASE WHEN p.file_id IS NOT NULL
             THEN GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")})
             WHEN thr.one_target_lane
@@ -293,14 +304,22 @@ export async function handleFilesReadRequest(
     "LEFT JOIN projects pr ON pr.id = q.id " +
     "LEFT JOIN org_settings os ON os.org_id = pr.org_id)"
   const joins =
-    // AQU-538: file_section_progress materializes one row per target lane.
-    // The files list is one row per file. A project that still has the ''
-    // bridge stays pinned to it. A project with a single tagged lane (AQU-1594)
-    // uses that tag. Several tagged lanes and no bridge match nothing here, so
-    // the file is not repeated once per lane.
-    " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = (" +
-    "SELECT CASE WHEN bool_or(l.legacy_tag = '') THEN '' WHEN COUNT(*) = 1 THEN MIN(l.legacy_tag) ELSE NULL END" +
+    // AQU-538: file_section_progress materializes one row per lane. The files
+    // list is one row per file, so the target counters stay pinned to one
+    // lane. Prefer the blank-bridge target (legacy_tag = ''). If there is no
+    // blank bridge and exactly one target lane, use that lane's id (AQU-1594).
+    // Several tagged targets and no bridge match nothing, so the file is not
+    // repeated once per lane.
+    //
+    // AQU-1599: pinned by lane id, not target_lang. The source lane's row
+    // carries '' in target_lang too (its legacy_tag is NULL), so a tag pin
+    // matched two rows and summed the blank-bridge translations onto the
+    // source lane's empty ones. Neither join adds a bind.
+    " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.lane_id = (" +
+    "SELECT CASE WHEN bool_or(l.legacy_tag = '') THEN MIN(l.id) FILTER (WHERE l.legacy_tag = '') WHEN COUNT(*) = 1 THEN MIN(l.id) ELSE NULL END" +
     " FROM public.lanes l WHERE l.project_id = f.project_id AND l.role = 'target')" +
+    // The lane-independent half of the same row set: the source lane's.
+    ` LEFT JOIN file_section_progress ps ON ps.project_id = f.project_id AND ps.file_id = f.id AND ps.scope = 'file' AND ps.section_key = '' AND ps.lane_id = ${sourceLaneIdSql("f.project_id")}` +
     " LEFT JOIN thr ON true" +
     " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true" +
     // AQU-1083: the structural share of the same buckets, for the subtraction.
@@ -429,15 +448,21 @@ async function grantedLaneTagsForFiles(
 function visibleLastEditSql(tagCount: number): string {
   if (tagCount === 0) return "NULL::bigint"
   const placeholders = Array.from({ length: tagCount }, () => "?").join(", ")
+  // AQU-1599: the granted lanes are TARGET lanes, so the join says so rather
+  // than matching `target_lang`, which the source lane's row also carries ''
+  // in. Same binds, same positions — the tags move from the column to the
+  // lane row they came from.
   return `(SELECT MAX(v.last_edit_at) FROM file_section_progress v
+     JOIN public.lanes vl
+       ON vl.project_id = v.project_id AND vl.id = v.lane_id AND vl.role = 'target'
     WHERE v.project_id = f.project_id AND v.file_id = f.id
       AND v.scope = 'file' AND v.section_key = ''
-      AND v.target_lang IN (${placeholders}))`
+      AND vl.legacy_tag IN (${placeholders}))`
 }
 
 /**
- * The files list is pinned to the default lane (`target_lang ''`) so a project
- * with several lanes does not fan out into one row per lane. That pin is the
+ * The files list's counters are pinned to the default lane so a project with
+ * several lanes does not fan out into one row per lane. That pin is the
  * default lane's counts. When the wall is on and this caller was not granted
  * that lane, replace those counts with the lanes they were granted. Every
  * lane's progress row carries a copy of the same source-cell denominator
@@ -489,6 +514,8 @@ async function hideUngrantedDefaultLaneCounts(
             SUM(GREATEST(0, p.filled_count - ${less("p.structural_filled_count")}))::int AS filled_count,
             SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count
        FROM file_section_progress p
+       JOIN public.lanes pl
+         ON pl.project_id = p.project_id AND pl.id = p.lane_id AND pl.role = 'target'
        CROSS JOIN thr
        LEFT JOIN LATERAL (
          SELECT SUM(entry.value::integer)::integer AS approved
@@ -503,7 +530,7 @@ async function hideUngrantedDefaultLaneCounts(
       WHERE p.project_id = ?
         AND p.scope = 'file' AND p.section_key = ''
         AND p.file_id IN (${filePlaceholders})
-        AND p.target_lang IN (${tagPlaceholders})
+        AND pl.legacy_tag IN (${tagPlaceholders})
       GROUP BY p.file_id`,
   )
     .bind(projectId, projectId, ...fileIds, ...tagList)

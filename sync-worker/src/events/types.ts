@@ -26,6 +26,8 @@ export type TermRenderingStatusPayload = 'preferred' | 'admitted' | 'forbidden'
 export interface TermRenderingPayload {
   rendering: string
   status: TermRenderingStatusPayload
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 /** Mirrors `Concept['status']` in src/lib/terminology/types.ts. */

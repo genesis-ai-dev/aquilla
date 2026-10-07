@@ -446,7 +446,8 @@ export async function isRegisteredLaneId(
 
 /** Legacy-tag form of {@link isRegisteredLaneId}. Empty string is the
  *  project-default lane; named lanes must be in settings.targetLanes and not
- *  archived. Removed with the project-level lane lists (AQU-1595). */
+ *  archived. The tag is matched exactly: "es" is not the lane registered as
+ *  "Spanish". Removed with the project-level lane lists (AQU-1595). */
 export async function isRegisteredTargetLane(
   db: SettingsDb,
   projectId: string,

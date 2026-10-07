@@ -1607,11 +1607,12 @@ async function fetchPortfolioLanes(
   // AQU-1458: a lane is archived when its row says so, or when an older
   // project only recorded the tag in settings.archivedLanes.
   //
-  // AQU-1600: the former default lane ('') archives like any other, so the
-  // empty tag is carried through both maps instead of being dropped. Only the
+  // AQU-1600: the former default lane ('') archives like any other. Only the
   // ROW can archive it — settings.archivedLanes is a list of non-empty tags
   // and never names it — so the settings mirror is consulted for non-empty
-  // tags only.
+  // tags only, and those tags are matched case-insensitively (the same rule
+  // as `listed()`), never by language. Two lanes may share a language; a row
+  // archives the lane whose id it is.
   const archivedTagsByProject = new Map<string, Set<string>>()
   for (const row of settingsRows.results ?? []) {
     const tags = new Set(
@@ -1621,25 +1622,25 @@ async function fetchPortfolioLanes(
     )
     if (tags.size > 0) archivedTagsByProject.set(row.project_id, tags)
   }
-  const archivedRowTags = new Map<string, Set<string>>()
+  const archivedIdsByProject = new Map<string, Set<string>>()
   for (const row of nameRows.results ?? []) {
     if (row.archived_at == null || row.archived_at === "") continue
-    if (row.legacy_tag == null) continue
-    const tag = row.legacy_tag.trim().toLowerCase()
-    let tags = archivedRowTags.get(row.project_id)
-    if (!tags) {
-      tags = new Set()
-      archivedRowTags.set(row.project_id, tags)
+    let ids = archivedIdsByProject.get(row.project_id)
+    if (!ids) {
+      ids = new Set()
+      archivedIdsByProject.set(row.project_id, ids)
     }
-    tags.add(tag)
+    ids.add(row.id)
   }
   for (const [projectId, lanes] of acc) {
     const fromSettings = archivedTagsByProject.get(projectId)
-    const fromRows = archivedRowTags.get(projectId)
+    const fromRows = archivedIdsByProject.get(projectId)
     if (!fromSettings && !fromRows) continue
     for (const entry of lanes.values()) {
       const key = entry.lane.toLowerCase()
-      if (fromRows?.has(key) || (key !== "" && fromSettings?.has(key))) entry.archived = true
+      if ((entry.laneId != null && fromRows?.has(entry.laneId)) || (key !== "" && fromSettings?.has(key))) {
+        entry.archived = true
+      }
     }
   }
   for (const [projectId, lanes] of acc) {

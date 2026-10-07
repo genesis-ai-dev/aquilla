@@ -418,7 +418,7 @@ export function ProjectOverview() {
     [id],
   )
   const canManagePm = (project?.syncRole?.level ?? 0) >= 600
-  const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
+  const { members: pmCandidates, refresh: refreshMembers } = useProjectMembers(canManagePm ? id : null)
   const { activeOrgId, activeOrg, orgs, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
@@ -1399,6 +1399,7 @@ export function ProjectOverview() {
     try {
       await setProjectPm(jwt, id, pmUserId)
       await refresh()
+      void refreshMembers()
       // AQU-507: the org overview's PM column joins from the app-wide
       // accessible-projects directory (OrgContext, fetched once per session) —
       // revalidate it so the new PM shows there without a hard reload. Not
@@ -1761,6 +1762,11 @@ export function ProjectOverview() {
                         />
                       )}
                     </div>
+                    {pm ? (
+                      <p className="mt-1 max-w-sm text-xs text-muted-foreground" data-testid="overview-pm-lead-note">
+                        {t("org.projectOverview.pmGrantsProjectLead")}
+                      </p>
+                    ) : null}
                   </Field>
                   <Field className="w-auto min-w-56">
                     <FieldLabel className="text-xs font-semibold text-muted-foreground">
@@ -1857,6 +1863,7 @@ export function ProjectOverview() {
                       <DialogTitle>{pm ? t("org.projectOverview.changeProjectManagerDialogTitle") : t("org.projectOverview.assignProjectManagerDialogTitle")}</DialogTitle>
                       <DialogDescription>
                         {t("org.projectOverview.pmDialogDescription")}
+                        {pmSelection !== "" ? ` ${t("org.projectOverview.pmGrantsProjectLead")}` : ""}
                       </DialogDescription>
                     </DialogHeader>
                     <FieldGroup>

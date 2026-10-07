@@ -31,10 +31,10 @@
 //   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
 //            `targetLanes`, `archivedLanes`). A write whose only *changed*
 //            keys are language keys is gated by the org's configurable
-//            `languageEditMinRole` floor (default maintainer 600, i.e. today's
-//            behaviour) so an org can let its project leads correct a wrong or
-//            reset language without also handing them AI config, validation,
-//            or health.
+//            `languageEditMinRole` floor (default project_lead 500 when the
+//            org has not stored one — AQU-984) so project leads can correct a
+//            wrong or reset language without also receiving AI config,
+//            validation, or health. An explicit stored floor is kept.
 //   AQU-1246 `autopilotEnabled` (the project-wide opt-in to the experimental
 //            Autopilot surface). An autopilot-only write is admitted at
 //            project_lead 500 — whether your own project tries an experiment
@@ -49,7 +49,8 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
-import { resolveProjectRole } from "../services/project-permissions"
+import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
+import { roleRequiredBody } from "../lib/role-denial"
 import {
   getTermbaseEditMinRoleForProject,
   getOrgCountStructuralCellsForProject,
@@ -101,10 +102,11 @@ const COUNT_STRUCTURAL_KEY = "countStructuralCells"
 const COUNT_STRUCTURAL_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /**
- * AQU-1086: the project-language keys, gated by the org's configurable
- * `languageEditMinRole` (default maintainer 600) rather than the flat
- * maintainer floor. The default target language and the extra-lane registry
- * are one scope on purpose: a lead who can change the default target must be
+ * AQU-1086 / AQU-984: the project-language keys, gated by the org's
+ * configurable `languageEditMinRole` (default project lead 500 when unset)
+ * rather than the flat maintainer floor. The default target language and the
+ * extra-lane registry are one scope on purpose: a lead who can change the
+ * default target must be
  * able to add/archive a lane too, or the Project Info and Languages cards
  * disagree (AQU-898).
  */
@@ -322,12 +324,7 @@ projectSettings.on(
       } else if (languageOnly) {
         const languageFloor = await getLanguageEditMinRoleForProject(c.env, projectId)
         if (role.level < languageFloor) {
-          return c.json(
-            {
-              error: `role >= ${languageFloor} required to change this project's languages (org languageEditMinRole)`,
-            },
-            403,
-          )
+          return c.json(languageWriteDenial(languageFloor, role), 403)
         }
       } else if (autopilotOnly) {
         // AQU-1246: this is the gate that decides whether the experimental
@@ -478,20 +475,30 @@ const archiveLaneSchema = z.object({
 })
 
 /**
- * Same floor as a language-only settings write: maintainer by default, or the
- * org's languageEditMinRole when that org let project leads edit languages.
+ * Same floor as a language-only settings write, lanes included: the org's
+ * languageEditMinRole, or PROJECT_LEAD when that key was never set.
  */
+function languageWriteDenial(
+  floor: number,
+  role: { level: number; source?: string | null },
+) {
+  const name = (ROLE_NAMES[floor] ?? `role ${floor}`).replaceAll("_", " ")
+  return roleRequiredBody(
+    `${name} or higher is required to change this project's languages`,
+    floor,
+    role,
+  )
+}
+
 async function denyLanguageWrite(
   env: AuthHonoEnv["Bindings"],
   user: AuthUser,
   projectId: string,
-): Promise<{ error: string } | null> {
+) {
   const role = await resolveProjectRole(env, user, projectId)
   if (!role) return { error: "no access to project" }
   const floor = await getLanguageEditMinRoleForProject(env, projectId)
-  if (role.level < floor) {
-    return { error: `role >= ${floor} required to change this project's languages` }
-  }
+  if (role.level < floor) return languageWriteDenial(floor, role)
   return null
 }
 

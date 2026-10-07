@@ -99,7 +99,7 @@ import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCac
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { isBibleOpen } from "@/lib/bible-data/experiment"
 import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
@@ -6963,7 +6963,7 @@ export function ProjectWorkspace() {
       // applies them; the click handler below asks the same question.
       const vote = textVoteGate(cell, project, { username: currentUsername, myScopes, activeLane })
       const hasMajorHealthIssue = activeInfractions.some(
-        (infraction) => ruleById.get(infraction.ruleId)?.severity === "major",
+        (infraction) => infractionSeverity(infraction, ruleById.get(infraction.ruleId)?.severity) === "major",
       )
       const needsHealthAttention = Boolean(
         cell.translated.trim()

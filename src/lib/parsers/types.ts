@@ -208,6 +208,22 @@ export interface RuleInfraction {
    *  concrete match (e.g. absence rules with no source trigger) — those
    *  fall back to the gutter icon only. */
   spans: InfractionSpan[]
+  /**
+   * AQU-1699: this infraction's own severity, when it is LOWER than its
+   * rule's. A Bible data check can report a minor finding under a major rule:
+   * P5 names a stray person (major) but also a stray place or group (minor).
+   * It never raises a rule's severity, so a project's own severity choice
+   * still holds. Read it through `infractionSeverity`.
+   */
+  severity?: "minor"
+}
+
+/** The severity an infraction shows at: its rule's, or lower when the infraction says so. */
+export function infractionSeverity(
+  infraction: Pick<RuleInfraction, "severity">,
+  ruleSeverity: "major" | "minor" | undefined,
+): "major" | "minor" | undefined {
+  return infraction.severity === "minor" ? "minor" : ruleSeverity
 }
 
 export interface RulePenalties {

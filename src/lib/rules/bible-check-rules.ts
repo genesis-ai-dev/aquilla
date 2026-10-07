@@ -13,6 +13,7 @@ import type { BibleCheckReadiness } from "../../../db/shared/bible-checks/partic
 import { scanHeadings, scanVersification, type BibleScanFinding, type ScanCellInput } from "../../../db/shared/bible-checks/scans"
 import { scanNameConsistency, scanRepeatedQuotations, type TextScanCell } from "../../../db/shared/bible-checks/scans-pack-b"
 import {
+  BIBLE_CHECK_DEFAULT_SEVERITY,
   isBibleCheckId,
   isBibleScanCheckId,
   type BibleCheckFinding,
@@ -68,6 +69,10 @@ export function bibleCheckInfraction(
     end,
     matchedText: text.slice(start, end),
   }))
+  // A finding below its check's default (an info P5 on a place, under P5's
+  // warning) shows as minor. One at the default leaves the rule's severity,
+  // including whatever the project set it to, untouched.
+  const lower = finding.severity === "info" && BIBLE_CHECK_DEFAULT_SEVERITY[checkId] === "warning"
   return {
     ruleId,
     cellId,
@@ -75,6 +80,7 @@ export function bibleCheckInfraction(
     reason: `builtin:${checkId}`,
     reasonParams: bibleReasonParams(finding),
     spans,
+    ...(lower ? { severity: "minor" as const } : {}),
   }
 }
 

@@ -815,6 +815,7 @@ export function AssignModal({
                       <SelectItem key={item.value || "empty"} value={item.value}>
                         {member ? (
                           <UsernameWithAvatar
+                            userId={member.userId}
                             username={member.username}
                             label={item.label}
                             size="xs"

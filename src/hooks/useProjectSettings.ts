@@ -63,11 +63,11 @@ export function isCountStructuralOnlyPatch(partial: ProjectWideSettings): boolea
 }
 
 /**
- * AQU-1086: the project-language keys, gated by the org's configurable
- * `languageEditMinRole` (default maintainer 600 — today's behaviour) rather
- * than {@link SETTINGS_EDIT_ROLE_FLOOR}. The default target language and the
- * extra-lane registry are one scope so the Project Info and Languages cards
- * can never disagree about who may edit them (AQU-898).
+ * AQU-1086 / AQU-984: the project-language keys, gated by the org's
+ * configurable `languageEditMinRole` (default project lead 500 when unset)
+ * rather than {@link SETTINGS_EDIT_ROLE_FLOOR}. The default target language
+ * and the extra-lane registry are one scope so the Project Info and Languages
+ * cards can never disagree about who may edit them (AQU-898).
  *
  * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
  * which re-derives the same "only language keys changed" test against the

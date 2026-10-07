@@ -6,7 +6,7 @@ import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { TableEmptyState } from "@/components/ui/empty"
-import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { UserChip } from "@/components/UserChip"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
@@ -44,14 +44,14 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
     () => [
       {
         id: "user",
-        accessorFn: (u) => (u.displayName ?? u.username).toLowerCase(),
+        accessorFn: (u) => u.username.toLowerCase(),
         header: ({ column }) => <DataTableColumnHeader column={column} title="User" />,
         cell: ({ row }) => {
           const u = row.original
           return (
-            <UsernameWithAvatar
+            <UserChip
+              userId={u.id}
               username={u.username}
-              label={u.displayName ? `${u.displayName} (${u.username})` : u.username}
               size="xs"
               nameClassName="font-normal"
             />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import type { CellPresencePeer } from "@/lib/sync/presence-store"
-import { initialsFromName } from "@/lib/avatar-utils"
+import { UserChip } from "@/components/UserChip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 
@@ -83,23 +83,28 @@ export function CellPresenceBadges({
         {peers.map((peer) => {
           const typing = (activityRef.current.get(peer.peerId)?.typingUntil ?? 0) > at
           return (
-            <span
-              key={peer.peerId}
-              title={peer.username}
-              aria-label={peer.username}
-              className={cn(
-                "inline-flex size-4 items-center justify-center rounded-full text-[8px] font-semibold text-white ring-1 ring-background",
-                typing && "animate-pulse",
-              )}
-              style={{ backgroundColor: peer.color }}
-            >
-              {initialsFromName(peer.username)}
+            <span key={peer.peerId} className={cn(typing && "animate-pulse")}>
+              <UserChip
+                username={peer.username}
+                distinguishId={peer.peerId}
+                color={peer.color}
+                size="xs"
+                avatarOnly
+                className="[&_svg]:size-4 [&_[data-slot=avatar]]:size-4"
+              />
             </span>
           )
         })}
       </span>
       <span className="truncate">
-        <span className="font-medium" style={{ color: first.color }}>{first.username}</span>
+        <UserChip
+          username={first.username}
+          distinguishId={first.peerId}
+          color={first.color}
+          hideMark
+          className="inline"
+          nameClassName="text-[10px] font-medium"
+        />
         {peers.length > 1 ? ` +${peers.length - 1}` : ""}
         {" · "}
         {stateLabel}

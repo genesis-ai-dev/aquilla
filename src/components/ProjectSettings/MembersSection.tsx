@@ -122,7 +122,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
           const m = row.original
           const sourceKey = SOURCE_LABEL_KEYS[m.role.source]
           return (
-            <UsernameWithAvatar username={m.username}>
+            <UsernameWithAvatar userId={m.userId} username={m.username}>
               <span className="truncate text-xs font-normal text-muted-foreground">
                 {sourceKey ? t(sourceKey) : m.role.source}
               </span>

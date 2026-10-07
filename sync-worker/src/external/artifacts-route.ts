@@ -77,7 +77,10 @@ export async function authArtifact(
   env: ExternalEnv,
   projectId: string,
   minRole: number,
-  opts: { writes?: boolean } = {},
+  /** `action` names the refused operation in the read-only message, so a
+   *  sibling write surface sharing this gate (the knowledge-base upload,
+   *  AQU-1762) does not tell its caller it cannot "upload an artifact". */
+  opts: { writes?: boolean; action?: string } = {},
 ): Promise<AuthResult> {
   const db = env.AQUILLA_PG
   if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
@@ -86,7 +89,7 @@ export async function authArtifact(
   if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
 
   try {
-    if (opts.writes === true) assertCredentialMayWrite(cred, 'upload an artifact')
+    if (opts.writes === true) assertCredentialMayWrite(cred, opts.action ?? 'upload an artifact')
     await assertCredentialScope(db, cred, projectId)
   } catch (err) {
     return { ok: false, response: toErrorResponse(err) }

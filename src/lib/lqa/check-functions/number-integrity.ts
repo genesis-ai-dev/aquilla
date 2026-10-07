@@ -2,29 +2,49 @@ import type { InfractionSpan } from "@/lib/parsers/types"
 
 export const MESSAGE = "Number from source missing in translation"
 
-// AQU-1667: Arabic, Persian and Urdu translations write numbers in their own
-// digits, so a digit here is any of Western 0–9, Arabic-Indic ٠–٩
-// (U+0660–0669) or Eastern Arabic-Indic / Persian ۰–۹ (U+06F0–06F9). JS `\d`
-// is ASCII-only, which made "٤٠" invisible and flagged the source's "40" as
-// missing. Every one of these is a single UTF-16 unit, and spans are taken
-// from the raw string, so source underline positions never move.
-const DIGIT = "[0-9\\u0660-\\u0669\\u06F0-\\u06F9]"
+// AQU-1667: a translation may write its numbers in its own script's digits:
+// Arabic-Indic ٤٠, Persian ۴۰, Burmese ၄၀, Thai ๔๐, Devanagari ४०, fullwidth
+// ４０, and so on. JS `\d` is ASCII-only, which made all of those invisible and
+// flagged the source's "40" as missing. So a digit here is ANY Unicode decimal
+// digit (General_Category Nd): every script Unicode gives decimal digits, with
+// no per-script list to keep up (Sam: "as many scripts covered as possible").
+// Spans are taken from the raw string, so source underline positions never
+// move, including for digits outside the BMP, which take two UTF-16 units.
+const DIGIT = "\\p{Nd}"
 // Between digit groups: "." and "," as before, plus their Arabic forms, the
 // decimal separator ٫ (U+066B) and the thousands separator ٬ (U+066C). The
 // Arabic comma "،" (U+060C) is a list separator, never part of a number.
 const GROUP_SEPARATOR = "[.,\\u066B\\u066C]"
-const NUMBER_RE = new RegExp(`-?${DIGIT}+(?:${GROUP_SEPARATOR}${DIGIT}+)*`, "g")
+const NUMBER_RE = new RegExp(`-?${DIGIT}+(?:${GROUP_SEPARATOR}${DIGIT}+)*`, "gu")
 
-const NATIVE_DIGIT_RE = /[٠-٩۰-۹]/g
+const ANY_DIGIT_RE = /\p{Nd}/gu
+const IS_DIGIT = /^\p{Nd}$/u
 
-/** ٤ (U+0664) and ۴ (U+06F4) both become "4"; anything else is untouched. */
+/** A decimal digit's value, 0–9, in any script.
+ *
+ *  Unicode's stability policy keeps every script's decimal digits in one run of
+ *  ten consecutive code points, 0 first. Some runs sit back to back (the five
+ *  mathematical digit styles fill U+1D7CE–1D7FF), so the value is the distance
+ *  from the start of the run, mod 10. Runs are at most 50 long, and each code
+ *  point is worked out once. */
+const digitValues = new Map<number, number>()
+function digitValue(cp: number): number {
+  const known = digitValues.get(cp)
+  if (known !== undefined) return known
+  let start = cp
+  while (start > 0 && IS_DIGIT.test(String.fromCodePoint(start - 1))) start--
+  const value = (cp - start) % 10
+  digitValues.set(cp, value)
+  return value
+}
+
+/** ٤, ۴, ၄, ๔ and 4 all become "4". */
 function toWesternDigit(ch: string): string {
-  const code = ch.charCodeAt(0)
-  return String(code >= 0x06f0 ? code - 0x06f0 : code - 0x0660)
+  return String(digitValue(ch.codePointAt(0)!))
 }
 
 function canonicalize(raw: string): string {
-  const western = raw.replace(NATIVE_DIGIT_RE, toWesternDigit)
+  const western = raw.replace(ANY_DIGIT_RE, toWesternDigit)
   if (western.startsWith("-")) return "-" + western.slice(1).replace(/[^0-9]/g, "")
   return western.replace(/[^0-9]/g, "")
 }

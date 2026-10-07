@@ -121,6 +121,57 @@ describe("number-integrity — native digits (AQU-1667)", () => {
   })
 })
 
+// Sam, Oct 7: "as many scripts covered as possible", with no list to keep up.
+// Any Unicode decimal digit counts, valued by its place in its script's run.
+describe("number-integrity — any script's decimal digits (AQU-1667)", () => {
+  const SOURCE = "He fasted 40 days and 40 nights."
+
+  it.each([
+    ["Burmese", "၄၀"],
+    ["Thai", "๔๐"],
+    ["Devanagari", "४०"],
+    ["Bengali", "৪০"],
+    ["Khmer", "៤០"],
+    ["Tibetan", "༤༠"],
+    ["fullwidth", "４０"],
+  ])("accepts %s digits", (_script, forty) => {
+    expect(runCheck(SOURCE, `${forty} … ${forty}`)).toBeNull()
+  })
+
+  it("accepts digits outside the BMP (Adlam 𞥔𞥐 is 40)", () => {
+    expect(runCheck(SOURCE, "𞥔𞥐 … 𞥔𞥐")).toBeNull()
+  })
+
+  it("values digits in back-to-back runs correctly (mathematical bold and double-struck)", () => {
+    // U+1D7CE–1D7FF holds five styles of 0–9 in a row.
+    expect(runCheck("40", "𝟒𝟎")).toBeNull()
+    expect(runCheck("40", "𝟜𝟘")).toBeNull()
+    // A double-struck 4 next to a bold 9 (U+1D7D7) is still 49.
+    expect(runCheck("49", "𝟜𝟗")).toBeNull()
+    expect(runCheck("41", "𝟜𝟘")).not.toBeNull()
+  })
+
+  it("still warns when the number differs: Burmese ၄၁ is not 40", () => {
+    expect(runCheck("40 days", "၄၁ ရက်")).toEqual([
+      { side: "source", start: 0, end: 2, matchedText: "40" },
+    ])
+  })
+
+  it("underlines a source number written outside the BMP at its own position", () => {
+    // Each Adlam digit is two UTF-16 units, so "𞥔𞥐" spans 0–4.
+    expect(runCheck("𞥔𞥐 days", "no number")).toEqual([
+      { side: "source", start: 0, end: 4, matchedText: "𞥔𞥐" },
+    ])
+  })
+
+  it("does not read numerals that are not decimal digits (Ethiopic ፵, Roman, CJK 四十)", () => {
+    // Unicode files these as letters or other numbers, not as digits 0–9, so
+    // they need their own reading; the number still counts as missing.
+    expect(runCheck("40", "፵")).not.toBeNull()
+    expect(runCheck("40", "四十")).not.toBeNull()
+  })
+})
+
 // Western-digit projects must see no change at all. The pre-AQU-1667 check is
 // reproduced verbatim below and both are run over the same Western inputs.
 describe("number-integrity — Western digits unchanged (AQU-1667)", () => {

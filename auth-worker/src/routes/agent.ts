@@ -44,6 +44,9 @@ import {
   resolveRunCostCapCents,
 } from "../lib/agent/frames"
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
+import { callerMayReadLane } from "../../../db/shared/lane-visibility"
+import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
+import { languageOfTargetLane } from "../../../db/shared/lane-language"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
@@ -536,6 +539,32 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     return c.json({ error: "forbidden", message: "No access to this project" }, 403)
   }
 
+  // `context.lane` is an id or a legacy tag. Resolve it once, then apply the
+  // same read wall the sync worker uses. An empty lane is the default target.
+  const requestedLane = (body.context?.lane ?? "").trim()
+  let resolvedLaneId = ""
+  if (requestedLane) {
+    const resolved = await resolveLaneIdOrTag(c.env.AQUILLA_PG, body.projectId, requestedLane)
+    if (!resolved.laneId) {
+      return c.json(
+        { error: "validation_failed", message: "That lane is not a target lane on this project." },
+        400,
+      )
+    }
+    resolvedLaneId = resolved.laneId
+  }
+  const laneVisible = await callerMayReadLane(
+    c.env.AQUILLA_PG,
+    c.env.LANE_READ_WALL,
+    body.projectId,
+    user.id,
+    role.level,
+    resolvedLaneId ? { laneId: resolvedLaneId } : { targetLang: "" },
+  )
+  if (!laneVisible) {
+    return c.json({ error: "forbidden", message: "No access to that lane" }, 403)
+  }
+
   // Volumetric floor: unlike the guards below, this actually blocks (see
   // comment at AGENT_RUN_MAX_PER_USER_PER_WINDOW).
   const rateLimitIdentifier = `user:${user.id}`
@@ -646,7 +675,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil, resolvedLaneId })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -725,6 +754,8 @@ interface LoopArgs {
   usage?: AgentUsageMeter
   /** Keeps the telemetry flush alive past the response. */
   waitUntil?: (p: Promise<unknown>) => void
+  /** Lane id resolved from `context.lane` (id or legacy tag). `""` is the default lane. */
+  resolvedLaneId: string
 }
 
 function parseToolArgs(raw: string): Record<string, unknown> {
@@ -745,7 +776,7 @@ function pickLane(rawArgs: string, projectTarget: string | undefined): string | 
   return projectTarget
 }
 
-async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage, waitUntil }: LoopArgs): Promise<void> {
+async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage, waitUntil, resolvedLaneId }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -759,7 +790,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     roleLevel,
     fileId: body.context?.fileId,
     cellId: body.context?.cellId,
-    lane: body.context?.lane ?? "",
+    lane: resolvedLaneId,
     aliases,
   }
 
@@ -789,9 +820,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       .bind(body.projectId)
       .first<{ source_language: string | null; target_language: string | null; brief_summary: string | null }>()
     if (settings) {
+      const fromLane = resolvedLaneId
+        ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
+        : null
       languages = {
         sourceLanguage: settings.source_language ?? undefined,
-        targetLanguage: settings.target_language ?? undefined,
+        targetLanguage: fromLane ?? settings.target_language ?? undefined,
       }
       briefSummary = settings.brief_summary ?? undefined
     }

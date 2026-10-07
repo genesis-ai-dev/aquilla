@@ -8,6 +8,7 @@
 // via files.book_code.
 
 import { PLAN_UNIT_FILE_PREDICATE } from "../../../../../db/shared/plan-units"
+import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
 import { AliasMap } from "../compress"
 import { lintDraft, loadLintRules, rulesForLane, type LintHit } from "../lint"
 import {
@@ -33,7 +34,9 @@ export interface ReadContext {
   projectId: string
   /** Focused file (:file). */
   focusedFileId?: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
 }
@@ -366,9 +369,12 @@ async function ruleFlags(
   ctx: ReadContext,
   fileId: string,
   pairs: CellPair[],
+  laneTag: string,
 ): Promise<Map<string, LintHit[]>> {
   const flags = new Map<string, LintHit[]>()
-  const rules = rulesForLane(await loadLintRules(db, ctx.projectId), ctx.lane)
+  // `rule.lane` is the legacy tag, not `lanes.id`. The run may name the lane
+  // by either spelling; the tag is what the editor stored.
+  const rules = rulesForLane(await loadLintRules(db, ctx.projectId), laneTag)
   if (rules.length === 0) return flags
   const { results } = await db
     .prepare(`SELECT cell_id, rule_id FROM cell_waivers WHERE project_id = ? AND file_id = ?`)
@@ -414,10 +420,11 @@ export async function executeRead(db: AquillaDb, args: ReadArgs, ctx: ReadContex
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
   const offset = Math.max(Number(args.offset) || 0, 0)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, targetLang: ctx.lane })
+  const lane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: lane.laneId })
   // Rules live in the project settings blob (can be megabytes), so only the
   // filter that needs them loads them; every other read is unchanged.
-  const flags = filter === "flagged" ? await ruleFlags(db, ctx, scope.fileId, all) : new Map<string, LintHit[]>()
+  const flags = filter === "flagged" ? await ruleFlags(db, ctx, scope.fileId, all, lane.targetLang) : new Map<string, LintHit[]>()
   const statusFor = (p: CellPair): ReadStatus => (flags.has(p.cellId) ? "flagged" : statusOf(p))
   const filtered = filter === "all" ? all : all.filter((p) => statusFor(p) === filter)
   const page = filtered.slice(offset, offset + limit)

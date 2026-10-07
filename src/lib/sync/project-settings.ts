@@ -12,6 +12,7 @@ import type {
 import type { Concept } from "@/lib/terminology/types"
 import type { CellUnit, LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
+import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
 
@@ -350,6 +351,12 @@ export interface ProjectWideSettings {
    * whole map: writers must send the full merged object.
    */
   fileGenres?: Record<string, string>
+  /**
+   * AQU-1075: which settings this project copies from its upstream, and which
+   * of those the maintainer has detached. Absent on a project that has not
+   * been offered the choice. The server owns `knowledgeDocCopies`.
+   */
+  inheritedFromLink?: InheritedFromLink
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */

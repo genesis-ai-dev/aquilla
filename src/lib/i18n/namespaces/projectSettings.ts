@@ -1187,6 +1187,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.termMatching.preset.arabic": "Arabic",
     "projectSettings.termMatching.preset.swahili": "Swahili",
     "projectSettings.termMatching.preset.turkish": "Turkish",
+
+    // ── AQU-1075: settings copied from the upstream project ──
+    "projectSettings.inherit.title": "Settings from {upstream}",
+    "projectSettings.inherit.description":
+      "This project keeps a copy of what you turn on. When {upstream} saves one of them, the copy updates, and so does the next project in the chain. Detach a field to keep your own.",
+    "projectSettings.inherit.linkTitle": "Copy these from the upstream project",
+    "projectSettings.inherit.linkDescription":
+      "Turn on what this project should receive. You can detach any of them later in its settings.",
+    "projectSettings.inherit.field.translationBrief": "Translation brief",
+    "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
+    "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
+    "projectSettings.inherit.field.workflowPolicyDetail":
+      "Validation count and role floors, self-validation, autopilot and agent mode, structural-cell counting, and check penalties.",
+    "projectSettings.inherit.field.livingMemory": "Living-memory notes",
+    "projectSettings.inherit.field.smartQuotes": "Smart quotes",
+    "projectSettings.inherit.field.systemPrompt": "AI instructions",
+    "projectSettings.inherit.fromUpstream": "from {upstream}",
+    "projectSettings.inherit.detach": "Detach",
   },
   context: {
     _context: {
@@ -2349,6 +2367,62 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.termMatching.preset.turkish": {
         description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.inherit.title": {
+        description:
+          "Heading of the inherited-settings card in Project Settings, shown only when this project is linked to an upstream. Names the upstream.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.description": {
+        description:
+          "Explanation under that heading: turned-on fields are copies that update when the upstream saves, including further down a chain, and Detach keeps a local copy.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.linkTitle": {
+        description:
+          "Heading of the same choice on the link confirm step, before the link exists. The checkboxes under it are what this new link will copy.",
+      },
+      "projectSettings.inherit.linkDescription": {
+        description:
+          "One sentence under that heading: the choice can be changed later, per field, from the downstream project's settings.",
+      },
+      "projectSettings.inherit.field.translationBrief": {
+        description: "Checkbox label. The translation brief is copied from the upstream when this is on.",
+      },
+      "projectSettings.inherit.field.knowledgeDocs": {
+        description: "Checkbox label. The upstream project's knowledge-base documents are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicy": {
+        description:
+          "Checkbox label. Validation counts, role floors, self-validation, autopilot, agent mode, structural-cell counting, and check penalties are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicyDetail": {
+        description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",
+      },
+      "projectSettings.inherit.field.livingMemory": {
+        description: "Checkbox label. Living-memory notes are copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.smartQuotes": {
+        description: "Checkbox label. The smart-quotes switch is copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.systemPrompt": {
+        description:
+          "Checkbox label. AI instructions (the system prompt) are copied when this is on. Off by default, because those instructions usually name the language pair.",
+      },
+      "projectSettings.inherit.fromUpstream": {
+        description:
+          "Shown beside a field that is still being copied, both in the inherited-settings card and next to the field itself.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.detach": {
+        description:
+          "Button beside a field that is still being copied. Stops future updates of that field and keeps the current copy.",
       },
     },
   },

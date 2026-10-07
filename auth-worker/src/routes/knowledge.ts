@@ -12,6 +12,7 @@ import { getEffectiveOrgRole } from "../services/org-permissions"
 import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
 import { shipLog } from "../posthog-logs"
 import { indexKnowledgeDoc } from "../lib/knowledge/index-doc"
+import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
   createDoc,
@@ -318,7 +319,22 @@ async function handleUpload(
 
   runIndexing(c, id)
 
+  // Snapshot before the copy. Indexing is already in flight, and awaiting the
+  // downstream copy yields long enough for that job to finish — the response
+  // would then say "ready" for a document the client was told was still pending.
   const doc = await getDocMeta(c.env.AQUILLA_PG, id)
+  if ("projectId" in scope) {
+    try {
+      await propagateKnowledgeDocs(c.env.AQUILLA_PG, scope.projectId, {
+        updatedBy: createdBy,
+        blobs: bucket,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("[inherited-settings] knowledge propagate failed:", err)
+    }
+  }
+
   return c.json({ doc }, 201)
 }
 
@@ -338,6 +354,17 @@ async function handleDelete(
   await deleteDoc(c.env.AQUILLA_PG, docId)
   const bucket = c.env.SNAPSHOTS
   if (bucket) await bucket.delete(meta.r2Key).catch(() => {})
+  if (meta.projectId) {
+    try {
+      await propagateKnowledgeDocs(c.env.AQUILLA_PG, meta.projectId, {
+        updatedBy: meta.createdBy,
+        blobs: bucket ?? null,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("[inherited-settings] knowledge propagate failed:", err)
+    }
+  }
   return c.json({ ok: true })
 }
 

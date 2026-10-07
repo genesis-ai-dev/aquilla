@@ -5805,7 +5805,6 @@ export const ar: Catalog = {
   "settings.monday.connectedNotice": "تم الاتصال بـ Monday.com.",
   "settings.monday.dismissNoticeAriaLabel": "إغلاق الإشعار",
   "settings.monday.connectFailed": "فشل الاتصال بـ Monday.com. حاول مرة أخرى.",
-  "settings.monday.connectFailedWithReason": "فشل الاتصال بـ Monday.com ({reason}). حاول مرة أخرى.",
   "settings.monday.connectionCardTitle": "الاتصال",
   "settings.monday.loadingStatus": "جاري تحميل حالة الاتصال…",
   "settings.monday.reauthExpiredNotice": "انتهت صلاحية تفويض Monday.com (يحدها Monday إلى 6 أشهر). أعد الاتصال لاستئناف المزامنة — يتم الاحتفاظ بروابط اللوحات والتعيينات.",

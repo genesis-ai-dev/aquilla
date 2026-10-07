@@ -299,7 +299,14 @@ export const settings = defineNamespace({
     "settings.monday.connectedNotice": "Monday.com connected.",
     "settings.monday.dismissNoticeAriaLabel": "Dismiss notice",
     "settings.monday.connectFailed": "Connecting to Monday.com failed. Try again.",
-    "settings.monday.connectFailedWithReason": "Connecting to Monday.com failed ({reason}). Try again.",
+    // Plain-language reasons a Monday.com connection failed, shown on the
+    // /oauth/callback page and in the org settings notice (lib/monday/oauth-return.ts).
+    "settings.monday.failure.cancelled": "Connecting was cancelled in Monday.com, so nothing was connected.",
+    "settings.monday.failure.expired":
+      "This connection request expired. It has to be approved in Monday.com within 10 minutes. Start again from Aquilla.",
+    "settings.monday.failure.rejected": "Monday.com didn't accept the approval. Try connecting again.",
+    "settings.monday.failure.timeout":
+      "No word from the Monday.com tab. If you approved there, reload this page; otherwise connect again.",
     "settings.monday.connectionCardTitle": "Connection",
     "settings.monday.loadingStatus": "Loading connection status…",
     "settings.monday.reauthExpiredNotice":
@@ -510,14 +517,29 @@ export const settings = defineNamespace({
           "'7-day audio history' heading above it — this one names the chart " +
           "as a chart, for a screen-reader user who can't see the bars.",
       },
-      "settings.monday.connectFailedWithReason": {
+      "settings.monday.failure.cancelled": {
         description:
-          "Inline error notice after a failed Monday.com OAuth round trip, " +
-          "shown instead of settings.monday.connectFailed when the server " +
-          "returned a specific reason.",
-        placeholders: {
-          reason: "Short, already-English machine/server-provided failure reason (not translated).",
-        },
+          "Why connecting Monday.com failed: the person cancelled or declined on Monday's " +
+          "approval screen. Shown on the page Monday returns to and in a red notice on " +
+          "the organization's Monday.com settings.",
+      },
+      "settings.monday.failure.expired": {
+        description:
+          "Why connecting Monday.com failed: the approval came back more than 10 minutes " +
+          "after it was started (or the same approval link was used twice). Shown on the " +
+          "page Monday returns to and in a red notice on the organization's Monday.com settings.",
+      },
+      "settings.monday.failure.rejected": {
+        description:
+          "Why connecting Monday.com failed: Monday refused to hand over access after the " +
+          "person approved. Shown on the page Monday returns to and in a red notice on the " +
+          "organization's Monday.com settings.",
+      },
+      "settings.monday.failure.timeout": {
+        description:
+          "Red notice in the tab that opened Monday.com for connecting, when 11 minutes " +
+          "pass with no word from the Monday tab. \"Reload this page\" means the current " +
+          "Aquilla settings page.",
       },
       "settings.monday.connectedAsRow": {
         description: "Row on the Monday.com connection card naming the connected Monday user.",

@@ -49,6 +49,7 @@ import {
   type MondayBoardLink,
   type MondayBoardStructure,
 } from "@/lib/monday/api"
+import { connectFailureKey, useMondayOAuthOutcome } from "@/lib/monday/oauth-return"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { openExternal } from "@/lib/open-external"
 import type { MondayColumnMapping, MondayMapping } from "@/lib/monday/types"
@@ -235,6 +236,13 @@ export function MondaySetupWizard({
     window.addEventListener("focus", onFocus)
     return () => window.removeEventListener("focus", onFocus)
   }, [awaitingOAuth, onConnected])
+  // The Monday tab says how it ended (or the wait times out), so a cancelled
+  // or failed connection doesn't leave "Waiting for Monday…" up forever.
+  useMondayOAuthOutcome(awaitingOAuth, orgId, (outcome) => {
+    setAwaitingOAuth(false)
+    if (outcome.ok) onConnected()
+    else setError(t(connectFailureKey(outcome.reason)))
+  })
 
   // The parent's connection refetch lands here: leave the connect gate and go
   // straight into the scan the user already asked for.

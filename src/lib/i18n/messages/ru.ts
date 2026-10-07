@@ -5932,7 +5932,6 @@ export const ru: Catalog = {
   "settings.monday.connectedNotice": "Monday.com подключён.",
   "settings.monday.dismissNoticeAriaLabel": "Скрыть уведомление",
   "settings.monday.connectFailed": "Не удалось подключиться к Monday.com. Попробуйте снова.",
-  "settings.monday.connectFailedWithReason": "Не удалось подключиться к Monday.com ({reason}). Попробуйте снова.",
   "settings.monday.connectionCardTitle": "Подключение",
   "settings.monday.loadingStatus": "Загрузка состояния подключения…",
   "settings.monday.reauthExpiredNotice": "Срок авторизации Monday.com истёк (Monday ограничивает её 6 месяцами). Подключитесь заново, чтобы возобновить синхронизацию — связи с досками и сопоставления сохраняются.",

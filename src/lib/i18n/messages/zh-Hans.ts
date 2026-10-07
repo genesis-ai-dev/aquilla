@@ -5813,7 +5813,6 @@ export const zh_Hans: Catalog = {
   "settings.monday.connectedNotice": "已连接 Monday.com。",
   "settings.monday.dismissNoticeAriaLabel": "关闭通知",
   "settings.monday.connectFailed": "连接 Monday.com 失败。请再试一次。",
-  "settings.monday.connectFailedWithReason": "连接 Monday.com 失败（{reason}）。请再试一次。",
   "settings.monday.connectionCardTitle": "连接",
   "settings.monday.loadingStatus": "正在加载连接状态…",
   "settings.monday.reauthExpiredNotice": "Monday.com 的授权已过期（Monday 将授权期限定为 6 个月）。请重新连接以继续同步 — 看板链接与对应设置都会保留。",

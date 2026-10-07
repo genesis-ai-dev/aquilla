@@ -1,8 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgSettingsMonday } from "./OrgSettingsMonday"
-import { fetchMondayConnection } from "@/lib/monday/api"
+import { fetchMondayConnection, startMondayConnect } from "@/lib/monday/api"
+import { announceMondayOAuthOutcome } from "@/lib/monday/oauth-return"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok" } }),
@@ -31,4 +32,29 @@ it("hands a connected organization off to its own projects without another autho
   expect(link).toHaveAttribute("href", "/project/ours/settings/integrations#section-monday")
   expect(screen.queryByText("Other organization")).toBeNull()
   expect(screen.queryByRole("button", { name: /^connect monday/i })).toBeNull()
+})
+
+it("shows a failed connect's reason in plain words when Monday sends the user back", async () => {
+  vi.mocked(fetchMondayConnection).mockResolvedValue({ connected: false })
+  render(<MemoryRouter initialEntries={["/orgs/7/settings/monday?monday=error&reason=expired"]}><OrgSettingsMonday /></MemoryRouter>)
+  const notice = await screen.findByRole("alert")
+  expect(notice.textContent).toMatch(/within 10 minutes/)
+  expect(notice.textContent).not.toMatch(/expired\)/)
+})
+
+it("stops waiting and shows the failure when the Monday tab reports one", async () => {
+  vi.mocked(fetchMondayConnection).mockResolvedValue({ connected: false })
+  vi.mocked(startMondayConnect).mockResolvedValue({ url: "https://auth.monday.com/x" })
+  const popup = { closed: false, location: { href: "" }, close: vi.fn() }
+  vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window)
+  render(<MemoryRouter><OrgSettingsMonday /></MemoryRouter>)
+
+  fireEvent.click(await screen.findByRole("button", { name: /connect monday/i }))
+  fireEvent.click(await screen.findByRole("button", { name: /yes, i'm a monday admin/i }))
+  expect(await screen.findByText(/waiting for the monday\.com tab/i)).toBeTruthy()
+
+  announceMondayOAuthOutcome({ ok: false, reason: "cancelled", orgId: 7 })
+
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/cancelled in Monday\.com/))
+  expect(screen.queryByText(/waiting for the monday\.com tab/i)).toBeNull()
 })

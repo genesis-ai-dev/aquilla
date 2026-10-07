@@ -1,11 +1,12 @@
 // Org settings → Monday.com — manage the org's single Monday connection.
 //
-// Contract: monday-integration-contract.md. One connection per org (OAuth
+// Contract: docs/MONDAY-INTEGRATION.md. One connection per org (OAuth
 // token held server-side; never returned to the browser). Maintainer+ (600)
 // on the org to connect/disconnect; any member can view status. The OAuth
 // round-trip returns to this page with `?monday=connected` or
 // `?monday=error&reason=...`, surfaced as an inline dismissible notice (this
-// app has no global toast system).
+// app has no global toast system). While the Monday tab is open, this tab
+// also hears how it ended (lib/monday/oauth-return.ts).
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
@@ -34,6 +35,12 @@ import {
   startMondayConnect,
   type MondayConnectionStatus,
 } from "@/lib/monday/api"
+import {
+  connectFailureKey,
+  toConnectFailure,
+  useMondayOAuthOutcome,
+  type MondayConnectFailure,
+} from "@/lib/monday/oauth-return"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { openExternal } from "@/lib/open-external"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
@@ -64,14 +71,16 @@ export function OrgSettingsMonday() {
   // OAuth return notice — read once, then strip the params so a reload
   // doesn't re-announce.
   const [searchParams, setSearchParams] = useSearchParams()
-  const [returnNotice, setReturnNotice] = useState<{ kind: "connected" | "error"; reason?: string } | null>(null)
+  const [returnNotice, setReturnNotice] = useState<
+    { kind: "connected" } | { kind: "error"; reason: MondayConnectFailure } | null
+  >(null)
   useEffect(() => {
     const monday = searchParams.get("monday")
     if (monday !== "connected" && monday !== "error") return
     setReturnNotice(
       monday === "connected"
         ? { kind: "connected" }
-        : { kind: "error", reason: searchParams.get("reason") ?? undefined },
+        : { kind: "error", reason: toConnectFailure(searchParams.get("reason")) },
     )
     const next = new URLSearchParams(searchParams)
     next.delete("monday")
@@ -108,6 +117,17 @@ export function OrgSettingsMonday() {
     window.addEventListener("focus", onFocus)
     return () => window.removeEventListener("focus", onFocus)
   }, [awaitingOAuth, load])
+  // The Monday tab says how it ended, or the wait times out: either way stop
+  // showing "Waiting for the Monday.com tab…".
+  useMondayOAuthOutcome(awaitingOAuth, activeOrgId, (outcome) => {
+    setAwaitingOAuth(false)
+    if (outcome.ok) {
+      setReturnNotice({ kind: "connected" })
+      void load()
+    } else {
+      setReturnNotice({ kind: "error", reason: outcome.reason })
+    }
+  })
 
   const handleConnect = useCallback(async () => {
     if (!jwt || activeOrgId == null) return
@@ -192,9 +212,7 @@ export function OrgSettingsMonday() {
         >
           <span className="flex items-center gap-2">
             <XCircle className="h-4 w-4 shrink-0" />
-            {returnNotice.reason
-              ? t("settings.monday.connectFailedWithReason", { reason: returnNotice.reason })
-              : t("settings.monday.connectFailed")}
+            {t(connectFailureKey(returnNotice.reason))}
           </span>
           <button
             type="button"

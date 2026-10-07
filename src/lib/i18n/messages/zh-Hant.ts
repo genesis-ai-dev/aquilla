@@ -5814,7 +5814,6 @@ export const zh_Hant: Catalog = {
   "settings.monday.connectedNotice": "已連接 Monday.com。",
   "settings.monday.dismissNoticeAriaLabel": "關閉通知",
   "settings.monday.connectFailed": "連接 Monday.com 失敗。請再試一次。",
-  "settings.monday.connectFailedWithReason": "連接 Monday.com 失敗（{reason}）。請再試一次。",
   "settings.monday.connectionCardTitle": "連線",
   "settings.monday.loadingStatus": "正在載入連線狀態…",
   "settings.monday.reauthExpiredNotice": "Monday.com 的授權已過期（Monday 將授權期限定為 6 個月）。請重新連接以繼續同步 — 看板連結與對應設定都會保留。",

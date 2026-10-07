@@ -5846,7 +5846,6 @@ export const fr: Catalog = {
   "settings.monday.connectedNotice": "Monday.com connecté.",
   "settings.monday.dismissNoticeAriaLabel": "Fermer la notification",
   "settings.monday.connectFailed": "Échec de la connexion à Monday.com. Réessayez.",
-  "settings.monday.connectFailedWithReason": "Échec de la connexion à Monday.com ({reason}). Réessayez.",
   "settings.monday.connectionCardTitle": "Connexion",
   "settings.monday.loadingStatus": "Chargement de l'état de la connexion…",
   "settings.monday.reauthExpiredNotice": "L'autorisation Monday.com a expiré (Monday la limite à 6 mois). Reconnectez-vous pour reprendre la synchronisation : les liens de tableaux et les correspondances sont conservés.",

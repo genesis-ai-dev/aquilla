@@ -561,6 +561,7 @@ export function OrgProjectsDataTable({
               }
               return (
                 <UsernameWithAvatar
+                  userId={row.original.pm?.id}
                   username={username}
                   size="xs"
                   nameClassName="font-normal"

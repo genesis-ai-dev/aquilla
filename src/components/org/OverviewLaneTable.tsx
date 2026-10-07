@@ -38,8 +38,7 @@ import {
 import { MenuItem } from "@/components/ui/menu-parts"
 import { Section } from "@/components/ui/page"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { UserChip } from "@/components/UserChip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
@@ -102,9 +101,7 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
   return (
     <AvatarGroup data-size="sm">
       {shown.map((m) => (
-        <AppTooltip key={m.userId} content={m.username}>
-          <InitialsAvatar name={m.username} size="sm" />
-        </AppTooltip>
+        <UserChip key={m.userId} userId={m.userId} username={m.username} size="sm" avatarOnly />
       ))}
       {extra > 0 && <AvatarGroupCount>+{extra}</AvatarGroupCount>}
     </AvatarGroup>

@@ -6,7 +6,7 @@ import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -1740,7 +1740,7 @@ export function ProjectOverview() {
                     </FieldLabel>
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       {pm ? (
-                        <UsernameWithAvatar username={pm.username} nameTestId="overview-pm-name" />
+                        <UsernameWithAvatar userId={pm.id} username={pm.username} nameTestId="overview-pm-name" />
                       ) : (
                         <span className="text-muted-foreground" data-testid="overview-pm-name">
                           {t("org.projectOverview.unassigned")}
@@ -1889,6 +1889,7 @@ export function ProjectOverview() {
                               {pmCandidates.map((m) => (
                                 <SelectItem key={m.userId} value={String(m.userId)}>
                                   <UsernameWithAvatar
+                                    userId={m.userId}
                                     username={m.username}
                                     size="xs"
                                     menuSafe
@@ -2460,16 +2461,12 @@ export function ProjectOverview() {
                             return (
                               <li key={w.userId} className="flex items-center gap-3 text-sm">
                                 {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
-                                <AppTooltip content={w.username ?? String(w.userId)}>
-                                  <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
-                                    <InitialsAvatar
-                                      name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })}
-                                      size="sm"
-                                      className="shrink-0"
-                                    />
-                                    <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
-                                  </span>
-                                </AppTooltip>
+                                <UserChip
+                                  userId={w.userId}
+                                  username={w.username}
+                                  size="sm"
+                                  className="w-40 shrink-0"
+                                />
                                 <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                                   <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
                                 </span>

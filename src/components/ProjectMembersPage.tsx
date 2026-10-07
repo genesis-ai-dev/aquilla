@@ -211,7 +211,7 @@ export function MembersTab({
           from={{ type: "project", id: projectId }}
           herePath={[{ type: "project", id: projectId, name: t("org.access.inspector.thisProject") }]}
         >
-          <UsernameWithAvatar username={m.username} />
+          <UsernameWithAvatar userId={m.userId} username={m.username} />
         </MemberInspectorTrigger>
         <GrantOriginBadge origin={origin} />
         <EffectiveRoleCell

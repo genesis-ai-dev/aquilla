@@ -298,6 +298,7 @@ export function AssignWork({
                       .map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>
                           <UsernameWithAvatar
+                            userId={m.userId}
                             username={m.username}
                             label={t("dialog.assign.assigneeSelfSuffix", { username: m.username })}
                             size="xs"
@@ -312,6 +313,7 @@ export function AssignWork({
                       {eligibleMembers.map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>
                           <UsernameWithAvatar
+                            userId={m.userId}
                             username={m.username}
                             size="xs"
                             menuSafe

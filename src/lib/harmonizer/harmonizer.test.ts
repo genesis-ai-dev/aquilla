@@ -8,7 +8,6 @@
 
 import { describe, expect, it } from "vitest"
 import {
-  CONTINUES,
   closingSpan,
   findQuoteSpans,
   learnQuotePair,
@@ -82,13 +81,13 @@ describe("findQuoteSpans", () => {
     expect(findQuoteSpans(cells, CURLY)).toEqual([])
   })
 
-  it("a quotation still open at the end of the passage is asked about, with a 'continues' way out", () => {
+  it("a quotation still open at the end of the passage is seen but NOT asked about", () => {
+    // Long discourses (John 8, John 14) run past the window; asking where they
+    // end produced most false alarms on clean text in the eval. Only a broken
+    // quotation — a new one opened — proves the speech ended.
     const open = JOHN_6.slice(0, 2)
-    const spans = findQuoteSpans(open, CURLY)
-    expect(spans).toEqual([{ startCell: 0, candidates: [0, 1], broken: false }])
-    const plan = quotationCheck.plan(open)
-    const questions = quotationCheck.questions(plan!, "p_")
-    expect(Object.keys((questions.p_s0 as { criteria: Record<string, string> }).criteria)).toContain(CONTINUES)
+    expect(findQuoteSpans(open, CURLY)).toEqual([{ startCell: 0, candidates: [0, 1], broken: false }])
+    expect(quotationCheck.plan(open)).toBeNull()
   })
 })
 

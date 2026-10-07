@@ -6,6 +6,7 @@ const row = (over: Partial<ExpertEventRow>): ExpertEventRow => ({
   kind: "target.cell.commit",
   file_id: "f1",
   target_lang: "",
+  lane_id: "lane-def",
   cell_id: "c1",
   canonical_ref: null,
   server_ts: 1,
@@ -18,14 +19,39 @@ describe("react signals are lane-scoped", () => {
   // would kick off drafting in English.
   it("keeps edits in two lanes of one file as separate signals", () => {
     const signals = groupByFile([
-      row({ target_lang: "", cell_id: "a", server_ts: 1 }),
-      row({ target_lang: "fr", cell_id: "b", server_ts: 2 }),
-      row({ target_lang: "fr", cell_id: "c", server_ts: 3 }),
+      row({ target_lang: "", lane_id: "lane-def", cell_id: "a", server_ts: 1 }),
+      row({ target_lang: "fr", lane_id: "lane-fr", cell_id: "b", server_ts: 2 }),
+      row({ target_lang: "fr", lane_id: "lane-fr", cell_id: "c", server_ts: 3 }),
     ])
-    expect(signals.map((s) => [s.targetLang, s.count, s.anchorCellId])).toEqual([
-      ["fr", 2, "c"],
-      ["", 1, "a"],
+    expect(signals.map((s) => [s.laneId, s.count, s.anchorCellId])).toEqual([
+      ["lane-fr", 2, "c"],
+      ["lane-def", 1, "a"],
     ])
+  })
+
+  // AQU-1610: the tag is not an identity. Two lanes agree on it whenever one
+  // was retagged after its rows were written — and grouping on the tag then
+  // merged their edits, so a reaction to one lane's correction drafted into
+  // whichever lane the merged signal happened to carry.
+  it("separates two lanes that share a tag", () => {
+    const signals = groupByFile([
+      row({ target_lang: "es", lane_id: "lane-a", cell_id: "a", server_ts: 1 }),
+      row({ target_lang: "es", lane_id: "lane-b", cell_id: "b", server_ts: 2 }),
+    ])
+    expect(signals.map((s) => [s.laneId, s.count])).toEqual([
+      ["lane-b", 1],
+      ["lane-a", 1],
+    ])
+  })
+
+  // A tag that resolves to no lane is its own bucket, never folded into a
+  // real lane's signal.
+  it("keeps an unresolvable lane apart from every real one", () => {
+    const signals = groupByFile([
+      row({ target_lang: "gone", lane_id: null, cell_id: "a", server_ts: 1 }),
+      row({ target_lang: "", lane_id: "lane-def", cell_id: "b", server_ts: 2 }),
+    ])
+    expect(signals.map((s) => s.laneId)).toEqual(["lane-def", null])
   })
 
   // Jev reads the newest few commits as its before → after sample; a

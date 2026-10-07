@@ -650,10 +650,6 @@ export const editor = defineNamespace({
       "You made the latest change to these cells, so someone else must validate them",
     "editor.selection.validateOwnEditsSome":
       "Some selected cells have your latest change, so someone else must validate them",
-    "editor.selection.validateAiDrafts":
-      "Nothing eligible — untouched AI drafts require individual review",
-    "editor.selection.validateAiDraftsOrgHint":
-      "An organization maintainer can allow this under Settings → Project defaults.",
     "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my text validations",
@@ -726,10 +722,6 @@ export const editor = defineNamespace({
     "editor.batchValidate.skip.ownEdit": plural({
       one: "{count} has your latest change, so someone else must validate it",
       other: "{count} have your latest change, so someone else must validate them",
-    }),
-    "editor.batchValidate.skip.aiDraft": plural({
-      one: "{count} is an untouched AI draft, reviewed one at a time",
-      other: "{count} are untouched AI drafts, reviewed one at a time",
     }),
     "editor.batchValidate.skip.outOfScope": plural({
       one: "{count} is outside your assigned files or lanes",
@@ -1600,6 +1592,7 @@ export const editor = defineNamespace({
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.addLaneItem": "Add lane…",
     "editor.lane.searchPlaceholder": "Search lanes…",
     "editor.lane.searchAriaLabel": "Search lanes",
     "editor.lane.searchEmpty": "No lanes found.",
@@ -1659,7 +1652,7 @@ export const editor = defineNamespace({
 
     // — AI drafting on the target side ————————————————————————————
     "editor.ai.draftBadge": "AI draft · review required",
-    "editor.ai.draftBadgeAria": "AI draft — individual human review required",
+    "editor.ai.draftBadgeAria": "AI draft — human review required",
     "editor.ai.lookingUpExamples": "Looking up similar examples…",
     "editor.ai.generatingTranslation": "Generating translation…",
     "editor.ai.signInForTranslations": "Sign in for AI translations",
@@ -1673,6 +1666,8 @@ export const editor = defineNamespace({
     // — Remaining action-rail tooltips ————————————————————————————
     "editor.audio.play": "Play audio",
     "editor.cue.playFrom": "Play from this cue",
+    // AQU-1118: the same button while this row's line is the one playing.
+    "editor.cue.pause": "Pause",
 
     // — Expansion tab: health ————————————————————————————————————
     "editor.expansion.retrievalSupport": "Health",
@@ -4525,7 +4520,7 @@ export const editor = defineNamespace({
           "nothing has happened yet.",
         placeholders: {
           count: "Cells the click will leave alone; selects the plural form.",
-          reasons: "A list of reason clauses such as \"7 are untouched AI drafts, reviewed one at a time\".",
+          reasons: "A list of reason clauses such as \"7 are outside your assigned files or lanes\".",
         },
       },
       "editor.selection.validateOutOfScope": {
@@ -4552,20 +4547,6 @@ export const editor = defineNamespace({
           "selected cells were last changed by this user on a project that does " +
           "not let people validate their own work. The rest are blocked for " +
           "another reason (already validated, or no translation yet).",
-      },
-      "editor.selection.validateAiDrafts": {
-        description:
-          "Tooltip when bulk-validate is disabled because the selected cells are " +
-          "untouched AI drafts. Policy: a human must open each AI draft " +
-          "individually, so they cannot be approved in bulk. The reason after the " +
-          "dash is the important half.",
-      },
-      "editor.selection.validateAiDraftsOrgHint": {
-        description:
-          "Second sentence of that same tooltip: an organization can switch the " +
-          "rule off. 'Settings → Project defaults' names the organization " +
-          "settings page where the switch lives — use this catalog's wording for " +
-          "both names, keeping the arrow.",
       },
       "editor.selection.validateNeedTranslation": {
         description:
@@ -4739,7 +4720,7 @@ export const editor = defineNamespace({
           count:
             "How many cells were skipped in total. Selects the plural form. Always the sum of the clauses in {reasons}.",
           reasons:
-            "The already-joined list of reasons, e.g. \"3 still need a translation, 2 are untouched AI drafts…\". Do not translate its contents here; translate the skip.* keys.",
+            "The already-joined list of reasons, e.g. \"3 still need a translation, 2 you had already validated…\". Do not translate its contents here; translate the skip.* keys.",
         },
       },
       "editor.batchValidate.skip.needsTranslation": {
@@ -4766,16 +4747,6 @@ export const editor = defineNamespace({
           + "work, so someone else has to. A fragment, not a sentence.",
         placeholders: {
           count: "How many cells carried this reader's own latest change. Selects the plural form.",
-        },
-      },
-      "editor.batchValidate.skip.aiDraft": {
-        description:
-          "One clause inside {reasons}: untouched AI drafts. Bulk validation "
-          + "deliberately excludes them — an unread machine draft must be "
-          + "approved individually — so this clause explains a RULE, not a "
-          + "failure. A fragment, not a sentence.",
-        placeholders: {
-          count: "How many cells were untouched AI drafts. Selects the plural form.",
         },
       },
       "editor.batchValidate.skip.outOfScope": {
@@ -4809,7 +4780,7 @@ export const editor = defineNamespace({
         description:
           "Toast title when a bulk validation ran and signed off no cells at "
           + "all. Neutral, not an error: the usual cause is that every "
-          + "candidate was an AI draft or already validated. The reasons "
+          + "candidate was already validated by this reader. The reasons "
           + "follow on the next line.",
       },
       "editor.batchValidate.nothingEligibleNoReason": {
@@ -6106,6 +6077,15 @@ export const editor = defineNamespace({
           "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
         maxLength: 28,
       },
+      "editor.lane.addLaneItem": {
+        description:
+          "Menu item inside the lane switcher, for a maintainer, that opens " +
+          "Languages settings to add another target-language lane. Shown even " +
+          "when the project has only one lane. Trailing ellipsis means it opens " +
+          "a further screen — keep it. Not shown to a member who can only see " +
+          "some lanes.",
+        maxLength: 16,
+      },
       "editor.lane.searchAriaLabel": {
         description:
           "Accessible label for the search field inside every lane-picker combobox (editor lane switcher, rule scope picker, rules lane filter). Filters the lane list as the user types.",
@@ -6356,8 +6336,8 @@ export const editor = defineNamespace({
       },
       "editor.ai.draftBadgeAria": {
         description:
-          "Screen-reader name of that badge, spelling out the policy: each AI draft " +
-          "must be reviewed one at a time and cannot be approved in bulk.",
+          "Screen-reader name of that badge, spelling out what it marks: text a " +
+          "model drafted, which a person still has to review and sign off.",
       },
       "editor.ai.lookingUpExamples": {
         description:
@@ -6423,6 +6403,13 @@ export const editor = defineNamespace({
           "Tooltip on the action-rail button that starts the file's master " +
           "audio/video from this cell's timecode, rather than playing the cell's own " +
           "recording. 'Cue' is the timed entry.",
+        maxLength: 24,
+      },
+      "editor.cue.pause": {
+        description:
+          "Tooltip on that same action-rail button while this row's line is the one " +
+          "playing: it shows a pause icon, and pressing it stops playback. A verb, " +
+          "short like 'Play'.",
         maxLength: 24,
       },
       "editor.expansion.retrievalSupport": {

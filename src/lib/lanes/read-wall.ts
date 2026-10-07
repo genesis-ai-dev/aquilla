@@ -51,7 +51,8 @@ export function visibleLaneTags(input: {
 
 export interface LaneIdentity {
   id: string
-  name: string
+  /** Stored display override. Null when the lane only has a language (AQU-1592). */
+  name: string | null
   /** `''` is the default target lane. Null is treated the same. */
   legacyTag: string | null
 }
@@ -93,7 +94,8 @@ export function labelsForGrantedLanes(lanes: readonly LaneIdentity[], grantedIds
   const kept = new Set<string>()
   for (const lane of lanes) {
     if (!grantedIds.has(lane.id)) continue
-    if (lane.name.trim() !== "") kept.add(lane.name)
+    const name = (lane.name ?? "").trim()
+    if (name !== "") kept.add(name)
     const legacy = lane.legacyTag ?? ""
     if (legacy !== "") kept.add(legacy)
   }
@@ -121,10 +123,9 @@ export function filterSettingsToVisibleLanes<
   for (const key of ["targetLanes", "archivedLanes"] as const) {
     const value = settings[key]
     if (!Array.isArray(value)) continue
-    settings[key] = value.filter((lane) => typeof lane === "string" && kept.has(lane))
+    settings[key] = value.filter((lane) => laneLabelShown(lane, kept))
   }
-  const primary = settings.targetLanguage
-  if (typeof primary === "string" && primary.trim() !== "" && !kept.has(primary)) {
+  if (primaryHidden(settings.targetLanguage, kept)) {
     settings.targetLanguage = ""
   }
   const rows = response.lanes
@@ -134,6 +135,72 @@ export function filterSettingsToVisibleLanes<
     settings,
     lanes: rows.filter((lane) => lane.role !== "target" || visible.has(lane.id)),
   }
+}
+
+/** Whether the filter keeps this `targetLanes` / `archivedLanes` entry. */
+function laneLabelShown(entry: unknown, kept: ReadonlySet<string>): boolean {
+  return typeof entry === "string" && kept.has(entry)
+}
+
+/** Whether the filter blanks this `targetLanguage`. */
+function primaryHidden(primary: unknown, kept: ReadonlySet<string>): primary is string {
+  return typeof primary === "string" && primary.trim() !== "" && !kept.has(primary)
+}
+
+export type RestoredLaneSettings =
+  | { ok: true; settings: Record<string, unknown> }
+  | { ok: false; error: string }
+
+/**
+ * AQU-1750: the write-side inverse of {@link filterSettingsToVisibleLanes}.
+ *
+ * A caller whose GET was filtered saves `{ ...thatGet, ...edit }`, so its body
+ * lacks what the filter took out. Stored whole, that echo deletes the hidden
+ * lanes and the primary language for everyone. A caller cannot change what it
+ * cannot see, so this puts the stored hidden parts back:
+ *
+ * - `targetLanes` / `archivedLanes`: each stored entry the filter hides keeps
+ *   its stored place. An entry the caller can see stays only if `incoming`
+ *   still has it, and new entries from `incoming` go on the end. An echo
+ *   therefore gives back the stored list exactly and adds nothing to the
+ *   write's diff. The caller's reorder of its own entries is not kept.
+ * - `targetLanguage`: a hidden stored primary is kept when `incoming` sends
+ *   `""` or nothing, which is all the caller saw. Any other value is refused,
+ *   because the caller would replace a language it never saw.
+ *
+ * `visible === null` (wall off, Maintainer+) returns `incoming` unchanged.
+ * `stored` must be the row the write is version-guarded on.
+ */
+export function restoreHiddenLaneSettings(
+  stored: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+  visible: VisibleLaneTags,
+  lanes: readonly LaneIdentity[] = [],
+): RestoredLaneSettings {
+  if (visible === null) return { ok: true, settings: incoming }
+  const kept = labelsForGrantedLanes(lanes, visible)
+  const settings: Record<string, unknown> = { ...incoming }
+  for (const key of ["targetLanes", "archivedLanes"] as const) {
+    const storedList: unknown[] = Array.isArray(stored[key]) ? stored[key] : []
+    if (storedList.every((entry) => laneLabelShown(entry, kept))) continue
+    const sent: unknown[] = Array.isArray(incoming[key]) ? incoming[key] : []
+    settings[key] = [
+      ...storedList.filter((entry) => !laneLabelShown(entry, kept) || sent.includes(entry)),
+      ...sent.filter((entry) => !storedList.includes(entry)),
+    ]
+  }
+  const primary = stored.targetLanguage
+  if (primaryHidden(primary, kept)) {
+    const sent = incoming.targetLanguage
+    if (sent !== undefined && sent !== "" && sent !== primary) {
+      return {
+        ok: false,
+        error: "the project's primary target language is on a lane you have no grant for",
+      }
+    }
+    settings.targetLanguage = primary
+  }
+  return { ok: true, settings }
 }
 
 /**
@@ -204,4 +271,40 @@ export function visibleDefaultLaneLanguage(
 ): string | null {
   if (allowedTags === null) return targetLanguage
   return allowedTags.has("") ? targetLanguage : null
+}
+
+/**
+ * AND-clause for a member limited by lane scopes while the read wall is off.
+ *
+ * Matches a target row by lane id OR by `target_lang`. The tag match is what
+ * keeps a translation visible before the backfill has stamped `lane_id`
+ * (NULL on the former default lane, and on any row written before its lane
+ * existed). Source rows stay. An empty id list and an empty tag list hide
+ * every target row — a scope that named nothing is not "see everything".
+ */
+export function scopedTargetVisibilityClause(args: {
+  ids: readonly string[]
+  tags: readonly string[]
+  sideExpr?: string
+  laneIdExpr: string
+  targetLangExpr: string
+}): { sql: string; binds: unknown[] } {
+  const parts: string[] = []
+  const binds: unknown[] = []
+  if (args.ids.length > 0) {
+    parts.push(`${args.laneIdExpr} IN (${args.ids.map(() => "?").join(", ")})`)
+    binds.push(...args.ids)
+  }
+  if (args.tags.length > 0) {
+    parts.push(`${args.targetLangExpr} IN (${args.tags.map(() => "?").join(", ")})`)
+    binds.push(...args.tags)
+  }
+  if (parts.length === 0) {
+    return args.sideExpr
+      ? { sql: `AND ${args.sideExpr} = 'source'`, binds: [] }
+      : { sql: "AND FALSE", binds: [] }
+  }
+  const match = parts.join(" OR ")
+  if (!args.sideExpr) return { sql: `AND (${match})`, binds }
+  return { sql: `AND (${args.sideExpr} = 'source' OR ${match})`, binds }
 }

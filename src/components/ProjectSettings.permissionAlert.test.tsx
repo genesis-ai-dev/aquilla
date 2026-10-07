@@ -201,13 +201,11 @@ describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
   })
 })
 
-// AQU-1086: the Source/Target language fields sit behind the org's
-// configurable languageEditMinRole rather than the hook-wide maintainer floor.
-// Two things must hold: at the default the fields look exactly as they did
-// before, and with the floor lowered a project lead gets the fields WITHOUT
-// the rest of the form unlocking.
-describe("ProjectSettings — org-configurable language floor (AQU-1086)", () => {
-  it("project lead at the default floor sees the language fields locked, naming Maintainers", async () => {
+// AQU-1086 / AQU-984: language fields sit behind languageEditMinRole. The
+// unset default is Project lead, so a lead edits them. An org that stored
+// Maintainer still locks them, and the hint names that role.
+describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-984)", () => {
+  it("project lead sees the language fields locked when the org stored Maintainer, naming Maintainers", async () => {
     currentProject = makeProject({ syncRole: { level: 500, source: "member" } } as Partial<ProjectRecord>)
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     const source = screen.getByLabelText(/source language/i)
@@ -215,7 +213,18 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086)", () =>
     await expectTooltip(source, /Only Maintainers can modify/)
   })
 
-  it("project lead with the floor lowered to 500 can edit the language fields", () => {
+  it("a contributor below the unset default sees the language fields locked, naming Project leads", async () => {
+    currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
+    currentCanEditLanguages = false
+    currentReasonCannotEditLanguages = "role"
+    currentLanguageEditFloor = 500
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    const source = screen.getByLabelText(/source language/i)
+    expect(source).toBeDisabled()
+    await expectTooltip(source, /Only Project leads can modify/)
+  })
+
+  it("project lead with the floor at 500 can edit the language fields", () => {
     currentProject = makeProject({
       syncRole: { level: 500, source: "member" },
       languageEditMinRole: 500,

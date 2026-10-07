@@ -1,8 +1,8 @@
 // AQU-1086: the language-scoped carve-out in the project-settings write
 // route. Below the maintainer settings floor a write whose only *changed* keys
 // are language keys (`sourceLanguage`, `targetLanguage`, `targetLanes`,
-// `archivedLanes`) is allowed — but only when the project's org has lowered
-// `languageEditMinRole` far enough.
+// `archivedLanes`) is allowed when the caller meets the org's
+// `languageEditMinRole`. Absence of that key is Project lead (AQU-984).
 //
 // Mirrors project-settings-termbase-scope.test.ts and guards the same two
 // failure modes, in order of severity:
@@ -12,8 +12,7 @@
 //      whole-object read-modify-write and every write echoes back every key —
 //      so the gate must key off the DIFF, not off key presence.
 //
-// The default floor is MAINTAINER (600): with no org setting, everything here
-// behaves exactly as it did before this issue.
+// A stored floor, including an explicit Maintainer (600), is kept.
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
@@ -88,13 +87,31 @@ describe("project-settings language carve-out (AQU-1086)", () => {
     expect((await storedSettings()).targetLanguage).toBe("de")
   })
 
-  it("403s the same write at the default floor (600) — today's behaviour preserved", async () => {
-    await seed() // org never configured a floor
+  it("lets a project lead change the target language when the org has not set a floor (AQU-984)", async () => {
+    await seed() // key absent — never set, so the default is project lead
+    const res = await patchProjectSettings("dan", {
+      sourceLanguage: "en",
+      targetLanguage: "de",
+    })
+    expect(res.status).toBe(200)
+    expect((await storedSettings()).targetLanguage).toBe("de")
+  })
+
+  it("403s a project lead when the org explicitly stored maintainer, and names that role", async () => {
+    await seed('{"languageEditMinRole":600}')
     const res = await patchProjectSettings("dan", {
       sourceLanguage: "en",
       targetLanguage: "de",
     })
     expect(res.status).toBe(403)
+    const body = (await res.json()) as {
+      error: string
+      code: string
+      required: { roleLevel: number }
+    }
+    expect(body.code).toBe("role_required")
+    expect(body.required.roleLevel).toBe(600)
+    expect(body.error).toMatch(/maintainer/i)
     expect((await storedSettings()).targetLanguage).toBe("fr")
   })
 
@@ -138,6 +155,14 @@ describe("project-settings language carve-out (AQU-1086)", () => {
       targetLanguage: "de",
     })
     expect(defaulted.status).toBe(403)
+    const body = (await defaulted.json()) as {
+      error: string
+      code: string
+      required: { roleLevel: number }
+    }
+    expect(body.code).toBe("role_required")
+    expect(body.required.roleLevel).toBe(500)
+    expect(body.error).toMatch(/project lead/i)
     expect((await storedSettings()).targetLanguage).toBe("fr")
   })
 

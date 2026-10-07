@@ -21,7 +21,7 @@ let mockOutputLatencySec = 0
 vi.mock("./useOutputLatency", () => ({ useOutputLatency: () => mockOutputLatencySec }))
 
 let mockQueueState: QueueState = { kind: "idle" }
-let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
 // Round 5: the speaker buttons push audibility straight into the queue.
 let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } | null = null
 // Stage 2: audibility is a STORE now — lib/audio/audibility merges every toggle
@@ -331,18 +331,18 @@ describe("TimelineEditor", () => {
 
     function playing(at: number) {
       mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
-      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1 }
+      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1, programmeClock: false }
     }
     function coldGate(at: number) {
       // A verse whose audio has not arrived yet. `transportPlaying` goes FALSE
       // here even though the transport has not stopped — which is exactly the
       // trap: gating compensation on that flag would switch it off mid-run.
       mockQueueState = { kind: "loading", cellIndex: 1, cellId: "m2" }
-      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1 }
+      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1, programmeClock: false }
     }
     const reset = () => {
       mockQueueState = { kind: "idle" }
-      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
       mockOutputLatencySec = 0
     }
 
@@ -400,7 +400,7 @@ describe("TimelineEditor", () => {
 
   it("the playhead tracks queue progress for THIS file's cells", () => {
     mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
-    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1, programmeClock: false }
     try {
       render(
         <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
@@ -410,7 +410,7 @@ describe("TimelineEditor", () => {
       expect(parseFloat(playhead.style.left)).toBeCloseTo(12 * 38, 0)
     } finally {
       mockQueueState = { kind: "idle" }
-      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
     }
   })
 
@@ -429,7 +429,7 @@ describe("TimelineEditor", () => {
     ]
     mockQueueState = { kind: "playing", cellIndex: 0, cellId: "t1" }
     // 3s INTO THE TAKE — not 3s into the file.
-    mockProgress = { currentTime: 3, duration: 8, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 3, duration: 8, rate: 1, volume: 1, programmeClock: false }
     try {
       render(
         <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={takeOnly} onRetimeSubtitle={() => {}} />,
@@ -437,13 +437,13 @@ describe("TimelineEditor", () => {
       expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBe(0)
     } finally {
       mockQueueState = { kind: "idle" }
-      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
     }
   })
 
   it("a queue playing ANOTHER file's cells does not move this playhead", () => {
     mockQueueState = { kind: "playing", cellIndex: 0, cellId: "other-file-cell" }
-    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1, programmeClock: false }
     try {
       render(
         <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
@@ -453,7 +453,7 @@ describe("TimelineEditor", () => {
       expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()
     } finally {
       mockQueueState = { kind: "idle" }
-      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
     }
   })
 
@@ -686,8 +686,20 @@ describe("TimelineEditor", () => {
   it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
     localStorage.removeItem("aquilla:timelineAudibility:spkfile")
     lastAudibility = null
+    // AQU-1682: the Target audio row only has a speaker once it holds a take.
+    const TAKE = "audio-m1-1700000000-take.webm"
+    const withTake = [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10, selectedAudioId: TAKE,
+        attachments: {
+          [SOURCE_CLIP]: { type: "audio", url: "frontier-audio://src" },
+          [TAKE]: { type: "audio", url: "frontier-audio://take" },
+        },
+      } as Partial<CellData>),
+      mediaCells[1],
+    ]
     render(
-      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={withTake} onRetimeSubtitle={() => {}} />,
     )
     // Mount pushes the default (both audible).
     expect(lastAudibility).toEqual({ source: true, target: true })
@@ -1031,6 +1043,99 @@ describe("TimelineEditor", () => {
       />,
     )
     expect(onSeekToTime).toHaveBeenCalledWith(10)
+  })
+})
+
+// ── AQU-1747: the playhead in FREE TIMING ───────────────────────────
+//
+// Free timing draws the PROGRAMME — the verses laid end to end — so the only
+// position the playhead may paint there is a programme second. A video-less
+// subtitle file has no imported recording, so the file-clock test the dubbing
+// path uses is false for it and the playhead sat on 0:00 through a whole run of
+// Play all while the bar's clock ran correctly.
+
+describe("TimelineEditor — playhead clock in Free timing", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  /** A text cue (SRT/VTT line) with a take of its own and NO source clip — what
+   *  a subtitle import with no video linked actually looks like. */
+  const cue = (id: string, startTime: number, endTime: number, takeMs: number): CellData => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return cell({
+      id, original: id, medium: "text", startTime, endTime,
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: takeMs } },
+    } as unknown as Partial<CellData>)
+  }
+  // Cues 0-3, 3-6, 6-9 s; takes 1 s, 5 s, 2 s — so the programme runs
+  // 0-1 (c1), 1-6 (c2), 6-8 (c3), as the reported walk did.
+  const cues = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+
+  const renderFree = () =>
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={cues}
+        timingMode="audioFirst" onRetimeSubtitle={() => {}}
+        onRetimeTarget={() => {}} onTrimTarget={() => {}}
+      />,
+    )
+  const playheadPx = () => parseFloat(screen.getByTestId("tl-playhead").style.left)
+  const reset = () => {
+    mockQueueState = { kind: "idle" }
+    mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
+  }
+
+  it("follows the programme clock while Play all runs", () => {
+    // 6 s on the programme == the start of c3's take, the third chip.
+    mockQueueState = { kind: "playing", cellIndex: 2, cellId: "c3" }
+    mockProgress = { currentTime: 6, duration: 8, rate: 1, volume: 1, programmeClock: true }
+    try {
+      renderFree()
+      // 38 px/s at the default zoom. Before the fix this was 0 for the whole run.
+      expect(playheadPx()).toBeCloseTo(6 * 38, 0)
+    } finally {
+      reset()
+    }
+  })
+
+  it("a take played from a row's rail still does NOT move the playhead", () => {
+    // THE GUARD THE GATE EXISTS FOR (2026-08-11, carried forward): the same
+    // cells, the same mode, a take sounding on its own clock — 3 s into the
+    // TAKE, which is not 3 s into anything the timeline draws. The transport
+    // says so by publishing `programmeClock: false`, and the head must not move.
+    mockQueueState = { kind: "playing", cellIndex: 2, cellId: "c3" }
+    mockProgress = { currentTime: 3, duration: 8, rate: 1, volume: 1, programmeClock: false }
+    try {
+      renderFree()
+      expect(playheadPx()).toBe(0)
+    } finally {
+      reset()
+    }
+  })
+
+  it("in dubbing mode the FILE clock still drives it, programme flag or not", () => {
+    // The other half of the mode split: dubbing draws file seconds, so it reads
+    // `queueClockIsFileTime` exactly as before and ignores the new flag.
+    const SOURCE_CLIP = "audio-f1-1690000000-shared.mp3"
+    const media = [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 20,
+        attachments: { [SOURCE_CLIP]: { type: "audio", url: "frontier-audio://src" } },
+      } as unknown as Partial<CellData>),
+    ]
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1, programmeClock: false }
+    try {
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={media}
+          timingMode="dubbing" onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(playheadPx()).toBeCloseTo(12 * 38, 0)
+    } finally {
+      reset()
+    }
   })
 })
 
@@ -1444,13 +1549,86 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
 
   it("leaves the target row's speaker button alone", () => {
     setVideoDurationSec(VIDEO, 120)
+    // AQU-1682: the Target audio row has a speaker once it holds a take.
+    const TAKE = "audio-s1-1700000000-take.webm"
+    const withTake = [
+      cell({
+        ...subtitleCells[0], selectedAudioId: TAKE,
+        attachments: { [TAKE]: { type: "audio", url: "frontier-audio://take" } },
+      } as Partial<CellData>),
+      subtitleCells[1],
+    ]
     render(
       <TimelineEditor
-        fileId="f1" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+        fileId="f1" coreMediaUrl={VIDEO} editable cells={withTake}
         tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
       />,
     )
     expect(screen.getByTestId("tl-speaker-target")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  // AQU-1682: a lane's mute button only where the lane has something to play.
+  describe("a mute button only on a lane with something to play (AQU-1682)", () => {
+    beforeEach(() => {
+      localStorage.removeItem("aquilla:timelineAudibility:f1682")
+    })
+
+    it("gives an empty Target audio row no speaker", () => {
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+      // The film still sounds, so the Source audio row keeps its speaker.
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+    })
+
+    it("gives the Source audio row no speaker when nothing on it plays (cues, no video, no recording)", () => {
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={null} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+    })
+
+    it("gives the Source audio row no speaker in Free timing, where the video is hidden and silent", () => {
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells} timingMode="audioFirst"
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+    })
+
+    it("keeps the Source audio row's speaker for an imported recording", () => {
+      render(
+        <TimelineEditor fileId="f1682" coreMediaUrl={null} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
+      )
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+    })
+
+    it("keeps the button on a muted lane even when it has nothing to play, so it can be unmuted", () => {
+      localStorage.setItem("aquilla:timelineAudibility:f1682", JSON.stringify({ source: true, target: false }))
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1682" coreMediaUrl={VIDEO} editable cells={subtitleCells}
+          tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
+        />,
+      )
+      const target = screen.getByTestId("tl-speaker-target")
+      expect(target).toHaveAttribute("aria-pressed", "false")
+      fireEvent.click(target)
+      // Unmuted and still empty: now it goes.
+      expect(screen.queryByTestId("tl-speaker-target")).toBeNull()
+    })
   })
 
   it("an imported recording keeps its gutter source speaker, and it still publishes", () => {
@@ -4278,7 +4456,7 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
   // leaves the other covering it. Removing both fails this.
   it("keeps the head on the hand when a transport publishes an older position", () => {
     mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
-    mockProgress = { currentTime: 2, duration: 20, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 2, duration: 20, rate: 1, volume: 1, programmeClock: false }
     const clipped = [
       cell({
         id: "m1", original: "One", medium: "media", startTime: 0, endTime: 20,
@@ -4302,7 +4480,7 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
     expect(head()).toBeCloseTo(38 * 12, 0)
 
     // The transport now reports where it got to. Mid-scrub, that is stale news.
-    mockProgress = { currentTime: 4, duration: 20, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 4, duration: 20, rate: 1, volume: 1, programmeClock: false }
     rerender(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={clipped}
@@ -4313,7 +4491,7 @@ describe("TimelineEditor — dragging the playhead (stage 5)", () => {
     expect(head()).toBeCloseTo(38 * 12, 0)
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 38 * 12 })
     mockQueueState = { kind: "idle" }
-    mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+    mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
   })
 
   // A drag's trailing `click` must not seek a second time and fight the

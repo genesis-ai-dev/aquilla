@@ -20,6 +20,7 @@ vi.mock("@/lib/sync/project-settings", () => ({ fetchProjectSettings: vi.fn() })
 import { MemberLaneScopeEditor } from "./MemberLaneScopeEditor"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
 import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const settings = (targetLanguage: string, targetLanes: string[]) =>
   ({ version: 1, updatedAt: "", updatedBy: null, settings: { targetLanguage, targetLanes } }) as never
@@ -48,7 +49,7 @@ describe("MemberLaneScopeEditor — the project's languages as checkboxes", () =
     // Label-wrapped: a click on the text reaches the control.
     fireEvent.click(screen.getByText("German"))
     fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
-    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled())
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
     expect(vi.mocked(putMemberScopes).mock.calls[0][3]).toEqual([{ kind: "lane", value: "" }])
   })
 
@@ -61,7 +62,7 @@ describe("MemberLaneScopeEditor — the project's languages as checkboxes", () =
     fireEvent.click(screen.getByText("Spansih (not a language in this project)"))
     fireEvent.click(screen.getByText("Spanish"))
     fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
-    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled())
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
     expect(vi.mocked(putMemberScopes).mock.calls[0][3]).toEqual([{ kind: "lane", value: "Spanish" }])
   })
 
@@ -109,7 +110,7 @@ describe("MemberLaneScopeEditor — lane rows and lane ids", () => {
 
     fireEvent.click(screen.getByText("Spanish (Mexico)"))
     fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
-    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled())
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
     expect(vi.mocked(putMemberScopes).mock.calls[0][3]).toEqual([{ kind: "lane", value: "ln-mx" }])
   })
 
@@ -121,7 +122,7 @@ describe("MemberLaneScopeEditor — lane rows and lane ids", () => {
     expect(screen.getByLabelText("Lane Spanish")).not.toBeChecked()
 
     fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
-    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled())
+    await vi.waitFor(() => expect(onSaved).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
     expect(vi.mocked(putMemberScopes).mock.calls[0][3]).toEqual([{ kind: "lane", value: "ln-mx" }])
   })
 

@@ -22,7 +22,12 @@ describe("partner registry — this tree", () => {
     const biblica = partnerIntegrations().find((integration) => integration.id === "biblica")
     expect(biblica).toBeDefined()
     expect(biblica?.importScreen?.titleKey).toBe("importExport.landing.biblica.title")
-    expect(biblica?.idmlTargetHtmlNormalizers).toHaveLength(1)
+    expect(biblica?.idmlTargetHtmlNormalizers).toHaveLength(2)
+    expect(biblica?.idmlExportOptions?.map((option) => option.id)).toEqual(["bible-swap"])
+    expect(biblica?.idmlExportOptions?.[0]?.profileIds).toEqual([
+      "builtin:biblica-study-notes",
+      "builtin:biblica-treasure-hunt",
+    ])
   })
 
   /** Without this hook the editor silently stops marking Biblica verse rows (AQU-1285). */

@@ -13,6 +13,7 @@ import {
 } from "../../../db/shared/counted-files"
 import { orgPathContribution } from "../../../db/shared/project-roles"
 import { takeSoundsOnItsTrackSql } from "../../../db/shared/audio-progress"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
 import {
   loadLaneGrantsForProjects,
   loadTargetLaneIdentitiesForProjects,
@@ -1228,14 +1229,21 @@ export async function detachGroupProject(env: Env, groupId: number, projectId: s
 
 /**
  * AQU-538: per-target-language-lane rollup for a project. Aggregated from
- * `file_section_progress` file-scope rows (`scope='file'`) grouped by
- * `target_lang`. `lane: ''` is the default lane (the project's configured
- * `targetLanguage`, labeled client-side) and is always present whenever the
- * project has any file-scope progress rows. `validatedCells` mirrors the
- * per-file progress route: cells whose endorsement count meets the project's
- * `validationCount` threshold (default 1, cap 15). `lastEditAt` is the most
- * recent progress-projection update in the lane (updated on every edit /
- * validation that touches the lane), which avoids a heavy per-lane cells scan.
+ * `file_section_progress` file-scope rows (`scope='file'`) grouped by the
+ * lane's tag. `lane: ''` is the former default lane (the project's configured
+ * `targetLanguage`, labeled client-side) and is present whenever the project
+ * has a lane row or file-scope progress rows for it.
+ *
+ * `validatedCells` mirrors the per-file progress route: cells whose endorsement
+ * count meets the project's `validationCount` threshold (default 1, cap 15).
+ * `lastEditAt` is the most recent progress-projection update in the lane
+ * (updated on every edit / validation that touches the lane), which avoids a
+ * heavy per-lane cells scan.
+ *
+ * AQU-1599: `totalCells` on a lane with no progress rows of its own is borrowed
+ * from the SOURCE lane's rows, not from the `''` lane's — the source-cell count
+ * is a fact about the source text, and reading it off the former default target
+ * lane meant archiving that lane zeroed every other lane's denominator.
  */
 export interface PortfolioLane {
   lane: string
@@ -1303,10 +1311,17 @@ interface VisiblePortfolioText {
   targetLanguage: string | null
 }
 
+function laterEdit(a: number | null, b: number | null): number | null {
+  if (a == null || !Number.isFinite(a)) return b
+  if (b == null || !Number.isFinite(b)) return a
+  return Math.max(a, b)
+}
+
 function mapPortfolioRow(
   r: PortfolioDbRow,
   lanesByProject: Map<string, PortfolioLane[]>,
   visibleText?: VisiblePortfolioText,
+  sourceActivityAt: number | null = null,
 ): PortfolioRow {
   return {
     id: r.id,
@@ -1315,7 +1330,7 @@ function mapPortfolioRow(
     validatedCells: visibleText ? visibleText.validatedCells : r.validated_cells,
     filledCells: visibleText ? visibleText.filledCells : r.filled_cells,
     aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
-    lastEditAt: visibleText ? visibleText.lastEditAt : r.last_edit_at,
+    lastEditAt: laterEdit(visibleText ? visibleText.lastEditAt : r.last_edit_at, sourceActivityAt),
     audioCells: r.audio_cells,
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
@@ -1335,7 +1350,14 @@ const MAX_VALIDATION_LEVEL = 15
 
 interface LaneDbRow {
   project_id: string
-  target_lang: string
+  target_lang: string | null
+  /**
+   * AQU-1599: which lane this progress row belongs to. `'source'` rows are the
+   * project's lane-independent numbers (the source-cell denominator), not a
+   * language anyone translates into, so they feed the denominator below and
+   * never become a lane chip.
+   */
+  lane_role: string
   total_count: number | string
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
@@ -1389,15 +1411,20 @@ function validatedFromHistogram(raw: LaneDbRow["validator_histogram"], threshold
  * Per-lane rollup for the given org's non-archived projects, keyed by project
  * id. Derive-on-read over `file_section_progress` file-scope rows (one row per
  * file per lane since migration 0055) — a SUM, not new bookkeeping. Lanes are
- * ordered default ('') first, then by tag, for deterministic output.
+ * ordered by `lanes.position`, with the tag as a tiebreak for rows that have no
+ * lane row to carry a position. AQU-1599 dropped the "default ('') first" rule
+ * that sat in front of it: the former default lane is an ordinary lane and
+ * sorts where its position says, including after a lane added later and moved
+ * above it.
  */
 async function fetchPortfolioLanes(
   env: Env,
   orgIds: number[],
   projectIds?: readonly string[],
-): Promise<Map<string, PortfolioLane[]>> {
+): Promise<{ lanes: Map<string, PortfolioLane[]>; sourceActivity: Map<string, number> }> {
   const byProject = new Map<string, PortfolioLane[]>()
-  if (orgIds.length === 0) return byProject
+  const sourceActivity = new Map<string, number>()
+  if (orgIds.length === 0) return { lanes: byProject, sourceActivity }
   const placeholders = orgIds.map(() => "?").join(", ")
   const projectFilter =
     projectIds != null && projectIds.length > 0
@@ -1407,7 +1434,13 @@ async function fetchPortfolioLanes(
   const projectBinds: unknown[] = projectIds != null && projectIds.length > 0 ? [...projectIds] : []
   const [laneRows, settingsRows, nameRows] = await Promise.all([
     env.AQUILLA_PG.prepare(
-      `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
+      // AQU-1599: the lane comes from the `lanes` row the projection wrote this
+      // progress row under, not from `fsp.target_lang`. The source lane's row
+      // carries '' there as well (its `legacy_tag` is NULL), so grouping by the
+      // column would fold the source lane's denominator into the former default
+      // lane's chip and double its cells.
+      `SELECT fsp.project_id AS project_id, l.legacy_tag AS target_lang,
+              l.role AS lane_role,
               fsp.total_count AS total_count, fsp.filled_count AS filled_count,
               fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at,
               fsp.structural_count AS structural_count,
@@ -1415,6 +1448,7 @@ async function fetchPortfolioLanes(
               fsp.structural_validator_histogram AS structural_validator_histogram
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
+         JOIN lanes l ON l.project_id = fsp.project_id AND l.id = fsp.lane_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'
           -- AQU-1626: one progress row per file per lane, so a hidden or
           -- deleted file contributes one here too — and a lane chip that
@@ -1440,7 +1474,7 @@ async function fetchPortfolioLanes(
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
     env.AQUILLA_PG.prepare(
-      `SELECT l.project_id AS project_id, l.id AS id, l.name AS name,
+      `SELECT l.project_id AS project_id, l.id AS id, ${laneDisplayNameSql("l")} AS name,
               l.legacy_tag AS legacy_tag, l.position AS position,
               l.archived_at AS archived_at
          FROM lanes l
@@ -1463,19 +1497,59 @@ async function fetchPortfolioLanes(
       .filter((row) => row.count_structural === "false")
       .map((row) => row.project_id),
   )
-  // Accumulate one lane entry per (project, target_lang).
+  // Accumulate one lane entry per (project, lane tag).
   const acc = new Map<string, Map<string, PortfolioLane>>()
+  // AQU-1599: the project's source-cell count, summed over the SOURCE lane's
+  // file rows. The lane-independent denominator every lane without progress
+  // rows of its own borrows, and the number that used to be read off the ''
+  // lane's chip.
+  const sourceTotals = new Map<string, number>()
+  /**
+   * AQU-1599: the lane-independent denominator a lane with no progress rows of
+   * its own borrows — the project's source-cell count, from the SOURCE lane's
+   * file rows.
+   *
+   * Falls back to the largest denominator any lane DOES report, because a
+   * project whose rows were projected before AQU-1599 has no source-lane rows
+   * until AQU-1616's batch recompute (AQU-1419's "work before and after the
+   * backfill" rule), and every lane's rows carried the same denominator then.
+   * Deliberately not "the '' lane's", which is the pin this ticket removes.
+   */
+  const laneIndependentTotal = (projectId: string): number => {
+    const fromSource = sourceTotals.get(projectId)
+    if (fromSource != null) return fromSource
+    const lanes = acc.get(projectId)
+    if (!lanes) return 0
+    let best = 0
+    for (const entry of lanes.values()) best = Math.max(best, entry.totalCells)
+    return best
+  }
   for (const row of laneRows.results ?? []) {
     const threshold = thresholds.get(row.project_id) ?? 1
+    // AQU-1083: subtract per file row, then clamp — a partially backfilled
+    // project must never contribute a negative number to the lane's sum.
+    const drop = excluding.has(row.project_id)
+    const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
+    if (row.lane_role === "source") {
+      sourceTotals.set(
+        row.project_id,
+        (sourceTotals.get(row.project_id) ?? 0)
+          + Math.max(0, (Number(row.total_count) || 0) - structuralTotal),
+      )
+      // A source-cell edit stamps this row and no target lane. The project
+      // clock has to see it or a source-only session looks idle.
+      const sourceUpdated = row.updated_at == null ? null : Number(row.updated_at)
+      if (sourceUpdated != null && Number.isFinite(sourceUpdated)) {
+        const prev = sourceActivity.get(row.project_id)
+        if (prev == null || sourceUpdated > prev) sourceActivity.set(row.project_id, sourceUpdated)
+      }
+      continue
+    }
     let lanes = acc.get(row.project_id)
     if (!lanes) { lanes = new Map(); acc.set(row.project_id, lanes) }
     const lane = row.target_lang ?? ""
     let entry = lanes.get(lane)
     if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
-    // AQU-1083: subtract per file row, then clamp — a partially backfilled
-    // project must never contribute a negative number to the lane's sum.
-    const drop = excluding.has(row.project_id)
-    const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
     const structuralFilled = drop ? Number(row.structural_filled_count) || 0 : 0
     const structuralValidated = drop
       ? validatedFromHistogram(row.structural_validator_histogram, threshold)
@@ -1493,9 +1567,10 @@ async function fetchPortfolioLanes(
   }
   // AQU-538: union in REGISTERED lanes that have no progress rows yet — a PM
   // who just added a language must see its 0% chip immediately, not after the
-  // first translation lands. The denominator is borrowed from the '' row
-  // (source-cell count is lane-independent); no '' row means the project has
-  // no progress rows at all and the registered lane stays 0/0.
+  // first translation lands. The denominator is the source lane's cell count
+  // when that row exists, and otherwise the largest denominator a lane that
+  // does have a row already reports — rows projected before the source lane
+  // had one of its own.
   // AQU-1473: the primary language is the '' lane even when create also wrote
   // it into targetLanes. Adding it again paints the first language twice.
   for (const row of settingsRows.results ?? []) {
@@ -1506,7 +1581,7 @@ async function fetchPortfolioLanes(
       lanes = new Map()
       acc.set(row.project_id, lanes)
     }
-    const denominator = lanes.get("")?.totalCells ?? 0
+    const denominator = laneIndependentTotal(row.project_id)
     for (const lane of registered) {
       if (lanes.has(lane)) continue
       lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
@@ -1521,8 +1596,8 @@ async function fetchPortfolioLanes(
     }
     let entry = lanes.get(tag)
     if (!entry) {
-      const denominator = lanes.get("")?.totalCells ?? 0
-      entry = { lane: tag, totalCells: tag === "" ? 0 : denominator, filledCells: 0, validatedCells: 0, lastEditAt: null }
+      const denominator = laneIndependentTotal(row.project_id)
+      entry = { lane: tag, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null }
       lanes.set(tag, entry)
     }
     entry.name = row.name
@@ -1570,18 +1645,19 @@ async function fetchPortfolioLanes(
   for (const [projectId, lanes] of acc) {
     byProject.set(
       projectId,
+      // AQU-1599: position, then the tag purely as a tiebreak so the output is
+      // deterministic. A lane with no `lanes` row has no position and sorts
+      // last; the former default lane gets no head start.
       [...lanes.values()].sort((a, b) => {
-        const ap = a.position ?? (a.lane === "" ? -1 : 1_000_000)
-        const bp = b.position ?? (b.lane === "" ? -1 : 1_000_000)
+        const ap = a.position ?? 1_000_000
+        const bp = b.position ?? 1_000_000
         if (ap !== bp) return ap - bp
         if (a.lane === b.lane) return 0
-        if (a.lane === "") return -1
-        if (b.lane === "") return 1
         return a.lane < b.lane ? -1 : 1
       }),
     )
   }
-  return byProject
+  return { lanes: byProject, sourceActivity }
 }
 
 /** Parse the generated target_lanes projection defensively across PG adapters. */
@@ -2051,7 +2127,7 @@ export async function listOrgPortfolioPage(
   const hasMore = page != null && list.length > page.limit
   const pageRows = hasMore ? list.slice(0, page.limit) : list
   const last = pageRows[pageRows.length - 1]
-  const lanesByProject = await fetchPortfolioLanes(
+  const { lanes: lanesByProject, sourceActivity } = await fetchPortfolioLanes(
     env,
     uniqueOrgIds,
     page ? pageRows.map((row) => row.id) : undefined,
@@ -2063,7 +2139,7 @@ export async function listOrgPortfolioPage(
   const visibleText = await visiblePortfolioText(env, viewer, pageRows, lanesByProject)
   return {
     projects: pageRows.map((row) => ({
-      ...mapPortfolioRow(row, lanesByProject, visibleText?.get(row.id)),
+      ...mapPortfolioRow(row, lanesByProject, visibleText?.get(row.id), sourceActivity.get(row.id) ?? null),
       orgId: row.org_id,
     })),
     nextCursor: hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null,
@@ -2643,33 +2719,31 @@ export async function getProjectRosterViewMinRole(env: Env, orgId: number): Prom
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// AQU-1086: configurable project-language edit floor
+// AQU-1086 / AQU-984: configurable project-language edit floor
 //
 // Second write-gating permission-policy key, built on exactly the same
 // org_settings plumbing as termbaseEditMinRole above. It answers "who may
-// change a project's source/target language and its extra target lanes" —
-// Project managers (project_lead 500) running day-to-day projects hit wrong
-// or reset languages and today must escalate to a Maintainer for a routine
-// correction.
+// change a project's source/target language and its extra target lanes."
 //
-// The default is MAINTAINER (600), i.e. today's behaviour byte-for-byte: an
-// org opts in by lowering the floor to PROJECT_LEAD. This is the opposite
-// choice from the termbase floor (which defaults to 500 to close a
-// pre-existing client/server divergence) and matches the read floors —
-// other partners deliberately keep languages maintainer-only.
+// The default is PROJECT_LEAD (500) when the key is absent or not a role-ladder
+// number (AQU-984). extractRoleFloor is what tells "never set" from an explicit
+// choice: a stored finite number in 100..700 is that org's choice and is kept,
+// including an explicit Maintainer (600). Only a missing or invalid key uses
+// this default.
 //
-// Scope is the language keys ONLY. Lowering this floor must never widen
-// write access to AI config, validation, health, timeline, or anything else
-// in the settings blob — enforcement is the language-scoped carve-out in
-// routes/project-settings.ts, which keys off the CHANGED keys of a write.
+// Scope is the language keys ONLY, lanes included. Changing this default must
+// never widen write access to AI config, validation, health, timeline, or
+// anything else in the settings blob — enforcement is the language-scoped
+// carve-out in routes/project-settings.ts, which keys off the CHANGED keys
+// of a write.
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Default floor for editing a project's languages when the org hasn't set one. */
-export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = 600 // ROLE.MAINTAINER
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
 
 /**
  * Resolve the effective language-edit floor for an org (falls back to the
- * MAINTAINER default when the org hasn't configured one, or configured a
+ * PROJECT_LEAD default when the org hasn't configured one, or configured a
  * value outside the role ladder).
  */
 export async function getLanguageEditMinRole(env: Env, orgId: number): Promise<number> {
@@ -2680,7 +2754,7 @@ export async function getLanguageEditMinRole(env: Env, orgId: number): Promise<n
 /**
  * Resolve the language-edit floor that applies to a project, via its org.
  * Projects with no org (personal / not-yet-attached) fall back to the same
- * MAINTAINER default — there is no org policy to consult.
+ * PROJECT_LEAD default — there is no org policy to consult.
  */
 export async function getLanguageEditMinRoleForProject(
   env: Env,

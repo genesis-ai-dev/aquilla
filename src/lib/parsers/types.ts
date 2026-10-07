@@ -4,11 +4,14 @@
 // here so every existing "@/lib/parsers/types" import keeps working unchanged.
 export type {
   CellType,
+  CellUnit,
   SourceLocation,
   TranslatableString,
   ParsedTextFileResult,
   ExportCellFields,
 } from "./core-types"
+// Also needed in local type positions below, not just re-exported.
+import type { CellUnit } from "./core-types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -97,12 +100,15 @@ export type BuiltinCheckId =
   | "target-equals-source"
   | "placeholder-integrity"
   | "number-integrity"
+  | "number-integrity-extra"
   | "end-punctuation-mismatch"
   | "punctuation-integrity"
   | "double-space"
   | "repeated-word"
   | "unpaired-symbols"
   | "abbreviation-mismatch"
+  | "capitalization"
+  | "footnote-quote-mismatch"
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -176,7 +182,7 @@ export interface RuleWaiver {
  * compose a localized sentence itself — it returns a reason CODE instead,
  * and a render-time helper (`formatInfractionReason` /
  * `formatInfractionMessage` in `src/lib/rules/format-infraction.ts`) turns
- * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the ten
+ * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the
  * algorithmic checks; the other three are the user-authored rule shapes.
  */
 export type RuleInfractionReason =
@@ -499,14 +505,19 @@ export interface ProjectRecord {
    */
   archivedLanes?: string[]
   /**
-   * AQU-1418: lane rows. The screen shows `name`. Selection and cell storage
-   * still use `legacyTag` ('' is the default target lane). Absent until the
-   * settings read returns them.
+   * AQU-1418: lane rows. Selection and cell storage still use `legacyTag` ('' is
+   * the default target lane). Absent until the settings read returns them.
+   *
+   * AQU-1592: read the display name and the language code through
+   * `laneDisplayName` / `laneLanguageCode` (src/lib/lanes/lane-display.ts) — a
+   * lane stores only what the user typed, so `name` is null when it just shows
+   * its `language`, and `langCode` is null when the code is derived.
    */
   lanes?: {
     id: string
     role: "source" | "target"
-    name: string
+    language?: string | null
+    name: string | null
     langCode: string | null
     legacyTag: string | null
     position: number
@@ -739,6 +750,12 @@ export interface ProjectRecord {
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AQU-1686: explicit per-enrichment Bible data choices, synced via
+   *  ProjectWideSettings. A missing id means that enrichment's default. Do not
+   *  read it directly for gating; use `resolveBibleEnrichment`
+   *  (db/shared/bible-enrichments.ts), which also applies the Bible data
+   *  switch above. */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings
@@ -746,6 +763,14 @@ export interface ProjectRecord {
    *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
    *  false imports front matter as translatable cells. */
   importExcludeFrontMatter?: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. `paragraph`
+   *  emits one cell per non-empty paragraph with no sentence split and no
+   *  length cap — the unit a dubbing/podcast project generates one voice clip
+   *  for. Absent/`sentence` (the default) keeps the segmenting behaviour that
+   *  suits subtitle and document work. Formats whose cell identity comes from
+   *  the format itself (USFM verses, subtitle cues, key/value resources) are
+   *  unaffected. */
+  importCellUnit?: CellUnit
   /** Curly quotes as you type in the translation editor. Synced via
    *  ProjectWideSettings; absent/false leaves straight quotes alone. */
   smartQuotes?: boolean
@@ -931,29 +956,52 @@ export function isHiddenTimelineFile(file: Pick<FileReference, "role"> | null | 
 }
 
 /**
- * Resolve a file's audio timing mode: Original timing for every subtitle import
- * (see below), else the file's own choice, else the project-level value (the
- * legacy Project Settings field, kept as a read-only fallback so pre-existing
- * projects keep the mode they had chosen), else Original timing. Mixed-mode
- * projects are allowed by design.
+ * True for a subtitle import that actually HAS the video its cues were timed
+ * against (`coreMediaUrl` — absent means no video). The one case where the
+ * timing mode is not a choice: the cues belong to that footage, so laying them
+ * end to end has nothing to fit.
+ *
+ * AQU-1704: the predicate the withdrawal in `resolveFileTimingMode` is scoped
+ * to. AQU-646 withdrew Free timing from every subtitle import on the grounds
+ * that "their cues are already timed to a video" — true of a film's VTT, and
+ * false of an audio-only dubbing project, whose source IS an SRT and which has
+ * no video at all. LOTE (sermon dubbing: podcast, YouTube, app) is that
+ * project, and the blanket rule made the mode unreachable for it: the picker
+ * was hidden AND the project-level key was inert, so a maintainer who set
+ * `audioTimingMode=audioFirst` through the API saw playback carry on fitting
+ * clips into the English cue slots — dead air after a short clip, overlap after
+ * a long one. The footage, not the file format, is what makes the cues binding.
+ */
+export function isVideoTimedSubtitleFile(
+  file: Pick<FileReference, "type" | "coreMediaUrl"> | null | undefined,
+): boolean {
+  return isSubtitleImportFile(file) && Boolean(file?.coreMediaUrl)
+}
+
+/**
+ * Resolve a file's audio timing mode: Original timing for a subtitle import
+ * with footage linked (see `isVideoTimedSubtitleFile`), else the file's own
+ * choice, else the project-level value (the legacy Project
+ * Settings field, kept as a read-only fallback so pre-existing projects keep
+ * the mode they had chosen), else Original timing. Mixed-mode projects are
+ * allowed by design.
  */
 export function resolveFileTimingMode(
-  file: Pick<FileReference, "timingMode" | "type"> | null | undefined,
+  file: Pick<FileReference, "timingMode" | "type" | "coreMediaUrl"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
 ): AudioTimingMode {
-  // AQU-646: Free timing does not exist for subtitle imports — their cues are
-  // already timed to a video, so laying them end to end has nothing to fit.
-  // Withdrawing it at RESOLUTION rather than from the picker is the whole
-  // point: hiding the control would have left three ways back in. (a) The
-  // file's own stored `timingMode`, written before the mode was withdrawn.
-  // (b) Inheritance from the LEGACY project-level `audioTimingMode` below — a
-  // VTT nobody has ever touched still resolves to Free timing off a project
-  // setting made back when the control lived in Project Settings. (c) A
-  // `file.timing.set` from an OLDER client that still offers the mode; the
-  // server deliberately keeps accepting it, since rejecting it would break
-  // those clients for no gain. A stray "audioFirst" on a subtitle file is
-  // simply inert from here on — nothing migrates it away.
-  if (isSubtitleImportFile(file)) return "dubbing"
+  // AQU-646, rescoped by AQU-1704: Free timing does not exist for a subtitle
+  // import whose video is linked here. This check runs BEFORE the file's own
+  // choice, and withdrawing the mode at RESOLUTION rather than from the picker
+  // is still the point: the picker is hidden for these files, so any stored
+  // value would otherwise be one nobody can change back. That covers (a) a
+  // Free timing the user picked while the file had no video, followed by
+  // linking one (file.video.set leaves timingMode untouched), (b) a value
+  // written before AQU-646 or by an OLDER client that still offers the mode,
+  // and (c) inheritance from the LEGACY project-level `audioTimingMode` below.
+  if (isVideoTimedSubtitleFile(file)) return "dubbing"
+  // AQU-1704: every other file reads its own choice next, so the picker the
+  // workspace now shows a video-less subtitle file is not inert.
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts

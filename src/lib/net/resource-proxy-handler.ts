@@ -33,6 +33,7 @@ export const EXTERNAL_CONTENT_HOSTS: readonly string[] = [
   "bible.helloao.org", // Free Use Bible API (helloao)
   "raw.githubusercontent.com", // BibleNLP/ebible corpus + translations.csv
   "tile.openstreetmap.org", // basemap tiles for the verse-resources locator map (AQU-461)
+  "bibletranslation.org", // Bible Knowledge Pack static files, /bkp/v1/* (AQU-1686)
 ]
 
 /** True when `host` is an allow-listed content host we're willing to proxy. */

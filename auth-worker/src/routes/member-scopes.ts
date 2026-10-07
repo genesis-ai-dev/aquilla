@@ -29,6 +29,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
 import { laneScopeIdsForStorage, type LaneScopeConversion } from "../../../src/lib/lanes/scope-ids"
+import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
 
 const memberScopes = new Hono<AuthHonoEnv>()
 
@@ -123,7 +124,7 @@ async function laneNamesForScopes(
   const names: Record<string, string> = {}
   for (const lane of lanes) {
     if (!laneValues.has(lane.id)) continue
-    const label = lane.name.trim() || (lane.legacyTag ?? "").trim()
+    const label = (lane.name ?? "").trim() || (lane.legacyTag ?? "").trim()
     if (label !== "") names[lane.id] = label
   }
   return Object.keys(names).length > 0 ? names : undefined
@@ -292,10 +293,52 @@ memberScopes.put(
         .run()
     }
 
+    // The write wall (on in dev and prod) reads lane grants, not scopes.
+    // Staffing only wrote scopes, so a person limited to one lane still saw
+    // every lane once the wall was on. Replace their grants to match the
+    // scopes just stored. No lane rows yet: leave grants alone (there is
+    // nothing to point at, and the backfill fills both later).
+    await syncMemberLaneGrants(c.env.AQUILLA_PG, projectId, targetUserId, laneIds, user.id)
+
     const saved = await loadScopes(c.env, projectId, targetUserId)
     const savedLaneNames = await laneNamesForScopes(c.env, projectId, saved)
     return c.json({ scopes: saved, ...(savedLaneNames ? { laneNames: savedLaneNames } : {}) })
   },
 )
+
+async function syncMemberLaneGrants(
+  db: AuthHonoEnv["Bindings"]["AQUILLA_PG"],
+  projectId: string,
+  targetUserId: number,
+  laneIds: readonly string[],
+  grantedBy: number,
+): Promise<void> {
+  const membership = await db
+    .prepare("SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?")
+    .bind(projectId, targetUserId)
+    .first<{ role_level: number }>()
+  if (!membership) return
+  const lanes = await loadTargetLaneIdentities(db, projectId)
+  if (lanes.length === 0) return
+  const plan = planLaneGrants({
+    roleLevel: membership.role_level,
+    laneScopes: laneIds,
+    lanes,
+  })
+  await db
+    .prepare("DELETE FROM project_member_lane_roles WHERE project_id = ? AND user_id = ?")
+    .bind(projectId, targetUserId)
+    .run()
+  for (const grant of plan.grants) {
+    await db
+      .prepare(
+        `INSERT INTO project_member_lane_roles
+           (project_id, user_id, lane, role_level, granted_by)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(projectId, targetUserId, grant.laneId, grant.level, grantedBy)
+      .run()
+  }
+}
 
 export default memberScopes

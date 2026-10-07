@@ -34,6 +34,8 @@ import {
 } from '../event-projection'
 import { buildChainClaimStmt, eventQualifiedParentKey, type ChainSlot } from '../chain-claims'
 import { buildEventInsertStmt } from '../event-insert'
+import { eventLaneTag } from '../../../../src/lib/lanes/event-lane'
+import { ensureTargetLaneStmt } from '../../../../db/shared/lanes'
 import type { DispatchResult } from './types'
 
 export interface HandleCellEventOptions {
@@ -123,6 +125,21 @@ export function handleCellEvent(
   const stmts: AquillaStatement[] = [eventInsert]
   let projectionTouches: readonly ProjectionTable[] = []
   let counterFile: DispatchResult['counterFile']
+
+  // A bare create writes a source lane and no target lane. The editor still
+  // commits the default translation as tag ''. That lane is created here,
+  // before the cells write resolves lane_id, and in the same batch. It is
+  // NOT the first projection statement: that one is the gated cells write,
+  // and its row count is what the route reads (AQU-1154). A tagged write
+  // does not create a '' lane. An existing '' lane is left untouched
+  // (ON CONFLICT DO NOTHING — legacy_tag never changes, and no second row).
+  if (
+    opts.updateProjection &&
+    event.kind.startsWith('target.cell.') &&
+    eventLaneTag(event.kind, event.payload) === ''
+  ) {
+    stmts.push(ensureTargetLaneStmt(db, event.projectId, ''))
+  }
 
   // Atomic AD-2 arbitration: chain-arbitrated events claim their chain slot in
   // the same transaction, and the projection's cells write is gated on the

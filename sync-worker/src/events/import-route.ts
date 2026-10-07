@@ -34,8 +34,10 @@ import {
   buildBulkSourceCellCreateStmt,
   buildBulkTargetCellCommitStmt,
   fileCountersRecomputeStmt,
+  laneOfEvent,
   type PersistedEvent,
 } from './event-projection'
+import { ensureTargetLaneStmt } from '../../../db/shared/lanes'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
@@ -776,6 +778,12 @@ export async function handleBulkImportRequest(
     // explicit completion request after every concurrent chunk settles.
     for (let i = 0; i < cellEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkSourceCellCreateStmt(db, cellEvents.slice(i, i + BULK_ROWS)))
+    }
+    // A default-lane target cell addresses ''. Create that bridge before the
+    // cell rows resolve lane_id, in this same batch. A project that already
+    // has the lane, or whose import does not write '', is unchanged.
+    if (targetEvents.some((event) => laneOfEvent(event.kind, event.payload) === '')) {
+      stmts.push(ensureTargetLaneStmt(db, body.projectId, ''))
     }
     for (let i = 0; i < targetEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkTargetCellCommitStmt(db, targetEvents.slice(i, i + BULK_ROWS)))

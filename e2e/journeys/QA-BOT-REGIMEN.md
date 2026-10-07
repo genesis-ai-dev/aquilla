@@ -14,38 +14,35 @@ deploy commands, calver tags).
 ## The line
 
 ```
-PR ──walk PASS, ci green, not on hold, base dev, not stacked──▶ dev
-        │
-        ├─ each day, adversarial Jev attacks deployed dev and files Linear tickets
-        │
-        └─ release plan cuts ──▶ release/YYYY/MM/DD-NN
-                └─ smart Jev on the current HEAD ──▶ a person deploys ──▶ prod + tag
+PR ──walk PASS + review + green checks──▶ dev ──bot cuts──▶ release/YYYY/MM/DD-NN ──smart Jev──▶ a person deploys──▶ tag YYYY.MM.DD.NN
 ```
+
+Adversarial Jev attacks deployed `dev` once a day and files Linear tickets. It
+is not a stage on this line.
 
 | Stage | Who acts | Gate |
 | --- | --- | --- |
-| PR → `dev` | Grok bot, or a Claude automation | Walk `PASS` at the head sha, `ci.yml` green, label is not `on hold`, base is `dev`, not stacked on an open parent. |
+| PR → `dev` | The agent who opened it | Walk **PASS** at the head sha, no proven unresolved finding, required checks green. |
 | `dev` → release branch | Deploy bot | `node scripts/release-plan.mjs` says `cut: true`. |
 | Release HEAD → deploy | A person, after smart Jev | A smart-Jev `FAIL` holds that HEAD. `PASS`, inconclusive, and harness unavailable do not. |
-| Release → prod | Kieran or Matthew | Always a person — see "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
+| Release → prod | Kieran or Matthew | Always a person. The tag is `YYYY.MM.DD.NN`. See "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
 
-## 1. Pull request: walk PASS, then ci.yml
+## 1. Pull request: verify once
 
-GitHub Actions does not click merge. GitHub's auto-merge checkbox cannot read
-the `on hold` label or a stacked parent, so it is not the merger.
-
-The Grok bot (or a Claude automation) may merge a pull request into `dev` when
-all of these hold at the pull request's **current head sha**:
+An agent may merge its own pull request into `dev` when all of these hold at
+the pull request's **current head sha**:
 
 - The bot walk comment ([PR-BOT.md](PR-BOT.md)) is **PASS** for that sha.
 - The review agent has no unresolved finding it could prove (a failing test, a
   reproduced bug). Unproven suspicions do not block.
-- The `ci.yml` jobs are green: lint (including `i18n:check` and the secret
-  scan), unit tests, worker tests, and `pnpm neon:check`.
-- The pull request does not have the label `on hold`.
-- The base is `dev`.
-- The pull request is not stacked on an open parent. A base that is another
-  open pull request's head is stacked; leave it open.
+- Required checks are green. Those checks are the `ci.yml` jobs: lint
+  (including `i18n:check` and the secret scan), unit tests, worker tests, and
+  `pnpm neon:check`.
+
+Leave it open when the label is `on hold`, the base is not `dev`, or it is
+stacked on an open parent. A base that is another open pull request's head is
+stacked. GitHub Actions does not click merge. Auto-merge cannot read `on hold`
+or a stacked parent, so the agent merges.
 
 Evidence is pinned to the sha. A push after the walk makes the evidence stale;
 walk again before merging. A push after `ci.yml` makes that run stale too; wait

@@ -6,19 +6,25 @@ import { describe, expect, it } from "vitest"
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const regimen = readFileSync(path.join(root, "e2e/journeys/QA-BOT-REGIMEN.md"), "utf8")
 const deploy = readFileSync(path.join(root, "e2e/journeys/DEPLOY-BOT.md"), "utf8")
+const agents = readFileSync(path.join(root, "AGENTS.md"), "utf8")
 
 describe("the merge rule the bots follow", () => {
-  it("merges when the walk is PASS and ci.yml is green", () => {
+  it("lets the agent merge its own pull request once the walk is PASS", () => {
+    expect(regimen).toContain("An agent may merge its own pull request into `dev`")
     expect(regimen).toContain("is **PASS** for that sha")
-    expect(regimen).toContain("The `ci.yml` jobs are green")
-    expect(regimen).toContain("does not have the label `on hold`")
-    expect(regimen).toContain("The base is `dev`")
-    expect(regimen).toContain("not stacked on an open parent")
+    expect(regimen).toContain("no unresolved finding it could prove")
+    expect(regimen).toContain("Those checks are the `ci.yml` jobs")
+    expect(regimen).toContain("the label is `on hold`")
+    expect(regimen).toContain("the base is not `dev`")
+    expect(regimen).toContain("stacked on an open parent")
     expect(regimen).toContain("Inconclusive is a checker bug, not QA work.")
     expect(regimen).not.toContain("`FAIL`, `FLAKY`, and `BLOCKED` still merge")
-    expect(regimen).not.toContain("The walk is not an input")
     expect(regimen).toContain("GitHub Actions does not click merge")
     expect(regimen).toContain("`enforce_admins` is false")
+    expect(agents).toContain("**Awaiting Deployment**")
+    expect(agents).toContain("production calver tag")
+    expect(agents).not.toContain("Dev Verification Needed")
+    expect(agents).not.toContain("merged the ticket into `main`")
   })
 
   it("holds a release HEAD only on a smart-Jev FAIL", () => {

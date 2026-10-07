@@ -59,6 +59,29 @@ export const org = defineNamespace({
     "org.access.page.csvGrantedBy": "Granted by",
     "org.access.page.csvGrantedAt": "Granted at",
 
+    // -- AQU-1072 access audit: owners and maintainers, one tree per person --
+    "org.accessAudit.title": "Access audit",
+    "org.accessAudit.description":
+      "Each person's organization role, the teams they belong to, and the role they actually have on each project — the same answer the access checks use — plus their lane grants.",
+    "org.accessAudit.print": "Print",
+    "org.accessAudit.loadError": "Couldn't load the access audit for this organization.",
+    "org.accessAudit.roleRequired":
+      "The access audit is available to organization owners and maintainers.",
+    "org.accessAudit.empty": "No people to list in this access audit.",
+    "org.accessAudit.noTeams": "No teams",
+    "org.accessAudit.noProjects": "No project access",
+    "org.accessAudit.noLanes": "No lane grants",
+    "org.accessAudit.notOrgMember": "Not an organization member",
+    "org.accessAudit.csvOrgRole": "Organization role",
+    "org.accessAudit.csvEffectiveRole": "Effective role",
+    "org.accessAudit.csvSource": "Comes from",
+    "org.accessAudit.csvLane": "Lane",
+    "org.accessAudit.csvLaneRole": "Lane role",
+    "org.accessAudit.generatedAt": "Generated {when}",
+    "org.accessAudit.teamMembership": "{name} ({role})",
+    "org.accessAudit.projectAccess": "{role} ({source})",
+    "org.accessAudit.laneGrant": "{lane} ({role})",
+
     // -- OrgDataEgress: maintainer/owner multi-project archive --
     "org.egress.title": "Data egress",
     "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
@@ -1629,6 +1652,32 @@ export const org = defineNamespace({
       "org.access.page.chip": {
         description: "People & access person view: one grant chip, the role held at a scope.",
         placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.accessAudit.generatedAt": {
+        description: "Print header on the access audit: when this copy of the report was generated.",
+        placeholders: { when: "Localized date and time, already formatted. Not translated further." },
+      },
+      "org.accessAudit.teamMembership": {
+        description: "One team in the access audit, with the role stored on that membership.",
+        placeholders: {
+          name: "The team's name. Not translated.",
+          role: "Localized role label, e.g. \"Project lead\".",
+        },
+      },
+      "org.accessAudit.projectAccess": {
+        description:
+          "A project row in the access audit: the effective role and the grant path that produced it (direct, team, org-wide, creator, or platform admin).",
+        placeholders: {
+          role: "Localized role label, e.g. \"Contributor\".",
+          source: "Localized name of the winning grant path, e.g. \"Team\" or \"Creator\".",
+        },
+      },
+      "org.accessAudit.laneGrant": {
+        description: "One lane grant under a project in the access audit, named by the lane's display name.",
+        placeholders: {
+          lane: "The lane's display name, e.g. \"French\". Not translated.",
+          role: "Localized role label of the lane grant, e.g. \"Reviewer\".",
+        },
       },
       "org.access.effective.creator": {
         description: "Effective role held because the person created the scope.",

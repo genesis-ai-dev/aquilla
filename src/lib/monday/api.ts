@@ -1,7 +1,7 @@
 /**
  * Client for the Monday.com integration API (auth-worker /api/v2/monday/*).
  *
- * Server contract: monday-integration-contract.md (routes in
+ * Server contract: docs/MONDAY-INTEGRATION.md (routes in
  * auth-worker/src/routes/monday.ts). Every function takes the caller's Bearer
  * JWT (from `useFrontierSession().session.jwt`) and hits `${AUTH_BASE}/api/v2/monday/...`
  * — same fetch/auth/error style as src/lib/terminology/subscriptions-api.ts and

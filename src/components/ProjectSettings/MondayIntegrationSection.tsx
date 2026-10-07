@@ -1,7 +1,7 @@
 // Project Settings → Integrations → Monday.com.
 //
-// Contract: monday-integration-contract.md (SPA section). Uses the org's
-// Monday connection (managed at /settings/monday); this section links ONE
+// Contract: docs/MONDAY-INTEGRATION.md. Uses the org's Monday connection
+// (managed at /orgs/:orgId/settings/monday); this section links ONE
 // board to the project, with an AI-proposed column mapping the user reviews
 // and applies, plus a manual mapping editor and a "Sync now" push trigger.
 //

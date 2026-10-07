@@ -24,6 +24,8 @@ design and audit material.
   mechanical checks with `pnpm run scan:secrets` and `pnpm audit --prod`.
 - [Inworld TTS 2 Flash](INWORLD-TTS.md) — commercial hosted TTS / clone
   engine (AQU-1189). Where to put `INWORLD_API_KEY`.
+- [Monday.com integration](MONDAY-INTEGRATION.md) — the connection, board link
+  and mapping contract, and the webhook address each environment needs.
 
 Runtime configuration in `wrangler.toml`, `auth-worker/wrangler.toml`,
 `sync-worker/wrangler.toml`, the deploy workflows, and `package.json` is enforced

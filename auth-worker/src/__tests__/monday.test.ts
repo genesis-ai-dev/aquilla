@@ -226,7 +226,9 @@ describe("GET /api/v2/monday/oauth/callback", () => {
       menv,
     )
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, backTo: "/settings/monday" })
+    // No backTo sent: return to the org's own Monday settings. (It used to be
+    // "/settings/monday", a page the app doesn't have.)
+    expect(await res.json()).toEqual({ ok: true, backTo: "/orgs/1/settings/monday" })
 
     // Token exchange hit the NEW OAuth 2.1 endpoint with the PKCE verifier —
     // and the verifier matches the challenge we sent in the authorize URL.

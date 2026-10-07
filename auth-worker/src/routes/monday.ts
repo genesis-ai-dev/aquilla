@@ -214,6 +214,9 @@ monday.get("/orgs/:orgId/connection", authMiddleware, async (c) => {
 
 const startSchema = z.object({ backTo: z.string().optional() })
 
+/** The org's Monday settings page in the SPA — where a connect returns by default. */
+const orgMondaySettingsPath = (orgId: number): string => `/orgs/${orgId}/settings/monday`
+
 monday.post(
   "/orgs/:orgId/connection/start",
   authMiddleware,
@@ -240,7 +243,7 @@ monday.post(
       {
         orgId: guard.orgId,
         userId: c.get("user").username,
-        backTo: backTo ?? "/settings/monday",
+        backTo: backTo ?? orgMondaySettingsPath(guard.orgId),
         cv,
         iat: now,
         exp: now + 600, // 10 minutes
@@ -278,12 +281,12 @@ monday.get("/oauth/callback", async (c) => {
   } catch {
     return fail("bad_state", 401)
   }
+  const orgId = Number(state.orgId)
+  if (!Number.isFinite(orgId)) return fail("bad_state", 401)
   const backTo =
     typeof state.backTo === "string" && isSafeAppPath(state.backTo)
       ? state.backTo
-      : "/settings/monday"
-  const orgId = Number(state.orgId)
-  if (!Number.isFinite(orgId)) return fail("bad_state", 401)
+      : orgMondaySettingsPath(orgId)
 
   // PKCE: recover the code_verifier minted in /connection/start (encrypted
   // inside the signed state — the browser never saw the plaintext).

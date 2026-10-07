@@ -1,7 +1,7 @@
 // Monday.com integration — mapping config shapes.
 //
 // MIRROR of auth-worker/src/lib/monday/types.ts per the shared contract
-// (monday-integration-contract.md). The `config` JSONB on monday_board_links
+// (docs/MONDAY-INTEGRATION.md). The `config` JSONB on integration_links
 // is a MondayMapping; keep both copies in lockstep.
 
 export type MondayMetricKey =

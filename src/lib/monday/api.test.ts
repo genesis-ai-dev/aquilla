@@ -1,5 +1,5 @@
 // Monday API client — asserts URL/method/headers/body shapes against the
-// shared contract (monday-integration-contract.md), mirroring the fetch-mock
+// shared contract (docs/MONDAY-INTEGRATION.md), mirroring the fetch-mock
 // style of src/lib/terminology/subscriptions-api.test.ts.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
@@ -74,12 +74,12 @@ describe("fetchMondayConnection", () => {
 describe("startMondayConnect", () => {
   it("POSTs backTo and returns the OAuth url", async () => {
     fetchMock().mockResolvedValueOnce(ok({ url: "https://auth.monday.com/oauth2/authorize?x=1" }))
-    const res = await startMondayConnect("jwt", 7, "/settings/monday")
+    const res = await startMondayConnect("jwt", 7, "/orgs/7/settings/monday")
     expect(res.url).toContain("auth.monday.com")
     const [url, init] = fetchMock().mock.calls[0]
     expect(url).toMatch(/\/api\/v2\/monday\/orgs\/7\/connection\/start$/)
     expect(init.method).toBe("POST")
-    expect(JSON.parse(init.body as string)).toEqual({ backTo: "/settings/monday" })
+    expect(JSON.parse(init.body as string)).toEqual({ backTo: "/orgs/7/settings/monday" })
   })
 
   it("sends an empty body when backTo is omitted", async () => {
@@ -91,9 +91,9 @@ describe("startMondayConnect", () => {
 
 describe("completeMondayOAuth", () => {
   it("GETs the callback with code+state as query params and no auth header", async () => {
-    fetchMock().mockResolvedValueOnce(ok({ ok: true, backTo: "/settings/monday" }))
+    fetchMock().mockResolvedValueOnce(ok({ ok: true, backTo: "/orgs/7/settings/monday" }))
     const res = await completeMondayOAuth("the-code", "the-state")
-    expect(res).toEqual({ ok: true, backTo: "/settings/monday" })
+    expect(res).toEqual({ ok: true, backTo: "/orgs/7/settings/monday" })
     const call = fetchMock().mock.calls[0]
     expect(call[0]).toMatch(/\/api\/v2\/monday\/oauth\/callback\?code=the-code&state=the-state$/)
     expect(call[1]).toBeUndefined() // plain GET, no headers

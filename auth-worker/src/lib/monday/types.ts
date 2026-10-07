@@ -1,6 +1,6 @@
-// Monday.com integration — shared shapes (contract v1).
+// Monday.com integration — shared shapes (contract v1, docs/MONDAY-INTEGRATION.md).
 //
-// MondayMapping is the `config` JSONB on monday_board_links. The SPA mirrors
+// MondayMapping is the `config` JSONB on integration_links. The SPA mirrors
 // these types in src/lib/monday/types.ts — keep them in lockstep.
 
 export type MondayMetricKey =
@@ -44,7 +44,7 @@ export interface MondayBoardGroup {
   title: string
 }
 
-/** Cached board structure stored on monday_board_links.board_structure. */
+/** Cached board structure stored on integration_links.remote_state. */
 export interface MondayBoardStructure {
   url?: string | null
   name?: string | null

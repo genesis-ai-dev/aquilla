@@ -2150,6 +2150,7 @@ export function ProjectOverview() {
               {showLanguages && audio && (
                 <OverviewLaneTable
                   projectId={id}
+                  projectName={project?.name}
                   orgId={portfolioOrgId}
                   jwt={jwt}
                   lanes={activeProjectLanes}

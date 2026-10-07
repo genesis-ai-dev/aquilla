@@ -54,6 +54,8 @@ import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 export interface OverviewLaneTableProps {
   projectId: string
+  /** Display name for the staffing grant sentence. */
+  projectName?: string | null
   /** Org that owns the project — for StaffLanePopover's roster + AssignModal. */
   orgId: number | null
   jwt: string | null
@@ -123,6 +125,7 @@ function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string })
 
 export function OverviewLaneTable({
   projectId,
+  projectName,
   orgId,
   jwt,
   lanes,
@@ -281,6 +284,7 @@ export function OverviewLaneTable({
                     lane={row.original.lane}
                     laneId={row.original.laneId}
                     laneLabel={label}
+                    projectName={projectName}
                     orgId={orgId}
                     anchorOnly
                     open={staffLane === row.original.lane}

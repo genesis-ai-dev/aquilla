@@ -14626,6 +14626,7 @@ export function ProjectWorkspace() {
       <SharePanel
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
+        projectName={project?.name}
         onSharesChanged={refreshChecklistShares}
       />
       {/* AQU-661: confirmation for workspace actions folded from the removed

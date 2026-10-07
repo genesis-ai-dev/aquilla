@@ -8,6 +8,7 @@ import { RoleLabel } from "@/components/RoleLabel";
 import { RoleSelect } from "@/components/RoleSelect";
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar";
 import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
+import type { GrantScope } from "@/lib/access/grant-scope-sentence";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
 import { useI18n } from "@/lib/i18n/I18nProvider";
 
@@ -113,6 +114,8 @@ interface MembersPanelProps {
   suggestions?: readonly UserSearchResult[];
   /** Shown when `suggestions` is provided but empty and nothing is typed. */
   emptySuggestionsHint?: string;
+  /** AQU-1030: scope of the add row's grant sentence. Omit to keep the plain Add label. */
+  grantScope?: GrantScope;
 }
 
 export function MembersPanel({
@@ -129,6 +132,7 @@ export function MembersPanel({
   scopeConfig,
   suggestions,
   emptySuggestionsHint,
+  grantScope,
 }: MembersPanelProps) {
   const { t } = useI18n();
   // AQU-553: the scopes editor is shown only when project context is supplied
@@ -231,6 +235,7 @@ export function MembersPanel({
         scopedUserSearch={scopedUserSearch}
         suggestions={suggestions}
         emptySuggestionsHint={emptySuggestionsHint}
+        grantScope={grantScope}
       />
     </div>
   );

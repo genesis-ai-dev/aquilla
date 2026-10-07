@@ -14,13 +14,16 @@
 // without Bible data and the tick records the reason on each span.
 
 import type { CellPair } from "../agent/tools/select-cells"
+import { buildNameTable, readinessFromDecisions } from "../../../../db/shared/bible-checks/agreed-names"
 import { compileFileExpectations } from "../../../../db/shared/bible-checks/compile"
 import { bibleChecksReadText } from "../../../../db/shared/bible-checks/evaluate"
+import type { BibleCheckReadiness, NameTable } from "../../../../db/shared/bible-checks/participant-types"
 import { expandCellRefs } from "../../../../db/shared/bible-checks/refs"
 import type { CellExpectation } from "../../../../db/shared/bible-checks/types"
 import { computeCellFacts, renderFactsLine } from "../../../../db/shared/bible-facts/facts"
 import type { CellFacts } from "../../../../db/shared/bible-facts/types"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
+import type { ProjectFact } from "../../../../db/shared/project-facts"
 import type { BkpFailureReason, BkpResult, BookPack } from "../bkp/pack-loader"
 import type { Concept } from "./project-context"
 import type { BibleJudgeDeps } from "./bible-span"
@@ -80,34 +83,44 @@ export function bookOfPairs(pairs: readonly CellPair[]): string | null {
  * The text layer is several MB. It feeds "you" singular/plural, worth loading
  * while the profile has not said whether "you" has number (a fact question
  * may ask) or says it does (the facts state the number); and (AQU-1697) the
- * Bible data checks that read it: numbers, negation, run-on sentences.
+ * Bible data checks that read it: numbers, negation, run-on sentences, and
+ * (AQU-1699) the names, "we" and κύριος of check pack B.
  */
-export function needsTextLayer(profile: LanguageProfile): boolean {
+export function needsTextLayer(profile: LanguageProfile, readiness?: BibleCheckReadiness): boolean {
   const second = profile.pronouns?.secondPerson
-  return second === undefined || second.numberDistinction || bibleChecksReadText(profile)
+  return second === undefined || second.numberDistinction || bibleChecksReadText(profile, readiness)
+}
+
+/** AQU-1699: what decides each name: the project's decisions, terminology, source language and lanes. */
+export interface NameInputs {
+  concepts: readonly Concept[]
+  facts?: readonly ProjectFact[]
+  sourceLanguage?: string | null
+  multiLane?: boolean
+}
+
+function nameTable(pack: BookPack, names: NameInputs): NameTable {
+  return buildNameTable({ people: pack.people, text: pack.text, ...names })
 }
 
 /**
- * Entity id → the project's agreed rendering, for names the termbase decides:
- * a concept whose source term is the entity's English label, with a preferred
- * (else admitted) rendering. Cheap, and exact-match only; a name the termbase
- * does not hold keeps its pack label.
+ * Entity id → the project's agreed rendering, for the facts lines. AQU-1699:
+ * the same agreed names the participant checks use
+ * (db/shared/bible-checks/agreed-names.ts): a `render.<entity>` decision, else
+ * a terminology entry whose source term is the entity's label in the project's
+ * source language (English when it has none). A decision for one book or
+ * passage is left out of a line that rides every cell; a name nothing decides
+ * keeps its pack label.
  */
-export function agreedRenderings(pack: BookPack, concepts: readonly Concept[]): Map<string, string> {
-  const byTerm = new Map<string, string>()
-  for (const concept of concepts) {
-    if (concept.status !== "active") continue
-    const rendering =
-      concept.renderings.find((r) => r.status === "preferred")?.rendering ??
-      concept.renderings.find((r) => r.status === "admitted")?.rendering
-    if (rendering) byTerm.set(concept.sourceTerm.trim().toLowerCase(), rendering)
-  }
+export function agreedRenderings(pack: BookPack, concepts: readonly Concept[], names: Omit<NameInputs, "concepts"> = {}): Map<string, string> {
+  return renderingMap(nameTable(pack, { concepts, ...names }))
+}
+
+function renderingMap(table: NameTable): Map<string, string> {
   const out = new Map<string, string>()
-  if (byTerm.size === 0) return out
-  for (const [id, entity] of Object.entries(pack.people.entities)) {
-    const label = entity.labels.eng?.trim().toLowerCase()
-    const rendering = label ? byTerm.get(label) : undefined
-    if (rendering) out.set(id, rendering)
+  for (const [id, list] of table.names) {
+    const name = list.find((n) => !n.fact || (!n.fact.scope.book && !n.fact.scope.passage))
+    if (name) out.set(id, name.renderings[0])
   }
   return out
 }
@@ -116,6 +129,10 @@ export async function prepareBibleRun(input: {
   pairs: readonly CellPair[]
   profile: LanguageProfile
   concepts: readonly Concept[]
+  /** AQU-1699: the decision log, the source language and the lanes, for the agreed names. */
+  facts?: readonly ProjectFact[]
+  sourceLanguage?: string | null
+  multiLane?: boolean
   flags: BibleFlags
   loadPack: LoadBookPack
 }): Promise<BibleRun> {
@@ -123,17 +140,25 @@ export async function prepareBibleRun(input: {
   const book = bookOfPairs(input.pairs)
   // A file with no verse refs (a glossary, a prose doc) has no Bible data to use.
   if (!book) return { state: "off" }
-  const loaded = await input.loadPack(book, { text: needsTextLayer(input.profile) })
+  const readiness = readinessFromDecisions(input.facts ?? [], input.concepts)
+  const loaded = await input.loadPack(book, { text: needsTextLayer(input.profile, readiness) })
   if (!loaded.ok) return { state: "unavailable", reason: loaded.reason }
   const pack = loaded.value
 
+  const names = nameTable(pack, {
+    concepts: input.concepts,
+    facts: input.facts,
+    sourceLanguage: input.sourceLanguage,
+    multiLane: input.multiLane,
+  })
   const expectations = compileFileExpectations(
     input.pairs.map((pair) => ({ id: pair.cellId, globalReferences: pair.canonicalRef ? [pair.canonicalRef] : [] })),
     pack.voices,
     pack.structure,
     pack.text,
+    { people: pack.people, names },
   )
-  const renderings = agreedRenderings(pack, input.concepts)
+  const renderings = renderingMap(names)
   const layers = { voices: pack.voices, structure: pack.structure, people: pack.people, text: pack.text }
   const facts = new Map<string, CellFacts>()
   const draftLines = new Map<string, string>()
@@ -166,7 +191,7 @@ export async function prepareBibleRun(input: {
  */
 export async function prepareBibleWave(
   deps: BibleTickDeps | undefined,
-  input: { pairs: readonly CellPair[]; profile: LanguageProfile; concepts: readonly Concept[] },
+  input: { pairs: readonly CellPair[]; profile: LanguageProfile } & NameInputs,
 ): Promise<BibleRun> {
   if (!deps) return { state: "off" }
   try {

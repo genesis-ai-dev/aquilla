@@ -65,7 +65,14 @@ bibleCheck.post(
     // The wave's own loader: a layer whose insides do not compile is `invalid`, not a 500.
     const bible = await prepareBibleWave(
       { flags: async () => flags, loadPack: deps.loadPack },
-      { pairs, profile: ctx.languageProfile, concepts: ctx.concepts },
+      {
+        pairs,
+        profile: ctx.languageProfile,
+        concepts: ctx.concepts,
+        facts: ctx.projectFacts,
+        sourceLanguage: ctx.sourceLanguage,
+        multiLane: ctx.multiLane,
+      },
     )
     if (bible.state === "off") {
       const { body: err, status } = errorJson("no_bible_refs", "This file has no verse references to check.", 422)

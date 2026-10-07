@@ -5,7 +5,8 @@
 // `run` is never called for them. The rule engine sends them to
 // db/shared/bible-checks/evaluate.ts with the cell's compiled expectation
 // (src/lib/rules/bible-check-rules.ts); S1 and S8 need the whole file and run
-// in "Check file" only (db/shared/bible-checks/scans.ts). They exist only
+// in "Check file" only (db/shared/bible-checks/scans.ts), and so do P2 and X3
+// (AQU-1699, db/shared/bible-checks/scans-pack-b.ts). They exist only
 // while the project's Bible data checks enrichment is on (`resolveBuiltinRules`).
 //
 // i18n-exempt, as in builtin-registry.ts: `name`/`description` are the English
@@ -92,6 +93,68 @@ const COPY: Readonly<Record<BibleCheckId, { name: string; description: string }>
     name: "Verse numbering",
     description:
       "The file has a cell for each verse the Bible data has, and none it lacks, so its facts reach the right cells. Runs in Check file.",
+  },
+  // AQU-1699: check pack B. Copy of the `bibleParticipants.*` keys (P8's name
+  // is `agent.finding.bibleCheck.youNumber`).
+  "bkp:P1": {
+    name: "Names kept",
+    description:
+      "Where the source names someone, the translation has their agreed name: a decision such as render.person.Peter, or a terminology entry.",
+  },
+  "bkp:P2": {
+    name: "One name across the file",
+    description:
+      "Each person, group or place has the same name in every verse that uses the same form of the name in the source. Runs in Check file.",
+  },
+  "bkp:P3": {
+    name: "Namesakes told apart",
+    description:
+      "Where the source names one of several people with the same name (six Marys, nine Simons), the translation uses that person's name, not a namesake's.",
+  },
+  "bkp:P4": {
+    name: "Name form kept",
+    description:
+      "Where the source uses one form of a name (Cephas, not Simon) and the project has a name for each form, the translation uses the name for that form.",
+  },
+  "bkp:P5": {
+    name: "No names the source lacks",
+    description:
+      "The translation names nobody that the source of the verse does not mention, by name, as a pronoun or as the subject of a verb. The subject of the verse before or after also counts.",
+  },
+  "bkp:P6": {
+    name: "Implied subject named correctly",
+    description: "Where the source names nobody and only implies who acts (“he says”), a name that the translation adds is the name of that person.",
+  },
+  "bkp:P8": {
+    name: "Singular or plural “you”",
+    description:
+      "Where every “you” in the source speaks to one person, or every one speaks to several, the translation uses a “you” of that number from the Language profile, and none of the other.",
+  },
+  "bkp:P9": {
+    name: "Inclusive or exclusive “we”",
+    description:
+      "Where “we” includes the people spoken to, or leaves them out, the translation uses the inclusive or exclusive “we” from the Language profile.",
+  },
+  "bkp:P10": {
+    name: "Dual, trial and paucal forms",
+    description: "Where a pronoun refers to two, three or a few people, the translation uses the form for that number from the Language profile.",
+  },
+  "bkp:P14": {
+    name: "Lord and Spirit",
+    description: "Where κύριος means Jesus or God, or πνεῦμα means the Holy Spirit, the translation uses the project's rendering for each.",
+  },
+  "bkp:P15": {
+    name: "Capitals for God",
+    description: "Where the house style capitalizes pronouns for God, Jesus and the Holy Spirit, those pronouns start with a capital letter.",
+  },
+  "bkp:X3": {
+    name: "Repeated quotations alike",
+    description: "Where the source repeats a quotation in the file, the translation renders it in the same way each time. Runs in Check file.",
+  },
+  "bkp:X4": {
+    name: "Decisions kept",
+    description:
+      "Where the project has decided whether “we” in a passage includes the listener (a clusivity decision), every “we” in that passage uses the decided form.",
   },
 }
 

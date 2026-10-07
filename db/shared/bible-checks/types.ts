@@ -10,6 +10,7 @@
 // worker parses.
 
 import type { LanguageProfileSlot } from '../language-profile'
+import type { CellParticipants } from './participant-types'
 
 /** The checks so far. Finding codes, `algorithmicChecks` keys and built-in rule ids all use these. */
 export const BIBLE_CHECK_IDS = [
@@ -30,6 +31,20 @@ export const BIBLE_CHECK_IDS = [
   'bkp:S6',
   'bkp:S7',
   'bkp:S8',
+  // AQU-1699, check pack B: participants and cross-cell consistency.
+  'bkp:P1',
+  'bkp:P2',
+  'bkp:P3',
+  'bkp:P4',
+  'bkp:P5',
+  'bkp:P6',
+  'bkp:P8',
+  'bkp:P9',
+  'bkp:P10',
+  'bkp:P14',
+  'bkp:P15',
+  'bkp:X3',
+  'bkp:X4',
 ] as const
 export type BibleCheckId = (typeof BIBLE_CHECK_IDS)[number]
 
@@ -41,9 +56,10 @@ export function isBibleCheckId(value: string): value is BibleCheckId {
  * Checks that need the whole file in order: headings between passages (S1)
  * and verses the pack and the file number differently (S8). They run in
  * "Check file" (./scans.ts), never on one cell, so they never make a cell's
- * live check worth loading the pack for.
+ * live check worth loading the pack for. AQU-1699: one name across the file
+ * (P2) and one rendering for a repeated quotation (X3) too (./scans-pack-b.ts).
  */
-export const BIBLE_SCAN_CHECK_IDS: readonly BibleCheckId[] = ['bkp:S1', 'bkp:S8']
+export const BIBLE_SCAN_CHECK_IDS: readonly BibleCheckId[] = ['bkp:S1', 'bkp:S8', 'bkp:P2', 'bkp:X3']
 
 export function isBibleScanCheckId(id: BibleCheckId): boolean {
   return BIBLE_SCAN_CHECK_IDS.includes(id)
@@ -78,6 +94,22 @@ export const BIBLE_CHECK_DEFAULT_SEVERITY: Readonly<Record<BibleCheckId, BibleCh
   'bkp:S6': 'info',
   'bkp:S7': 'info',
   'bkp:S8': 'info',
+  // AQU-1699: pack B starts at info, except a name the source does not have
+  // (P5, for a person; a place or group is info) and a name in place of the
+  // implied subject (P6): both make the verse say someone else did it.
+  'bkp:P1': 'info',
+  'bkp:P2': 'info',
+  'bkp:P3': 'info',
+  'bkp:P4': 'info',
+  'bkp:P5': 'warning',
+  'bkp:P6': 'warning',
+  'bkp:P8': 'info',
+  'bkp:P9': 'info',
+  'bkp:P10': 'info',
+  'bkp:P14': 'info',
+  'bkp:P15': 'info',
+  'bkp:X3': 'info',
+  'bkp:X4': 'info',
 }
 
 /** The Language-profile slots a Bible data check can wait for. */
@@ -109,6 +141,21 @@ export const BIBLE_CHECK_NEEDS: Readonly<Record<BibleCheckId, readonly BibleChec
   'bkp:S7': ['textualVariants'],
   // Pack verses against the file's verses: nothing about the language.
   'bkp:S8': [],
+  // AQU-1699: pack B waits for decisions, terminology or a slot's FIELDS
+  // (forms, not just a filled slot), so ./dormancy.ts says what each needs.
+  'bkp:P1': [],
+  'bkp:P2': [],
+  'bkp:P3': [],
+  'bkp:P4': [],
+  'bkp:P5': [],
+  'bkp:P6': [],
+  'bkp:P8': [],
+  'bkp:P9': [],
+  'bkp:P10': [],
+  'bkp:P14': [],
+  'bkp:P15': [],
+  'bkp:X3': [],
+  'bkp:X4': [],
 }
 
 // ── Structural pack inputs ──────────────────────────────────────────────────
@@ -128,6 +175,10 @@ export interface SpeechInput {
   selfProjected: boolean
   speakerConf: number
   speakerSources: readonly string[]
+  /** AQU-1699: entity ids of who speaks and who is addressed (P1, P9). */
+  speaker?: string
+  addressee?: string
+  addresseeConf?: number
 }
 
 /** A run of words with one innermost voice: "narrator" or a speech id. */
@@ -166,6 +217,19 @@ export interface TextWordInput {
   english?: string
   /** Punctuation and space after the word: "·", ";", ",". */
   after?: string
+  // AQU-1699: what the participant checks read. A compact copy keeps them
+  // for the words those checks use (./text-compact.ts).
+  /** The word as printed (X3). */
+  text?: string
+  /** "noun", "verb", "pron", … and "proper" for a proper noun. */
+  class?: string
+  type?: string
+  /** Macula morphology: "V-PAM-2S", "P-1NP". */
+  morph?: string
+  person?: string
+  number?: string
+  case?: string
+  mood?: string
 }
 
 /**
@@ -256,6 +320,11 @@ export interface CellExpectation {
    * the critical text omits). Then only the variant checks have facts to go on.
    */
   inPack: boolean
+  /**
+   * AQU-1699: who the cell's source names and refers to, with the project's
+   * agreed names (check pack B). Absent without the people layer.
+   */
+  participants?: CellParticipants | null
 }
 
 /** AQU-1697: one number the source states. */
@@ -327,6 +396,23 @@ export type BibleCheckReason =
   | 'heading-inside-pericope'
   | 'verse-not-in-pack'
   | 'pack-verse-without-cell'
+  // AQU-1699
+  | 'name-missing'
+  | 'name-variant-different'
+  | 'name-variant-none'
+  | 'homonym-name'
+  | 'name-form-missing'
+  | 'name-not-in-source'
+  | 'subject-name-wrong'
+  | 'you-number-missing'
+  | 'you-number-wrong'
+  | 'clusivity-missing'
+  | 'clusivity-wrong'
+  | 'group-number-missing'
+  | 'divine-name-missing'
+  | 'divine-name-swapped'
+  | 'deity-pronoun-lowercase'
+  | 'quotation-differs'
 
 /** Where the fact behind a finding comes from. */
 export type BibleCheckEvidence =
@@ -350,6 +436,23 @@ export type BibleCheckEvidence =
   | { kind: 'variant'; refs: readonly string[]; passage: string }
   | { kind: 'pericope'; refs: readonly string[]; title: string }
   | { kind: 'versification'; refs: readonly string[] }
+  // AQU-1699. `word` is the word's position in its verse (the first verse of `refs`).
+  | { kind: 'mention'; refs: readonly string[]; entity: string; word: number; mention: string }
+  | { kind: 'no-mention'; refs: readonly string[]; entity: string }
+  | { kind: 'second-person'; refs: readonly string[]; number: 'singular' | 'plural' }
+  | {
+      kind: 'clusivity'
+      refs: readonly string[]
+      word: number
+      referents: readonly string[]
+      addressees: readonly string[]
+    }
+  | { kind: 'decision'; refs: readonly string[]; key: string }
+  | { kind: 'group'; refs: readonly string[]; entity: string; size: number; word: number }
+  | { kind: 'divine-name'; refs: readonly string[]; word: number }
+  | { kind: 'alignment'; refs: readonly string[] }
+  | { kind: 'name-variants'; refs: readonly string[]; entity: string }
+  | { kind: 'repeated-quotation'; refs: readonly string[]; other: string; similarity: number }
 
 export interface BibleCheckSpan {
   /** Offsets into the target text: start inclusive, end exclusive. */

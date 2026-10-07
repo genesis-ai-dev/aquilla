@@ -14,6 +14,7 @@
 import { evaluateCell, isBibleCheckDormant } from "../../../../db/shared/bible-checks/evaluate"
 import { bibleReasonParams, encodeBibleParams } from "../../../../db/shared/bible-checks/params"
 import { markSetForDepth } from "../../../../db/shared/bible-checks/quote-scan"
+import type { BibleCheckReadiness } from "../../../../db/shared/bible-checks/participant-types"
 import {
   BIBLE_CHECK_DEFAULT_SEVERITY,
   isBibleCheckId,
@@ -70,6 +71,14 @@ export interface StageRecheck {
   residual: boolean
 }
 
+/** AQU-1699: what the project's decisions and terminology switch on, as the file's expectations carry it. */
+function gateReadiness(gate: BibleGate): BibleCheckReadiness | undefined {
+  for (const expectation of gate.expectations.values()) {
+    if (expectation.participants) return expectation.participants.names.readiness
+  }
+  return undefined
+}
+
 /**
  * Re-check a cell's final text just before it is staged. The evaluator's
  * codes recorded during the run described an earlier text, so they are
@@ -84,7 +93,8 @@ export function recheckForStage(
   findings: readonly string[],
 ): StageRecheck {
   const fresh = bibleFindings(gate, cellId, text)
-  const kept = findings.filter((code) => !(isBibleCheckId(code) && !isBibleCheckDormant(code, gate.profile)))
+  const readiness = gateReadiness(gate)
+  const kept = findings.filter((code) => !(isBibleCheckId(code) && !isBibleCheckDormant(code, gate.profile, readiness)))
   const out = [...kept]
   const values: Record<string, string> = {}
   for (const finding of fresh) {
@@ -195,5 +205,54 @@ export function bibleConstraint(finding: BibleCheckFinding, facts: CellFacts | u
     case "verse-not-in-pack":
     case "pack-verse-without-cell":
       return `Check the verse numbering of ${finding.evidence.kind === "speech" ? finding.evidence.startRef : finding.evidence.refs.join(", ")}.`
+    default:
+      return packBConstraint(finding)
+  }
+}
+
+/**
+ * AQU-1699: check pack B. P5 (a person) and P6 are the warnings autopilot
+ * repairs; the rest stay advisory, but every reason has its sentence.
+ */
+function packBConstraint(finding: BibleCheckFinding): string {
+  const p = finding.params
+  const name = p.name ?? "this person"
+  const rendering = p.rendering ? `"${p.rendering}"` : "the project's name"
+  switch (finding.reason) {
+    case "name-missing":
+      return `Use ${rendering} for ${name} here: the source names them in this verse.`
+    case "name-variant-different":
+    case "name-variant-none":
+      return `Call ${name} "${p.usual ?? ""}" here, as the rest of the file does.`
+    case "homonym-name":
+      return `Use ${rendering} for ${name} here, not "${p.found ?? ""}", which is the name of ${p.other ?? "someone else"}.`
+    case "name-form-missing":
+      return `The source calls ${name} "${p.form ?? ""}" here: use the project's rendering of that form, ${rendering}.`
+    case "name-not-in-source":
+      return `Do not name "${p.found ?? ""}" here: the source of this verse does not mention ${name}.`
+    case "subject-name-wrong":
+      return `The one who acts here is ${name}${p.rendering ? ` ("${p.rendering}")` : ""}, not "${p.found ?? ""}".`
+    case "you-number-missing":
+    case "you-number-wrong":
+      return `Use the ${p.number === "plural" ? "plural" : "singular"} "you" here: every "you" in the source of this verse speaks to ${p.number === "plural" ? "several people" : "one person"}.`
+    case "clusivity-missing":
+    case "clusivity-wrong":
+      return p.clusivity === "inclusive"
+        ? 'Use the inclusive "we" here: it includes the people spoken to.'
+        : 'Use the exclusive "we" here: it does not include the people spoken to.'
+    case "group-number-missing":
+      return `Use the ${p.number ?? "dual"} form here: the pronoun refers to ${p.size ?? "a few"} people (${name}).`
+    case "divine-name-missing":
+    case "divine-name-swapped": {
+      const meaning =
+        p.divine === "kyrios-jesus" ? "κύριος means Jesus" : p.divine === "kyrios-god" ? "κύριος means God" : "πνεῦμα means the Holy Spirit"
+      return `Here ${meaning}: render it ${rendering}${p.found ? `, not "${p.found}"` : ""}.`
+    }
+    case "deity-pronoun-lowercase":
+      return "Capitalize the pronouns that refer to God, Jesus or the Holy Spirit, as the house style does."
+    case "quotation-differs":
+      return `Render the repeated quotation as in ${p.other ?? "its first occurrence"}.`
+    default:
+      return "Check this verse against the Bible data."
   }
 }

@@ -19,6 +19,9 @@ import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 import { JHN_A_STRUCTURE } from "../../../db/shared/bible-checks/__fixtures__/pack-a"
+import { JHN_B_PEOPLE, JHN_B_STRUCTURE, JHN_B_TEXT, JHN_B_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack-b"
+import { buildNameTable } from "../../../db/shared/bible-checks/agreed-names"
+import { buildCellCheckContexts } from "@/lib/bible-data/check-context"
 import {
   scanTermConsistency,
   checkableRules,
@@ -335,5 +338,46 @@ describe("runDeterministicCheck with the Bible data scans", () => {
     const dormant = { ...bibleScan, profile: {} }
     expect((await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [], bibleScan: dormant })).totalFindingCount).toBe(0)
     expect((await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [] })).totalFindingCount).toBe(0)
+  })
+})
+
+// AQU-1699: the pack-B scans (P2 one name across the file, X3 repeated
+// quotations) take the same path. WHY: the scan input useBibleChecks.fileScan
+// builds (each cell's compiled expectation, with its participants) must reach
+// the rule pass, read each cell's translation, and report under P2's own rule.
+describe("runDeterministicCheck with the check-pack-B scans", () => {
+  const decide = (key: string, value: string) => ({ id: key, key, value, scope: {}, author: "dev", at: "2026-10-06T00:00:00.000Z" })
+  const names = buildNameTable({
+    people: JHN_B_PEOPLE,
+    text: JHN_B_TEXT,
+    facts: [decide("render.person.Peter", "Peter|Simon Peter")],
+    sourceLanguage: "en",
+  })
+  const cells = [
+    cell("src", "She ran to Simon Peter.", { id: "a", globalReferences: ["JHN 20:2"] }),
+    cell("src", "She came to Simon Peter.", { id: "b", globalReferences: ["JHN 20:2"] }),
+    cell("src", "She ran to Peter.", { id: "c", globalReferences: ["JHN 20:2"] }),
+  ]
+  const contexts = buildCellCheckContexts(cells, JHN_B_VOICES, JHN_B_STRUCTURE, {}, JHN_B_TEXT, { people: JHN_B_PEOPLE, names })
+  const expectations = new Map([...contexts].flatMap(([id, context]) => (context.bible ? [[id, context.bible.expectation] as const] : [])))
+  const bibleRules = resolveBuiltinRules(undefined, { bibleChecks: true })
+  const bibleScan = { structure: JHN_B_STRUCTURE, profile: {}, voices: JHN_B_VOICES, text: JHN_B_TEXT, expectations, readiness: names.readiness }
+
+  it("reports the cell out of line with the file under the P2 rule", async () => {
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [], bibleScan })
+    const p2 = result.ruleFindings.find((group) => group.rule.id === "builtin:bkp:P2")
+    expect(p2?.infractions).toEqual([
+      expect.objectContaining({
+        cellId: "c",
+        reason: "builtin:bkp:P2",
+        reasonParams: expect.objectContaining({ kind: "name-variant-different", found: "Peter", usual: "Simon Peter", entity: "person:Peter" }),
+      }),
+    ])
+  })
+
+  it("reports nothing while the names are not decided", async () => {
+    const undecided = { ...bibleScan, readiness: { ...names.readiness, agreedNames: false } }
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [], bibleScan: undecided })
+    expect(result.ruleFindings.find((group) => group.rule.id === "builtin:bkp:P2")).toBeUndefined()
   })
 })

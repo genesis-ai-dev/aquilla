@@ -386,3 +386,18 @@ describe("lane-scoped authored rules (AQU-609)", () => {
     expect(rulesForLane(ctx.authoredRules, "").map((r) => r.id)).toEqual(["all", "default-only"])
   })
 })
+
+// AQU-1699: the termbase does not say which target lane a rendering is for,
+// so with several lanes a terminology entry gives a name only when it has one
+// rendering. WHY: the registry may list the primary language itself
+// (AQU-1473); that is the default lane, not a second one.
+describe("several target lanes (AQU-1699)", () => {
+  it("counts a registered lane beside the primary, but not the primary or an archived lane", async () => {
+    await seedSettings("proj-ctx-one-lane", { targetLanguage: "en", targetLanes: ["en"] })
+    expect((await loadProjectContext(db, "proj-ctx-one-lane")).multiLane).toBeUndefined()
+    await seedSettings("proj-ctx-archived-lane", { targetLanguage: "en", targetLanes: ["en", "fr"], archivedLanes: ["fr"] })
+    expect((await loadProjectContext(db, "proj-ctx-archived-lane")).multiLane).toBeUndefined()
+    await seedSettings("proj-ctx-two-lanes", { targetLanguage: "en", targetLanes: ["en", "fr"] })
+    expect((await loadProjectContext(db, "proj-ctx-two-lanes")).multiLane).toBe(true)
+  })
+})

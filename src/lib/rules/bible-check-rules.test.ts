@@ -11,7 +11,12 @@ import { checkRulesForCell } from "./rule-engine"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 import { bibleChecksEnabled, bibleChecksGate, buildCellCheckContexts } from "@/lib/bible-data/check-context"
 import type { CellData } from "@/hooks/useCells"
-import type { RuleInfraction } from "@/lib/parsers/types"
+import { infractionSeverity, type RuleInfraction } from "@/lib/parsers/types"
+import { bibleCheckInfraction } from "./bible-check-rules"
+import { JHN_B_PEOPLE, JHN_B_STRUCTURE, JHN_B_TEXT, JHN_B_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack-b"
+import { buildNameTable } from "../../../db/shared/bible-checks/agreed-names"
+import { compileFileExpectations } from "../../../db/shared/bible-checks/compile"
+import type { ProjectFact } from "../../../db/shared/project-facts"
 import { JHN4_STRUCTURE, JHN4_VOICES } from "../../../db/shared/bible-checks/__fixtures__/pack"
 import type { LanguageProfile } from "../../../db/shared/language-profile"
 
@@ -148,6 +153,22 @@ describe("Rules → Built-in checks configures them like any built-in", () => {
       ["builtin:bkp:S6", "minor", true],
       ["builtin:bkp:S7", "minor", true],
       ["builtin:bkp:S8", "minor", true],
+      // AQU-1699: pack B starts minor, except a name the verse does not have
+      // (P5) and a wrong name for the implied subject (P6): both make the
+      // verse say that someone else did it.
+      ["builtin:bkp:P1", "minor", true],
+      ["builtin:bkp:P2", "minor", true],
+      ["builtin:bkp:P3", "minor", true],
+      ["builtin:bkp:P4", "minor", true],
+      ["builtin:bkp:P5", "major", true],
+      ["builtin:bkp:P6", "major", true],
+      ["builtin:bkp:P8", "minor", true],
+      ["builtin:bkp:P9", "minor", true],
+      ["builtin:bkp:P10", "minor", true],
+      ["builtin:bkp:P14", "minor", true],
+      ["builtin:bkp:P15", "minor", true],
+      ["builtin:bkp:X3", "minor", true],
+      ["builtin:bkp:X4", "minor", true],
     ])
   })
 
@@ -162,5 +183,53 @@ describe("Rules → Built-in checks configures them like any built-in", () => {
     const contexts = buildCellCheckContexts(REFS, JHN4_VOICES, JHN4_STRUCTURE, ENGLISH)
     const quoted = cell("c8", `“${WEB_4_8}”`)
     expect(bibleOnly(checkRulesForCell(quoted, "f", rules.filter((r) => r.enabled), contexts.get("c8")))).toEqual([])
+  })
+})
+
+// Review of #1199: a finding below its check's default severity shows below
+// it. P5 is major (warning) for a stray person, but the pack marks a stray
+// place or group as info, and the Issues tab showed that as a red major.
+describe("a Bible data finding keeps its own lower severity (AQU-1699)", () => {
+  const fact = (key: string, value: string): ProjectFact => ({
+    id: key, key, value, scope: {}, author: "translator", at: "2026-10-06T00:00:00.000Z",
+  })
+  // The English names evaluate-names.test.ts decides for these verses, plus Galilee.
+  const facts = [
+    fact("render.person.Jesus.2", "Jesus|Christ|Messiah"),
+    fact("render.person.Peter", "Peter|Simon|Cephas"),
+    fact("render.person.John", "John"),
+    fact("render.person.Andrew", "Andrew"),
+    fact("render.person.Philip", "Philip"),
+    fact("render.person.John.4", "Jonah"),
+    fact("render.person.Marymagdalene", "Mary Magdalene"),
+    fact("render.person.Mary.3", "Mary of Bethany|Mary"),
+    fact("render.place.Galilee", "Galilee"),
+  ]
+  const names = buildNameTable({ people: JHN_B_PEOPLE, text: JHN_B_TEXT, facts, sourceLanguage: "en" })
+  const refs = Object.keys(JHN_B_VOICES.verses).map((ref) => ({ id: ref, globalReferences: [ref] }))
+  const expectations = compileFileExpectations(refs, JHN_B_VOICES, JHN_B_STRUCTURE, JHN_B_TEXT, { people: JHN_B_PEOPLE, names })
+  const input = (ref: string) => ({ expectation: expectations.get(ref)!, profile: { questionMarkers: {} } })
+  const WEB_4_17 = "The woman answered, “I have no husband.” Jesus said to her, “You said well, ‘I have no husband,’"
+  const WEB_1_42 =
+    "He brought him to Jesus. Jesus looked at him and said, “You are Simon the son of Jonah. You shall be called Cephas” (which is by interpretation, Peter)."
+
+  it("marks a stray place under P5 as minor", () => {
+    const text = `${WEB_4_17} (in Galilee)`
+    const infraction = bibleCheckInfraction("builtin:bkp:P5", "bkp:P5", "JHN 4:17", "f", text, input("JHN 4:17"))
+    expect(infraction?.severity).toBe("minor")
+    expect(infractionSeverity(infraction!, "major")).toBe("minor")
+  })
+
+  it("leaves a stray person under P5 at the rule's severity", () => {
+    const text = WEB_1_42.replace("You are Simon", "You are John")
+    const infraction = bibleCheckInfraction("builtin:bkp:P5", "bkp:P5", "JHN 1:42", "f", text, input("JHN 1:42"))
+    expect(infraction).not.toBeNull()
+    expect(infraction?.severity).toBeUndefined()
+    expect(infractionSeverity(infraction!, "major")).toBe("major")
+  })
+
+  it("never raises a rule: a minor rule stays minor", () => {
+    expect(infractionSeverity({}, "minor")).toBe("minor")
+    expect(infractionSeverity({ severity: "minor" }, "minor")).toBe("minor")
   })
 })

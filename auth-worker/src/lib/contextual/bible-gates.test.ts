@@ -14,6 +14,10 @@ import { fallbackTriage } from "./triage"
 import { bibleConstraint, isRepairable, recheckForStage, withBibleVerdicts, type BibleGate } from "./bible-gates"
 import { decodeBibleParams } from "../../../../db/shared/bible-checks/params"
 import { ENGLISH_QUOTES, jhn4BibleData, jhn4Pairs } from "./bible-test-helpers"
+import { prepareBibleRun, type BibleRunData } from "./bible-run"
+import { pair } from "./test-helpers"
+import type { BookPack } from "../bkp/pack-loader"
+import { JHN_B_PEOPLE, JHN_B_STRUCTURE, JHN_B_TEXT, JHN_B_VOICES } from "../../../../db/shared/bible-checks/__fixtures__/pack-b"
 import type { LintFlag, SpanDraft } from "./types"
 
 /** JHN 4:9 with the quotation closed AFTER the narrator's aside — the classic slip. */
@@ -151,5 +155,68 @@ describe("a dropped negation (bkp:M3)", () => {
     expect(risk.verifiers).toEqual(["ambiguity"])
     expect(fallbackTriage(["bkp:M3"])).toEqual({ triage: "human", severity: 3 })
     expect(recheckForStage(gate, "c9", DROPPED_4_9, []).residual).toBe(true)
+  })
+})
+
+// AQU-1699: check pack B rides the same gate. WHY: a name the source does not
+// have makes the verse say that someone else did it, so P5 for a person is a
+// warning autopilot repairs and, if it survives, sends to a person. Like a
+// quotation slip it has a cheap fix of its own and must not buy the deep panel.
+describe("a name the source does not have (bkp:P5)", () => {
+  const WEB_4_17 = "The woman answered, “I have no husband.” Jesus said to her, “You said well, ‘I have no husband,’"
+  const PLANTED = WEB_4_17.replace("Jesus said", "Peter said")
+  const decide = (key: string, value: string) => ({ id: key, key, value, scope: {}, author: "dev", at: "2026-10-06T00:00:00.000Z" })
+  const pairs = [pair("c17", { canonicalRef: "JHN 4:17", source: WEB_4_17 })]
+
+  async function nameGate(): Promise<{ gate: BibleGate; data: BibleRunData }> {
+    const pack: BookPack = {
+      version: "1.2.0",
+      book: "JHN",
+      voices: JHN_B_VOICES as unknown as BookPack["voices"],
+      structure: { ...JHN_B_STRUCTURE, segments: [], moves: [] } as unknown as BookPack["structure"],
+      people: JHN_B_PEOPLE as unknown as BookPack["people"],
+      text: JHN_B_TEXT as unknown as BookPack["text"],
+    }
+    const run = await prepareBibleRun({
+      pairs,
+      profile: ENGLISH_QUOTES,
+      concepts: [],
+      facts: [decide("render.person.Jesus.2", "Jesus"), decide("render.person.Peter", "Peter")],
+      sourceLanguage: "en",
+      flags: { autopilot: true, checks: true },
+      loadPack: async () => ({ ok: true, value: pack }),
+    })
+    if (run.state !== "ready") throw new Error(`not ready: ${run.state}`)
+    return { gate: { expectations: run.data.expectations, profile: run.data.profile }, data: run.data }
+  }
+
+  it("flows through the gate as a repairable warning (major), apart from lint", async () => {
+    const { gate, data } = await nameGate()
+    const flags = lintSpanDraft([], pairs, draftOf([{ cellId: "c17", text: PLANTED }]), [], gate).filter((f) => f.ruleId === "bkp:P5")
+    expect(flags).toEqual([expect.objectContaining({ cellId: "c17", ruleId: "bkp:P5", message: "name-not-in-source" })])
+    const finding = flags[0].bible
+    if (!finding) throw new Error("no finding")
+    expect(finding.severity).toBe("warning")
+    expect(isRepairable(finding)).toBe(true)
+    expect(bibleConstraint(finding, data.facts.get("c17"), data.profile)).toBe(
+      'Do not name "Peter" here: the source of this verse does not mention Peter.',
+    )
+    expect(lintSpanDraft([], pairs, draftOf([{ cellId: "c17", text: WEB_4_17 }]), [], gate).filter((f) => f.ruleId === "bkp:P5")).toEqual([])
+  })
+
+  it("does not force the deep panel; a surviving one goes to a person, a repaired one does not", async () => {
+    const { gate } = await nameGate()
+    const draft = draftOf([{ cellId: "c17", text: PLANTED }])
+    const flags = lintSpanDraft([], pairs, draft, [], gate)
+    expect(flags.every((f) => f.ruleId.startsWith("bkp:"))).toBe(true)
+    const risk = classifyRisk(draft, flags, [], 1)
+    expect(risk.level).toBe("low")
+    expect(risk.verifiers).toEqual(["ambiguity"])
+    expect(fallbackTriage(["bkp:P5"])).toEqual({ triage: "human", severity: 3 })
+    expect(recheckForStage(gate, "c17", PLANTED, []).residual).toBe(true)
+    // The redraft named Jesus again: the stale P5 recorded on the earlier text goes.
+    const fixed = recheckForStage(gate, "c17", WEB_4_17, ["bkp:P5", "redrafted"])
+    expect(fixed.findings).toEqual(["redrafted"])
+    expect(fixed.residual).toBe(false)
   })
 })

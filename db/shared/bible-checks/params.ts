@@ -8,7 +8,7 @@
 //
 // Relative imports only, no DOM: shared with the workers.
 
-import type { BibleCheckFinding } from './types'
+import type { BibleCheckEvidence, BibleCheckFinding } from './types'
 
 /** A finding as flat strings: its params, `kind` (the reason), `evidence` and the evidence fields. */
 export function bibleReasonParams(finding: BibleCheckFinding): Record<string, string> {
@@ -32,9 +32,37 @@ export function bibleReasonParams(finding: BibleCheckFinding): Record<string, st
       params.passage = evidence.passage
     } else if (evidence.kind === 'pericope') {
       params.title = evidence.title
+    } else {
+      Object.assign(params, packBEvidence(evidence))
     }
   }
   return params
+}
+
+/** AQU-1699: the pack data each check-pack-B evidence kind adds. */
+function packBEvidence(evidence: BibleCheckEvidence): Record<string, string> {
+  switch (evidence.kind) {
+    case 'mention':
+      return { entity: evidence.entity, word: String(evidence.word), mention: evidence.mention }
+    case 'no-mention':
+    case 'name-variants':
+      return { entity: evidence.entity }
+    case 'second-person':
+      return { number: evidence.number }
+    case 'clusivity':
+      // Labels, which may hold commas: joined for display as they are.
+      return { word: String(evidence.word), referents: evidence.referents.join('; '), addressees: evidence.addressees.join('; ') }
+    case 'decision':
+      return { decision: evidence.key }
+    case 'group':
+      return { entity: evidence.entity, size: String(evidence.size), word: String(evidence.word) }
+    case 'divine-name':
+      return { word: String(evidence.word) }
+    case 'repeated-quotation':
+      return { other: evidence.other, similarity: String(evidence.similarity) }
+    default:
+      return {}
+  }
 }
 
 /** Flat params as one string, for a draft's verdict value. */

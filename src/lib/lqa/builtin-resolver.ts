@@ -50,6 +50,20 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "bkp:S6": "bibleChecks.s6.name",
   "bkp:S7": "bibleChecks.s7.name",
   "bkp:S8": "bibleChecks.s8.name",
+  // AQU-1699: check pack B. P8 keeps the name autopilot already shows for it.
+  "bkp:P1": "bibleParticipants.p1.name",
+  "bkp:P2": "bibleParticipants.p2.name",
+  "bkp:P3": "bibleParticipants.p3.name",
+  "bkp:P4": "bibleParticipants.p4.name",
+  "bkp:P5": "bibleParticipants.p5.name",
+  "bkp:P6": "bibleParticipants.p6.name",
+  "bkp:P8": "agent.finding.bibleCheck.youNumber",
+  "bkp:P9": "bibleParticipants.p9.name",
+  "bkp:P10": "bibleParticipants.p10.name",
+  "bkp:P14": "bibleParticipants.p14.name",
+  "bkp:P15": "bibleParticipants.p15.name",
+  "bkp:X3": "bibleParticipants.x3.name",
+  "bkp:X4": "bibleParticipants.x4.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -79,6 +93,19 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "bkp:S6": "bibleChecks.s6.description",
   "bkp:S7": "bibleChecks.s7.description",
   "bkp:S8": "bibleChecks.s8.description",
+  "bkp:P1": "bibleParticipants.p1.description",
+  "bkp:P2": "bibleParticipants.p2.description",
+  "bkp:P3": "bibleParticipants.p3.description",
+  "bkp:P4": "bibleParticipants.p4.description",
+  "bkp:P5": "bibleParticipants.p5.description",
+  "bkp:P6": "bibleParticipants.p6.description",
+  "bkp:P8": "bibleParticipants.p8.description",
+  "bkp:P9": "bibleParticipants.p9.description",
+  "bkp:P10": "bibleParticipants.p10.description",
+  "bkp:P14": "bibleParticipants.p14.description",
+  "bkp:P15": "bibleParticipants.p15.description",
+  "bkp:X3": "bibleParticipants.x3.description",
+  "bkp:X4": "bibleParticipants.x4.description",
 }
 
 /**

@@ -45,7 +45,7 @@ import {
 } from "@/lib/audio/file-has-audio"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
+import { infractionSeverity, type TranslationRule, type RuleInfraction, type ProjectRecord, type Voice, type ProjectTtsSettings, type OrderedBy, type FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
 import { isPartnerScriptureCell } from "@/lib/partners/registry"
@@ -5535,11 +5535,18 @@ function EditorRow({
     }
   }, [cell.targetEventId, localTargetDraft])
 
+  // AQU-1699: an infraction can show below its rule's severity (an info P5 on
+  // a place). A cell has at most one infraction per rule, so this row's map
+  // can carry it per rule, and every mark below reads it from here.
   const ruleSeverity = useMemo(() => {
     const m = new Map<string, "major" | "minor">()
     for (const [id, rule] of ruleMap) m.set(id, rule.severity)
+    for (const inf of [...cellInfractions, ...waivedInfractions]) {
+      const severity = infractionSeverity(inf, m.get(inf.ruleId))
+      if (severity) m.set(inf.ruleId, severity)
+    }
     return m
-  }, [ruleMap])
+  }, [ruleMap, cellInfractions, waivedInfractions])
 
   const waivedRuleIds = useMemo(
     () => new Set((cell.waivers ?? []).map((w) => w.ruleId)),
@@ -6521,7 +6528,7 @@ function EditorRow({
     && needsAttentionFromConfidence(smoothedHealthValue, decayConfig.decayWarnThreshold)
 
   const hasMajorInfraction = cellInfractions.some(
-    (i) => ruleMap.get(i.ruleId)?.severity === "major",
+    (i) => infractionSeverity(i, ruleMap.get(i.ruleId)?.severity) === "major",
   )
   const infractionCount = cellInfractions.length
 

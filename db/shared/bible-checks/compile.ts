@@ -8,8 +8,10 @@
 //
 // Relative imports only, no DOM: shared with the workers.
 
+import { compileParticipants } from './compile-participants'
 import { verseNumbers } from './greek-numbers'
 import { cellNegation } from './negation'
+import type { NameTable, PeopleLayerInput } from './participant-types'
 import { expandCellRefs, siblingWordId, wordNumber, type CellVerses } from './refs'
 import type {
   CellExpectation,
@@ -122,6 +124,15 @@ export interface CompileOptions {
   sharedRefs?: ReadonlySet<string>
   /** AQU-1697: the text layer (or a compact copy) for the numbers (N1, N2) and negation (M3). */
   text?: TextLayerInput | null
+  /** AQU-1699: the people layer and the project's agreed names, for check pack B. */
+  participants?: ParticipantLayers | null
+}
+
+/** AQU-1699: what check pack B compiles from besides voices, structure and text. */
+export interface ParticipantLayers {
+  people: PeopleLayerInput
+  /** Built once per file: ./agreed-names.ts `buildNameTable`. */
+  names: NameTable
 }
 
 // ── AQU-1697: moves (S3) ────────────────────────────────────────────────────
@@ -298,6 +309,24 @@ export function compileCellExpectation(
     }
   }
 
+  // AQU-1699: who the cell names and refers to, with the verses either side for P5's subject chain.
+  const layers = options.participants
+  const participants = layers
+    ? compileParticipants({
+        people: layers.people,
+        text: options.text,
+        names: layers.names,
+        refs: verses.verses,
+        previous: first > 0 ? index.runs[first - 1].ref : null,
+        next: last + 1 < index.runs.length ? index.runs[last + 1].ref : null,
+        verseKey: (ref) => {
+          const range = index.refRange.get(ref)
+          return range ? index.runs[range.first].from.slice(0, 9) : null
+        },
+        speeches: speeches.flatMap((s) => index.speeches.get(s.id) ?? []),
+      })
+    : null
+
   return {
     book: verses.book,
     refs: verses.verses,
@@ -317,6 +346,7 @@ export function compileCellExpectation(
     continuesPast: sentenceRunsPast(structureLayer, cellTo) && !greekStopsAt(options.text, cellTo),
     variant: cellVariant(verses.verses),
     inPack: true,
+    participants,
   }
 }
 
@@ -336,6 +366,8 @@ export function compileFileExpectations(
   voicesLayer: VoicesLayerInput,
   structureLayer: StructureLayerInput | null | undefined,
   text?: TextLayerInput | null,
+  /** AQU-1699: the people layer and agreed names; without them check pack B has no facts. */
+  participants?: ParticipantLayers | null,
 ): Map<string, CellExpectation> {
   const cellsPerVerse = new Map<string, number>()
   for (const cell of cells) {
@@ -346,7 +378,11 @@ export function compileFileExpectations(
   const sharedRefs = new Set([...cellsPerVerse].filter(([, count]) => count > 1).map(([ref]) => ref))
   const out = new Map<string, CellExpectation>()
   for (const cell of cells) {
-    const expectation = compileCellExpectation(cell.globalReferences ?? [], voicesLayer, structureLayer, { sharedRefs, text })
+    const expectation = compileCellExpectation(cell.globalReferences ?? [], voicesLayer, structureLayer, {
+      sharedRefs,
+      text,
+      participants,
+    })
     if (expectation) out.set(cell.id, expectation)
   }
   return out

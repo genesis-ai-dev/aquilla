@@ -170,8 +170,12 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
             projectId: p.id,
             projectName: p.name,
             cellCount: f.cellCount,
-            sourceLanguage: f.sourceLanguage?.trim() || sourceLanguage,
-            targetLanguage: f.targetLanguage?.trim() || targetLanguage,
+            // AQU-1596: the project's (lane-sourced) languages, never the
+            // file's own declared claim — an egress row that named a different
+            // language from its project's is exactly the disagreement this
+            // ticket removes.
+            sourceLanguage,
+            targetLanguage,
             lanes,
             hasAudio: (pf?.audioCells ?? 0) > 0,
             lastEditAt: pf?.lastEditAt ?? null,

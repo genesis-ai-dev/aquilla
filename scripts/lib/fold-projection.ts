@@ -21,6 +21,7 @@
 // never removed. Any other kind throws (fail loud) rather than silently drop.
 
 import { contentHash, CHAIN_MUTATING_KINDS, laneOfEvent } from "../../sync-worker/src/events/event-projection"
+import { assignDeclaredLanguages } from "../../db/shared/file-declared-languages"
 
 export interface FoldEvent {
   id: string
@@ -227,9 +228,11 @@ function apply(e: FoldEvent, s: State): void {
     }
     case "file.create": {
       if (!e.fileId) throw new Error(`file.create ${e.id} missing fileId`)
-      const langMeta: Record<string, string> = {}
-      if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage as string
-      if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage as string
+      // AQU-1596: the same declared-languages contract the canonical projection
+      // uses. This fold must stay byte-identical to a full replay, so the meta
+      // keys have to come from one place, not be spelled out twice.
+      const langMeta: Record<string, unknown> = {}
+      assignDeclaredLanguages(langMeta, p.sourceLanguage, p.targetLanguage)
       if (p.orderedBy) langMeta.orderedBy = p.orderedBy as string
       // ON CONFLICT(id) DO UPDATE name/kind/event_id/meta — last writer wins.
       s.files.set(e.fileId, {

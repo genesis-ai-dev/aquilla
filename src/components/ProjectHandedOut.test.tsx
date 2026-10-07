@@ -44,7 +44,9 @@ describe("ProjectHandedOut", () => {
     render(<ProjectHandedOut projectId="p" jwt="j" author="carol" />)
     expect(await screen.findByText("Handed out by you")).toBeTruthy()
     expect(screen.getByText("Genesis 1")).toBeTruthy()
-    expect(screen.getByText("To bob")).toBeTruthy()
+    // The name sits in a user chip, so "To" and "bob" are separate nodes.
+    expect(screen.getByText("To", { exact: false })).toBeTruthy()
+    expect(screen.getByText("bob")).toBeTruthy()
     expect(screen.getByText("Spanish")).toBeTruthy()
   })
 

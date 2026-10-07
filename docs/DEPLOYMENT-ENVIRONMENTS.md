@@ -216,8 +216,10 @@ route. Its build deploys matching auth/sync previews and never promotes a live v
 production/development traffic. `versification-tool` remains disconnected
 because it has no deployable Wrangler application.
 
-The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
-pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudflare
+The consolidated `.github/workflows/ci.yml` runs on pull requests into `dev`
+(lint, `i18n:check`, the secret scan, unit tests, worker tests, and
+`pnpm neon:check`) and on `workflow_dispatch` (that set, plus typecheck, the
+Vite build, Tauri, and the IDML browser suite). It does not deploy. Cloudflare
 receives GitHub repository events, runs the repository-owned build commands, and
 reports compilation results and preview links back to GitHub. The local pre-push
 hook runs a secret scan and the existing commit-based affected E2E selection,

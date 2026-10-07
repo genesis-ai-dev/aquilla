@@ -471,7 +471,9 @@ function chainCacheKey(
   laneFilter: string | null,
   paired: boolean,
 ): string {
-  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneFilter ?? ""} ${paired}`
+  // `null` (every target lane) must not share a slot with `''` (the blank bridge).
+  const laneKey = laneFilter === null ? "*" : `=${laneFilter}`
+  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneKey} ${paired}`
 }
 
 /** Keep every side/lane of a cell together, even across a page boundary. */
@@ -695,12 +697,15 @@ export async function handleCellsReadRequest(
   const paired = url.searchParams.get("paired") === "1" && sideFilter === null
 
   // AQU-538: optional lane filter — target rows only; source rows are always
-  // included (the shared-source invariant). Absent = all lanes (unchanged).
+  // included (the shared-source invariant). Absent (`null`) means every target
+  // lane. Present and empty (`''`) is the blank bridge, the target lane whose
+  // legacy_tag is `''`. The in-app client omits the param when it wants every
+  // lane, so those two must stay distinct.
   const qLane = url.searchParams.get("lane")
   if (qLane !== null && qLane.length > 64) {
     return new Response("invalid lane: must be 64 characters or fewer", { status: 400 })
   }
-  const laneFilter = qLane && qLane.length > 0 ? qLane : null
+  const laneFilter = qLane
   // AQU-730: when the wall is on, "no lane param" is no longer "every target
   // lane". Below Maintainer the response is cut to granted lanes. The token
   // is already verified above; 600+ and platform stay unrestricted (token "").

@@ -515,7 +515,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'health or coverage yourself from read_content: your denominators will not match ' +
       'theirs. Args: projectId; optional fileId to scope to one file, lane for one ' +
       'target-language lane, limit/offset to page the per-file list. Returns ' +
-      '{ projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
+      '{ laneId, projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
       'nextCursor }. health is null for a file with no translated cells (not started, ' +
       'not unhealthy). Errors: scope_denied (403) if your credential is scoped to a ' +
       'different project, not_found (404) for an unknown fileId, rate_limited (429).',

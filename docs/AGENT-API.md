@@ -332,8 +332,9 @@ is absent, the same as one that does not exist.
 3. **Read per lane**: `GET .../files/:fileId/cells?lane=<id>` (and export,
    quality, and the MCP `read_content` `lane` argument) require that id.
    Prompt preview takes `?targetLang=<id>` — the value is the lane id, not a
-   language tag. Cells come back with `laneId`. Similar results return
-   `laneId` and omit rows on a lane the caller cannot see.
+   language tag. Cells come back with `laneId`. Quality and term consistency
+   return `laneId` (the lane's id, including the blank bridge). Similar results
+   return `laneId` and omit rows on a lane the caller cannot see.
 4. **Import several lanes at once**: each `PlanImport` cell takes
    `variants: [{ laneId, languageTag?, content, contentHtml? }]`. `laneId` is
    the lane's id. A bilingual parse passes the same id.

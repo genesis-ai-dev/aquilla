@@ -202,6 +202,7 @@ async function handleQuality(
     "lane",
   )
   if (!resolvedLane.ok) return externalError("validation_failed", resolvedLane.message, 400)
+  const laneId = resolvedLane.lane.id
   const lane = resolvedLane.lane.legacyTag ?? ""
   const { limit, offset } = parsePageParams(url)
 
@@ -210,9 +211,12 @@ async function handleQuality(
 
   // Health: one delegated call covers the whole scope (the rollup route
   // iterates the project's files itself, or one file with ?fileId=).
+  // Always pass the tag, including `''`. A missing health param means every
+  // granted tag when the read wall is on. Progress is the opposite: a missing
+  // param already means the blank bridge, so that query stays omitted below.
   const healthSearch = new URLSearchParams()
   if (fileIdFilter !== null) healthSearch.set("fileId", fileIdFilter)
-  if (lane) healthSearch.set("lane", lane)
+  healthSearch.set("lane", lane)
   const healthRes = await handleHealthRollupRequest(
     await internalRequest(
       env,
@@ -295,7 +299,7 @@ async function handleQuality(
   const page = paginate(perFile, offset, limit)
   return Response.json({
     projectId,
-    lane,
+    laneId,
     /** Same value the project health ring shows: cell-weighted mean over files. */
     projectHealth: health.projectHealth,
     /** Translated cells the health mean was taken over. */
@@ -446,6 +450,7 @@ async function handleTermConsistency(
     "lane",
   )
   if (!resolvedLane.ok) return externalError("validation_failed", resolvedLane.message, 400)
+  const laneId = resolvedLane.lane.id
   const lane = resolvedLane.lane.legacyTag ?? ""
   const onlyDrift = url.searchParams.get("onlyDrift") === "1"
   const { limit, offset } = parsePageParams(url)
@@ -472,7 +477,7 @@ async function handleTermConsistency(
   return Response.json({
     projectId,
     fileId: fileIdFilter,
-    lane,
+    laneId,
     /** Source cells the scan ran over (capped — see `truncated`). */
     scannedCells: cells.length,
     truncated: cells.length >= MAX_SCAN_CELLS,

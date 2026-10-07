@@ -180,7 +180,7 @@ interface QualityBody {
 interface TermsBody {
   projectId: string
   fileId: string | null
-  lane?: string
+  laneId?: string
   scannedCells: number
   conceptCount: number
   flaggedCellCount: number
@@ -463,7 +463,7 @@ describe("external quality reads (AQU-1231)", () => {
     )
     expect(res?.status).toBe(200)
     const body = (await res!.json()) as TermsBody
-    expect(body.lane).toBe("es")
+    expect(body.laneId).toBe("lane-tgt-es")
     const grace = body.data[0]
     expect(grace.conceptId).toBe("concept-grace")
     // Default-lane c1–c3 and the fr-only row have no es-lane target, so they

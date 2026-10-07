@@ -106,6 +106,7 @@ export type BuiltinCheckId =
   | "repeated-word"
   | "unpaired-symbols"
   | "abbreviation-mismatch"
+  | "capitalization"
   | "footnote-quote-mismatch"
 
 export interface AlgorithmicCheckOverride {
@@ -180,7 +181,7 @@ export interface RuleWaiver {
  * compose a localized sentence itself — it returns a reason CODE instead,
  * and a render-time helper (`formatInfractionReason` /
  * `formatInfractionMessage` in `src/lib/rules/format-infraction.ts`) turns
- * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the ten
+ * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the
  * algorithmic checks; the other three are the user-authored rule shapes.
  */
 export type RuleInfractionReason =

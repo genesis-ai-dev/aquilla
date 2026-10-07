@@ -9,7 +9,7 @@ import { defineNamespace, plural } from "./types"
  *
  * NEVER translate (content, not chrome): the user's OWN rule `name` /
  * `description`, autofix pattern/replacement/flags, every `RuleCheck`
- * pattern, `concept.sourceTerm`, matched cell text. The eleven BUILT-IN checks
+ * pattern, `concept.sourceTerm`, matched cell text. The BUILT-IN checks
  * are the one ambiguous case — `resolveBuiltinRules()` copies
  * `BUILTIN_CHECKS[id].name`/`.description` onto a `TranslationRule` so four
  * renderers can't structurally tell a built-in from a user rule apart. Those
@@ -46,6 +46,7 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.repeatedWord": "Word repeated in translation",
     "rules.infraction.builtin.unpairedSymbols": "Unpaired bracket/parenthesis/brace in translation",
     "rules.infraction.builtin.abbreviationMismatch": "Abbreviation from source missing in translation",
+    "rules.infraction.builtin.capitalization": "Lowercase letter where a capital is expected",
     "rules.infraction.builtin.footnoteQuoteMismatch":
       "This footnote quotes text that is not in the verse",
     "rules.infraction.builtin.placeholderIntegrity": plural({
@@ -83,6 +84,9 @@ export const rules = defineNamespace({
     "rules.builtin.abbreviationMismatch.name": "Abbreviation pass-through",
     "rules.builtin.abbreviationMismatch.description":
       "ALL-CAPS abbreviations from source missing in translation.",
+    "rules.builtin.capitalization.name": "Capitalization",
+    "rules.builtin.capitalization.description":
+      "A lowercase letter where a capital is expected — opening a sentence, or opening a paragraph or heading after its marker.",
     "rules.builtin.footnoteQuoteMismatch.name": "Footnote quote",
     "rules.builtin.footnoteQuoteMismatch.description":
       "Text a footnote or cross-reference quotes from the verse must appear in that verse's translation.",
@@ -122,6 +126,14 @@ export const rules = defineNamespace({
     "rules.checkDrawer.checkedNoIssues": "Checked {summary} — no issues found.",
     "rules.checkDrawer.ruleViolations": "Rule violations ({count})",
     "rules.checkDrawer.termConsistency": "Term consistency ({count})",
+    "rules.checkDrawer.capitalization": "Capitalization ({count})",
+    "rules.checkDrawer.headingStartsLowercase": "Heading starts with a lowercase letter",
+    "rules.checkDrawer.mixedCaseHeadline": plural({
+      one: "{count} cell writes a capital inside this word",
+      other: "{count} cells write a capital inside this word",
+    }),
+    "rules.checkDrawer.caseExceptionsLearned":
+      "Not flagged — recurring in this text, so treated as the project's own spelling: {forms}",
     "rules.checkDrawer.otherTermsClean": plural({
       one: "{count} other term checked with no issues.",
       other: "{count} other terms checked with no issues.",
@@ -545,6 +557,21 @@ export const rules = defineNamespace({
       "rules.checkDrawer.termConsistency": {
         description: "Section heading in the check-file findings drawer, counting term-consistency findings.",
         placeholders: { count: "Number of flagged term-consistency findings." },
+      },
+      "rules.checkDrawer.capitalization": {
+        description:
+          "Section heading in the check-file findings drawer, counting capitalization findings — a capital inside a word (e.g. 'tHe'), or a heading that opens lowercase.",
+        placeholders: { count: "Number of cells with a capitalization finding." },
+      },
+      "rules.checkDrawer.mixedCaseHeadline": {
+        description:
+          "Headline of one mixed-capitalization card, under the offending word itself (which is raw cell content and never translated).",
+        placeholders: { count: "How many cells use that exact word form." },
+      },
+      "rules.checkDrawer.caseExceptionsLearned": {
+        description:
+          "Footnote under the mixed-capitalization section naming the word forms the check learned to allow because they recur in the project's own text (a noun-class prefix like 'kiSwahili', a brand name). Lets a reviewer confirm or reject what was let through.",
+        placeholders: { forms: "The excepted word forms, comma-joined — raw cell content, never translated." },
       },
       "rules.checkDrawer.otherTermsClean": {
         description:

@@ -307,6 +307,10 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         >
           <PopoverTitle className="sr-only">{t("editor.view.settings")}</PopoverTitle>
 
+          <div
+            data-testid="view-settings-scroller"
+            className="max-h-[min(32rem,calc(100dvh-5rem))] w-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-y-contain"
+          >
           <FieldGroup className="gap-3">
             <SwitchRow
               id="view-split-milestones"
@@ -467,6 +471,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 { label: t("editor.view.lowMemoryOff"), value: "off" },
               ]}
             />
+          </div>
           </div>
         </PopoverContent>
       </Popover>

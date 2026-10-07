@@ -82,6 +82,9 @@ describe("ViewSettingsMenu popover", () => {
 
     const panel = screen.getByTestId("view-settings-popover")
     expect(panel).toBeTruthy()
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller).toHaveClass("overflow-y-auto")
+    expect(scroller).toHaveClass("overflow-x-hidden")
     expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeTruthy()
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()

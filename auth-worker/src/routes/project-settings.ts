@@ -74,7 +74,8 @@ import {
   filterSettingsToVisibleLanes,
   restoreHiddenLaneSettings,
 } from "../../../src/lib/lanes/read-wall"
-import { visibleTagsForMember } from "../../../db/shared/lane-visibility"
+import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
+import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
 
@@ -213,11 +214,39 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
 
   const response = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-  const { visible, lanes } = await visibleTagsForMember(
+  let { visible, lanes } = await visibleTagsForMember(
     c.env.AQUILLA_PG, c.env.LANE_READ_WALL, projectId, user.id, role.level,
   )
+  // AQU-1039: local and e2e leave the read wall off, but a member staffed on
+  // one lane still must not be handed the other lanes. Maintainer and an
+  // unscoped member are unchanged. Does not read lanes.language, so a row
+  // the backfill has not filled yet filters the same way.
+  if (visible === null && role.level < ROLE.MAINTAINER) {
+    const scoped = await laneScopeValuesFor(c.env.AQUILLA_PG, projectId, user.id)
+    if (scoped.length > 0) {
+      const identities = await loadTargetLaneIdentities(c.env.AQUILLA_PG, projectId)
+      const limited = lanesForScopeVisibility(scoped, identities)
+      visible = limited.visible
+      lanes = [...limited.lanes]
+    }
+  }
   return c.json(await withOrgDefaults(c.env, projectId, filterSettingsToVisibleLanes(response, visible, lanes)))
 })
+
+async function laneScopeValuesFor(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+): Promise<string[]> {
+  const rows = await db
+    .prepare(
+      `SELECT value FROM project_member_scopes
+        WHERE project_id = ? AND user_id = ? AND kind = 'lane'`,
+    )
+    .bind(projectId, userId)
+    .all<{ value: string }>()
+  return (rows.results ?? []).map((row) => row.value)
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // PUT/PATCH /api/v2/projects/:projectId/settings

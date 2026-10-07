@@ -52,12 +52,13 @@
 // 8. GET /api/v2/projects/:termbaseProjectId/termbase/concepts?subscriberProjectId=...
 //    The upstream published termbase's ACTIVE concepts, for a subscriber's
 //    enforcement merge (consumed by src/hooks/useSubscribedConcepts.ts, which
-//    no editor surface calls yet — AQU-1715).
+//    the editor workspace and Settings → Rules call — AQU-1721).
 //    Access is the Q19 implicit grant — canReadTermbase, NOT a role check on
 //    the upstream. Concepts are read as the editor reads a project's own
 //    (lib/concepts-read.ts): the live rows of the `concepts` table, and the
 //    legacy settings.terminology blob only while the table has none. Autopilot
-//    reads subscribed termbases through the same function.
+//    reads subscribed termbases through the same function, and applies the
+//    same published / unarchived / same-org gate as canReadTermbase (AQU-1721).
 //    → 200 { concepts: Concept[] }   // status === "active" only
 //    → 400 { error: "subscriberProjectId required" }
 //    → 403 { error: "no termbase read access" }  (non-member / no subscription /

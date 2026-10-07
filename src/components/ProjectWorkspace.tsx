@@ -155,6 +155,7 @@ import {
   nextPaintGate,
   runReconnectResync,
   runAfterPushedLinkSync,
+  workspaceTerminology,
   timelinePlayReady,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
@@ -451,6 +452,7 @@ import {
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { textValidationScope, textVoteGate } from "@/lib/review/text-validation-policy"
 import { useConcepts } from "@/hooks/useConcepts"
+import { useSubscribedConcepts } from "@/hooks/useSubscribedConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import type { ConceptDraft } from "@/lib/terminology/types"
 import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
@@ -1452,6 +1454,19 @@ export function ProjectWorkspace() {
     tokenReady: !!frontierSession?.jwt,
   })
 
+  // AQU-1721: the concepts of the org termbases this project subscribes to.
+  // The editor surfaces apply them ahead of this project's own concepts; the
+  // glossary gets only its own (see workspaceTerminology).
+  const {
+    concepts: subscribedConcepts,
+    error: subscribedConceptsError,
+    refresh: refreshSubscribedConcepts,
+  } = useSubscribedConcepts(project?.id ?? null)
+  const surfaceConcepts = useMemo(
+    () => workspaceTerminology(localConcepts, subscribedConcepts),
+    [localConcepts, subscribedConcepts],
+  )
+
   // Project-AWARE fetcher for the outbox flusher. The outbox is global across
   // every project the user touches, so the flusher must mint a token for each
   // event's OWN projectId — not the workspace's active project. Minting against
@@ -2349,8 +2364,18 @@ export function ProjectWorkspace() {
     if (!project) return null
     const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage ?? project.targetLanguage
-    return { ...project, sourceLanguage, targetLanguage, terminology: localConcepts }
-  }, [activeSourceLanguage, activeLaneTargetLanguage, project, localConcepts])
+    return { ...project, sourceLanguage, targetLanguage, terminology: surfaceConcepts.editor }
+  }, [activeSourceLanguage, activeLaneTargetLanguage, project, surfaceConcepts.editor])
+  // AQU-1721: the same record for the glossary, carrying only this project's
+  // own concepts. The glossary edits what it lists, and a concept from a
+  // subscribed termbase is not this project's to edit.
+  const glossaryProject = useMemo<ProjectRecord | null>(
+    () =>
+      editorProject && surfaceConcepts.glossary !== surfaceConcepts.editor
+        ? { ...editorProject, terminology: surfaceConcepts.glossary }
+        : editorProject,
+    [editorProject, surfaceConcepts],
+  )
   // AQU-1471: direction resolves file row → project setting → language.
   // useFileMeta already falls back to the language, so the only thing added
   // here is the project-level default sitting between the two — which is why
@@ -4887,7 +4912,9 @@ export function ProjectWorkspace() {
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
     orgRules,
-    undefined,
+    // AQU-1721: term violations and the draft prompt's rules block apply the
+    // subscribed termbases too (the Agent API prompt preview mirrors this).
+    subscribedConcepts,
     // AQU-609: every consumer of this instance's `rules` evaluates against the
     // active lane's cell view, so lane-scoped rules for other lanes drop here.
     activeLane,
@@ -6704,7 +6731,9 @@ export function ProjectWorkspace() {
         fileId: activeFileId,
         cells: getActiveCells(),
         rules,
-        concepts: localConcepts,
+        // AQU-1721: its term scan reads concepts, not `rules`, so the
+        // subscribed termbases come in here as well.
+        concepts: surfaceConcepts.editor,
         termMatching: project?.termMatching,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
@@ -6714,7 +6743,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, getActiveCells, rules, surfaceConcepts.editor, project?.termMatching])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -13073,8 +13102,9 @@ export function ProjectWorkspace() {
                 rule set, so term blots and violations silently stop appearing.
                 Say it out loud rather than letting the editor look like a
                 project with no terminology. The glossary surface carries its own
-                error state, so this doesn't double up there. */}
-            {conceptsError && centerSurface !== "terminology" && (
+                error state, so this doesn't double up there. AQU-1721: a failed
+                read of a subscribed termbase drops its terms the same way. */}
+            {(conceptsError || subscribedConceptsError) && centerSurface !== "terminology" && (
               <div
                 role="alert"
                 data-testid="terminology-unavailable-banner"
@@ -13083,7 +13113,10 @@ export function ProjectWorkspace() {
                 <span>{t("workspace.terminologyUnavailableBanner")}</span>
                 <button
                   type="button"
-                  onClick={() => void refreshConcepts()}
+                  onClick={() => {
+                    if (conceptsError) void refreshConcepts()
+                    if (subscribedConceptsError) void refreshSubscribedConcepts()
+                  }}
                   className="rounded bg-amber-200/60 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/50 dark:hover:bg-amber-800"
                 >
                   {t("common.retry")}
@@ -13234,7 +13267,9 @@ export function ProjectWorkspace() {
                 // The projection-folded record: `project.terminology` is the retired
                 // settings blob, so a glossary handed the raw record shows the blob
                 // and never a term that was created through the event log.
-                project={editorProject ?? project}
+                // AQU-1721: glossaryProject, not editorProject — it leaves out the
+                // subscribed termbases, which this glossary must never edit.
+                project={glossaryProject ?? project}
                 patchSettings={patchSettings}
                 // AQU-1340: the record can only carry the terms, so the read's
                 // status travels beside it — otherwise this path renders a

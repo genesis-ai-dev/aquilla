@@ -30,6 +30,7 @@ import {
 } from "../lib/contextual/project-context"
 import { computeContextReadiness } from "../lib/contextual/readiness"
 import { rulesForLane } from "../lib/agent/lint"
+import { seedUser } from "./helpers/db"
 
 const db = env.AQUILLA_PG
 
@@ -256,6 +257,18 @@ describe("loadProjectContext", () => {
   })
 
   it("picks up concepts from a subscribed org termbase", async () => {
+    // AQU-1721: a subscription counts only while its termbase is published and
+    // in the subscriber's org (the editor's rule), so both projects need rows.
+    // termbase-subscription-gate.test.ts covers the cases that do not count.
+    await seedUser(1, "owner")
+    await db.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Org', 1)").run()
+    await db
+      .prepare(
+        `INSERT INTO projects (id, name, org_id, created_by, org_published_termbase) VALUES
+          ('proj-upstream', 'Upstream', 1, 1, TRUE),
+          ('proj-subscriber', 'Subscriber', 1, 1, FALSE)`,
+      )
+      .run()
     await seedSettings("proj-upstream", {
       terminology: [
         {

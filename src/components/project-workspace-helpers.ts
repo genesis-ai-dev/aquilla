@@ -8,6 +8,7 @@ import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glos
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { Concept } from "@/lib/terminology/types"
 import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 
 /**
@@ -384,6 +385,28 @@ export function runAfterPushedLinkSync(
   void targets.refreshAllFilesProgress().catch(() => {
     // The next normal sidebar refresh retries a transient failure.
   })
+}
+
+/**
+ * AQU-1721: which concepts each workspace surface reads. The editor surfaces
+ * (source highlights, the term-lookup popover, Check file) apply the termbases
+ * this project subscribes to ahead of its own concepts, in the order `useRules`
+ * compiles them. The glossary edits this project's own termbase, so it gets
+ * only those. A glossary edit is a `term.*` event keyed by concept id under
+ * this project's id: the server would drop one for an upstream concept while
+ * the glossary showed it saved.
+ *
+ * With no subscriptions, `editor` is `local` itself, so the editor record keeps
+ * its identity and the common case allocates nothing.
+ */
+export function workspaceTerminology(
+  local: Concept[],
+  subscribed: Concept[],
+): { editor: Concept[]; glossary: Concept[] } {
+  return {
+    editor: subscribed.length === 0 ? local : [...subscribed, ...local],
+    glossary: local,
+  }
 }
 
 /**

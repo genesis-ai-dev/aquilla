@@ -355,6 +355,31 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(stored.bibleEnrichments).toEqual(value)
     expect(stored.targetLanguage).toBe('fr')
   })
+
+  // AQU-1692: an agent may correct who speaks a speech, as a maintainer may.
+  // The voice index reads the map, so a malformed one is refused at prepare,
+  // and a project lead cannot rewrite who speaks.
+  it('bibleVoiceOverrides refuses a malformed correction and a project lead, and stores a valid one', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res: badRes, body: bad } = await prepare(env, maintainer.token, patchCmd([
+      { key: 'bibleVoiceOverrides', value: { 'sp:a-b': { speaker: 'person:Jesus' } } },
+    ]))
+    expect(badRes.status).toBe(400)
+    expect(bad.error.code).toBe('validation_failed')
+    expect(JSON.stringify(bad.error.details)).toContain('bibleVoiceOverrides')
+
+    const value = { 'sp:a-b': { speaker: 'person:Jesus', note: 'FCBH', by: 'agent', at: '2026-10-06T00:00:00Z' } }
+    const lead = await memberToken(tdb, 500)
+    const { res: deniedRes } = await prepare(env, lead.token, patchCmd([{ key: 'bibleVoiceOverrides', value }]))
+    expect(deniedRes.status).toBe(403)
+
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'bibleVoiceOverrides', value }]))
+    expect(res.status).toBe(200)
+    expect((await commit(env, maintainer.token, body.changeset.id)).res.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.bibleVoiceOverrides).toEqual(value)
+  })
 })
 
 /** Overwrite the seeded blob in place (version stays 1) so a per-key case can

@@ -11,7 +11,9 @@
 
 import { isStructuralCell } from "@/lib/cells/structural"
 import { parseScriptureReference } from "@/lib/scripture-reference"
+import type { BibleVoiceOverrides } from "../../../db/shared/bible-voice-overrides"
 import type { BkpEntityId, BkpRef, BkpSpeech, BkpVoicesLayer, BkpWordId } from "./pack-types"
+import { applyVoiceOverrides, voiceOverridesKey, type AppliedVoiceOverride } from "./voice-overrides"
 
 /** The pack's speech id for the narrator's (or, in letters, the author's) runs. */
 const NARRATOR = "narrator"
@@ -40,6 +42,10 @@ export interface VoiceIndex {
   wordRange: ReadonlyMap<BkpRef, readonly [BkpWordId, BkpWordId]>
   /** Per verse, every speech whose span touches it, including speeches with no run there. */
   touching: ReadonlyMap<BkpRef, readonly BkpSpeech[]>
+  /** AQU-1692: the project's corrections, by speech id. The speeches above already carry them. */
+  overrides: ReadonlyMap<string, AppliedVoiceOverride>
+  /** AQU-1692: this book's corrections whose speech the pack no longer has. */
+  orphanedOverrides: readonly string[]
 }
 
 /** Verses sorted by first word, so a speech finds the verses it spans by binary search. */
@@ -67,7 +73,10 @@ function speechesByVerse(
   return out
 }
 
-export function buildVoiceIndex(layer: BkpVoicesLayer): VoiceIndex {
+/** The index of `source`, with the project's corrections (AQU-1692) applied to its speeches. */
+export function buildVoiceIndex(source: BkpVoicesLayer, overrides?: BibleVoiceOverrides): VoiceIndex {
+  const corrected = applyVoiceOverrides(source, overrides)
+  const layer = corrected.layer
   const speeches = new Map<string, BkpSpeech>()
   for (const speech of layer.speeches) speeches.set(speech.id, speech)
 
@@ -98,10 +107,12 @@ export function buildVoiceIndex(layer: BkpVoicesLayer): VoiceIndex {
     speeches,
     wordRange,
     touching: speechesByVerse(layer.speeches, wordRange),
+    overrides: corrected.applied,
+    orphanedOverrides: corrected.orphaned,
   }
 }
 
-// ── Memo: one index per (pack version, book) ────────────────────────────────
+// ── Memo: one index per (pack version, book, corrections) ──────────────────
 
 /** The open book's only (AQU-1700): an entry holds its layers, and an OT book's are several MB. */
 const INDEX_CACHE_LIMIT = 1
@@ -110,13 +121,15 @@ const indexCache = new Map<string, { layer: BkpVoicesLayer; index: VoiceIndex }>
 /**
  * The index for one book of one pack version, built once. The layer object is
  * kept with it, so a different file under the same key (a test, a refetch) is
- * never answered with the old index.
+ * never answered with the old index. AQU-1692: the key also holds a hash of
+ * the book's corrections, so a changed correction rebuilds it and an equal
+ * one, refetched with the settings, does not.
  */
-export function voiceIndexFor(version: string, layer: BkpVoicesLayer): VoiceIndex {
-  const key = `${version}/${layer.book}`
+export function voiceIndexFor(version: string, layer: BkpVoicesLayer, overrides?: BibleVoiceOverrides): VoiceIndex {
+  const key = `${version}/${layer.book}/${voiceOverridesKey(layer, overrides)}`
   const hit = indexCache.get(key)
   if (hit && hit.layer === layer) return hit.index
-  const index = buildVoiceIndex(layer)
+  const index = buildVoiceIndex(layer, overrides)
   indexCache.delete(key)
   indexCache.set(key, { layer, index })
   if (indexCache.size > INDEX_CACHE_LIMIT) {
@@ -283,6 +296,8 @@ export interface VoiceChipModel {
   voices: Voice[]
   /** How many more speeches the cell has than the chip shows. */
   more: number
+  /** AQU-1692: a speech in the cell has a disputed boundary, shown or not. */
+  disputed: boolean
 }
 
 /**
@@ -294,9 +309,35 @@ export interface VoiceChipModel {
 export function voiceChipModel(index: VoiceIndex, cell: CellVoices): VoiceChipModel {
   const sequence = voiceSequence(index, cell)
   const speeches = distinctVoices(sequence).filter((voice) => voice.kind === "speech")
-  if (speeches.length <= 1) return { voices: sequence, more: 0 }
+  const disputed = speeches.some((voice) => voice.kind === "speech" && speechDispute(voice.speech) !== null)
+  if (speeches.length <= 1) return { voices: sequence, more: 0, disputed }
   const firstSpeech = sequence.findIndex((voice) => voice.kind === "speech")
-  return { voices: sequence.slice(0, firstSpeech + 1), more: speeches.length - 1 }
+  return { voices: sequence.slice(0, firstSpeech + 1), more: speeches.length - 1, disputed }
+}
+
+// ── What deserves a second look (AQU-1692) ──────────────────────────────────
+
+/**
+ * At or below this, the pack's sources disagree about who speaks (the
+ * pipeline's 0.5), or none of them names anyone (0).
+ */
+export const CHECK_SPEAKER_CONF = 0.5
+
+/** The data is unsure who speaks. A speaker the project corrected is sure. */
+export function speakerNeedsCheck(speech: BkpSpeech): boolean {
+  return typeof speech.speakerConf === "number" && speech.speakerConf <= CHECK_SPEAKER_CONF
+}
+
+/**
+ * Pack slice 3 marks a speech whose boundary scholars dispute (John 3:16–21).
+ * Any object there means disputed; its reason, English data, comes along when
+ * it is text.
+ */
+export function speechDispute(speech: BkpSpeech): { reason: string | null } | null {
+  const disputed: unknown = speech.disputed
+  if (typeof disputed !== "object" || disputed === null || Array.isArray(disputed)) return null
+  const reason: unknown = (disputed as Record<string, unknown>).reason
+  return { reason: typeof reason === "string" && reason.trim() !== "" ? reason : null }
 }
 
 /** True when `speaker` speaks anywhere in the cell, quoted speech included. */

@@ -50,6 +50,7 @@ import { harmonizer } from "../namespaces/harmonizer"
 import { bibleData } from "../namespaces/bibleData"
 import { bibleAlignment } from "../namespaces/bibleAlignment"
 import { bibleHelps } from "../namespaces/bibleHelps"
+import { bibleVoices } from "../namespaces/bibleVoices"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -84,6 +85,7 @@ export const en = {
   ...bibleData.keys,
   ...bibleAlignment.keys,
   ...bibleHelps.keys,
+  ...bibleVoices.keys,
 } as const
 
 export type MessageKey = keyof typeof en

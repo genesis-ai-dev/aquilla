@@ -246,6 +246,13 @@ export interface ProjectWideSettings {
    */
   bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
   /**
+   * AQU-1692: maintainers' corrections of who speaks a Bible Knowledge Pack
+   * speech, and to whom, keyed by speech id (db/shared/bible-voice-overrides.ts).
+   * Maintainer floor, like the rest of the blob; the settings route refuses a
+   * malformed map.
+   */
+  bibleVoiceOverrides?: import("../../../db/shared/bible-voice-overrides").BibleVoiceOverrides
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.

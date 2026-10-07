@@ -5,16 +5,26 @@
 // which datasets say so, a "Show every line by …" action per speaker, and
 // where each name came from. Shown in the chip's popover on hover and on
 // keyboard focus. AQU-1695: a "Boundary disputed" badge on a speech the pack
-// marks disputed (slice 3).
+// marks disputed (slice 3). AQU-1692: a "Check" badge where the data is unsure
+// who speaks, a maintainer's correction ("Corrected by …") with the action
+// that opens the correction dialog, and "Adopt voices as cast".
 
 import { Fragment } from "react"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, CircleHelp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PopoverTitle } from "@/components/ui/popover"
 import type { BkpEntityId, BkpSpeech } from "@/lib/bible-data/pack-types"
-import { distinctVoices, voiceSequence, type Voice } from "@/lib/bible-data/voice-index"
+import {
+  distinctVoices,
+  speakerNeedsCheck,
+  speechDispute,
+  voiceSequence,
+  type Voice,
+} from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
+import { chapterOf } from "@/lib/bible-data/voice-cast"
+import type { AppliedVoiceOverride } from "@/lib/bible-data/voice-overrides"
 import type { CellVoiceView } from "./voices-context"
 import { evidenceSourceKey, labelSourceKey, narratorKey, speechTypeKey } from "./voice-text"
 
@@ -35,6 +45,7 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
   const t = useT()
   const { context, voices } = view
   const shown = distinctVoices(voiceSequence(context.index, voices))
+  const adoptCast = context.maintainer?.adoptCast
 
   // One "Show every line by …" per speaker, on that speaker's first speech.
   const offered = new Set<BkpEntityId>()
@@ -69,6 +80,8 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
                 nameOf={nameOf}
                 hasAddresseeName={Boolean(voice.speech.addressee && context.labelFor(voice.speech.addressee))}
                 onShowLines={offersFilter(voice.speech) ? context.showLinesBy : undefined}
+                applied={context.index.overrides.get(voice.speech.id)}
+                onCorrect={context.maintainer?.correct ?? undefined}
               />
             )}
           </li>
@@ -98,24 +111,27 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
           </dl>
         </div>
       )}
+      {adoptCast && voices.refs[0] && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto self-start border-t border-border/60 px-0 pt-2 pb-0.5 text-xs"
+          onClick={() => adoptCast(chapterOf(voices.refs[0]))}
+        >
+          {t("bibleVoices.cast.adopt")}
+        </Button>
+      )}
     </div>
   )
 }
 
+/** A badge on a speech that deserves a second look. */
+const BADGE_CLASS =
+  "inline-flex items-center gap-1 self-start rounded-sm border border-amber-600/50 px-1.5 py-px text-[10px] font-medium text-amber-800 dark:border-amber-400/50 dark:text-amber-300"
+
 function voiceListKey(voice: Voice): string {
   return voice.kind === "narrator" ? "narrator" : voice.speech.id
-}
-
-/**
- * Pack slice 3 marks a speech whose boundary scholars dispute (John 3:16–21).
- * Any object there means disputed; its reason, English data, shows when it is
- * text.
- */
-function speechDispute(speech: BkpSpeech): { reason: string | null } | null {
-  const disputed: unknown = speech.disputed
-  if (typeof disputed !== "object" || disputed === null || Array.isArray(disputed)) return null
-  const reason: unknown = (disputed as Record<string, unknown>).reason
-  return { reason: typeof reason === "string" && reason.trim() !== "" ? reason : null }
 }
 
 function SpeechDetails({
@@ -123,11 +139,17 @@ function SpeechDetails({
   nameOf,
   hasAddresseeName,
   onShowLines,
+  applied,
+  onCorrect,
 }: {
   speech: BkpSpeech
   nameOf: (entityId: BkpEntityId | undefined) => string
   hasAddresseeName: boolean
   onShowLines?: (speaker: BkpEntityId) => void
+  /** AQU-1692: the project's correction of this speech, if any. */
+  applied?: AppliedVoiceOverride
+  /** AQU-1692: a maintainer opens the correction dialog. */
+  onCorrect?: (speechId: string) => void
 }) {
   const t = useT()
   const fmt = useFormat()
@@ -170,12 +192,20 @@ function SpeechDetails({
         </span>
       </span>
       <span className="text-muted-foreground">{facts.join(" · ")}</span>
+      {speakerNeedsCheck(speech) && (
+        <>
+          <span data-testid="speaker-check" className={BADGE_CLASS}>
+            <CircleHelp className="size-3" aria-hidden="true" />
+            {t("bibleVoices.check.badge")}
+          </span>
+          <span className="text-muted-foreground">
+            {t(speech.speaker ? "bibleVoices.check.disagree" : "bibleVoices.check.unknown")}
+          </span>
+        </>
+      )}
       {dispute && (
         <>
-          <span
-            data-testid="speech-disputed"
-            className="inline-flex items-center gap-1 self-start rounded-sm border border-amber-600/50 px-1.5 py-px text-[10px] font-medium text-amber-800 dark:border-amber-400/50 dark:text-amber-300"
-          >
+          <span data-testid="speech-disputed" className={BADGE_CLASS}>
             <AlertTriangle className="size-3" aria-hidden="true" />
             {t("bibleHelps.voices.disputed")}
           </span>
@@ -186,13 +216,16 @@ function SpeechDetails({
           )}
         </>
       )}
-      <span className="text-muted-foreground">
-        {t("bibleData.voices.speakerEvidence", {
-          confidence: fmt.isolate(fmt.percent(speech.speakerConf)),
-          sources: sourcesOf(speech.speakerSources),
-        })}
-      </span>
-      {addressee !== null && speech.addresseeConf !== undefined && (
+      {applied && <CorrectionDetails applied={applied} nameOf={nameOf} />}
+      {!applied?.override.speaker && (
+        <span className="text-muted-foreground">
+          {t("bibleData.voices.speakerEvidence", {
+            confidence: fmt.isolate(fmt.percent(speech.speakerConf)),
+            sources: sourcesOf(speech.speakerSources),
+          })}
+        </span>
+      )}
+      {addressee !== null && speech.addresseeConf !== undefined && !applied?.override.addressee && (
         <span className="text-muted-foreground">
           {t("bibleData.voices.addresseeEvidence", {
             confidence: fmt.isolate(fmt.percent(speech.addresseeConf)),
@@ -213,6 +246,45 @@ function SpeechDetails({
           {t("bibleData.voices.showLinesBy", { speaker: fmt.isolate(speaker) })}
         </Button>
       )}
+      {onCorrect && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto self-start px-0 py-0.5 text-xs"
+          onClick={() => onCorrect(speech.id)}
+        >
+          {t(applied ? "bibleVoices.override.edit" : "bibleVoices.override.correct")}
+        </Button>
+      )}
     </div>
+  )
+}
+
+/** AQU-1692: who corrected the speech, when, why, and what the Bible data said. */
+function CorrectionDetails({
+  applied,
+  nameOf,
+}: {
+  applied: AppliedVoiceOverride
+  nameOf: (entityId: BkpEntityId | undefined) => string
+}) {
+  const t = useT()
+  const fmt = useFormat()
+  const { override, original } = applied
+  const speaker = fmt.isolate(nameOf(original.speaker))
+  const reading = original.addressee
+    ? t("bibleData.voices.speaksTo", { speaker, addressee: fmt.isolate(nameOf(original.addressee)) })
+    : speaker
+  return (
+    <>
+      <span data-testid="voice-corrected" className="font-medium">
+        {t("bibleVoices.override.correctedBy", { name: fmt.isolate(override.by), date: fmt.date(override.at) })}
+      </span>
+      <span dir="auto" className="text-muted-foreground">
+        {override.note}
+      </span>
+      <span className="text-muted-foreground">{t("bibleVoices.override.original", { reading })}</span>
+    </>
   )
 }

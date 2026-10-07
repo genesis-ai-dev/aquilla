@@ -28,6 +28,7 @@ import { useFormat } from "@/lib/i18n/format"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { onMentionJumpRequest } from "./bible-data-bus"
+import type { BiblePackFailure } from "./useBibleVoices"
 import { createMentionHighlightStore } from "./mention-highlight-store"
 import { deityFormName, participantName } from "./people-text"
 import { usePeoplePack } from "./people-pack"
@@ -64,6 +65,8 @@ export interface WhosWho {
   context: WhosWhoContextValue | null
   index: PeopleIndex | null
   nameOf: ((entityId: BkpEntityId) => string) | null
+  /** AQU-1692: why the book's people did not load; null when they did or are loading. */
+  failure: BiblePackFailure | null
 }
 
 export function useWhosWho({
@@ -197,5 +200,6 @@ export function useWhosWho({
     ],
   )
 
-  return { context, index: enabled ? index : null, nameOf }
+  const failure = pack && !pack.ok ? { book: pack.book, reason: pack.reason } : null
+  return { context, index: enabled ? index : null, nameOf, failure }
 }

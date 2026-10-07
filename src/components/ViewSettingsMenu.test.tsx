@@ -459,6 +459,40 @@ describe("ViewSettingsMenu — Bible data", () => {
     expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
   })
 
+  // AQU-1692: offline with nothing cached, the editor shows no chips; this says why.
+  it("says when the open book's Bible data is not downloaded yet", () => {
+    renderViewSettings({
+      bibleDataVoicesEnabled: true,
+      bibleDataStatus: { book: "RUT", failure: "offline", orphanedCorrections: [] },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getByTestId("bible-data-pack-status").textContent).toBe(
+      "The Bible data for this book isn't downloaded yet. It loads when you're back online.",
+    )
+  })
+
+  // AQU-1692: after a pack rebuild moves a speech, its correction applies to
+  // nothing. It is listed rather than lost, and a maintainer can remove it.
+  it("lists voice corrections the Bible data no longer matches, with Remove for a maintainer", () => {
+    const remove = vi.fn()
+    const moved = "sp:o080010100041-o080010100070"
+    renderViewSettings({
+      bibleDataVoicesEnabled: true,
+      bibleDataStatus: { book: "RUT", failure: null, orphanedCorrections: [moved] },
+      bibleVoiceCorrections: {
+        [moved]: { speaker: "person:Ruth", note: "We follow Ruth.", by: "mara", at: "2026-10-06T12:00:00Z" },
+      },
+      onRemoveVoiceCorrection: remove,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const list = screen.getByTestId("bible-data-orphaned-corrections")
+    expect(list.textContent).toContain("1 voice correction no longer matches the Bible data:")
+    expect(list.textContent).toContain("RUT 1:10 · mara: We follow Ruth.")
+    expect(screen.queryByTestId("bible-data-pack-status")).toBeNull()
+    fireEvent.click(within(list).getByRole("button", { name: "Remove" }))
+    expect(remove).toHaveBeenCalledWith(moved)
+  })
+
   it("has no Bible data section when the project shows neither Voices nor Who's Who", () => {
     renderViewSettings({ bibleDataVoicesEnabled: false, bibleDataWhosWhoEnabled: false })
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))

@@ -20,6 +20,7 @@
 
 import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
 import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
+import { isBibleVoiceOverrides } from './bible-voice-overrides'
 
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
@@ -40,6 +41,12 @@ export interface SettingsKeySpec {
    * each must hold a boolean. Absent means any plain object.
    */
   booleanFlags?: readonly string[]
+  /**
+   * AQU-1692: when `kind` is 'object', a check the whole value must pass, and
+   * the shape to name in errors and docs.
+   */
+  check?: (value: unknown) => boolean
+  shape?: string
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -49,6 +56,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 /** Human-readable type name for a spec — used in errors and describe_command. */
 export function settingsTypeName(spec: SettingsKeySpec): string {
   if (spec.kind === 'enum') return (spec.values ?? []).map((v) => `"${v}"`).join(' | ')
+  if (spec.shape) return spec.shape
   if (spec.kind === 'object' && spec.booleanFlags) {
     return `{ ${spec.booleanFlags.map((flag) => `"${flag}"?: boolean`).join(', ')} }`
   }
@@ -67,6 +75,7 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       return Array.isArray(value) && value.every((v) => typeof v === 'string')
     case 'object': {
       if (!isPlainObject(value)) return false
+      if (spec.check) return spec.check(value)
       const flags = spec.booleanFlags
       if (!flags) return true
       return Object.entries(value).every(
@@ -159,6 +168,14 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   // AQU-1686: one switch per Bible data enrichment (db/shared/bible-enrichments.ts).
   // A missing id means that enrichment's default.
   bibleEnrichments: { kind: 'object', booleanFlags: BIBLE_ENRICHMENT_IDS },
+  // AQU-1692: maintainers' corrections of who speaks a pack speech, and to whom
+  // (db/shared/bible-voice-overrides.ts). Maintainer-only like every key with
+  // no carve-out.
+  bibleVoiceOverrides: {
+    kind: 'object',
+    check: isBibleVoiceOverrides,
+    shape: '{ [speechId: "sp:…"]: { speaker?: string, addressee?: string, note: string, by: string, at: string } }',
+  },
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },
   smartQuotes: { kind: 'boolean' },

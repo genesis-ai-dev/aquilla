@@ -14,6 +14,7 @@ import { loadLayer, type BkpFailureReason, type BkpResult } from "@/lib/bible-da
 import type { BkpLayerData, BkpQuestion, BkpRef, BkpTermsLayer, BkpWordId } from "@/lib/bible-data/pack-types"
 import { mapLayerToProject } from "@/lib/bible-data/versification"
 import type { BkpLayer } from "../../../db/shared/bible-enrichments"
+import { useRetryOnReconnect } from "./use-retry-on-reconnect"
 
 /** One layer of `book` while `wanted`: null while it loads, and while it is not wanted. */
 function useLayerWhileOpen<L extends BkpLayer>(
@@ -23,6 +24,9 @@ function useLayerWhileOpen<L extends BkpLayer>(
 ): BkpResult<BkpLayerData[L]> | null {
   const key = wanted ? `${layer}|${book}` : null
   const [state, setState] = useState<{ key: string; result: BkpResult<BkpLayerData[L]> } | null>(null)
+  const current = key && state?.key === key ? state.result : null
+  // AQU-1692: a layer that failed offline loads again on reconnecting.
+  const attempt = useRetryOnReconnect(current?.ok === false && current.reason === "offline")
   useEffect(() => {
     if (!key) return
     let live = true
@@ -35,8 +39,8 @@ function useLayerWhileOpen<L extends BkpLayer>(
     return () => {
       live = false
     }
-  }, [key, layer, book])
-  return key && state?.key === key ? state.result : null
+  }, [key, layer, book, attempt])
+  return current
 }
 
 /**

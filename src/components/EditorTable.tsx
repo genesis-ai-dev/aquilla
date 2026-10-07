@@ -55,6 +55,7 @@ import { hasTiming } from "@/lib/timeline/derive"
 import { timestampNeighbours } from "@/lib/timeline/timestamp-neighbours"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
+import { ROLE } from "@/lib/frontier/roles"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { v7 as uuidv7 } from "uuid"
@@ -232,6 +233,9 @@ import { SpeechRails } from "./bible-data/SpeechRails"
 import { useBibleData } from "./bible-data/useBibleData"
 import { VoiceChip } from "./bible-data/VoiceChip"
 import { VoiceFilterBanner } from "./bible-data/VoiceFilterBanner"
+import { VoiceOverrideDialog } from "./bible-data/VoiceOverrideDialog"
+import { AdoptCastDialog, type VoiceCastAssignment } from "./bible-data/AdoptCastDialog"
+import type { SaveVoiceOverride } from "./bible-data/use-voice-override-writer"
 import { useCellVoices } from "./bible-data/voices-context"
 import { useCellContext, useCellMentionWords, useCellTargetTints } from "./bible-data/whos-who-context"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
@@ -1033,6 +1037,17 @@ interface EditorTableProps {
    * file. Bible data shows only then (AQU-1685).
    */
   bibleOpen?: boolean
+  /**
+   * AQU-1692: saves a maintainer's voice correction. Without it (or below
+   * maintainer) the voice details offer no "Correct…".
+   */
+  onSaveVoiceOverride?: SaveVoiceOverride
+  /**
+   * AQU-1692: writes the adopted voices as the lines' cast names (and mints
+   * the cast). Without it (or below maintainer, `cast.assign`'s floor) the
+   * voice details offer no "Adopt voices as cast".
+   */
+  onAdoptVoicesAsCast?: (assignments: readonly VoiceCastAssignment[]) => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -1082,6 +1097,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onFootnoteCreated,
   chapterNavTrailing,
   bibleOpen = false,
+  onSaveVoiceOverride,
+  onAdoptVoicesAsCast,
 }, ref) {
   const t = useT()
   // The switcher trigger and the closed pill name the lane the same way.
@@ -1209,6 +1226,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     fileId: audioFileId,
     jumpToCell: jumpToBibleCell,
     getTokenForFile,
+    // AQU-1692: maintainer (600) is both the settings floor and `cast.assign`'s.
+    canCorrectVoices: Boolean(onSaveVoiceOverride) && (project.syncRole?.level ?? 0) >= ROLE.MAINTAINER,
+    canAdoptVoiceCast: Boolean(onAdoptVoicesAsCast) && (project.syncRole?.level ?? 0) >= ROLE.MAINTAINER,
   })
   const { filterHides: voiceFilterHides, clearFilter: clearVoiceFilter } = bibleData
   const voiceFilterActive = bibleData.filteredCellIds !== null
@@ -3094,6 +3114,26 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       {/* AQU-1687: outside the list conditional, so the way back stays on
           screen even when the filter leaves no rows. */}
       {bibleData.filter && <VoiceFilterBanner filter={bibleData.filter} onClear={clearVoiceFilter} />}
+      {bibleData.correcting && bibleData.voices && onSaveVoiceOverride && (
+        <VoiceOverrideDialog
+          key={bibleData.correcting}
+          speechId={bibleData.correcting}
+          voices={bibleData.voices}
+          onSave={onSaveVoiceOverride}
+          onClose={bibleData.closeCorrection}
+        />
+      )}
+      {bibleData.adoptingCast && bibleData.voices && onAdoptVoicesAsCast && (
+        <AdoptCastDialog
+          key={bibleData.adoptingCast}
+          chapter={bibleData.adoptingCast}
+          voices={bibleData.voices}
+          cells={bibleData.voiceCastCells}
+          castNames={getVoiceLibrary(project.ttsSettings).map((voice) => voice.name)}
+          onAdopt={onAdoptVoicesAsCast}
+          onClose={bibleData.closeAdoptCast}
+        />
+      )}
       {displayCellIds.length > 0 ? (
         <div
           ref={listRootRef}

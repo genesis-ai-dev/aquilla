@@ -26,6 +26,8 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 import { BibleDataViewSettings } from "@/components/bible-data/BibleDataViewSettings"
+import type { BiblePackStatus } from "@/components/bible-data/bible-data-bus"
+import type { BibleVoiceOverrides } from "../../db/shared/bible-voice-overrides"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
@@ -76,6 +78,12 @@ interface ViewSettingsMenuProps {
   bibleDataVoicesEnabled?: boolean
   /** AQU-1689: the project has the Who's Who enrichment on, so its options apply. */
   bibleDataWhosWhoEnabled?: boolean
+  /** AQU-1692: how the open book's Bible data loaded, as the editor published it. */
+  bibleDataStatus?: BiblePackStatus | null
+  /** AQU-1692: the project's voice corrections, to describe orphaned ones. */
+  bibleVoiceCorrections?: BibleVoiceOverrides
+  /** AQU-1692: a maintainer removes an orphaned voice correction. */
+  onRemoveVoiceCorrection?: (speechId: string) => void
   /** Per-file source-column font size in px. */
   sourceFontSize: number
   /** Per-file target-column font size in px. */
@@ -120,6 +128,9 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   targetKeyTermHighlightMode = "never",
   bibleDataVoicesEnabled = false,
   bibleDataWhosWhoEnabled = false,
+  bibleDataStatus,
+  bibleVoiceCorrections,
+  onRemoveVoiceCorrection,
   sourceFontSize,
   targetFontSize,
   sourceFontSizeExplicit = false,
@@ -425,7 +436,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           {(bibleDataVoicesEnabled || bibleDataWhosWhoEnabled) && (
             <>
               <Separator />
-              <BibleDataViewSettings voices={bibleDataVoicesEnabled} whosWho={bibleDataWhosWhoEnabled} />
+              <BibleDataViewSettings
+                voices={bibleDataVoicesEnabled}
+                whosWho={bibleDataWhosWhoEnabled}
+                status={bibleDataStatus}
+                corrections={bibleVoiceCorrections}
+                onRemoveCorrection={onRemoveVoiceCorrection}
+              />
             </>
           )}
 

@@ -109,6 +109,8 @@ import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { useReplaceFileChoices } from "@/hooks/useReplaceFileChoices"
 import { ROLE } from "@/lib/frontier/roles"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
+import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import {
   selectedClashNames,
   summarizeFileSelection,
@@ -183,6 +185,11 @@ export function LinkSourceFlow({
   // of upstream (the question is about the corpus, not the project), and reset
   // after a successful link so a re-link following a Detach asks again.
   const [consumes, setConsumes] = useState<LinkConsumes>("")
+  // AQU-1605: which of the upstream's translations this chain link consumes.
+  // Only asked for consumes='target'; reset whenever the upstream or the corpus
+  // answer changes, so a lane picked for one upstream can never be sent with
+  // another.
+  const [laneId, setLaneId] = useState("")
   const [linking, setLinking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // AQU-1544: the link request succeeded but neither the server's seed nor
@@ -234,6 +241,31 @@ export function LinkSourceFlow({
     reset: resetReplace,
     isUnresolved: replaceIsUnresolved,
   } = useReplaceFileChoices({ jwt, projectId, sourceProjectId: reviewing, files: previewFiles })
+
+  // AQU-1605: the upstream lanes this caller may consume. Asked only for the
+  // chain case — a link that consumes the upstream's SOURCE has one lane to read
+  // and nothing to choose.
+  const laneChoices = useUpstreamLaneChoices(jwt, chosen, consumes === "target")
+  const laneOptions = laneChoices.lanes
+  // Pre-fill a single lane (AQU-1419: no forced chooser at one lane), and drop a
+  // pick the lane list no longer holds — a different upstream, or one whose
+  // lanes this user's grants have since narrowed.
+  useEffect(() => {
+    if (!laneOptions) return
+    if (laneOptions.length === 1) {
+      setLaneId(laneOptions[0]!.id)
+      return
+    }
+    setLaneId((current) => (laneOptions.some((lane) => lane.id === current) ? current : ""))
+  }, [laneOptions])
+
+  // AQU-1605: the chosen lane's name, for the confirm step — which no longer has
+  // the picker on screen. Empty when the list has not landed or nothing is
+  // picked, in which case the badge is simply not shown.
+  const chosenLaneLabel = useMemo(
+    () => (laneOptions ?? []).find((lane) => lane.id === laneId)?.label ?? "",
+    [laneOptions, laneId],
+  )
 
   // The upstream's name from the picker is the fallback heading while the
   // preview loads or after it fails — the confirm step must name the project
@@ -339,6 +371,10 @@ export function LinkSourceFlow({
         sourceProjectId: reviewing,
         mode: "live",
         consumes,
+        // AQU-1605: the chain case names its lane; the sibling case consumes the
+        // upstream's source lane, which is not a choice and is left to the
+        // server to record.
+        ...(consumes === "target" && laneId ? { laneId } : {}),
         // AQU-1559: every file left checked means "follow the whole project" —
         // the request omits the list entirely, so the upstream's later files
         // keep arriving, exactly as before this slice. A subset sends the picked
@@ -368,6 +404,7 @@ export function LinkSourceFlow({
       const seeded = result.seeded !== false || (await triggerLinkSync(jwt, projectId))
       setChosen("")
       setConsumes("")
+      setLaneId("")
       setReviewing(null)
       setPreview(null)
       setSelectedFileIds(new Set())
@@ -556,6 +593,14 @@ export function LinkSourceFlow({
               })}
             </Badge>
           )}
+          {/* AQU-1605: and WHICH translation. The picker that chose it is off
+              screen by now, so without this the confirm step reads identically
+              for every lane of the upstream. */}
+          {consumes === "target" && chosenLaneLabel && (
+            <Badge variant="outline">
+              {t("projectSettings.sourceLink.laneLabel", { value: chosenLaneLabel })}
+            </Badge>
+          )}
         </div>
         <p className="text-xs text-muted-foreground">
           {replacing.length > 0
@@ -600,6 +645,7 @@ export function LinkSourceFlow({
           value={chosen}
           onValueChange={(value) => {
             setChosen(value)
+            setLaneId("")
             setError(null)
           }}
           placeholder={t("projectSettings.linkSource.pickerPlaceholder")}
@@ -618,6 +664,7 @@ export function LinkSourceFlow({
             value={consumes || null}
             onValueChange={(value) => {
               setConsumes((value ?? "") as LinkConsumes)
+              setLaneId("")
               setError(null)
             }}
             className="gap-2"
@@ -653,6 +700,21 @@ export function LinkSourceFlow({
           </RadioGroup>
         </Field>
       )}
+      {/* AQU-1605: which translation of the upstream becomes this project's
+          source. Only the chain case asks it. */}
+      {chosen && consumes === "target" && (
+        <UpstreamLaneChoiceField
+          id="link-source-lane"
+          lanes={laneOptions}
+          failed={laneChoices.failed}
+          value={laneId}
+          onValueChange={(next) => {
+            setLaneId(next)
+            setError(null)
+          }}
+          onRetry={laneChoices.retry}
+        />
+      )}
       {projectsError ? (
         <p className="text-sm text-destructive">{projectsError}</p>
       ) : (
@@ -673,7 +735,10 @@ export function LinkSourceFlow({
           // AQU-1528: no corpus answer, no way forward — and since the
           // confirm step is only reachable through here, the link action is
           // unavailable until one is chosen too.
-          disabled={!chosen || !consumes || linking || !session}
+          // AQU-1605: and no lane answer, no way forward either — a chain link
+          // must name the translation it consumes rather than let the server
+          // fall back to whichever lane carries the empty legacy tag.
+          disabled={!chosen || !consumes || linking || !session || (consumes === "target" && !laneId)}
           onClick={() => setReviewing(chosen)}
         >
           {t("projectSettings.linkSource.reviewButton")}

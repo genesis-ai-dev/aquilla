@@ -128,9 +128,15 @@ const TEXT_LAYER_CHECKS: readonly BibleCheckId[] = [
   'bkp:P1', 'bkp:P3', 'bkp:P4', 'bkp:P8', 'bkp:P9', 'bkp:P10', 'bkp:P14', 'bkp:X4',
 ]
 
-/** AQU-1699: checks that read the people layer (who each word refers to). */
+/**
+ * AQU-1699: checks that read the people layer (who each word refers to). Every
+ * check that reads `participants` belongs here: P8 reads the Greek's "you"
+ * number from it, and without it P8 never ran in the editor on a project whose
+ * only runnable participant check was P8. P2 (a scan) reads the named
+ * participants too.
+ */
 const PEOPLE_LAYER_CHECKS: readonly BibleCheckId[] = [
-  'bkp:P1', 'bkp:P3', 'bkp:P4', 'bkp:P5', 'bkp:P6', 'bkp:P9', 'bkp:P10', 'bkp:P14', 'bkp:P15', 'bkp:X4',
+  'bkp:P1', 'bkp:P2', 'bkp:P3', 'bkp:P4', 'bkp:P5', 'bkp:P6', 'bkp:P8', 'bkp:P9', 'bkp:P10', 'bkp:P14', 'bkp:P15', 'bkp:X4',
 ]
 
 /** Is the text layer worth loading for this profile? Several MB per book, so only when a check reads it. */

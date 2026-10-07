@@ -13,7 +13,7 @@ import type { ProjectFact } from '../project-facts'
 import { JHN_B_PEOPLE, JHN_B_STRUCTURE, JHN_B_TEXT, JHN_B_VOICES } from './__fixtures__/pack-b'
 import { buildNameTable } from './agreed-names'
 import { compileFileExpectations } from './compile'
-import { evaluateCell, isBibleCheckDormant } from './evaluate'
+import { bibleChecksReadPeople, evaluateCell, isBibleCheckDormant } from './evaluate'
 import type { PeopleLayerInput } from './participant-types'
 import type { BibleCheckFinding, BibleCheckId, CellExpectation } from './types'
 
@@ -81,6 +81,24 @@ describe('P8: "you" has the number the Greek gives it', () => {
     expect(isBibleCheckDormant('bkp:P8', english)).toBe(true)
     expect(check('JHN 4:22', 'Yu i lotu.', 'bkp:P8', english)).toEqual([])
     expect(isBibleCheckDormant('bkp:P8', { pronouns: { secondPerson: { numberDistinction: true, singular: ['yu'] } } })).toBe(true)
+  })
+})
+
+describe('the people layer loads for P8 alone', () => {
+  // Review of #1199: P8 reads the Greek's "you" number from the people layer,
+  // but the editor only loads that layer when a check that reads it can run,
+  // and P8 was missing from that list. A profile with "you" forms and nothing
+  // else (no agreed names, no "we" or group forms) ran no participant check.
+  it('loads it when P8 is the only participant check that can run', () => {
+    const youOnly: LanguageProfile = {
+      pronouns: { secondPerson: { numberDistinction: true, singular: ['yu'], plural: ['yupela'] } },
+    }
+    expect(isBibleCheckDormant('bkp:P8', youOnly)).toBe(false)
+    expect(bibleChecksReadPeople(youOnly)).toBe(true)
+  })
+
+  it('does not load it when no participant check can run', () => {
+    expect(bibleChecksReadPeople({ pronouns: { secondPerson: { numberDistinction: false } } })).toBe(false)
   })
 })
 

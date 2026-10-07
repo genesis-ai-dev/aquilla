@@ -179,7 +179,7 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
-import { cellIdAtSec } from "@/lib/timeline/source-regions"
+import { cellIdAtSec, heldCellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
 import {
   getVirtualClockPlaying,
@@ -10911,7 +10911,11 @@ export function ProjectWorkspace() {
     virtualSoundingCellId,
     freeTiming: timingMode === "audioFirst",
   })
-  const playingCueCellId = fileTransport.running ? fileTransport.cellId : null
+  // …and through the silence after a line it stays on that line until the
+  // next one starts (Sam, Oct 7): the transport's own line is null in a gap.
+  const playingCueCellId = fileTransport.running
+    ? (fileTransport.cellId ?? heldCellIdAtSec(audioMergedCells, fileTransport.progress.currentTime))
+    : null
 
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition

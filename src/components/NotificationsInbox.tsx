@@ -41,7 +41,7 @@ import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
 /** Rough row height. Rows truncate to two lines, so a fixed estimate is enough. */
-const NOTICE_ROW_PX = 64
+const NOTICE_ROW_PX = 48
 
 type PendingDelete =
   | { kind: "one"; commentId: string }
@@ -204,9 +204,9 @@ export function NotificationsInbox({
           side="bottom"
           sideOffset={6}
           initialFocus={shown.length > 0 ? firstNoticeRef : undefined}
-          className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden px-0.5 pt-0.5 pb-0"
+          className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-hidden pt-2 pr-0 pb-0 pl-2"
         >
-          <header className="flex shrink-0 items-center justify-between gap-2">
+          <header className="flex shrink-0 items-center justify-between gap-2 pr-2">
             <h3 className="text-base font-semibold tracking-tight">{t("comments.inbox.title")}</h3>
             {notices.length > 0 && (
               <div className="flex items-center gap-1">
@@ -436,7 +436,7 @@ function NotificationList({
       ref={handleScrollRef}
       aria-label={label}
       onKeyDown={onKeyDown}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pb-0.5"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pr-2 pb-2"
     >
       <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
@@ -534,11 +534,11 @@ function NotificationRow({
             onClick={onOpen}
             onFocus={onFocus}
             data-active={active || undefined}
-            className="flex h-full w-full cursor-default items-start gap-2 rounded-md px-2 py-1.5 text-start outline-hidden select-none hover:bg-accent/40 focus-visible:bg-accent focus-visible:text-accent-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground data-[active=true]:hover:bg-accent"
+            className="flex h-full w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-start outline-hidden select-none hover:bg-accent/40 focus-visible:bg-accent focus-visible:text-accent-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground data-[active=true]:hover:bg-accent"
           />
         }
       >
-        <span aria-hidden className="mt-0.5 shrink-0">
+        <span aria-hidden className="shrink-0">
           <InitialsAvatar name={notice.authorId} size="sm" />
         </span>
         <span className="min-w-0 flex-1">

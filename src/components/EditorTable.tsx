@@ -11,6 +11,7 @@ import {
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
   Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
+  Plus,
   Pilcrow,
   PilcrowRight,
   X,
@@ -726,10 +727,10 @@ interface EditorTableProps {
   activeLane?: string
   /**
    * AQU-602: all selectable target lanes, default lane FIRST as `''` (callers
-   * build `['', ...targetLanes]`). When more than one is offered AND
+   * build `['', ...targetLanes]`). When at least one is offered AND
    * `onLaneChange` is provided, the TARGET language tag in the column header
-   * becomes a dropdown that switches the active lane. With one lane (or no
-   * handler) the tag stays a static pill — byte-identical to the N=1 header.
+   * is a dropdown that switches the active lane (AQU-1601: one lane is named,
+   * not hidden). With no lanes (or no handler) the tag stays a static pill.
    */
   lanes?: string[]
   /** AQU-601: archived lane tags (a subset of `lanes`). Archived lanes are
@@ -741,8 +742,9 @@ interface EditorTableProps {
    *  is used. Omit to keep the tag non-interactive. */
   onLaneChange?: (lane: string) => void
   /** The lanes a lane-limited member below MAINTAINER may switch between
-   *  (`scopedLanesFor`). With two or more, they get the switcher — offering
-   *  only those lanes — which AQU-608 otherwise keeps from their role. */
+   *  (`scopedLanesFor`): only the lanes the read wall left them. One is
+   *  enough for the switcher (AQU-1601) — a single non-default lane used to
+   *  be reachable only by typing `?lane=`. They never get "Add lane". */
   scopedLanes?: string[] | null
   /** Human label for the default (`''`) lane in the TARGET tag dropdown — the
    *  project/file's default target-language name. Non-default lanes label
@@ -761,6 +763,12 @@ interface EditorTableProps {
    *  language" affordance. Omit to keep the tag a static pill (the pre-AQU-583
    *  behaviour). */
   onEditTargetLanguage?: () => void
+  /**
+   * AQU-1601: opens Languages settings to add a lane. Rendered in the
+   * switcher only for a maintainer (`canSwitchLanes`). A lane-scoped member
+   * does not get this entry even if a caller passes it.
+   */
+  onAddLane?: () => void
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /**
@@ -1032,7 +1040,7 @@ interface EditorTableProps {
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels,
-  onEditTargetLanguage,
+  onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
   onCompleteSingle, onPrefetchCompletion, onCompleteBatch, onCompleteParagraph, healthMap,
@@ -1088,8 +1096,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       ?? (activeLane ? activeLane : project.targetLanguage))
     || t("editor.lane.setTargetLanguage")
   // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
-  // lane-limited member over their own lanes only (`scopedLanesFor`).
-  const switchableLanes = canSwitchLanes(project.syncRole?.level) ? lanes : scopedLanes
+  // lane-limited member over the lanes the read wall left them (`scopedLanes`).
+  // One lane is enough (AQU-1601). "Add lane" is maintainer-only.
+  const canManageLanes = canSwitchLanes(project.syncRole?.level)
+  const switchableLanes = canManageLanes ? lanes : scopedLanes
+  const showLaneSwitcher = Boolean(onLaneChange && switchableLanes && switchableLanes.length >= 1)
+  const showAddLane = canManageLanes && !!onAddLane
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
   // repair path treats any hand-edited source cell as damage and overwrites
   // it, so the "Edit source" affordance must stay off. Loading counts as
@@ -2961,26 +2973,27 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
-                • >1 lane (+ change handler) → a dropdown that switches the active
-                  lane; with `onEditTargetLanguage` it also gets a "Change target
-                  language…" item so the language is reachable here, not buried in
-                  Settings. The switcher does NOT require a default target to be
-                  set — with extra lanes registered but no default language yet the
-                  dropdown still opens (trigger reads "Set target language"), so the
-                  named lanes stay reachable and the default can be set from here.
+                • ≥1 lane (+ change handler) → a dropdown that switches the active
+                  lane (AQU-1601: one lane is named, plus "Add lane…" for a
+                  maintainer). With `onEditTargetLanguage` it also gets a "Change
+                  target language…" item so the language is reachable here, not
+                  buried in Settings. The switcher does NOT require a default
+                  target to be set — with extra lanes registered but no default
+                  language yet the dropdown still opens (trigger reads "Set target
+                  language"), so the named lanes stay reachable and the default
+                  can be set from here.
                 • otherwise, with `onEditTargetLanguage` → a clickable pill (or a
                   "Set target language" prompt when none is set yet) opening the
                   language settings.
                 • with neither handler → the original static pill (byte-identical
                   to the pre-AQU-583 header for callers that pass no handlers).
                 AQU-608: lane switching is a maintainer-and-above affordance —
-                below maintainer the control stays a static pill so translators
-                keep to their assigned lane (a lane-limited member switches among
-                their own lanes only). The pill uses the same lane name as the
-                switcher. */}
-            {switchableLanes &&
-            switchableLanes.length > 1 &&
-            onLaneChange ? (
+                below maintainer, a member with no lane scope keeps a static pill
+                so translators stay on their assigned lane. A lane-limited member
+                gets the switcher over only the lanes the read wall left them,
+                including when that list has one lane (AQU-1601), and no "Add
+                lane". The pill uses the same lane name as the switcher. */}
+            {showLaneSwitcher && switchableLanes && onLaneChange ? (
               /* AQU-609: the switcher is a searchable combobox — client
                  projects carry 150+ lanes, and lane switching is a combobox
                  by explicit client request. Archived-lane semantics (AQU-601)
@@ -3016,22 +3029,42 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   </button>
                 }
                 footer={
-                  onEditTargetLanguage
+                  onEditTargetLanguage || showAddLane
                     ? (close) => (
-                        /* AQU-583: manage the default target language from the
-                           switcher. */
-                        <button
-                          type="button"
-                          data-testid="edit-target-language"
-                          onClick={() => {
-                            close()
-                            onEditTargetLanguage()
-                          }}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-                        >
-                          <Languages className="h-3.5 w-3.5" />
-                          {t("editor.lane.changeTargetLanguageItem")}
-                        </button>
+                        <>
+                          {onEditTargetLanguage ? (
+                            /* AQU-583: manage the default target language from the
+                               switcher. */
+                            <button
+                              type="button"
+                              data-testid="edit-target-language"
+                              onClick={() => {
+                                close()
+                                onEditTargetLanguage()
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                            >
+                              <Languages className="h-3.5 w-3.5" />
+                              {t("editor.lane.changeTargetLanguageItem")}
+                            </button>
+                          ) : null}
+                          {showAddLane ? (
+                            /* AQU-1601: one lane still offers a way to add another.
+                               Lane-scoped members do not get this. */
+                            <button
+                              type="button"
+                              data-testid="add-lane"
+                              onClick={() => {
+                                close()
+                                onAddLane?.()
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              {t("editor.lane.addLaneItem")}
+                            </button>
+                          ) : null}
+                        </>
                       )
                     : undefined
                 }

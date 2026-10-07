@@ -1592,6 +1592,7 @@ export const editor = defineNamespace({
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.addLaneItem": "Add lane…",
     "editor.lane.searchPlaceholder": "Search lanes…",
     "editor.lane.searchAriaLabel": "Search lanes",
     "editor.lane.searchEmpty": "No lanes found.",
@@ -6075,6 +6076,15 @@ export const editor = defineNamespace({
           "Menu item inside the lane switcher that opens the target-language " +
           "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
         maxLength: 28,
+      },
+      "editor.lane.addLaneItem": {
+        description:
+          "Menu item inside the lane switcher, for a maintainer, that opens " +
+          "Languages settings to add another target-language lane. Shown even " +
+          "when the project has only one lane. Trailing ellipsis means it opens " +
+          "a further screen — keep it. Not shown to a member who can only see " +
+          "some lanes.",
+        maxLength: 16,
       },
       "editor.lane.searchAriaLabel": {
         description:

@@ -912,6 +912,7 @@ export const org = defineNamespace({
     "org.assignWork.assignButtonLabel": "Assign…",
     "org.assignWork.chooseAssignee": "Choose an assignee.",
     "org.assignWork.chooseFile": "Choose a file.",
+    "org.assignWork.chooseLane": "Choose the language lane this work is for.",
     "org.assignWork.assigneeLabel": "Assignee",
     "org.assignWork.bookLabel": "Book",
     "org.assignWork.wholeBookNoChapters": "Whole book — this file has no chapters to narrow to.",
@@ -2609,6 +2610,13 @@ export const org = defineNamespace({
         description:
           "Subheading on the shared-with-you page when arriving scoped to one guest organization (via the org switcher), naming that organization.",
         placeholders: { org: "Display name of the guest organization — not translated." },
+      },
+      "org.assignWork.chooseLane": {
+        description:
+          "Shown in the Assign work panel's language-lane menu when no lane is " +
+          "selected, and as the error when Assign is pressed anyway. Happens on " +
+          "the All languages tab of a project that has several lanes: nothing is " +
+          "pre-selected. Imperative sentence.",
       },
       "org.assignWork.chaptersSelectedCount": {
         description:

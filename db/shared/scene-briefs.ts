@@ -15,6 +15,7 @@
 // from either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
+import { liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -45,6 +46,9 @@ export interface SceneBrief {
   /** Endpoint cell UUIDs, never ordinals — membership = document order walk. */
   startCellId: string
   endCellId: string
+  /** The lane this brief was written for — `lanes.id` (AQU-1610). */
+  laneId: string
+  /** The lane's legacy tag; never a key (AQU-1611). */
   targetLang: string
   /** L2: situation/participants/tenor/moves markdown. */
   construal: string
@@ -144,6 +148,7 @@ interface SceneBriefRow {
   start_cell_id: string
   end_cell_id: string
   target_lang: string
+  lane_id: string
   construal: string
   ambiguity_register: unknown
   l1_summary: string | null
@@ -198,6 +203,7 @@ function rowToBrief(r: SceneBriefRow): SceneBrief {
     fileId: r.file_id,
     startCellId: r.start_cell_id,
     endCellId: r.end_cell_id,
+    laneId: r.lane_id,
     targetLang: r.target_lang,
     construal: r.construal,
     ambiguityRegister: parseRegister(r.ambiguity_register),
@@ -217,7 +223,7 @@ function rowToBrief(r: SceneBriefRow): SceneBrief {
   }
 }
 
-const BRIEF_COLS = `id, project_id, file_id, start_cell_id, end_cell_id, target_lang,
+const BRIEF_COLS = `id, project_id, file_id, start_cell_id, end_cell_id, target_lang, lane_id,
   construal, ambiguity_register, l1_summary, l1_generated_at, l1_model_id, status,
   human_edited, stale_since, stale_reason, provenance, created_by, reviewed_by,
   version, created_at, updated_at`
@@ -226,12 +232,11 @@ const BRIEF_COLS = `id, project_id, file_id, start_cell_id, end_cell_id, target_
 // Primitives
 // ──────────────────────────────────────────────────────────────────────────
 
-export interface ProposeSceneBriefInput {
+export interface ProposeSceneBriefInput extends LaneRef {
   projectId: string
   fileId: string
   startCellId: string
   endCellId: string
-  targetLang?: string
   construal: string
   ambiguityRegister?: AmbiguityEntry[]
   l1Summary?: string | null
@@ -261,17 +266,16 @@ export async function proposeSceneBrief(
   })
   if (err) return { status: "validation_failed", message: err.message }
 
+  // AQU-1610: the lane is resolved to its id once, here; the tag is only
+  // what the un-dropped target_lang column stores.
+  const lane = await resolveLane(db, input.projectId, input)
   const row = await db
     .prepare(
-      // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
-      // (db/shared cannot import sync-worker's lane-id-sql); NULL until lanes
-      // exist, filled by the backfill. Mirrors laneIdResolveSql('target').
       `INSERT INTO scene_briefs
           (id, project_id, file_id, start_cell_id, end_cell_id, target_lang,
            construal, ambiguity_register, l1_summary, l1_generated_at,
            l1_model_id, status, provenance, created_by, lane_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 'proposed', ?::jsonb, ?,
-               (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 'proposed', ?::jsonb, ?, ?)
        RETURNING ${BRIEF_COLS}`,
     )
     .bind(
@@ -280,7 +284,7 @@ export async function proposeSceneBrief(
       input.fileId,
       input.startCellId,
       input.endCellId,
-      input.targetLang ?? "",
+      lane.targetLang,
       input.construal,
       // postgres.js infers both cast parameters as jsonb and applies its JSON
       // serializer. Keep them structured here: pre-stringifying would store
@@ -292,18 +296,16 @@ export async function proposeSceneBrief(
       input.l1ModelId ?? null,
       input.provenance ?? null,
       input.createdBy ?? null,
-      input.projectId,
-      input.targetLang ?? "",
+      lane.laneId,
     )
     .first<SceneBriefRow>()
   if (!row) return { status: "validation_failed", message: "failed to insert scene brief" }
   return { status: "ok", brief: rowToBrief(row) }
 }
 
-export interface ListSceneBriefsFilter {
+export interface ListSceneBriefsFilter extends LaneRef {
   fileId?: string
   status?: SceneBriefStatus
-  targetLang?: string
 }
 
 export async function listSceneBriefs(
@@ -321,9 +323,9 @@ export async function listSceneBriefs(
     where.push("status = ?")
     binds.push(filter.status)
   }
-  if (filter.targetLang !== undefined) {
-    where.push("target_lang = ?")
-    binds.push(filter.targetLang)
+  if (filter.laneId !== undefined || filter.targetLang !== undefined) {
+    where.push("lane_id = ?")
+    binds.push((await resolveLane(db, projectId, filter)).laneId)
   }
   const { results } = await db
     .prepare(
@@ -393,7 +395,7 @@ export type ReviewSceneBriefResult =
 /**
  * Approve or reject a `proposed` scene brief. Approving supersedes any
  * currently approved row on the same span key (project, file, start, end,
- * target_lang) → 'archived' first (so the partial UNIQUE index never
+ * lane_id) → 'archived' first (so the partial UNIQUE index never
  * conflicts), then flips this row to 'approved' — both in one atomic batch.
  */
 export async function reviewSceneBrief(
@@ -423,16 +425,26 @@ export async function reviewSceneBrief(
     return { status: "ok", brief: rowToBrief(row) }
   }
 
-  // approve: archive the current holder of this span key (if any), then approve.
+  // approve: archive the current holder of this span key (if any), then
+  // approve. The span key is lane_id after migration 0151 and the legacy tag
+  // before it (AQU-1610); archiving by the column the index does NOT use
+  // leaves the current holder in place for the approve to collide with.
+  const liveKey = await liveLaneKey(db, "scene_briefs_live")
   await db.batch([
     db
       .prepare(
         `UPDATE scene_briefs
             SET status = 'archived', updated_at = now()
           WHERE project_id = ? AND file_id = ? AND start_cell_id = ?
-            AND end_cell_id = ? AND target_lang = ? AND status = 'approved'`,
+            AND end_cell_id = ? AND ${liveKey} = ? AND status = 'approved'`,
       )
-      .bind(current.projectId, current.fileId, current.startCellId, current.endCellId, current.targetLang),
+      .bind(
+        current.projectId,
+        current.fileId,
+        current.startCellId,
+        current.endCellId,
+        liveKey === "lane_id" ? current.laneId : current.targetLang,
+      ),
     db
       .prepare(
         `UPDATE scene_briefs

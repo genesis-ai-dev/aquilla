@@ -326,7 +326,7 @@ describe("MembersTab", () => {
     const input = screen.getByPlaceholderText("Aquilla username")
     fireEvent.change(input, { target: { value: "dave" } })
 
-    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    fireEvent.click(screen.getByRole("button", { name: /every lane/i }))
 
     await waitFor(() => {
       expect(mockAddMany).toHaveBeenCalledTimes(1)
@@ -349,7 +349,7 @@ describe("InviteLinkTab", () => {
     const { createServerInvite } = await import("@/lib/sync/invites")
     renderInvite()
 
-    const createButtons = screen.getAllByRole("button", { name: "Create invite link" })
+    const createButtons = screen.getAllByRole("button", { name: /create invite link/i })
     fireEvent.click(createButtons[createButtons.length - 1])
 
     await waitFor(() => {
@@ -620,7 +620,7 @@ describe("MembersTab multi-select add — AQU-672 suggestions + AQU-734 batch", 
     fireEvent.change(input, { target: { value: "bogus" } })
     fireEvent.keyDown(input, { key: "Enter" })
 
-    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+    fireEvent.click(screen.getByRole("button", { name: /every lane/i }))
 
     await waitFor(() => {
       expect(mockAddMany).toHaveBeenCalledTimes(1)
@@ -644,7 +644,7 @@ describe("MembersTab multi-select add — AQU-672 suggestions + AQU-734 batch", 
   it("disables Add until someone is staged or typed", async () => {
     renderPage()
     const input = focusAddInput()
-    const addButton = screen.getByRole("button", { name: "Add" })
+    const addButton = screen.getByRole("button", { name: /every lane/i })
     expect(addButton).toBeDisabled()
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "dana" }))

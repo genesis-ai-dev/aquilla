@@ -948,8 +948,16 @@ describe("ProjectOverview PM assignment", () => {
     expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
     expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
 
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
+      /adds them as a Project lead/,
+    )
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
+      /does not remove that membership/,
+    )
+
     fireEvent.click(screen.getByRole("button", { name: "Change project manager" }))
     expect(screen.getByRole("heading", { name: "Change project manager" })).toBeInTheDocument()
+    expect(screen.getByRole("dialog")).toHaveTextContent(/adds them as a Project lead/)
     fireEvent.click(screen.getByRole("button", { name: "Clear" }))
 
     await waitFor(() => expect(setProjectPm).toHaveBeenCalledWith("jwt", "p1", null))

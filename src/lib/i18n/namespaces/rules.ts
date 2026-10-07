@@ -39,6 +39,7 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.emptyTarget": "Source has content but the translation is empty",
     "rules.infraction.builtin.targetEqualsSource": "Translation is identical to the source",
     "rules.infraction.builtin.numberIntegrity": "Number from source missing in translation",
+    "rules.infraction.builtin.numberIntegrityExtra": "Number in translation not found in source",
     "rules.infraction.builtin.endPunctuationMismatch": "Terminal punctuation differs from source",
     "rules.infraction.builtin.punctuationIntegrity":
       "Clause punctuation from source missing in translation",
@@ -67,6 +68,9 @@ export const rules = defineNamespace({
     "rules.builtin.numberIntegrity.name": "Number integrity",
     "rules.builtin.numberIntegrity.description":
       "Numerals in source must appear in target (locale separators are tolerated).",
+    "rules.builtin.numberIntegrityExtra.name": "Extra numbers",
+    "rules.builtin.numberIntegrityExtra.description":
+      "Numerals in the translation should also appear in the source — catches a number the translator added.",
     "rules.builtin.endPunctuationMismatch.name": "End punctuation",
     "rules.builtin.endPunctuationMismatch.description":
       "Source ends in ?/!/. — translation should end the same way.",
@@ -457,6 +461,24 @@ export const rules = defineNamespace({
         "Translation rules, quality checks and health — the rule list and editor, the file-check pass and its findings drawer, and completion/health readouts. Note the user's OWN rule names and descriptions are content and are never keyed; only the chrome around them is.",
     },
     keys: {
+      "rules.builtin.numberIntegrityExtra.name": {
+        description:
+          "Name of a built-in quality check, shown in the built-in checks list on the Rules page. " +
+          "It flags a number that appears in the translation but not in the source (the opposite " +
+          "direction of 'Number integrity'). Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.numberIntegrityExtra.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "minor by default and can be switched off, because an added number is sometimes legitimate.",
+      },
+      "rules.infraction.builtin.numberIntegrityExtra": {
+        description:
+          "Finding shown on a row (in its Issues tab and the rule card) when the translation contains a " +
+          "number the source doesn't. The number is underlined in the translation. Mirrors " +
+          "'Number from source missing in translation'.",
+      },
       "rules.builtin.placeholderIntegrity.description": {
         description:
           "Description of the built-in placeholder-integrity check, shown under its name in the built-in checks list.",

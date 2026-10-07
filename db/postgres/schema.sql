@@ -188,6 +188,16 @@ CREATE TABLE projects (
     -- history up to the cursor, then moves them into source_link_file_ids and
     -- clears this, in one statement.
     source_link_backfill TEXT,
+    -- AQU-1605: which UPSTREAM LANE this link consumes (migration 0138), by
+    -- `lanes.id` (globally unique since AQU-1606). NULL = the upstream's
+    -- `legacy_tag = ''` lane, which is what every link consumed before this
+    -- slice, so a row that predates AQU-1616's backfill keeps today's
+    -- behaviour. For `source_link_consumes = 'target'` it selects which of the
+    -- upstream's translations become this project's source; for 'source' it
+    -- records the upstream's source lane and changes no query (source rows all
+    -- store `target_lang = ''`). No FK: the lane belongs to another project and
+    -- an unresolvable one fails the fold closed rather than the write.
+    source_link_lane_id  TEXT,
     -- AQU-1679: files of THIS project that stand in for upstream files
     -- (migration 0140). NULL = none. A JSON object {"files": {<upstream file
     -- id>: <this project's file id>…}, "pending": [<upstream file id>…]}: the
@@ -1764,7 +1774,7 @@ CREATE TABLE IF NOT EXISTS scene_briefs (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS scene_briefs_live
-  ON scene_briefs(project_id, file_id, start_cell_id, end_cell_id, target_lang)
+  ON scene_briefs(project_id, file_id, start_cell_id, end_cell_id, lane_id)
   WHERE status='approved';
 CREATE INDEX IF NOT EXISTS scene_briefs_lookup
   ON scene_briefs(project_id, file_id, start_cell_id);
@@ -1852,7 +1862,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
 -- One ACTIVE run per (project, file, lane). Partial UNIQUE both serves the
 -- pill's hydrate lookup and enforces createRun's refuse-double-active.
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_runs_active
-  ON contextual_runs(project_id, file_id, target_lang)
+  ON contextual_runs(project_id, file_id, lane_id)
   WHERE status IN ('running','pausing','paused','parked','waiting');
 -- Stranded-run sweeper: 'running' with a quiet heartbeat (dead driver) or
 -- 'parked' with spans still on the cursor (loop hit its wave cap).
@@ -1865,7 +1875,7 @@ CREATE INDEX IF NOT EXISTS contextual_runs_scope_group
 CREATE INDEX IF NOT EXISTS contextual_runs_project_time
   ON contextual_runs(project_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time
-  ON contextual_runs(project_id, file_id, target_lang, created_at DESC, id DESC);
+  ON contextual_runs(project_id, file_id, lane_id, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS contextual_steering (
   id text PRIMARY KEY,                  -- uuidv7
@@ -1903,7 +1913,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
 -- first (same batch) so this index never conflicts. Sibling languages on the
 -- same cell keep independent review queues (0075).
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_drafts_live
-  ON contextual_drafts(project_id, file_id, cell_id, target_lang)
+  ON contextual_drafts(project_id, file_id, cell_id, lane_id)
   WHERE status = 'proposed';
 CREATE INDEX IF NOT EXISTS contextual_drafts_run
   ON contextual_drafts(run_id, status);

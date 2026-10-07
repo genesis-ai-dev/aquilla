@@ -161,4 +161,31 @@ describe("Monday metrics — pre-backfill file-counter fallback (AQU-1620)", () 
     expect(file.filled_count).toBe(5)
     expect(file.completion_pct).toBe(25)
   })
+
+  it("leaves an archived lane's progress row out of the sum", async () => {
+    await seedProject("proj-6")
+    await seedFallbackFile("proj-6", { cellCount: 10, filledCount: 14, approvedCount: 12 })
+    await seedTargetLanes("proj-6", ["", "French"])
+    await env.AQUILLA_PG.prepare(
+      "UPDATE lanes SET archived_at = now() WHERE project_id = ? AND legacy_tag = 'French'",
+    )
+      .bind("proj-6")
+      .run()
+    for (const [laneId, filled] of [["lane0", 3], ["lane1", 8]] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO file_section_progress
+           (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, updated_at)
+         VALUES (?, 'f1', 'file', '', ?, 10, ?, 0)`,
+      )
+        .bind("proj-6", laneId, filled)
+        .run()
+    }
+
+    const summary = await computeProjectMetrics(env.AQUILLA_PG, "proj-6")
+
+    expect(summary!.files[0].metrics.total_count).toBe(10)
+    expect(summary!.files[0].metrics.filled_count).toBe(3)
+    expect(summary!.project.total_count).toBe(10)
+    expect(summary!.project.filled_count).toBe(3)
+  })
 })

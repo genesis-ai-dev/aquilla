@@ -2420,6 +2420,34 @@ export function TimelineEditor({
   }
 
   /**
+   * Does this lane have anything its mute button would silence? (AQU-1682)
+   *
+   * Every audio lane used to draw a speaker whether or not it held anything
+   * that plays, so an empty Target audio lane, or a Source audio lane on a
+   * file with no sound at all, offered a mute that did nothing you could hear.
+   *
+   *  - Source audio: its recording's segments, or a linked video's own sound.
+   *    The film only sounds where the picture plays, and in Free timing it is
+   *    hidden and silent.
+   *  - Target audio and added tracks: at least one take on the lane.
+   *
+   * The caller keeps the button on a lane that is muted right now, whatever
+   * this says, so a lane muted before it emptied can always be unmuted.
+   */
+  function laneHasSound(track: TimelineTrack): boolean {
+    switch (track.kind) {
+      case "source-audio":
+        return dialogue.length > 0 || (Boolean(coreMediaUrl) && !audioFirst)
+      case "target-audio":
+        return targetItems.length > 0
+      case "audio":
+        return targetItemsForTrack(track).items.length > 0
+      default:
+        return true
+    }
+  }
+
+  /**
    * WHAT A NEW TRACK CAN HONESTLY LINE UP WITH. (AQU-646 stage 6J)
    *
    * Two of Sam's 2026-08-27 rulings, and both need this to live in the editor
@@ -4470,7 +4498,9 @@ export function TimelineEditor({
                     }
                     trailing={
                       <>
-                        {speaker
+                        {/* AQU-1682: only where there's something to play,
+                            or the lane is muted now (never strand a mute). */}
+                        {speaker && (laneHasSound(track) || !trackAudible(audibility, speaker))
                           ? speakerToggle(
                               speaker,
                               // On a subtitle file this row's cues are timings over

@@ -509,14 +509,13 @@ export function scopedLanesFor(
 // re-resolves the floor on every language write, so this is an affordance
 // value used to disable controls — never authority.
 //
-// The default is MAINTAINER, i.e. the behaviour before this issue: an org opts
-// in to project-lead language editing by lowering `languageEditMinRole` on
-// Org Settings → Security. Deliberately different from the termbase floor
-// (glossary-view.ts), which defaults to PROJECT_LEAD.
+// The default is PROJECT_LEAD when the org has not stored a floor (AQU-984).
+// A stored `languageEditMinRole`, including an explicit MAINTAINER, is kept.
+// Deliberately the same default as the termbase floor (glossary-view.ts).
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Floor for editing a project's languages when the org hasn't configured one. */
-export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /** Clamp an org-configured language floor to the role ladder, else the default. */
 export function resolveLanguageEditFloor(minRole?: number | null): number {

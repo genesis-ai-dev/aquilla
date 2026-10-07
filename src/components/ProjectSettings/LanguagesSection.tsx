@@ -189,7 +189,10 @@ export function LanguagesSection({
   // straight away — `setNewLane` has not landed in state yet at that point.
   async function handleAdd(candidate: string = newLane) {
     if (!canEdit) return
-    if (rowMode && onCreateLane) {
+    // A lane you can translate in is a lane row. The settings tag list alone
+    // is not enough: a commit to a tag with no row is refused. Create the row
+    // even when this project has none yet (the first extra lane).
+    if (onCreateLane) {
       const language = normalizeLane(candidate)
       // AQU-1592: the LANGUAGE is the required field. The name is optional and
       // is submitted only when the user typed one — never derived from the

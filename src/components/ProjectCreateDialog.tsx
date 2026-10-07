@@ -18,6 +18,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
+import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
+import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
@@ -200,6 +202,9 @@ const projectSchema = z
     shape: z.enum(["self-contained", "linked-target"]),
     upstreamProjectId: optionalString,
     linkConsumes: z.union([z.enum(["source", "target"]), z.literal("")]),
+    // AQU-1605: which of the upstream's lanes a chain link consumes (`lanes.id`).
+    // Empty for the sibling case, which consumes the upstream's one source lane.
+    upstreamLaneId: optionalString,
   })
   .superRefine((data, ctx) => {
     if (!data.targetLanguage.trim()) {
@@ -226,6 +231,16 @@ const projectSchema = z
         code: z.ZodIssueCode.custom,
         message: "Choose which corpus should become this project's source",
         path: ["linkConsumes"],
+      })
+    }
+    // AQU-1605: the chain case has to name the translation it consumes. Without
+    // it the server falls back to whichever of the upstream's lanes carries the
+    // empty legacy tag, which is an accident of history rather than a choice.
+    if (linking && data.linkConsumes === "target" && !data.upstreamLaneId.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Choose which of the upstream project's translations to use",
+        path: ["upstreamLaneId"],
       })
     }
   })
@@ -317,6 +332,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       extraLanguages: [] as string[],
       shape: "self-contained" as ProjectShape,
       upstreamProjectId: "",
+      upstreamLaneId: "",
       linkConsumes: "" as LinkConsumes,
     },
     validators: { onSubmit: projectSchema },
@@ -360,6 +376,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         const willLink = !!upstreamId
         const linkMode: LinkMode = value.shape === "linked-target" ? "live" : "clone"
         const linkConsumes = value.linkConsumes === "target" ? "target" : "source"
+        // AQU-1605: only the chain case carries a lane — the sibling case
+        // consumes the upstream's source lane, which the server records itself.
+        const linkLaneId = linkConsumes === "target" ? value.upstreamLaneId.trim() : ""
         // AQU-1561: guarded as well as disabled — nothing may create a project
         // whose link follows no files, or one whose file list was never read.
         // Nothing has been created at this point, so returning is clean.
@@ -413,6 +432,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               sourceProjectId: upstreamId,
               mode: linkMode,
               consumes: linkConsumes,
+              ...(linkLaneId ? { laneId: linkLaneId } : {}),
               ...(pickedFileIds ? { fileIds: pickedFileIds } : {}),
             })
             if (linkResult.seeded === false && linkMode === "live") {
@@ -486,6 +506,35 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const chosenUpstreamId = useStore(form.store, (state) =>
     state.values.upstreamProjectId.trim(),
   )
+
+  // ── AQU-1605: which of the chosen upstream's lanes this link consumes ──
+  //
+  // Read off the form for the same reason the file list is: the corpus answer
+  // moves with the shape, the picker and `form.reset()`, and this must follow it
+  // rather than keep a copy that can disagree. Only the chain case asks — a link
+  // that consumes the upstream's SOURCE has one lane to read.
+  const chosenConsumes = useStore(form.store, (state) => state.values.linkConsumes)
+  const laneChoices = useUpstreamLaneChoices(
+    session?.jwt,
+    chosenUpstreamId,
+    chosenConsumes === "target",
+  )
+  const laneOptions = laneChoices.lanes
+  useEffect(() => {
+    if (!laneOptions) return
+    // One lane is pre-filled, never asked (AQU-1419: no forced chooser at one
+    // lane) — it is still named on screen, so the choice stays visible.
+    if (laneOptions.length === 1) {
+      form.setFieldValue("upstreamLaneId", laneOptions[0]!.id)
+      return
+    }
+    // A pick the list no longer holds (another upstream, or lanes this user's
+    // grants have since narrowed) must not survive into the request.
+    const current = form.getFieldValue("upstreamLaneId")
+    if (current && !laneOptions.some((lane) => lane.id === current)) {
+      form.setFieldValue("upstreamLaneId", "")
+    }
+  }, [laneOptions, form])
 
   useEffect(() => {
     // No upstream, no question to ask — and the stale answer must go with it, so
@@ -848,6 +897,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                     // drops the corpus question; reset its answer
                                     // so a stale pick can't satisfy a later link.
                                     if (!value) form.setFieldValue("linkConsumes", "")
+                                    // AQU-1605: a lane belongs to the upstream it
+                                    // was listed from — changing the upstream
+                                    // retires the answer, cleared or not.
+                                    form.setFieldValue("upstreamLaneId", "")
                                   }}
                                   invalid={invalid}
                                   placeholder={t("projectSettings.create.upstreamProjectPlaceholder")}
@@ -962,9 +1015,12 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                       <RadioGroup
                                         // null = nothing selected (never prefill).
                                         value={field.state.value || null}
-                                        onValueChange={(value) =>
+                                        onValueChange={(value) => {
                                           field.handleChange((value ?? "") as LinkConsumes)
-                                        }
+                                          // AQU-1605: the lane question belongs to
+                                          // the chain case alone.
+                                          form.setFieldValue("upstreamLaneId", "")
+                                        }}
                                         disabled={locked}
                                         className="gap-2"
                                       >
@@ -1004,6 +1060,32 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                   </form.Subscribe>
                                   {invalid && <FieldError errors={field.state.meta.errors} />}
                                 </Field>
+                              )
+                            }}
+                          />
+                        ) : null}
+
+                        {/* AQU-1605: which of the upstream's translations
+                            becomes this project's source. Chain case only. */}
+                        {showCorpusChoice && chosenConsumes === "target" ? (
+                          <form.Field
+                            name="upstreamLaneId"
+                            children={(field) => {
+                              const invalid = isFieldInvalid(field)
+                              return (
+                                <UpstreamLaneChoiceField
+                                  id="create-upstream-lane"
+                                  lanes={laneOptions}
+                                  failed={laneChoices.failed}
+                                  value={field.state.value}
+                                  onValueChange={(next) => field.handleChange(next)}
+                                  onRetry={laneChoices.retry}
+                                  disabled={locked}
+                                  invalid={invalid}
+                                  error={
+                                    invalid ? <FieldError errors={field.state.meta.errors} /> : null
+                                  }
+                                />
                               )
                             }}
                           />

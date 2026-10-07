@@ -33,6 +33,7 @@ not a micro-spec farm.
 | Importing | Media with companion or embedded MP4/M4A captions preserves reviewed wording, cue boundaries, playable source clips, and byte-exact original media across publication and reload. Attaching captions creates an independent track; counted overwrite preserves other wording and source audio. Pasted and uploaded scripts reuse persisted word timings, preserve paragraph boundaries, save reviewed independent tracks, and retain byte-exact original script downloads (SPA → sync-worker → Postgres + R2). Preview, confidence, boundary correction, and consent changes also have RTL coverage | `e2e/specs/editor/import-media-captions.smoke.spec.ts` |
 | Editor | Adaptive cell pages preserve ordering and show download progress | Covered in worker integration (`cells-read.test.ts`) and RTL (`CellLoadingProgress.test.tsx`, `useActiveCellStore.stale-rejection.test.tsx`) |
 | Editor | Hidden cells are not work — excluded from progress (numerator and denominator, live in both directions), health, automatic drafting and search (AQU-1424) | Covered in worker integration (`sync-worker/src/__tests__/hidden-cells-progress.test.ts` — progress projection, `files` counters, FTS; `auth-worker/src/__tests__/hidden-cells-agent.test.ts` — the shared cell selector behind autopilot and the agent's read/draft, plus agent search) and RTL/unit (`useActiveCellStore.hiddenProgress.test.ts`, `src/lib/completion/draft-targets.test.ts`, `src/lib/health/excluded-cell.test.ts`). No new smoke: the hide/show journey itself is AQU-1422's row, and nothing here can lose data, access or a committed artifact — a regression misreports a number or wastes a credit. |
+| Project management | A project's lane-independent numbers live on its SOURCE lane's progress row, not on the former default target lane's — so the plan board's totals, the files list's counts and the org overview's per-lane denominators are the same whichever target lanes a project has, and a lane with no translations yet still shows the full denominator (AQU-1599) | Covered in worker integration (`sync-worker/src/__tests__/progress-projection.test.ts` — a row per real lane, the source lane's row carrying the denominator and no translations; `lane-validators-progress.test.ts` — the per-lane row sets and the source lane's own; `progress-book-audio.test.ts` — the prune reaches the source lane's rows too; `progress-lane-join.test.ts` — the lane join stays the bare, indexable `target_lang` equality; `plan-read.test.ts` and `files-read.test.ts` — the readers; `auth-worker/src/__tests__/org-portfolio.test.ts` — the org overview's denominator and lane order). No new smoke, on the same reading as the AQU-1424 row above: nothing here can lose data, access or a committed artifact — a regression misreports a number — and the surfaces it shows up on already have smoke journeys. |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
 | Editor | EPUB chapter picker excludes navigation, cover, and notes by default | `e2e/specs/editor/import-epub-picker.smoke.spec.ts` |
 | Editor | Commit survives stale in-flight refetch | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` |
@@ -253,6 +254,19 @@ UI chrome that used to be one smoke file per click is covered under
   as a count of zero, and cancel) in `LinkSourceSection.test.tsx`. No data or artifact
   is at risk before confirming and the step crosses no second service, so per the rules
   above it stays RTL rather than becoming a smoke journey.
+  Which corpus of the upstream a link consumes, and — for the chain case — WHICH of
+  its translations (AQU-1528 / AQU-1605), is RTL plus worker tests, not smoke: the
+  question's states (asked for the chain case only, pre-filled at a single lane,
+  refused with several and no pick, offering exactly the lanes the server returned,
+  and an unreadable lane list said out loud with a retry) are in
+  `ProjectCreateDialog.upstreamLane.test.tsx` and `LinkSourceSection.test.tsx`; which
+  lanes a caller may be offered at all, and the server refusing a lane of another
+  project, an archived lane or one the read wall hides, in auth-worker's
+  `source-linking-lane-choice.test.ts`; and the fold actually reading the named lane
+  (and nothing of the upstream's other lanes) against real Postgres in
+  `sync-worker/src/__tests__/link-sync-lane-choice.test.ts`, whose sibling
+  `link-sync-fold.default-lane-baseline.test.ts` pins that a link naming no lane still
+  reads the former default one.
   The Import dialog's second entry point to the same action (AQU-1527, "From another
   project" on the landing screen) is RTL in `ImportDialog.linkProject.test.tsx`: the tile
   routes to the flow, back links nothing, the shared pre-link preview appears on this

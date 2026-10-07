@@ -1286,11 +1286,10 @@ export class Workspace {
   }
 
   /**
-   * AQU-602: the lane switcher is the TARGET language tag in the editor's
-   * column header (`data-testid="lane-switcher"`). It renders as a dropdown
-   * ONLY when the project has a second target lane — otherwise the tag is a
-   * static pill. The trigger carries `data-active-lane="<tag>"` (default lane
-   * is `""`). Opening it reveals `data-testid="lane-option-<tag>"` items.
+   * AQU-602 / AQU-1601: the lane switcher is the TARGET language tag in the
+   * editor's column header (`data-testid="lane-switcher"`). A maintainer sees
+   * it at one lane. The trigger carries `data-active-lane="<tag>"` (default
+   * lane is `""`). Opening it reveals `data-testid="lane-option-<tag>"` items.
    */
   laneSwitcher(): Locator {
     return this.page.getByTestId("lane-switcher")

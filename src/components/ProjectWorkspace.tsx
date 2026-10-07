@@ -13791,6 +13791,14 @@ export function ProjectWorkspace() {
                 state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
               })
             }
+            // AQU-1601: "Add lane…" opens Languages. The keyword "target lanes"
+            // matches that section only ("target language" also matches Project
+            // Info). EditorTable withholds the item from anyone below maintainer.
+            onAddLane={() =>
+              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target lanes")}`, {
+                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+              })
+            }
             // AQU-1271: the add-to-terminology popover offers this when the
             // project has no prefix/suffix inventory for its matcher yet.
             onSetUpAffixes={() =>

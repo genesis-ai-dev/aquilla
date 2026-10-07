@@ -194,8 +194,10 @@ describe("loadProjectContext", () => {
     )
 
     const ctx = await loadProjectContext(db, "proj-ctx-load")
-    expect(ctx.sourceLanguage).toBe("English")
-    expect(ctx.targetLanguage).toBe("Spanish")
+    // AQU-1595: a null lane language does not read settings.sourceLanguage
+    // or settings.targetLanguage. These keys are still in the blob.
+    expect(ctx.sourceLanguage).toBeUndefined()
+    expect(ctx.targetLanguage).toBeUndefined()
     expect(ctx.projectBriefL1).toContain("young readers")
     expect(ctx.briefParameters.audience).toBe("Youth")
     expect(ctx.concepts.map((c) => c.id)).toEqual(["c1"])

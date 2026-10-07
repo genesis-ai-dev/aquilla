@@ -33,17 +33,10 @@ export function laneIdRequiredMessage(where: string): string {
   )
 }
 
-export const RETIRED_LANE_SETTINGS_KEYS = [
-  'sourceLanguage',
-  'targetLanguage',
-  'targetLanes',
-  'archivedLanes',
-] as const
-
-export const RETIRED_LANE_SETTINGS_MESSAGE =
-  'sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings. ' +
-  'Create lanes with CreateProject or ProjectSetup ' +
-  '(lanes: [{ role, language, name?, code? }]) and address a lane by its id.'
+export {
+  RETIRED_LANE_SETTINGS_KEYS,
+  RETIRED_LANE_SETTINGS_MESSAGE,
+} from '../../../db/shared/retired-lane-settings'
 
 export interface CallerLane {
   id: string

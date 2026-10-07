@@ -23,10 +23,8 @@ import {
   laneReadWallEnabled,
   legacyTagsForVisibleLanes,
   portfolioTextFromVisibleLanes,
-  visibleDefaultLaneLanguage,
   visibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
-import { extraRegistryLanes } from "../../../src/lib/lanes/registry-lanes"
 import {
   emptyPortfolioAggregate,
   summarizePortfoliosByOrg,
@@ -1252,9 +1250,11 @@ export interface PortfolioLane {
   position?: number
   /** AQU-1458: archived lanes stay in the payload so the overview can tuck them away. */
   archived?: boolean
+  /** Source lanes ride along so the language pair is read from the row. Chips skip them. */
+  role?: "source" | "target"
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 /** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
@@ -1281,10 +1281,6 @@ interface PortfolioDbRow {
   audio_cells: number
   validated_audio_cells: number
   recorded_ms: number
-  // AQU-523: project language pair, read from the project_settings JSON blob
-  // (the canonical per-project source useProject overlays). Null when unset.
-  source_language: string | null
-  target_language: string | null
   // AQU-1097: planning units — how many this project has, how many a manager
   // has marked done, and how many are past their target date without a mark.
   units_total: number
@@ -1301,7 +1297,6 @@ interface VisiblePortfolioText {
   validatedCells: number
   lastEditAt: number | null
   aiDraftedCells: number
-  targetLanguage: string | null
 }
 
 function mapPortfolioRow(
@@ -1321,10 +1316,6 @@ function mapPortfolioRow(
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
     deadlineAt: r.deadline_at,
-    // "" (empty settings default) is normalized to null so the client shows a
-    // graceful "no language set" rather than a blank/broken "→" (AQU-523).
-    sourceLanguage: r.source_language || null,
-    targetLanguage: visibleText ? visibleText.targetLanguage : (r.target_language || null),
     lanes: visibleText ? visibleText.lanes : (lanesByProject.get(r.id) ?? []),
     unitsTotal: Number(r.units_total) || 0,
     unitsDone: Number(r.units_done) || 0,
@@ -1351,10 +1342,6 @@ interface LaneDbRow {
 interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
-  target_lanes: unknown
-  archived_lanes: unknown
-  /** The default lane's language. The same string may also sit in target_lanes. */
-  target_language: string | null
   /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
   count_structural?: string | null
 }
@@ -1431,9 +1418,6 @@ async function fetchPortfolioLanes(
       // before anyway (default threshold, no registered lanes).
       `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
-              ps.target_lanes AS target_lanes,
-              (ps.settings::jsonb)->'archivedLanes' AS archived_lanes,
-              ps.target_language AS target_language,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
@@ -1442,11 +1426,11 @@ async function fetchPortfolioLanes(
     ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
     env.AQUILLA_PG.prepare(
       `SELECT l.project_id AS project_id, l.id AS id, ${laneDisplayNameSql("l")} AS name,
-              l.legacy_tag AS legacy_tag, l.position AS position,
+              l.role AS role, l.legacy_tag AS legacy_tag, l.position AS position,
               l.archived_at AS archived_at
          FROM lanes l
          JOIN projects p ON p.id = l.project_id
-        WHERE l.role = 'target' AND p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
     ).bind(...orgBinds, ...projectBinds).all<{
       project_id: string
       id: string
@@ -1454,6 +1438,7 @@ async function fetchPortfolioLanes(
       legacy_tag: string | null
       position: number
       archived_at: string | null
+      role: string
     }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
@@ -1492,107 +1477,56 @@ async function fetchPortfolioLanes(
       entry.lastEditAt = entry.lastEditAt == null ? updatedAt : Math.max(entry.lastEditAt, updatedAt)
     }
   }
-  // AQU-538: union in REGISTERED lanes that have no progress rows yet — a PM
-  // who just added a language must see its 0% chip immediately, not after the
-  // first translation lands. The denominator is borrowed from the '' row
-  // (source-cell count is lane-independent); no '' row means the project has
-  // no progress rows at all and the registered lane stays 0/0.
-  // AQU-1473: the primary language is the '' lane even when create also wrote
-  // it into targetLanes. Adding it again paints the first language twice.
-  for (const row of settingsRows.results ?? []) {
-    const registered = extraRegistryLanes(readTargetLanes(row.target_lanes), row.target_language)
-    if (registered.length === 0) continue
-    let lanes = acc.get(row.project_id)
-    if (!lanes) {
-      lanes = new Map()
-      acc.set(row.project_id, lanes)
-    }
-    const denominator = lanes.get("")?.totalCells ?? 0
-    for (const lane of registered) {
-      if (lanes.has(lane)) continue
-      lanes.set(lane, { lane, totalCells: denominator, filledCells: 0, validatedCells: 0, lastEditAt: null })
-    }
-  }
+  // One portfolio lane per lane row, keyed by lanes.id. Progress still hangs
+  // off legacy_tag (the event key). Two rows that share a tag — or that a
+  // language comparison would call the same tag — stay two lanes. Settings
+  // targetLanes / archivedLanes / targetLanguage are not read.
+  const listed = new Map<string, PortfolioLane[]>()
   for (const row of nameRows.results ?? []) {
-    const tag = row.legacy_tag ?? ""
-    let lanes = acc.get(row.project_id)
+    const role = row.role === "source" ? "source" : "target"
+    const tag = role === "target" ? (row.legacy_tag ?? "") : ""
+    const progress = role === "target" ? acc.get(row.project_id)?.get(tag) : undefined
+    const borrowed =
+      role === "target" && !progress && tag !== ""
+        ? acc.get(row.project_id)?.get("")?.totalCells ?? 0
+        : 0
+    const entry: PortfolioLane = {
+      lane: tag,
+      role,
+      name: row.name,
+      laneId: row.id,
+      position: Number(row.position) || 0,
+      totalCells: progress?.totalCells ?? borrowed,
+      filledCells: progress?.filledCells ?? 0,
+      validatedCells: progress?.validatedCells ?? 0,
+      lastEditAt: progress?.lastEditAt ?? null,
+      ...(row.archived_at != null && row.archived_at !== "" ? { archived: true } : {}),
+    }
+    let lanes = listed.get(row.project_id)
     if (!lanes) {
-      lanes = new Map()
-      acc.set(row.project_id, lanes)
+      lanes = []
+      listed.set(row.project_id, lanes)
     }
-    let entry = lanes.get(tag)
-    if (!entry) {
-      const denominator = lanes.get("")?.totalCells ?? 0
-      entry = { lane: tag, totalCells: tag === "" ? 0 : denominator, filledCells: 0, validatedCells: 0, lastEditAt: null }
-      lanes.set(tag, entry)
-    }
-    entry.name = row.name
-    entry.laneId = row.id
-    entry.position = Number(row.position) || 0
+    lanes.push(entry)
   }
-  // AQU-1458: a lane is archived when its row says so, or when an older
-  // project only recorded the tag in settings.archivedLanes.
-  //
-  // AQU-1600: the former default lane ('') archives like any other, so the
-  // empty tag is carried through both maps instead of being dropped. Only the
-  // ROW can archive it — settings.archivedLanes is a list of non-empty tags
-  // and never names it — so the settings mirror is consulted for non-empty
-  // tags only.
-  const archivedTagsByProject = new Map<string, Set<string>>()
-  for (const row of settingsRows.results ?? []) {
-    const tags = new Set(
-      readTargetLanes(row.archived_lanes)
-        .map((tag) => tag.toLowerCase())
-        .filter((tag) => tag !== ""),
-    )
-    if (tags.size > 0) archivedTagsByProject.set(row.project_id, tags)
-  }
-  const archivedRowTags = new Map<string, Set<string>>()
-  for (const row of nameRows.results ?? []) {
-    if (row.archived_at == null || row.archived_at === "") continue
-    if (row.legacy_tag == null) continue
-    const tag = row.legacy_tag.trim().toLowerCase()
-    let tags = archivedRowTags.get(row.project_id)
-    if (!tags) {
-      tags = new Set()
-      archivedRowTags.set(row.project_id, tags)
-    }
-    tags.add(tag)
-  }
-  for (const [projectId, lanes] of acc) {
-    const fromSettings = archivedTagsByProject.get(projectId)
-    const fromRows = archivedRowTags.get(projectId)
-    if (!fromSettings && !fromRows) continue
-    for (const entry of lanes.values()) {
-      const key = entry.lane.toLowerCase()
-      if (fromRows?.has(key) || (key !== "" && fromSettings?.has(key))) entry.archived = true
-    }
-  }
-  for (const [projectId, lanes] of acc) {
+  for (const [projectId, lanes] of listed) {
     byProject.set(
       projectId,
-      [...lanes.values()].sort((a, b) => {
+      lanes.sort((a, b) => {
+        const aSource = a.role === "source" ? 1 : 0
+        const bSource = b.role === "source" ? 1 : 0
+        if (aSource !== bSource) return aSource - bSource
         const ap = a.position ?? (a.lane === "" ? -1 : 1_000_000)
         const bp = b.position ?? (b.lane === "" ? -1 : 1_000_000)
         if (ap !== bp) return ap - bp
-        if (a.lane === b.lane) return 0
-        if (a.lane === "") return -1
-        if (b.lane === "") return 1
-        return a.lane < b.lane ? -1 : 1
+        if (a.lane === "" && b.lane !== "") return -1
+        if (b.lane === "" && a.lane !== "") return 1
+        if (a.lane !== b.lane) return a.lane < b.lane ? -1 : 1
+        return (a.laneId ?? "").localeCompare(b.laneId ?? "")
       }),
     )
   }
   return byProject
-}
-
-/** Parse the generated target_lanes projection defensively across PG adapters. */
-function readTargetLanes(raw: unknown): string[] {
-  let value = raw
-  if (typeof raw === "string") {
-    try { value = JSON.parse(raw) } catch { return [] }
-  }
-  if (!Array.isArray(value)) return []
-  return value.filter((lane): lane is string => typeof lane === "string" && lane !== "")
 }
 
 /**
@@ -1959,19 +1893,22 @@ async function visiblePortfolioText(
       laneGrants: grants.get(row.id) ?? [],
     })
     const tags = legacyTagsForVisibleLanes(identities.get(row.id) ?? [], visible) ?? new Set<string>()
-    const text = portfolioTextFromVisibleLanes(lanesByProject.get(row.id) ?? [], tags)
+    const all = lanesByProject.get(row.id) ?? []
+    const text = portfolioTextFromVisibleLanes(
+      all.filter((lane) => lane.role !== "source"),
+      tags,
+    )
     let aiDraftedCells = 0
     for (const [lane, count] of aiCounts.get(row.id) ?? []) {
       if (tags.has(lane)) aiDraftedCells += count
     }
     overrides.set(row.id, {
-      lanes: text?.lanes ?? [],
+      lanes: [...(text?.lanes ?? []), ...all.filter((lane) => lane.role === "source")],
       totalCells: text?.totalCells ?? 0,
       filledCells: text?.filledCells ?? 0,
       validatedCells: text?.validatedCells ?? 0,
       lastEditAt: text?.lastEditAt ?? null,
       aiDraftedCells,
-      targetLanguage: visibleDefaultLaneLanguage(row.target_language || null, tags),
     })
   }
   return overrides
@@ -2009,10 +1946,10 @@ export async function listOrgPortfolioPage(
   if (page) extraBinds.push(page.limit + 1)
 
   // Perf (dashboard 15s timeout fix):
-  //  - The AQU-523 language pair reads the STORED generated columns on
-  //    project_settings (migration 0054) — never (settings::jsonb)->>'…'
-  //    inline: settings blobs run to ~6 MB and the inline extraction
-  //    re-parsed that JSON on every file-fan-out row (~100x per project).
+  //  - Languages come from lane rows (AQU-1595), not the generated
+  //    source_language / target_language columns and not the settings blob.
+  //    Parsing ~6 MB of JSON per file-fan-out row is what timed this
+  //    dashboard out.
   //  - au: the previous 3 correlated cell_audio subqueries re-scanned and
   //    re-sorted cell_audio (~300k rows) per project; one MATERIALIZED
   //    grouped pass replaces them. It joins 1:1 on project_id, so MAX()
@@ -2024,8 +1961,6 @@ export async function listOrgPortfolioPage(
     `${portfolioCtes(`org_id IN (${placeholders})`)}
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
-            MAX(ps.source_language)                 AS source_language,
-            MAX(ps.target_language)                 AS target_language,
             MAX(p.created_by)                       AS created_by,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,

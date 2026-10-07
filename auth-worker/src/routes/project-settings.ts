@@ -78,6 +78,11 @@ import {
 } from "../../../src/lib/lanes/read-wall"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
+import {
+  includesRetiredLaneSettings,
+  preserveRetiredLaneSettings,
+  RETIRED_LANE_SETTINGS_MESSAGE,
+} from "../../../db/shared/retired-lane-settings"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -289,6 +294,15 @@ projectSettings.on(
 
     const role = await resolveProjectRole(c.env, user, projectId)
     if (!role) return c.json({ error: "no access to project" }, 403)
+    // AQU-1595: the four language keys are lane rows, not settings. The same
+    // list and message the external commands use. An echo of a stored key is
+    // still "includes" — the client omits them, and the write below copies the
+    // stored values back so the blob is not rewritten.
+    if (includesRetiredLaneSettings(body.settings)) {
+      return c.json({ error: RETIRED_LANE_SETTINGS_MESSAGE }, 400)
+    }
+    const storedSettings = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    const settingsToWrite = preserveRetiredLaneSettings(storedSettings.settings, body.settings)
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
       // AQU-822 / AQU-1086: below the maintainer floor, the ONLY writes
       // allowed are a terminology-only one (gated by the org's configured
@@ -300,8 +314,7 @@ projectSettings.on(
       // The scopes are tested in this order because a no-op write (nothing
       // changed) satisfies both vacuously; keeping terminology first preserves
       // the pre-AQU-1086 behaviour for that case exactly.
-      const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-      const changed = changedSettingsKeys(stored.settings, body.settings)
+      const changed = changedSettingsKeys(storedSettings.settings, settingsToWrite)
       // Each carve-out is key-exact and carries its own floor. A write that
       // touches anything else — even alongside a permitted key — falls through
       // to the maintainer 403, so widening one of these can never widen access
@@ -415,7 +428,7 @@ projectSettings.on(
     // ifMatchVersion extraction, status mapping, and the best-effort notify.
     const result = await updateProjectSettingsShared(c.env.AQUILLA_PG, {
       projectId,
-      settings: body.settings,
+      settings: settingsToWrite,
       ifMatchVersion,
       updatedBy: user.id,
     })

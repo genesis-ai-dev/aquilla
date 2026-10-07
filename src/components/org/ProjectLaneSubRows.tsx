@@ -65,7 +65,7 @@ export function ProjectLaneSubRows({
             const lastEdit = lane.lastEditAt
             return (
               <div
-                key={lane.lane || "__default__"}
+                key={lane.laneId || lane.lane || "__default__"}
                 data-testid={`project-lane-row-${projectId}-${lane.lane}`}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 text-sm"
               >

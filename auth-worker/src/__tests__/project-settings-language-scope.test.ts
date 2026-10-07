@@ -77,143 +77,52 @@ async function storedSettings(): Promise<Record<string, unknown>> {
   return JSON.parse(row?.settings ?? "{}") as Record<string, unknown>
 }
 
-describe("project-settings language carve-out (AQU-1086)", () => {
-  it("lets a project lead change the target language when the org floor is 500", async () => {
-    await seed('{"languageEditMinRole":500}')
-    const res = await patchProjectSettings("dan", {
-      sourceLanguage: "en", // unchanged echo — the client sends the whole object
-      targetLanguage: "de",
-    })
-    expect(res.status).toBe(200)
-    expect((await storedSettings()).targetLanguage).toBe("de")
-  })
-
-  it("403s the same write at the default floor (600) — today's behaviour preserved", async () => {
-    await seed() // org never configured a floor
-    const res = await patchProjectSettings("dan", {
-      sourceLanguage: "en",
-      targetLanguage: "de",
-    })
-    expect(res.status).toBe(403)
-    expect((await storedSettings()).targetLanguage).toBe("fr")
-  })
-
-  it("covers the extra-lane registry, so Project Info and Languages agree", async () => {
-    await seed('{"languageEditMinRole":500}')
-    const added = await patchProjectSettings("dan", {
-      sourceLanguage: "en",
-      targetLanguage: "fr",
-      targetLanes: ["sw"],
-    })
-    expect(added.status).toBe(200)
-    expect((await storedSettings()).targetLanes).toEqual(["sw"])
-
-    const archived = await patchProjectSettings(
-      "dan",
-      {
-        sourceLanguage: "en",
-        targetLanguage: "fr",
-        targetLanes: ["sw"],
-        archivedLanes: ["sw"],
-      },
-      2,
-    )
-    expect(archived.status).toBe(200)
-    expect((await storedSettings()).archivedLanes).toEqual(["sw"])
-  })
-
-  it("403s a contributor (400) either way — the floor only reaches project lead", async () => {
-    await seed('{"languageEditMinRole":500}')
-    const lowered = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
-      targetLanguage: "de",
-    })
-    expect(lowered.status).toBe(403)
-
-    await env.AQUILLA_PG.prepare(
-      "UPDATE org_settings SET settings = '{}' WHERE org_id = 1",
-    ).run()
-    const defaulted = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
-      targetLanguage: "de",
-    })
-    expect(defaulted.status).toBe(403)
-    expect((await storedSettings()).targetLanguage).toBe("fr")
-  })
-
-  it("403s a below-maintainer write that changes any non-language key, even with the floor lowered", async () => {
-    await seed('{"languageEditMinRole":500}')
-    const bundled = await patchProjectSettings("dan", {
-      sourceLanguage: "en",
-      targetLanguage: "de", // changed alongside a policy key
-      validationCount: 3,
-    })
-    expect(bundled.status).toBe(403)
-
-    const otherKeyOnly = await patchProjectSettings("dan", {
-      sourceLanguage: "en",
-      targetLanguage: "fr",
-      systemPrompt: "be terse",
-    })
-    expect(otherKeyOnly.status).toBe(403)
-
-    const stored = await storedSettings()
-    expect(stored.targetLanguage).toBe("fr")
-    expect(stored.validationCount).toBeUndefined()
-    expect(stored.systemPrompt).toBeUndefined()
-  })
-
-  it("403s a below-maintainer write that DROPS a non-language key", async () => {
-    // A removed key is a change too — otherwise a lead could wipe the
-    // project's AI config by omitting it from an otherwise language-only write.
-    await seed('{"languageEditMinRole":500}', '{"sourceLanguage":"en","systemPrompt":"keep me"}')
-    const res = await patchProjectSettings("dan", { sourceLanguage: "en", targetLanguage: "de" })
-    expect(res.status).toBe(403)
-    expect((await storedSettings()).systemPrompt).toBe("keep me")
-  })
-
-  it("leaves the maintainer path untouched", async () => {
+describe("project-settings language keys (AQU-1595)", () => {
+  it("rejects a settings write that includes any of the four keys, and leaves the blob", async () => {
     await seed()
     const res = await patchProjectSettings("bob", {
       sourceLanguage: "es",
       targetLanguage: "de",
+      targetLanes: ["sw"],
+      archivedLanes: ["sw"],
       validationCount: 2,
     })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toMatch(/not settings/)
+    expect(body.error).toMatch(/lane/i)
     const stored = await storedSettings()
-    expect(stored.sourceLanguage).toBe("es")
-    expect(stored.validationCount).toBe(2)
+    expect(stored.sourceLanguage).toBe("en")
+    expect(stored.targetLanguage).toBe("fr")
+    expect(stored.validationCount).toBeUndefined()
   })
 
-  it("does not widen the termbase carve-out (its floor still governs terminology)", async () => {
-    // languageEditMinRole 500 must not let a contributor through on
-    // terminology — that scope has its own floor, unchanged at its 500 default.
+  it("rejects a lead the same way, including when the org lowered the language floor", async () => {
     await seed('{"languageEditMinRole":500}')
-    const res = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
-      targetLanguage: "fr",
-      terminology: [{ id: "c1", sourceTerm: "grace", renderings: [], status: "active" }],
-    })
-    expect(res.status).toBe(403)
-    expect((await storedSettings()).terminology).toBeUndefined()
-  })
-
-  it("preserves optimistic concurrency on a carve-out write", async () => {
-    await seed('{"languageEditMinRole":500}')
-    const first = await patchProjectSettings("dan", {
+    const res = await patchProjectSettings("dan", {
       sourceLanguage: "en",
       targetLanguage: "de",
     })
-    expect(first.status).toBe(200)
+    expect(res.status).toBe(400)
+    expect((await storedSettings()).targetLanguage).toBe("fr")
+  })
 
-    // Same stale ifMatchVersion — must 409 with the current row, not clobber.
-    const stale = await patchProjectSettings("dan", {
-      sourceLanguage: "en",
-      targetLanguage: "it",
-    })
-    expect(stale.status).toBe(409)
-    const body = (await stale.json()) as { current?: { version: number } }
-    expect(body.current?.version).toBe(2)
-    expect((await storedSettings()).targetLanguage).toBe("de")
+  it("keeps stored language keys when a maintainer writes other settings without them", async () => {
+    await seed()
+    const res = await patchProjectSettings("bob", { validationCount: 2, systemPrompt: "be terse" })
+    expect(res.status).toBe(200)
+    const stored = await storedSettings()
+    expect(stored.sourceLanguage).toBe("en")
+    expect(stored.targetLanguage).toBe("fr")
+    expect(stored.validationCount).toBe(2)
+    expect(stored.systemPrompt).toBe("be terse")
+  })
+
+  it("still 403s a lead who changes a non-language key", async () => {
+    await seed('{"languageEditMinRole":500}', '{"sourceLanguage":"en","systemPrompt":"keep me"}')
+    const res = await patchProjectSettings("dan", { systemPrompt: "be terse" })
+    expect(res.status).toBe(403)
+    expect((await storedSettings()).systemPrompt).toBe("keep me")
+    expect((await storedSettings()).sourceLanguage).toBe("en")
   })
 })

@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
 import type {
@@ -710,12 +711,20 @@ export async function fetchProjectSettings(
 
 /**
  * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
- * settings blob (no per-key merge) — send a complete blob. Per-key merge is
- * only available via the `useProjectSettings` hook and the Agent API
- * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
- * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
- * `{kind: "forbidden", required, role}`.
+ * settings blob (no per-key merge). The four retired lane keys are omitted
+ * here; the server rejects a body that includes them and keeps the stored
+ * copies. Per-key merge is only available via the `useProjectSettings` hook
+ * and the Agent API PatchSettings command. Caller must include
+ * `ifMatchVersion`; mismatched version returns `{kind: "conflict", latest}`.
+ * Sub-PROJECT_LEAD callers get `{kind: "forbidden", required, role}`.
  */
+/** Drop the retired language keys. The server rejects a body that includes them. */
+function settingsForPatch(settings: ProjectWideSettings): ProjectWideSettings {
+  const next: ProjectWideSettings = { ...settings }
+  for (const key of RETIRED_LANE_SETTINGS_KEYS) delete next[key]
+  return next
+}
+
 export async function patchProjectSettings(
   jwt: string,
   projectId: string,
@@ -730,7 +739,7 @@ export async function patchProjectSettings(
       {
         method: "PATCH",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ settings, ifMatchVersion }),
+        body: JSON.stringify({ settings: settingsForPatch(settings), ifMatchVersion }),
       },
     )
   } catch (e) {

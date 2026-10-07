@@ -23,11 +23,10 @@ export function displayLanes(p: PortfolioProject): PortfolioLane[] {
     validatedCells: p.validatedCells,
     lastEditAt: p.lastEditAt,
   }
-  if (!p.lanes || p.lanes.length === 0) return [synthesizedDefault]
-  const defaults = p.lanes.filter((l) => l.lane === "")
-  const rest = p.lanes.filter((l) => l.lane !== "")
-  const defaultLane = defaults.length > 0 ? defaults[0] : synthesizedDefault
-  return [defaultLane, ...rest]
+  const lanes = (p.lanes ?? []).filter((lane) => lane.role !== "source")
+  if (lanes.length === 0) return [synthesizedDefault]
+  // Every target row stays, including two that share a tag. The server orders them.
+  return lanes
 }
 
 /** Human label for a lane chip: the '' lane shows the project's default target

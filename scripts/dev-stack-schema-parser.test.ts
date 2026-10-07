@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { parsePgSchema } from "./dev-stack-schema-parser"
 
@@ -86,6 +88,27 @@ describe("local dev schema parser", () => {
     expect(indexesByTable.get("artifact_bindings")).toEqual([
       "CREATE INDEX IF NOT EXISTS idx_artifact_bindings_project ON artifact_bindings(project_id);",
     ])
+  })
+
+  // AQU-1686: the parser skips lines nested inside a column's parentheses, so
+  // a generated column written as `AS (` + lines + `) STORED` came out as
+  // `… GENERATED ALWAYS AS (` and its ALTER would have broken every local boot
+  // that reconciles an existing container. Guard the real schema, not a fixture.
+  it("reads every column of the real schema.sql as a complete definition", () => {
+    // Two multi-line CHECK columns already parse short. They were created with
+    // their tables (0074, 0076), and a missing table is rebuilt from its full
+    // CREATE block, so the reconciler never ALTERs them in. Nothing else may.
+    const knownShort = new Set(["contextual_run_events.kind", "contextual_decisions.readiness_item"])
+    const schema = readFileSync(path.resolve(import.meta.dirname, "..", "db", "postgres", "schema.sql"), "utf8")
+    const incomplete: string[] = []
+    for (const [table, { columns }] of parsePgSchema(schema).tables) {
+      for (const { name, def } of columns) {
+        const opens = (def.match(/\(/g) ?? []).length
+        const closes = (def.match(/\)/g) ?? []).length
+        if (opens !== closes && !knownShort.has(`${table}.${name}`)) incomplete.push(`${table}.${name}: ${def}`)
+      }
+    }
+    expect(incomplete).toEqual([])
   })
 
   it("collects CREATE VIEW statements, with OR REPLACE forced in, without disturbing tables", () => {

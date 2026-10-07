@@ -1,9 +1,9 @@
 // AQU-602: resolve the editor's active target language from the active lane.
 //
-// The lanes model (AQU-538) is "one source, N target lanes"; a non-default
-// lane has its own target language, while the default lane (`''`) uses the
-// project's `targetLanguage`. Switching lanes must therefore switch the target
-// language the editor reads/writes/translates into — not just the cell filter.
+// The lanes model (AQU-538) is "one source, N target lanes". Switching lanes
+// switches the target language the editor reads/writes/translates into — not
+// just the cell filter. That language is the lane row's (AQU-1592), including
+// the default lane; the project setting is the fallback when there is no row.
 //
 // AQU-1586: that language comes from the lane ROW, never from the lane's tag.
 // The tag is the event key (`target_lang`), and `planNewTargetLane` sets it to
@@ -11,15 +11,11 @@
 // matches the project default — so reading the tag as the language drafted a
 // second Spanish lane "into a3f09c1e". `laneLanguageForTag` owns that rule.
 //
-// AQU-583: the default lane is driven SOLELY by the PROJECT target, never by a
-// per-file one. A file's `targetLanguage` is only ever an import-time snapshot
-// (or an inference seed — AQU-249); there is no UI to set a deliberate per-file
-// target on the default lane. Consulting it caused two bugs: a stamped value
-// shadowed a later Settings change (the pill stayed stale with >1 import), and a
-// stamped value (e.g. "English") surfaced when the project had NO target set,
-// hiding the "Set target language" prompt. So the project target is the single
-// source of truth: when it is unset the default lane has no target (the prompt
-// shows), regardless of how many files were imported or what they carry.
+// AQU-583: a file's `targetLanguage` is only ever an import-time snapshot
+// (or an inference seed — AQU-249). Consulting it on the default lane shadowed
+// a later Settings change and surfaced a stamped language when the project had
+// none set. The file is never consulted. With no lane rows, the project target
+// is what the default lane uses; when it is unset the prompt shows.
 // `fileTargetLanguage` is retained in the signature but intentionally unused.
 //
 // This pure helper isolates that rule from the heavyweight ProjectWorkspace
@@ -37,8 +33,9 @@ import { laneLanguageForTag, type LaneLanguageRow } from "@/lib/lanes/lane-langu
  *   records no language of its own inherits the project's `targetLanguage`,
  *   exactly as the default lane does — never an empty string, and never the
  *   lane's own id.
- * - The default lane (`''`) → the project's `targetLanguage` only (AQU-583);
- *   the per-file target is ignored so the project setting is authoritative.
+ * - The default lane (`''`) → the lane row's language when the project has
+ *   rows (AQU-1592). With no rows, the project's `targetLanguage` only
+ *   (AQU-583). The per-file target is ignored either way.
  *
  * Returns `undefined` only when NOTHING records a target language — then the
  * caller shows the "Set target language" prompt.
@@ -53,7 +50,8 @@ export function resolveActiveTargetLanguage(
   if (activeLane) {
     return laneLanguageForTag(activeLane, lanes) || projectTargetLanguage || undefined
   }
-  return projectTargetLanguage || undefined
+  const fromRow = lanes && lanes.length > 0 ? laneLanguageForTag("", lanes) : null
+  return fromRow || projectTargetLanguage || undefined
 }
 
 /** One target lane as the Import dialog's "Is this a translation?" check sees

@@ -380,6 +380,23 @@ describe('default target write creates the blank bridge (AQU-1594)', () => {
     expect(await laneIdOf(t, 'target', 'sw')).toBe('swlane01')
   })
 
+  it('does not insert a blank lane when a tagged target lane already exists', async () => {
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag) VALUES
+         ('src00001', $1, 'source', 'en', NULL),
+         ('swlane01', $1, 'target', 'sw', 'sw')`,
+      [PROJECT],
+    )
+    await expect(write('tc-sw-default')).rejects.toThrow(/not-null constraint/i)
+    const lanes = await targetLanes()
+    expect(lanes.rows.map((row) => row.legacy_tag)).toEqual(['sw'])
+    const cells = await t.pg.query(
+      `SELECT cell_id FROM cells WHERE project_id = $1 AND side = 'target'`,
+      [PROJECT],
+    )
+    expect(cells.rows).toEqual([])
+  })
+
   it('keeps an existing blank lane, including its tag and language', async () => {
     await t.pg.query(
       `INSERT INTO lanes (id, project_id, role, language, legacy_tag) VALUES

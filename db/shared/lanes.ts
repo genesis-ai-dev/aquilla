@@ -704,6 +704,30 @@ export function ensureTargetLaneStmt(
     .bind(newLaneId(), projectId, isLaneId(tag) ? "" : tag, tag, projectId)
 }
 
+/**
+ * The one `''` target lane a bare project (source lane, no target lane) needs
+ * so a default translation can resolve `lane_id`. The `NOT EXISTS` is in this
+ * statement: a project that already has any target lane — the `''` bridge or
+ * a tagged one — inserts nothing. `ON CONFLICT DO NOTHING` covers two writers
+ * racing to create the bridge. An existing row's `legacy_tag` is never rewritten.
+ */
+export function ensureBlankTargetBridgeStmt(
+  db: AquillaDb,
+  projectId: string,
+): AquillaStatement {
+  return db
+    .prepare(
+      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+       SELECT ?, ?, 'target', '', NULL, NULL, '',
+              COALESCE((SELECT MAX(position) FROM lanes WHERE project_id = ?), -1) + 1
+        WHERE NOT EXISTS (
+          SELECT 1 FROM lanes WHERE project_id = ? AND role = 'target'
+        )
+       ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
+    )
+    .bind(newLaneId(), projectId, projectId, projectId)
+}
+
 export type ArchiveLaneResult =
   | { status: "ok"; lane: ProjectLaneRecord }
   | { status: "not_found" }

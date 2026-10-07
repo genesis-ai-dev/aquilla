@@ -80,11 +80,26 @@ async function recompute(db: Db, file = F) {
   for (const stmt of fullProgressRecomputeStmts(db, P, file, TS)) await stmt.run()
 }
 
+/**
+ * The lane these assertions are about.
+ *
+ * AQU-1599 writes one progress row per lane, and the source lane's
+ * `target_lang` is '' too (its `legacy_tag` is NULL). A bare
+ * `target_lang = ''` therefore matches both, and `.first()` returns
+ * whichever the engine lists first — the source row, whose `filled_count`
+ * is 0 because it joins no translations. Prefer the target lane, where the
+ * fills live, and fall back to the source lane for a fixture that has no
+ * target lane yet. Both lanes count the same chapters, so the totals agree.
+ */
 async function row(db: Db, scope: string, key: string) {
   return db
     .prepare(
-      `SELECT total_count, filled_count FROM file_section_progress
-        WHERE project_id = ? AND file_id = ? AND scope = ? AND section_key = ? AND target_lang = ''`,
+      `SELECT p.total_count, p.filled_count
+         FROM file_section_progress p
+         JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
+        WHERE p.project_id = ? AND p.file_id = ? AND p.scope = ? AND p.section_key = ?
+        ORDER BY (l.role = 'target') DESC, l.id
+        LIMIT 1`,
     )
     .bind(P, F, scope, key)
     .first<{ total_count: number; filled_count: number }>()
@@ -93,8 +108,8 @@ async function row(db: Db, scope: string, key: string) {
 async function keys(db: Db, scope: string) {
   const r = await db
     .prepare(
-      `SELECT section_key FROM file_section_progress
-        WHERE project_id = ? AND file_id = ? AND scope = ? AND target_lang = ''
+      `SELECT DISTINCT section_key FROM file_section_progress
+        WHERE project_id = ? AND file_id = ? AND scope = ?
         ORDER BY section_key`,
     )
     .bind(P, F, scope)

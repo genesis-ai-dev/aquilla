@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  dismissMentions,
+  getMentionDismissedIds,
   getMentionReadIds,
   markMentionsRead,
   resetMentionReadStateForTests,
@@ -31,5 +33,12 @@ describe("mention read state", () => {
     expect(stored.size).toBe(400)
     expect(stored.has("c0")).toBe(false)
     expect(stored.has("c404")).toBe(true)
+  })
+
+  it("hides dismissed mentions without marking them read", () => {
+    dismissMentions("proj-1", "alice", ["c1"])
+    expect(getMentionDismissedIds("proj-1", "alice").has("c1")).toBe(true)
+    expect(getMentionReadIds("proj-1", "alice").has("c1")).toBe(false)
+    expect(getMentionDismissedIds("proj-1", "bob").has("c1")).toBe(false)
   })
 })

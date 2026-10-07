@@ -100,6 +100,23 @@ export const comments = defineNamespace({
     "comments.inbox.emptyTitle": "No mentions yet",
     "comments.inbox.empty": "When a teammate @mentions you in a comment, it shows up here.",
     "comments.inbox.markAllRead": "Mark all as read",
+    "comments.inbox.markRead": "Mark as read",
+    "comments.inbox.commented": "{author} commented: {excerpt}",
+    "comments.inbox.unreadsOnly": "Show unreads only",
+    "comments.inbox.actionsAria": "Notification actions",
+    "comments.inbox.deleteAll": "Delete all",
+    "comments.inbox.deleteAllRead": "Delete all read",
+    "comments.inbox.deleteTitle": "Delete notification?",
+    "comments.inbox.deleteDescription":
+      "This removes the notification from your inbox. The comment stays.",
+    "comments.inbox.deleteAllTitle": "Delete all notifications?",
+    "comments.inbox.deleteAllDescription":
+      "This removes every notification from your inbox. The comments stay.",
+    "comments.inbox.deleteAllReadTitle": "Delete read notifications?",
+    "comments.inbox.deleteAllReadDescription":
+      "This removes notifications you have already read. Unread ones stay, and the comments stay.",
+    "comments.inbox.noUnreadTitle": "No unread notifications",
+    "comments.inbox.noUnread": "You're caught up.",
     "comments.inbox.unreadBadge": "Unread",
     "comments.inbox.footer": "Mentions in this project.",
     "comments.inbox.openAria": "Notifications",
@@ -499,8 +516,76 @@ export const comments = defineNamespace({
       },
       "comments.inbox.markAllRead": {
         description:
-          "Button in the notifications popover that marks every visible mention as read. " +
-          "Shown only while at least one mention is unread.",
+          "Item in the notifications ⋯ menu that marks every mention in the inbox as read. " +
+          "Disabled when nothing is unread.",
+      },
+      "comments.inbox.markRead": {
+        description:
+          "Item in the right-click menu on one notification. Marks that row read without " +
+          "opening it. Shown only while the row is unread.",
+      },
+      "comments.inbox.commented": {
+        description:
+          "Second line of a notification row. Names who wrote the comment, then the " +
+          "comment itself. Example: \"dev commented: @carol yes\".",
+        placeholders: {
+          author: "Display name of the person who wrote the comment.",
+          excerpt: "The comment text, with @mentions kept as @name.",
+        },
+      },
+      "comments.inbox.unreadsOnly": {
+        description:
+          "Tooltip and accessible name of the filter button at the top right of the " +
+          "notifications popover. Pressed, the list shows only unread rows.",
+      },
+      "comments.inbox.actionsAria": {
+        description:
+          "Accessible name of the ⋯ button at the top right of the notifications popover. " +
+          "The button itself has no visible text.",
+      },
+      "comments.inbox.deleteAll": {
+        description:
+          "Item in the notifications ⋯ menu. Removes every notification from this " +
+          "device's inbox. Does not delete the comments.",
+      },
+      "comments.inbox.deleteAllRead": {
+        description:
+          "Item in the notifications ⋯ menu. Removes notifications that have already " +
+          "been read. Unread ones stay. Does not delete the comments.",
+      },
+      "comments.inbox.deleteTitle": {
+        description:
+          "Heading of the confirmation dialog before removing one notification from the inbox.",
+      },
+      "comments.inbox.deleteDescription": {
+        description:
+          "Body of the confirmation dialog for deleting one notification. Says the " +
+          "comment itself is kept.",
+      },
+      "comments.inbox.deleteAllTitle": {
+        description: "Heading of the confirmation dialog before clearing the whole inbox.",
+      },
+      "comments.inbox.deleteAllDescription": {
+        description:
+          "Body of the confirmation dialog for deleting every notification. Says the " +
+          "comments themselves are kept.",
+      },
+      "comments.inbox.deleteAllReadTitle": {
+        description:
+          "Heading of the confirmation dialog before removing notifications that are already read.",
+      },
+      "comments.inbox.deleteAllReadDescription": {
+        description:
+          "Body of the confirmation dialog for deleting read notifications. Says unread " +
+          "rows and the comments themselves stay.",
+      },
+      "comments.inbox.noUnreadTitle": {
+        description:
+          "Heading shown in the notifications list when Show unreads only is on and " +
+          "every remaining notification has been read.",
+      },
+      "comments.inbox.noUnread": {
+        description: "Short line under the no-unread heading.",
       },
       "comments.inbox.unreadBadge": {
         description: "Small badge on a notification row that has not been opened yet.",

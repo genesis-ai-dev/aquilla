@@ -463,7 +463,10 @@ describe('POST /import/reconcile', () => {
     expect(responseBody).toMatchObject({ added: 1, importedTargets: 1 })
 
     const { results } = await db.prepare(
-      `SELECT side, target_lang, lane_id FROM cells WHERE project_id = ? AND file_id = ?`,
+      `SELECT c.side, COALESCE(l.legacy_tag, '') AS target_lang, c.lane_id
+         FROM cells c
+         LEFT JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+        WHERE c.project_id = ? AND c.file_id = ?`,
     ).bind(PROJECT_ID, FILE_ID).all<{ side: string; target_lang: string; lane_id: string | null }>()
     const source = results.filter((row) => row.side === 'source')
     const target = results.filter((row) => row.side === 'target' && row.target_lang === 'fr')

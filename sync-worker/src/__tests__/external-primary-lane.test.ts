@@ -243,7 +243,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const r = await setTranslation(fileId, cellId, 'hola', 'es')
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: 'es', value: 'hola', legacy_tag: 'es' }),
+      expect.objectContaining({ target_lang: '', value: 'hola', legacy_tag: 'es' }),
     ])
   })
 
@@ -258,7 +258,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const r = await setTranslation(fileId, cellId, 'icitte', 'fr-CA')
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: 'fr-CA', value: 'icitte', legacy_tag: 'fr-CA' }),
+      expect.objectContaining({ target_lang: '', value: 'icitte', legacy_tag: 'fr-CA' }),
     ])
   })
 
@@ -297,7 +297,7 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
     ])
     expect(await targetRows()).toEqual([
       expect.objectContaining({ target_lang: '', value: 'primary variant', legacy_tag: '' }),
-      expect.objectContaining({ target_lang: 'es', value: 'variante', legacy_tag: 'es' }),
+      expect.objectContaining({ target_lang: '', value: 'variante', legacy_tag: 'es' }),
     ])
   })
 

@@ -283,9 +283,8 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     const binding = await db.prepare(
       `SELECT binding_role, target_lang, lane_id FROM artifact_bindings WHERE artifact_id::text = ?`,
     ).bind(artifactId).first<{ binding_role: string; target_lang: string; lane_id: string }>()
-    // AQU-1611: the tag is still written during the expand step, but lane_id is
-    // what identifies the row and what the upsert arbitrates on.
-    expect(binding).toEqual({ binding_role: "target", target_lang: "fr-CA", lane_id: "lane-frca" })
+    // AQU-1611b: the writer leaves the column at its default. lane_id is the row.
+    expect(binding).toEqual({ binding_role: "target", target_lang: "", lane_id: "lane-frca" })
     const sourceSidecar = await db.prepare(
       `SELECT format, r2_key FROM file_source_blobs WHERE file_id = 'f1'`,
     ).first<{ format: string; r2_key: string }>()

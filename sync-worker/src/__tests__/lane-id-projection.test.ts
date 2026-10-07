@@ -89,8 +89,13 @@ async function replayViaRebuild(t: TestDb): Promise<void> {
 
 async function laneIdOf(t: TestDb, side: 'source' | 'target', targetLang: string): Promise<string | null> {
   const r = await t.pg.query<{ lane_id: string | null }>(
-    `SELECT lane_id FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND side = $3 AND target_lang = $4`,
+    `SELECT c.lane_id FROM cells c
+       JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1 AND c.file_id = $2 AND c.side = $3
+        AND (
+          ($3 = 'source' AND l.role = 'source')
+          OR ($3 = 'target' AND l.role = 'target' AND l.legacy_tag IS NOT DISTINCT FROM $4)
+        )`,
     [PROJECT, FILE, side, targetLang],
   )
   return r.rows[0]?.lane_id ?? null
@@ -239,12 +244,13 @@ describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
 
     const r = await t.pg.query<{ target_lang: string; lane_id: string | null }>(
       `SELECT target_lang, lane_id FROM cell_validators
-        WHERE project_id = $1 ORDER BY target_lang`,
+        WHERE project_id = $1 ORDER BY lane_id`,
       [PROJECT],
     )
+    // The writer leaves the column at its default. The lane id is the identity.
     expect(r.rows).toEqual([
       { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
-      { target_lang: 'es', lane_id: ES_LANE },
+      { target_lang: '', lane_id: ES_LANE },
     ])
   })
 
@@ -259,14 +265,13 @@ describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
       [PROJECT],
     )
     // AQU-1599: one row set per row of `lanes`, the SOURCE lane included — it
-    // carries the lane-independent numbers. Ordered by lane_id because
-    // `target_lang` no longer identifies a row: the source lane's `legacy_tag`
-    // is NULL, so its row carries '' exactly as the default lane's does, which
-    // is why every reader resolves a lane id instead of matching the column.
+    // carries the lane-independent numbers. AQU-1611b: the writer leaves
+    // target_lang at its default on every row, including the named lane.
+    // Ordered by lane_id because the column no longer identifies a row.
     expect(r.rows).toEqual([
       { target_lang: '', lane_id: SOURCE_LANE },
       { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
-      { target_lang: 'es', lane_id: ES_LANE },
+      { target_lang: '', lane_id: ES_LANE },
     ])
   })
 })

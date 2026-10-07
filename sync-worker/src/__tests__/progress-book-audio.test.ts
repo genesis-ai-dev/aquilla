@@ -80,13 +80,13 @@ async function recompute(db: Parameters<typeof fullProgressRecomputeStmts>[0]) {
 async function rows(db: { prepare: (s: string) => { bind: (...a: unknown[]) => { all: () => Promise<{ results: unknown[] }> } } }, scope: string) {
   const r = await db
     .prepare(
-      `SELECT p.section_key, p.target_lang, p.total_count, p.filled_count, p.audio_count,
+      `SELECT p.section_key, COALESCE(l.legacy_tag, '') AS target_lang, p.total_count, p.filled_count, p.audio_count,
               p.audio_validated_count, p.last_edit_at,
               p.validator_histogram, p.audio_validator_histogram
          FROM file_section_progress p
          JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
         WHERE p.project_id = ? AND p.file_id = ? AND p.scope = ? AND l.role = 'target'
-        ORDER BY p.section_key, p.target_lang`,
+        ORDER BY p.section_key, l.legacy_tag`,
     )
     .bind(P, F, scope)
     .all()

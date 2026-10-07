@@ -77,9 +77,9 @@ export async function buildSourceArtifactPersistenceStatements(
     ),
     db.prepare(
       `INSERT INTO artifact_bindings (
-         id, project_id, artifact_id, file_id, binding_role, target_lang,
+         id, project_id, artifact_id, file_id, binding_role,
          member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveBindingSql()})
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveBindingSql()})
        ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
@@ -94,7 +94,6 @@ export async function buildSourceArtifactPersistenceStatements(
       input.artifactId,
       input.fileId,
       input.bindingRole,
-      input.targetLang,
       input.memberPath,
       input.profileId,
       input.profileVersion,

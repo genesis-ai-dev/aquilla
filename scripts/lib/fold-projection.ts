@@ -101,13 +101,15 @@ export function foldProjection(events: FoldEvent[]): ProjectionRows {
   // AQU-538: endorsement is counted per (cell, lane, chain-head) so a lane's
   // validators never leak into another lane's validated flag.
   const endorsements = new Map<string, number>()
-  for (const v of validators.values()) {
-    const k = `${v.project_id}\0${v.file_id}\0${v.cell_id}\0${v.target_lang}\0${v.event_id}`
+  for (const [key, v] of validators) {
+    const lane = key.split("\0")[3] ?? ""
+    const k = `${v.project_id}\0${v.file_id}\0${v.cell_id}\0${lane}\0${v.event_id}`
     endorsements.set(k, (endorsements.get(k) ?? 0) + 1)
   }
-  for (const c of cells.values()) {
+  for (const [key, c] of cells) {
     if (c.side !== "target") continue
-    const n = endorsements.get(`${c.project_id}\0${c.file_id}\0${c.cell_id}\0${c.target_lang}\0${c.event_id}`) ?? 0
+    const lane = key.split("\0")[4] ?? ""
+    const n = endorsements.get(`${c.project_id}\0${c.file_id}\0${c.cell_id}\0${lane}\0${c.event_id}`) ?? 0
     c.endorsement_count = n
     c.validated = n > 0 ? 1 : 0
   }
@@ -140,7 +142,7 @@ function apply(e: FoldEvent, s: State): void {
         file_id: e.fileId,
         cell_id: cellId,
         side: "source",
-        target_lang: "",
+        target_lang: "", // projection column is not filled (AQU-1611b)
         value,
         value_html: (p.valueHtml as string) ?? null,
         type: (p.type as string) ?? null,
@@ -178,7 +180,7 @@ function apply(e: FoldEvent, s: State): void {
         file_id: e.fileId,
         cell_id: e.cellId,
         side: "target",
-        target_lang: lane,
+        target_lang: "",
         type: null,
         canonical_ref: null,
         anchor_cell_id: null,
@@ -219,7 +221,7 @@ function apply(e: FoldEvent, s: State): void {
         project_id: e.projectId,
         file_id: e.fileId,
         cell_id: e.cellId,
-        target_lang: lane,
+        target_lang: "",
         event_id: (p.editEventId as string) ?? null,
         username: e.author,
         decided_ts: e.serverTs,

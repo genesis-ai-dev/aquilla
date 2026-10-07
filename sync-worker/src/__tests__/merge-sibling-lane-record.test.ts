@@ -110,9 +110,11 @@ async function hostLanes(db: TestDb): Promise<LaneRow[]> {
 
 async function hostLaneCells(db: TestDb, tag: string): Promise<Array<{ cell_id: string; value: string; lane_id: string }>> {
   const r = await db.pg.query<{ cell_id: string; value: string; lane_id: string }>(
-    `SELECT cell_id, value, lane_id FROM cells
-      WHERE project_id = $1 AND side = 'target' AND target_lang = $2
-      ORDER BY cell_id`,
+    `SELECT c.cell_id, c.value, c.lane_id
+       FROM cells c
+       JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1 AND c.side = 'target' AND l.legacy_tag = $2
+      ORDER BY c.cell_id`,
     [HOST, tag],
   )
   return r.rows

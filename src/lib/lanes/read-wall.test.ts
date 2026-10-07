@@ -8,6 +8,7 @@ import {
   lanesForRequestedTag,
   legacyTagsForVisibleLanes,
   portfolioTextFromVisibleLanes,
+  restoreHiddenLaneSettings,
   visibilityCacheToken,
   scopedTargetVisibilityClause,
   visibleDefaultLaneLanguage,
@@ -149,6 +150,59 @@ describe("lane read wall", () => {
     // A response without rows, and an unrestricted caller, are left alone.
     expect(filterSettingsToVisibleLanes({ settings: {}, lanes: undefined }, new Set(["es"]), lanes).lanes).toBeUndefined()
     expect(filterSettingsToVisibleLanes({ settings: {}, lanes: rows }, null, lanes).lanes).toBe(rows)
+  })
+
+  describe("restoreHiddenLaneSettings (AQU-1750)", () => {
+    // German and Italian are hidden from a caller granted Spanish only.
+    const lanes = [
+      { id: "ln-main", name: "French", legacyTag: "" },
+      { id: "ln-de", name: "German", legacyTag: "de" },
+      { id: "ln-es", name: "Spanish", legacyTag: "es" },
+      { id: "ln-it", name: "Italian", legacyTag: "it" },
+    ]
+    const visible = new Set(["ln-es"])
+    const stored = {
+      targetLanguage: "French",
+      targetLanes: ["de", "es", "it"],
+      archivedLanes: ["it"],
+      systemPrompt: "Formal.",
+    }
+
+    it("turns an echo of the filtered read back into the stored blob exactly", () => {
+      // The client's echo is the filter's own output. Restored, it must equal
+      // the stored row key for key and in the same order, or the route's diff
+      // reports a language change and a one-key carve-out write is refused.
+      const echo = filterSettingsToVisibleLanes({ settings: stored }, visible, lanes).settings
+      expect(echo).toEqual({ targetLanguage: "", targetLanes: ["es"], archivedLanes: [], systemPrompt: "Formal." })
+      expect(restoreHiddenLaneSettings(stored, echo, visible, lanes)).toEqual({ ok: true, settings: stored })
+    })
+
+    it("keeps the caller's own lane edits around the hidden entries", () => {
+      const removed = restoreHiddenLaneSettings(stored, { ...stored, targetLanes: [] }, visible, lanes)
+      expect(removed).toEqual({ ok: true, settings: { ...stored, targetLanes: ["de", "it"] } })
+      // A hidden label sent again is not doubled.
+      const added = restoreHiddenLaneSettings(stored, { ...stored, targetLanes: ["es", "pt", "de"] }, visible, lanes)
+      expect(added).toEqual({ ok: true, settings: { ...stored, targetLanes: ["de", "es", "it", "pt"] } })
+    })
+
+    it("restores a hidden primary the body leaves out, and refuses one it replaces", () => {
+      const { targetLanguage: _dropped, ...withoutPrimary } = stored
+      expect(restoreHiddenLaneSettings(stored, withoutPrimary, visible, lanes)).toEqual({ ok: true, settings: stored })
+      const replaced = restoreHiddenLaneSettings(stored, { ...stored, targetLanguage: "Spanish" }, visible, lanes)
+      expect(replaced.ok).toBe(false)
+    })
+
+    it("leaves the body alone when nothing is hidden", () => {
+      // No key is added where the stored row has none, and a visible primary
+      // stays the caller's to change.
+      const plain = { targetLanguage: "Spanish", sourceLanguage: "English" }
+      const body = { targetLanguage: "", sourceLanguage: "Hebrew" }
+      expect(restoreHiddenLaneSettings(plain, body, visible, lanes)).toEqual({ ok: true, settings: body })
+      expect(restoreHiddenLaneSettings(stored, { targetLanes: [] }, null, lanes)).toEqual({
+        ok: true,
+        settings: { targetLanes: [] },
+      })
+    })
   })
 })
 

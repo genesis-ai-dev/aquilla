@@ -493,21 +493,17 @@ future pass (verify each still applies — code moves):
   tsconfig.app.json` scoped to the touched file(s) plus full `pnpm test`/`pnpm lint`
   byte-identical-failure-list comparison; no test files touched.
 
-## `src/hooks/useSubscribedConcepts.ts` — looks dead, is not
+## `src/hooks/useSubscribedConcepts.ts` — looked dead, was not (resolved 2026-10-06, AQU-1721)
 
-- **File**: `src/hooks/useSubscribedConcepts.ts` (140 lines). Zero real importers (only
-  doc-comment mentions in `TermbaseSharingSection.tsx` and `useRules.ts`), no colocated
-  test file — flagged by a zero-importer grep sweep in the 2026-08-14 run.
-- **Why NOT deleted**: the file's own header comment is a `SWARM-TODO` marking it as
-  deliberately-staged scaffolding for a planned server route
-  (`GET /api/v2/projects/:id/termbase/concepts`, see `docs/swarm/TERM3-ORG-API.md`) — it
-  treats any non-2xx as "no concepts yet" specifically so "the ordering/merge wiring...
-  starts returning real concepts the moment the server route lands, with NO client change
-  required." That reads as in-flight work, not abandoned debris; deleting it would erase
-  a documented forward-compat contract.
-- **What would need to change before revisiting**: confirm with a human (or check for a
-  newer doc) whether the SWARM-TODO is still active or has gone stale/abandoned. If truly
-  abandoned, it's a clean deletion (zero importers, self-contained).
+- **Resolved**: AQU-1721 wired the hook in. `ProjectWorkspace.tsx` and
+  `ProjectSettings/RulesSection.tsx` call it, and it has its own test
+  (`useSubscribedConcepts.test.tsx`). It is no longer a zero-importer candidate. Its old
+  `SWARM-TODO` was stale: the server route it waited for
+  (`GET /api/v2/projects/:id/termbase/concepts`) had landed on the same day as the hook,
+  2026-06-08, and nothing ever called the hook.
+- **History**: flagged by the zero-importer grep sweep of the 2026-08-14 run, and kept
+  because its header described staged scaffolding for that route. The other entries in
+  this file that cite it as the "looks dead, is not" precedent are records of past runs.
 
 The 2026-08-10 run also recorded an E2E limitation in the Claude Code web sandbox: its
 Docker/Wrangler setup was not reliable enough to complete the smoke suite. This is an

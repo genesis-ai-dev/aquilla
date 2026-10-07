@@ -238,6 +238,14 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * AQU-1686: one explicit switch per Bible data enrichment
+   * (db/shared/bible-enrichments.ts). A missing id means that enrichment's
+   * default, and `bibleResourcesEnabled` off turns every one of them off.
+   * Maintainer floor, like the rest of the blob. Read server-side through the
+   * `bible_enrichments` generated column (auth-worker/src/lib/aquifer/gate.ts).
+   */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.
@@ -449,7 +457,16 @@ export interface ProjectSettingsResponse {
 export interface ProjectLaneView {
   id: string
   role: "source" | "target"
-  name: string
+  /**
+   * AQU-1592: the freeform language the user typed, never derived. Null on a
+   * row that predates migration 0152, and absent from a server that predates
+   * it — read it through `laneLanguage` / `laneDisplayName`
+   * (src/lib/lanes/lane-display.ts), which fall back to `name`.
+   */
+  language?: string | null
+  /** Optional display override. Null means "display the language". */
+  name: string | null
+  /** Optional BCP 47 override. Null means "derive from the language on read". */
   langCode: string | null
   legacyTag: string | null
   position: number
@@ -472,16 +489,44 @@ function authHeaders(jwt: string): HeadersInit {
 export type RenameLaneResult =
   | { kind: "ok"; lane: ProjectLaneView }
   | { kind: "duplicate" }
+  /** AQU-1592: the code override is not a well-formed BCP 47 tag. */
+  | { kind: "malformed_code" }
   | { kind: "error"; message: string }
+
+/**
+ * AQU-1592: a 400 from the lane endpoints names which field the server
+ * rejected. Only `malformed_code` gets its own message on the screen; every
+ * other problem stays the generic invalid-name path the UI already had.
+ */
+async function isMalformedCode(res: Response): Promise<boolean> {
+  if (res.status !== 400) return false
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    return body.error === "malformed_code"
+  } catch {
+    return false
+  }
+}
+
+/**
+ * AQU-1592: the identity fields the languages screen may edit. Omit a field to
+ * leave it as it is; `null` on `name` or `code` clears that override.
+ */
+export interface LaneIdentityEdit {
+  name?: string | null
+  language?: string
+  code?: string | null
+}
 
 /** PATCH /api/v2/projects/:id/lanes/:laneId. Language-edit floor. */
 export async function renameProjectLane(
   jwt: string,
   projectId: string,
   laneId: string,
-  name: string,
+  edit: string | LaneIdentityEdit,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<RenameLaneResult> {
+  const patchBody: LaneIdentityEdit = typeof edit === "string" ? { name: edit } : edit
   let res: Response
   try {
     res = await fetch(
@@ -489,13 +534,14 @@ export async function renameProjectLane(
       {
         method: "PATCH",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(patchBody),
       },
     )
   } catch (e) {
     return { kind: "error", message: e instanceof Error ? e.message : String(e) }
   }
   if (res.status === 409) return { kind: "duplicate" }
+  if (await isMalformedCode(res)) return { kind: "malformed_code" }
   if (!res.ok) {
     return { kind: "error", message: `rename failed (${res.status})` }
   }
@@ -506,13 +552,15 @@ export async function renameProjectLane(
 export type CreateLaneResult =
   | { kind: "ok"; lane: ProjectLaneView }
   | { kind: "duplicate" }
+  /** AQU-1592: the code override is not a well-formed BCP 47 tag. */
+  | { kind: "malformed_code" }
   | { kind: "error"; message: string }
 
 /** POST /api/v2/projects/:id/lanes. Language-edit floor. */
 export async function createProjectLane(
   jwt: string,
   projectId: string,
-  input: { name: string; language: string },
+  input: { name: string; language: string; code?: string | null },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CreateLaneResult> {
   let res: Response
@@ -529,6 +577,7 @@ export async function createProjectLane(
     return { kind: "error", message: e instanceof Error ? e.message : String(e) }
   }
   if (res.status === 409) return { kind: "duplicate" }
+  if (await isMalformedCode(res)) return { kind: "malformed_code" }
   if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
   const body = (await res.json()) as { lane: ProjectLaneView }
   return { kind: "ok", lane: body.lane }

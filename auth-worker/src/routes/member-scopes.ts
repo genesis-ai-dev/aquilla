@@ -124,7 +124,7 @@ async function laneNamesForScopes(
   const names: Record<string, string> = {}
   for (const lane of lanes) {
     if (!laneValues.has(lane.id)) continue
-    const label = lane.name.trim() || (lane.legacyTag ?? "").trim()
+    const label = (lane.name ?? "").trim() || (lane.legacyTag ?? "").trim()
     if (label !== "") names[lane.id] = label
   }
   return Object.keys(names).length > 0 ? names : undefined

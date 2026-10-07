@@ -113,7 +113,7 @@ export const LANE_DOES_NOT_EXIST_REASON = "lane does not exist"
 
 function rowIsArchived(lane: ArchiveLaneRow, archivedTags: readonly string[]): boolean {
   if (lane.archivedAt != null && lane.archivedAt !== "") return true
-  return listed(archivedTags, lane.legacyTag ?? "") || listed(archivedTags, lane.name)
+  return listed(archivedTags, lane.legacyTag ?? "") || listed(archivedTags, lane.name ?? "")
 }
 
 /**
@@ -138,7 +138,7 @@ export function archivedLaneReason(input: {
     input.tag !== "" &&
     (listed(input.archivedTags, input.tag) ||
       matches.some(
-        (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name),
+        (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name ?? ""),
       ))
   if (!archivedMatch && !inSettings) return null
 
@@ -146,7 +146,7 @@ export function archivedLaneReason(input: {
   if (visible != null) {
     const knowable = matches.find((lane) => visible.has(lane.id) && rowIsArchived(lane, input.archivedTags))
     if (!knowable) return LANE_DOES_NOT_EXIST_REASON
-    const display = knowable.name.trim() || input.tag
+    const display = (knowable.name ?? "").trim() || input.tag
     return `lane '${display}' is archived`
   }
 

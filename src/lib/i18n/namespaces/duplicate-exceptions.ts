@@ -911,4 +911,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "data the agent READS is a different UI role from a navigation entry, and " +
     "languages that distinguish the subject matter from the place it lives " +
     "should be free to split them.",
+  "bibleData.enrichment.voices.label":
+    "AQU-1686: names the Bible data enrichment that labels who SPEAKS in the " +
+    "Bible text (Jesus, the narrator, a crowd). common.voices is the panel of " +
+    "synthetic text-to-speech voices. People speaking and machine voices are " +
+    "different words in most target languages.",
+  "bibleData.enrichment.terms.label":
+    "AQU-1686: names the enrichment that marks biblical key terms (a term of art " +
+    "in Bible translation, as in Paratext's Biblical Terms) in the source text. " +
+    "autopilot.readiness.terminology.label names the readiness check on the " +
+    "project's own approved renderings, which several languages call terminology.",
 }

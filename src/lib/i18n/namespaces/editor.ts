@@ -1666,6 +1666,8 @@ export const editor = defineNamespace({
     // — Remaining action-rail tooltips ————————————————————————————
     "editor.audio.play": "Play audio",
     "editor.cue.playFrom": "Play from this cue",
+    // AQU-1118: the same button while this row's line is the one playing.
+    "editor.cue.pause": "Pause",
 
     // — Expansion tab: health ————————————————————————————————————
     "editor.expansion.retrievalSupport": "Health",
@@ -6401,6 +6403,13 @@ export const editor = defineNamespace({
           "Tooltip on the action-rail button that starts the file's master " +
           "audio/video from this cell's timecode, rather than playing the cell's own " +
           "recording. 'Cue' is the timed entry.",
+        maxLength: 24,
+      },
+      "editor.cue.pause": {
+        description:
+          "Tooltip on that same action-rail button while this row's line is the one " +
+          "playing: it shows a pause icon, and pressing it stops playback. A verb, " +
+          "short like 'Play'.",
         maxLength: 24,
       },
       "editor.expansion.retrievalSupport": {

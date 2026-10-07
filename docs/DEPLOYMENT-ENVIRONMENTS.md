@@ -14,7 +14,8 @@ profile or fall back from an unknown branch.
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
 `/sync/*` through the sync Worker. The identity Worker also owns
 `/.well-known/oauth-authorization-server/*`, the RFC 8414 discovery location for
-its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`). Staging is retired from the deployable
+its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`), and
+`/.well-known/openai-apps-challenge`, OpenAI's plugin domain check. Staging is retired from the deployable
 application contract; development is the only non-production live environment.
 
 `config/cloudflare-deployments.json` is the machine-readable source for Worker

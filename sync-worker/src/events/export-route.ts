@@ -22,6 +22,7 @@
 //
 // Returns null if the URL doesn't match (chainable in the fetch dispatcher).
 
+import { attachmentDisposition } from "./content-disposition"
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
@@ -168,7 +169,7 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": mimeType,
-          "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(downloadName),
           // Signal to client: this is a raw side-car, not injection-substituted.
           // The client should perform its own XML injection using the cells it holds.
           "X-Export-Mode": "raw-sidecar",
@@ -186,7 +187,7 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": "application/octet-stream",
-          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(fileName),
           "X-Export-Mode": "raw-original",
         },
       }), request)
@@ -197,7 +198,7 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(fileName),
           // The exact original is recoverable, but translated cells have not
           // been injected. The import manifest reports content-only fidelity.
           "X-Export-Mode": "raw-original",
@@ -218,7 +219,7 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(fileName),
         },
       }),
       request,
@@ -236,7 +237,7 @@ export async function handleExportSourceRequest(
       status: 200,
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+        "Content-Disposition": attachmentDisposition(fileName),
         "X-Export-Mode": "raw-original",
       },
     }), request)
@@ -281,7 +282,7 @@ export async function handleExportSourceRequest(
         status: 200,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+          "Content-Disposition": attachmentDisposition(downloadName),
           "X-Export-Mode": "raw-original",
         },
       }),
@@ -325,7 +326,7 @@ export async function handleExportSourceRequest(
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
+        "Content-Disposition": attachmentDisposition(downloadName),
         // AQU-276: number of translated verses whose original span contained
         // intra-verse markers (footnotes, poetry, character markers) that the
         // plain-text substitution dropped. 0 = clean round-trip. The client

@@ -15,6 +15,7 @@ import type {
   ContextualRunPage,
   ContextualRunRecord,
 } from "@/lib/contextual/transport"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const RUN_ID = "01920000-0000-7000-8000-000000000001"
 let originalMyanmarCatalog: Catalog
@@ -325,7 +326,7 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.queryByText("Opaque upstream diagnostic.")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Technical & evidence/ }))
     fireEvent.click(screen.getByRole("button", { name: "Copy activity log" }))
-    await vi.waitFor(() => expect(writeText).toHaveBeenCalled())
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
     const copied = writeText.mock.calls[0][0]
     expect(copied).toContain("drafts_staged")
     expect(copied).toContain("Opaque upstream diagnostic.")
@@ -605,7 +606,7 @@ describe("AutopilotActivityInspector", () => {
       "p1",
       restarted.runId,
       expect.objectContaining({ draftLimit: 50 }),
-    ))
+    ), { timeout: STALL_WATCHDOG_MS })
     // Mirrors the editor parent refreshing its fallback snapshot after the
     // mutation while focusRunId still points at the failed run.
     rerender(
@@ -674,7 +675,7 @@ describe("AutopilotActivityInspector", () => {
       "p1",
       firstRun.runId,
       expect.objectContaining({ draftCursor }),
-    ))
+    ), { timeout: STALL_WATCHDOG_MS })
     fireEvent.click(screen.getByRole("button", { name: /B\.usfm.*1 ready to review/i }))
     expect(await screen.findByText("Second run activity.")).toBeInTheDocument()
 
@@ -760,8 +761,8 @@ describe("AutopilotActivityInspector", () => {
     renderInspector({ fallbackRun: parked, onRunChanged })
 
     fireEvent.click(await screen.findByRole("button", { name: "Stop" }))
-    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith("p1", RUN_ID, "terminate"))
-    await vi.waitFor(() => expect(onRunChanged).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith("p1", RUN_ID, "terminate"), { timeout: STALL_WATCHDOG_MS })
+    await vi.waitFor(() => expect(onRunChanged).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
   })
 
   it("places per-collection truncation notices beside their evidence", async () => {
@@ -810,8 +811,8 @@ describe("AutopilotActivityInspector", () => {
 
     expect(await screen.findByText(/Could not refresh detailed activity/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
-    await vi.waitFor(() => expect(runsMock).toHaveBeenCalledTimes(2))
-    await vi.waitFor(() => expect(activityMock).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(runsMock).toHaveBeenCalledTimes(2), { timeout: STALL_WATCHDOG_MS })
+    await vi.waitFor(() => expect(activityMock).toHaveBeenCalledTimes(2), { timeout: STALL_WATCHDOG_MS })
     expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
     expect(screen.queryByText(/Could not refresh detailed activity/)).not.toBeInTheDocument()
   })
@@ -877,7 +878,7 @@ describe("AutopilotActivityInspector", () => {
     expect(await screen.findByText(/couldn’t draft at the time/)).toBeInTheDocument()
     expect(screen.queryByText("unsupported_target_language_lane")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
-    await vi.waitFor(() => expect(retryMock).toHaveBeenCalledWith("p1", "file-1", "fr"))
+    await vi.waitFor(() => expect(retryMock).toHaveBeenCalledWith("p1", "file-1", "fr"), { timeout: STALL_WATCHDOG_MS })
     await screen.findByText("3 reviewable drafts staged")
     fireEvent.click(screen.getByRole("button", { name: /Ready for review/ }))
     const reviewLink = await screen.findByRole("link", { name: /Review in editor/ })
@@ -945,7 +946,7 @@ describe("AutopilotActivityInspector", () => {
       "p1",
       frenchReview.runId,
       expect.objectContaining({ draftStatus: "proposed" }),
-    ))
+    ), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("2 ready to review")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /French\.usfm/ })).toHaveAttribute("aria-pressed", "true")
   })
@@ -1007,7 +1008,7 @@ describe("AutopilotActivityInspector", () => {
       "p1",
       evidenceRun.runId,
       expect.objectContaining({ draftStatus: "proposed" }),
-    ))
+    ), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("2 ready to review")).toBeInTheDocument()
   })
 

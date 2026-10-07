@@ -6,7 +6,7 @@
 // that does not exist — "lane does not exist", with no name and no "archived"
 // — which is the AQU-1462 / external prepare response. Do not invent a status.
 
-import { type ExternalLaneSpec, type ProjectLaneRecord } from '../../../db/shared/lanes'
+import { type AskedLane, type ExternalLaneSpec, type ProjectLaneRecord } from '../../../db/shared/lanes'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import type { AquillaDb } from '../../../db/shim/postgres'
@@ -112,6 +112,47 @@ function toCallerLane(lane: ProjectLaneRecord, settings: LaneLanguageSettings | 
     legacyTag: lane.legacyTag,
     archivedAt: lane.archivedAt,
   }
+}
+
+/**
+ * Resolution context plus target lanes this plan will insert.
+ *
+ * Those rows are not in the database yet. They count as visible target lanes
+ * for this check: the caller is creating them, and a ProjectSetup import has
+ * to be able to name one.
+ */
+export function laneContextWithPlanned(
+  ctx: LaneResolutionContext,
+  planned: readonly AskedLane[] | undefined,
+): LaneResolutionContext {
+  const extra: ProjectLaneRecord[] = []
+  const visibleIds = ctx.visibleIds === null ? null : new Set(ctx.visibleIds)
+  for (const lane of planned ?? []) {
+    if (lane.role !== 'target' || !lane.id) continue
+    extra.push({
+      id: lane.id,
+      role: 'target',
+      language: lane.language,
+      name: lane.name ?? null,
+      langCode: lane.langCode ?? null,
+      legacyTag: lane.legacyTag ?? null,
+      position: ctx.rows.length + extra.length,
+      archivedAt: null,
+    })
+    visibleIds?.add(lane.id)
+  }
+  if (extra.length === 0) return ctx
+  return { rows: [...ctx.rows, ...extra], settings: ctx.settings, visibleIds }
+}
+
+/** Target lanes this caller may write: visible, and not archived. */
+export function writableTargetLanes(ctx: LaneResolutionContext): ProjectLaneRecord[] {
+  const archived = archivedTagsFromSettings(ctx.settings)
+  return ctx.rows.filter((lane) => {
+    if (lane.role !== 'target') return false
+    if (ctx.visibleIds !== null && !ctx.visibleIds.has(lane.id)) return false
+    return !rowIsArchived(lane, archived)
+  })
 }
 
 /** Lanes this caller may see, in display order. A hidden lane is absent. */

@@ -598,8 +598,20 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
           }
           variants = []
           for (const [variantIndex, rawVariant] of rc.variants.entries()) {
-            if (!isPlainObject(rawVariant) || typeof rawVariant.laneId !== 'string' || typeof rawVariant.content !== 'string') {
+            if (!isPlainObject(rawVariant) || typeof rawVariant.content !== 'string') {
               issues.push({ index, message: `PlanImport.cells[${cellIndex}].variants[${variantIndex}] has invalid required fields` })
+              cellInvalid = true
+              return
+            }
+            // Omitted and '' are the same omission. A language tag is a string
+            // and falls through; prepare rejects it as a lane that does not exist.
+            if (typeof rawVariant.laneId !== 'string' || rawVariant.laneId === '') {
+              issues.push({
+                index,
+                message: laneIdRequiredMessage(
+                  `PlanImport.cells[${cellIndex}].variants[${variantIndex}].laneId`,
+                ),
+              })
               cellInvalid = true
               return
             }

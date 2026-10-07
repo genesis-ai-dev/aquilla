@@ -337,7 +337,9 @@ is absent, the same as one that does not exist.
    return `laneId` and omit rows on a lane the caller cannot see.
 4. **Import several lanes at once**: each `PlanImport` cell takes
    `variants: [{ laneId, languageTag?, content, contentHtml? }]`. `laneId` is
-   the lane's id. A bilingual parse passes the same id.
+   the lane's id. A bilingual parse passes the same id. A ProjectSetup import
+   that omits it lands on the single target lane that plan leaves; with none
+   or several, `laneId` is required.
 
 Preconditions and drift are lane-scoped — the same cell edited concurrently in two
 different lanes never triggers `plan_stale` across lanes. The self-discovery

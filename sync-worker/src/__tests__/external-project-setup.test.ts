@@ -110,6 +110,9 @@ afterEach(() => {
 
 /** USFM with a footnote, a character marker and a non-breaking space — the
  *  markers AQU-1283 strips. `cellsWithMarkup` must come back 0. */
+/** Two-column CSV from csv-bilingual.test.ts ("parses 2-column CSV without header"). */
+const BILINGUAL_CSV = "Hello world,Bonjour monde\nGoodbye,Au revoir"
+
 const USFM_ACTS = [
   '\\id ACT Test Bible',
   '\\h Acts',
@@ -899,5 +902,99 @@ describe('ProjectSetup — failure, resume and live policy re-check', () => {
       { index: 0, kind: 'settings', status: 'superseded' },
       { index: 1, kind: 'brief', status: 'applied' },
     ])
+  })
+})
+
+describe('ProjectSetup bilingual import lane id', () => {
+  async function storedPlan(changesetId: string): Promise<{
+    summary: {
+      plannedIds?: {
+        projectSetup?: { steps?: { kind: string; laneId?: string }[] }
+      }
+    }
+    commands: { plannedLanes?: { id?: string; role: string; legacyTag?: string; language?: string }[] }[]
+  }> {
+    const stored = await tdb.pg.query<{ summary: unknown; commands: unknown }>(
+      `SELECT summary, commands FROM changesets WHERE id = $1`,
+      [changesetId],
+    )
+    const row = stored.rows[0]
+    const summary = typeof row.summary === 'string' ? JSON.parse(row.summary) : row.summary
+    const commands = typeof row.commands === 'string' ? JSON.parse(row.commands) : row.commands
+    return { summary, commands }
+  }
+
+  it('stamps the one new target lane onto a bilingual import that omits laneId', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'pairs.csv', BILINGUAL_CSV)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [{ role: 'target', language: 'fr' }],
+        imports: [{ artifactId, fileName: 'Pairs', fileType: 'csv' }],
+      }),
+    )
+    expect(res.status).toBe(200)
+    const plan = await storedPlan(body.changeset.id)
+    const planned = plan.commands[0].plannedLanes?.find((lane) => lane.role === 'target')
+    expect(planned?.legacyTag).toBe('fr')
+    expect(planned?.language).toBe('fr')
+    const importStep = plan.summary.plannedIds?.projectSetup?.steps?.find((step) => step.kind === 'import')
+    expect(importStep?.laneId).toBe(planned?.id)
+
+    await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
+    const committed = await commit(env, caller.token, body.changeset.id)
+    expect(committed.res.status).toBe(200)
+
+    const lanes = await tdb.pg.query<{ id: string; legacy_tag: string; language: string }>(
+      `SELECT id, legacy_tag, language FROM lanes WHERE project_id = $1 AND role = 'target' ORDER BY legacy_tag`,
+      [PROJECT],
+    )
+    expect(lanes.rows).toEqual([{ id: planned?.id, legacy_tag: 'fr', language: 'fr' }])
+    const cells = await tdb.pg.query<{ side: string; value: string; lane_id: string; target_lang: string }>(
+      `SELECT side, value, lane_id, target_lang FROM cells WHERE project_id = $1 AND side = 'target' ORDER BY value`,
+      [PROJECT],
+    )
+    expect(cells.rows).toEqual([
+      { side: 'target', value: 'Au revoir', lane_id: planned?.id, target_lang: 'fr' },
+      { side: 'target', value: 'Bonjour monde', lane_id: planned?.id, target_lang: 'fr' },
+    ])
+  })
+
+  it('requires a lane id when a bilingual import could land on two target lanes', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'pairs.csv', BILINGUAL_CSV)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [
+          { role: 'target', language: 'fr' },
+          { role: 'target', language: 'sw' },
+        ],
+        imports: [{ artifactId, fileName: 'Pairs', fileType: 'csv' }],
+      }),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error?.message).toContain('GET /api/v1/external')
+  })
+
+  it('rejects a language tag used as a bilingual import laneId', async () => {
+    const env = makeEnv(tdb.db, bucket)
+    const caller = await memberToken(700)
+    const artifactId = await upload(env, caller.token, 'pairs.csv', BILINGUAL_CSV)
+    const { res, body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        lanes: [{ role: 'target', language: 'fr' }],
+        imports: [{ artifactId, fileName: 'Pairs', fileType: 'csv', laneId: 'fr' }],
+      }),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error?.message).toContain('lane does not exist')
   })
 })

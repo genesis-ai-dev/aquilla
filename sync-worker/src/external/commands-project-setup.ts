@@ -226,8 +226,8 @@ export function validateProjectSetupCommand(
         issues.push({ index, message: `ProjectSetup.imports[${i}].fileName must be a non-empty string` })
         return null
       }
-      if (raw.laneId !== undefined && !isNonEmptyString(raw.laneId)) {
-        issues.push({ index, message: `ProjectSetup.imports[${i}].laneId lane does not exist` })
+      if (raw.laneId !== undefined && typeof raw.laneId !== 'string') {
+        issues.push({ index, message: `ProjectSetup.imports[${i}].laneId must be a string when present` })
         return null
       }
       for (const key of ['fileType', 'sourceLanguage', 'targetLanguage'] as const) {

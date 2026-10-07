@@ -12,7 +12,13 @@ import { resolveProjectTextDirection } from '../../../db/shared/text-direction'
 import { askedLanesFromSpecs, listProjectLanes } from '../../../db/shared/lanes'
 import { laneLanguage } from '../../../src/lib/lanes/lane-display'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
-import { laneContextFrom, resolveTargetLaneId } from './external-lane'
+import {
+  laneContextFrom,
+  laneContextWithPlanned,
+  laneIdRequiredMessage,
+  resolveTargetLaneId,
+  writableTargetLanes,
+} from './external-lane'
 import { errorResponse } from './errors'
 import { stageAndRespond } from './stage'
 import { parseArtifactToCells } from './import-parse-core'
@@ -295,7 +301,10 @@ export async function prepareProjectSetup(
     Number(cred.userId),
     role.level,
   )
-  const laneCtx = laneContextFrom(current.lanes ?? [], current.settings, visibleLaneIds)
+  const laneCtx = laneContextWithPlanned(
+    laneContextFrom(current.lanes ?? [], current.settings, visibleLaneIds),
+    cmd.plannedLanes,
+  )
   const planNames = new Set<string>()
   let sourceCellsAdded = 0
   let filesCreated = 0
@@ -347,10 +356,11 @@ export async function prepareProjectSetup(
       )
     }
 
+    const callerLaneId = spec.laneId && spec.laneId.length > 0 ? spec.laneId : undefined
     const parsed = await parseArtifactToCells(env, urlProjectId, spec.artifactId, {
       ...(spec.fileType !== undefined ? { fileType: spec.fileType } : {}),
       ...(spec.resultIndex !== undefined ? { resultIndex: spec.resultIndex } : {}),
-      ...(spec.laneId !== undefined ? { laneId: spec.laneId } : {}),
+      ...(callerLaneId !== undefined ? { laneId: callerLaneId } : { deferMissingLaneId: true }),
       requireSingleResult: true,
     })
     if (!parsed.ok) return parsed.response
@@ -364,9 +374,9 @@ export async function prepareProjectSetup(
         { cells: cells.length, maxCells: PLAN_IMPORT_MAX_CELLS },
       )
     }
-    const laneProblem = variantLaneProblem(cells, laneCtx)
-    if (laneProblem !== null) {
-      return fieldError('validation_failed', `imports[${i}].laneId`, laneProblem)
+    const bound = bindSetupImportLanes(cells, laneCtx, `imports[${i}].laneId`)
+    if (!bound.ok) {
+      return fieldError('validation_failed', `imports[${i}].laneId`, bound.message)
     }
 
     const resolvedSource = spec.sourceTextDirection
@@ -395,7 +405,7 @@ export async function prepareProjectSetup(
       ...(spec.targetLanguage !== undefined ? { targetLanguage: spec.targetLanguage } : {}),
       ...(spec.sourceTextDirection !== undefined ? { sourceTextDirection: spec.sourceTextDirection } : {}),
       ...(spec.targetTextDirection !== undefined ? { targetTextDirection: spec.targetTextDirection } : {}),
-      ...(spec.laneId !== undefined ? { laneId: spec.laneId } : {}),
+      ...(bound.laneId !== undefined ? { laneId: bound.laneId } : {}),
       cellCount: cells.length,
       // Minted per import (W1-B): a crash-retry re-posts IDENTICAL ids, so the
       // /events idempotency layer dedupes instead of creating a second file.
@@ -474,18 +484,38 @@ function languageForSetupSide(
   return language.trim() === '' ? null : language
 }
 
-/** The first variant whose lane id the caller may not write, or null. */
-function variantLaneProblem(
+/**
+ * Bind each translation to a target lane id.
+ *
+ * Omitted and `''` (the parse placeholder) are an omission. Inside ProjectSetup
+ * that omission uses the one target lane this plan leaves — an existing
+ * visible non-archived target, or a lane in `plannedLanes`. Zero or several
+ * is the required-id 400. A caller-supplied id must be one of those lanes.
+ * A language tag is not an id.
+ */
+function bindSetupImportLanes(
   cells: readonly PlanImportCell[],
   ctx: Parameters<typeof resolveTargetLaneId>[2],
-): string | null {
+  where: string,
+): { ok: true; laneId?: string } | { ok: false; message: string } {
+  const targets = writableTargetLanes(ctx)
+  const sole = targets.length === 1 ? targets[0] : null
+  let laneId: string | undefined
   for (const cell of cells) {
     for (const variant of cell.variants ?? []) {
-      const resolved = resolveTargetLaneId(variant.laneId, 'laneId', ctx)
-      if (!resolved.ok) return resolved.message
+      if (variant.laneId === undefined || variant.laneId === '') {
+        if (!sole) return { ok: false, message: laneIdRequiredMessage(where) }
+        variant.laneId = sole.id
+        laneId = sole.id
+        continue
+      }
+      const resolved = resolveTargetLaneId(variant.laneId, where, ctx)
+      if (!resolved.ok) return { ok: false, message: resolved.message }
+      variant.laneId = resolved.lane.id
+      laneId = resolved.lane.id
     }
   }
-  return null
+  return { ok: true, ...(laneId !== undefined ? { laneId } : {}) }
 }
 
 /** One receipt line for the plan's resolved import directions: the shared pair

@@ -724,6 +724,34 @@ describe('PlanImport — commit', () => {
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
+  it('treats an omitted or blank variant laneId as a missing id, not a language', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+       VALUES ('lane-fr', $1, 'target', 'fr', 'fr', 1)`,
+      [PROJECT],
+    )
+    for (const laneId of ['', undefined] as const) {
+      const response = (await handleExternalChangesetsRequest(
+        prepareReq(token, {
+          kind: 'PlanImport',
+          fileName: 'pairs.csv',
+          fileType: 'csv',
+          cells: [{
+            content: 'Hello world',
+            variants: [{ ...(laneId !== undefined ? { laneId } : {}), content: 'Bonjour monde' }],
+          }],
+        }),
+        env,
+      ))!
+      expect(response.status).toBe(400)
+      const body = (await response.json()) as { error: { message: string } }
+      expect(body.error.message).toContain('GET /api/v1/external')
+      expect(body.error.message).not.toContain('lane does not exist')
+    }
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('rejects a PlanImport whose artifactId does not exist in the project', async () => {
     const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
     const res = (await handleExternalChangesetsRequest(

@@ -67,7 +67,7 @@ import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds }
 import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
-import { laneContextFrom, resolveTargetLaneId } from './external-lane'
+import { laneContextFrom, laneIdRequiredMessage, resolveTargetLaneId } from './external-lane'
 import { languagesEqual } from '../../../src/lib/language-normalize'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
@@ -880,6 +880,11 @@ async function preparePlanImport(
     const cellLanes = new Set<string>()
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
       const where = `PlanImport.cells[${cellIndex}].variants[${variantIndex}].laneId`
+      // PlanImport does not create lanes. '' is the parse placeholder, an
+      // omission, not the blank bridge and not a language match.
+      if (variant.laneId === undefined || variant.laneId === '') {
+        return errorResponse('validation_failed', laneIdRequiredMessage(where))
+      }
       const resolved = resolveTargetLaneId(variant.laneId, where, laneCtx)
       if (!resolved.ok) return errorResponse('validation_failed', resolved.message)
       if (cellLanes.has(resolved.lane.id)) {

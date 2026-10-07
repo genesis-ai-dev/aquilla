@@ -215,7 +215,7 @@ function apiMap(): Record<string, unknown> {
         `1. Read the lanes: GET ${EXTERNAL_ROOT}/projects/:projectId → lanes: [{ id, name, language, role }]. Create them with CreateProject or ProjectSetup (lanes: [{ role, language, name?, code? }]). Do not write sourceLanguage, targetLanguage, targetLanes, or archivedLanes.`,
         '2. Write per lane: "laneId" on SetTranslation, DraftCells, PlanImport variants, SplitCell targetOffsets, and the EmitEvents kinds that address one cell is that id. It is required. An unknown id, a tag, or a lane you cannot see is validation_failed with "lane does not exist".',
         `3. Read per lane: GET .../files/:fileId/cells?lane=<id>, export, quality, and term consistency use the same ?lane=<id>, and prompt-preview uses ?targetLang=<id>. The value is the lane id. Cells, quality, and term consistency come back with laneId.`,
-        '4. Importing a file can seed a lane: each PlanImport cell takes "variants": [{ "laneId": "<id>", "content": "..." }]. A bilingual parse passes the same id as laneId.',
+        '4. Importing a file can seed a lane: each PlanImport cell takes "variants": [{ "laneId": "<id>", "content": "..." }]. A bilingual parse passes the same id as laneId. A ProjectSetup import that omits it lands on the single target lane that plan leaves; with none or several, laneId is required.',
       ],
     },
     mcp: {

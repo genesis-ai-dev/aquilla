@@ -323,8 +323,14 @@ export interface ParseArtifactOptions {
    *  failure mode this guards. */
   requireSingleResult?: boolean
   /** Lane id for translations the artifact already carries. Required when any
-   *  string has a translation. */
+   *  string has a translation, unless {@link deferMissingLaneId} is set. */
   laneId?: string
+  /**
+   * ProjectSetup only. Parse a bilingual artifact that omitted laneId and
+   * stamp `''` on the variants, so the plan can bind the single target lane
+   * it is about to create. Other callers still get the required-id 400.
+   */
+  deferMissingLaneId?: boolean
 }
 
 /**
@@ -434,7 +440,7 @@ export async function parseArtifactToCells(
 
   const chosen = results[opts.resultIndex ?? 0]
   const hasTranslation = chosen.strings.some((s) => (s.translated ?? '').trim() !== '')
-  if (hasTranslation && !opts.laneId) {
+  if (hasTranslation && !opts.laneId && !opts.deferMissingLaneId) {
     return {
       ok: false,
       response: errorResponse('validation_failed', laneIdRequiredMessage('laneId')),

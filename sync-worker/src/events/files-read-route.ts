@@ -20,8 +20,8 @@ import { verifyTokenForProject, type SyncTokenClaims } from "../auth"
 import { resolveCorpusMarker } from "./corpus-marker"
 import { usableSortIndex } from "./sort-index"
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
-import { sourceLaneIdSql, targetLaneIdSql } from "../../../db/shared/lane-sql"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
+import { sourceLaneIdSql, targetLaneIdSql } from "../../../db/shared/lane-sql"
 import { notHiddenFileSql } from "../../../db/shared/counted-files"
 import { legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
 import { visibleLanesForRead } from "./lane-read-wall"
@@ -306,17 +306,24 @@ export async function handleFilesReadRequest(
   const joins =
     // AQU-538: file_section_progress now materializes one row per lane. The
     // files list is a cross-project legacy surface and takes no `?lane=`, so
-    // its FILLED / APPROVED counters stay pinned to the default lane so that
-    // N=1 stays byte-identical and an N>1 file does not fan out into one
-    // listing row per lane. (Showing the ACTIVE lane's counters here is
-    // AQU-1601's, once the surface learns which lane that is.)
+    // its FILLED / APPROVED counters stay pinned to one lane so that N=1 stays
+    // byte-identical and an N>1 file does not fan out into one listing row per
+    // lane. (Showing the ACTIVE lane's counters here is AQU-1601's, once the
+    // surface learns which lane that is.)
     //
     // AQU-1599: pinned by LANE ID, not `target_lang = ''`. The source lane's
     // row carries '' there too — its `legacy_tag` is NULL — so the old pin
     // matched two rows per file and summed the default lane's translations
-    // onto the source lane's empty ones. Neither join below adds a bind: each
-    // subquery reads `f.project_id`, and the default lane's tag is a literal.
-    ` LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.lane_id = ${targetLaneIdSql("f.project_id", "''")}` +
+    // onto the source lane's empty ones.
+    //
+    // AQU-1594: which lane. A project that still has the '' bridge stays
+    // pinned to it. A project whose only target lane is tagged with its
+    // language uses that lane. Several tagged lanes and no bridge match nothing
+    // here, so the file is not repeated once per lane. Neither join below adds
+    // a bind: each subquery reads `f.project_id`, and the bridge's tag is a
+    // literal.
+    ` LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.lane_id = COALESCE(${targetLaneIdSql("f.project_id", "''")}, ` +
+    "(SELECT CASE WHEN COUNT(*) = 1 THEN MIN(l.id) END FROM public.lanes l WHERE l.project_id = f.project_id AND l.role = 'target'))" +
     // The lane-independent half of the same row set: the source lane's.
     ` LEFT JOIN file_section_progress ps ON ps.project_id = f.project_id AND ps.file_id = f.id AND ps.scope = 'file' AND ps.section_key = '' AND ps.lane_id = ${sourceLaneIdSql("f.project_id")}` +
     " LEFT JOIN thr ON true" +

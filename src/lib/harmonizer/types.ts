@@ -66,6 +66,12 @@ export interface HarmonizerFinding {
   confidence: number
 }
 
+/** Overrides for an eval's threshold sweep. Production passes nothing and each
+ *  check uses its own default. */
+export interface FindingOptions {
+  minProbability?: number
+}
+
 export interface HarmonyCheck<Plan> {
   id: string
   metafunction: Metafunction
@@ -78,5 +84,6 @@ export interface HarmonyCheck<Plan> {
     cells: readonly HarmonizerCell[],
     answers: Record<string, unknown>,
     prefix: string,
+    opts?: FindingOptions,
   ): HarmonizerFinding[]
 }

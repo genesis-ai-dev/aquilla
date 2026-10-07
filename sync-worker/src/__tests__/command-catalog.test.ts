@@ -55,7 +55,7 @@ describe('command catalog — invariants', () => {
 
   it('every catalog kind is accepted by validateCommands (vocabulary parity)', () => {
     const minimal: Record<string, unknown> = {
-      SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
+      SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'lane0001', value: 'v' },
       LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a' },
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
       CreateOrg: { kind: 'CreateOrg', name: 'O' },
@@ -63,7 +63,7 @@ describe('command catalog — invariants', () => {
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
-      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'] },
+      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'], laneId: 'lane0001' },
       SetSource: { kind: 'SetSource', fileId: 'f', cellId: 'c', value: 'v' },
       SetTranscription: { kind: 'SetTranscription', fileId: 'f', cellId: 'c', transcription: 't' },
       SetTiming: { kind: 'SetTiming', fileId: 'f', cellId: 'c', startMs: 0, endMs: 1 },
@@ -77,7 +77,7 @@ describe('command catalog — invariants', () => {
       UnarchiveProject: { kind: 'UnarchiveProject', projectId: 'p' },
       SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
       RegenerateBriefSummary: { kind: 'RegenerateBriefSummary', projectId: 'p', ifMatchVersion: 0 },
-      ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', settings: { targetLanguage: 'fr' } },
+      ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', lanes: [{ role: 'target', language: 'fr' }] },
       AddOrgMember: { kind: 'AddOrgMember', orgId: 1, username: 'u', role: 400 },
       SetOrgRole: { kind: 'SetOrgRole', orgId: 1, username: 'u', role: 400 },
       RemoveOrgMember: { kind: 'RemoveOrgMember', orgId: 1, username: 'u' },

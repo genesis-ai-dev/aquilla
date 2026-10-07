@@ -64,6 +64,12 @@ const BANNED_FUNCTIONS = [
   "table_to_xml", "table_to_xml_and_xmlschema", "table_to_xmlschema",
   "cursor_to_xml", "cursor_to_xmlschema", "schema_to_xml", "schema_to_xml_and_xmlschema",
   "database_to_xml", "database_to_xml_and_xmlschema",
+  // ts_stat('<sql>') also executes a query passed as a string (same masking
+  // blind spot). Advisory locks are cross-session side effects a READ ONLY
+  // transaction does not block; pg_stat_file/pg_ls_* probe the server FS.
+  "ts_stat", "pg_advisory_lock", "pg_advisory_xact_lock", "pg_try_advisory_lock",
+  "pg_try_advisory_xact_lock", "pg_advisory_lock_shared", "pg_advisory_xact_lock_shared",
+  "pg_stat_file", "pg_ls_logdir", "pg_ls_waldir", "pg_ls_tmpdir", "pg_ls_archive_statusdir",
 ] as const
 
 // Columns with no legitimate read use through this tool, banned outright

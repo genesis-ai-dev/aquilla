@@ -1122,3 +1122,61 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
     expect(bad.status).toBe(400)
   })
 })
+
+describe('file progress follows the lanes that exist (AQU-1594)', () => {
+  const P = 'proj-sw-progress'
+  const F = 'file-sw-progress'
+
+  async function recompute(lanes: Array<Record<string, unknown>>) {
+    const { db, pg } = await makeTestDb({
+      files: [{ id: F, project_id: P, name: 'Genesis', event_id: 'file-event' }],
+      lanes,
+      cells: [{
+        project_id: P, file_id: F, cell_id: 'c1', side: 'source',
+        value: 'In the beginning', canonical_ref: 'GEN 1:1', event_id: 'source-c1',
+        last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
+      }],
+    })
+    // Production has no lane-fill trigger. A manufactured '' row must fail here,
+    // not get a lane minted on the way in.
+    await pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    return pg.query<{
+      scope: string
+      target_lang: string
+      lane_id: string
+      total_count: number
+      filled_count: number
+    }>(
+      `SELECT scope, target_lang, lane_id, total_count, filled_count
+         FROM file_section_progress
+        WHERE project_id = $1 AND scope = 'file'
+        ORDER BY target_lang, lane_id`,
+      [P],
+    )
+  }
+
+  it('writes the sw lane, with a lane id, and does not insert a blank tag', async () => {
+    const { rows } = await recompute([
+      { id: 'srcsw001', project_id: P, role: 'source', legacy_tag: null },
+      { id: 'tgtsw001', project_id: P, role: 'target', language: 'sw', legacy_tag: 'sw' },
+    ])
+    // The source lane's own row (AQU-1599) carries '' in target_lang because its
+    // legacy_tag is NULL. It is the only '' row: no blank target lane is made up.
+    expect(rows).toEqual([
+      { scope: 'file', target_lang: '', lane_id: 'srcsw001', total_count: 1, filled_count: 0 },
+      { scope: 'file', target_lang: 'sw', lane_id: 'tgtsw001', total_count: 1, filled_count: 0 },
+    ])
+  })
+
+  it('still writes the blank tag when that lane exists', async () => {
+    const { rows } = await recompute([
+      { id: 'srcblank', project_id: P, role: 'source', legacy_tag: null },
+      { id: 'tgtblank', project_id: P, role: 'target', language: 'sw', legacy_tag: '' },
+    ])
+    expect(rows).toEqual([
+      { scope: 'file', target_lang: '', lane_id: 'srcblank', total_count: 1, filled_count: 0 },
+      { scope: 'file', target_lang: '', lane_id: 'tgtblank', total_count: 1, filled_count: 0 },
+    ])
+  })
+})

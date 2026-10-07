@@ -211,6 +211,18 @@ export async function linkProjectSource(
      * `fetchLinkFileMatches`.
      */
     replaceFiles?: Array<{ upstreamFileId: string; fileId: string }>
+    /**
+     * AQU-1075: which settings this project copies from the upstream. Omitted
+     * fields use the server defaults. AI instructions default to off.
+     */
+    inherit?: {
+      translationBrief?: boolean
+      knowledgeDocs?: boolean
+      workflowPolicy?: boolean
+      livingMemory?: boolean
+      smartQuotes?: boolean
+      systemPrompt?: boolean
+    }
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<LinkProjectSourceResult> {

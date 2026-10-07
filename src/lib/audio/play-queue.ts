@@ -210,15 +210,29 @@ export interface QueueProgress {
   rate: number
   /** 0..1 volume (persists across tracks). */
   volume: number
+  /**
+   * AQU-1747: true when `currentTime` is a second on the AUDIO-FIRST
+   * PROGRAMME clock — the whole file's verses laid end to end, which is the
+   * x-axis a Free-timing timeline draws. It is the audio-first counterpart to
+   * `queueClockIsFileTime`: between them a consumer can tell a position it may
+   * paint from a per-take clock that restarts at 0 and means nothing outside
+   * its own clip. Derived in one place (`progOwnsProgressClock`) rather than
+   * set per call site, so it cannot drift from whichever path wrote the value.
+   */
+  programmeClock: boolean
 }
 
-let progress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+let progress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
 const progressListeners = new Set<() => void>()
 
 function notifyProgress(): void { for (const l of progressListeners) l() }
 
 function setProgress(patch: Partial<QueueProgress>): void {
-  progress = { ...progress, ...patch }
+  // The clock domain is re-derived on EVERY publish rather than passed in by
+  // each of the ~15 writers: the programme and dubbing paths both write
+  // `currentTime`, and a writer that forgot the tag would silently hand a
+  // per-clip second to a consumer painting a programme position. (AQU-1747)
+  progress = { ...progress, ...patch, programmeClock: progOwnsProgressClock() }
   notifyProgress()
 }
 
@@ -668,6 +682,30 @@ async function resolveAudioSrc(
 /** True while the audio-first transport is the one running the show. */
 function progRunning(): boolean {
   return timingMode === "audioFirst" && (state.kind === "playing" || state.kind === "loading")
+}
+
+/**
+ * Is `progress.currentTime` a PROGRAMME second? (AQU-1747)
+ *
+ * `progIndex >= 0` is already this module's own test for "the programme
+ * transport owns playback" (see pauseQueue / resumeQueue / the skips):
+ * `progEngageForContext` clears it when a context falls through to the dubbing
+ * path, so a take playing on its own per-take clock reads false here and no
+ * consumer can mistake that 0 for the left edge of the file.
+ *
+ * The snapshot exclusion is the other half, and it is not theoretical: a
+ * deliberate one-cell context ("play just this line") builds a one-slot
+ * programme that starts at 0, so publishing its clock as a programme position
+ * would yank a file-wide playhead to the left edge — exactly the bug the
+ * per-take guard was added for, arriving by another route.
+ */
+function progOwnsProgressClock(): boolean {
+  return (
+    timingMode === "audioFirst" &&
+    programme != null &&
+    progIndex >= 0 &&
+    activeContext?.snapshot !== true
+  )
 }
 
 function progCurrentSlot(): ProgrammeSlot | null {

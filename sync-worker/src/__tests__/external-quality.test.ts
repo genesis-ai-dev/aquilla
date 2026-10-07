@@ -99,6 +99,11 @@ async function seedProject(testDb: TestDb) {
      VALUES ('file-x', 'proj-a', 'Titus', 'evt-fx', 4, 3, 1), ('file-y', 'proj-a', 'Philemon', 'evt-fy', 1, 0, 0)`,
   )
 
+  await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+  )
+
   // file-x source cells + their targets.
   const cells: [string, string, string, string, number][] = [
     // cellId, canonicalRef, source, target, validated
@@ -175,7 +180,7 @@ interface QualityBody {
 interface TermsBody {
   projectId: string
   fileId: string | null
-  lane?: string
+  laneId?: string
   scannedCells: number
   conceptCount: number
   flaggedCellCount: number
@@ -253,7 +258,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("404s an unknown fileId rather than silently reporting the whole project", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality?fileId=nope", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1&fileId=nope", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(404)
@@ -268,7 +273,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("per-file health equals the internal health-rollup route's value", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(200)
@@ -294,7 +299,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("scoping to one file matches that file's own rollup", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality?fileId=file-x", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1&fileId=file-x", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as QualityBody
@@ -313,7 +318,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("coverage counts and percentages equal the internal progress route's", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality?fileId=file-x", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1&fileId=file-x", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as QualityBody
@@ -342,7 +347,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("a file with no projection row still reports coverage from the files counters", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality?fileId=file-y", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1&fileId=file-y", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as QualityBody
@@ -354,7 +359,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("project coverage sums the files in scope", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/quality", tokenA),
+      req("/api/v1/external/projects/proj-a/quality?lane=deflane1", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as QualityBody
@@ -371,7 +376,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("lists the drifting term with the cells where each variant occurs", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1&fileId=file-x", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(200)
@@ -407,13 +412,13 @@ describe("external quality reads (AQU-1231)", () => {
       `UPDATE cells SET value = 'gracia y paz' WHERE project_id = 'proj-a' AND file_id = 'file-x' AND cell_id = 'c2' AND side = 'target'`,
     )
     const all = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1&fileId=file-x", tokenA),
       env(testDb),
     )
     expect(((await all!.json()) as TermsBody).data).toHaveLength(1)
 
     const drift = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x&onlyDrift=1", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1&fileId=file-x&onlyDrift=1", tokenA),
       env(testDb),
     )
     const body = (await drift!.json()) as TermsBody
@@ -423,7 +428,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("scans the whole project when no fileId is given", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1", tokenA),
       env(testDb),
     )
     const body = (await res!.json()) as TermsBody
@@ -463,12 +468,12 @@ describe("external quality reads (AQU-1231)", () => {
     )
 
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x&lane=es", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?fileId=file-x&lane=lane-tgt-es", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(200)
     const body = (await res!.json()) as TermsBody
-    expect(body.lane).toBe("es")
+    expect(body.laneId).toBe("lane-tgt-es")
     const grace = body.data[0]
     expect(grace.conceptId).toBe("concept-grace")
     // Default-lane c1–c3 and the fr-only row have no es-lane target, so they
@@ -604,7 +609,7 @@ describe("external quality reads (AQU-1231)", () => {
 
   it("/terms does not shadow /terms/consistency", async () => {
     const res = await handleExternalQualityRequest(
-      req("/api/v1/external/projects/proj-a/terms/consistency", tokenA),
+      req("/api/v1/external/projects/proj-a/terms/consistency?lane=deflane1", tokenA),
       env(testDb),
     )
     expect(res?.status).toBe(200)

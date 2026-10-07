@@ -34,6 +34,52 @@ describe("laneLanguage", () => {
   it("is empty for a lane that carries neither", () => {
     expect(laneLanguage({ language: "", name: null })).toBe("")
   })
+
+  it("does not use an 8-hex lane id as a language (AQU-1593)", () => {
+    expect(
+      laneLanguage(
+        { role: "target", language: null, name: null, langCode: null },
+        { role: "target", legacyTag: "a3f09c1e" },
+      ),
+    ).toBe("")
+    expect(
+      laneLanguage(
+        { role: "target", language: null, name: "a3f09c1e", langCode: "a3f09c1e" },
+        { role: "target", legacyTag: "a3f09c1e", settings: { targetLanguage: "Spanish" } },
+      ),
+    ).toBe("")
+  })
+
+  it("falls back to settings for the former default lane, then name, and never overrides a typed language (AQU-1593)", () => {
+    const settings = { sourceLanguage: "English", targetLanguage: "Spanish" }
+    expect(
+      laneLanguage(
+        { role: "target", language: null, name: null },
+        { settings, role: "target", legacyTag: "" },
+      ),
+    ).toBe("Spanish")
+    expect(
+      laneLanguage(
+        { role: "target", language: "French", name: null },
+        { settings, role: "target", legacyTag: "" },
+      ),
+    ).toBe("French")
+  })
+
+  it("falls back to settings.sourceLanguage for an unbackfilled source lane (AQU-1593)", () => {
+    expect(
+      laneLanguage(
+        { role: "source", language: null, name: "Source" },
+        { settings: { sourceLanguage: "Gom" }, role: "source", legacyTag: null },
+      ),
+    ).toBe("Gom")
+    expect(
+      laneLanguage(
+        { role: "source", language: "Koine Greek", name: null },
+        { settings: { sourceLanguage: "English" }, role: "source", legacyTag: null },
+      ),
+    ).toBe("Koine Greek")
+  })
 })
 
 describe("laneDisplayName", () => {

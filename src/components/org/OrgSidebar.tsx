@@ -1,6 +1,6 @@
 import { startTransition, type ComponentProps, type MouseEvent } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
-import { KeyRound, type LucideIcon } from "lucide-react"
+import { KeyRound, ScrollText, type LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
@@ -150,6 +150,13 @@ export function OrgSidebar() {
           <OrgNavLink to={orgPath(activeOrgId, "/access")} className={link}>
             <NavIcon icon={KeyRound} />
             {t("org.access.page.title")}
+          </OrgNavLink>
+        )}
+        {/* AQU-1072: owners and maintainers. Platform operators resolve as owner. */}
+        {activeOrgId != null && (isAdmin || (isMemberOrg && isPlatformAdmin)) && (
+          <OrgNavLink to={orgPath(activeOrgId, "/access-audit")} className={link}>
+            <NavIcon icon={ScrollText} />
+            {t("org.accessAudit.title")}
           </OrgNavLink>
         )}
         {isAdmin && activeOrgId != null && (

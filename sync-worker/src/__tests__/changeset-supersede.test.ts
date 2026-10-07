@@ -98,6 +98,11 @@ beforeEach(async () => {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1), ('eslane01', $1, 'target', 'es', 2)`,
+    [PROJECT],
+  )
 })
 
 describe('SetTranslation — drift that IS the plan', () => {
@@ -105,7 +110,7 @@ describe('SetTranslation — drift that IS the plan', () => {
     const env = makeEnv(tdb.db)
     const alice = await token(1, 'alice', 600)
     const { body: prep } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, laneId: 'deflane1', value: 'hola' }],
     }))
     const id = (prep.changeset as { id: string }).id
 
@@ -136,7 +141,7 @@ describe('SetTranslation — drift that IS the plan', () => {
     const env = makeEnv(tdb.db)
     const alice = await token(1, 'alice', 600)
     const { body: prep } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, laneId: 'deflane1', value: 'hola' }],
     }))
     const id = (prep.changeset as { id: string }).id
 
@@ -158,7 +163,7 @@ describe('SetTranslation — drift that IS the plan', () => {
       [PROJECT, JSON.stringify({ targetLanes: ['es'] })],
     )
     const { body: prep } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'hola', laneId: 'es' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'hola', laneId: 'eslane01' }],
     }))
     const id = (prep.changeset as { id: string }).id
 
@@ -180,7 +185,7 @@ describe('SetTranslation — drift that IS the plan', () => {
     const env = makeEnv(tdb.db)
     const alice = await token(1, 'alice', 600)
     const { body: prep } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, laneId: 'deflane1', value: 'hola' }],
     }))
     const id = (prep.changeset as { id: string }).id
 
@@ -207,7 +212,7 @@ describe('EmitEvents — validation a human already gave', () => {
 
   async function stageValidate(env: ReturnType<typeof makeEnv>, alice: string): Promise<string> {
     const { body } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'EmitEvents', events: [{ kind: 'cell.validate', fileId: FILE, cellId: CELL }] }],
+      commands: [{ kind: 'EmitEvents', events: [{ kind: 'cell.validate', fileId: FILE, cellId: CELL, laneId: 'deflane1' }] }],
     }))
     return (body.changeset as { id: string }).id
   }
@@ -258,7 +263,7 @@ describe('PatchSettings — a settings write a human beat the agent to', () => {
   ): Promise<{ id: string; digest: string }> {
     const { body } = await call(env, req(alice, '', 'POST', {
       commands: [
-        { kind: 'PatchSettings', projectId: PROJECT, ops: [{ key: 'targetLanes', value: ['es'] }], ifMatchVersion: 0 },
+        { kind: 'PatchSettings', projectId: PROJECT, ops: [{ key: 'systemPrompt', value: 'Be plain.' }], ifMatchVersion: 0 },
       ],
     }))
     return { id: (body.changeset as { id: string }).id, digest: body.digest as string }
@@ -276,7 +281,7 @@ describe('PatchSettings — a settings write a human beat the agent to', () => {
     const env = makeEnv(tdb.db)
     const alice = await token(1, 'alice', 600)
     const { id, digest } = await stagePatch(env, alice)
-    await humanWritesSettings({ targetLanes: ['es'] })
+    await humanWritesSettings({ systemPrompt: 'Be plain.' })
     await insertConfirmation(tdb.db, id, digest)
 
     const { res, body } = await call(env, req(alice, `/${id}/commit`, 'POST'))
@@ -290,7 +295,7 @@ describe('PatchSettings — a settings write a human beat the agent to', () => {
     const env = makeEnv(tdb.db)
     const alice = await token(1, 'alice', 600)
     const { id, digest } = await stagePatch(env, alice)
-    await humanWritesSettings({ targetLanes: ['pt'] })
+    await humanWritesSettings({ systemPrompt: 'Be ornate.' })
     await insertConfirmation(tdb.db, id, digest)
 
     const { body } = await call(env, req(alice, `/${id}/commit`, 'POST'))
@@ -304,7 +309,7 @@ describe('superseded is its own status', () => {
     const env = makeEnv(tdb.db)
     const alice = await token(1, 'alice', 600)
     const { body: prep } = await call(env, req(alice, '', 'POST', {
-      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'hola' }],
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: CELL, laneId: 'deflane1', value: 'hola' }],
     }))
     const id = (prep.changeset as { id: string }).id
     await humanCommitsTarget(tdb, 'hola', 'human-evt-1')

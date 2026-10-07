@@ -130,6 +130,11 @@ export const common = defineNamespace({
     "common.role.denialUnknown": "You need at least {minRole} access to do this.",
     "common.role.denialKnown":
       "{currentRole} cannot perform this action — you need at least {minRole} access.",
+
+    // AQU-1411: the anonymous half of the user chip. The username, when there
+    // is one, is data and is not catalogued. The id is never part of this label.
+    "common.userChip.anonymous": "User",
+    "common.userChip.idTooltip": "User ID {id}",
   },
   context: {
     _context: {
@@ -748,6 +753,24 @@ export const common = defineNamespace({
           currentRole: "The caller's current role name, already localized and pluralized (e.g. 'Viewers').",
           minRole: "The minimum role name required, already localized (e.g. 'Contributor').",
         },
+      },
+      "common.userChip.anonymous": {
+        description:
+          "Label on the person chip when that account has no username. It is the " +
+          "same word for every such person — they are told apart by the shape and " +
+          "color of the mark beside it, not by a made-up name. Do not insert a " +
+          "personal name, an email, or the user id.",
+        maxLength: 16,
+      },
+      "common.userChip.idTooltip": {
+        description:
+          "Tooltip on the person chip revealing the account's user id, for support. " +
+          "The id is not shown as the chip's label. '{id}' is the raw id and is not " +
+          "translated.",
+        placeholders: {
+          id: "The account's user id, exactly as stored. Not a name.",
+        },
+        maxLength: 40,
       },
     },
   },

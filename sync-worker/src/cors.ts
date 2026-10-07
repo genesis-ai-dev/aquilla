@@ -57,6 +57,11 @@ const CORS_HEADERS: Record<string, string> = {
     // (AQU-1631).
     "X-Artifact-Target-Lang",
     "X-Artifact-Member-Path",
+    // X-Doc-Name: the knowledge-base (reference document) upload's filename
+    // header, percent-encoded (AQU-1762). Same header the identity host already
+    // allows for the in-app upload, so a browser-based agent console can reach
+    // POST /api/v1/external/projects/:id/knowledge too.
+    "X-Doc-Name",
     "X-Artifact-Profile-Id",
     "X-Artifact-Profile-Version",
     "X-Artifact-Fidelity",

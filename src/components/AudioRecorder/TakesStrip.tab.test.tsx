@@ -36,6 +36,7 @@ vi.mock("@/lib/audio/peaks-loader", async (orig) => ({
 }))
 
 import { TakesStrip } from "./TakesStrip"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const session = { jwt: "jwt", username: "dir" } as never
 const project = { id: "p1", name: "P", audioMediaStrategy: "lazy", files: [] } as unknown as ProjectRecord
@@ -120,7 +121,7 @@ describe("TakesStrip — the Recording tab's list of other takes", () => {
   it("uses a take the same way the recorder does — a generated one empties the recording slot", async () => {
     draw()
     fireEvent.click(screen.getByTestId(`take-row-${GEN.audioId}`).querySelector('button[aria-label="Use this take"]')!)
-    await vi.waitFor(() => expect(emitDeselect).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitDeselect).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     expect(emitSelect.mock.calls[0][0]).toMatchObject({ audioId: GEN.audioId, slot: "generatedVoice" })
     expect(emitDeselect.mock.calls[0][0]).toMatchObject({ slot: "recording" })
   })

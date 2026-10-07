@@ -554,6 +554,7 @@ export function OrgProjectsDataTable({
               }
               return (
                 <UsernameWithAvatar
+                  userId={row.original.pm?.id}
                   username={username}
                   size="xs"
                   nameClassName="font-normal"
@@ -705,6 +706,7 @@ export function OrgProjectsDataTable({
                 expanded.has(p.id) ? (
                   <ProjectLaneSubRows
                     projectId={p.id}
+                    projectName={p.name}
                     lanes={displayLanes(p)}
                     defaultLaneLabel={resolveDefaultLaneLabel(p)}
                     colSpan={colSpan}

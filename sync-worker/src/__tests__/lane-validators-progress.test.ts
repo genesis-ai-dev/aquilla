@@ -301,4 +301,30 @@ describe('per-lane file/section progress', () => {
       ['GEN 1', 'swh', 2, 1],
     ])
   })
+
+  it('materializes one row set per lane that exists, sharing the source denominator', async () => {
+    // Two source cells; fr fills both, swh fills one. No '' lane, so no '' row.
+    await applyEvents(t.db, [
+      ev({ kind: 'source.cell.create', id: 'src-1', payload: { cellId: 'cell-1', value: 'a', canonicalRef: 'GEN 1:1' } }),
+      ev({ kind: 'source.cell.create', id: 'src-2', payload: { cellId: 'cell-2', value: 'b', canonicalRef: 'GEN 1:2' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-fr-1', cellId: 'cell-1', parentId: 'src-1', payload: { value: 'Bonjour', targetLang: 'fr' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-fr-2', cellId: 'cell-2', parentId: 'src-2', payload: { value: 'Salut', targetLang: 'fr' } }),
+      ev({ kind: 'target.cell.commit', id: 'tc-swh-1', cellId: 'cell-1', parentId: 'src-1', payload: { value: 'Habari', targetLang: 'swh' } }),
+    ])
+    for (const s of fullProgressRecomputeStmts(t.db, PROJECT, FILE, 5000)) await s.run()
+
+    const rows = await progress()
+    // File scope: one row per lane that exists; denominator shared (=2).
+    const files = rows.filter((r) => r.scope === 'file')
+    expect(files.map((r) => [r.target_lang, r.total_count, r.filled_count])).toEqual([
+      ['fr', 2, 2],
+      ['swh', 2, 1],
+    ])
+    // Section scope mirrors it (single section GEN 1).
+    const sections = rows.filter((r) => r.scope === 'section')
+    expect(sections.map((r) => [r.section_key, r.target_lang, r.total_count, r.filled_count])).toEqual([
+      ['GEN 1', 'fr', 2, 2],
+      ['GEN 1', 'swh', 2, 1],
+    ])
+  })
 })

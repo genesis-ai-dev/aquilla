@@ -92,6 +92,25 @@ describe("sentenceCheck findings", () => {
     })])
   })
 
+  it("flags a fragment closed by a full stop even when the source only weakly runs on (ACT 3:9)", () => {
+    // Greek often closes a clause where English needs the next verse, so Jev's
+    // source answer sat at 0.52 on this real fragment in the eval.
+    const cells = [
+      { id: "ACT 3:9", ref: "ACT 3:9", source: "καὶ εἶδεν πᾶς ὁ λαὸς αὐτὸν περιπατοῦντα καὶ αἰνοῦντα τὸν θεόν,", target: "When all the people saw him walking and praising God." },
+      { id: "ACT 3:10", ref: "ACT 3:10", source: "ἐπεγίνωσκον δὲ αὐτὸν…", target: "They recognized him as the man who used to sit begging." },
+    ]
+    expect(findingsFor(cells, { p_t0_continues: { noul: 0.52 }, p_t0_complete: { noul: 0.19 } }))
+      .toEqual([expect.objectContaining({ cellId: "ACT 3:9", reasonKey: "harmonizer.sentence.brokenOff" })])
+  })
+
+  it("leaves a verbless heading alone: the source does not run on either", () => {
+    const cells = [
+      { id: "MRK 1:1", ref: "MRK 1:1", source: "Ἀρχὴ τοῦ εὐαγγελίου Ἰησοῦ Χριστοῦ υἱοῦ θεοῦ.", target: "The beginning of the gospel of Jesus Christ, the Son of God." },
+      { id: "MRK 1:2", ref: "MRK 1:2", source: "Καθὼς γέγραπται…", target: "As it is written in Isaiah the prophet…" },
+    ]
+    expect(findingsFor(cells, { p_t0_continues: { noul: 0.15 }, p_t0_complete: { noul: 0.2 } })).toEqual([])
+  })
+
   it("does not flag a translator's deliberate split: the target sentence is complete", () => {
     const split = [{ ...LUKE_5[0], target: "When he had finished speaking, he turned to Simon." }, LUKE_5[1]]
     expect(findingsFor(split, { p_t0_continues: { noul: 0.95 }, p_t0_complete: { noul: 0.9 } })).toEqual([])

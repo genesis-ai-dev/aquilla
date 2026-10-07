@@ -37,6 +37,7 @@ import { parseAquiferOp } from "../lib/agent/aquifer-guard"
 import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
 import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
+import { languagesForLanes, loadLaneRows } from "../lib/read-lane-language"
 import { insertAgentRun, finishAgentRun, listAgentRuns } from "../lib/agent/runs"
 import { makePostgres } from "../../../db/shim/postgres"
 import {
@@ -758,6 +759,11 @@ interface LoopArgs {
   resolvedLaneId: string
 }
 
+function parseSettingsObject(raw: unknown): Record<string, unknown> {
+  const value = typeof raw === "string" ? (() => { try { return JSON.parse(raw) as unknown } catch { return null } })() : raw
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
 function parseToolArgs(raw: string): Record<string, unknown> {
   try {
     const v: unknown = JSON.parse(raw || "{}")
@@ -768,12 +774,12 @@ function parseToolArgs(raw: string): Record<string, unknown> {
 }
 
 /** Telemetry lane: a `targetLang`/`lane` string in the call args wins over the
- *  project's target language. */
-function pickLane(rawArgs: string, projectTarget: string | undefined): string | undefined {
+ *  lane the user is working in. Never a language name. */
+function pickLane(rawArgs: string, activeLane: string | undefined): string | undefined {
   const args = parseToolArgs(rawArgs)
   if (typeof args.targetLang === "string") return args.targetLang
   if (typeof args.lane === "string") return args.lane
-  return projectTarget
+  return activeLane
 }
 
 async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage, waitUntil, resolvedLaneId }: LoopArgs): Promise<void> {
@@ -812,21 +818,20 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings::jsonb ->> 'sourceLanguage' AS source_language,
-              settings::jsonb ->> 'targetLanguage' AS target_language,
+      `SELECT settings,
               settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
        FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ source_language: string | null; target_language: string | null; brief_summary: string | null }>()
+      .first<{ settings: unknown; brief_summary: string | null }>()
     if (settings) {
+      const parsed = parseSettingsObject(settings.settings)
+      const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
+      languages = languagesForLanes(lanes, parsed, body.context?.lane ?? "")
       const fromLane = resolvedLaneId
         ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
         : null
-      languages = {
-        sourceLanguage: settings.source_language ?? undefined,
-        targetLanguage: fromLane ?? settings.target_language ?? undefined,
-      }
+      if (fromLane) languages = { ...languages, targetLanguage: fromLane }
       briefSummary = settings.brief_summary ?? undefined
     }
   } catch {
@@ -1260,7 +1265,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         telemetry.toolRun({
           tool: call.function.name,
           args: parseToolArgs(call.function.arguments),
-          lane: pickLane(call.function.arguments, languages.targetLanguage),
+          lane: pickLane(call.function.arguments, body.context?.lane ?? ""),
           ok: resultOk ?? toolOk,
           data: resultData,
           resultText: result,

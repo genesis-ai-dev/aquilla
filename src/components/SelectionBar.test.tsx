@@ -30,6 +30,7 @@ vi.mock("@/lib/posthog", () => ({
 }))
 import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
 // the real outbox/IDB, and so we can assert they fired alongside the new
@@ -625,7 +626,7 @@ describe("SelectionBar — validation telemetry (AQU-1572)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^validate audio/i }))
 
-    await vi.waitFor(() => expect(emitCellAudioValidate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitCellAudioValidate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     expect(emitCellAudioValidate).toHaveBeenCalledWith(expect.objectContaining({ surface: "selection" }))
     expect(events("cell validated")).toHaveLength(0)
     vi.restoreAllMocks()
@@ -729,7 +730,7 @@ describe("SelectionBar — Validate recordings", () => {
     const button = screen.getByRole("button", { name: /^validate audio/i })
     expect(button).toHaveTextContent("1")
     fireEvent.click(button)
-    await vi.waitFor(() => expect(emitCellAudioValidate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitCellAudioValidate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     expect(emitCellAudioValidate).toHaveBeenCalledWith(expect.objectContaining({
       fileId: "cue-file", cellId: "cue-a", audioId: "take-c",
     }))
@@ -742,7 +743,7 @@ describe("SelectionBar — Validate recordings", () => {
       audioByCellId: audioMap({ validatorCount: 1, validators: ["alice"] }),
     })
     fireEvent.click(screen.getByRole("button", { name: /remove my audio validations/i }))
-    await vi.waitFor(() => expect(emitCellAudioUnvalidate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitCellAudioUnvalidate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     expect(emitCellAudioUnvalidate).toHaveBeenCalledWith(expect.objectContaining({
       cellId: "cell-1", audioId: "take-1", author: "alice",
     }))
@@ -857,7 +858,7 @@ describe("SelectionBar — a write that never queued", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Validate text/i }))
 
-    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith("[validate] enqueue failed:", expect.any(Error)))
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith("[validate] enqueue failed:", expect.any(Error)), { timeout: STALL_WATCHDOG_MS })
     warn.mockRestore()
     vi.restoreAllMocks()
   })
@@ -1027,15 +1028,15 @@ describe("SelectionBar — Voice together failure", () => {
       title: "Couldn't voice these lines together",
       // The categoriser's plain words, never the raw "Request failed (503)".
       description: expect.stringMatching(/server error/i),
-    })))
+    })), { timeout: STALL_WATCHDOG_MS })
     expect(posthog.captureException).toHaveBeenCalledWith(failure, {
       surface: "voice-together",
       project_id: "proj-1",
     })
     // Back to idle: the button works again and a second try reaches the handler.
-    await vi.waitFor(() => expect(voiceButton()).toBeEnabled())
+    await vi.waitFor(() => expect(voiceButton()).toBeEnabled(), { timeout: STALL_WATCHDOG_MS })
     fireEvent.click(voiceButton())
-    await vi.waitFor(() => expect(onVoiceTogether).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(onVoiceTogether).toHaveBeenCalledTimes(2), { timeout: STALL_WATCHDOG_MS })
     vi.restoreAllMocks()
   })
 
@@ -1056,7 +1057,7 @@ describe("SelectionBar — Voice together failure", () => {
       type: "error",
       title: "Couldn't voice these lines together",
       description: "Selected lines are too long to voice together",
-    })))
+    })), { timeout: STALL_WATCHDOG_MS })
     vi.restoreAllMocks()
   })
 
@@ -1077,7 +1078,7 @@ describe("SelectionBar — Voice together failure", () => {
       title: "Couldn't voice these lines together",
       description:
         "These lines use Inworld TTS, not Gemini. Inworld TTS isn't set up on this server, so a Gemini API key will not fix it.",
-    })))
+    })), { timeout: STALL_WATCHDOG_MS })
     const description = (added.mock.calls.at(-1)?.[0] as { description?: string }).description ?? ""
     expect(description).not.toMatch(/this line/i)
     expect(description).not.toContain("—")
@@ -1100,7 +1101,7 @@ describe("SelectionBar — Voice together failure", () => {
       type: "error",
       title: "Couldn't voice these lines together",
       description: "The AI provider rejected this request",
-    })))
+    })), { timeout: STALL_WATCHDOG_MS })
     vi.restoreAllMocks()
   })
 })

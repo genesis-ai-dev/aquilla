@@ -253,6 +253,19 @@ UI chrome that used to be one smoke file per click is covered under
   as a count of zero, and cancel) in `LinkSourceSection.test.tsx`. No data or artifact
   is at risk before confirming and the step crosses no second service, so per the rules
   above it stays RTL rather than becoming a smoke journey.
+  Which corpus of the upstream a link consumes, and — for the chain case — WHICH of
+  its translations (AQU-1528 / AQU-1605), is RTL plus worker tests, not smoke: the
+  question's states (asked for the chain case only, pre-filled at a single lane,
+  refused with several and no pick, offering exactly the lanes the server returned,
+  and an unreadable lane list said out loud with a retry) are in
+  `ProjectCreateDialog.upstreamLane.test.tsx` and `LinkSourceSection.test.tsx`; which
+  lanes a caller may be offered at all, and the server refusing a lane of another
+  project, an archived lane or one the read wall hides, in auth-worker's
+  `source-linking-lane-choice.test.ts`; and the fold actually reading the named lane
+  (and nothing of the upstream's other lanes) against real Postgres in
+  `sync-worker/src/__tests__/link-sync-lane-choice.test.ts`, whose sibling
+  `link-sync-fold.default-lane-baseline.test.ts` pins that a link naming no lane still
+  reads the former default one.
   The Import dialog's second entry point to the same action (AQU-1527, "From another
   project" on the landing screen) is RTL in `ImportDialog.linkProject.test.tsx`: the tile
   routes to the flow, back links nothing, the shared pre-link preview appears on this

@@ -1047,6 +1047,9 @@ export interface EventPayloads {
       /** The upstream event's server_seq — the monotonic apply-guard key. */
       seq: number
       side: 'source' | 'target'
+      /** Upstream lane the text was copied from (`lanes.id`). Provenance only:
+       *  the downstream row is that project's own source lane. */
+      laneId?: string
       contentHash: string
     }
   }

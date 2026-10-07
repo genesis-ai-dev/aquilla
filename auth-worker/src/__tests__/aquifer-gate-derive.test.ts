@@ -186,3 +186,66 @@ describe("isBibleResourcesEnabled — reads the generated column", () => {
     expect(recorded.statements.some((sql) => /\bfiles\b/.test(sql))).toBe(true)
   })
 })
+
+/** The live database, except that the 0150 columns do not exist: any statement
+ *  that names them fails the way Postgres does (undefined_column, 42703). */
+function envWithout0150(): { env: typeof env; statements: string[] } {
+  const statements: string[] = []
+  const db = env.AQUILLA_PG
+  const missing = Object.assign(new Error('column "bible_resources_enabled" does not exist'), { code: "42703" })
+  const failing = {
+    bind: () => failing,
+    first: async () => { throw missing },
+    all: async () => { throw missing },
+    run: async () => { throw missing },
+  }
+  const without = {
+    ...env,
+    AQUILLA_PG: {
+      prepare: (sql: string) => {
+        statements.push(sql)
+        return /\bbible_resources_enabled\b|\bbible_enrichments\b/.test(sql) ? failing : db.prepare(sql)
+      },
+    },
+  }
+  return { env: without as unknown as typeof env, statements }
+}
+
+// The QA bot's finding on this PR: with 0150 not applied, the column read
+// failed, the gate took that as "no choice", and a scripture project that had
+// switched Bible data OFF was let through. The gate now reads the blob instead.
+describe("isBibleResourcesEnabled — on a database without migration 0150", () => {
+  it("keeps an explicit OFF off on a scripture project", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "usfm")
+    await seedExplicitSetting(p, false)
+    const without = envWithout0150()
+
+    expect(await isBibleResourcesEnabled(without.env, p)).toBe(false)
+    // It fell back to the blob, as the gate read it before AQU-1686.
+    expect(without.statements.some((sql) => /settings::jsonb ->> 'bibleResourcesEnabled'/.test(sql))).toBe(true)
+  })
+
+  it("keeps an explicit ON on, with no scripture files", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "docx")
+    await seedExplicitSetting(p, true)
+    expect(await isBibleResourcesEnabled(envWithout0150().env, p)).toBe(true)
+  })
+
+  it("still derives from scripture files when nothing is set: on with scripture", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "usfm")
+    expect(await isBibleResourcesEnabled(envWithout0150().env, p)).toBe(true)
+  })
+
+  it("still derives from scripture files when nothing is set: off without", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "docx")
+    expect(await isBibleResourcesEnabled(envWithout0150().env, p)).toBe(false)
+  })
+})

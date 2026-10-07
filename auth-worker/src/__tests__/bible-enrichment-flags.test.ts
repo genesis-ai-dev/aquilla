@@ -104,3 +104,47 @@ describe("readBibleEnrichmentFlags", () => {
     expect(statements.some((sql) => /\bfiles\b/.test(sql))).toBe(false)
   })
 })
+
+/** The live database, except that the 0150 columns do not exist: any statement
+ *  that names them fails the way Postgres does (undefined_column, 42703). */
+function envWithout0150(): { env: typeof env; statements: string[] } {
+  const statements: string[] = []
+  const db = env.AQUILLA_PG
+  const missing = Object.assign(new Error('column "bible_resources_enabled" does not exist'), { code: "42703" })
+  const failing = {
+    bind: () => failing,
+    first: async () => { throw missing },
+    all: async () => { throw missing },
+    run: async () => { throw missing },
+  }
+  const without = {
+    ...env,
+    AQUILLA_PG: {
+      prepare: (sql: string) => {
+        statements.push(sql)
+        return /\bbible_resources_enabled\b|\bbible_enrichments\b/.test(sql) ? failing : db.prepare(sql)
+      },
+    },
+  }
+  return { env: without as unknown as typeof env, statements }
+}
+
+// Same fallback as the gate: before 0150 is applied, the switches come from
+// the blob, so an explicit choice is still honoured.
+describe("readBibleEnrichmentFlags — on a database without migration 0150", () => {
+  it("keeps everything off when Bible data is explicitly off", async () => {
+    const p = await seedProject({
+      scripture: true,
+      settings: { bibleResourcesEnabled: false, bibleEnrichments: { voices: true } },
+    })
+    expect(await readBibleEnrichmentFlags(envWithout0150().env, p)).toEqual(allOff())
+  })
+
+  it("keeps an explicit enrichment choice", async () => {
+    const p = await seedProject({
+      scripture: true,
+      settings: { bibleEnrichments: { voices: false, autopilot: true } },
+    })
+    expect(await readBibleEnrichmentFlags(envWithout0150().env, p)).toEqual({ ...defaults(), voices: false, autopilot: true })
+  })
+})

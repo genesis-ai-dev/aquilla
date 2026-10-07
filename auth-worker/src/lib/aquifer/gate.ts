@@ -18,10 +18,17 @@
 // cross-import — so the file-type set is duplicated here deliberately).
 //
 // AQU-1686: the explicit switches are read from project_settings' generated
-// columns (migration 0150), never from the settings blob, which runs to
-// several MB. `readBibleEnrichmentFlags` resolves the per-enrichment Bible
-// data switches with the same rules the SPA uses
-// (db/shared/bible-enrichments.ts), for server-side readers such as autopilot.
+// columns (migration 0150), not from the settings blob, which runs to several
+// MB. `readBibleEnrichmentFlags` resolves the per-enrichment Bible data
+// switches with the same rules the SPA uses (db/shared/bible-enrichments.ts),
+// for server-side readers such as autopilot.
+//
+// A DATABASE WITHOUT 0150 STILL RESPECTS AN EXPLICIT OFF. If the column read
+// fails, the switches are read from the blob exactly as the gate read them
+// before AQU-1686. Treating that failure as "no choice" re-enabled Bible data
+// on every scripture project that had switched it off, the trust bug the
+// derive-on-read design above exists to prevent (the QA bot reproduced it on
+// this PR's preview, where 0150 was not applied).
 
 import type { Env } from "../../types"
 import {
@@ -73,7 +80,8 @@ interface ExplicitBibleData {
   enrichments: unknown
 }
 
-/** The explicit switches, from the generated columns only. */
+/** The explicit switches, from the generated columns; from the settings blob
+ *  if that read fails (see the header). */
 async function readExplicitBibleData(env: Env, projectId: string): Promise<ExplicitBibleData> {
   try {
     const row = await env.AQUILLA_PG.prepare(
@@ -87,6 +95,31 @@ async function readExplicitBibleData(env: Env, projectId: string): Promise<Expli
     return {
       switchValue: typeof value === "boolean" ? value : undefined,
       enrichments: row?.bible_enrichments ?? null,
+    }
+  } catch {
+    // Most likely the columns do not exist yet (0150 not applied). Any other
+    // failure lands in the same place: the blob read below either answers, or
+    // fails too and behaves exactly as the gate did before AQU-1686.
+    return readExplicitBibleDataFromBlob(env, projectId)
+  }
+}
+
+/** The pre-0150 read: the switches straight out of the settings blob, mapped
+ *  the way the generated column maps them (the `->>` strings "true" and
+ *  "false"; anything else is unset). It parses the blob, so it runs only
+ *  after the column read has failed. */
+async function readExplicitBibleDataFromBlob(env: Env, projectId: string): Promise<ExplicitBibleData> {
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT settings::jsonb ->> 'bibleResourcesEnabled' AS enabled,
+              settings::jsonb -> 'bibleEnrichments' AS enrichments
+         FROM project_settings WHERE project_id = ?`,
+    )
+      .bind(projectId)
+      .first<{ enabled: string | null; enrichments: unknown }>()
+    return {
+      switchValue: row?.enabled === "true" ? true : row?.enabled === "false" ? false : undefined,
+      enrichments: row?.enrichments ?? null,
     }
   } catch {
     // Settings unreadable is not itself a security-relevant "explicit false",

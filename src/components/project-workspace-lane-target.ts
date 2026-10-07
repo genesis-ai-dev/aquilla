@@ -23,35 +23,30 @@
 // `project-workspace-lane-deeplink.ts`.
 
 import { laneLanguageForTag, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import type { LaneLanguageSettings } from "@/lib/lanes/lane-display"
 
 /**
  * The target language for the currently active lane.
  *
- * - A non-default lane (`activeLane` truthy) → the language recorded on that
- *   lane's row (AQU-1586). Without rows (a server that predates AQU-1418) the
- *   tag is the only thing available and is used as before. A lane whose row
- *   records no language of its own inherits the project's `targetLanguage`,
- *   exactly as the default lane does — never an empty string, and never the
- *   lane's own id.
- * - The default lane (`''`) → the lane row's language when the project has
- *   rows (AQU-1592). With no rows, the project's `targetLanguage` only
- *   (AQU-583). The per-file target is ignored either way.
+ * - Any lane → {@link laneLanguageForTag}, which calls `laneLanguage`. A typed
+ *   `language` wins. The former default lane (`''`) may still answer from
+ *   `settings.targetLanguage` inside that function until AQU-1616 backfills
+ *   the row. An id-tagged lane never inherits the project language and never
+ *   uses its tag.
+ * - With no rows, a non-id tag is the language (a server that predates lane
+ *   rows). The per-file target is ignored either way.
  *
  * Returns `undefined` only when NOTHING records a target language — then the
  * caller shows the "Set target language" prompt.
  */
 export function resolveActiveTargetLanguage(
   activeLane: string,
-  // Retained for signature stability; the default lane no longer consults it.
+  // Retained for signature stability; the file stamp is never consulted.
   _fileTargetLanguage: string | null | undefined,
-  projectTargetLanguage: string | null | undefined,
+  settings: LaneLanguageSettings | null | undefined,
   lanes?: readonly LaneLanguageRow[] | null,
 ): string | undefined {
-  if (activeLane) {
-    return laneLanguageForTag(activeLane, lanes) || projectTargetLanguage || undefined
-  }
-  const fromRow = lanes && lanes.length > 0 ? laneLanguageForTag("", lanes) : null
-  return fromRow || projectTargetLanguage || undefined
+  return laneLanguageForTag(activeLane, lanes, settings) || undefined
 }
 
 /** One target lane as the Import dialog's "Is this a translation?" check sees
@@ -67,21 +62,19 @@ export interface LaneTargetLanguage {
  * from a source one, and which of them is the open lane (the one a translation
  * import fills).
  *
- * The language follows the same rule as the editor's (AQU-1586): from the
- * lane ROW, never the tag, which can be the lane's opaque id. The default lane
- * is the project's target language. A lane whose row records no language is
- * left out rather than given the project's, so it can't pass for the default
- * lane's language.
+ * The language follows the same rule as the editor's: {@link laneLanguageForTag}
+ * for every lane, including the former default. A lane that resolves to nothing
+ * is left out.
  */
 export function laneTargetLanguages(
   lanes: readonly string[],
   activeLane: string,
-  projectTargetLanguage: string | null | undefined,
+  settings: LaneLanguageSettings | null | undefined,
   laneLabels: Readonly<Record<string, string>>,
   rows?: readonly LaneLanguageRow[] | null,
 ): LaneTargetLanguage[] {
   return lanes.flatMap((lane) => {
-    const language = lane === "" ? projectTargetLanguage?.trim() : laneLanguageForTag(lane, rows)
+    const language = laneLanguageForTag(lane, rows, settings)
     return language ? [{ language, label: laneLabels[lane] || null, active: lane === activeLane }] : []
   })
 }

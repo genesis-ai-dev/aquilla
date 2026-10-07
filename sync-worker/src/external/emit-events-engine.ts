@@ -255,7 +255,7 @@ export async function prepareEmitEvents(
     ? await loadProjectSettings(db, projectId)
     : null
   const cmd = projectSettings
-    ? canonicalEmitEvents(requested, settingsTargetLanguage(projectSettings.settings))
+    ? canonicalEmitEvents(requested, settingsTargetLanguage(projectSettings.settings, projectSettings.lanes))
     : requested
   const refs = collectRefs(cmd.events)
   const hasTerms = cmd.events.some((e) => TERM_EMIT_KINDS.has(e.kind))
@@ -758,7 +758,10 @@ export async function commitEmitEvents(
   // name the primary language. Pins stay keyed by the stored lane id; the
   // compiled payload carries the canonical one.
   const targetLanguage = cmd.events.some((e) => e.laneId)
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
+    ? await (async () => {
+        const loaded = await loadProjectSettings(db, projectId)
+        return settingsTargetLanguage(loaded.settings, loaded.lanes)
+      })()
     : null
   for (const [i, e] of cmd.events.entries()) {
     const planned = cs.plannedIds?.emitEvents?.[i]

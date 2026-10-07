@@ -23,6 +23,7 @@ import {
   patchProjectSettings,
 } from "@/lib/sync/project-settings"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 
 const MAX_LANE_LENGTH = 64
 
@@ -85,7 +86,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
     }
     setSnapshot({
       version: res.version,
-      defaultTargetLanguage: res.settings.targetLanguage ?? "",
+      defaultTargetLanguage: laneLanguageForTag("", res.lanes, res.settings) ?? "",
       targetLanes: res.settings.targetLanes ?? [],
     })
     setPhase("ready")
@@ -131,7 +132,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
       setValue("")
       setSnapshot({
         version: result.value.version,
-        defaultTargetLanguage: result.value.settings.targetLanguage ?? snapshot.defaultTargetLanguage,
+        defaultTargetLanguage: laneLanguageForTag("", result.value.lanes, result.value.settings) ?? snapshot.defaultTargetLanguage,
         targetLanes: result.value.settings.targetLanes ?? [...snapshot.targetLanes, trimmed],
       })
       setPhase("ready")
@@ -142,7 +143,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
     if (result.kind === "conflict") {
       setSnapshot({
         version: result.latest.version,
-        defaultTargetLanguage: result.latest.settings.targetLanguage ?? snapshot.defaultTargetLanguage,
+        defaultTargetLanguage: laneLanguageForTag("", result.latest.lanes, result.latest.settings) ?? snapshot.defaultTargetLanguage,
         targetLanes: result.latest.settings.targetLanes ?? snapshot.targetLanes,
       })
       setError(t("org.addLanguagePopover.conflictError"))

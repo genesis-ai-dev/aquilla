@@ -607,7 +607,7 @@ async function verifyBriefReachesCopilot(
   const preview = await buildPromptPreview(step.db, {
     projectId: step.cs.projectId,
     cellId: cell.cell_id,
-    targetLang: typeof settings.targetLanguage === 'string' ? settings.targetLanguage : '',
+    targetLang: '',
     fileId: first.fileId,
   })
   if (!preview.ok) return { reaches: true, details: caveat }

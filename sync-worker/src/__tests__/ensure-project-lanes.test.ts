@@ -480,7 +480,7 @@ describe("createProjectShared seeds lanes atomically", () => {
       legacy_tag: "",
     })
     const records = await listProjectLanes(t.db, PROJECT)
-    expect(records.map(laneLanguageCode)).toEqual(["en", "es"])
+    expect(records.map((lane) => laneLanguageCode(lane))).toEqual(["en", "es"])
   })
 })
 

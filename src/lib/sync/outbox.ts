@@ -262,8 +262,14 @@ async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boole
     import("@/lib/offline/offline-reads"),
     import("@/lib/offline/schema"),
   ])
-  const store = await getOfflineStore()
-  if (!isProjectOfflineReady(store, event.projectId)) return false
+  // A store that won't open (e.g. a newer build owns it — see
+  // generation-guard.ts) has no ready projects: fall back to IndexedDB rather
+  // than lose the write.
+  const store = await getOfflineStore().catch((error: unknown) => {
+    console.warn("[outbox] offline store unavailable — queueing in IndexedDB", error)
+    return null
+  })
+  if (!store || !isProjectOfflineReady(store, event.projectId)) return false
   store.commit(
     offlineEvents.eventQueued({
       id: event.id,

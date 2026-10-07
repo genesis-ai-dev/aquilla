@@ -9,6 +9,7 @@ import { schema } from "./schema"
 import { isTauriRuntime } from "./is-tauri"
 import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
 import { checkClientSessionHead } from "./head-check"
+import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
 
 // Names the OPFS directory the store lives in — changing it strands every
 // device's existing data (incl. unsent edits). eventlog-compat.test.ts pins it.
@@ -45,12 +46,19 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
 
 let storePromise: Promise<Store<typeof schema>> | undefined
 
-/** Boots (once) and returns the offline store. Memoized — repeat calls return the same promise/instance. */
-export function getOfflineStore(createAdapter: CreateOfflineAdapter = defaultCreateAdapter): Promise<Store<typeof schema>> {
+/**
+ * Boots (once) and returns the offline store. Memoized — repeat calls return the same promise/instance.
+ * Rejects with NewerOfflineDataError when a newer build owns this device's offline data (see generation-guard.ts).
+ */
+export function getOfflineStore(
+  createAdapter: CreateOfflineAdapter = defaultCreateAdapter,
+  generationMarker: GenerationMarker = opfsGenerationMarker,
+): Promise<Store<typeof schema>> {
   if (!isTauriRuntime()) {
     return Promise.reject(new Error("getOfflineStore() is only available in the Tauri desktop app"))
   }
-  storePromise ??= Promise.resolve(createAdapter())
+  storePromise ??= claimOfflineGeneration(generationMarker)
+    .then(() => createAdapter())
     .then((adapter) => createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }))
     .then(async (store) => {
       // A stale client session must not take writes; hold the store back

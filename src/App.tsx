@@ -36,6 +36,7 @@ import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
+import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -312,6 +313,7 @@ export default function App() {
           <ConflictToast />
           <OfflineLeaderWatchdog />
           <DesktopUpdatePrompt />
+          <NewerOfflineDataNotice />
           {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
           <SessionExpiredBanner />
           {/* AQU-1322: admin step-up dialog; renders nothing until a 403 "elevation required" lands. */}

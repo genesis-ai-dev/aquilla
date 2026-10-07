@@ -567,6 +567,16 @@ describe("Tauri offline routing", () => {
     expect(currentOfflineStore!.query(offlineTables.eventQueue.select())).toHaveLength(0)
   })
 
+  it("falls through to IndexedDB when the offline store won't open (e.g. a newer build owns it)", async () => {
+    setTauriRuntime(true)
+    getOfflineStoreMock.mockRejectedValueOnce(new Error("newer offline data"))
+
+    await enqueueOutboxEvent(commitEvent)
+
+    expect(getOfflineStoreMock).toHaveBeenCalled()
+    expect(await outboxPendingCount()).toBe(1)
+  })
+
   it("a non-routable kind always goes to IndexedDB regardless of Tauri/offline-ready state", async () => {
     setTauriRuntime(true)
     markProjectOfflineReady("proj1")

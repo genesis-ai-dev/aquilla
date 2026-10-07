@@ -59,6 +59,12 @@ export interface Concept {
   caseSensitive?: boolean
   /** Matching options; see TermMatchOptions. Absent = all defaults. */
   match?: TermMatchOptions
+  /**
+   * Set only on a concept read from a termbase this project subscribes to
+   * (useSubscribedConcepts, AQU-1721): the id of the project that owns it.
+   * Such a concept is read-only here, so no surface may offer to edit it.
+   */
+  termbaseProjectId?: string
 }
 
 /** Payload from the editor "Add to terminology" popover. */

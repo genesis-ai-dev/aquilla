@@ -17,8 +17,15 @@ import { hasSortableData } from "@dnd-kit/sortable"
 export const FILE_DRAG_ACTIVATION_DISTANCE = 8
 
 export type SidebarFileDrop =
+  /** Within the file's own group: a new slot. */
   | { kind: "move"; fileId: string; group: string; toPosition: number }
-  | { kind: "refuse"; group: string }
+  /**
+   * AQU-1702: into a DIFFERENT group. `toPosition` is the slot in that
+   * group, or null when the pointer was on the group rather than one of its
+   * rows (its header, or a collapsed group) — meaning the end. Whether the
+   * move can actually be written is `planFileRegroup`'s call, not geometry's.
+   */
+  | { kind: "regroup"; fileId: string; fromGroup: string; group: string; toPosition: number | null }
   | { kind: "cancel" }
 
 export function readSidebarGroup(data: unknown): string | null {
@@ -39,10 +46,18 @@ export function resolveSidebarFileDrop(active: Active | null, over: Over | null)
   if (!over) return { kind: "cancel" }
   const overGroup = readSidebarGroup(over.data.current)
   if (overGroup === null) return { kind: "cancel" }
-  // A file only moves inside the group it already belongs to. The other
-  // group's header and its rows are both refusals, including a collapsed
-  // group that has no row under the pointer.
-  if (overGroup !== activeGroup) return { kind: "refuse", group: overGroup }
+  // AQU-1702: another group is a move into it, at the hovered row's slot —
+  // or at its end when the pointer is on the group itself (its header, or a
+  // collapsed group with no row under the pointer).
+  if (overGroup !== activeGroup) {
+    return {
+      kind: "regroup",
+      fileId: String(active.id),
+      fromGroup: activeGroup,
+      group: overGroup,
+      toPosition: hasSortableData(over) ? over.data.current.sortable.index : null,
+    }
+  }
   if (!hasSortableData(over) || over.id === active.id) return { kind: "cancel" }
   const toPosition = over.data.current.sortable.index
   if (toPosition < 0) return { kind: "cancel" }
@@ -72,8 +87,10 @@ function sameGroupFiles(args: Parameters<CollisionDetection>[0], group: string):
 /**
  * A file row sits inside its group droppable.
  *
- * The pointer wins when it is actually on a row. A different group's header
- * (or a collapsed group) is a refusal. Gaps between rows, and a pointer that
+ * The pointer wins when it is actually on a row, in any group (AQU-1702: a
+ * row in another group is the slot the file lands in there). A different
+ * group's header, or a collapsed one, targets that group as a whole — the
+ * file lands at its end. Gaps between rows, and a pointer that
  * has drifted off the narrow column, keep sorting against the nearest row in
  * the active group — otherwise the list freezes the moment the cursor leaves
  * a 28px row. The active group's own header is the exception: it is above

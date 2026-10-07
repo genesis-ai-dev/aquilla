@@ -1,3 +1,4 @@
+import { ProjectMondayCard } from "./ProjectMondayCard"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, ChevronDown, ChevronRight } from "lucide-react"
@@ -5,7 +6,7 @@ import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -45,6 +46,7 @@ import {
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { isLaneArchived } from "@/components/project-lane-archive"
 import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
 import { laneChipLabel } from "./project-lanes"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -417,7 +419,7 @@ export function ProjectOverview() {
     [id],
   )
   const canManagePm = (project?.syncRole?.level ?? 0) >= 600
-  const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
+  const { members: pmCandidates, refresh: refreshMembers } = useProjectMembers(canManagePm ? id : null)
   const { activeOrgId, activeOrg, orgs, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
@@ -453,13 +455,11 @@ export function ProjectOverview() {
    * worse than not offering it.
    */
   const autopilotLanes = useMemo(() => {
-    const archived = new Set(
-      (project?.archivedLanes ?? []).map((lane) => lane.trim().toLowerCase()).filter(Boolean),
-    )
+    const archivedLanes = project?.archivedLanes ?? []
     return [
       "",
       ...extraRegistryLanes(project?.targetLanes, project?.targetLanguage).filter(
-        (lane) => !archived.has(lane.trim().toLowerCase()),
+        (lane) => !isLaneArchived(lane.trim(), archivedLanes),
       ),
     ]
   }, [project?.targetLanes, project?.targetLanguage, project?.archivedLanes])
@@ -1398,6 +1398,7 @@ export function ProjectOverview() {
     try {
       await setProjectPm(jwt, id, pmUserId)
       await refresh()
+      void refreshMembers()
       // AQU-507: the org overview's PM column joins from the app-wide
       // accessible-projects directory (OrgContext, fetched once per session) —
       // revalidate it so the new PM shows there without a hard reload. Not
@@ -1738,7 +1739,7 @@ export function ProjectOverview() {
                     </FieldLabel>
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       {pm ? (
-                        <UsernameWithAvatar username={pm.username} nameTestId="overview-pm-name" />
+                        <UsernameWithAvatar userId={pm.id} username={pm.username} nameTestId="overview-pm-name" />
                       ) : (
                         <span className="text-muted-foreground" data-testid="overview-pm-name">
                           {t("org.projectOverview.unassigned")}
@@ -1760,6 +1761,11 @@ export function ProjectOverview() {
                         />
                       )}
                     </div>
+                    {pm ? (
+                      <p className="mt-1 max-w-sm text-xs text-muted-foreground" data-testid="overview-pm-lead-note">
+                        {t("org.projectOverview.pmGrantsProjectLead")}
+                      </p>
+                    ) : null}
                   </Field>
                   <Field className="w-auto min-w-56">
                     <FieldLabel className="text-xs font-semibold text-muted-foreground">
@@ -1856,6 +1862,7 @@ export function ProjectOverview() {
                       <DialogTitle>{pm ? t("org.projectOverview.changeProjectManagerDialogTitle") : t("org.projectOverview.assignProjectManagerDialogTitle")}</DialogTitle>
                       <DialogDescription>
                         {t("org.projectOverview.pmDialogDescription")}
+                        {pmSelection !== "" ? ` ${t("org.projectOverview.pmGrantsProjectLead")}` : ""}
                       </DialogDescription>
                     </DialogHeader>
                     <FieldGroup>
@@ -1881,6 +1888,7 @@ export function ProjectOverview() {
                               {pmCandidates.map((m) => (
                                 <SelectItem key={m.userId} value={String(m.userId)}>
                                   <UsernameWithAvatar
+                                    userId={m.userId}
                                     username={m.username}
                                     size="xs"
                                     menuSafe
@@ -1943,6 +1951,10 @@ export function ProjectOverview() {
 
                 {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
               </div>
+
+              {project?.syncRole && (
+                <ProjectMondayCard projectId={id} jwt={jwt} roleLevel={project.syncRole.level} />
+              )}
 
               {/* ── Progress card ── */}
               {/* AQU-486: progress has no configurable floor today — everyone
@@ -2137,6 +2149,7 @@ export function ProjectOverview() {
               {showLanguages && audio && (
                 <OverviewLaneTable
                   projectId={id}
+                  projectName={project?.name}
                   orgId={portfolioOrgId}
                   jwt={jwt}
                   lanes={activeProjectLanes}
@@ -2448,16 +2461,12 @@ export function ProjectOverview() {
                             return (
                               <li key={w.userId} className="flex items-center gap-3 text-sm">
                                 {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
-                                <AppTooltip content={w.username ?? String(w.userId)}>
-                                  <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
-                                    <InitialsAvatar
-                                      name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })}
-                                      size="sm"
-                                      className="shrink-0"
-                                    />
-                                    <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
-                                  </span>
-                                </AppTooltip>
+                                <UserChip
+                                  userId={w.userId}
+                                  username={w.username}
+                                  size="sm"
+                                  className="w-40 shrink-0"
+                                />
                                 <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                                   <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
                                 </span>
@@ -2505,7 +2514,15 @@ export function ProjectOverview() {
                             files={project?.files ?? []}
                             jwt={jwt ?? ""}
                             author={session?.username ?? ""}
-                            targetLang={selectedLaneTag ?? ""}
+                            arrivedLane={showLaneTabs ? selectedLaneTag : null}
+                            laneTags={
+                              targetLaneRows.length > 0
+                                ? [...new Set(targetLaneRows.map((lane) => lane.legacyTag ?? ""))]
+                                : ["", ...(project?.targetLanes ?? [])]
+                            }
+                            laneLabels={autopilotLaneLabels}
+                            defaultLaneLabel={project?.targetLanguage ?? ""}
+                            laneRows={targetLaneRows}
                             roleLevel={project?.syncRole?.level ?? 0}
                             allowSelfAssignment={orgSettings.allowSelfAssignment}
                             assignmentMinRole={orgSettings.assignmentMinRole}

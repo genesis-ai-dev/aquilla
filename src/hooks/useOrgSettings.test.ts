@@ -490,10 +490,9 @@ describe("useOrgSettings — assignmentMinRole (AQU-1037)", () => {
   })
 })
 
-// AQU-1086: languageEditMinRole — the second write-gating permission-policy
-// key. Unlike the termbase floor its default is MAINTAINER (600), i.e. the
-// behaviour before the setting existed; an org opts IN by lowering it.
-describe("useOrgSettings — languageEditMinRole (AQU-1086)", () => {
+// AQU-1086 / AQU-984: languageEditMinRole. Absence is "never set" and resolves
+// to PROJECT_LEAD (500). A stored number, including an explicit 600, is kept.
+describe("useOrgSettings — languageEditMinRole (AQU-1086 / AQU-984)", () => {
   function makeLanguageResponse(languageEditMinRole?: number): OrgSettingsResponse {
     return {
       orgId: 1,
@@ -504,14 +503,21 @@ describe("useOrgSettings — languageEditMinRole (AQU-1086)", () => {
     }
   }
 
-  it("defaults to maintainer (600) when the org has not set it", async () => {
+  it("defaults to project lead (500) when the org has not set it", async () => {
     mockFetchResponse = makeLanguageResponse()
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.languageEditMinRole).toBe(500)
+  })
+
+  it("keeps an explicit maintainer floor (600)", async () => {
+    mockFetchResponse = makeLanguageResponse(600)
     const { result } = renderHook(() => useOrgSettings(1, 700))
     await waitFor(() => expect(result.current.hasFetched).toBe(true))
     expect(result.current.languageEditMinRole).toBe(600)
   })
 
-  it("reads an explicitly lowered floor (project lead 500)", async () => {
+  it("reads an explicitly stored project-lead floor (500)", async () => {
     mockFetchResponse = makeLanguageResponse(500)
     const { result } = renderHook(() => useOrgSettings(1, 700))
     await waitFor(() => expect(result.current.hasFetched).toBe(true))
@@ -522,7 +528,7 @@ describe("useOrgSettings — languageEditMinRole (AQU-1086)", () => {
     mockFetchResponse = makeLanguageResponse(9999)
     const { result } = renderHook(() => useOrgSettings(1, 700))
     await waitFor(() => expect(result.current.hasFetched).toBe(true))
-    expect(result.current.languageEditMinRole).toBe(600)
+    expect(result.current.languageEditMinRole).toBe(500)
   })
 })
 

@@ -164,6 +164,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'plan_stale at prepare AND again at commit), changesetId (optional UUIDv7 for ' +
       'idempotency). JSON cannot express undefined, so a key cannot be deleted — write null. ' +
       'Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); ' +
+      '`sourceLanguage`, `targetLanguage`, `targetLanes`, and `archivedLanes` need the org ' +
+      'language-edit floor (default PROJECT_LEAD 500 when unset; a stored floor is kept); ' +
       'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
       'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +

@@ -313,6 +313,26 @@ export interface UpdateProjectSettingsInput {
   ifMatchVersion: number
   /** Writer's user id (numeric, or its string form). */
   updatedBy: number | string
+  /**
+   * AQU-1075: this write is the link copying a field into a downstream.
+   * Skip the inherit prepare (it would detach the field being copied) and
+   * skip a further cascade from this write — the caller walks the chain.
+   */
+  inheritPropagation?: boolean
+  /** Originals for knowledge documents copied with a newly enabled field. */
+  blobs?: {
+    get(key: string): Promise<{
+      arrayBuffer(): Promise<ArrayBuffer>
+      httpMetadata?: { contentType?: string }
+    } | null>
+    put(
+      key: string,
+      value: ArrayBuffer | Uint8Array,
+      options?: { httpMetadata?: { contentType?: string } },
+    ): Promise<unknown>
+    delete(key: string): Promise<unknown>
+  } | null
+  r2KeyPrefix?: string
 }
 
 /**
@@ -329,7 +349,12 @@ export interface UpdateProjectSettingsInput {
  * `error` to its own 500, matching the internal route's original behavior.
  */
 export type UpdateProjectSettingsResult =
-  | { status: "ok"; settings: ProjectSettingsResponse }
+  | {
+      status: "ok"
+      settings: ProjectSettingsResponse
+      /** Live downstreams this save copied into, with the version now stored. */
+      propagated?: { projectId: string; version: number }[]
+    }
   | { status: "conflict"; current: ProjectSettingsResponse }
   | { status: "error"; message: string }
 
@@ -391,7 +416,29 @@ export async function updateProjectSettingsShared(
     return { status: "conflict", current }
   }
 
-  const normalizedSettings = normalizeSettings(input.settings)
+  // AQU-1075: a normal save keeps the link's choice, detaches a field the
+  // maintainer just edited, and pulls a field they just turned on. A copy
+  // the link itself is writing skips this — otherwise the copy would detach
+  // the field it is delivering. A failure here must not refuse the save.
+  let settingsToStore = input.settings
+  let pullKnowledge = false
+  if (!input.inheritPropagation) {
+    try {
+      const inherited = await import("./inherited-settings")
+      const prepared = await inherited.prepareInheritedSettingsWrite(
+        db,
+        input.projectId,
+        current.settings,
+        input.settings,
+      )
+      settingsToStore = prepared.settings
+      pullKnowledge = prepared.pullKnowledge
+    } catch (err) {
+      console.error("[inherited-settings] prepare failed:", err)
+    }
+  }
+
+  const normalizedSettings = normalizeSettings(settingsToStore)
   const newSettingsJson = JSON.stringify(normalizedSettings)
   const newVersion = current.version + 1
   const oldThreshold = validationThreshold(current.settings)
@@ -483,5 +530,29 @@ export async function updateProjectSettingsShared(
   }
 
   const fresh = await loadProjectSettings(db, input.projectId)
-  return { status: "ok", settings: fresh }
+  let propagated: { projectId: string; version: number }[] = []
+  if (!input.inheritPropagation) {
+    try {
+      const inherited = await import("./inherited-settings")
+      propagated = await inherited.afterInheritedSettingsWrite(db, {
+        projectId: input.projectId,
+        before: current.settings,
+        after: normalizedSettings,
+        updatedBy: input.updatedBy,
+        pullKnowledge,
+        blobs: input.blobs,
+        r2KeyPrefix: input.r2KeyPrefix,
+      })
+    } catch (err) {
+      console.error("[inherited-settings] propagate failed:", err)
+    }
+  }
+  const settings = propagated.length > 0 || pullKnowledge
+    ? await loadProjectSettings(db, input.projectId)
+    : fresh
+  return {
+    status: "ok",
+    settings,
+    ...(propagated.length > 0 ? { propagated } : {}),
+  }
 }

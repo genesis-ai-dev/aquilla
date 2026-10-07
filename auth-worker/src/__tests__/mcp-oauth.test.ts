@@ -118,6 +118,14 @@ describe("discovery", () => {
     expect((await app.request("/.well-known/oauth-authorization-server/chat", {}, oauthEnv)).status).toBe(404)
   })
 
+  it("serves OpenAI's domain-verification token as the whole plain-text body, and 404s until it is set", async () => {
+    // The plugin portal compares the body byte-for-byte; JSON or padding fails verification.
+    const verified = await app.request("/.well-known/openai-apps-challenge", {}, Object.assign(Object.create(oauthEnv) as typeof oauthEnv, { OPENAI_APPS_CHALLENGE: " tok_abc123\n" }))
+    expect(verified.status).toBe(200)
+    expect(await verified.text()).toBe("tok_abc123")
+    expect((await app.request("/.well-known/openai-apps-challenge", {}, oauthEnv)).status).toBe(404)
+  })
+
   it("sends the browser to the SPA consent page with the request untouched", async () => {
     const query = new URLSearchParams(await authorizeParams()).toString()
     const response = await app.request(`/oauth/authorize?${query}`, {}, oauthEnv)

@@ -68,7 +68,7 @@ import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken 
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
-import { laneIdResolveSql } from '../events/lane-id-sql'
+import { artifactBindingConflictColumn, laneIdResolveSql } from '../events/lane-id-sql'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
 import type { RawEvent } from '../events/types'
@@ -962,20 +962,20 @@ export async function applyPlanImport(
         .run()
     }
 
+    const conflictColumn = await artifactBindingConflictColumn(db)
     await db
       .prepare(
         `INSERT INTO artifact_bindings (
            id, project_id, artifact_id, file_id, binding_role, target_lang,
            member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
          ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
-         ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+         ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
          DO UPDATE SET
            profile_id = excluded.profile_id,
            profile_version = excluded.profile_version,
            fidelity = excluded.fidelity,
            manifest = excluded.manifest,
            recipe = excluded.recipe,
-           lane_id = COALESCE(excluded.lane_id, artifact_bindings.lane_id),
            updated_at = now()`,
       )
       .bind(

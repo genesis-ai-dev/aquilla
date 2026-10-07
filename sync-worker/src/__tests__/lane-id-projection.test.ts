@@ -249,17 +249,23 @@ describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
     ])
   })
 
-  it('progress recompute writes lane_id grouped by target_lang', async () => {
+  it('progress recompute writes a row per lane, keyed by lane_id', async () => {
     await seedLanes(t)
     await project(t, [SOURCE, LEGACY_TARGET, ES_TARGET])
     for (const s of fullProgressRecomputeStmts(t.db, PROJECT, FILE, 5000)) await s.run()
 
     const r = await t.pg.query<{ target_lang: string; lane_id: string | null }>(
       `SELECT DISTINCT target_lang, lane_id FROM file_section_progress
-        WHERE project_id = $1 ORDER BY target_lang`,
+        WHERE project_id = $1 ORDER BY lane_id`,
       [PROJECT],
     )
+    // AQU-1599: one row set per row of `lanes`, the SOURCE lane included — it
+    // carries the lane-independent numbers. Ordered by lane_id because
+    // `target_lang` no longer identifies a row: the source lane's `legacy_tag`
+    // is NULL, so its row carries '' exactly as the default lane's does, which
+    // is why every reader resolves a lane id instead of matching the column.
     expect(r.rows).toEqual([
+      { target_lang: '', lane_id: SOURCE_LANE },
       { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
       { target_lang: 'es', lane_id: ES_LANE },
     ])

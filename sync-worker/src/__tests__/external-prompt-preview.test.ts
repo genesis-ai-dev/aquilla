@@ -705,25 +705,48 @@ describe("external prompt preview", () => {
 
     it("resolves a lane tagged with its own id to the lane's language", async () => {
       await testDb.pg.query(
-        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
-         VALUES ('a3f09c1e', 'proj-a', 'target', 'Spanish (Mexico team)', 'es', 'a3f09c1e', 1)`,
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('a3f09c1e', 'proj-a', 'target', 'Spanish', 'Spanish (Mexico team)', 'es', 'a3f09c1e', 1)`,
       )
       const { status, body } = await preview(testDb, token, "cell-live", "?targetLang=a3f09c1e")
       expect(status).toBe(200)
       expect(body.targetLang).toBe("a3f09c1e")
-      expect(body.targetLanguage).toBe("es")
+      expect(body.targetLanguage).toBe("Spanish")
       // And the assembled prompt carries the language, not the key.
-      expect(body.messages[0].content).toContain("es")
+      expect(body.messages[0].content).toContain("Spanish")
       expect(body.messages[0].content).not.toContain("a3f09c1e")
     })
 
     it("leaves a lane whose tag IS a language exactly as it was", async () => {
       await testDb.pg.query(
-        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
-         VALUES ('frc00002', 'proj-a', 'target', 'French (Canada)', 'fra', 'fr-CA', 1)`,
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('frc00002', 'proj-a', 'target', 'fr-CA', 'French (Canada)', 'fra', 'fr-CA', 1)`,
       )
       const { body } = await preview(testDb, token, "cell-live", "?targetLang=fr-CA")
       expect(body.targetLanguage).toBe("fr-CA")
+    })
+
+    it("sends the default lane's stored language, not the project setting", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('defa0001', 'proj-a', 'target', 'French', NULL, NULL, '', 0)`,
+      )
+      await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "Spanish" })
+      const { body } = await preview(testDb, token, "cell-live")
+      expect(body.targetLang).toBe("")
+      expect(body.targetLanguage).toBe("French")
+    })
+
+    it("sends the language after it is edited", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('c0ffee01', 'proj-a', 'target', 'Yoruba', NULL, 'yo', 'Yoruba', 1)`,
+      )
+      await testDb.pg.query(
+        `UPDATE lanes SET language = 'Yoruba (Oyo)' WHERE project_id = 'proj-a' AND id = 'c0ffee01'`,
+      )
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=Yoruba")
+      expect(body.targetLanguage).toBe("Yoruba (Oyo)")
     })
 
     it("falls back to the project target when no lane row carries the tag", async () => {

@@ -13,6 +13,7 @@ import {
   type LaneIdentity,
   type VisibleLaneTags,
 } from "../../../src/lib/lanes/read-wall"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
 
 export { laneReadWallEnabled, laneTagAllowed, visibilityCacheToken } from "../../../src/lib/lanes/read-wall"
 export type { VisibleLaneTags } from "../../../src/lib/lanes/read-wall"
@@ -20,7 +21,7 @@ export type { VisibleLaneTags } from "../../../src/lib/lanes/read-wall"
 export async function loadTargetLanes(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, name, legacy_tag FROM lanes
+      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE project_id = ? AND role = 'target'`,
     )
     .bind(projectId)

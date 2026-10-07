@@ -507,18 +507,28 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
 
-  const renameLane = useCallback(async (laneId: string, name: string) => {
+  // AQU-1592: the languages screen sends the identity fields the user touched —
+  // the language, or a nullable name/code override. A null clears an override
+  // rather than writing a derived value back.
+  const renameLane = useCallback(async (
+    laneId: string,
+    edit: { name?: string | null; language?: string; code?: string | null },
+  ) => {
     const jwt = session?.jwt
     if (!jwt || !id) return "invalid" as const
-    const result = await renameProjectLane(jwt, id, laneId, name)
+    const result = await renameProjectLane(jwt, id, laneId, edit)
     if (result.kind === "ok") {
       await refreshSharedSettings()
       return "ok" as const
     }
-    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
+    if (result.kind === "duplicate") return "duplicate" as const
+    if (result.kind === "malformed_code") return "malformed_code" as const
+    return "invalid" as const
   }, [session?.jwt, id, refreshSharedSettings])
 
-  const createLane = useCallback(async (input: { name: string; language: string }) => {
+  const createLane = useCallback(async (
+    input: { name: string; language: string; code?: string | null },
+  ) => {
     const jwt = session?.jwt
     if (!jwt || !id) return "invalid" as const
     const result = await createProjectLane(jwt, id, input)
@@ -526,7 +536,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       await refreshSharedSettings()
       return "ok" as const
     }
-    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
+    if (result.kind === "duplicate") return "duplicate" as const
+    if (result.kind === "malformed_code") return "malformed_code" as const
+    return "invalid" as const
   }, [session?.jwt, id, refreshSharedSettings])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {

@@ -24,6 +24,10 @@ async function setup() {
   // question; AQU-1050's release gate needs the project to have opted in.
   await env.AQUILLA_PG.prepare('INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)')
     .bind(PROJECT, JSON.stringify({ sourceLanguage: 'en', targetLanguage: 'sw', autopilotEnabled: true, translationBrief: { parameters: { purpose: 'Community reading' } } })).run()
+  // AQU-1595: the start gate reads both languages off the lane rows. Seed them
+  // before the cells so the test trigger attaches the cells to these rows.
+  await env.AQUILLA_PG.prepare(`INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+    VALUES ('ctxu-src', ?, 'source', 'English', NULL, 0), ('ctxu-tgt', ?, 'target', 'Swahili', '', 1)`).bind(PROJECT, PROJECT).run()
   for (const [cellId, ref, text] of [['c1', 'MRK 1:1', 'In the beginning'], ['c2', 'MRK 1:2', 'was the word']] as const) {
     await env.AQUILLA_PG.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
       VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`).bind(PROJECT, FILE, cellId, text, ref, `ev-${cellId}`).run()
@@ -88,6 +92,8 @@ it('fails closed on unowned projects and non-local providers before creating a r
   const f = await setup()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('unowned', 'Unowned', 1)").run()
   await env.AQUILLA_PG.prepare("INSERT INTO project_settings (project_id, settings, version, updated_by) SELECT 'unowned', settings, 1, 1 FROM project_settings WHERE project_id = ?").bind(PROJECT).run()
+  await env.AQUILLA_PG.prepare(`INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+    VALUES ('unown-src', 'unowned', 'source', 'English', NULL, 0), ('unown-tgt', 'unowned', 'target', 'Swahili', '', 1)`).run()
   expect((await f.start({}, 'unowned')).status).toBe(403)
   expect((await f.start({ OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1' })).status).toBe(503)
   expect(f.completions).toHaveLength(0)

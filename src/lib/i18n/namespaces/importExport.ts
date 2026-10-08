@@ -441,7 +441,7 @@ export const importExport = defineNamespace({
       "Import a Bible translation from the {link} — over 1,000 versions with section " +
       "headings and formatting. You can import the whole bible, a single testament, or individual books.",
     "importExport.helloao.apiLinkText": "Free Use Bible API",
-    "importExport.helloao.searchPlaceholder": "Search by language, name, or id (e.g. 'eng', 'BSB')",
+    "importExport.helloao.searchPlaceholder": "Search by language, name, or id (e.g. 'English', 'BSB')",
     "importExport.helloao.searchAriaLabel": "Search Bible translations",
     "importExport.helloao.failedToLoadList": "Failed to load list: {error}",
     "importExport.helloao.loadingTranslations": "Loading translations...",
@@ -478,7 +478,7 @@ export const importExport = defineNamespace({
     "importExport.ebible.targetDescription":
       "Match eBible verses to existing source cells by canonical reference (e.g. GEN 1:1) and " +
       "fill the target column. A review step lets you keep or replace any existing target content.",
-    "importExport.ebible.searchPlaceholder": "Search by language, title, or id (e.g. 'eng', 'KJV')",
+    "importExport.ebible.searchPlaceholder": "Search by language, title, or id (e.g. 'English', 'KJV')",
     "importExport.ebible.searchAriaLabel": "Search eBible translations",
     "importExport.ebible.otBooks": "{count} OT",
     "importExport.ebible.ntBooks": "{count} NT",
@@ -1058,6 +1058,7 @@ export const importExport = defineNamespace({
       "cells.",
     "importExport.dcs.languageCodeAriaLabel": "Language code",
     "importExport.dcs.languageFilterLabel": "Language",
+    "importExport.dcs.languageNamePlaceholder": "English, Traditional Han…",
     "importExport.dcs.loadingCatalog": "Loading catalog…",
     "importExport.dcs.noResults": "No released resources match these filters.",
     "importExport.dcs.noResultsHint": "Try a broader language, owner, or subject.",
@@ -2639,10 +2640,9 @@ export const importExport = defineNamespace({
       },
       "importExport.dcs.languageCodeAriaLabel": {
         description:
-          "Accessible name, read aloud by screen readers, for the same box the " +
-          "visible Language label sits above. It is more specific than the visible " +
-          "label because the box takes a short standard language code rather than a " +
-          "language name.",
+          "Accessible name of the editable language-code field under the Door43 " +
+          "language name. The code is derived from the name; the reader corrects " +
+          "it here when that derivation is wrong.",
       },
       "importExport.dcs.languageFilterLabel": {
         description:
@@ -2650,6 +2650,11 @@ export const importExport = defineNamespace({
           "the resources they want to find in the Door43 catalog. A noun naming " +
           "what the box filters on, not an instruction and not the language of the " +
           "interface.",
+      },
+      "importExport.dcs.languageNamePlaceholder": {
+        description:
+          "Placeholder in the Door43 language box. Examples are language names, " +
+          "never codes. The code is derived into the box beneath and can be edited.",
       },
       "importExport.dcs.loadingCatalog": {
         description:

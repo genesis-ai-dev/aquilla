@@ -52,7 +52,7 @@ describe("LanguagesSection", () => {
   it("rejects an empty lane", async () => {
     const { patch } = renderSection({ targetLanes: [] })
     fireEvent.click(screen.getByTestId("add-target-lang-btn"))
-    await waitFor(() => expect(screen.getByText(/enter a language tag/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/enter a language name/i)).toBeTruthy())
     expect(patch).not.toHaveBeenCalled()
   })
 
@@ -606,6 +606,17 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
         allowDuplicateName: false,
       }),
     )
+  })
+
+  it("fills the empty code box with the code derived from the language name (AQU-1792)", async () => {
+    renderIdentity()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "Turkana" },
+    })
+    fireEvent.click(screen.getByTestId("add-lane-advanced-toggle"))
+    const code = screen.getByTestId("add-lane-code-input") as HTMLInputElement
+    expect(code.value).toBe("")
+    await waitFor(() => expect(code.placeholder).toBe("tuv"))
   })
 
   it("reports a malformed code from the create path", async () => {

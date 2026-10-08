@@ -86,6 +86,22 @@ describe("changed-file E2E impact selection", () => {
     expect(selectAffectedE2E([specs[3]], specs).specs).toEqual([specs[3]])
   })
 
+  it("does not treat the word popover as a feature match", () => {
+    const withPresence = [
+      ...specs,
+      "e2e/specs/collab/member-presence-popover.smoke.spec.ts",
+    ]
+    const selected = selectAffectedE2E(
+      ["src/components/org/AddLanguagePopover.tsx"],
+      withPresence,
+    ).specs
+    expect(selected).not.toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
+    expect(selectAffectedE2E(
+      ["src/components/collab/MemberPresence.tsx"],
+      withPresence,
+    ).specs).toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
+  })
+
   it("maps domain code to a sentinel and close filename matches", () => {
     expect(selectAffectedE2E([
       "src/components/ProjectSettings/ProjectSettingsValidation.tsx",

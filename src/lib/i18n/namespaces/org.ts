@@ -699,9 +699,9 @@ export const org = defineNamespace({
     "org.addLanguagePopover.description":
       "Registers a new lane on this project. Manage or remove lanes in project settings.",
     "org.addLanguagePopover.loadingLanguages": "Loading languages…",
-    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
-    "org.addLanguagePopover.inputAriaLabel": "New target language tag",
-    // "Enter a language tag." → projectSettings.create.extraLanguagesEmptyError (identical text)
+    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
+    "org.addLanguagePopover.inputAriaLabel": "New target language",
+    // "Enter a language name." → projectSettings.create.extraLanguagesEmptyError (identical text)
     // too-long error → projectSettings.create.extraLanguagesTooLongError (identical text)
     // already-default error → projectSettings.languages.alreadyDefaultError (identical text)
     // lane-already-exists error → projectSettings.languages.alreadyExistsError (identical text)

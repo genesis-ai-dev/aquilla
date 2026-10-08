@@ -15,7 +15,7 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { extractUsfmStrings } from "../../src/lib/parsers/usfm"
-import { readProjectLanes, updateProjectSettings } from "./frontier-api"
+import { patchProjectLane, readProjectLanes } from "./frontier-api"
 import { mintSyncToken, seedProjectWithFile, type SeededProject } from "./seed-project"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -64,15 +64,14 @@ export async function seedTranslatedProject(
     if (row < 0) throw new Error(`no cell for ${ref}`)
     return row
   }
-  await updateProjectSettings(jwt, seeded.projectId, {
-    sourceLanguage: fixture.sourceLanguage,
-    targetLanguage: fixture.targetLanguage,
-  })
-
-  // The default target lane's row id: the projection keys cells by lane.
+  // Languages are lane rows (AQU-1594/1595), not settings: relabel the lanes
+  // seedProjectWithFile created to this fixture's language pair.
   const lanes = await readProjectLanes(jwt, seeded.projectId)
+  const source = lanes.find((l) => l.role === "source")
   const lane = lanes.find((l) => l.role === "target" && !l.archivedAt)
-  if (!lane) throw new Error("seeded project has no target lane")
+  if (!source || !lane) throw new Error("seeded project has no source or target lane")
+  await patchProjectLane(jwt, seeded.projectId, source.id, { language: fixture.sourceLanguage })
+  await patchProjectLane(jwt, seeded.projectId, lane.id, { language: fixture.targetLanguage })
   const laneFields = { laneId: lane.id }
 
   const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)

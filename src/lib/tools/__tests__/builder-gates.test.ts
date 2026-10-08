@@ -10,6 +10,7 @@ import { validateManifest, type ToolManifest } from "../../../../shared/tools/ma
 import { runBuildFlow, MAX_REPAIRS } from "../build-flow"
 import { runToolSmoke } from "../smoke"
 import { HEATMAP_MANIFEST, HEATMAP_SOURCE } from "../starters/heatmap-source"
+import { STARTER_EXTENSIONS } from "../starters"
 import type { BuildAttempt } from "../tools-api"
 import { fakeSmokeFrame } from "./fake-frame"
 
@@ -52,6 +53,17 @@ describe("smoke gate", () => {
     expect(res.calls["files.list"]).toBe(2)
     expect(res.calls["cells.list"]).toBeGreaterThanOrEqual(1)
   }, 30_000)
+})
+
+describe("every reviewed starter", () => {
+  for (const starter of STARTER_EXTENSIONS) {
+    it(`${starter.manifest.name} passes lint, manifest and smoke`, async () => {
+      expect(lintToolSource(starter.source).issues).toEqual([])
+      expect(validateManifest(starter.manifest).errors).toEqual([])
+      const res = await runToolSmoke(starter.source, starter.manifest, smokeOpts)
+      expect(res.errors).toEqual([])
+    }, 30_000)
+  }
 })
 
 describe("repair loop", () => {

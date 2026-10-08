@@ -51,7 +51,9 @@ export interface ToolBoot {
   tool: { id: string; name: string; version: number }
   project: { id: string; name: string }
   user: { username: string; roleLevel: number | null }
-  mount: "page" | "panel" | "inline" | "smoke"
+  mount: "page" | "panel" | "inline" | "editor" | "smoke"
+  /** Editor mounts: the file being edited. */
+  file?: { fileId: string; name: string }
   /** Inline mounts: the cell the tool sits under. */
   cell?: { fileId: string; cellId: string }
   theme: Record<string, string>

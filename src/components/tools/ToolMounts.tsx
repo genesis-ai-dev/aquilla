@@ -23,15 +23,17 @@ function toolsFor(tools: ToolSummary[], mount: ToolMount): ToolSummary[] {
   return tools.filter((t) => t.manifest.mounts.includes(mount))
 }
 
-function MountedTool({
+export function MountedTool({
   toolId,
   mount,
   cell,
+  file,
   className,
 }: {
   toolId: string
-  mount: "panel" | "inline"
+  mount: "panel" | "inline" | "editor"
   cell?: { fileId: string; cellId: string }
+  file?: { fileId: string; name: string }
   className?: string
 }) {
   const ctx = useToolsMount()
@@ -47,6 +49,7 @@ function MountedTool({
       roleLevel={roleLevel ?? null}
       mount={mount}
       {...(cell ? { cell } : {})}
+      {...(file ? { file } : {})}
       onGrantChange={() => ctx.refresh()}
       className={className}
     />

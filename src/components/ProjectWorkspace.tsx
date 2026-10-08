@@ -176,6 +176,9 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { ToolsDockPanel } from "./tools/ToolMounts"
+import { ExtensionEditorSurface, ExtensionEditorSwitcher, useExtensionEditorChoice } from "./tools/ExtensionEditor"
+import { STANDARD_EDITOR } from "@/lib/tools/editor-choice"
+import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
@@ -1373,6 +1376,9 @@ export function ProjectWorkspace() {
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
+  // Smart Extensions: an installed `editor` extension may replace the
+  // standard editor for this file (choice remembered per user/project/file).
+  const extensionEditorChoice = useExtensionEditorChoice(currentUsername, projectId ?? "", activeFileId ?? null)
   // Keep the ref in sync so effects declared earlier in the component can
   // access the resolved username without a hoisting issue.
   currentUsernameRef.current = currentUsername
@@ -7404,6 +7410,8 @@ export function ProjectWorkspace() {
               }
               if (!msg.cell || msg.project !== pid) return
               if (msg.file) invalidateCellHistory(pid, msg.file, msg.cell)
+              // Smart Extensions: live-refresh mounted extensions (incl. editor mounts).
+              publishProjectApplied({ project: pid, ...(msg.file ? { file: msg.file } : {}), cell: msg.cell })
               const ownWrite = isOwnWriteEcho(msg, currentUsername)
               // Validation state has two projections: `cells.validated` drives
               // progress, while `cell_validators` identifies who approved the
@@ -13456,9 +13464,15 @@ export function ProjectWorkspace() {
               onVisibleCellIdsChange: handleVisibleCellIdsChange,
             }}
           />
+        ) : activeFileId && activeFile && extensionEditorChoice.selected !== STANDARD_EDITOR ? (
+          <ExtensionEditorSurface
+            choice={extensionEditorChoice}
+            file={{ fileId: activeFileId, name: activeFile.name }}
+          />
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
           <div className="relative flex h-full w-full flex-col">
+            <ExtensionEditorSwitcher choice={extensionEditorChoice} />
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">

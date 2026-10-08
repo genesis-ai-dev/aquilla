@@ -10,6 +10,7 @@ import { useOutbox } from "@/context/OutboxContext"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { subscribeAppliedEvents } from "@/lib/sync/outbox-flush"
+import { subscribeProjectApplied, type ProjectAppliedFrame } from "@/lib/tools/project-applied-bus"
 import { BridgeError, createBridgeHost, type BridgeHost, type ToolErrorReport } from "@/lib/tools/host-bridge"
 import { createToolHandlers } from "@/lib/tools/host-handlers"
 import { LiveToolData } from "@/lib/tools/live-data"
@@ -47,11 +48,15 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   const flushRef = useRef(flushNow)
   const grantCbRef = useRef(onGrantChange)
   const hostRef = useRef<BridgeHost | null>(null)
+  // Declared scopes via a ref so a refetched tool object (same version) does
+  // not re-create the bridge mid-session.
+  const declaredRef = useRef(tool.manifest.scopes)
   useEffect(() => {
     roleRef.current = roleLevel
     flushRef.current = flushNow
     grantCbRef.current = onGrantChange
-  }, [roleLevel, flushNow, onGrantChange])
+    declaredRef.current = tool.manifest.scopes
+  }, [roleLevel, flushNow, onGrantChange, tool.manifest.scopes])
   // Prompts are serialized: a tool firing three gated calls at once gets one
   // prompt at a time, and a later call reuses an "always" answer.
   const promptChain = useRef<Promise<unknown>>(Promise.resolve())
@@ -71,7 +76,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
         if (decision.kind === "allow") return true
         if (decision.kind === "deny") return false
         const answer = await new Promise<PromptAnswer>((resolve) => {
-          setPrompt({ scope, declared: tool.manifest.scopes.includes(scope), answer: resolve })
+          setPrompt({ scope, declared: declaredRef.current.includes(scope), answer: resolve })
         })
         setPrompt(null)
         const outcome = applyPromptAnswer(scope, answer, standingRef.current)
@@ -79,7 +84,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
         if (outcome.nextStanding) {
           // The server only stores declared scopes; an undeclared "always"
           // degrades to a session grant.
-          const declared = outcome.nextStanding.filter((s) => tool.manifest.scopes.includes(s))
+          const declared = outcome.nextStanding.filter((s) => declaredRef.current.includes(s))
           standingRef.current = new Set(outcome.nextStanding)
           try {
             const saved = await setToolGrant(session.jwt, projectId, tool.id, declared)
@@ -94,7 +99,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       promptChain.current = next.catch(() => undefined)
       return next
     },
-    [projectId, session.jwt, tool.id, tool.manifest.scopes],
+    [projectId, session.jwt, tool.id],
   )
 
   const toolName = tool.name
@@ -133,9 +138,12 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     // the cached read and tell the tool which cells changed.
     let timer: ReturnType<typeof setTimeout> | null = null
     const pending = new Map<string, Set<string>>()
-    const unsubscribe = subscribeAppliedEvents((frames) => {
+    const onFrames = (frames: readonly ProjectAppliedFrame[]) => {
       for (const f of frames) {
-        if (f.project !== projectId || !f.file || !data.watchedFiles.has(f.file)) continue
+        // Every file of this project: the data source may have been re-created
+        // (new grant, new version) since the tool listed its files, and tools
+        // filter by fileId themselves.
+        if (f.project !== projectId || !f.file) continue
         const set = pending.get(f.file) ?? new Set<string>()
         if (f.cell) set.add(f.cell)
         pending.set(f.file, set)
@@ -149,11 +157,15 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
         }
         pending.clear()
       }, 150)
-    })
+    }
+    // Our own flush acks, plus everyone's writes from the project WebSocket.
+    const unsubscribeOwn = subscribeAppliedEvents((frames) => onFrames(frames))
+    const unsubscribeRemote = subscribeProjectApplied((frame) => onFrames([frame]))
 
     return () => {
       stop()
-      unsubscribe()
+      unsubscribeOwn()
+      unsubscribeRemote()
       if (timer) clearTimeout(timer)
       hostRef.current = null
     }

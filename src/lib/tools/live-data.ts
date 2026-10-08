@@ -99,7 +99,7 @@ export function pairRows(rows: CellRow[], lane: string, laneId: string | null = 
 export class LiveToolData implements ToolHostData {
   private readonly opts: LiveToolDataOptions
   private readonly cache = new Map<string, Map<string, CachedCell>>()
-  /** Files this tool has listed — the scope of its cells.changed pushes. */
+  /** Files this tool has read through this data source. */
   readonly watchedFiles = new Set<string>()
   private defaultLane: Promise<{ tag: string; id: string | null }> | null = null
 

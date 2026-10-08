@@ -21,14 +21,16 @@ export interface ToolFrameProps {
   tool: ToolDetail
   session: FrontierSession
   roleLevel: number | null
-  mount?: "page" | "panel" | "inline"
+  mount?: "page" | "panel" | "inline" | "editor"
+  /** Editor mounts: the file being edited. */
+  file?: { fileId: string; name: string }
   /** Inline mounts: the cell this tool sits under. */
   cell?: { fileId: string; cellId: string }
   onGrantChange?: (scopes: ToolScope[]) => void
   className?: string
 }
 
-export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, onGrantChange, className }: ToolFrameProps) {
+export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, className }: ToolFrameProps) {
   const t = useT()
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const { prompt, errors, clearErrors } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange })
@@ -42,10 +44,11 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
         user: { username: session.username, roleLevel },
         mount,
         ...(cell ? { cell } : {}),
+        ...(file ? { file } : {}),
         theme: readThemeVars(),
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on a new version, not on role/theme changes (pushed live)
-    [tool.id, tool.currentVersion, tool.source, project.id, cell?.fileId, cell?.cellId],
+    [tool.id, tool.currentVersion, tool.source, project.id, cell?.fileId, cell?.cellId, file?.fileId],
   )
 
   return (

@@ -21,7 +21,7 @@ export class ToolsPage {
 
   /** Install a starter; leaves the read scopes checked and write scopes off
    *  (the install dialog's defaults), so writes prompt on first use. */
-  async installStarter(name: string): Promise<void> {
+  async installStarter(name: string, opts: { landsIn?: "page" | "editor" } = {}): Promise<void> {
     await this.page.getByRole("button", { name: `Install: ${name}` }).click()
     const dialog = this.page.getByRole("dialog", { name: `Install ${name}?` })
     await expect(dialog).toBeVisible()
@@ -30,7 +30,13 @@ export class ToolsPage {
     )
     await dialog.getByRole("button", { name: "Install", exact: true }).click()
     expect((await installed).status()).toBe(201)
-    await this.page.waitForURL(/\/extensions\/[0-9a-f-]{36}$/)
+    // Editor extensions land in the editor (its switcher); others on their page.
+    await this.page.waitForURL(opts.landsIn === "editor" ? /\/editor/ : /\/extensions\/[0-9a-f-]{36}$/)
+  }
+
+  /** Pick an editor in the file view's editor switcher ("Standard editor" or an extension). */
+  async switchEditor(label: string): Promise<void> {
+    await this.page.getByRole("combobox", { name: "Edit with" }).first().selectOption({ label })
   }
 
   /** The running tool's document (an opaque-origin sandboxed frame). */

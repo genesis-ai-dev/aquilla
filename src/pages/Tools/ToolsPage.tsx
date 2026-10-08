@@ -19,7 +19,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProject } from "@/hooks/useProject"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { revokeScope } from "@/lib/tools/permissions"
-import { HEATMAP_MANIFEST, HEATMAP_SOURCE } from "@/lib/tools/starters/heatmap-source"
+import { STARTER_EXTENSIONS } from "@/lib/tools/starters"
 import {
   installTool,
   listTools,
@@ -35,9 +35,7 @@ interface Candidate {
   manifest: ToolManifest
 }
 
-const STARTERS: { manifest: ToolManifest; source: string }[] = [
-  { manifest: { ...HEATMAP_MANIFEST, scopes: [...HEATMAP_MANIFEST.scopes], mounts: [...HEATMAP_MANIFEST.mounts] }, source: HEATMAP_SOURCE },
-]
+const STARTERS = STARTER_EXTENSIONS
 
 export function ToolsPage() {
   const t = useT()
@@ -74,7 +72,13 @@ export function ToolsPage() {
       const tool = await installTool(jwt, projectId, { ...candidate.input, grant })
       setCandidate(null)
       await refresh()
-      navigate(`/project/${projectId}/extensions/${tool.id}`)
+      // Editor extensions surface in the editor's switcher; everything else
+      // opens on its own page first.
+      navigate(
+        tool.manifest.mounts.includes("editor")
+          ? `/project/${projectId}/editor`
+          : `/project/${projectId}/extensions/${tool.id}`,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

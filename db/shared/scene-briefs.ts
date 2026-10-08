@@ -15,6 +15,7 @@
 // from either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
+import { wireLegacyTagSql } from "./lane-sql"
 import { liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
 
@@ -223,7 +224,7 @@ function rowToBrief(r: SceneBriefRow): SceneBrief {
   }
 }
 
-const BRIEF_COLS = `id, project_id, file_id, start_cell_id, end_cell_id, target_lang, lane_id,
+const BRIEF_COLS = `id, project_id, file_id, start_cell_id, end_cell_id, ${wireLegacyTagSql("scene_briefs")} AS target_lang, lane_id,
   construal, ambiguity_register, l1_summary, l1_generated_at, l1_model_id, status,
   human_edited, stale_since, stale_reason, provenance, created_by, reviewed_by,
   version, created_at, updated_at`
@@ -359,7 +360,7 @@ export async function listSceneBriefsByRun(
           .bind(projectId, runId)
       : db
           .prepare(
-            `SELECT ${BRIEF_COLS}
+            `SELECT *
                FROM (
                  SELECT ${BRIEF_COLS} FROM scene_briefs
                   WHERE project_id = ? AND provenance ->> 'runId' = ?

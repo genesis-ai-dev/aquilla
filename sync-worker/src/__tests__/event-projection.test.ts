@@ -345,8 +345,8 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells'))
     expect(cellsStmts[0].sql).toContain('DELETE FROM cells')
     expect(cellsStmts[0].sql).toContain('side = ?')
-    // AQU-538: trailing bind is the target lane ('' = default).
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', ''])
+    // AQU-1611: side, then the lane lookup (project, legacy tag). '' is the default lane.
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', ''])
   })
 
   it('source.cell.delete binds side=source', () => {
@@ -356,8 +356,9 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     // Two now: the cascade's lane rows (literal side = 'target') and the
     // source row itself (parameterised side = ?).
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells') && !r.sql.includes("side = 'target'"))
-    // AQU-538: source rows always live on the default lane ('').
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source', ''])
+    // AQU-1611: source matches on side. The lane lookup binds are still supplied
+    // (project, tag '') because the predicate is `side = 'source' OR lane_id = …`.
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source', 'proj-1', ''])
   })
 
   it('target.cell.delete with targetLang deletes only that lane', () => {
@@ -365,8 +366,9 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', { targetLang: 'fr' }), stmts)
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells'))
-    expect(cellsStmts[0].sql).toContain('target_lang = ?')
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
+    expect(cellsStmts[0].sql).toContain('legacy_tag = ?')
+    expect(cellsStmts[0].sql).toContain('lane_id =')
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', 'fr'])
   })
 })
 
@@ -383,8 +385,9 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
     expect(recorded[0].sql).toContain('side = ?')
     expect(recorded[0].args[0]).toBe('cell-7')
     expect(recorded[0].args[1]).toBe('evt-test-id') // event_id
-    // AQU-538: last two positional args are the bound `side` and lane.
-    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('target')
+    // AQU-1611: the tail is side, then the lane lookup (project, legacy tag).
+    expect(recorded[0].args[recorded[0].args.length - 3]).toBe('target')
+    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('proj-1')
     expect(recorded[0].args[recorded[0].args.length - 1]).toBe('')
   })
 
@@ -396,7 +399,8 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
       makeEvent('source.cell.reorder', { anchorCellId: 'cell-9' }),
       stmts,
     )
-    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('source')
+    expect(recorded[0].args[recorded[0].args.length - 3]).toBe('source')
+    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('proj-1')
     expect(recorded[0].args[recorded[0].args.length - 1]).toBe('')
   })
 })
@@ -439,7 +443,11 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
       //     `SELECT ...` form used for chain-claim gating (target.cell.commit),
       //  3. a parametrised `side = ?` with the matching value in args
       //     (deletes, reorders).
-      const litMatch = sql.match(/side\s*=\s*'(source|target)'/)
+      // A literal `side = 'source' OR …` is the source-row short-circuit
+      // (AQU-1611), not the mutation's side. The mutation's own side is the
+      // bound `side = ?` (deletes, reorders) or a side literal that is not
+      // that OR.
+      const litMatch = sql.match(/side\s*=\s*'(source|target)'(?!\s*OR)/)
       const valuesMatch = sql.match(/(?:VALUES\s*\(|\)\s*SELECT\s)[^)]*'(source|target)'/)
       if (litMatch) {
         expect(litMatch[1]).toBe(expectedSide)
@@ -1165,8 +1173,9 @@ describe('source.cell.delete — dependent cleanup', () => {
     // act as removing the cell.
     const rows = sqlFor(deleteStmts('target.cell.delete', { targetLang: 'fr' }), 'DELETE FROM cells')
     expect(rows).toHaveLength(1)
-    expect(rows[0].sql).toContain('target_lang = ?')
-    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
+    expect(rows[0].sql).toContain('legacy_tag = ?')
+    expect(rows[0].sql).toContain('lane_id =')
+    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', 'fr'])
   })
 
   it('clears every lane of validators for the cell', () => {
@@ -1233,8 +1242,9 @@ describe('source.cell.delete — dependent cleanup', () => {
     const recorded = deleteStmts('target.cell.delete', { targetLang: 'fr' })
     const validators = sqlFor(recorded, 'cell_validators')
     expect(validators).toHaveLength(1)
-    expect(validators[0].sql).toContain('target_lang = ?')
-    expect(validators[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'fr'])
+    expect(validators[0].sql).toContain('legacy_tag = ?')
+    expect(validators[0].sql).toContain('lane_id =')
+    expect(validators[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', 'fr'])
     const backtranslations = sqlFor(recorded, 'cell_backtranslations')
     expect(backtranslations).toHaveLength(1)
     expect(backtranslations[0].sql).toContain('legacy_tag = ?')

@@ -750,7 +750,6 @@ CREATE TABLE file_section_progress (
 );
 
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
-CREATE INDEX idx_file_section_progress_lane_id ON file_section_progress(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 
 -- AQU-1493: where each line with no verse reference counts on the plan, as last
 -- projected (0145). Written ONLY by the full progress recompute's first
@@ -1156,7 +1155,6 @@ CREATE INDEX assignment_cells_by_file ON assignment_cells(file_id, cell_id);
 CREATE INDEX IF NOT EXISTS idx_assignment_scopes_file ON assignment_scopes(file_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
-CREATE INDEX idx_assignments_lane_id ON assignments(project_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE deleted = 0;
 -- AQU-1591 (migration 0135): the lane-scoped form of the index above — the
 -- per-file audio read and the progress audio CTE both filter on the lane now.
@@ -1169,18 +1167,16 @@ CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
 -- index so the pre-backfill default-lane read is covered too.
 CREATE INDEX idx_cell_bt_lane ON cell_backtranslations(project_id, file_id, cell_id, lane_id, created_at DESC);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
-CREATE INDEX idx_cell_validators_lane_id ON cell_validators(project_id, file_id, cell_id, lane_id) WHERE lane_id IS NOT NULL;
 -- "Which takes have I validated?" — a per-viewer question the editor asks for a
 -- whole file at once, which the primary key's leading columns cannot answer.
 CREATE INDEX idx_cell_audio_validators_user ON cell_audio_validators(project_id, username);
 CREATE INDEX idx_cell_waivers_file ON cell_waivers(project_id, file_id);
 CREATE INDEX idx_cells_decay_drags ON cells(project_id, endorsement_count);
 CREATE INDEX idx_cells_file_order ON cells(project_id, file_id, side, anchor_cell_id);
--- AQU-1160: backs the cell-page-read chain-cache's bounded page fetch
--- ((side, target_lang, cell_id) tuple lookup) — see 0083_cells_scan_index.sql.
-CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang, cell_id);
--- AQU-1240 slice 7: dual-read prefers lane_id once backfill has populated it.
-CREATE INDEX idx_cells_lane_id ON cells(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
+-- AQU-1611 (0154): the cells page fetch and the progress recompute look up
+-- (project, file, side, lane_id, cell_id). The partial idx_cells_lane_id from
+-- 0098 is redundant with this index and with cells_pkey.
+CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, lane_id, cell_id);
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
 -- AQU-1464: newest target edit in ONE lane across every file, for the archive
 -- confirmation's "last change in this lane" lookup. The two indexes above lead

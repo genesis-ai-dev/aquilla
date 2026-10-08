@@ -34,21 +34,20 @@ export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
  * one lane and the join has to say which. `a.lane` is a CTE column, so the
  * index note below does not apply to it.
  *
- * AQU-1261 — why every lane join below compares the BARE column.
+ * AQU-1611 — the lane join compares the BARE `lane_id` column.
  *
- * `cells.target_lang` is `TEXT NOT NULL DEFAULT ''` (migration 0057) and is the
- * fourth column of `idx_cells_file_scan(project_id, file_id, side, target_lang,
- * cell_id)`. So `t.target_lang = lanes.join_tag` is an indexable equality that
- * lands on the full five-column tuple.
+ * `idx_cells_file_scan` is `(project_id, file_id, side, lane_id, cell_id)`
+ * (migration 0154). `t.lane_id = lanes.lane_id` is an indexable equality on
+ * that full tuple. The source lane's id matches no target row, which is what
+ * `join_tag` being NULL used to do for the tag column.
  *
- * Wrapping it — `COALESCE(t.target_lang, '') = lanes.join_tag` — is a no-op on the
- * data (the column cannot be NULL) but makes the predicate non-indexable:
- * Postgres can only use the `(project_id, file_id, side)` prefix, so it pairs
- * `lanes × source cells` against EVERY target row in the file and filters
- * afterwards. On a 10k-cell file one recompute rejected 4,009,599 candidate
- * pairs that way, and those scans ran against the same rows concurrent writers
- * were locking. Keep the comparison bare; `progress-lane-join.test.ts` fails
- * if a COALESCE comes back.
+ * Wrapping it — `COALESCE(t.lane_id, '') = lanes.lane_id` — changes no result
+ * (`lane_id` is NOT NULL) but makes the predicate non-indexable: Postgres
+ * stops at `(project_id, file_id, side)` and pairs every target row in the
+ * file. On a 10k-cell file one recompute rejected millions of candidate pairs
+ * that way. Keep the comparison bare; `progress-lane-join.test.ts` fails if a
+ * COALESCE comes back. The audio join stays on `join_tag`: a take with no
+ * lane yet still reads as the `''` tag, before and after the AQU-1616 backfill.
  */
 
 /**
@@ -108,7 +107,7 @@ export const UNREFERENCED_LINES_STALE_FILES_SQL = `WITH candidates AS MATERIALIZ
                FROM (
                  SELECT DISTINCT b.project_id, b.file_id
                    FROM file_section_progress b
-                  WHERE b.scope = 'book' AND b.target_lang = ''
+                  WHERE b.scope = 'book'
                ) f
               WHERE EXISTS (
                   SELECT 1 FROM cells u
@@ -235,12 +234,11 @@ const AUDIO_HISTOGRAM_SQL = `jsonb_object_agg(audio_validator_bucket::text, buck
  *     under. Every project create / settings PATCH / migrate path runs
  *     `ensureProjectLaneStmts` (db/shared/lanes.ts), so the rows are there.
  *
- * `join_tag` is NULL on the source lane and the tag on every target lane, so
- * the `paired` join below pairs source cells with target cells for target
- * lanes only — `t.target_lang = NULL` never matches — while staying the bare
- * column equality the index needs (see the AQU-1261 note above). Without it
- * the source lane, whose `legacy_tag` is NULL and so whose `lane` is '',
- * would have borrowed the default target lane's translations.
+ * `join_tag` is NULL on the source lane and the tag on every target lane.
+ * The cells join below pairs on `lane_id`, so the source lane matches no
+ * target row. `join_tag` remains the audio join's key (see the note above).
+ * A tag comparison on the cells join would also borrow the default target
+ * lane's translations for the source lane, whose stored tag is ''.
  *
  * Archived lanes are enumerated too: archiving is a soft display decision, and
  * a lane that comes back must not come back with its counts zeroed.
@@ -329,7 +327,7 @@ export function fileProgressRecomputeStmt(
           AND t.file_id = s.file_id
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
-          AND t.target_lang = lanes.join_tag
+          AND t.lane_id = lanes.lane_id
          LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
@@ -491,7 +489,7 @@ export function sectionsProgressRecomputeStmt(
           AND t.file_id = s.file_id
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
-          AND t.target_lang = lanes.join_tag
+          AND t.lane_id = lanes.lane_id
          LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
          ${PLAN_KEYS_JOIN('s')}
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
@@ -645,7 +643,7 @@ export function fullProgressRecomputeStmts(
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
-            AND t.target_lang = lanes.join_tag
+            AND t.lane_id = lanes.lane_id
            LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
            ${PLAN_KEYS_JOIN('s')}
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'

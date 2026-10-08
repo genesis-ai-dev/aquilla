@@ -458,7 +458,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // ── GET /cell-validators read route (AQU-538: per-lane; AQU-1240 dual-read) ─
     // Two shapes: all lanes (no ?lane=) or a single lane (dual-read by tag).
     if (
-      /^SELECT event_id, username, decided_ts, target_lang(?:, lane_id)? FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \?/.test(
+      /SELECT event_id, username, decided_ts, (?:target_lang|COALESCE\(\(SELECT l\.legacy_tag FROM public\.lanes l WHERE l\.project_id = cell_validators\.project_id AND l\.id = cell_validators\.lane_id\), ''\) AS target_lang)(?:, lane_id)? FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \?/.test(
         normalized,
       )
     ) {
@@ -489,7 +489,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
 
     // ── GET /cells/audit-stats — cells select ──────────────────────────
     if (
-      /SELECT cell_id, side, content_hash, last_edit_at, event_id\s+AS last_edit_event_id, source_event_id FROM cells WHERE project_id = \? AND file_id = \?/.test(
+      /SELECT cell_id, side, (?:content_hash|COALESCE\(\(SELECT l\.legacy_tag FROM public\.lanes l WHERE l\.project_id = cells\.project_id AND l\.id = cells\.lane_id\), ''\) AS target_lang, lane_id, content_hash), last_edit_at, event_id\s+AS last_edit_event_id, source_event_id FROM cells WHERE project_id = \? AND file_id = \?/.test(
         normalized,
       )
     ) {
@@ -500,6 +500,8 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
         .map((c) => ({
           cell_id: c.cell_id,
           side: c.side,
+          target_lang: c.target_lang ?? "",
+          lane_id: (c as { lane_id?: string | null }).lane_id ?? null,
           content_hash: c.content_hash ?? null,
           last_edit_at: c.last_edit_at,
           last_edit_event_id: c.event_id,
@@ -618,7 +620,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // timecode-aware and older column lists. The hasTimecodes check below conditionally
     // includes start_ms/end_ms in the returned rows.
     if (
-      /^SELECT cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, endorsement_count/.test(
+      /SELECT cell_id, side, (?:target_lang|COALESCE\(\(SELECT l\.legacy_tag FROM public\.lanes l WHERE l\.project_id = cells\.project_id AND l\.id = cells\.lane_id\), ''\) AS target_lang), value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, endorsement_count/.test(
         normalized,
       )
     ) {
@@ -702,6 +704,24 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const cid = args[2] as string
       db.cells = db.cells.filter(
         (c) => !(c.project_id === pid && c.file_id === fid && c.cell_id === cid),
+      )
+      return []
+    }
+
+    // AQU-1611: the delete matches `side = ?` and, for a target row, the lane
+    // whose legacy_tag is the following bind. Source rows match on side alone.
+    // Bind order: project, file, cell, side, lane-project, legacy tag.
+    if (/^DELETE FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \? AND \(side = 'source' OR \(lane_id = \(SELECT id FROM public\.lanes WHERE project_id = \? AND role = 'target' AND legacy_tag = \?\)\)/.test(normalized)) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const side = args[3] as string
+      const lane = (args[5] as string) ?? ""
+      db.cells = db.cells.filter(
+        (c) => !(
+          c.project_id === pid && c.file_id === fid && c.cell_id === cid && c.side === side
+          && (side === "source" || laneOf(c) === lane)
+        ),
       )
       return []
     }
@@ -992,6 +1012,33 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
+    // AQU-1611: side, then the lane lookup (project, legacy tag).
+    if (/^UPDATE cells SET anchor_cell_id = \?, event_id = \?, last_editor = \?, last_edit_at = \? WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \? AND \(side = 'source' OR \(lane_id = \(SELECT id FROM public\.lanes WHERE project_id = \? AND role = 'target' AND legacy_tag = \?\)\)/.test(
+      normalized,
+    )) {
+      const anchor = args[0] as string | null
+      const eventId = args[1] as string
+      const lastEditor = args[2] as string | null
+      const lastEditAt = args[3] as number
+      const projectId = args[4] as string
+      const fileId = args[5] as string
+      const cellId = args[6] as string
+      const side = args[7] as string
+      const lane = (args[9] as string) ?? ""
+      const cell = db.cells.find(
+        (c) =>
+          c.project_id === projectId && c.file_id === fileId && c.cell_id === cellId
+          && c.side === side && (side === "source" || laneOf(c) === lane),
+      )
+      if (cell) {
+        cell.anchor_cell_id = anchor
+        cell.event_id = eventId
+        cell.last_editor = lastEditor
+        cell.last_edit_at = lastEditAt
+      }
+      return []
+    }
+
     // ── UPDATE cells (reorder) ──────────────────────────────────────────
     // AQU-538: side + lane scoped; the optional chain-claims gate is ignored.
     if (/^UPDATE cells SET anchor_cell_id = \?, event_id = \?, last_editor = \?, last_edit_at = \? WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \? AND target_lang = \?/.test(
@@ -1111,6 +1158,29 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
+    if (
+      /^DELETE FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? AND \(lane_id = \(SELECT id FROM public\.lanes WHERE project_id = \? AND role = 'target' AND legacy_tag = \?\)\) AND username = \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const lane = (args[4] as string) ?? ""
+      const user = args[5] as string
+      db.cell_validators = db.cell_validators.filter(
+        (v) =>
+          !(
+            v.project_id === pid &&
+            v.file_id === fid &&
+            v.cell_id === cid &&
+            (v.target_lang ?? "") === lane &&
+            v.username === user
+          ),
+      )
+      return []
+    }
+
     // ── DELETE cell_validators (cell.unvalidate, 0055) ─────────────────
     if (
       /^DELETE FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? AND target_lang = \? AND username = \?$/.test(
@@ -1142,11 +1212,12 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // 3=cell_id, 4=target_lang (subquery), 5=project_id, 6=file_id, 7=cell_id,
     // 8=target_lang (WHERE).
     if (/^UPDATE cells SET validated/.test(normalized)) {
+      const viaLane = normalized.includes("legacy_tag = ?")
       const threshold = Math.max(1, (args[0] as number) ?? 1)
-      const projectId = args[5] as string
-      const fileId = args[6] as string
-      const cellId = args[7] as string
-      const lane = (args[8] as string) ?? ""
+      const projectId = (viaLane ? args[6] : args[5]) as string
+      const fileId = (viaLane ? args[7] : args[6]) as string
+      const cellId = (viaLane ? args[8] : args[7]) as string
+      const lane = ((viaLane ? args[10] : args[8]) as string) ?? ""
       const cell = db.cells.find(
         (c) =>
           c.project_id === projectId &&

@@ -9,7 +9,7 @@ const ROSTER = [{ username: "bob" }, { username: "bobby" }, { username: "carol" 
 function Harness({
   onKeyDown,
 }: {
-  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  onKeyDown?: (event: React.KeyboardEvent<HTMLDivElement>) => void
 }) {
   const [value, setValue] = useState("Check ")
   return (

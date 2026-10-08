@@ -8,8 +8,17 @@
  * rewritten, and readers use this function until the backfill (AQU-1616)
  * has re-folded the projection.
  *
+ * A termbase a project SUBSCRIBES to (AQU-1721) is another project with its
+ * own lanes, so its renderings carry the termbase's lane ids, which never
+ * equal the subscriber's. `mapSubscribedConceptLanes` rewrites them onto the
+ * subscriber's lanes by language before any of the filters below run
+ * (AQU-1777).
+ *
  * Keep this module free of `@/` aliases. The fold and the workers import it.
  */
+
+import { languagesEqual } from "../../../db/shared/language-normalize"
+import { laneRowLanguage, type LaneLanguageRow } from "../lanes/lane-language"
 
 export interface RenderingLaneRef {
   id: string
@@ -133,4 +142,99 @@ export function conceptsForLaneTag<T extends { renderings: readonly unknown[] }>
   const activeId = laneIdForLegacyTag(laneTag, lanes)
   if (!activeId) return concepts.map((concept) => ({ ...concept, renderings: [] }))
   return conceptsForLane(concepts, activeId, emptyId)
+}
+
+// ── Subscribed termbases (AQU-1777) ──────────────────────────────────────────
+
+/** Target rows only. The source lane's null tag is not the `''` bridge. */
+function targetLanes(lanes: readonly LaneLanguageRow[]): LaneLanguageRow[] {
+  return lanes.filter((lane) => lane.role !== "source")
+}
+
+/**
+ * Does a termbase lane carry the same language as a subscriber lane?
+ *
+ * Both languages known (AQU-1592's reader: the typed column, else the name,
+ * else a tag that is a language string): the AQU-1597 normalizer decides, so
+ * "Spanish", "spanish" and "es" are one language. Either unknown: the two
+ * `legacy_tag`s must be byte-equal, which is how two un-backfilled `''`
+ * lanes still find each other.
+ */
+export function subscribedLanesMatch(
+  termbaseLane: LaneLanguageRow,
+  subscriberLane: LaneLanguageRow,
+): boolean {
+  const termbaseLanguage = laneRowLanguage(termbaseLane)
+  const subscriberLanguage = laneRowLanguage(subscriberLane)
+  if (termbaseLanguage && subscriberLanguage) {
+    return languagesEqual(termbaseLanguage, subscriberLanguage)
+  }
+  return termbaseLane.legacyTag != null && termbaseLane.legacyTag === subscriberLane.legacyTag
+}
+
+/**
+ * The termbase lanes a rendering is visible in on the TERMBASE's own
+ * surfaces: the lane its `laneId` names, else the termbase's `''` bridge
+ * lane. A termbase with no `''` lane has not grown lanes — `conceptsForLaneTag`
+ * leaves its lists unfiltered there — so every target lane shows every
+ * rendering. `lanes` is already target-only.
+ */
+function termbaseLanesShowing(
+  rendering: RenderingWithLane,
+  lanes: readonly LaneLanguageRow[],
+): readonly LaneLanguageRow[] {
+  const emptyId = legacyEmptyLaneId(lanes)
+  if (!emptyId) return lanes
+  const laneId = renderingLaneId(rendering, emptyId)
+  const lane = lanes.find((candidate) => candidate.id === laneId)
+  return lane ? [lane] : []
+}
+
+/**
+ * Map a subscribed termbase's concepts onto the subscriber's lanes.
+ *
+ * Each rendering is re-stamped with the id of every subscriber lane whose
+ * language matches a termbase lane that shows it ({@link subscribedLanesMatch});
+ * one copy per such lane, and a rendering no subscriber lane matches is
+ * dropped. The bridge rule for a missing `laneId` is applied against the
+ * TERMBASE's lanes, never the subscriber's. After this, `conceptsForLane` /
+ * `conceptsForLaneTag` treat the result exactly like the subscriber's own
+ * concepts, so no consumer needs to know which concepts are subscribed.
+ *
+ * With no target lane rows on either side the mapping has nothing to key on
+ * and returns the concepts unchanged (shallow copies): the AQU-1508 "not grown
+ * lanes" rule, on whichever side lacks them.
+ */
+export function mapSubscribedConceptLanes<T extends { renderings: readonly unknown[] }>(
+  concepts: readonly T[],
+  termbaseLanes: readonly LaneLanguageRow[],
+  subscriberLanes: readonly LaneLanguageRow[],
+): T[] {
+  const termbase = targetLanes(termbaseLanes)
+  const subscriber = targetLanes(subscriberLanes)
+  if (termbase.length === 0 || subscriber.length === 0) {
+    return concepts.map((concept) => ({ ...concept }))
+  }
+  // Each termbase lane's matching subscriber lane ids, resolved once per call.
+  const matches = new Map<string, string[]>()
+  for (const lane of termbase) {
+    matches.set(
+      lane.id,
+      subscriber.filter((candidate) => subscribedLanesMatch(lane, candidate)).map((c) => c.id),
+    )
+  }
+  return concepts.map((concept) => {
+    const renderings: unknown[] = []
+    for (const rendering of concept.renderings) {
+      const stamped = new Set<string>()
+      for (const lane of termbaseLanesShowing(rendering as RenderingWithLane, termbase)) {
+        for (const laneId of matches.get(lane.id) ?? []) {
+          if (stamped.has(laneId)) continue
+          stamped.add(laneId)
+          renderings.push({ ...(rendering as object), laneId })
+        }
+      }
+    }
+    return { ...concept, renderings }
+  })
 }

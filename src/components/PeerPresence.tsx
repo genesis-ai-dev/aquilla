@@ -102,6 +102,9 @@ export function PeerPresence({ peers: peersProp, store, onJumpToPeer, resolveCel
                     nameClassName="truncate text-xs font-normal"
                   />
                   <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
+                    {/* AQU-1791: one row per user; a genuine second tab or
+                        device reads as a count, never a duplicate row. */}
+                    {(peer.connectionCount ?? 1) > 1 ? `×${peer.connectionCount} · ` : ""}
                     {at ? `${at} · ` : ""}
                     {peer.isEditing
                       ? t("editor.presence.editing")

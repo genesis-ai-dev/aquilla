@@ -7311,6 +7311,10 @@ export function ProjectWorkspace() {
             const aFile = projectFilesRef.current[0]?.id ?? "__project__"
             return getTokenForFile(aFile)
           },
+          // AQU-1791: this is the channel that publishes presence, so its
+          // connId is per TAB — a reconnect after a dropped link replaces this
+          // tab's roster row instead of adding another "viewing" entry.
+          connIdStorageKey: `aquilla.presence.connId.${pid}`,
         },
         {
           onOpen({ connId }) {

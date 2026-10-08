@@ -383,19 +383,28 @@ export async function mergeSiblingProject(
   return { status: r.status, body }
 }
 
-/** POST /api/v2/projects/:projectId/invites — mint a share-link invite
- * (caller needs project_lead+). Pass an email to email-bind it. */
+/**
+ * POST /api/v2/projects/:projectId/invites — mint a share-link invite
+ * (caller needs project_lead+). Pass an email to email-bind it.
+ *
+ * Below project lead, a missing lane list is no longer every lane. Specs
+ * that mint a link are making that every-lane choice unless they name lanes.
+ */
 export async function createProjectInvite(
   jwt: string,
   projectId: string,
-  opts: { email?: string; role?: number } = {},
+  opts: { email?: string; role?: number; scopeLanes?: string[]; allCurrentLanes?: boolean } = {},
 ): Promise<{ token: string }> {
+  const body: Record<string, unknown> = { ...opts }
+  if (!opts.scopeLanes?.length && opts.allCurrentLanes !== false) {
+    body.allCurrentLanes = true
+  }
   const r = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
     {
       method: "POST",
       headers: authHeaders(jwt),
-      body: JSON.stringify(opts),
+      body: JSON.stringify(body),
     },
   )
   if (!r.ok) throw new Error(`createProjectInvite failed: HTTP ${r.status} — ${await r.text()}`)

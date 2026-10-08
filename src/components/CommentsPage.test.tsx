@@ -8,13 +8,14 @@ import { CommentsPage } from "./CommentsPage"
 
 const mockComments = vi.fn<() => CommentRecord[]>(() => [])
 const mockRefresh = vi.fn()
+const mockResolveThread = vi.fn()
 
 vi.mock("@/hooks/useComments", () => ({
   useComments: () => ({
     comments: mockComments(),
     isLoading: false,
     isError: false,
-    resolveThread: vi.fn(),
+    resolveThread: mockResolveThread,
     editComment: vi.fn(async () => {}),
     deleteComment: vi.fn(async () => {}),
     refresh: mockRefresh,
@@ -309,7 +310,10 @@ describe("CommentsPage — jump to a comment", () => {
     mockComments.mockReturnValue([makeComment()])
     renderWithEditorRoute()
 
-    fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
+    expect(screen.queryByRole("button", { name: /Open file/i })).not.toBeInTheDocument()
+    const comment = screen.getByRole("button", { name: /unique-search-token/i })
+    expect(comment.closest(".rounded-lg")).toHaveClass("bg-card")
+    fireEvent.click(comment)
 
     expect(jumpedTo()).toBe(
       "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=c1",
@@ -326,11 +330,35 @@ describe("CommentsPage — jump to a comment", () => {
     // reviewer revisiting old notes does.
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
     fireEvent.click(screen.getByRole("switch", { name: "Show resolved" }))
+    fireEvent.click(screen.getByRole("button", { name: /resolved comment from/i }))
 
-    fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
+    fireEvent.click(screen.getByRole("button", { name: /unique-search-token/i }))
 
     expect(jumpedTo()).toContain("comments=1")
     expect(jumpedTo()).toContain("commentId=c1")
+  })
+
+  it("opens edit, resolve, and delete from a right-click on the comment", () => {
+    mockComments.mockReturnValue([makeComment()])
+    renderWithEditorRoute()
+
+    fireEvent.contextMenu(screen.getByText("unique-search-token"))
+
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Resolve thread" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument()
+  })
+
+  it("reopens a resolved thread from a right-click on the summary", async () => {
+    mockComments.mockReturnValue([makeComment({ resolved: true })])
+    renderWithEditorRoute()
+    fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
+    fireEvent.click(screen.getByRole("switch", { name: "Show resolved" }))
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /resolved comment from/i }))
+    await userEvent.setup().click(screen.getByRole("menuitem", { name: "Reopen thread" }))
+
+    expect(mockResolveThread).toHaveBeenCalledWith("c1", false)
   })
 
   it("scrolls to the reply that was clicked, not the top of the thread", () => {

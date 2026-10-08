@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
   MessageCircle, MessageCircleCheck, ChevronsUpDown, ChevronsDownUp,
-  AlertCircle, Search, Settings2, ArrowUpRight,
+  AlertCircle, Search, Settings2,
   MoreHorizontal, Pencil, Trash2, RefreshCw, Check, Undo2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,18 +20,24 @@ import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible"
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { createMenuHandle } from "@/components/ui/menu-parts"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { cn } from "@/lib/utils"
-import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { UserChip } from "@/components/UserChip"
 import { useComments } from "@/hooks/useComments"
 import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
@@ -131,6 +137,240 @@ function safeCommentHtml(text: string): string {
     ALLOWED_TAGS: ["b", "i", "code", "br", "span"],
     ALLOWED_ATTR: ["class"],
   })
+}
+
+/** Edit, resolve or reopen, and delete. Shared by the ⋯ button and a right-click. */
+function PageCommentActions({
+  showEdit,
+  showDelete,
+  showResolve,
+  resolved,
+  canResolve,
+  resolveDenialReason,
+  onEdit,
+  onToggleResolved,
+  onDelete,
+}: {
+  showEdit: boolean
+  showDelete: boolean
+  showResolve: boolean
+  resolved: boolean
+  canResolve: boolean
+  resolveDenialReason: string | null
+  onEdit: () => void
+  onToggleResolved: () => void
+  onDelete: () => void
+}) {
+  const { t } = useI18n()
+  return (
+    <>
+      {showEdit && (
+        <DropdownMenuItem onClick={onEdit}>
+          <Pencil />
+          {t("common.edit")}
+        </DropdownMenuItem>
+      )}
+      {showResolve && (
+        <AppTooltip content={!canResolve ? (resolveDenialReason ?? "") : ""}>
+          <DropdownMenuItem
+            data-testid="thread-resolve"
+            aria-disabled={!canResolve || undefined}
+            className={cn(!canResolve && "cursor-not-allowed opacity-50")}
+            onClick={() => {
+              if (!canResolve) return
+              onToggleResolved()
+            }}
+          >
+            {resolved ? <Undo2 /> : <Check />}
+            {resolved ? t("comments.thread.reopen") : t("comments.thread.resolve")}
+          </DropdownMenuItem>
+        </AppTooltip>
+      )}
+      {showDelete && (
+        <DropdownMenuItem onClick={onDelete}>
+          <Trash2 />
+          {t("common.delete")}
+        </DropdownMenuItem>
+      )}
+    </>
+  )
+}
+
+function PageCommentRow({
+  comment,
+  isRoot,
+  fileMissing,
+  place,
+  fileMap,
+  root,
+  canMutate,
+  canResolve,
+  resolveDenialReason,
+  resolved,
+  editing,
+  editBody,
+  isSavingEdit,
+  mentionRoster,
+  currentUsername,
+  onStartEdit,
+  onEditBody,
+  onCancelEdit,
+  onSaveEdit,
+  onRequestDelete,
+  onToggleResolved,
+  onNavigate,
+}: {
+  comment: CommentRecord
+  isRoot: boolean
+  fileMissing: boolean
+  place?: string
+  fileMap: Map<string, string>
+  root: CommentRecord
+  canMutate: boolean
+  canResolve: boolean
+  resolveDenialReason: string | null
+  resolved: boolean
+  editing: boolean
+  editBody: string
+  isSavingEdit: boolean
+  mentionRoster: readonly MentionCandidate[]
+  currentUsername?: string
+  onStartEdit: () => void
+  onEditBody: (value: string) => void
+  onCancelEdit: () => void
+  onSaveEdit: () => void
+  onRequestDelete: () => void
+  onToggleResolved: () => void
+  onNavigate?: (comment: CommentRecord) => void
+}) {
+  const { t } = useI18n()
+  const actionsMenu = useMemo(() => createMenuHandle(), [])
+  const hasMenu = isRoot || canMutate
+  function actions() {
+    return (
+      <PageCommentActions
+        showEdit={canMutate}
+        showDelete={canMutate}
+        showResolve={isRoot}
+        resolved={resolved}
+        canResolve={canResolve}
+        resolveDenialReason={resolveDenialReason}
+        onEdit={onStartEdit}
+        onToggleResolved={onToggleResolved}
+        onDelete={onRequestDelete}
+      />
+    )
+  }
+  const body = (
+    <>
+      {isRoot && (
+        <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <CellPlace root={root} place={place} fileMap={fileMap} t={t} />
+          {fileMissing && (
+            <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
+              {t("comments.file.deletedBadge")}
+            </Badge>
+          )}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 text-xs">
+        <UserChip
+          username={comment.authorLabel ?? comment.authorId}
+          size="xs"
+          nameClassName="text-xs"
+        />
+        <span className="text-muted-foreground">
+          <DateTooltip
+            value={comment.createdAt}
+            label=""
+            variant="ago"
+            side="top"
+            editedAt={comment.deletedAt ? null : comment.updatedAt}
+            editedNotice={t("comments.bubble.edited")}
+          />
+        </span>
+        {hasMenu && (
+          <DropdownMenuTrigger
+            handle={actionsMenu}
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="ms-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/comment:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:aria-expanded:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:data-popup-open:opacity-100"
+                aria-label={t("comments.thread.actionsAria")}
+                onClick={(event) => event.stopPropagation()}
+              />
+            }
+          >
+            <MoreHorizontal />
+          </DropdownMenuTrigger>
+        )}
+      </div>
+      {editing ? (
+        <div className="mt-1 ps-7">
+          <MentionTextarea
+            value={editBody}
+            onChange={onEditBody}
+            candidates={mentionRoster}
+            currentUsername={currentUsername}
+            placeholder={t("comments.composer.editPlaceholder")}
+            autoHeight
+            caretAtEnd
+            className="min-h-5 border-0 bg-transparent p-0 text-sm shadow-none rounded-none focus-visible:border-transparent focus-visible:ring-0 data-[empty=true]:before:start-0 data-[empty=true]:before:top-0"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                onCancelEdit()
+                return
+              }
+              if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              onSaveEdit()
+            }}
+          />
+          <div className="mt-1.5 flex justify-end gap-1.5">
+            <Button type="button" size="xs" variant="ghost" onClick={onCancelEdit} disabled={isSavingEdit}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="button" size="xs" onClick={onSaveEdit} disabled={isSavingEdit || !editBody.trim()}>
+              {isSavingEdit ? <Spinner className="size-3" /> : t("common.save")}
+            </Button>
+          </div>
+        </div>
+      ) : comment.deletedAt != null ? (
+        <p className="mt-1 ps-7 text-sm text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onNavigate?.(comment)}
+          disabled={!onNavigate}
+          className="mt-1 block w-full ps-7 text-start text-sm select-text disabled:cursor-default"
+        >
+          <div data-ph-mask="" dangerouslySetInnerHTML={{ __html: safeCommentHtml(comment.body) }} />
+        </button>
+      )}
+    </>
+  )
+
+  if (!hasMenu) {
+    return <div className="group/comment p-2">{body}</div>
+  }
+
+  return (
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger render={<div className="group/comment p-2" />}>
+          {body}
+        </ContextMenuTrigger>
+        <ContextMenuContent className="min-w-44">{actions()}</ContextMenuContent>
+      </ContextMenu>
+      <DropdownMenu handle={actionsMenu}>
+        <DropdownMenuContent align="end" className="min-w-44">
+          {actions()}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  )
 }
 
 // ── Thread (top-level + replies) ─────────────────────────────────────────
@@ -243,29 +483,6 @@ function CommentThreadCard({
     authors,
   })
   const fileMissing = !!root.fileId && !resolveFileName(root.fileId, fileMap, t).exists
-  const canOpenFile = !!onNavigate && root.scopeKind === "cell" && !!root.fileId && !!root.cellId
-
-  function openFileButton() {
-    if (!canOpenFile || !onNavigate) return null
-    if (fileMissing) {
-      return (
-        <AppTooltip content={t("comments.fileDeletedTooltip")}>
-          <Button type="button" variant="ghost" size="xs" className="cursor-not-allowed opacity-50" disabled>
-            <ArrowUpRight data-icon="inline-start" />
-            {t("comments.openFile")}
-          </Button>
-        </AppTooltip>
-      )
-    }
-    return (
-      <AppTooltip content={t("comments.goToCell")}>
-        <Button type="button" variant="ghost" size="xs" onClick={() => onNavigate(root)}>
-          <ArrowUpRight data-icon="inline-start" />
-          {t("comments.openFile")}
-        </Button>
-      </AppTooltip>
-    )
-  }
 
   const threadBody = (
     <>
@@ -273,126 +490,32 @@ function CommentThreadCard({
         {messages.map((comment, index) => {
           const isOwn = !!currentUsername && comment.authorId === currentUsername
           const canMutate = isOwn && comment.deletedAt == null
-          const editing = editingId === comment.commentId
           return (
-            <li key={comment.commentId} className="group/comment p-2">
-              {index === 0 && (
-                <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <CellPlace root={root} place={place} fileMap={fileMap} t={t} />
-                  {fileMissing && (
-                    <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
-                      {t("comments.file.deletedBadge")}
-                    </Badge>
-                  )}
-                  {openFileButton()}
-                </div>
-              )}
-              <div className="flex items-center gap-1.5 text-xs">
-                <UsernameWithAvatar
-                  username={comment.authorLabel ?? comment.authorId}
-                  size="xs"
-                  nameClassName="text-xs"
-                />
-                <span className="text-muted-foreground">
-                  <DateTooltip
-                    value={comment.createdAt}
-                    label=""
-                    variant="ago"
-                    side="top"
-                    editedAt={comment.deletedAt ? null : comment.updatedAt}
-                    editedNotice={t("comments.bubble.edited")}
-                  />
-                </span>
-                {(index === 0 || canMutate) && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          className="ms-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/comment:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:aria-expanded:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:data-popup-open:opacity-100"
-                          aria-label={t("comments.thread.actionsAria")}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="end" className="min-w-44">
-                      {canMutate && (
-                        <DropdownMenuItem onClick={() => startEdit(comment.commentId, comment.body)}>
-                          <Pencil />
-                          {t("common.edit")}
-                        </DropdownMenuItem>
-                      )}
-                      {index === 0 && (
-                        <AppTooltip content={!canResolve ? (resolveDenialReason ?? "") : ""}>
-                          <DropdownMenuItem
-                            data-testid="thread-resolve"
-                            aria-disabled={!canResolve || undefined}
-                            className={cn(!canResolve && "cursor-not-allowed opacity-50")}
-                            onClick={() => {
-                              if (!canResolve) return
-                              onResolve(root.commentId, !root.resolved)
-                            }}
-                          >
-                            {root.resolved ? <Undo2 /> : <Check />}
-                            {root.resolved ? t("comments.thread.reopen") : t("comments.thread.resolve")}
-                          </DropdownMenuItem>
-                        </AppTooltip>
-                      )}
-                      {canMutate && (
-                        <DropdownMenuItem onClick={() => requestDelete(comment.commentId)}>
-                          <Trash2 />
-                          {t("common.delete")}
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-              </div>
-              {editing ? (
-                <div className="mt-1 ps-7">
-                  <MentionTextarea
-                    value={editBody}
-                    onChange={setEditBody}
-                    candidates={mentionRoster}
-                    currentUsername={currentUsername}
-                    placeholder={t("comments.composer.editPlaceholder")}
-                    autoHeight
-                    caretAtEnd
-                    className="min-h-5 border-0 bg-transparent p-0 text-sm shadow-none rounded-none focus-visible:border-transparent focus-visible:ring-0 data-[empty=true]:before:start-0 data-[empty=true]:before:top-0"
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        cancelEdit()
-                        return
-                      }
-                      if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || e.nativeEvent.isComposing) return
-                      e.preventDefault()
-                      void saveEdit()
-                    }}
-                  />
-                  <div className="mt-1.5 flex justify-end gap-1.5">
-                    <Button type="button" size="xs" variant="ghost" onClick={cancelEdit} disabled={isSavingEdit}>
-                      {t("common.cancel")}
-                    </Button>
-                    <Button type="button" size="xs" onClick={() => { void saveEdit() }} disabled={isSavingEdit || !editBody.trim()}>
-                      {isSavingEdit ? <Spinner className="size-3" /> : t("common.save")}
-                    </Button>
-                  </div>
-                </div>
-              ) : comment.deletedAt != null ? (
-                <p className="mt-1 ps-7 text-sm text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onNavigate?.(comment)}
-                  disabled={!onNavigate}
-                  className="mt-1 block w-full ps-7 text-start text-sm disabled:cursor-default"
-                >
-                  <div data-ph-mask="" dangerouslySetInnerHTML={{ __html: safeCommentHtml(comment.body) }} />
-                </button>
-              )}
+            <li key={comment.commentId}>
+            <PageCommentRow
+              comment={comment}
+              isRoot={index === 0}
+              fileMissing={fileMissing}
+              place={place}
+              fileMap={fileMap}
+              root={root}
+              canMutate={canMutate}
+              canResolve={canResolve}
+              resolveDenialReason={resolveDenialReason}
+              resolved={root.resolved}
+              editing={editingId === comment.commentId}
+              editBody={editBody}
+              isSavingEdit={isSavingEdit}
+              mentionRoster={mentionRoster}
+              currentUsername={currentUsername}
+              onStartEdit={() => startEdit(comment.commentId, comment.body)}
+              onEditBody={setEditBody}
+              onCancelEdit={cancelEdit}
+              onSaveEdit={() => { void saveEdit() }}
+              onRequestDelete={() => requestDelete(comment.commentId)}
+              onToggleResolved={() => onResolve(root.commentId, !root.resolved)}
+              onNavigate={onNavigate}
+            />
             </li>
           )
         })}
@@ -405,7 +528,7 @@ function CommentThreadCard({
       data-slot="collapsible"
       open={expanded}
       onOpenChange={setExpanded}
-      className="mb-3 rounded-lg border text-sm"
+      className="rounded-lg border bg-card text-sm"
     >
       {expanded ? (
         <>
@@ -419,21 +542,35 @@ function CommentThreadCard({
           <CollapsiblePrimitive.Panel data-slot="collapsible-content">{threadBody}</CollapsiblePrimitive.Panel>
         </>
       ) : (
-        <div className="flex items-center gap-2 p-2">
-          <CollapsiblePrimitive.Trigger
-            data-slot="collapsible-trigger"
-            className="flex min-w-0 flex-1 items-center gap-2 text-start outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-          >
-            <MessageCircleCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">{resolvedSummary}</span>
-            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          </CollapsiblePrimitive.Trigger>
-          {openFileButton()}
-        </div>
+        <ContextMenu>
+          <ContextMenuTrigger render={<div />}>
+            <CollapsiblePrimitive.Trigger
+              data-slot="collapsible-trigger"
+              className="flex w-full items-center gap-2 p-2 text-start outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+            >
+              <MessageCircleCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">{resolvedSummary}</span>
+              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            </CollapsiblePrimitive.Trigger>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="min-w-44">
+            <PageCommentActions
+              showEdit={false}
+              showDelete={!!currentUsername && root.authorId === currentUsername && root.deletedAt == null}
+              showResolve
+              resolved={root.resolved}
+              canResolve={canResolve}
+              resolveDenialReason={resolveDenialReason}
+              onEdit={() => {}}
+              onToggleResolved={() => onResolve(root.commentId, false)}
+              onDelete={() => requestDelete(root.commentId)}
+            />
+          </ContextMenuContent>
+        </ContextMenu>
       )}
     </CollapsiblePrimitive.Root>
   ) : (
-    <div className="mb-3 rounded-lg border text-sm">{threadBody}</div>
+    <div className="rounded-lg border bg-card text-sm">{threadBody}</div>
   )
 
   return (
@@ -873,7 +1010,7 @@ export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: 
       )}
 
       {displayedRoots.length > 0 && (
-        <div>
+        <div className="space-y-2">
           {displayedRoots.map((root) => (
             <CommentThreadCard
               key={root.commentId}

@@ -12,9 +12,20 @@
 // The app then behaves like the browser SPA (server reads, IndexedDB outbox)
 // until the user updates; the newer data stays untouched for that build.
 //
-// The marker lives in OPFS next to the store, so wiping the store's data also
-// wipes the marker. Only a positive "newer" reading refuses: a marker that
-// can't be read fails open, rather than shutting offline mode off for good.
+// The marker is a file at the OPFS root, beside (not inside) LiveStore's
+// `livestore-<STORE_ID>@<format>` directory: clearing the site's data removes
+// both, but deleting only the store directory (LiveStore's resetPersistence,
+// or any recovery that drops it) leaves the marker behind — such a path must
+// also remove GENERATION_MARKER_FILE, or older builds keep refusing an empty
+// store.
+//
+// The marker is claimed before the store boots, so a newer build that crashes
+// on its first boot still locks older builds out. That's deliberate: the
+// newer build may have written before it crashed.
+//
+// Only a positive "newer" reading refuses: a marker that can't be read fails
+// open, rather than shutting offline mode off for good. It is left as it is,
+// though — overwriting it could lower a newer build's claim.
 import { OFFLINE_DATA_GENERATION } from "./schema"
 
 /** Thrown by getOfflineStore() when this device's offline data comes from a newer build. */
@@ -76,8 +87,9 @@ export async function claimOfflineGeneration(
   try {
     stored = await marker.read()
   } catch (error) {
+    // Don't rewrite it: an unreadable marker may hold a newer build's claim.
     console.warn("[offline] couldn't read the offline data generation marker — opening the store anyway", error)
-    stored = null
+    return
   }
   if (stored !== null && stored > buildGeneration) throw new NewerOfflineDataError(stored, buildGeneration)
   if (stored === buildGeneration) return

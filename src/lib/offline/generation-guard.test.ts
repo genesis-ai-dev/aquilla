@@ -41,14 +41,16 @@ describe("claimOfflineGeneration", () => {
     expect(marker.writes).toBe(0)
   })
 
-  it("opens anyway when the marker can't be read", async () => {
+  it("opens anyway when the marker can't be read, without overwriting it", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
-    const marker = memoryMarker(null)
+    // Unreadable to this build, but it may still be a newer build's claim.
+    const marker = memoryMarker(3)
     marker.read = async () => {
       throw new Error("garbage")
     }
     await expect(claimOfflineGeneration(marker, 2)).resolves.toBeUndefined()
-    expect(marker.value).toBe(2)
+    expect(marker.value).toBe(3)
+    expect(marker.writes).toBe(0)
   })
 
   it("opens anyway when the marker can't be written", async () => {

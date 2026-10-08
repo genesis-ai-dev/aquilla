@@ -255,6 +255,8 @@ const OFFLINE_ROUTABLE_KINDS: ReadonlySet<OutboxEventKind> = new Set<OutboxEvent
  * case — an event kind that never routes offline — never pays for the import
  * or a store round-trip at all.
  */
+let warnedOfflineStoreUnavailable = false
+
 async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boolean> {
   if (!OFFLINE_ROUTABLE_KINDS.has(event.kind)) return false
   const [{ getOfflineStore }, { isProjectOfflineReady }, { events: offlineEvents }] = await Promise.all([
@@ -264,9 +266,12 @@ async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boole
   ])
   // A store that won't open (e.g. a newer build owns it — see
   // generation-guard.ts) has no ready projects: fall back to IndexedDB rather
-  // than lose the write.
+  // than lose the write. The failure is memoized, so warn once, not per write.
   const store = await getOfflineStore().catch((error: unknown) => {
-    console.warn("[outbox] offline store unavailable — queueing in IndexedDB", error)
+    if (!warnedOfflineStoreUnavailable) {
+      warnedOfflineStoreUnavailable = true
+      console.warn("[outbox] offline store unavailable — queueing in IndexedDB", error)
+    }
     return null
   })
   if (!store || !isProjectOfflineReady(store, event.projectId)) return false

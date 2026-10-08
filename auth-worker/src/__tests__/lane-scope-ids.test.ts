@@ -103,13 +103,27 @@ describe("AQU-1607 member scopes store lane ids", () => {
       { kind: "file", value: "f1" },
     ])
     expect(res.status).toBe(200)
-    // The response also names the lane, so a chip can read as a lane.
+    // The response also names the lane, so a chip can read as a lane. Kept as
+    // a deep equality so an unintended extra field still fails here.
+    // AQU-1783 added `laneAccess`: the grants this save rewrote, so the member
+    // inspector's "lanes they can read" list refreshes without a page reload.
     expect(await res.json()).toEqual({
       scopes: [
         { kind: "file", value: "f1" },
         { kind: "lane", value: "ln-pe" },
       ],
       laneNames: { "ln-pe": "Spanish — Peru" },
+      laneAccess: {
+        memberRoleLevel: 400,
+        // This suite leaves LANE_READ_WALL unset, as local and e2e do.
+        readWallEnabled: false,
+        grants: [{ laneId: "ln-pe", name: "Spanish — Peru", level: 400 }],
+        targetLanes: [
+          { id: "ln-main", name: "Spanish" },
+          { id: "ln-mx", name: "Spanish" },
+          { id: "ln-pe", name: "Spanish — Peru" },
+        ],
+      },
     })
   })
 

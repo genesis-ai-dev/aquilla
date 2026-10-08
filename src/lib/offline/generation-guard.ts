@@ -23,6 +23,16 @@
 // on its first boot still locks older builds out. That's deliberate: the
 // newer build may have written before it crashed.
 //
+// Known gap, accepted: if the newer build was installed with edits still
+// queued (DesktopUpdatePrompt's "stuck" path) and the user then runs an older
+// one, those edits wait in the refused store until the next update. Online
+// edits the older build makes to the same cells win the head CAS meanwhile,
+// so the queued ones come back as conflicts (ConflictToast) to re-apply by
+// hand — logged server-side, not lost. The updater never downgrades, so
+// this needs a manually run old installer, and projects aren't shared that
+// way. If that changes, the newer build could record its pending projects in
+// the marker so the older build can say so (or block editing them).
+//
 // Only a positive "newer" reading refuses: a marker that can't be read fails
 // open, rather than shutting offline mode off for good. It is left as it is,
 // though — overwriting it could lower a newer build's claim.

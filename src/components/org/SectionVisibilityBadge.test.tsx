@@ -83,7 +83,6 @@ describe("SectionVisibilityBadge", () => {
     expect(everyone).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByRole("option", { name: /contributors and up/i })).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByRole("option", { name: /project leads and up/i })).not.toHaveAttribute("aria-disabled", "true")
-    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent("Lower the other setting first.")
 
     fireEvent.pointerMove(everyone)
     fireEvent.mouseMove(everyone)
@@ -98,6 +97,29 @@ describe("SectionVisibilityBadge", () => {
     await waitFor(() => expect(onChangeMinRole).toHaveBeenCalledWith(ROLE.PROJECT_LEAD))
   })
 
+  it("keeps the why behind a circled-i that expands and collapses it", async () => {
+    render(
+      <SectionVisibilityBadge
+        minRole={ROLE.MAINTAINER}
+        canEdit
+        onChangeMinRole={vi.fn()}
+        minSelectableRole={ROLE.PROJECT_LEAD}
+        belowMinSelectableHint="Lower the other setting first."
+      />,
+    )
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    const info = await screen.findByRole("button", { name: /why some options are unavailable/i })
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByTestId("section-visibility-min-hint")).not.toBeInTheDocument()
+
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent("Lower the other setting first.")
+
+    fireEvent.click(info)
+    expect(screen.queryByTestId("section-visibility-min-hint")).not.toBeInTheDocument()
+  })
+
   it("shows no hint when every option is selectable", async () => {
     render(
       <SectionVisibilityBadge
@@ -110,7 +132,7 @@ describe("SectionVisibilityBadge", () => {
     )
     fireEvent.click(screen.getByTestId("section-visibility-badge"))
     await screen.findByRole("combobox", { name: /who can see this section/i })
-    expect(screen.queryByTestId("section-visibility-min-hint")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /why some options are unavailable/i })).not.toBeInTheDocument()
   })
 })
 

@@ -954,6 +954,7 @@ export const org = defineNamespace({
     "org.sectionVisibilityBadge.rolePickerOwner": "Owners only",
     "org.sectionVisibilityBadge.changeVisibilityAriaLabel": "{label}. Change section visibility",
     "org.sectionVisibilityBadge.whoCanSeeLabel": "Who can see this section",
+    "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": "Why some options are unavailable",
 
     // -- WorkloadRollup: org Overview team-workload manager rollup --
     "org.workloadRollup.title": "Team workload",
@@ -2656,10 +2657,14 @@ export const org = defineNamespace({
       },
       "org.projectOverview.teamVisibilityRosterFloorHint": {
         description:
-          "One-line note in the project overview's Team card visibility popover, shown when the options below the member-list setting are greyed out. Explains why (the card shows people, so it can't be more open than the member list) and where to lower the member list first. 'Members card' is the card of that name on the same page; 'Settings → Security' is the org settings page — use the localized names of both.",
+          "Note in the project overview's Team card visibility popover, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the card shows people, so it can't be more open than the member list) and where to lower the member list first. 'Members card' is the card of that name on the same page; 'Settings → Security' is the org settings page — use the localized names of both.",
         placeholders: {
           floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
         },
+      },
+      "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": {
+        description:
+          "Accessible name for the small circled-i button beside 'Who can see this section'. It appears only when some options in that picker are greyed out, and clicking it expands a sentence explaining why.",
       },
       "org.sectionVisibilityBadge.changeVisibilityAriaLabel": {
         description:

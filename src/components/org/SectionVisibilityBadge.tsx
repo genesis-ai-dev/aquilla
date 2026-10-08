@@ -17,7 +17,7 @@
 // settings patch, or a static floor) and the hide/show decision.
 
 import { useState } from "react"
-import { Lock, Eye, ChevronDown } from "lucide-react"
+import { Lock, Eye, ChevronDown, Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   Popover,
@@ -113,8 +113,8 @@ export interface SectionVisibilityBadgeProps {
    * of two settings must not offer a value that saves but cannot show.
    */
   minSelectableRole?: number
-  /** Why the options below `minSelectableRole` are off; shown in the popover
-   *  whenever any option is disabled. */
+  /** Why the options below `minSelectableRole` are off. Whenever any option
+   *  is disabled, a circled-i beside the picker's label expands it in place. */
   belowMinSelectableHint?: string
   className?: string
 }
@@ -137,6 +137,7 @@ export function SectionVisibilityBadge({
   const t = useT()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [hintOpen, setHintOpen] = useState(false)
   const label = t(visibilityFloorLabelKey(minRole))
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
@@ -190,7 +191,25 @@ export function SectionVisibilityBadge({
       />
       <PopoverContent align="end" className="w-64">
         <Field>
-          <FieldLabel className="text-xs font-medium">{t("org.sectionVisibilityBadge.whoCanSeeLabel")}</FieldLabel>
+          <div className="flex items-center justify-between gap-2">
+            <FieldLabel className="text-xs font-medium">{t("org.sectionVisibilityBadge.whoCanSeeLabel")}</FieldLabel>
+            {/* A click, not a hover: the disabled options themselves take no
+                pointer events, and a tooltip inside this popover would not
+                reach touch screens. */}
+            {someDisabled && belowMinSelectableHint && (
+              <button
+                type="button"
+                data-testid="section-visibility-min-info"
+                className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                aria-label={t("org.sectionVisibilityBadge.whyOptionsOffAriaLabel")}
+                aria-expanded={hintOpen}
+                aria-controls="section-visibility-min-hint"
+                onClick={() => setHintOpen((v) => !v)}
+              >
+                <Info className="size-3.5" aria-hidden />
+              </button>
+            )}
+          </div>
           <Select
             items={VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: t(opt.labelKey) }))}
             value={String(minRole)}
@@ -211,8 +230,8 @@ export function SectionVisibilityBadge({
             </SelectContent>
           </Select>
           {description && <FieldDescription className="text-xs">{description}</FieldDescription>}
-          {someDisabled && belowMinSelectableHint && (
-            <FieldDescription className="text-xs" data-testid="section-visibility-min-hint">
+          {someDisabled && belowMinSelectableHint && hintOpen && (
+            <FieldDescription id="section-visibility-min-hint" className="text-xs" data-testid="section-visibility-min-hint">
               {belowMinSelectableHint}
             </FieldDescription>
           )}

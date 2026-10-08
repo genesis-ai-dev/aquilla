@@ -5807,7 +5807,7 @@ export function ProjectWorkspace() {
     if (!project?.id || !aiTrailToken) return
     void recordModelCall(project.id, activeLane, call, aiTrailToken)
   }, [project?.id, activeLane, aiTrailToken])
-  const { completeSingle, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, alignCellStyles, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -5858,6 +5858,11 @@ export function ProjectWorkspace() {
   const handleCompleteParagraph = useCallback(
     (cellId: string) => completeParagraph(cellId),
     [completeParagraph],
+  )
+
+  const handleAlignStyles = useCallback(
+    (cell: CellData) => alignCellStyles(cell),
+    [alignCellStyles],
   )
 
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
@@ -13989,6 +13994,7 @@ export function ProjectWorkspace() {
             onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onPrefetchCompletion={prefetchSingleEvidence} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}
+            onAlignStyles={handleAlignStyles}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}

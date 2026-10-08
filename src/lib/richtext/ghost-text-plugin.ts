@@ -60,11 +60,19 @@ export function dismissGhostText(view: EditorView): boolean {
 }
 
 /** Insert `text` at the ghost position; keep `rest` showing after it. */
+/**
+ * Caret position right after an accept, per view. An accepted suggestion ends
+ * on a whole word, so the next suggestion there is the NEXT word (with a
+ * leading space), not a completion of the word just accepted.
+ */
+const acceptedAt = new WeakMap<EditorView, number>()
+
 function insertGhost(view: EditorView, ghost: GhostText, text: string, rest: string): void {
   const end = ghost.pos + text.length
   const tr = view.state.tr.insertText(text, ghost.pos)
   tr.setSelection(TextSelection.create(tr.doc, end))
   tr.setMeta(ghostTextPluginKey, rest ? { pos: end, text: rest } : null)
+  acceptedAt.set(view, end)
   view.dispatch(tr)
 }
 
@@ -138,8 +146,10 @@ export function createGhostTextExtension(options: GhostTextOptions) {
           const asked = view.state
           const context = caretContext(asked)
           if (!context || !context.left.trim()) return
+          const continuing = acceptedAt.get(view) === context.pos && !/\s$/u.test(context.left)
+          const lead = continuing ? " " : ""
           void client
-            .suggest(context.left, context.right, { excludeCellId: options.getCellId(), limit: 1 })
+            .suggest(context.left + lead, context.right, { excludeCellId: options.getCellId(), limit: 1 })
             .then(([best]) => {
               // Not a closure flag: TipTap reconfigures plugins (e.g. when the
               // bubble menu registers), which destroys one plugin view and
@@ -147,7 +157,7 @@ export function createGhostTextExtension(options: GhostTextOptions) {
               if (view.isDestroyed || !best) return
               const now = view.state
               if (now.doc !== asked.doc || !now.selection.eq(asked.selection) || !hasFocus(view)) return
-              setGhost(view, { pos: context.pos, text: best.insert })
+              setGhost(view, { pos: context.pos, text: lead + best.insert })
             })
             .catch(() => undefined)
         }, debounceMs)

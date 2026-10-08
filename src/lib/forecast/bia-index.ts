@@ -13,9 +13,11 @@
  *
  * Differences from the Python, all deliberate (see docs in bia-engine.ts):
  *   - A "sentence" is an Aquilla cell, not a regex split on `.`/`?` of one big
- *     text file; tokenization is the shared Unicode tokenizer
+ *     text file; tokenization matches the shared Unicode tokenizer
  *     (`completion/tokenize.ts`), so any script works, including scripts that
- *     point vowels with combining marks.
+ *     point vowels with combining marks. Words are keyed lower-case (as the
+ *     Python lower-cased the corpus) but the most common surface spelling is
+ *     kept for display, so a suggestion reads "Dios", not "dios".
  *   - Bigrams never cross a cell boundary (the Python chained the whole corpus).
  *   - Every cell carries a weight: validated cells count 1, unvalidated
  *     target cells count FALLBACK_WEIGHT. Counts are weight sums.
@@ -25,7 +27,11 @@
  * Pure, synchronous, no DOM — runs in a Web Worker or a test.
  */
 
-import { tokenize } from "@/lib/completion/tokenize"
+/** Same token class as `completion/tokenize.ts`, without lower-casing. */
+const TOKEN_RE = /[\p{L}\p{N}\p{M}]+/gu
+
+/** A sentence-initial capital says little about a word's usual spelling. */
+const INITIAL_SURFACE_WEIGHT = 0.01
 
 /** Weight of a target cell that is not validated (validated cells weigh 1). */
 export const FALLBACK_WEIGHT = 0.5
@@ -45,6 +51,7 @@ export interface ForecastCell {
 
 interface IndexedCell {
   tokens: string[]
+  surface: string[]
   weight: number
   order: number
 }
@@ -75,6 +82,8 @@ export class BiaIndex {
   private readonly postings = new Map<string, Map<string, number>>()
   /** word → weighted occurrence count. */
   private readonly freq = new Map<string, number>()
+  /** word → (surface spelling → weight). */
+  private readonly surfaces: WeightTable = new Map()
   /** prev → (next → weight): the Python `MarkovChain.mapping`. */
   private readonly forward: WeightTable = new Map()
   /** next → (prev → weight): the Python `MarkovChain.reverse_mapping`. */
@@ -90,13 +99,14 @@ export class BiaIndex {
   upsert(cells: readonly ForecastCell[]): void {
     for (const cell of cells) {
       this.removeOne(cell.id)
-      const tokens = tokenize(cell.text)
+      const surface = Array.from(cell.text.matchAll(TOKEN_RE), (m) => m[0])
+      const tokens = surface.map((t) => t.toLowerCase())
       if (tokens.length === 0) continue
       const order = cell.order ?? this.nextOrder
       this.nextOrder = Math.max(this.nextOrder, order + 1)
       const weight = cell.validated ? 1 : FALLBACK_WEIGHT
-      this.cells.set(cell.id, { tokens, weight, order })
-      this.apply(cell.id, tokens, weight, 1)
+      this.cells.set(cell.id, { tokens, surface, weight, order })
+      this.apply(cell.id, tokens, surface, weight, 1)
     }
   }
 
@@ -108,6 +118,7 @@ export class BiaIndex {
     this.cells.clear()
     this.postings.clear()
     this.freq.clear()
+    this.surfaces.clear()
     this.forward.clear()
     this.backward.clear()
     this.nextOrder = 0
@@ -117,12 +128,13 @@ export class BiaIndex {
     const existing = this.cells.get(id)
     if (!existing) return
     this.cells.delete(id)
-    this.apply(id, existing.tokens, existing.weight, -1)
+    this.apply(id, existing.tokens, existing.surface, existing.weight, -1)
   }
 
-  private apply(id: string, tokens: readonly string[], weight: number, sign: 1 | -1): void {
+  private apply(id: string, tokens: readonly string[], surface: readonly string[], weight: number, sign: 1 | -1): void {
     const seen = new Set<string>()
     tokens.forEach((word, pos) => {
+      bump(this.surfaces, word, surface[pos], sign * weight * (pos === 0 ? INITIAL_SURFACE_WEIGHT : 1))
       const f = (this.freq.get(word) ?? 0) + sign * weight
       if (f <= EPSILON) this.freq.delete(word)
       else this.freq.set(word, f)
@@ -149,6 +161,21 @@ export class BiaIndex {
   }
 
   // ── Reads ─────────────────────────────────────────────────────────────────
+
+  /** The word's most common spelling in the corpus (the key itself if unseen). */
+  display(word: string): string {
+    const row = this.surfaces.get(word)
+    if (!row) return word
+    let best = word
+    let bestWeight = -1
+    for (const [form, w] of row) {
+      if (w > bestWeight) {
+        best = form
+        bestWeight = w
+      }
+    }
+    return best
+  }
 
   has(word: string): boolean {
     return this.postings.has(word)

@@ -164,12 +164,15 @@ export class BiaEngine {
     const votes = new Map<string, number>()
     for (const { word, distance } of anchors) {
       const landed = new Map<string, number>()
-      for (const [cellId, pos] of index.postingsOf(word) ?? []) {
+      for (const [cellId, first] of index.postingsOf(word) ?? []) {
         if (cellId === opts.excludeCellId) continue
         const cell = index.cell(cellId)
         if (!cell) continue
         if (opts.bound && (cell.order < opts.bound[0] || cell.order > opts.bound[1])) continue
-        const cast = pos - distance
+        // The anchor's FIRST position in the cell, as the Python's
+        // `list.index`. (Casting from every occurrence was measured and
+        // changed accuracy by < 1 point either way, so the faithful form stays.)
+        const cast = first - distance
         if (cast < 0 || cast >= cell.tokens.length) continue
         const hit = cell.tokens[cast]
         if ((landed.get(hit) ?? 0) < cell.weight) landed.set(hit, cell.weight)
@@ -253,13 +256,15 @@ export class BiaEngine {
     const prefix = inside ? (tokens.pop() ?? "") : ""
     const words = this.fill(tokens, [], prefix, opts)
     const extend = opts.extend ?? true
+    const { index } = this
     return words.map(({ word, score, source }, rank) => {
-      let insert = word.slice(prefix.length)
+      const shown = index.display(word)
+      let insert = shown.slice(prefix.length)
       if (extend && rank < MULTI_WORD_TOP) {
         const [follow] = this.fill([...tokens, word], [], "", { ...opts, limit: 1 })
-        if (follow) insert += ` ${follow.word}`
+        if (follow) insert += ` ${index.display(follow.word)}`
       }
-      return { word, insert, score, source }
+      return { word: shown, insert, score, source }
     })
   }
 
@@ -269,12 +274,10 @@ export class BiaEngine {
     const leftTokens = tokenize(left)
     const prefix = inside ? (leftTokens.pop() ?? "") : ""
     const rightTokens = tokenize(right)
-    return this.fill(leftTokens, rightTokens, prefix, opts).map(({ word, score, source }) => ({
-      word,
-      insert: word.slice(prefix.length),
-      score,
-      source,
-    }))
+    return this.fill(leftTokens, rightTokens, prefix, opts).map(({ word, score, source }) => {
+      const shown = this.index.display(word)
+      return { word: shown, insert: shown.slice(prefix.length), score, source }
+    })
   }
 
   /**
@@ -341,9 +344,12 @@ export class BiaEngine {
       // bereaving for "king"); this gives men, people, house, father.
       const prev = sample.tokens[sample.at - 1]
       const next = sample.tokens[sample.at + 1]
-      const fitting = ranked.filter(
-        ([c]) => (prev === undefined || index.canBeNext(prev, c)) && (next === undefined || index.canPrecede(c, next)),
-      )
+      const fitsLeft = (c: string) => prev === undefined || index.canBeNext(prev, c)
+      const fitsRight = (c: string) => next === undefined || index.canPrecede(c, next)
+      // Both neighbours when possible; one side when a rare neighbour (only
+      // ever seen beside the word itself) would otherwise rule out everything.
+      let fitting = ranked.filter(([c]) => fitsLeft(c) && fitsRight(c))
+      if (fitting.length === 0) fitting = ranked.filter(([c]) => fitsLeft(c) || fitsRight(c))
       const top = fitting[0]?.[1] ?? 0
       for (const [candidate, votes] of fitting.slice(0, THESAURUS_PER_SAMPLE)) {
         const idf = index.idf(candidate)
@@ -354,6 +360,6 @@ export class BiaEngine {
     const total = Array.from(combined.values()).reduce((a, b) => a + b, 0)
     return this.rank(combined)
       .slice(0, opts.limit ?? 10)
-      .map(([w, s]) => ({ word: w, score: total > 0 ? s / total : 0 }))
+      .map(([w, s]) => ({ word: index.display(w), score: total > 0 ? s / total : 0 }))
   }
 }

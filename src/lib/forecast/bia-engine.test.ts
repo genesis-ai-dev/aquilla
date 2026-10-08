@@ -49,6 +49,21 @@ describe("BiaIndex", () => {
     expect(index.vocabularyByFrequency()).toEqual([])
   })
 
+  it("keys words lower-case but remembers their usual mid-sentence spelling", () => {
+    const index = new BiaIndex()
+    index.upsert([
+      { id: "a", text: "Y dijo Dios", validated: true },
+      { id: "b", text: "Y vio Dios que y era bueno", validated: true },
+    ])
+    expect(index.has("dios")).toBe(true)
+    expect(index.display("dios")).toBe("Dios")
+    // Sentence-initial "Y" does not outvote the mid-sentence "y".
+    expect(index.display("y")).toBe("y")
+    const engine = new BiaEngine(index)
+    expect(engine.suggestNext("Y dijo ", { extend: false })[0]).toMatchObject({ word: "Dios", insert: "Dios" })
+    expect(engine.suggestNext("y vio Di", { extend: false })[0]).toMatchObject({ insert: "os" })
+  })
+
   it("tokenizes non-Latin scripts without shredding combining marks", () => {
     const index = new BiaIndex()
     index.upsert([{ id: "a", text: "बिचमा परमप्रभुको भय छाउनेछ ।", validated: true }])

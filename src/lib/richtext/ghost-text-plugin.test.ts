@@ -78,6 +78,13 @@ describe("ghost-text plugin", () => {
     expect(ed.state.selection.head).toBe(ed.state.doc.content.size - 1)
   })
 
+  it("after Tab, the next ghost continues with the next word, not a completion of the last", async () => {
+    const ed = await editorWithGhost("the lord is ")
+    handleGhostKeyDown(ed.view, key("Tab"))
+    await vi.waitFor(() => expect(getGhostText(ed.state)?.text).toBe(" leads me"))
+    expect(ed.getText()).toBe("the lord is my shepherd")
+  })
+
   it("→ at the end accepts one word and keeps the rest showing", async () => {
     const ed = await editorWithGhost("the lord is ")
     expect(handleGhostKeyDown(ed.view, key("ArrowRight"))).toBe(true)

@@ -80,7 +80,7 @@ export function runForecastEval(train: readonly ForecastCell[], testTexts: reado
     (right.length === 0
       ? engine.suggestNext(`${left.join(" ")} `, { ...o, extend: false, limit: 3 })
       : engine.suggestInfill(`${left.join(" ")} `, ` ${right.join(" ")}`, { ...o, limit: 3 })
-    ).map((s) => s.word)
+    ).map((s) => s.word.toLowerCase())
   const biaMethods: Record<string, Predictor> = {
     [FAITHFUL]: bia(FAITHFUL_OPTIONS),
     "bia votes only (no markov)": bia({ ...FAITHFUL_OPTIONS, markov: "off" }),

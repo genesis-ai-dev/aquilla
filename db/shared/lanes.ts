@@ -246,21 +246,39 @@ export type ExistingLaneShape = {
  * Lanes a caller genuinely registers through the settings registry — the
  * external Agent API's only way to declare one, and the create dialog's extra
  * languages — name a different language, so they are untouched by this.
+ *
+ * AQU-1810: matching on the display name alone was not enough. The planner
+ * recognises the primary by today's `settings.targetLanguage`, so an entry it
+ * plans from that key is the default lane *by construction* — `legacy_tag ''`
+ * is the identity, not whatever the lane happens to be called now. Rename the
+ * default lane and the two stopped agreeing: the name match missed, and any
+ * settings save — a lane archive among them, since that is a settings save —
+ * minted an empty lane labelled with the stored language beside the lane that
+ * already was it. So a caller that knows the stored `targetLanguage` passes it
+ * and the entry is matched against every way that one lane is named: the
+ * stored language it was planned from, the language the row itself holds, and
+ * its display label.
  */
 export function isDefaultLaneUnderAnotherName(
   legacyTag: string | null,
   existingLanes: ReadonlyArray<ExistingLaneShape>,
+  storedTargetLanguage?: string | null,
 ): boolean {
   // The source lane (null) and the default lane itself ('') are never dropped.
   if (!legacyTag) return false
   const defaultLane = existingLanes.find(
     (lane) => lane.role === "target" && lane.legacyTag === "",
   )
-  // No default lane yet, or one still unnamed, says nothing about this entry.
+  // No default lane yet says nothing about this entry.
   if (!defaultLane) return false
   const label = laneDisplayName({ role: "target", name: defaultLane.name, language: defaultLane.language })
-  if (label === BLANK_LANE_PLACEHOLDER) return false
-  return isPrimaryRegistryLane(legacyTag, label)
+  const names = [
+    storedTargetLanguage,
+    defaultLane.language,
+    label === BLANK_LANE_PLACEHOLDER ? null : label,
+  ]
+  // An unnamed default lane with no stored language says nothing either.
+  return names.some((name) => (name ?? "").trim() !== "" && isPrimaryRegistryLane(legacyTag, name))
 }
 
 /** One lane a caller asked to create. `legacy_tag` is never changed later. */
@@ -431,9 +449,16 @@ export function ensureProjectLaneStmts(
 ): AquillaStatement[] {
   const asked = opts?.lanes ?? lanesAskedFromSettings(opts?.settings, opts?.dataTargetTags ?? [])
   const existing = opts?.existingLanes
+  // AQU-1810: the blob's own `targetLanguage` is what the planner turned into
+  // a target entry, so the guard needs it to see that the entry is the default
+  // lane under a name that no longer matches.
+  const storedTargetLanguage = settingsToLaneInputs(opts?.settings).targetLanguage
   const planned = asked.map((lane, position) => ({ lane, position }))
   const kept = existing
-    ? planned.filter(({ lane }) => !isDefaultLaneUnderAnotherName(lane.legacyTag ?? null, existing))
+    ? planned.filter(
+        ({ lane }) =>
+          !isDefaultLaneUnderAnotherName(lane.legacyTag ?? null, existing, storedTargetLanguage),
+      )
     : planned
   const stmts: AquillaStatement[] = []
   for (const { lane, position } of kept) {

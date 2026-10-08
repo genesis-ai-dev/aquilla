@@ -72,6 +72,7 @@ import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
+import { cellMetadataWireSql } from "../../../db/shared/cell-metadata-sql"
 import { grantedLaneIds, scopeReadClause, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
 
 export interface CellsReadEnv {
@@ -772,7 +773,7 @@ export async function handleCellsReadRequest(
     `cells.cell_id, cells.side, COALESCE(wl.legacy_tag, '') AS target_lang, cells.value, cells.value_html, cells.type, cells.canonical_ref, cells.anchor_cell_id, ` +
     "cells.event_id, cells.source_event_id, cells.last_editor, cells.last_edit_at, cells.validated, cells.ai_drafted, cells.ai_draft, cells.word_count, " +
     "cells.endorsement_count, cells.start_ms, cells.end_ms, " +
-    "cells.medium, cells.sequence_index, cells.transcription, cells.camera_state, cells.metadata, cells.lane_id, cells.hidden_at"
+    `cells.medium, cells.sequence_index, cells.transcription, cells.camera_state, ${cellMetadataWireSql("cells")} AS metadata, cells.lane_id, cells.hidden_at`
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell

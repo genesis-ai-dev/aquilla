@@ -5143,8 +5143,6 @@ export const fr: Catalog = {
   "rules.surface.autofixEditor.flagsPlaceholder": "Indicateurs (p. ex. gi)",
   "rules.surface.autofixEditor.saveButton": "Enregistrer la correction automatique",
   "rules.drawer.closeAriaLabel": "Fermer les détails de la règle",
-  "rules.drawer.autofixUnavailable": "La correction automatique n'est pas disponible dans cette version",
-  "rules.drawer.autofixUnavailableAriaLabel": "Correction automatique indisponible",
   "rules.drawer.amendRuleButton": "Modifier la règle",
   "rules.drawer.savedAutofix": "Correction automatique enregistrée : /{pattern}/{flags} → {replacement}",
   "rules.drawer.noSavedFix": "Aucune correction enregistrée pour l'instant",

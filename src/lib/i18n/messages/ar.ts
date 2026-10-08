@@ -5104,8 +5104,6 @@ export const ar: Catalog = {
   "rules.surface.autofixEditor.flagsPlaceholder": "العلامات (مثل gi)",
   "rules.surface.autofixEditor.saveButton": "حفظ الإصلاح التلقائي",
   "rules.drawer.closeAriaLabel": "إغلاق تفاصيل القاعدة",
-  "rules.drawer.autofixUnavailable": "الإصلاح التلقائي غير متاح في هذا الإصدار",
-  "rules.drawer.autofixUnavailableAriaLabel": "الإصلاح التلقائي غير متاح",
   "rules.drawer.amendRuleButton": "تعديل القاعدة",
   "rules.drawer.savedAutofix": "الإصلاح التلقائي المحفوظ: /{pattern}/{flags} → {replacement}",
   "rules.drawer.noSavedFix": "لا يوجد إصلاح محفوظ بعد",

@@ -5095,8 +5095,6 @@ export const my: Catalog = {
   "rules.surface.autofixEditor.flagsPlaceholder": "Flags (ဥပမာ- gi)",
   "rules.surface.autofixEditor.saveButton": "အလိုအလျောက်ပြင်ဆင်မှု သိမ်းရန်",
   "rules.drawer.closeAriaLabel": "စည်းမျဉ်းအသေးစိတ် ပိတ်ရန်",
-  "rules.drawer.autofixUnavailable": "ဤ Build တွင် အလိုအလျောက်ပြင်ဆင်မှု မရနိုင်ပါ",
-  "rules.drawer.autofixUnavailableAriaLabel": "အလိုအလျောက်ပြင်ဆင်မှု မရနိုင်ပါ",
   "rules.drawer.amendRuleButton": "စည်းမျဉ်း ပြင်ဆင်ရန်",
   "rules.drawer.savedAutofix": "သိမ်းဆည်းထားသော အလိုအလျောက်ပြင်ဆင်မှု- /{pattern}/{flags} → {replacement}",
   "rules.drawer.noSavedFix": "သိမ်းဆည်းထားသော ပြင်ဆင်မှု မရှိသေးပါ",

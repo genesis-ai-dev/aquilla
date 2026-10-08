@@ -5074,8 +5074,6 @@ export const ms: Catalog = {
   "rules.surface.autofixEditor.flagsPlaceholder": "Bendera (cth. gi)",
   "rules.surface.autofixEditor.saveButton": "Simpan pembetulan auto",
   "rules.drawer.closeAriaLabel": "Tutup butiran peraturan",
-  "rules.drawer.autofixUnavailable": "Pembetulan auto tidak tersedia dalam binaan ini",
-  "rules.drawer.autofixUnavailableAriaLabel": "Pembetulan auto tidak tersedia",
   "rules.drawer.amendRuleButton": "Pinda peraturan",
   "rules.drawer.savedAutofix": "Pembetulan auto disimpan: /{pattern}/{flags} → {replacement}",
   "rules.drawer.noSavedFix": "Belum ada pembetulan disimpan",

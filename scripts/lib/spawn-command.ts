@@ -55,15 +55,15 @@ function windowsNodeLaunch(
   return undefined
 }
 
-function launch(
+function launch<O extends SpawnOptions | SpawnSyncOptions>(
   command: string,
   args: readonly string[],
-  options: SpawnOptions | SpawnSyncOptions | undefined,
-): { command: string; args: readonly string[]; options: SpawnOptions | SpawnSyncOptions | undefined } {
+  options: O,
+): { command: string; args: readonly string[]; options: O } {
   if (process.platform !== "win32" || command !== "npx") {
     return { command, args, options }
   }
-  const cwd = typeof options?.cwd === "string" ? options.cwd : undefined
+  const cwd = typeof options.cwd === "string" ? options.cwd : undefined
   const rewritten = windowsNodeLaunch(args, cwd)
   if (rewritten) return { command: rewritten.command, args: rewritten.args, options }
   return { command, args, options: { ...options, shell: true } }
@@ -72,7 +72,7 @@ function launch(
 export function spawn(
   command: string,
   args: readonly string[],
-  options?: SpawnOptions,
+  options: SpawnOptions = {},
 ): ChildProcess {
   const launched = launch(command, args, options)
   return nodeSpawn(launched.command, launched.args, launched.options)
@@ -81,7 +81,7 @@ export function spawn(
 export function spawnSync(
   command: string,
   args: readonly string[],
-  options?: SpawnSyncOptions,
+  options: SpawnSyncOptions = {},
 ): SpawnSyncReturns<string | Buffer> {
   const launched = launch(command, args, options)
   return nodeSpawnSync(launched.command, launched.args, launched.options)

@@ -9,13 +9,23 @@
 //
 // Tauri v2 has no built-in update dialog (`plugins.updater.dialog` is a v1
 // key), so nothing checked for updates before this module.
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::shutdown_guard::{self, ShutdownGuardState};
+
+/// Bounds on a check and a download. Without them a connection that stalls
+/// (sleep, a captive portal) never resolves, and since the call holds
+/// `downloading`, every later check would queue behind it until a restart.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
+/// A download is only abandoned when no bytes arrive for this long, so a slow
+/// but moving connection still finishes.
+const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(120);
+const DOWNLOAD_STALL_POLL: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct AppUpdateState {
@@ -57,16 +67,44 @@ pub async fn download_app_update(
         return Ok(Some(update.into()));
     }
     let updater = app.updater().map_err(|e| e.to_string())?;
-    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+    let Some(update) = tokio::time::timeout(CHECK_TIMEOUT, updater.check())
+        .await
+        .map_err(|_| "update check timed out".to_string())?
+        .map_err(|e| e.to_string())?
+    else {
         return Ok(None);
     };
-    let bytes = update
-        .download(|_, _| {}, || {})
-        .await
-        .map_err(|e| e.to_string())?;
+    let bytes = download_unless_stalled(&update).await?;
     let info = DownloadedUpdate::from(&update);
     *state.ready.lock().map_err(|e| e.to_string())? = Some((update, bytes));
     Ok(Some(info))
+}
+
+/// Downloads `update`, giving up once no bytes have arrived for
+/// `DOWNLOAD_STALL_TIMEOUT`. Dropping the download future cancels the request.
+async fn download_unless_stalled(update: &Update) -> Result<Vec<u8>, String> {
+    let last_progress = Arc::new(Mutex::new(Instant::now()));
+    let on_chunk = {
+        let last_progress = Arc::clone(&last_progress);
+        move |_: usize, _: Option<u64>| {
+            if let Ok(mut at) = last_progress.lock() {
+                *at = Instant::now();
+            }
+        }
+    };
+    let download = update.download(on_chunk, || {});
+    tokio::pin!(download);
+    loop {
+        tokio::select! {
+            result = &mut download => return result.map_err(|e| e.to_string()),
+            _ = tokio::time::sleep(DOWNLOAD_STALL_POLL) => {
+                let idle = last_progress.lock().map(|at| at.elapsed()).unwrap_or_default();
+                if idle >= DOWNLOAD_STALL_TIMEOUT {
+                    return Err(format!("update download stalled for {}s", idle.as_secs()));
+                }
+            }
+        }
+    }
 }
 
 /// Installs the downloaded update and relaunches into it, after the same save

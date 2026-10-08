@@ -52,6 +52,12 @@ export const workspace = defineNamespace({
       one: "Aquilla {version} is ready, but {count} change hasn't reached the server yet. If you update now, it stays saved on this device and sends after the restart.",
       other: "Aquilla {version} is ready, but {count} changes haven't reached the server yet. If you update now, they stay saved on this device and send after the restart.",
     }),
+    // Some of the unsent changes were refused by the server; those don't send
+    // on their own, after a restart or otherwise.
+    "workspace.update.refusedToast": plural({
+      one: "Aquilla {version} is ready, but {count} change hasn't reached the server — it was refused, so it won't send on its own. If you update now, it stays saved on this device.",
+      other: "Aquilla {version} is ready, but {count} changes haven't reached the server, and some were refused and won't send on their own. If you update now, they all stay saved on this device.",
+    }),
     "workspace.update.unknownToast": "Aquilla {version} is ready, but this device couldn't check whether all your changes have reached the server. If you update now, anything unsent stays saved on this device.",
     "workspace.update.updateAnyway": "Update anyway",
     // Tauri offline mode: the server refuses to sync a downloaded project —

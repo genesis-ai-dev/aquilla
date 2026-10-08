@@ -31,8 +31,12 @@ export type UpdateGate =
   | { kind: "clear" }
   /** Still sending — say nothing yet, the flusher is on it. */
   | { kind: "sending"; count: number }
-  /** Not draining — offer to update anyway; the rows stay queued on this device. */
-  | { kind: "stuck"; count: number }
+  /**
+   * Not draining — offer to update anyway; the rows stay queued on this device.
+   * `failed` rows won't send after the restart either, so the prompt mustn't
+   * promise that they will.
+   */
+  | { kind: "stuck"; count: number; failed: number }
   /**
    * A queue can't be read — the offline store failed to open, or IndexedDB
    * errored on the outbox. Warn and
@@ -69,6 +73,6 @@ export function evaluateUpdateGate(queue: OfflineQueueSnapshot | null, graceOver
   if (!queue) return { kind: "unknown" }
   if (queue.count === 0) return { kind: "clear" }
   // A failed row won't be retried on its own, so there's nothing to wait for.
-  if (queue.failed > 0 || graceOver) return { kind: "stuck", count: queue.count }
+  if (queue.failed > 0 || graceOver) return { kind: "stuck", count: queue.count, failed: queue.failed }
   return { kind: "sending", count: queue.count }
 }

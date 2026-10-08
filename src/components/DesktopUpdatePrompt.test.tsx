@@ -159,7 +159,9 @@ describe("DesktopUpdatePrompt", () => {
     store!.commit(queued("q1"))
     store!.commit(events.eventQueueStatusSet({ id: "q1", status: "failed" }))
     renderPrompt(fakeCommands())
-    expect(await screen.findByText(/1 change hasn't reached the server yet/)).toBeInTheDocument()
+    expect(await screen.findByText(/1 change hasn't reached the server — it was refused/)).toBeInTheDocument()
+    // A refused edit isn't retried after the restart, so don't promise it.
+    expect(screen.queryByText(/sends after the restart/)).toBeNull()
   })
 
   it("holds the update while the offline store is still booting", async () => {
@@ -198,9 +200,17 @@ describe("DesktopUpdatePrompt", () => {
 
   it("counts both queues in the Update anyway warning", async () => {
     store!.commit(queued("q1"))
+    outbox = { count: 2, failed: 0 }
+    renderPrompt(fakeCommands(), 50)
+    expect(await screen.findByText(/3 changes haven't reached the server yet/)).toBeInTheDocument()
+  })
+
+  it("says refused changes won't send on their own when the outbox has a failed edit", async () => {
+    store!.commit(queued("q1"))
     outbox = { count: 2, failed: 1 }
     renderPrompt(fakeCommands())
-    expect(await screen.findByText(/3 changes haven't reached the server yet/)).toBeInTheDocument()
+    expect(await screen.findByText(/3 changes haven't reached the server, and some were refused/)).toBeInTheDocument()
+    expect(screen.queryByText(/send after the restart/)).toBeNull()
   })
 
   it("warns instead of claiming all is sent when the outbox can't be read", async () => {

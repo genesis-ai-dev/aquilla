@@ -136,6 +136,7 @@ export function DesktopUpdatePrompt({
   const gate = storeLoading || outbox === undefined ? null : evaluateUpdateGate(total, graceOver)
   const gateKind = gate?.kind ?? "sending"
   const count = gate?.kind === "sending" || gate?.kind === "stuck" ? gate.count : 0
+  const refused = gate?.kind === "stuck" && gate.failed > 0
 
   useEffect(() => {
     if (!update || gateKind === "sending") {
@@ -165,13 +166,15 @@ export function DesktopUpdatePrompt({
           ? t("workspace.update.readyToast", { version: update.version })
           : gateKind === "unknown"
             ? t("workspace.update.unknownToast", { version: update.version })
-            : t("workspace.update.stuckToast", { version: update.version, count }),
+            : refused
+              ? t("workspace.update.refusedToast", { version: update.version, count })
+              : t("workspace.update.stuckToast", { version: update.version, count }),
       actionProps: {
         children: gateKind === "clear" ? t("workspace.update.restartToUpdate") : t("workspace.update.updateAnyway"),
         onClick: install,
       },
     })
-  }, [commands, update, gateKind, count, t])
+  }, [commands, update, gateKind, count, refused, t])
 
   return null
 }

@@ -32,6 +32,7 @@ import {
   setUnresolvedCommentHighlight,
   useUnresolvedCommentHighlight,
 } from "@/lib/store/unresolved-comment-highlight-pref"
+import { setGhostTextEnabled, useGhostTextEnabled } from "@/lib/store/ghost-text-pref"
 import {
   setLowMemoryMode,
   useLowMemoryMode,
@@ -138,6 +139,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   // and EditorTable is the only reader, so a prop pair through
   // ProjectWorkspace would be two more parameters carrying no extra meaning.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
+  const ghostTextEnabled = useGhostTextEnabled()
   const lowMemoryMode = useLowMemoryMode()
   const mismatch = useMemo(
     () =>
@@ -348,6 +350,12 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               checked={highlightUnresolvedComments}
               disabled={!fileOpen}
               onCheckedChange={setUnresolvedCommentHighlight}
+            />
+            <SwitchRow
+              id="view-ghost-text"
+              label={t("editor.view.ghostText")}
+              checked={ghostTextEnabled}
+              onCheckedChange={setGhostTextEnabled}
             />
           </FieldGroup>
 

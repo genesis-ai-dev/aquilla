@@ -410,6 +410,10 @@ export const editor = defineNamespace({
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
     "editor.view.highlightUnresolvedComments": "Highlight open comments",
+    "editor.view.ghostText": "Suggest next words",
+    "editor.wordsThatFit.button": "Words that fit here",
+    "editor.wordsThatFit.empty": "No suggestions yet",
+    "editor.wordsThatFit.replace": "Replace with {word}",
     "editor.view.lowMemory": "Low-memory mode",
     "editor.view.lowMemoryAuto": "Auto",
     "editor.view.lowMemoryOn": "On",
@@ -3515,6 +3519,37 @@ export const editor = defineNamespace({
           "keep their small always-on comment badge when this is off. Applies to " +
           "this browser only.",
         maxLength: 32,
+      },
+      "editor.view.ghostText": {
+        description:
+          "Label of the switch that shows a faint suggested next word (learned " +
+          "from this project's own translated lines) after the caret while " +
+          "typing a translation. Tab accepts it; Esc hides it. Applies to this " +
+          "browser only.",
+        maxLength: 32,
+      },
+      "editor.wordsThatFit.button": {
+        description:
+          "Tooltip and screen-reader name of the toolbar button, shown above a " +
+          "selected word in the translation, that lists other words this " +
+          "project's translation uses in the same kinds of places (a project " +
+          "thesaurus), so the translator can swap the selected word.",
+        maxLength: 40,
+      },
+      "editor.wordsThatFit.empty": {
+        description:
+          "Shown in the alternative-words list when the project has not " +
+          "translated enough text yet to suggest any.",
+        maxLength: 40,
+      },
+      "editor.wordsThatFit.replace": {
+        description:
+          "Screen-reader name of one alternative-word button. {word} is the " +
+          "alternative that will replace the selected word in the translation.",
+        placeholders: {
+          word: "The alternative word, in the translation's own language and script.",
+        },
+        maxLength: 60,
       },
       "editor.view.lowMemory": {
         description:

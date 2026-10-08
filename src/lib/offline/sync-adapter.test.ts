@@ -237,6 +237,34 @@ describe("flushNow", () => {
     adapter.close()
   })
 
+  it.each([
+    [403, "role too low for target.cell.commit"],
+    [422, 'unknown lane "fr"; register it in settings.targetLanes'],
+    [400, "event missing fileId"],
+  ])("keeps a write the server refuses with %i as failed, not dequeued", async (status, reason) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    queueCommit("q1")
+
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ accepted: [], rejected: [{ id: "q1", status, reason }], stale: [] }), { status: 200 }),
+    )
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+    await drainMicrotasks()
+
+    await adapter.flushNow()
+
+    expect(store.query(tables.eventQueue.select().where({ id: "q1" }).first())).toMatchObject({ status: "failed" })
+    adapter.close()
+  })
+
   it("marks a conflict and dequeues on a stale flush result", async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     store.commit(

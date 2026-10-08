@@ -409,7 +409,7 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
     return c.json({ suggestions })
   } catch (error) {
     console.error("[smart-edits] llm failed:", error)
-    return c.json({ error: "llm_unavailable", message: error instanceof Error ? error.message : String(error) }, 502)
+    return c.json({ error: "llm_unavailable", message: "Smart edits are temporarily unavailable" }, 502)
   }
 })
 

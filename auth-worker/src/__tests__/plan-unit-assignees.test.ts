@@ -57,9 +57,7 @@ async function seed(): Promise<void> {
   // The book rows are what make f1's units its books — the same rows the
   // board's own unit list is read from.
   await db.prepare(
-    `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, updated_at) VALUES
-      ('pa','f1','book','GEN','',1), ('pa','f1','book','EXO','',1), ('pa','f1','file','','',1),
-      ('pa','f2','file','','',1)`,
+    `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, updated_at) VALUES ('pa', 'f1', 'book', 'GEN', 1), ('pa', 'f1', 'book', 'EXO', 1), ('pa', 'f1', 'file', '', 1), ('pa', 'f2', 'file', '', 1)`,
   ).run()
   await db.prepare(
     `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref) VALUES
@@ -71,13 +69,7 @@ async function seed(): Promise<void> {
       ('pa','f2','m1','source','s','e-pa',1,NULL)`,
   ).run()
   await db.prepare(
-    `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
-      ('as-anna',   'pa', 2, 'cells', 'GEN 1',   '', 2, NULL, 1, 1000, NULL, NULL),
-      ('as-bob',    'pa', 3, 'cells', 'mixed',   '', 2, NULL, 1, 1100, NULL, NULL),
-      ('as-cara',   'pa', 4, 'files', 'memo',    '', 1, NULL, 1, 1200, NULL, NULL),
-      ('as-old',    'pa', 2, 'cells', 'EXO 1:2', '', 1, NULL, 1,  900, 1500, NULL),
-      ('as-done',   'pa', 4, 'cells', 'EXO 1:2', '', 1, NULL, 1,  950, NULL, 1600),
-      ('as-anna-2', 'pa', 2, 'cells', 'GEN 2',   '', 1, NULL, 1, 1300, NULL, NULL)`,
+    `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES ('as-anna', 'pa', 2, 'cells', 'GEN 1', 2, NULL, 1, 1000, NULL, NULL), ('as-bob', 'pa', 3, 'cells', 'mixed', 2, NULL, 1, 1100, NULL, NULL), ('as-cara', 'pa', 4, 'files', 'memo', 1, NULL, 1, 1200, NULL, NULL), ('as-old', 'pa', 2, 'cells', 'EXO 1:2', 1, NULL, 1, 900, 1500, NULL), ('as-done', 'pa', 4, 'cells', 'EXO 1:2', 1, NULL, 1, 950, NULL, 1600), ('as-anna-2', 'pa', 2, 'cells', 'GEN 2', 1, NULL, 1, 1300, NULL, NULL)`,
   ).run()
   await db.prepare(
     `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
@@ -121,8 +113,7 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
       "INSERT INTO files (id, project_id, name, event_id) VALUES ('f3', 'pa', 'genesis.usfm', 'e-pa')",
     ).run()
     await db.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, updated_at) VALUES
-        ('pa','f3','book','GEN','',1), ('pa','f3','file','','',1)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, updated_at) VALUES ('pa', 'f3', 'book', 'GEN', 1), ('pa', 'f3', 'file', '', 1)`,
     ).run()
     await db.prepare(
       `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id) VALUES
@@ -131,9 +122,7 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
         ('pa','f1','n1','source','s','e-pa',1,NULL,'x1')`,
     ).run()
     await db.prepare(
-      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
-        ('as-dana', 'pa', 5, 'cells', 'added', '', 1, NULL, 1, 2000, NULL, NULL),
-        ('as-erin', 'pa', 6, 'cells', 'added', '', 1, NULL, 1, 2100, NULL, NULL)`,
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES ('as-dana', 'pa', 5, 'cells', 'added', 1, NULL, 1, 2000, NULL, NULL), ('as-erin', 'pa', 6, 'cells', 'added', 1, NULL, 1, 2100, NULL, NULL)`,
     ).run()
     await db.prepare(
       `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
@@ -163,8 +152,7 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
       "UPDATE cells SET anchor_cell_id = 'hb' WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id = 'x1' AND side = 'source'",
     ).run()
     await db.prepare(
-      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
-        ('as-dana', 'pa', 5, 'cells', 'heading', '', 1, NULL, 1, 2000, NULL, NULL)`,
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES ('as-dana', 'pa', 5, 'cells', 'heading', 1, NULL, 1, 2000, NULL, NULL)`,
     ).run()
     await db.prepare("INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-dana','f1','hb')").run()
     await storePlanKeys("f1")
@@ -191,9 +179,7 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
         ('pa','f1','gu','source','words','e-pa',1,'GEN 1:3',NULL)`,
     ).run()
     await db.prepare(
-      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at) VALUES
-        ('as-dana', 'pa', 5, 'cells', 'GEN heading', '', 1, NULL, 1, 1400),
-        ('as-erin', 'pa', 6, 'cells', 'GEN 1:3',     '', 1, NULL, 1, 1450)`,
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, created_by, created_at) VALUES ('as-dana', 'pa', 5, 'cells', 'GEN heading', 1, NULL, 1, 1400), ('as-erin', 'pa', 6, 'cells', 'GEN 1:3', 1, NULL, 1, 1450)`,
     ).run()
     await db.prepare(
       `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES

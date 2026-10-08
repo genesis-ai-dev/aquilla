@@ -52,12 +52,18 @@
 // 8. GET /api/v2/projects/:termbaseProjectId/termbase/concepts?subscriberProjectId=...
 //    The upstream published termbase's ACTIVE concepts, for a subscriber's
 //    enforcement merge (consumed by src/hooks/useSubscribedConcepts.ts, which
-//    no editor surface calls yet — AQU-1715).
+//    the editor workspace and Settings → Rules call — AQU-1721).
 //    Access is the Q19 implicit grant — canReadTermbase, NOT a role check on
 //    the upstream. Concepts are read as the editor reads a project's own
 //    (lib/concepts-read.ts): the live rows of the `concepts` table, and the
 //    legacy settings.terminology blob only while the table has none. Autopilot
-//    reads subscribed termbases through the same function.
+//    reads subscribed termbases through the same function, and applies the
+//    same published / unarchived / same-org gate as canReadTermbase (AQU-1721).
+//    Renderings come back stamped with the SUBSCRIBER's lane ids: each one is
+//    mapped from the lane it has in the termbase to the subscriber lane of the
+//    same language (mapSubscribedConceptLanes, AQU-1777), so the editor's lane
+//    filter treats them like the project's own. A rendering no subscriber lane
+//    matches is left out.
 //    → 200 { concepts: Concept[] }   // status === "active" only
 //    → 400 { error: "subscriberProjectId required" }
 //    → 403 { error: "no termbase read access" }  (non-member / no subscription /
@@ -78,6 +84,8 @@ import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole, canReadTermbase } from "../services/org-permissions"
 import { readProjectConcepts } from "../lib/concepts-read"
+import { loadLaneRows } from "../lib/read-lane-language"
+import { mapSubscribedConceptLanes } from "../../../src/lib/terminology/rendering-lane"
 
 const termbase = new Hono<AuthHonoEnv>()
 
@@ -385,8 +393,20 @@ termbase.get("/:termbaseProjectId/termbase/concepts", authMiddleware, async (c) 
   // deliberately don't grant. Since the concepts migration deletes the
   // settings.terminology key, reading only that key returned nothing for every
   // migrated termbase (AQU-1715).
-  const concepts = (await readProjectConcepts(c.env.AQUILLA_PG, termbaseProjectId)).filter(
-    (concept) => concept.status === "active",
+  const db = c.env.AQUILLA_PG
+  const [termbaseConcepts, termbaseLanes, subscriberLanes] = await Promise.all([
+    readProjectConcepts(db, termbaseProjectId),
+    loadLaneRows(db, termbaseProjectId),
+    loadLaneRows(db, subscriberProjectId),
+  ])
+  // AQU-1777: the renderings carry the TERMBASE's lane ids, which never equal
+  // the subscriber's. Rewrite them onto the subscriber's lanes by language
+  // here, so the editor's lane filter (conceptsForLaneTag over the
+  // subscriber's own rows) treats them exactly like local renderings.
+  const concepts = mapSubscribedConceptLanes(
+    termbaseConcepts.filter((concept) => concept.status === "active"),
+    termbaseLanes,
+    subscriberLanes,
   )
 
   return c.json({ concepts })

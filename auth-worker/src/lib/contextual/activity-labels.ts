@@ -115,7 +115,7 @@ export async function loadCellDisplayIndex(
     .prepare(
       `SELECT cell_id, canonical_ref, sequence_index, anchor_cell_id, metadata, start_ms, end_ms
          FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''`,
+        WHERE project_id = ? AND file_id = ? AND side = 'source'`,
     )
     .bind(projectId, fileId)
     .all<CellLabelRow>()

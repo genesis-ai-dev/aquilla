@@ -198,6 +198,30 @@ export function cellIdAtSec(segments: readonly RegionSegment[], sec: number): st
   return null
 }
 
+/**
+ * The line the Text pane marks as playing. (AQU-1118, Sam, Oct 7)
+ *
+ * The line under the playhead, and through the silence after a line the mark
+ * stays on that line until the next one starts: it ends at the LATER of its
+ * line's own end and the next line's start. Where lines overlap, the earlier
+ * one keeps the mark until it ends, as `cellIdAtSec` already answers. Before
+ * the first line and after the last one, nothing is marked.
+ */
+export function heldCellIdAtSec(segments: readonly RegionSegment[], sec: number): string | null {
+  const at = cellIdAtSec(segments, sec)
+  if (at != null || !Number.isFinite(sec)) return at
+  let previous: { id: string; startTime: number } | null = null
+  let nextLineStarts = false
+  for (const s of segments) {
+    const { startTime, endTime } = s
+    if (typeof startTime !== "number" || !Number.isFinite(startTime)) continue
+    if (typeof endTime !== "number" || !Number.isFinite(endTime)) continue
+    if (startTime > sec) nextLineStarts = true
+    else if (!previous || startTime >= previous.startTime) previous = { id: s.id, startTime }
+  }
+  return previous && nextLineStarts ? previous.id : null
+}
+
 /** Where the text table may offer to insert a line, resolved for a whole file. */
 export interface InsertSlots {
   /** The silence before the very first cue, when there is room in it — the

@@ -518,6 +518,15 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
       lanes: [{ id: 'eslane01', project_id: 'proj-a', role: 'target', name: 'Spanish', legacy_tag: 'es' }],
     })
 
+  // snapshot() is the stored column. Writers leave it empty; the lane tag is
+  // what these assertions mean by target_lang.
+  function cellsByLane(
+    tables: Record<string, Array<Record<string, unknown>>>,
+  ): Array<Record<string, unknown> & { target_lang: string }> {
+    const tag = new Map((tables.lanes ?? []).map((l) => [l.id, (l.legacy_tag as string | null) ?? '']))
+    return (tables.cells ?? []).map((c) => ({ ...c, target_lang: tag.get(c.lane_id) ?? '' }))
+  }
+
   it("two lanes' first commits share the source parent and BOTH project (separate requests)", async () => {
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
@@ -544,7 +553,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     // THE regression: this was `stale: [evt-es]` and the lane row never landed.
     expect(body2.stale).toHaveLength(0)
 
-    const cells = (await snapshot()).cells
+    const cells = cellsByLane(await snapshot())
     const targets = cells.filter((c: any) => c.side === 'target')
     expect(targets.map((c: any) => [c.target_lang, c.value]).sort()).toEqual([
       ['', 'English draft'],
@@ -613,7 +622,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     )
     // Reproduce the broken-period artifact: the event row stays, but its
     // projection row and chain claim never existed.
-    await db.prepare(`DELETE FROM cells WHERE target_lang = 'es'`).run()
+    await db.prepare(`DELETE FROM cells WHERE lane_id = 'eslane01'`).run()
     await db.prepare(`DELETE FROM chain_claims WHERE parent_key LIKE '%@lane:es'`).run()
 
     // A fresh commit chains on the projection head (the source event, since
@@ -626,7 +635,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     const r1 = await handleEventsWriteRequest(await makeRequest([retry], token), makeEnv(db))
     const body1 = (await r1!.json()) as any
     expect(body1.stale.map((s: any) => s.id)).toEqual(['evt-retry'])
-    expect((await snapshot()).cells.find((c: any) => c.target_lang === 'es')).toBeUndefined()
+    expect(cellsByLane(await snapshot()).find((c) => c.target_lang === 'es')).toBeUndefined()
 
     // Realistic log noise: an assignment event whose projection is built by
     // handleAssignmentEvent, not buildEventProjectionStmts. The rebuild must
@@ -666,7 +675,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
       makeEnv(db) as never,
     ))!
     expect(rebuildRes.status).toBe(200)
-    const healed = (await snapshot()).cells.find((c: any) => c.target_lang === 'es')
+    const healed = cellsByLane(await snapshot()).find((c) => c.target_lang === 'es')
     expect(healed?.value).toBe('ghost draft')
     expect(healed?.event_id).toBe('evt-ghost')
 
@@ -679,7 +688,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     })
     const r2 = await handleEventsWriteRequest(await makeRequest([next], token), makeEnv(db))
     expect(((await r2!.json()) as any).stale).toHaveLength(0)
-    expect((await snapshot()).cells.find((c: any) => c.target_lang === 'es')?.value).toBe('post-heal draft')
+    expect(cellsByLane(await snapshot()).find((c) => c.target_lang === 'es')?.value).toBe('post-heal draft')
   })
 
   it('a same-lane sibling still loses its slot (AD-2 preserved per lane)', async () => {
@@ -706,7 +715,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     expect(body.stale).toHaveLength(1)
     expect(body.stale[0].id).toBe('evt-es-2')
 
-    const es = (await snapshot()).cells.find((c: any) => c.side === 'target' && c.target_lang === 'es')
+    const es = cellsByLane(await snapshot()).find((c) => c.side === 'target' && c.target_lang === 'es')
     expect(es?.value).toBe('primero')
     expect(es?.event_id).toBe('evt-es-1')
   })

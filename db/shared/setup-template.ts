@@ -5,7 +5,7 @@
 // operator emails a partner; `parseSetupTemplate` turns the filled reply back
 // into the body of a `ProjectSetup` command (minus `kind`/`projectId`) plus a
 // `warnings[]` list naming every blank. The four fields an agent must NEVER
-// guess — settings.sourceLanguage, settings.targetLanguage,
+// guess — the source and target lane languages,
 // brief.parameters.sourceTexts, brief.parameters.keyTerms — come back as
 // `required: true` warnings; everything else may be defaulted by the agent as
 // long as the approval summary marks it "(defaulted)".
@@ -92,7 +92,7 @@ That's everything. Once we have this, the project is set up in one step and your
 // ── result shapes ────────────────────────────────────────────────────────────
 
 export interface SetupTemplateWarning {
-  /** Dotted path into the setup body (e.g. "settings.targetLanguage",
+  /** Dotted path into the setup body (e.g. "lanes.target.language",
    *  "brief.parameters.keyTerms", "members[2]", "notes.script"). */
   field: string
   message: string
@@ -116,10 +116,18 @@ export interface SetupTemplateImport {
 
 /** The `ProjectSetup` command body minus `kind`/`projectId`, plus the two
  *  human-facing strings the form carries that no settings key holds. */
+export interface SetupTemplateLane {
+  role: 'source' | 'target'
+  language: string
+  name?: string
+}
+
 export interface SetupTemplateSetup {
   projectName?: string
   orgName?: string
   settings: Record<string, unknown>
+  /** Lane rows for ProjectSetup. Absent when both language codes were blank. */
+  lanes?: SetupTemplateLane[]
   brief: { parameters: Record<string, string>; freeformNotes: string }
   members: SetupTemplateMember[]
   /** Always empty from the form — it carries file attachments, not artifact
@@ -163,7 +171,7 @@ function stripPlaceholder(value: string): string {
 type LineFieldTarget =
   | { kind: 'projectName' }
   | { kind: 'orgName' }
-  | { kind: 'setting'; key: 'sourceLanguage' | 'targetLanguage' }
+  | { kind: 'lane'; role: 'source' | 'target' }
   | { kind: 'note'; label: string }
   | { kind: 'yesNo'; id: 'hideNames' | 'sharedTm' }
 
@@ -179,12 +187,12 @@ interface LineFieldSpec {
 
 const LINE_FIELDS: readonly LineFieldSpec[] = [
   { marker: 'Language you are translating', field: 'notes.targetLanguageName', target: { kind: 'note', label: 'Target language name' } },
-  { marker: 'Language code, if you know it', field: 'settings.targetLanguage', target: { kind: 'setting', key: 'targetLanguage' }, required: true },
+  { marker: 'Language code, if you know it', field: 'lanes.target.language', target: { kind: 'lane', role: 'target' }, required: true },
   { marker: 'Script (', field: 'notes.script', target: { kind: 'note', label: 'Script' } },
   { marker: 'Your organization', field: 'orgName', target: { kind: 'orgName' } },
   { marker: 'What should the project be called', field: 'projectName', target: { kind: 'projectName' } },
   { marker: 'Which text does the translator read', field: 'notes.baseText', target: { kind: 'note', label: 'Base text' } },
-  { marker: 'Language code of that text', field: 'settings.sourceLanguage', target: { kind: 'setting', key: 'sourceLanguage' }, required: true },
+  { marker: 'Language code of that text', field: 'lanes.source.language', target: { kind: 'lane', role: 'source' }, required: true },
   { marker: 'Who owns that text', field: 'notes.baseTextOwner', target: { kind: 'note', label: 'Base text owner' } },
   { marker: 'Are we allowed to load it', field: 'notes.baseTextPermission', target: { kind: 'note', label: 'Permission to load base text' } },
   { marker: 'Which book(s) to start with', field: 'notes.books', target: { kind: 'note', label: 'Books to start with' } },
@@ -241,8 +249,9 @@ export const SETUP_TEMPLATE_JSON_SCHEMA: Record<string, unknown> = {
   title: 'ProjectSetup body (from the partner intake form)',
   description:
     'Stage as { kind: "ProjectSetup", projectId, ...this } against an EXISTING project. ' +
-    'settings.sourceLanguage, settings.targetLanguage, brief.parameters.sourceTexts and ' +
-    'brief.parameters.keyTerms must come from the partner — never guess them.',
+    'lanes (role, language, optional name), brief.parameters.sourceTexts and ' +
+    'brief.parameters.keyTerms must come from the partner — never guess them. ' +
+    'Do not write settings.sourceLanguage, settings.targetLanguage, targetLanes, or archivedLanes.',
   type: 'object',
   properties: {
     projectName: { type: 'string', description: 'Human project name (CreateProject.name); not a settings key.' },
@@ -251,12 +260,24 @@ export const SETUP_TEMPLATE_JSON_SCHEMA: Record<string, unknown> = {
       type: 'object',
       description: 'PatchSettings keys. Policy keys are writable in the restrictive direction only.',
       properties: {
-        sourceLanguage: { type: 'string', description: 'Language code of the text the translator drafts FROM (e.g. "ru").' },
-        targetLanguage: { type: 'string', description: 'Language code of the translation (ISO 639-3, e.g. "sty").' },
         contributeToGlobalTm: { const: false, description: 'Present only when the partner declined shared translation memory.' },
         agentAuthorship: { const: 'none', description: 'Present only when the partner asked to hide translator names from agents.' },
       },
       additionalProperties: true,
+    },
+    lanes: {
+      type: 'array',
+      description: 'ProjectSetup lanes: [{ role, language, name? }]. Present only for language codes the partner filled in.',
+      items: {
+        type: 'object',
+        properties: {
+          role: { type: 'string', enum: ['source', 'target'] },
+          language: { type: 'string', description: 'Language of the lane (e.g. "ru", "sty").' },
+          name: { type: 'string', description: 'Optional display name. The target lane uses the language name from the form.' },
+        },
+        required: ['role', 'language'],
+        additionalProperties: false,
+      },
     },
     brief: {
       type: 'object',
@@ -401,6 +422,8 @@ export function parseSetupTemplate(markdown: string): SetupTemplateParseResult {
   const settings: Record<string, unknown> = {}
   const parameters: Record<string, string> = {}
   const notes: string[] = []
+  const laneLanguage: Partial<Record<'source' | 'target', string>> = {}
+  let targetName = ''
   const setup: SetupTemplateSetup = {
     settings,
     brief: { parameters, freeformNotes: '' },
@@ -434,12 +457,13 @@ export function parseSetupTemplate(markdown: string): SetupTemplateParseResult {
       case 'orgName':
         setup.orgName = value
         break
-      case 'setting':
-        settings[t.key] = value
+      case 'lane':
+        laneLanguage[t.role] = value
         break
       case 'note':
         notes.push(`${t.label}: ${value}`)
         if (t.label === 'Base text') baseText = value
+        if (t.label === 'Target language name') targetName = value
         break
       case 'yesNo': {
         const yn = yesNo(value)
@@ -491,6 +515,17 @@ export function parseSetupTemplate(markdown: string): SetupTemplateParseResult {
   })
   if (rows.length === 0) blank('members', false)
   if (locations.length > 0) notes.push(`Team locations: ${locations.join(', ')}`)
+
+  const lanes: SetupTemplateLane[] = []
+  if (laneLanguage.source) lanes.push({ role: 'source', language: laneLanguage.source })
+  if (laneLanguage.target) {
+    lanes.push({
+      role: 'target',
+      language: laneLanguage.target,
+      ...(targetName !== '' ? { name: targetName } : {}),
+    })
+  }
+  if (lanes.length > 0) setup.lanes = lanes
 
   setup.brief.freeformNotes = notes.join('\n')
   return { setup, warnings }

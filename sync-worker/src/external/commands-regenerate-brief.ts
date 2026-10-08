@@ -224,6 +224,7 @@ export async function commitRegenerateBriefSummary(
     ops: [{ key: BRIEF_SETTINGS_KEY, value: nextBrief }],
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    registerLanes: false,
   })
 
   if (result.status === 'conflict') {

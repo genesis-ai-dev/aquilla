@@ -35,9 +35,9 @@ SET idle_in_transaction_session_timeout = '10s';
 WITH s AS (
     SELECT
         ps.project_id,
-        NULLIF(BTRIM(ps.target_language), '')                      AS tag,
-        COALESCE(jsonb_array_length(ps.target_lanes), 0)           AS n_lanes,
-        COALESCE(ps.target_lanes, '[]'::jsonb)                     AS lanes_json,
+        NULLIF(BTRIM((ps.settings::jsonb)->>'targetLanguage'), '') AS tag,
+        COALESCE(jsonb_array_length((ps.settings::jsonb)->'targetLanes'), 0) AS n_lanes,
+        COALESCE((ps.settings::jsonb)->'targetLanes', '[]'::jsonb) AS lanes_json,
         COALESCE((ps.settings::jsonb)->'archivedLanes', '[]'::jsonb) AS archived_json
     FROM project_settings ps
 ),
@@ -107,12 +107,12 @@ SELECT metric, value FROM (
             (SELECT COUNT(DISTINCT c.project_id) FROM cells c
              WHERE c.target_lang='' AND c.side='target'
                AND c.project_id IN (SELECT project_id FROM project_settings
-                                    WHERE NULLIF(BTRIM(target_language),'') IS NULL))),
+                                    WHERE NULLIF(BTRIM((settings::jsonb)->>'targetLanguage'),'') IS NULL))),
       (14, 'AMBIGUOUS: multi-lane projects w/ '''' target cells',
             (SELECT COUNT(DISTINCT c.project_id) FROM cells c
              WHERE c.target_lang='' AND c.side='target'
                AND c.project_id IN (SELECT project_id FROM project_settings
-                                    WHERE COALESCE(jsonb_array_length(target_lanes),0) > 1)))
+                                    WHERE COALESCE(jsonb_array_length((settings::jsonb)->'targetLanes'),0) > 1)))
 ) AS t(ord, metric, value)
 ORDER BY ord;
 

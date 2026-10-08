@@ -386,7 +386,7 @@ describe('RegenerateBriefSummary — guards', () => {
 
     const { res, body } = await prepare(env, maintainer.token, [
       ...regen(),
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'c1', value: 'v' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'c1', laneId: 'deflane1', value: 'v' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

@@ -39,6 +39,7 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.emptyTarget": "Source has content but the translation is empty",
     "rules.infraction.builtin.targetEqualsSource": "Translation is identical to the source",
     "rules.infraction.builtin.numberIntegrity": "Number from source missing in translation",
+    "rules.infraction.builtin.numberIntegrityExtra": "Number in translation not found in source",
     "rules.infraction.builtin.endPunctuationMismatch": "Terminal punctuation differs from source",
     "rules.infraction.builtin.punctuationIntegrity":
       "Clause punctuation from source missing in translation",
@@ -67,6 +68,9 @@ export const rules = defineNamespace({
     "rules.builtin.numberIntegrity.name": "Number integrity",
     "rules.builtin.numberIntegrity.description":
       "Numerals in source must appear in target (locale separators are tolerated).",
+    "rules.builtin.numberIntegrityExtra.name": "Extra numbers",
+    "rules.builtin.numberIntegrityExtra.description":
+      "Numerals in the translation should also appear in the source — catches a number the translator added.",
     "rules.builtin.endPunctuationMismatch.name": "End punctuation",
     "rules.builtin.endPunctuationMismatch.description":
       "Source ends in ?/!/. — translation should end the same way.",
@@ -394,48 +398,12 @@ export const rules = defineNamespace({
     "rules.autofix.noReasonGiven": "No reason given",
     "rules.autofix.couldNotApplyFixes": "Could not apply fixes",
 
-    // ── RuleCreateDialog.tsx (standalone create-rule dialog) ────────────────
-    "rules.createDialog.namePlaceholder": "Preserve numbers",
-    "rules.createDialog.descriptionLabel": "Description",
-    "rules.createDialog.ruleTypeLabel": "Rule Type",
-    "rules.createDialog.checkType.sourceTargetMatch": "Source-target match",
-    "rules.createDialog.checkType.sourceRequiresTarget": "Source requires target",
-    "rules.createDialog.checkType.targetForbids": "Target forbids",
-    "rules.createDialog.patternRegexLabel": "Pattern (regex)",
-    "rules.createDialog.patternFieldHint.match": "Must appear in both source and target",
-    "rules.createDialog.forbiddenPatternRegexLabel": "Forbidden pattern (regex)",
-    "rules.createDialog.patternFieldHint.forbidden": "Target must not contain this",
-    "rules.createDialog.sourcePatternRegexLabel": "Source pattern (regex)",
-    "rules.createDialog.requiredTargetPatternRegexLabel": "Required target pattern (regex)",
-    "rules.createDialog.testYourRuleHeading": "Test your rule",
-    "rules.createDialog.testSourcePlaceholder": "Source text...",
-    "rules.createDialog.testTargetPlaceholder": "Target text...",
-    "rules.createDialog.testButton": "Test",
-
-    // ── RuleSuggestDialog.tsx (standalone "Suggest from edits" dialog) ──────
-    "rules.suggestDialog.description":
-      "The LLM will analyze your human-validated translations and propose rules " +
-      "based on patterns it finds. You'll review each suggestion before anything " +
-      "is saved.",
-    "rules.suggestDialog.analyzeButton": "Analyze my validated edits",
-    "rules.suggestDialog.analyzedSummary": plural({
-      one: "Analyzed {count} validated pair. Toggle suggestions to include or exclude.",
-      other: "Analyzed {count} validated pairs. Toggle suggestions to include or exclude.",
-    }),
-
-    // ── RulesPage.tsx (standalone rules page) ────────────────────────────────
+    // ── ProjectSettings/RulesSection.tsx (the project's rules list) ─────────
     "rules.loadingLabel": "Loading rules",
     // AQU-1340: without this the list just omits every terminology rule, so it
     // disagrees with what the editor enforces and gives no hint why.
     "rules.terminologyUnavailableNotice":
       "Terminology rules could not be loaded, so they are missing from this list.",
-    "rules.page.heading": "Translation Rules",
-    "rules.page.corpusLoadErrorPrefix": "Couldn't load the complete project corpus: {message}",
-    "rules.page.readOnlySuffix": "Changes made here won't be saved.",
-    "rules.page.rulesCardTitle": "Rules ({count})",
-    "rules.page.noRulesYet": "No rules defined yet.",
-    "rules.page.deleteRuleDialogTitle": "Delete rule",
-    "rules.page.deleteRuleAriaLabel": "Delete rule: {name}",
 
     // ── FixReviewPanel (harmonize / bulk-fix review sheet) ──────────────────
     "rules.fixReview.modeCachedRegex": "Cached regex",
@@ -457,6 +425,24 @@ export const rules = defineNamespace({
         "Translation rules, quality checks and health — the rule list and editor, the file-check pass and its findings drawer, and completion/health readouts. Note the user's OWN rule names and descriptions are content and are never keyed; only the chrome around them is.",
     },
     keys: {
+      "rules.builtin.numberIntegrityExtra.name": {
+        description:
+          "Name of a built-in quality check, shown in the built-in checks list on the Rules page. " +
+          "It flags a number that appears in the translation but not in the source (the opposite " +
+          "direction of 'Number integrity'). Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.numberIntegrityExtra.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "minor by default and can be switched off, because an added number is sometimes legitimate.",
+      },
+      "rules.infraction.builtin.numberIntegrityExtra": {
+        description:
+          "Finding shown on a row (in its Issues tab and the rule card) when the translation contains a " +
+          "number the source doesn't. The number is underlined in the translation. Mirrors " +
+          "'Number from source missing in translation'.",
+      },
       "rules.builtin.placeholderIntegrity.description": {
         description:
           "Description of the built-in placeholder-integrity check, shown under its name in the built-in checks list.",
@@ -844,120 +830,18 @@ export const rules = defineNamespace({
         description: "Primary button applying the selected fix previews.",
         placeholders: { count: "Number of previews currently selected to apply." },
       },
-      "rules.createDialog.namePlaceholder": {
-        description:
-          "Example placeholder text in the empty rule-name field, illustrating the " +
-          "kind of short name a rule has — not a real rule, purely illustrative.",
-      },
-      "rules.createDialog.descriptionLabel": {
-        description: "Field label for a new rule's free-text description in the standalone create-rule dialog.",
-      },
-      "rules.createDialog.ruleTypeLabel": {
-        description: "Field label above the check-type select (which of the three check shapes the rule uses).",
-      },
-      "rules.createDialog.checkType.sourceTargetMatch": {
-        description:
-          "Option label for the check-type meaning: a pattern must appear in both " +
-          "source and target. Shown in a select dropdown.",
-      },
-      "rules.createDialog.checkType.sourceRequiresTarget": {
-        description:
-          "Option label for the check-type meaning: when the source matches a " +
-          "pattern, the target must contain a (possibly different) required pattern. " +
-          "Shown in a select dropdown.",
-      },
-      "rules.createDialog.checkType.targetForbids": {
-        description:
-          "Option label for the check-type meaning: the target must never match a " +
-          "forbidden pattern. Shown in a select dropdown.",
-      },
-      "rules.createDialog.patternRegexLabel": {
-        description: "Field label for the single shared regex pattern, shown when the check type is source-target-match.",
-      },
-      "rules.createDialog.patternFieldHint.match": {
-        description: "Small helper text under the pattern field for the source-target-match check type.",
-      },
-      "rules.createDialog.forbiddenPatternRegexLabel": {
-        description: "Field label for the forbidden regex pattern, shown when the check type is target-forbids.",
-      },
-      "rules.createDialog.patternFieldHint.forbidden": {
-        description: "Small helper text under the pattern field for the target-forbids check type.",
-      },
-      "rules.createDialog.sourcePatternRegexLabel": {
-        description: "Field label for the source-side regex pattern, shown when the check type is source-requires-target.",
-      },
-      "rules.createDialog.requiredTargetPatternRegexLabel": {
-        description: "Field label for the required target-side regex pattern, shown when the check type is source-requires-target.",
-      },
-      "rules.createDialog.testYourRuleHeading": {
-        description: "Small heading over the live test area at the bottom of the standalone create-rule dialog.",
-      },
-      "rules.createDialog.testSourcePlaceholder": {
-        description: "Placeholder in the empty sample-source-text input of the rule test area.",
-      },
-      "rules.createDialog.testTargetPlaceholder": {
-        description: "Placeholder in the empty sample-target-text input of the rule test area.",
-      },
-      "rules.createDialog.testButton": {
-        description: "Button running the draft rule against the two sample text inputs above it.",
-      },
-      "rules.suggestDialog.description": {
-        description:
-          "Intro paragraph in the standalone 'Suggest from edits' dialog's idle state, " +
-          "explaining what the analysis pass will do before the user starts it.",
-      },
-      "rules.suggestDialog.analyzeButton": {
-        description: "Button starting the LLM analysis of the user's validated translation pairs.",
-      },
-      "rules.suggestDialog.analyzedSummary": {
-        description:
-          "Result-count line shown once analysis finishes, above the list of " +
-          "suggestions to accept or reject.",
-        placeholders: { count: "Number of validated source/target pairs analyzed." },
-      },
       "rules.loadingLabel": {
         description:
           "Loading label on the spinner panel shown while a project's translation " +
-          "rules are still being fetched. Rendered in two places for the same data — " +
-          "the standalone Rules page and the Rules section inside Project Settings — " +
-          "so it is deliberately worded without naming either container.",
-      },
-      "rules.page.heading": {
-        description: "Header title of the standalone Rules page.",
+          "rules are still being fetched, in the Rules section inside Project " +
+          "Settings. Deliberately worded without naming its container: it used to " +
+          "be rendered by the standalone Rules page too, and may be shared again.",
       },
       "rules.suggestFromEdits.corpusLoadFailed": {
         description:
           "Inline error in the 'Suggest rules from your edits' dialog when the " +
           "project's translations couldn't be read, so Analyze is disabled.",
         placeholders: { message: "The underlying fetch error's own message, verbatim (not translated)." },
-      },
-      "rules.page.corpusLoadErrorPrefix": {
-        description:
-          "Inline error banner shown when the Rules page couldn't load the full " +
-          "project corpus needed to evaluate built-in checks.",
-        placeholders: { message: "The underlying fetch error's own message, verbatim (not translated)." },
-      },
-      "rules.page.readOnlySuffix": {
-        description:
-          "Trailing sentence appended after the (separately-sourced) role-denial " +
-          "reason in the read-only banner shown to users below the rule-management " +
-          "role floor. Reads as a second sentence following that reason.",
-      },
-      "rules.page.rulesCardTitle": {
-        description: "Card heading over the standalone Rules page's project-rules list, with the total rule count.",
-        placeholders: { count: "Total number of project rules." },
-      },
-      "rules.page.noRulesYet": {
-        description: "Empty-state text shown when the standalone Rules page's project-rules list has no rules yet.",
-      },
-      "rules.page.deleteRuleDialogTitle": {
-        description: "Title of the checkbox-confirm dialog shown before permanently deleting a rule.",
-      },
-      "rules.page.deleteRuleAriaLabel": {
-        description:
-          "Accessible name for the trash button opening the delete-rule confirm dialog on a " +
-          "standalone Rules page row.",
-        placeholders: { name: "The rule's own name — content, never translated." },
       },
       "rules.editor.wouldBeFlagged": {
         description:

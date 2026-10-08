@@ -20,10 +20,26 @@
 // violations inbox point at the same concept rather than at two definitions
 // that drift.
 
-import { termToRegexSource, type LintHit, type LintRule } from "../agent/lint"
+import {
+  compileRulePattern,
+  countMatches,
+  ruleViolation,
+  type LintHit,
+  type LintRule,
+  type RuleViolation,
+} from "../agent/lint"
+import {
+  compileConceptsToRulesCore,
+  type CompileLabels,
+  type CompiledTermRule,
+} from "../../../../src/lib/terminology/compile-core"
+import { conceptToRegexSource } from "../../../../src/lib/terminology/match"
 import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
-import type { TermMatchOptions } from "../../../../src/lib/terminology/model"
+import type { TermMatchOptions, TermMatchingSettings } from "../../../../src/lib/terminology/model"
+import { conceptsForLane, mapSubscribedConceptLanes } from "../../../../src/lib/terminology/rendering-lane"
 import { readProjectConcepts } from "../concepts-read"
+import type { LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
+import { languagesForLanes, loadLaneRows } from "../read-lane-language"
 
 // ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
 
@@ -32,6 +48,8 @@ export type RenderingStatus = "preferred" | "admitted" | "forbidden"
 export interface TermRendering {
   rendering: string
   status: RenderingStatus
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 export interface Concept {
@@ -40,8 +58,8 @@ export interface Concept {
   renderings: TermRendering[]
   notes?: string
   status: "active" | "draft" | "deprecated"
-  /** Carried as the editor reads them (AQU-1710). The matching here does not
-   *  use them yet; aligning it with the editor is AQU-1711. */
+  /** Read as the editor reads them (AQU-1710) and matched as the editor
+   *  matches them (AQU-1711). */
   caseSensitive?: boolean
   match?: TermMatchOptions
 }
@@ -90,12 +108,21 @@ export interface TermGuidance {
 export interface ProjectContext {
   sourceLanguage?: string
   targetLanguage?: string
+  /**
+   * Lane rows, so a run can resolve its own lane's language. Not a prompt
+   * field — the languages above are already resolved for the source lane and
+   * the former default lane.
+   */
+  lanes?: LaneLanguageRow[]
   /** Model-generated compression of the whole brief, when one exists. */
   projectBriefL1?: string
   /** The brief's structured answers — used verbatim when there is no L1. */
   briefParameters: TranslationBriefParameters
   /** Active concepts, the project's own plus any it subscribes to. */
   concepts: Concept[]
+  /** The project's affix inventory for source-term matching
+   *  (ProjectWideSettings.termMatching), as the editor applies it. */
+  termMatching?: TermMatchingSettings
   /** Hand-authored project rules. */
   authoredRules: LintRule[]
 }
@@ -121,7 +148,12 @@ function parseConcepts(raw: unknown): Concept[] {
         const rr = r as Record<string, unknown>
         if (typeof rr.rendering !== "string" || !rr.rendering.trim()) continue
         if (rr.status !== "preferred" && rr.status !== "admitted" && rr.status !== "forbidden") continue
-        renderings.push({ rendering: rr.rendering.trim(), status: rr.status })
+        const laneId = typeof rr.laneId === "string" && rr.laneId !== "" ? rr.laneId : undefined
+        renderings.push({
+          rendering: rr.rendering.trim(),
+          status: rr.status,
+          ...(laneId ? { laneId } : {}),
+        })
       }
     }
     const match = coerceMatchOptions(c.match)
@@ -157,38 +189,79 @@ function parseBriefParameters(raw: unknown): TranslationBriefParameters {
   return out
 }
 
-// ── Terminology checking ────────────────────────────────────────────────────
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-function buildTermRegex(term: string): RegExp | null {
-  const src = termToRegexSource(term)
-  if (src === null) return null
-  try {
-    return new RegExp(src, "iu")
-  } catch {
-    return null // malformed user pattern — never break drafting over it
+/** `ProjectWideSettings.termMatching`, which the editor passes to the matcher
+ *  as stored. Only the types are checked here, so a malformed value cannot
+ *  throw inside the matcher in the middle of a run. */
+function parseTermMatching(raw: unknown): TermMatchingSettings | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const r = raw as Record<string, unknown>
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : []
+  return {
+    prefixes: strings(r.prefixes),
+    suffixes: strings(r.suffixes),
+    ...(typeof r.maxAffixes === "number" ? { maxAffixes: r.maxAffixes } : {}),
+    ...(typeof r.foldMarksDefault === "boolean" ? { foldMarksDefault: r.foldMarksDefault } : {}),
   }
 }
 
-function termMatches(haystack: string, term: string): boolean {
-  if (!haystack) return false
-  const re = buildTermRegex(term)
-  return re !== null && re.test(haystack)
+// ── Terminology checking ────────────────────────────────────────────────────
+
+/** Names for the compiled term rules. Hits carry them to the model, so they
+ *  name the term and its renderings, never the regex. */
+const TERM_LABELS: CompileLabels = {
+  approvedName: (term) => `Term: ${term}`,
+  approvedDescription: (term, renderings) => `"${term}" must use an approved rendering (${renderings})`,
+  forbiddenName: (term) => `Term: ${term} — forbidden rendering`,
+  forbiddenDescription: (rendering, term) => `"${rendering}" is a forbidden rendering for "${term}"`,
+}
+
+function termMessage(rule: CompiledTermRule, violation: RuleViolation): string {
+  // Renderings are present but too few or too many: say which, so the model
+  // knows whether to add one or remove one.
+  if (violation.type === "source-requires-target" && violation.targetCount > 0) {
+    return `${rule.description}, once each time the term appears: ×${violation.sourceCount} in the source, ×${violation.targetCount} in the target`
+  }
+  return rule.description
+}
+
+interface ConceptCheck {
+  concept: Concept
+  /** The rules the editor compiles from the concept (compile-core.ts). */
+  rules: CompiledTermRule[]
+  /** The concept's source pattern, with its rules' flags. Null when it
+   *  compiles to no rules or the pattern is invalid. */
+  source: RegExp | null
+}
+
+// Compiled once per termbase per run: `ctx.concepts` is one array for a whole
+// tick, so every cell, span and redraft reuses it. Compiling per cell cost
+// ~9 ms per cell on a 961-term termbase, and ~30 ms with an affix inventory.
+const conceptChecks = new WeakMap<Concept[], { termMatching?: TermMatchingSettings; checks: ConceptCheck[] }>()
+
+function checksFor(concepts: Concept[], termMatching?: TermMatchingSettings): ConceptCheck[] {
+  const cached = conceptChecks.get(concepts)
+  if (cached && cached.termMatching === termMatching) return cached.checks
+  const checks = concepts.map((concept): ConceptCheck => {
+    const rules = compileConceptsToRulesCore([concept], TERM_LABELS, termMatching)
+    const pattern = rules.length > 0 ? conceptToRegexSource(concept, termMatching) : null
+    return { concept, rules, source: pattern === null ? null : compileRulePattern(rules[0], pattern) }
+  })
+  conceptChecks.set(concepts, { termMatching, checks })
+  return checks
 }
 
 /**
- * Check one drafted cell against the project's key terms.
+ * Check one drafted cell against the project's key terms with the rules the
+ * editor compiles from them (src/lib/terminology/compile-core.ts), judged as
+ * the editor judges them (`ruleViolation`, AQU-1711). Both sides run the
+ * shared table in src/lib/terminology/__fixtures__/terminology-lint-parity.ts.
  *
- * Deliberately NOT expressed as `LintRule`s run through `lintDraft`. Concepts
- * hold raw termbase terms, which need term semantics (termToRegexSource: `*`
- * wildcards, whole-word boundaries), while `lintDraft` compiles rule patterns
- * as raw regexes, as the editor does (AQU-1705). The any-of test — "the target
- * must contain AT LEAST ONE of these approved renderings" — lives here instead.
+ * One deliberate difference: a forbidden rendering counts only when the
+ * cell's SOURCE bears the concept. That is the intended rule; the editor's
+ * `target-forbids` has no source condition yet (AQU-1712).
  *
- * Hit ids match the client's compiled rule ids (`term:<conceptId>:approved`,
+ * Hit ids are the client's compiled rule ids (`term:<conceptId>:approved`,
  * `term:<conceptId>:forbidden:<rendering>`) so findings stay attributable to
  * the same concept in the violations inbox.
  */
@@ -196,31 +269,18 @@ export function lintTerminology(
   concepts: Concept[],
   sourceText: string,
   targetText: string,
+  termMatching?: TermMatchingSettings,
 ): LintHit[] {
-  if (!targetText) return []
+  // Like the editor, terminology does not judge an empty translation.
+  if (!targetText.trim()) return []
   const hits: LintHit[] = []
-  for (const concept of concepts) {
-    // The concept only constrains a cell whose SOURCE bears the term.
-    if (!termMatches(sourceText, concept.sourceTerm)) continue
-
-    const approved = concept.renderings.filter(
-      (r) => r.status === "preferred" || r.status === "admitted",
-    )
-    if (approved.length > 0 && !approved.some((r) => termMatches(targetText, r.rendering))) {
-      hits.push({
-        ruleId: `term:${concept.id}:approved`,
-        ruleName: `Term: ${concept.sourceTerm}`,
-        message: `"${concept.sourceTerm}" must use an approved rendering (${approved.map((r) => r.rendering).join(", ")})`,
-      })
-    }
-    for (const f of concept.renderings.filter((r) => r.status === "forbidden")) {
-      if (termMatches(targetText, f.rendering)) {
-        hits.push({
-          ruleId: `term:${concept.id}:forbidden:${escapeRegex(f.rendering)}`,
-          ruleName: `Term: ${concept.sourceTerm} — forbidden rendering`,
-          message: `"${f.rendering}" is a forbidden rendering for "${concept.sourceTerm}"`,
-        })
-      }
+  for (const { rules, source } of checksFor(concepts, termMatching)) {
+    // The concept constrains only a cell whose source bears it: the same
+    // pattern and flags as its approved rule's source side.
+    if (!source || countMatches(sourceText, source) === 0) continue
+    for (const rule of rules) {
+      const violation = ruleViolation(rule, sourceText, targetText)
+      if (violation) hits.push({ ruleId: rule.id, ruleName: rule.name, message: termMessage(rule, violation) })
     }
   }
   return hits
@@ -243,24 +303,25 @@ export const MAX_TERMS_PER_SPAN = 24
 export function termGuidanceForSpan(
   concepts: Concept[],
   sourceTexts: string[],
+  termMatching?: TermMatchingSettings,
 ): TermGuidance[] {
   if (concepts.length === 0) return []
   const haystack = sourceTexts.join("\n")
   if (!haystack.trim()) return []
 
   const hits: { at: number; guidance: TermGuidance }[] = []
-  for (const concept of concepts) {
-    const re = buildTermRegex(concept.sourceTerm)
-    if (!re) continue
-    const match = re.exec(haystack)
-    if (!match) continue
+  for (const { concept, source } of checksFor(concepts, termMatching)) {
+    // Found with the lint's own pattern, so the model is told about exactly
+    // the terms the lint checks (AQU-1711). `search` leaves `source` reusable.
+    const at = source ? haystack.search(source) : -1
+    if (at < 0) continue
     const preferred = concept.renderings.filter((r) => r.status === "preferred").map((r) => r.rendering)
     const admitted = concept.renderings.filter((r) => r.status === "admitted").map((r) => r.rendering)
     const forbidden = concept.renderings.filter((r) => r.status === "forbidden").map((r) => r.rendering)
     // A concept with no decisions recorded yet constrains nothing.
     if (preferred.length === 0 && admitted.length === 0 && forbidden.length === 0) continue
     hits.push({
-      at: match.index,
+      at,
       guidance: {
         conceptId: concept.id,
         sourceTerm: concept.sourceTerm,
@@ -290,8 +351,6 @@ interface SettingsDb {
 
 interface SettingsRow {
   settings: unknown
-  source_language: string | null
-  target_language: string | null
 }
 
 function parseSettings(raw: unknown): Record<string, unknown> {
@@ -319,6 +378,7 @@ function parseSettings(raw: unknown): Record<string, unknown> {
 export async function loadProjectContext(
   db: SettingsDb,
   projectId: string,
+  lane?: { laneId?: string | null; targetLang?: string | null },
 ): Promise<ProjectContext> {
   const empty: ProjectContext = {
     briefParameters: {},
@@ -329,8 +389,7 @@ export async function loadProjectContext(
   try {
     row = await db
       .prepare(
-        `SELECT settings, source_language, target_language
-           FROM project_settings WHERE project_id = ?`,
+        `SELECT settings FROM project_settings WHERE project_id = ?`,
       )
       .bind(projectId)
       .first<SettingsRow>()
@@ -346,19 +405,63 @@ export async function loadProjectContext(
       ? (brief as Record<string, unknown>)
       : {}
 
-  const concepts = [
+  const lanes: LaneLanguageRow[] = await loadLaneRows(db, projectId).catch(() => [])
+  const loaded = [
     ...(await loadLocalConcepts(db, projectId)),
-    ...(await loadSubscribedConcepts(db, projectId)),
+    ...(await loadSubscribedConcepts(db, projectId, lanes)),
   ]
+  const concepts = lane ? await conceptsForRequestedLane(db, projectId, loaded, lane) : loaded
+  const resolved = languagesForLanes(lanes, settings, "")
+  const sourceLanguage = resolved.sourceLanguage ?? ""
+  const targetLanguage = resolved.targetLanguage ?? ""
+  const termMatching = parseTermMatching(settings.termMatching)
 
   return {
-    ...(asString(row.source_language) ? { sourceLanguage: asString(row.source_language) } : {}),
-    ...(asString(row.target_language) ? { targetLanguage: asString(row.target_language) } : {}),
+    ...(sourceLanguage ? { sourceLanguage } : {}),
+    ...(targetLanguage ? { targetLanguage } : {}),
+    lanes,
     ...(asString(briefObj.l1Summary) ? { projectBriefL1: asString(briefObj.l1Summary) } : {}),
     briefParameters: parseBriefParameters(briefObj.parameters),
     concepts,
+    ...(termMatching ? { termMatching } : {}),
     authoredRules: parseAuthoredRules(settings.rules),
   }
+}
+
+async function targetLaneId(
+  db: SettingsDb,
+  projectId: string,
+  ref: { laneId?: string | null; targetLang?: string | null },
+): Promise<string | null> {
+  const id = (ref.laneId ?? "").trim()
+  if (id) {
+    const row = await db
+      .prepare(`SELECT id FROM lanes WHERE project_id = ? AND id = ? AND role = 'target'`)
+      .bind(projectId, id)
+      .first<{ id: string }>()
+    return row?.id ?? null
+  }
+  const row = await db
+    .prepare(
+      `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`,
+    )
+    .bind(projectId, ref.targetLang ?? "")
+    .first<{ id: string }>()
+  return row?.id ?? null
+}
+
+/** Same rule as renderingLaneId. No `''` row: leave the list alone. */
+async function conceptsForRequestedLane(
+  db: SettingsDb,
+  projectId: string,
+  concepts: Concept[],
+  lane: { laneId?: string | null; targetLang?: string | null },
+): Promise<Concept[]> {
+  const emptyId = await targetLaneId(db, projectId, { targetLang: "" })
+  if (!emptyId) return concepts
+  const activeId = await targetLaneId(db, projectId, lane)
+  if (!activeId) return concepts.map((concept) => ({ ...concept, renderings: [] }))
+  return conceptsForLane(concepts, activeId, emptyId)
 }
 
 function stringList(raw: unknown): string[] {
@@ -367,8 +470,40 @@ function stringList(raw: unknown): string[] {
     : []
 }
 
-/** Empty string is always the project-default lane. Named lanes must be
- *  registered in settings.targetLanes and not archived. */
+/**
+ * Is this lane one the project may draft into?
+ *
+ * AQU-1610: a lane id is checked against the `lanes` table — the lane's own
+ * row, archived or not — which is the only identity that cannot name two
+ * lanes at once. A legacy TAG still falls back to the settings rule
+ * (`settings.targetLanes` minus `archivedLanes`, with `''` the project-default
+ * lane) because older clients send tags and the project-level lists are
+ * AQU-1595's to remove, not this ticket's.
+ */
+export async function isRegisteredLaneId(
+  db: SettingsDb,
+  projectId: string,
+  laneId: string,
+): Promise<boolean> {
+  if (!laneId) return false
+  try {
+    const row = await db
+      .prepare(
+        `SELECT 1 AS ok FROM lanes
+          WHERE project_id = ? AND id = ? AND role = 'target' AND archived_at IS NULL`,
+      )
+      .bind(projectId, laneId)
+      .first<{ ok: number }>()
+    return row != null
+  } catch {
+    return false
+  }
+}
+
+/** Legacy-tag form of {@link isRegisteredLaneId}. Empty string is the
+ *  project-default lane; named lanes must be in settings.targetLanes and not
+ *  archived. The tag is matched exactly: "es" is not the lane registered as
+ *  "Spanish". Removed with the project-level lane lists (AQU-1595). */
 export async function isRegisteredTargetLane(
   db: SettingsDb,
   projectId: string,
@@ -414,17 +549,40 @@ async function loadLocalConcepts(db: SettingsDb, projectId: string): Promise<Con
   }
 }
 
-/** Concepts from termbases this project subscribes to, in priority order.
- *  An org that publishes one shared termbase expects it to bind everywhere. */
-async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promise<Concept[]> {
+/** Concepts from termbases this project subscribes to, in the order the
+ *  subscriptions list shows (priority, then age).
+ *  An org that publishes one shared termbase expects it to bind everywhere.
+ *
+ *  A subscription counts only while its termbase is published, not archived,
+ *  and in the subscriber's org. That is the rule `canReadTermbase` applies to
+ *  the editor's read (route #8), so the editor and autopilot apply the same
+ *  termbases (AQU-1721). Deleting a project cascades to none of the
+ *  subscription, settings or concept rows, so the join on `projects` is what
+ *  drops a deleted termbase.
+ *
+ *  Each termbase's renderings carry ITS lane ids. They are mapped onto this
+ *  project's lanes by language (mapSubscribedConceptLanes, AQU-1777) before
+ *  `conceptsForRequestedLane` runs, as route #8 maps them for the editor, so a
+ *  lane's run and that lane's editor see the same subscribed renderings. */
+async function loadSubscribedConcepts(
+  db: SettingsDb,
+  projectId: string,
+  subscriberLanes: readonly LaneLanguageRow[],
+): Promise<Concept[]> {
   try {
     // The order the subscriptions list shows: priority, then age.
     const { results } = await db
       .prepare(
-        `SELECT termbase_project_id
-           FROM project_termbase_subscriptions
-          WHERE project_id = ?
-          ORDER BY priority ASC, created_at ASC`,
+        `SELECT s.termbase_project_id
+           FROM project_termbase_subscriptions s
+           JOIN projects sub ON sub.id = s.project_id
+           JOIN projects tb ON tb.id = s.termbase_project_id
+          WHERE s.project_id = ?
+            AND s.termbase_project_id <> s.project_id
+            AND tb.org_published_termbase = TRUE
+            AND tb.archived_at IS NULL
+            AND tb.org_id = sub.org_id
+          ORDER BY s.priority ASC, s.created_at ASC`,
       )
       .bind(projectId)
       .all<{ termbase_project_id: string }>()
@@ -433,9 +591,15 @@ async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promis
     // settings blob only while it has none. Reading only the blob gave
     // subscribers nothing once the termbase was migrated.
     const termbases = await Promise.all(
-      results.map((r) => readProjectConcepts(db, r.termbase_project_id)),
+      results.map(async (r) => {
+        const [concepts, termbaseLanes] = await Promise.all([
+          readProjectConcepts(db, r.termbase_project_id),
+          loadLaneRows(db, r.termbase_project_id),
+        ])
+        return mapSubscribedConceptLanes(parseConcepts(concepts), termbaseLanes, subscriberLanes)
+      }),
     )
-    return termbases.flatMap((concepts) => parseConcepts(concepts))
+    return termbases.flat()
   } catch (err) {
     // Draft without them rather than fail the run, but say so: a silently
     // empty termbase is the failure this read exists to end.

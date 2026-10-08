@@ -345,7 +345,7 @@ afterEach(() => vi.clearAllMocks())
 
 /** Build a FileSummary stub for testing the file list. */
 function fileSummary(i: number): import("@/lib/sync/cells-read").FileSummary {
-  return { fileId: `f${i}`, projectId: "p1", name: `File${i}.usfm`, fileType: "usfm", sourceLanguage: null, targetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
+  return { fileId: `f${i}`, projectId: "p1", name: `File${i}.usfm`, fileType: "usfm", declaredSourceLanguage: null, declaredTargetLanguage: null, cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100, lastEditAt: null }
 }
 
 
@@ -930,8 +930,16 @@ describe("ProjectOverview PM assignment", () => {
     expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
     expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
 
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
+      /adds them as a Project lead/,
+    )
+    expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
+      /does not remove that membership/,
+    )
+
     fireEvent.click(screen.getByRole("button", { name: "Change project manager" }))
     expect(screen.getByRole("heading", { name: "Change project manager" })).toBeInTheDocument()
+    expect(screen.getByRole("dialog")).toHaveTextContent(/adds them as a Project lead/)
     fireEvent.click(screen.getByRole("button", { name: "Clear" }))
 
     await waitFor(() => expect(setProjectPm).toHaveBeenCalledWith("jwt", "p1", null))
@@ -2189,7 +2197,7 @@ describe("imported originals on the overview (AQU-656)", () => {
   ): import("@/lib/sync/cells-read").FileSummary {
     return {
       fileId, projectId: "p1", name, fileType: "usfm",
-      sourceLanguage: null, targetLanguage: null,
+      declaredSourceLanguage: null, declaredTargetLanguage: null,
       cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100,
       lastEditAt: null, hasOriginalSource,
     }

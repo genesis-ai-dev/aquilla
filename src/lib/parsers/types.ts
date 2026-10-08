@@ -100,6 +100,7 @@ export type BuiltinCheckId =
   | "target-equals-source"
   | "placeholder-integrity"
   | "number-integrity"
+  | "number-integrity-extra"
   | "end-punctuation-mismatch"
   | "punctuation-integrity"
   | "double-space"
@@ -749,6 +750,12 @@ export interface ProjectRecord {
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AQU-1686: explicit per-enrichment Bible data choices, synced via
+   *  ProjectWideSettings. A missing id means that enrichment's default. Do not
+   *  read it directly for gating; use `resolveBibleEnrichment`
+   *  (db/shared/bible-enrichments.ts), which also applies the Bible data
+   *  switch above. */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings
@@ -819,9 +826,17 @@ export interface FileReference {
    * mutates cell data — it only chooses the sort key. Fully reversible.
    */
   orderedBy?: OrderedBy
-  /** Optional file-level language hints from import metadata. */
-  sourceLanguage?: string
-  targetLanguage?: string
+  /**
+   * AQU-1596: the languages this file's header *declared* at import. Import
+   * information about the file, not the language of any lane — a Macula file
+   * declares the corpus code `hbo`, and a file declaring Spanish may have been
+   * imported into the French lane. Nothing resolves a lane's or project's
+   * language from these (see `resolveActiveSourceLanguage` / AQU-848 and
+   * `resolveActiveTargetLanguage` / AQU-583); the one surface that shows them
+   * is the file-details modal, which labels them as declared.
+   */
+  declaredSourceLanguage?: string
+  declaredTargetLanguage?: string
   /** Optional file-level text direction hints from import metadata. */
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"

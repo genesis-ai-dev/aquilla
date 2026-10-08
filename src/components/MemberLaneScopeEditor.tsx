@@ -26,7 +26,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { laneRowLabel } from "@/lib/lanes/lane-language"
+import { laneLanguageForTag, laneRowLabel } from "@/lib/lanes/lane-language"
 import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
@@ -111,6 +111,9 @@ export function MemberLaneScopeEditor({
           (lane) => lane.role === "target" && !lane.archivedAt,
         )
         setDraft(normalizeLaneScopes(scopes ?? [], rows))
+        const defaultLanguage = settings
+          ? laneLanguageForTag("", settings.lanes, settings.settings) ?? ""
+          : ""
         setLaneOptions(
           rows.length > 0
             ? rows.map((lane) => ({
@@ -121,9 +124,9 @@ export function MemberLaneScopeEditor({
               ? [
                   {
                     value: "",
-                    label: settings.settings.targetLanguage || t("org.memberLaneScopeEditor.mainLanguageFallback"),
+                    label: defaultLanguage || t("org.memberLaneScopeEditor.mainLanguageFallback"),
                   },
-                  ...extraRegistryLanes(settings.settings.targetLanes, settings.settings.targetLanguage).map((lane) => ({ value: lane, label: lane })),
+                  ...extraRegistryLanes(settings.settings.targetLanes, defaultLanguage).map((lane) => ({ value: lane, label: lane })),
                 ]
               : null,
         )

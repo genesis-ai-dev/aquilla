@@ -91,7 +91,10 @@ export const REACT_JEV_BUDGET_MS = 20_000
 export interface StartReactionRunInput {
   projectId: string
   fileId: string
-  /** Lane the human edited ('' = default lane); the reaction drafts there. */
+  /** Lane the human edited — `lanes.id` (AQU-1610); the reaction drafts
+   *  there. `null` when the edit's tag named no lane. */
+  laneId: string | null
+  /** The same lane's legacy tag ('' = former default lane). */
   targetLang: string
   /** Most recently edited cell — the first wave starts there. */
   anchorCellId: string | null
@@ -113,7 +116,10 @@ export type StartReactionRun = (
 export interface WakeReactionRunInput {
   projectId: string
   fileId: string
-  /** Lane of the edit (and of the parked run — states are keyed per lane). */
+  /** Lane of the edit and of the parked run — `lanes.id`; run states are
+   *  keyed per lane (AQU-1610). */
+  laneId: string | null
+  /** The same lane's legacy tag. */
   targetLang: string
   /** The parked run to wake — the reaction continues ITS conversation. */
   runId: string
@@ -348,7 +354,7 @@ export async function reactCheckProject(
         skipped.push({ fileId: signal.fileId, reason: "not a discourse file" })
         continue
       }
-      const runState = runStates.get(fileLaneKey(signal.fileId, signal.targetLang))
+      const runState = runStates.get(fileLaneKey(signal.fileId, signal.laneId))
       if (runState?.state === "busy") {
         skipped.push({ fileId: signal.fileId, reason: "a run is already active on this file" })
         continue
@@ -422,6 +428,7 @@ export async function reactCheckProject(
               await deps.wakeRun(env, {
                 projectId,
                 fileId: signal.fileId,
+                laneId: signal.laneId,
                 targetLang: signal.targetLang,
                 runId: runState.runId,
                 parkReason: runState.parkReason,
@@ -431,6 +438,7 @@ export async function reactCheckProject(
             : await deps.startRun(env, {
                 projectId,
                 fileId: signal.fileId,
+                laneId: signal.laneId,
                 targetLang: signal.targetLang,
                 anchorCellId: signal.anchorCellId,
                 direction,

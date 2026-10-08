@@ -55,7 +55,17 @@ describe("patchProjectSettings", () => {
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     ))
-    const got = await patchProjectSettings("jwt", "p1", { systemPrompt: "x" }, 4, API)
+    const got = await patchProjectSettings(
+      "jwt",
+      "p1",
+      { sourceLanguage: "en", targetLanguage: "es", targetLanes: ["es"], archivedLanes: ["fr"], systemPrompt: "x" },
+      4,
+      API,
+    )
+    const sent = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)) as {
+      settings: Record<string, unknown>
+    }
+    expect(sent.settings).toEqual({ systemPrompt: "x" })
     expect(got.kind).toBe("ok")
     if (got.kind === "ok") expect(got.value.version).toBe(5)
   })

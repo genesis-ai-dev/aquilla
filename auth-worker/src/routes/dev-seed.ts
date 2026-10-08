@@ -140,6 +140,14 @@ async function upsertProject(
     )
     .bind(projectId, name, orgId, createdBy, deadlineAt)
     .run()
+  // AQU-1594: every dev project has a source lane and one target lane. The
+  // tag is the language, not `''`. Idempotent, so a reseed keeps the rows.
+  await ensureProjectLanes(db, projectId, {
+    lanes: [
+      { role: "source", language: "English" },
+      { role: "target", language: "Spanish", legacyTag: "Spanish" },
+    ],
+  })
 }
 
 async function upsertOrgMember(
@@ -302,6 +310,12 @@ async function seedDev(db: AquillaDb): Promise<{
     .run()
 
   await upsertProjectMember(db, DEV_PROJECT_ID, userId, ROLE.OWNER, userId)
+  await ensureProjectLanes(db, DEV_PROJECT_ID, {
+    lanes: [
+      { role: "source", language: "English" },
+      { role: "target", language: "Spanish", legacyTag: "Spanish" },
+    ],
+  })
 
   // ── Extra collaborators + projects so the Members matrix is non-trivial ──
   const aliceId = await upsertUser(db, ALICE_USERNAME, ALICE_EMAIL, passwordHash)
@@ -413,21 +427,6 @@ async function seedDev(db: AquillaDb): Promise<{
   await upsertProjectMember(db, SHARED_AUDIO_PROJECT_ID, aliceId, ROLE.OWNER, aliceId)
   await upsertProjectMember(db, SHARED_MATTHEW_PROJECT_ID, userId, ROLE.CONTRIBUTOR, aliceId)
   await upsertProjectMember(db, SHARED_AUDIO_PROJECT_ID, userId, ROLE.CONTRIBUTOR, aliceId)
-
-  // AQU-1240: createProjectShared mints source + default-target lanes; this
-  // route INSERTs projects directly, so import/cell writes resolved lane_id
-  // to NULL and POST /import 500'd on the local stack.
-  for (const projectId of [
-    DEV_PROJECT_ID,
-    GENESIS_PROJECT_ID,
-    EXODUS_PROJECT_ID,
-    LEVITICUS_PROJECT_ID,
-    NUMBERS_PROJECT_ID,
-    SHARED_MATTHEW_PROJECT_ID,
-    SHARED_AUDIO_PROJECT_ID,
-  ]) {
-    await ensureProjectLanes(db, projectId)
-  }
 
   await applyDemoTimestamps(db, { userId, aliceId, bobId, carolId, orgId })
 

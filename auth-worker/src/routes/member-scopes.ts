@@ -29,6 +29,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
 import { laneScopeIdsForStorage, type LaneScopeConversion } from "../../../src/lib/lanes/scope-ids"
+import { syncMemberLaneGrants } from "../services/lane-grants"
 
 const memberScopes = new Hono<AuthHonoEnv>()
 
@@ -291,6 +292,13 @@ memberScopes.put(
         .bind(projectId, targetUserId, s.kind, s.value, String(user.id), now)
         .run()
     }
+
+    // The write wall (on in dev and prod) reads lane grants, not scopes.
+    // Staffing only wrote scopes, so a person limited to one lane still saw
+    // every lane once the wall was on. Replace their grants to match the
+    // scopes just stored. No lane rows yet: leave grants alone (there is
+    // nothing to point at, and the backfill fills both later).
+    await syncMemberLaneGrants(c.env.AQUILLA_PG, projectId, targetUserId, laneIds, user.id)
 
     const saved = await loadScopes(c.env, projectId, targetUserId)
     const savedLaneNames = await laneNamesForScopes(c.env, projectId, saved)

@@ -180,7 +180,8 @@ mergeSibling.post(
       )
     }
 
-    // Lane must not already be registered on the host.
+    // Exact tag only. A second lane of the same language is legal; a display
+    // name another lane already shows is refused just below.
     const hostSettings = await loadProjectSettings(c.env, hostId)
     const existingLanes = readTargetLanes(hostSettings.settings)
     if (existingLanes.includes(lane)) {
@@ -235,9 +236,10 @@ mergeSibling.post(
     // AQU-1602 asked for this registry write to go. It stays for now because
     // POST /:projectId/lanes — the canonical way a lane is created (AQU-1418) —
     // still makes it, for the readers that have not moved to lane rows yet
-    // (billing's `project_settings.target_lanes`, the contextual project
-    // context, the external API's PatchSettings). Dropping it here alone would
-    // make a merged lane the only lane missing from them. AQU-1595 removes the
+    // (the contextual project context, the external API's PatchSettings).
+    // Billing counts lanes rows (AQU-1595). Dropping the registry write here
+    // alone would make a merged lane the only lane missing from them.
+    // AQU-1595 removes the
     // four settings keys everywhere, once those readers are on lane rows.
     const registered = await mergeSettingsArray(
       c.env.AQUILLA_PG,

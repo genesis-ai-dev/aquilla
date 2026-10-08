@@ -21,7 +21,6 @@ import {
   setHealthScoreColorCoding,
 } from "@/lib/store/health-score-color-coding-pref"
 
-vi.mock("@/lib/offline/schema", () => ({ schema: {} }))
 vi.mock("@/lib/offline/store", () => ({
   isTauriRuntime: () => false,
   getOfflineStore: async () => {

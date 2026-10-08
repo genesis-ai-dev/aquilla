@@ -84,9 +84,7 @@ describe("POST /api/v2/orgs/portfolio/summary", () => {
       ).bind(`f-${row.id}`, row.id, eventId, row.total, row.filled, row.approved, row.edit).run()
       if (row.laneAt != null) {
         await env.AQUILLA_PG.prepare(
-          `INSERT INTO file_section_progress
-             (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at)
-           VALUES (?, ?, 'file', '', '', ?, ?, '{}', 1, ?)`,
+          `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, revision, updated_at) VALUES (?, ?, 'file', '', ?, ?, '{}', 1, ?)`,
         ).bind(row.id, `f-${row.id}`, row.total, row.filled, row.laneAt).run()
       }
       if (row.behind) {

@@ -153,6 +153,7 @@ import {
   type TranslationSignal,
 } from "@/lib/import/translation-signals"
 import { LANGUAGES, type LanguageEntry } from "@/lib/languages/catalog"
+import { resolveImportDirection, type ImportDirectionLane } from "@/components/import/import-direction"
 import { loadFullLanguageCatalog, peekFullLanguageCatalog } from "@/lib/languages/full-catalog"
 
 type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
@@ -284,6 +285,11 @@ interface ImportDialogProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  /**
+   * Lane rows. Direction is decided from these, not from the active tag:
+   * `""` does not match a target lane tagged with its language.
+   */
+  lanes?: readonly ImportDirectionLane[] | null
   /** Active target-lane storage key. Empty means the project default lane. */
   targetLang?: string
   /** Identity JWT used only when a format needs AI-assisted analysis. */
@@ -380,6 +386,7 @@ export function ImportDialog({
   username,
   sourceLanguage,
   targetLanguage,
+  lanes,
   targetLang,
   identityToken,
   getToken,
@@ -611,26 +618,43 @@ export function ImportDialog({
         return
       }
 
-      const effectiveSource = (inferredLanguages?.sourceLanguage || sourceLanguage).trim()
-      const effectiveTarget = (inferredLanguages?.targetLanguage || targetLanguage).trim()
-
-      // Direction is ambiguous when: both empty, target is unset, or source==target
-      // (using the normalizer so "French"=="fra" doesn't spuriously trigger this).
-      // Small fix: also fire when both are empty (""=="" would otherwise pass the
-      // effectiveSource!=="" gate and silently leave source==target=="").
-      const bothEmpty = effectiveSource === "" && effectiveTarget === ""
-      const needsDirection =
-        bothEmpty ||
-        (effectiveSource !== "" && (effectiveTarget === "" || languagesEqual(effectiveSource, effectiveTarget)))
+      // Lane rows name the direction. The active tag is often `""`, which does
+      // not match a target lane tagged `fr`, so the language props can both be
+      // empty while the project already has a source and a target.
+      //
+      // AQU-1596: the direction decision reads the *lane's* languages. A file's
+      // declared languages are import information and can disagree with the
+      // lane — letting a declaration stand in for the lane's language here is
+      // what let a Spanish-declaring file answer the direction question for a
+      // French lane. The declaration is still used, but only to pre-fill the
+      // panel below as a suggestion.
+      const direction = resolveImportDirection({
+        lanes,
+        activeTag: targetLang ?? "",
+        sourceLanguage,
+        targetLanguage,
+      })
+      const declaredSource = (inferredLanguages?.sourceLanguage ?? "").trim()
+      const declaredTarget = (inferredLanguages?.targetLanguage ?? "").trim()
 
       // Respect the persisted per-project skip choice so we don't re-prompt on
       // every import once the user has deliberately deferred direction setup.
       const skipped = localStorage.getItem(skipStorageKey(projectId)) === "true"
 
-      if (needsDirection && !skipped) {
+      if (direction.needsDirection && !skipped) {
         setPendingImport({ refs, inferredLanguages })
-        setDirectionSource(effectiveSource)
-        setDirectionTarget(languagesEqual(effectiveSource, effectiveTarget) ? "" : effectiveTarget)
+        // The declared values are the suggestion: they pre-fill the inputs
+        // wherever the lane has nothing usable to show, and the user's answer is
+        // what actually gets saved (AQU-1596 — suggest or warn, never silently
+        // adopt). "Usable" excludes a target equal to the source, which is the
+        // broken state the panel exists to repair — there the declaration is
+        // the most useful thing we can offer.
+        const suggestedSource = direction.source || declaredSource
+        const laneTargetUsable =
+          direction.target !== "" && !languagesEqual(direction.source, direction.target)
+        const suggestedTarget = laneTargetUsable ? direction.target : declaredTarget
+        setDirectionSource(suggestedSource)
+        setDirectionTarget(languagesEqual(suggestedSource, suggestedTarget) ? "" : suggestedTarget)
         setScreen("direction")
         return
       }
@@ -642,8 +666,35 @@ export function ImportDialog({
       await onImported(refs, inferredLanguages)
       onOpenChange(false)
     },
-    [sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
+    [lanes, targetLang, sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
   )
+
+  // Lane rows can arrive after the import callback already opened an empty
+  // direction form. A project whose lanes already name a source and a target
+  // must not stay on that form. Closing does not record a skip.
+  const directionAutoFinished = useRef<typeof pendingImport>(null)
+  useEffect(() => {
+    if (screen !== "direction" || !pendingImport) {
+      if (screen !== "direction") directionAutoFinished.current = null
+      return
+    }
+    const direction = resolveImportDirection({
+      lanes,
+      activeTag: targetLang ?? "",
+      sourceLanguage,
+      targetLanguage,
+    })
+    if (!direction.needsDirection) {
+      if (directionAutoFinished.current === pendingImport) return
+      directionAutoFinished.current = pendingImport
+      void finishPendingImport(pendingImport, false)
+      return
+    }
+    // A source can arrive before any target. Show it. Leave an equal target
+    // blank: the form cleared it so the person can type a different one, and
+    // putting it back would lock the field.
+    setDirectionSource((current) => (current.trim() ? current : direction.source))
+  }, [screen, pendingImport, lanes, targetLang, sourceLanguage, targetLanguage, finishPendingImport])
 
   // AQU-277: called from ResultPanel when the user explicitly dismisses the
   // import-result screen. At this point we flush the actual onImported callback
@@ -678,7 +729,12 @@ export function ImportDialog({
     try {
       const mergedLanguages = {
         ...(captured.inferredLanguages ?? {}),
-        sourceLanguage: directionSource.trim() || captured.inferredLanguages?.sourceLanguage,
+        // AQU-1596: the confirmed value is exactly what stands in the field.
+        // The source used to fall back to the file's declaration when the user
+        // cleared it, which turned a declaration the user had just deleted into
+        // the lane's language. Cleared now means "leave the lane alone", which
+        // is what the target side already did.
+        sourceLanguage: directionSource.trim() || undefined,
         targetLanguage: directionTarget.trim() || undefined,
         // BLOCKER 1: mark as explicit so handleImported in ProjectWorkspace
         // REPLACES current values instead of only filling empty slots.

@@ -297,7 +297,7 @@ export function AgentContextRows({
               ? cell.idmlConfiguration.context.paragraphStyleId
               : undefined
             const completionState = completing?.get(cell.cellId)
-            const isLoading = completionState === "searching" || completionState === "generating"
+            const isLoading = completionState === "searching" || completionState === "generating" || completionState === "aligning"
             const actionsRevealed = !isSource
               && (actionCellId === cell.cellId
                 || activeEditingCellId === cell.cellId

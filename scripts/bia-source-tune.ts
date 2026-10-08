@@ -8,7 +8,8 @@
 // index is built from the rest, and a grid of (alpha, lambda) is scored on dev.
 // The grid point with the best mean of next/infill top-1/top-3 across every
 // pair and slice is printed; bia-engine.ts's SOURCE_WEIGHT / SOURCE_LAMBDA
-// are set from it. Output: docs/forecast/bia-source-tuning.md.
+// are set from it. Output: docs/forecast/bia-source-tuning*.md (round1: alpha x lambda; round2-4 on the
+// first-2000 dev splits: Dice power, add vs boost mixing, target-IDF exponent).
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"

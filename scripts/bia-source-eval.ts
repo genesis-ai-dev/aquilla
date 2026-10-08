@@ -55,7 +55,7 @@ writeFileSync(resolve(out, "bia-source-eval-results.md"), [
   "| pair | slice | task | unigram | bigram | BIA, no source | BIA + source | source only |",
   "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
   ...rows.flatMap(({ pair, slice, report }) => (["next", "infill"] as const).map((task) =>
-    `| ${pair} | ${slice} | ${task} | ${cell(report, task, "unigram")} | ${cell(report, task, "bigram-markov")} | ${cell(report, task, NO_SOURCE)} | **${cell(report, task, WITH_SOURCE)}** | ${cell(report, task, `bia ${SOURCE_ONLY}`)} |`)),
+    `| ${pair} | ${slice} | ${task} | ${cell(report, task, "unigram")} | ${cell(report, task, "bigram-markov")} | ${cell(report, task, NO_SOURCE)} | ${cell(report, task, WITH_SOURCE)} | ${cell(report, task, `bia ${SOURCE_ONLY}`)} |`)),
   "",
 ].join("\n"))
 console.log(`\nwrote ${out}/bia-source-eval-results.{json,md}`)

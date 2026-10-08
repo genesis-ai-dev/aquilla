@@ -1,0 +1,440 @@
+[
+  {
+    "pair": "eng→npi (Nepali)",
+    "slice": "full",
+    "report": {
+      "trainCells": 27864,
+      "testCells": 3095,
+      "next": {
+        "unigram": {
+          "top1": 0.03866666666666667,
+          "top3": 0.05466666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.144,
+          "top3": 0.24866666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.15133333333333332,
+          "top3": 0.25533333333333336,
+          "coverage": 0.9993333333333333,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.16466666666666666,
+          "top3": 0.29133333333333333,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.05,
+          "top3": 0.11333333333333333,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.04533333333333334,
+          "top3": 0.058,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.23333333333333334,
+          "top3": 0.3353333333333333,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.24466666666666667,
+          "top3": 0.36866666666666664,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.27266666666666667,
+          "top3": 0.4033333333333333,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.11133333333333334,
+          "top3": 0.17133333333333334,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "msPerQuery": 10.469888888888889
+    }
+  },
+  {
+    "pair": "eng→npi (Nepali)",
+    "slice": "first 2000",
+    "report": {
+      "trainCells": 2000,
+      "testCells": 223,
+      "next": {
+        "unigram": {
+          "top1": 0.03333333333333333,
+          "top3": 0.054,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.128,
+          "top3": 0.20866666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.15333333333333332,
+          "top3": 0.24066666666666667,
+          "coverage": 0.996,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.14533333333333334,
+          "top3": 0.23533333333333334,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.05,
+          "top3": 0.096,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.037333333333333336,
+          "top3": 0.062,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.21466666666666667,
+          "top3": 0.3006666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.24533333333333332,
+          "top3": 0.35533333333333333,
+          "coverage": 0.9993333333333333,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.254,
+          "top3": 0.364,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.09933333333333333,
+          "top3": 0.16,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "msPerQuery": 0.8926666666666667
+    }
+  },
+  {
+    "pair": "eng→tpi (Tok Pisin)",
+    "slice": "full",
+    "report": {
+      "trainCells": 27864,
+      "testCells": 3019,
+      "next": {
+        "unigram": {
+          "top1": 0.11533333333333333,
+          "top3": 0.21333333333333335,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.23533333333333334,
+          "top3": 0.4266666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.23866666666666667,
+          "top3": 0.428,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.23133333333333334,
+          "top3": 0.448,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.05266666666666667,
+          "top3": 0.09533333333333334,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.11266666666666666,
+          "top3": 0.228,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.384,
+          "top3": 0.5666666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.38466666666666666,
+          "top3": 0.5733333333333334,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.398,
+          "top3": 0.6026666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.098,
+          "top3": 0.176,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "msPerQuery": 25.357777777777777
+    }
+  },
+  {
+    "pair": "eng→tpi (Tok Pisin)",
+    "slice": "first 2000",
+    "report": {
+      "trainCells": 2000,
+      "testCells": 219,
+      "next": {
+        "unigram": {
+          "top1": 0.12333333333333334,
+          "top3": 0.22866666666666666,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.222,
+          "top3": 0.43,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.24266666666666667,
+          "top3": 0.4493333333333333,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.2673333333333333,
+          "top3": 0.4726666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.074,
+          "top3": 0.13066666666666665,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.10533333333333333,
+          "top3": 0.22266666666666668,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.388,
+          "top3": 0.5713333333333334,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.39466666666666667,
+          "top3": 0.5733333333333334,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.426,
+          "top3": 0.6133333333333333,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.14466666666666667,
+          "top3": 0.24666666666666667,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "msPerQuery": 1.3094444444444444
+    }
+  },
+  {
+    "pair": "spa→eng (English)",
+    "slice": "full",
+    "report": {
+      "trainCells": 27853,
+      "testCells": 3094,
+      "next": {
+        "unigram": {
+          "top1": 0.07,
+          "top3": 0.152,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.20533333333333334,
+          "top3": 0.338,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.21733333333333332,
+          "top3": 0.356,
+          "coverage": 0.9993333333333333,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.2926666666666667,
+          "top3": 0.4533333333333333,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.12866666666666668,
+          "top3": 0.208,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.09866666666666667,
+          "top3": 0.18533333333333332,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.296,
+          "top3": 0.472,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.30133333333333334,
+          "top3": 0.4806666666666667,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.3626666666666667,
+          "top3": 0.562,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.21066666666666667,
+          "top3": 0.308,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "msPerQuery": 18.24077777777778
+    }
+  },
+  {
+    "pair": "spa→eng (English)",
+    "slice": "first 2000",
+    "report": {
+      "trainCells": 2000,
+      "testCells": 223,
+      "next": {
+        "unigram": {
+          "top1": 0.07,
+          "top3": 0.16133333333333333,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.19266666666666668,
+          "top3": 0.3253333333333333,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.21333333333333335,
+          "top3": 0.37133333333333335,
+          "coverage": 0.9993333333333333,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.2906666666666667,
+          "top3": 0.44733333333333336,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.13133333333333333,
+          "top3": 0.212,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "infill": {
+        "unigram": {
+          "top1": 0.06533333333333333,
+          "top3": 0.144,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bigram-markov": {
+          "top1": 0.3233333333333333,
+          "top3": 0.468,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped, no source": {
+          "top1": 0.332,
+          "top3": 0.49933333333333335,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia shipped + source": {
+          "top1": 0.3893333333333333,
+          "top3": 0.5653333333333334,
+          "coverage": 1,
+          "n": 1500
+        },
+        "bia source lexicon only": {
+          "top1": 0.21066666666666667,
+          "top3": 0.3,
+          "coverage": 1,
+          "n": 1500
+        }
+      },
+      "msPerQuery": 1.092
+    }
+  }
+]

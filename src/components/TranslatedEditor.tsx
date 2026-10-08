@@ -40,7 +40,7 @@ import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } fro
 import { createSmartQuotesExtension } from "@/lib/richtext/smart-quotes"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
-import { createGhostTextExtension, handleGhostKeyDown } from "@/lib/richtext/ghost-text-plugin"
+import { acceptGhostText, createGhostTextExtension, getGhostText, handleGhostKeyDown } from "@/lib/richtext/ghost-text-plugin"
 import type { ForecastClient } from "@/lib/forecast/forecast-client"
 import { useForecast } from "@/context/ForecastContext"
 import { WordsThatFitMenu } from "@/components/WordsThatFitMenu"
@@ -1678,12 +1678,20 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     if (event.key !== "Tab") return
     const target = event.target as HTMLElement | null
     if (!target?.closest(".ProseMirror")) return
+    // A visible ghost suggestion takes Tab (accept) before cell navigation —
+    // this capture handler runs ahead of ProseMirror's own keydown props.
+    if (!event.shiftKey && editor && !editor.isDestroyed && getGhostText(editor.state)) {
+      event.preventDefault()
+      event.stopPropagation()
+      acceptGhostText(editor.view)
+      return
+    }
     const navigate = onNavigateCellRef.current
     if (!navigate) return
     event.preventDefault()
     event.stopPropagation()
     navigate(event.shiftKey ? "prev" : "next")
-  }, [])
+  }, [editor])
 
   const handleFormattingToolbarMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault()

@@ -20,11 +20,16 @@ function client() {
   return createInThreadForecastClient(engine)
 }
 
-async function mount(ghostTextEnabled: boolean) {
+async function mount(ghostTextEnabled: boolean, onNavigateCell?: (direction: "prev" | "next") => void) {
   const commits: TranslatedEditorCommit[] = []
   const view = render(
     <ForecastProvider value={{ client: client(), ghostTextEnabled }}>
-      <TranslatedEditor cellId="active" initialPlain="the lord is" onCommit={(snap) => { commits.push(snap) }} />
+      <TranslatedEditor
+        cellId="active"
+        initialPlain="the lord is"
+        onCommit={(snap) => { commits.push(snap) }}
+        onNavigateCell={onNavigateCell}
+      />
     </ForecastProvider>,
   )
   await act(async () => { await Promise.resolve() })
@@ -53,6 +58,21 @@ describe("TranslatedEditor — BIA ghost text", () => {
     expect(editor.getText()).toBe("the lord is my shepherd")
     act(() => { window.dispatchEvent(new Event("pagehide")) })
     expect(commits.at(-1)?.value).toBe("the lord is my shepherd")
+  })
+
+  // Regression: in the table the row wires onNavigateCell, whose capture-phase
+  // Tab handler used to move to the next cell before the ghost could take Tab.
+  it("Tab accepts the ghost instead of moving cells; without a ghost Tab still navigates", async () => {
+    const navigations: string[] = []
+    const { pm, editor } = await mount(true, (direction) => { navigations.push(direction) })
+    await waitFor(() => expect(pm.querySelector("[data-testid='ghost-text']")).not.toBeNull())
+    act(() => { fireEvent.keyDown(pm, { key: "Tab" }) })
+    expect(editor.getText()).toBe("the lord is my shepherd")
+    expect(navigations).toEqual([])
+
+    act(() => { fireEvent.keyDown(pm, { key: "Escape" }) })
+    act(() => { fireEvent.keyDown(pm, { key: "Tab" }) })
+    expect(navigations).toEqual(["next"])
   })
 
   it("Esc dismisses the ghost instead of leaving the cell, and writes nothing", async () => {

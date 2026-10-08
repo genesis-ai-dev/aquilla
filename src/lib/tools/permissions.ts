@@ -22,6 +22,7 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   "terms.list": "read:terms",
   "cells.commit": "write:target",
   "cells.validate": "write:validation",
+  "ai.generate": "ai:generate",
 }
 
 /** The event kind whose server role floor bounds each write scope. */

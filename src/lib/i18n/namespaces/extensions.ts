@@ -45,6 +45,8 @@ export const extensions = defineNamespace({
     "extensions.scope.readTerms": "read the termbase",
     "extensions.scope.writeTarget": "edit translations",
     "extensions.scope.writeValidation": "mark cells validated",
+    "extensions.scope.aiGenerate": "use AI on your behalf",
+    "extensions.tell.label": "Message from {name}",
     "extensions.installDialog.title": "Install {name}?",
     "extensions.installDialog.body":
       "Choose what this extension may do without asking. Anything left unchecked, it has to ask for the first time it needs it.",
@@ -131,6 +133,7 @@ export const extensions = defineNamespace({
       "extensions.revert.skippedHeading": { description: "Heading over cells revert left alone.", placeholders: { count: "Number of cells." } },
       "extensions.revert.skippedRow": { description: "One skipped cell.", placeholders: { cell: "Cell reference.", by: "Username now holding the cell." } },
       "extensions.palette.openPanel": { description: "Command palette entry.", placeholders: { name: "Extension name." } },
+      "extensions.tell.label": { description: "Heading of a message an extension left for the user.", placeholders: { name: "Extension name." } },
       "extensions.heal.failed": { description: "Error after an automatic fix failed.", placeholders: { message: "Builder error." } },
       "extensions.heal.done": { description: "Result after an extension was changed or healed.", placeholders: { version: "New version number." } },
       "extensions.palette.useAsEditor": { description: "Command palette entry.", placeholders: { name: "Extension name." } },

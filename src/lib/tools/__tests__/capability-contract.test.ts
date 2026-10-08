@@ -21,7 +21,7 @@ import { defaultSmokeFixtures } from "../smoke"
 import { buildToolSrcdoc } from "../srcdoc"
 import { createFakeFramePair } from "./fake-frame"
 
-const runtimeMethods = [...TOOL_RUNTIME_SOURCE.matchAll(/call\("([a-z]+\.[A-Za-z]+)"/g)].map((m) => m[1])
+const runtimeMethods = [...TOOL_RUNTIME_SOURCE.matchAll(/call\("([a-z]+(?:\.[A-Za-z]+)?)"/g)].map((m) => m[1])
 const removed = REMOVED_APIS.map((r) => r.method)
 const live = runtimeMethods.filter((m) => !removed.includes(m))
 const stub = defaultSmokeFixtures({ name: "x", description: "", scopes: [...TOOL_SCOPES], mounts: ["page"], apiRev: 1 })[1].data

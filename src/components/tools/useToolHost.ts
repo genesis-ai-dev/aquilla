@@ -35,6 +35,9 @@ export interface ToolHostState {
   clearErrors: () => void
   /** Set when the tool called a removed bridge API. */
   removedApi: string | null
+  /** Messages the tool left with aquilla.tell (newest last). */
+  messages: string[]
+  dismissMessage: (index: number) => void
   ready: boolean
 }
 
@@ -44,6 +47,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   const [errors, setErrors] = useState<ToolErrorReport[]>([])
   const [ready, setReady] = useState(false)
   const [removedApi, setRemovedApi] = useState<string | null>(null)
+  const [messages, setMessages] = useState<string[]>([])
 
   const standingRef = useRef<Set<ToolScope>>(new Set(tool.grantedScopes))
   const deniedRef = useRef<Set<ToolScope>>(new Set())
@@ -119,6 +123,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       tokenFor: makeAudioSyncTokenFetcher(() => session),
       flush: () => flushRef.current(),
       notify: (message) => toast.add({ title: toolName, description: message }),
+      tell: (message) => setMessages((prev) => [...prev.slice(-4), message]),
       grantedScopes: () => [...standingRef.current],
       requestScope: (scope) => ask(scope),
       storageKey: `aquilla.tools.storage.v1:${session.username}:${projectId}:${toolId}`,
@@ -182,5 +187,13 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     return () => observer.disconnect()
   }, [])
 
-  return { prompt, errors, clearErrors: () => setErrors([]), ready, removedApi }
+  return {
+    prompt,
+    errors,
+    clearErrors: () => setErrors([]),
+    ready,
+    removedApi,
+    messages,
+    dismissMessage: (index: number) => setMessages((prev) => prev.filter((_, i) => i !== index)),
+  }
 }

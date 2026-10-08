@@ -130,6 +130,12 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     ui: {
       notify: function (message) { return call("ui.notify", { message: String(message) }); },
     },
+    ai: {
+      generate: function (prompt, opts) {
+        return call("ai.generate", { prompt: String(prompt), system: opts && opts.system ? String(opts.system) : "", maxTokens: opts && opts.maxTokens ? Number(opts.maxTokens) : 0 });
+      },
+    },
+    tell: function (message) { return call("tell", { message: String(message) }); },
     on: function (type, cb) {
       (listeners[type] = listeners[type] || []).push(cb);
       return function () { aquilla.off(type, cb); };
@@ -139,7 +145,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     },
   };
   Object.freeze(aquilla.files); Object.freeze(aquilla.cells); Object.freeze(aquilla.terms);
-  Object.freeze(aquilla.storage); Object.freeze(aquilla.permissions); Object.freeze(aquilla.ui);
+  Object.freeze(aquilla.storage); Object.freeze(aquilla.permissions); Object.freeze(aquilla.ui); Object.freeze(aquilla.ai);
   Object.defineProperty(window, "aquilla", { value: Object.freeze(aquilla), writable: false, configurable: false });
 
   window.addEventListener("load", function () { post({ type: "ready" }); });

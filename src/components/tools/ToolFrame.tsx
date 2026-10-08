@@ -38,7 +38,7 @@ export interface ToolFrameProps {
 export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className }: ToolFrameProps) {
   const t = useT()
   const frameRef = useRef<HTMLIFrameElement | null>(null)
-  const { prompt, errors, clearErrors, removedApi } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange })
+  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange })
 
   // Built once per tool version: re-rendering the srcdoc would reload the tool.
   const srcdoc = useMemo(
@@ -70,6 +70,17 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
           )}
         </div>
       )}
+      {messages.map((m, i) => (
+        <div key={`${i}:${m}`} role="status" className="flex items-start gap-2 border-b bg-sky-50 px-4 py-2 text-sm dark:bg-sky-950/40" data-testid="extension-message">
+          <span className="min-w-0 flex-1 break-words">
+            <span className="font-medium">{t("extensions.tell.label", { name: tool.name })}: </span>
+            {m}
+          </span>
+          <Button size="icon-xs" variant="ghost" onClick={() => dismissMessage(i)} aria-label={t("common.dismiss")}>
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      ))}
       {errors.length > 0 && (
         <div role="alert" className="flex items-start gap-2 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />

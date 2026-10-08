@@ -12,6 +12,7 @@ import { fetchAllFileCells, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { fetchConcepts } from "@/lib/sync/concepts-read"
 import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { FRONTIER_CHAT_URL } from "@/lib/completion/completion-service"
 import { emitCellValidate, emitTargetCellCommits, type CellCommitInput } from "@/lib/sync/events-emit"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import type { ToolOrigin, ToolScope } from "../../../shared/tools/manifest"
@@ -45,6 +46,8 @@ export interface LiveToolDataOptions {
   /** Kick the outbox so writes land promptly (OutboxContext.flushNow). */
   flush: () => void
   notify: (message: string) => void
+  /** Persistent message for the user (aquilla.tell). */
+  tell: (message: string) => void
   grantedScopes: () => ToolScope[]
   requestScope: (scope: ToolScope) => Promise<boolean>
   /** Per-tool, per-user storage namespace. */
@@ -273,6 +276,27 @@ export class LiveToolData implements ToolHostData {
 
   notify(message: string): void {
     this.opts.notify(message)
+  }
+
+  tell(message: string): void {
+    this.opts.tell(message)
+  }
+
+  /** aquilla.ai.generate: the app's own chat proxy, billed/guarded like any
+   *  in-app AI call (the extension never sees a key). */
+  async generate(input: { prompt: string; system: string; maxTokens: number }): Promise<{ text: string }> {
+    const messages = [
+      ...(input.system ? [{ role: "system", content: input.system }] : []),
+      { role: "user", content: input.prompt },
+    ]
+    const res = await fetch(FRONTIER_CHAT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.opts.sessionJwt}` },
+      body: JSON.stringify({ model: "default", messages, max_tokens: input.maxTokens, temperature: 0.3, stream: false, projectId: this.opts.projectId }),
+    })
+    if (!res.ok) throw new Error(`AI request failed (HTTP ${res.status})`)
+    const body = (await res.json()) as { choices?: { message?: { content?: string | null } }[] }
+    return { text: body.choices?.[0]?.message?.content ?? "" }
   }
 
   grantedScopes(): ToolScope[] {

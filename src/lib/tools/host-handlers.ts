@@ -56,6 +56,10 @@ export interface ToolHostData {
   storageSet: (key: string, value: unknown) => Promise<void>
   storageRemove: (key: string) => Promise<void>
   notify: (message: string) => void
+  /** One completion through the app's own AI proxy, as the user. */
+  generate: (input: { prompt: string; system: string; maxTokens: number }) => Promise<{ text: string }>
+  /** A message for the user that stays until dismissed (unlike notify). */
+  tell: (message: string) => void
   grantedScopes: () => ToolScope[]
   /** Explicit permission request (aquilla.permissions.request). */
   requestScope: (scope: ToolScope) => Promise<boolean>
@@ -135,6 +139,18 @@ export function createToolHandlers(data: ToolHostData): Record<string, BridgeHan
     "permissions.request": async (params) => {
       if (!isRecord(params) || !isToolScope(params.scope)) bad("scope must be a known scope")
       return data.requestScope(params.scope)
+    },
+    "ai.generate": async (params) => {
+      if (!isRecord(params) || typeof params.prompt !== "string" || !params.prompt.trim()) bad("prompt must be a non-empty string")
+      if (params.prompt.length > 20_000) bad("prompt exceeds 20000 characters")
+      const system = typeof params.system === "string" ? params.system.slice(0, 5000) : ""
+      const maxTokens = typeof params.maxTokens === "number" && params.maxTokens > 0 ? Math.min(params.maxTokens, 2000) : 800
+      return data.generate({ prompt: params.prompt, system, maxTokens })
+    },
+    tell: async (params) => {
+      if (!isRecord(params) || typeof params.message !== "string") bad("message must be a string")
+      data.tell(params.message.slice(0, 1000))
+      return true
     },
     "ui.notify": async (params) => {
       if (!isRecord(params) || typeof params.message !== "string") bad("message must be a string")

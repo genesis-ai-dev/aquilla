@@ -19,6 +19,7 @@ export const TOOL_SCOPES = [
   "read:terms",
   "write:target",
   "write:validation",
+  "ai:generate",
 ] as const
 
 export type ToolScope = (typeof TOOL_SCOPES)[number]
@@ -28,6 +29,7 @@ export const TOOL_SCOPE_LABELS: Record<ToolScope, string> = {
   "read:terms": "read the termbase",
   "write:target": "edit translations",
   "write:validation": "mark cells validated",
+  "ai:generate": "use AI on your behalf",
 }
 
 export function isToolScope(value: unknown): value is ToolScope {

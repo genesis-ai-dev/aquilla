@@ -46,6 +46,9 @@ through the global \`aquilla\` object the host injects before your code runs.
     Calls needing an ungranted scope pause on a user prompt automatically; a denied call
     rejects with an Error whose .code is "permission_denied". Handle that gracefully.
 - aquilla.ui.notify(message) — show a short toast in the app.
+- aquilla.tell(message) — leave a message for the user that stays above the extension until dismissed.
+- aquilla.ai.generate(prompt, { system?, maxTokens? }) → { text }   scope ai:generate
+    One completion through the app's own AI (as the user, on their credits). Use sparingly, never in a loop over every cell without the user asking.
 - aquilla.on("cells.changed", (e) => …) — e = { type, fileId, cellIds }. Fired after any write
   to a file the tool has listed (its own writes and other people's). Re-read and re-render.
   aquilla.on returns an unsubscribe function.

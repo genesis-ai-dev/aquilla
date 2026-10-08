@@ -91,6 +91,8 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
       store.delete(k)
     },
     notify: () => {},
+    generate: async ({ prompt }) => ({ text: `(generated for: ${prompt.slice(0, 40)})` }),
+    tell: () => {},
     grantedScopes: () => [...scopes],
     requestScope: async () => true,
   }

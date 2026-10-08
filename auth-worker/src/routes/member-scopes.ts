@@ -29,7 +29,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
 import { laneScopeIdsForStorage, type LaneScopeConversion } from "../../../src/lib/lanes/scope-ids"
-import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
+import { syncMemberLaneGrants } from "../services/lane-grants"
 
 const memberScopes = new Hono<AuthHonoEnv>()
 
@@ -305,40 +305,5 @@ memberScopes.put(
     return c.json({ scopes: saved, ...(savedLaneNames ? { laneNames: savedLaneNames } : {}) })
   },
 )
-
-async function syncMemberLaneGrants(
-  db: AuthHonoEnv["Bindings"]["AQUILLA_PG"],
-  projectId: string,
-  targetUserId: number,
-  laneIds: readonly string[],
-  grantedBy: number,
-): Promise<void> {
-  const membership = await db
-    .prepare("SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?")
-    .bind(projectId, targetUserId)
-    .first<{ role_level: number }>()
-  if (!membership) return
-  const lanes = await loadTargetLaneIdentities(db, projectId)
-  if (lanes.length === 0) return
-  const plan = planLaneGrants({
-    roleLevel: membership.role_level,
-    laneScopes: laneIds,
-    lanes,
-  })
-  await db
-    .prepare("DELETE FROM project_member_lane_roles WHERE project_id = ? AND user_id = ?")
-    .bind(projectId, targetUserId)
-    .run()
-  for (const grant of plan.grants) {
-    await db
-      .prepare(
-        `INSERT INTO project_member_lane_roles
-           (project_id, user_id, lane, role_level, granted_by)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(projectId, targetUserId, grant.laneId, grant.level, grantedBy)
-      .run()
-  }
-}
 
 export default memberScopes

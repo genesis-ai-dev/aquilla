@@ -23,6 +23,7 @@ const specs = [
   "e2e/specs/projects/project-settings.smoke.spec.ts",
   "e2e/specs/projects/route-health.smoke.spec.ts",
   "e2e/specs/rules/violation.smoke.spec.ts",
+  "e2e/specs/editor/ghost-text.spec.ts",
 ]
 
 describe("changed-file E2E impact selection", () => {
@@ -41,6 +42,15 @@ describe("changed-file E2E impact selection", () => {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-media-captions.smoke.spec.ts",
       )
+    }
+  })
+  it("selects the ghost-text journey for BIA forecasting changes", () => {
+    for (const file of [
+      "src/lib/forecast/bia-engine.ts", "src/lib/richtext/ghost-text-plugin.ts",
+      "src/hooks/useForecastCorpus.ts", "src/components/WordsThatFitMenu.tsx",
+      "src/context/ForecastContext.tsx", "src/lib/store/ghost-text-pref.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain("e2e/specs/editor/ghost-text.spec.ts")
     }
   })
   it("selects billing for catalog, client, and shared-contract changes", () => {

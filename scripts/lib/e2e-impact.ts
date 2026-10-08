@@ -74,6 +74,12 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/rules/violation.smoke.spec.ts"],
   },
   {
+    // BIA forecasting: ghost-text next words + "words that fit here". The
+    // journey crosses the projection → SPA read → forecast worker → commit.
+    source: /^src\/(?:lib\/forecast\/|lib\/richtext\/ghost-text|hooks\/useForecastCorpus|components\/WordsThatFitMenu|context\/ForecastContext|lib\/store\/ghost-text-pref)/,
+    sentinels: ["e2e/specs/editor/ghost-text.spec.ts"],
+  },
+  {
     source: /^src\/(?:components|lib)\/(?:terminology|termbase)/i,
     sentinels: ["e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts"],
   },

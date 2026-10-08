@@ -395,6 +395,9 @@ import { useShowHiddenCells, setShowHiddenCells } from "@/lib/store/show-hidden-
 import { EditorScrollProvider } from "@/context/EditorScrollContext"
 import { ScrollToGroupHandler } from "@/components/ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
+import { ForecastProvider } from "@/context/ForecastContext"
+import { useForecastCorpus } from "@/hooks/useForecastCorpus"
+import { useGhostTextEnabled } from "@/lib/store/ghost-text-pref"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { downloadImportedOriginal } from "@/lib/file-original-download"
 import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
@@ -5150,6 +5153,23 @@ export function ProjectWorkspace() {
   // rebuild to once the batch pauses removes the storm. Health, progress, and
   // the edit/commit path keep live selectors.
   const corpusCells = useDebouncedValue(cellSummaries, 600)
+
+  // BIA forecasting — ghost-text next words and "words that fit here" — from
+  // the project's own target text, in a Web Worker (see useForecastCorpus).
+  const ghostTextEnabled = useGhostTextEnabled()
+  const forecastClient = useForecastCorpus({
+    enabled: true,
+    projectId: project?.id,
+    files: projectFiles,
+    activeFileId,
+    activeCells: corpusCells,
+    getToken: getTokenForFile,
+    lane: activeLane,
+  })
+  const forecastValue = useMemo(
+    () => (forecastClient ? { client: forecastClient, ghostTextEnabled } : null),
+    [forecastClient, ghostTextEnabled],
+  )
 
   const { importSourceCells, fileTargetCells } = useImportCellRefs(cellSummaries, importOpen)
 
@@ -13491,6 +13511,7 @@ export function ProjectWorkspace() {
                   stacks the timeline above it. The provider wraps both so the
                   table's row actions work identically in either position. */}
               <EditorActionsProvider value={editorActionsValue}>
+              <ForecastProvider value={forecastValue}>
               {/* AQU-646 stage 3: the timeline/table split is a DRAGGABLE
                   divider now — the rows have multiplied (four tracks, more
                   later) and a timeline sized to its own content was squeezing
@@ -14046,6 +14067,7 @@ export function ProjectWorkspace() {
               </ResizablePanelGroup>
               </ResizablePanel>
               </ResizablePanelGroup>
+              </ForecastProvider>
               </EditorActionsProvider>
             </div>
             {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}

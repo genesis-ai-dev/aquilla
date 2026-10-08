@@ -10,6 +10,12 @@ export const harmonizer = defineNamespace({
       "The quotation that opens in {openedIn} ends here in the source, so close it at the end of this verse.",
     "harmonizer.reference.unclearSubject":
       "Someone new does this in the source, but a reader coming from {previous} may think it is the same person. Consider naming who it is.",
+    "harmonizer.connective.reason":
+      "In the source this verse gives the reason for {previous}, but this connective presents it as a result.",
+    "harmonizer.connective.inference":
+      "In the source this verse draws a conclusion from {previous}, but this connective presents it as a reason.",
+    "harmonizer.connective.contrast":
+      "In the source this verse contrasts with {previous}, but this connective presents it as a result.",
     "harmonizer.sentence.brokenCase":
       "This verse ends its sentence here, but {next} carries on in lowercase. Either the sentence continues or the next verse needs a capital.",
     "harmonizer.sentence.brokenOff":
@@ -43,6 +49,25 @@ export const harmonizer = defineNamespace({
           "Same as the reason above, for when the translation does not state who acts at all " +
           "(it is only implied by the verb).",
         placeholders: { previous: "Reference of the previous verse, e.g. 'JHN 6:27'." },
+      },
+      "harmonizer.connective.reason": {
+        description:
+          "Reason on an underlined linking word (like 'so' or 'therefore') at the start of a verse. " +
+          "The source's linking word (e.g. Greek γάρ) gives a reason ('for'), so a result word " +
+          "reverses the logic. No automatic fix.",
+        placeholders: { previous: "Reference of the previous verse, e.g. 'JHN 3:16'." },
+      },
+      "harmonizer.connective.inference": {
+        description:
+          "Same kind of reason: the source (e.g. Greek οὖν) draws a conclusion ('therefore'), but the " +
+          "translation's linking word gives a reason ('for').",
+        placeholders: { previous: "Reference of the previous verse." },
+      },
+      "harmonizer.connective.contrast": {
+        description:
+          "Same kind of reason: the source (e.g. Greek ἀλλά) contrasts ('but'), but the translation's " +
+          "linking word presents a result ('so').",
+        placeholders: { previous: "Reference of the previous verse." },
       },
       "harmonizer.sentence.brokenCase": {
         description:

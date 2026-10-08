@@ -124,6 +124,7 @@ import {
   focusedCommentFromSearchParams,
   openCommentsCellFromSearchParams,
   resolveDeepLinkLaneSelection,
+  searchWithoutCommentDeepLink,
 } from "./project-workspace-lane-deeplink"
 import {
   restoreMayPark, stepPendingScroll,
@@ -1182,6 +1183,21 @@ export function ProjectWorkspace() {
     setAttachmentsDrawerOpen(false)
     setCommentsCellId(cellId)
   }, [searchParams])
+  // Closing the panel must drop `comments` and `commentId`. Leaving them makes
+  // the same notification a no-op: navigate() to the identical URL never
+  // changes searchParams, so the effect above does not open the drawer again.
+  // Read location through a ref so this stays one identity. The editor row
+  // callbacks below are memoized, and a new function on every address change
+  // would rerender every visible row.
+  const locationRef = useRef(location)
+  locationRef.current = location
+  const closeCommentsPanel = useCallback(() => {
+    setCommentsCellId(null)
+    const current = locationRef.current
+    const nextSearch = searchWithoutCommentDeepLink(current.search)
+    if (nextSearch === current.search) return
+    navigate(`${current.pathname}${nextSearch}${current.hash}`, { replace: true })
+  }, [navigate])
   // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
   // LLM). Findings are session-local: held here, never persisted or synced.
   const [checkOpen, setCheckOpen] = useState(false)
@@ -6583,7 +6599,7 @@ export function ProjectWorkspace() {
     if (!activeFileId || checkRunning) return
     // One aside panel at a time (matches the existing drawer pattern).
     setDrawerRuleId(null)
-    setCommentsCellId(null)
+    closeCommentsPanel()
     setHistoryCellId(null)
     setAttachmentsDrawerOpen(false)
     setCheckOpen(true)
@@ -6604,7 +6620,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, localConcepts, project?.termMatching])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -7615,24 +7631,24 @@ export function ProjectWorkspace() {
   // rows are React.memo'd, so a new function identity here would fail the
   // shallow-compare for every visible row on every ProjectWorkspace render.
   const handleInfractionClick = useCallback((ruleId: string) => {
-    setCommentsCellId(null); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
+    closeCommentsPanel(); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
     setDrawerRuleId(ruleId)
-  }, [])
+  }, [closeCommentsPanel])
   const handleOpenComments = useCallback((cellId: string) => {
     setDrawerRuleId(null); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
     setCommentsCellId(cellId)
   }, [])
   const handleOpenHistory = useCallback((cellId: string) => {
-    setDrawerRuleId(null); setCommentsCellId(null); setAttachmentsDrawerOpen(false)
+    setDrawerRuleId(null); closeCommentsPanel(); setAttachmentsDrawerOpen(false)
     setHistoryCellId(cellId)
-  }, [])
+  }, [closeCommentsPanel])
   // AQU-777: one aside panel at a time, same as the three above.
   const handleOpenAttachment = useCallback((_cellId: string, attachmentId: string) => {
-    setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(null)
+    setDrawerRuleId(null); closeCommentsPanel(); setHistoryCellId(null)
     setCheckOpen(false)
     setAttachmentDrawerFocusId(attachmentId)
     setAttachmentsDrawerOpen(true)
-  }, [])
+  }, [closeCommentsPanel])
   // AQU-777: an attach just landed — show the link before the outbox flush
   // does, then reconcile against the server on the next refresh.
   const handleAttachmentAdded = useCallback((record: CellAttachmentRecord) => {
@@ -12885,7 +12901,7 @@ export function ProjectWorkspace() {
                           setActiveFileId(first.fileId)
                         }
                         setDrawerRuleId(null)
-                        setCommentsCellId(null)
+                        closeCommentsPanel()
                         setHistoryCellId(first.cellId)
                       }
                       clearStaleSiblings()
@@ -13855,7 +13871,7 @@ export function ProjectWorkspace() {
                 liveComments={allProjectComments.filter(
                   (c) => c.cellId === commentsCell.id && c.deletedAt === null
                 )}
-                onClose={() => setCommentsCellId(null)}
+                onClose={closeCommentsPanel}
                 onNewThread={(text) => addThread(commentsCell.id, text)}
                 onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
                 onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}

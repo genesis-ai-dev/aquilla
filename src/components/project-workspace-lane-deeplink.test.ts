@@ -6,6 +6,7 @@ import {
   editorCommentHref,
   focusedCommentFromSearchParams,
   openCommentsCellFromSearchParams,
+  searchWithoutCommentDeepLink,
   resolveDeepLinkLane,
   resolveDeepLinkLaneFromSearchParams,
   resolveDeepLinkLaneSelection,
@@ -162,6 +163,19 @@ describe('comment deep links', () => {
     const params = new URL(href, 'https://app.test').searchParams
     expect(openCommentsCellFromSearchParams(params)).toBe('cell 2')
     expect(focusedCommentFromSearchParams(params)).toBeNull()
+  })
+
+  it('drops the open flag and the focused comment when the panel closes', () => {
+    const href = editorCommentHref('p1', 'f1', 'c1', 'reply 9')
+    const search = new URL(href, 'https://app.test').search
+    const next = searchWithoutCommentDeepLink(search)
+    const params = new URLSearchParams(next)
+    expect(params.get('cellId')).toBe('c1')
+    expect(params.get('comments')).toBeNull()
+    expect(params.get('commentId')).toBeNull()
+    expect(openCommentsCellFromSearchParams(params)).toBeNull()
+    expect(focusedCommentFromSearchParams(params)).toBeNull()
+    expect(searchWithoutCommentDeepLink('?cellId=c1&lane=fr')).toBe('?cellId=c1&lane=fr')
   })
 
   it('names the reply so the open thread can scroll to it', () => {

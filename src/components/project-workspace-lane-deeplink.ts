@@ -174,3 +174,21 @@ export function focusedCommentFromSearchParams(
   const commentId = searchParams.get(FOCUS_COMMENT_PARAM)
   return commentId ? commentId : null
 }
+
+/**
+ * Search string after the comments panel closes.
+ *
+ * Drops the open flag and the focused comment so the URL no longer asks the
+ * editor to open the thread. `cellId` stays: it is the row the editor is on,
+ * and a bare cell link must not reopen the panel. When neither comment param
+ * is present the original string is returned unchanged, so a close that did
+ * not come from a deep link does not rewrite the address.
+ */
+export function searchWithoutCommentDeepLink(search: string): string {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search)
+  if (!params.has(OPEN_COMMENTS_PARAM) && !params.has(FOCUS_COMMENT_PARAM)) return search
+  params.delete(OPEN_COMMENTS_PARAM)
+  params.delete(FOCUS_COMMENT_PARAM)
+  const next = params.toString()
+  return next ? `?${next}` : ""
+}

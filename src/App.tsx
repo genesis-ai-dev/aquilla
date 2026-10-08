@@ -71,7 +71,18 @@ import { RedirectToProjectOverview } from "@/components/RedirectToProjectOvervie
 
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
-  import("@/components/ProjectWorkspace").then((m) => ({ default: m.ProjectWorkspace })),
+  import("@/components/ProjectWorkspace").then((m) => ({
+    // Smart Extensions (prototype): the project's installed extensions feed
+    // the panel, inline and editor mounts inside the workspace. One stable
+    // component type, so surface hops keep the instance (AQU-1496).
+    default: function ProjectWorkspaceWithExtensions() {
+      return (
+        <ToolsMountProvider>
+          <m.ProjectWorkspace />
+        </ToolsMountProvider>
+      )
+    },
+  })),
 )
 const OrgDataEgress = lazy(() =>
   import("@/pages/OrgDataEgress").then((m) => ({ default: m.OrgDataEgress })),

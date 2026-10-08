@@ -121,7 +121,7 @@ export function ToolActivityPanel({
                       ? t("extensions.activity.validate", { cell })
                       : t("extensions.activity.other", { kind: e.kind, cell })}
                 </span>
-                {e.value !== null && <span className="min-w-0 flex-1 truncate text-muted-foreground">{e.value}</span>}
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{e.value ?? ""}</span>
                 <span className="text-xs text-muted-foreground">{e.author}</span>
                 <span className="text-xs text-muted-foreground">{fmtShortCalendarDate(e.serverTs)} {new Date(e.serverTs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                 {e.verified ? (

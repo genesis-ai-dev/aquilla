@@ -205,10 +205,13 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
                 setError(null)
                 void handleAdd(name)
               }}
-              exclude={[
-                snapshot.defaultTargetLanguage,
-                ...snapshot.laneLanguages,
-              ].filter((language) => language.trim().length > 0)}
+              exclude={
+                snapshot
+                  ? [snapshot.defaultTargetLanguage, ...snapshot.laneLanguages].filter(
+                      (language) => language.trim().length > 0,
+                    )
+                  : []
+              }
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault()

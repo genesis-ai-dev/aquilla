@@ -31,13 +31,12 @@ import type {
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import { activeLanes, archivedRegisteredLanes } from "@/components/project-lane-archive"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { codeForLanguageLabel } from "@/lib/lanes/backfill-plan"
 import {
-  derivedLaneLanguageCode,
   laneDisplayName,
   laneLanguage,
   laneLanguageCode,
 } from "@/lib/lanes/lane-display"
+import { useDerivedLanguageCode } from "@/lib/languages/use-derived-language-code"
 import { laneLabelSuffixesById } from "@/lib/lanes/lane-language"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -156,6 +155,7 @@ export function LanguagesSection({
   const [pendingArchive, setPendingArchive] = useState<string | null>(null)
   const [laneActionError, setLaneActionError] = useState<string | null>(null)
   const [busyLane, setBusyLane] = useState<string | null>(null)
+  const derivedNewLaneCode = useDerivedLanguageCode(newLane)
 
   const laneRows = laneRecords ?? []
   const targetRows = laneRows.filter((lane) => lane.role === "target")
@@ -720,7 +720,7 @@ export function LanguagesSection({
                   data-testid="add-lane-code-input"
                   value={laneCode}
                   placeholder={
-                    codeForLanguageLabel(normalizeLane(newLane)) ??
+                    derivedNewLaneCode ??
                     t("projectSettings.languages.laneCodeDerivedPlaceholder")
                   }
                   disabled={!canEdit || adding}
@@ -785,13 +785,15 @@ function LaneIdentityFields({
   const storedLanguage = laneLanguage(lane)
   const storedName = lane.name ?? ""
   const storedCode = lane.langCode ?? ""
-  const derivedCode = derivedLaneLanguageCode(lane)
 
   const [language, setLanguage] = useState(storedLanguage)
   const [name, setName] = useState(storedName)
   const [code, setCode] = useState(storedCode)
   const [advanced, setAdvanced] = useState(storedCode.length > 0)
   const [error, setError] = useState<string | null>(null)
+  // The grey text tracks what is in the language box, including a name the
+  // person has typed but not saved yet.
+  const derivedCode = useDerivedLanguageCode(language)
 
   // Each field resyncs to the server's value when THAT field changes — the same
   // pattern the single-field version of this component used. Deliberately three

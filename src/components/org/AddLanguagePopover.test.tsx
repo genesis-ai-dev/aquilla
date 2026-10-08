@@ -37,7 +37,7 @@ beforeEach(() => {
 async function openPopover() {
   render(<AddLanguagePopover projectId="p1" jwt="jwt" />)
   fireEvent.click(screen.getByTestId("org-add-lang-p1"))
-  return waitFor(() => screen.getByLabelText("New target language tag"))
+  return waitFor(() => screen.getByLabelText("New target language"))
 }
 
 describe("AddLanguagePopover (AQU-538 §3.2)", () => {
@@ -90,7 +90,20 @@ describe("AddLanguagePopover (AQU-538 §3.2)", () => {
   })
 
   it("rejects a lane equal to the default target language without creating one", async () => {
-    fetchProjectSettings.mockResolvedValue(settings({ targetLanguage: "en", targetLanes: [] }))
+    fetchProjectSettings.mockResolvedValue(
+      settings({ targetLanguage: "en", targetLanes: [] }, 3, [
+        {
+          id: "default-lane",
+          role: "target",
+          language: "en",
+          name: null,
+          langCode: "en",
+          legacyTag: "",
+          position: 0,
+          archivedAt: null,
+        },
+      ]),
+    )
 
     const input = await openPopover()
     fireEvent.change(input, { target: { value: "EN" } })

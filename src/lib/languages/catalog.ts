@@ -260,6 +260,29 @@ function fold(value: string): string {
     .toLowerCase()
 }
 
+/**
+ * Code for an exact catalog name or code. A 639-1 `altCode` wins over the
+ * 639-3 id ("Spanish" → "es", not "spa"). A language with no two-letter code
+ * keeps its 639-3 id ("Turkana" → "tuv"). Not a fuzzy search: "Grade 7
+ * English" matches nothing.
+ */
+export function codeFromLanguageCatalog(
+  label: string | null | undefined,
+  catalog: readonly LanguageEntry[],
+): string | null {
+  const folded = fold((label ?? "").trim())
+  if (!folded) return null
+  const byName = catalog.find((entry) => fold(entry.name) === folded)
+  if (byName) return byName.altCode ?? byName.code
+  const byCode = catalog.find(
+    (entry) =>
+      fold(entry.code) === folded || (entry.altCode !== undefined && fold(entry.altCode) === folded),
+  )
+  if (!byCode) return null
+  if (byCode.altCode !== undefined && fold(byCode.altCode) === folded) return byCode.altCode
+  return byCode.code
+}
+
 /** Display name for a known code, so a seeded tag can be shown as a name. */
 export function nameForLanguageCode(code: string): string | null {
   const folded = fold(code.trim())

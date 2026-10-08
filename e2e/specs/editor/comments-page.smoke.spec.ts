@@ -53,11 +53,9 @@ test("comments page empty state, filters, search, and resolved surface session",
 
     const drawer = alice.locator('[data-testid="comments-drawer"]')
     await expect(drawer).toBeVisible({ timeout: 10_000 })
-    const textarea = drawer
-      .locator('textarea[placeholder*="comment" i], textarea[placeholder*="Comment" i]')
-      .first()
-    await expect(textarea).toBeVisible()
-    await textarea.fill(uniqueText)
+    const composer = drawer.getByRole("textbox", { name: "New thread" })
+    await expect(composer).toBeVisible()
+    await composer.fill(uniqueText)
     await drawer.locator('button[type="submit"], button:has-text("Post")').first().click()
     await expect(drawer.getByText(uniqueText)).toBeVisible({ timeout: 10_000 })
 
@@ -151,9 +149,9 @@ test("comments page empty state, filters, search, and resolved surface session",
     await addCommentBtn.click()
 
     const commentText = `resolved-comment-${Date.now()}`
-    const textarea = alice.locator("textarea").first()
-    await textarea.waitFor({ state: "visible", timeout: 5_000 })
-    await textarea.fill(commentText)
+    const composer = alice.getByRole("textbox", { name: "New thread" })
+    await composer.waitFor({ state: "visible", timeout: 5_000 })
+    await composer.fill(commentText)
     const postBtn = alice.getByRole("button", { name: /post|submit|send/i }).first()
     await expect(postBtn).toBeEnabled({ timeout: 3_000 })
     await postBtn.click()

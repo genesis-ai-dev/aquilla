@@ -61,9 +61,9 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
   const drawer = alice.locator("[data-testid='comments-drawer']").first()
   await expect(drawer).toBeVisible({ timeout: 5_000 })
   const commentText = `cross-comment-${Date.now()}`
-  const textarea = drawer.locator("textarea").first()
-  await textarea.waitFor({ state: "visible", timeout: 5_000 })
-  await textarea.fill(commentText)
+  const composer = drawer.getByRole("textbox", { name: "New thread" })
+  await composer.waitFor({ state: "visible", timeout: 5_000 })
+  await composer.fill(commentText)
   const postBtn = drawer.getByRole("button", { name: /post|submit|send/i }).first()
   await expect(postBtn).toBeVisible()
   await postBtn.click()

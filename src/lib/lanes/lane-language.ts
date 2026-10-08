@@ -12,8 +12,15 @@
  * blank, and an 8-hex lane id is never either answer.
  */
 
-import { laneDisplayName, laneLanguage, type LaneLanguageSettings } from "./lane-display"
+import {
+  hasLaneCodeOverride,
+  laneDisplayName,
+  laneLanguage,
+  laneLanguageCode,
+  type LaneLanguageSettings,
+} from "./lane-display"
 import { isLaneId } from "./lane-id"
+import { laneLabelSuffixes } from "./lane-label-suffix"
 
 /** The identity fields of a lane row (`ProjectLaneView` / `ProjectRecord.lanes`). */
 export interface LaneLanguageRow {
@@ -134,4 +141,50 @@ export function laneLabelsByTag(
     if (label) labels[lane.legacyTag ?? ""] = label
   }
   return labels
+}
+
+/**
+ * `legacy_tag` → the lane's code OVERRIDE, for the surfaces that tell two
+ * same-named lanes apart by it (AQU-1784). Only an override is included: a
+ * code DERIVED from the language is the same string for both colliding lanes,
+ * so it distinguishes nothing and is left out rather than offered as a suffix.
+ */
+export function laneCodesByTag(
+  lanes: readonly LaneLanguageRow[] | null | undefined,
+): Record<string, string> {
+  const codes: Record<string, string> = {}
+  for (const lane of targetRows(lanes)) {
+    if (!hasLaneCodeOverride(lane)) continue
+    const code = laneLanguageCode(lane)
+    if (code) codes[lane.legacyTag ?? ""] = code
+  }
+  return codes
+}
+
+/**
+ * Lane id → the suffix that tells a lane apart from a sibling showing the same
+ * string (AQU-1784), for the surfaces that hold lane ROWS rather than tags —
+ * the languages screen.
+ *
+ * `lanes` must already be in REGISTRY order (`position`, then id), which is
+ * the order the lane switcher offers them in, so the two surfaces number one
+ * collision the same way. Lanes whose label is unique are left out, so a
+ * caller's `?? null` keeps rendering them untouched.
+ */
+export function laneLabelSuffixesById(
+  lanes: readonly LaneLanguageRow[] | null | undefined,
+): Record<string, string> {
+  const rows = targetRows(lanes)
+  const suffixes = laneLabelSuffixes(
+    rows.map((lane) => ({
+      label: laneDisplayName(lane),
+      code: hasLaneCodeOverride(lane) ? laneLanguageCode(lane) : null,
+    })),
+  )
+  const byId: Record<string, string> = {}
+  for (const [index, lane] of rows.entries()) {
+    const suffix = suffixes[index]
+    if (suffix) byId[lane.id] = suffix
+  }
+  return byId
 }

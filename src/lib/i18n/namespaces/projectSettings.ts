@@ -996,6 +996,14 @@ export const projectSettings = defineNamespace({
       "That is not a valid language code. Use a BCP 47 tag such as \"es\" or \"es-MX\".",
     "projectSettings.languages.duplicateNameError":
       "Another lane already has this name. Change one of them.",
+    // AQU-1784: adding a lane that reads the same as an active one is allowed —
+    // two teams may translate into one language — so this warns before the save
+    // rather than refusing it afterwards, and says how the pair will be told
+    // apart once both exist.
+    "projectSettings.languages.duplicateNameNotice":
+      "\"{lane}\" already reads the same as another active lane. You can still add " +
+      "it — the lane switcher will number them.",
+    "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
     "projectSettings.languages.nameTooLongError": "That name is too long.",
     "projectSettings.languages.noAdditionalLanes": "No additional lanes yet.",
     "projectSettings.languages.archiveConfirm":
@@ -1807,6 +1815,25 @@ export const projectSettings = defineNamespace({
         description: "Instruction above the detach-confirmation input, naming the exact word the user must type.",
         placeholders: {
           word: "The literal, untranslated confirmation word 'DETACH' the user must type verbatim — styled bold-monospace by the caller. Never translate this word: the input is validated against the exact English literal.",
+        },
+      },
+      "projectSettings.languages.duplicateNameNotice": {
+        description:
+          "Notice under the add-lane fields when the lane being added would read " +
+          "the same as a lane the project already has. Not an error — adding it is " +
+          "allowed, and the lane switcher then numbers the pair. Appears while the " +
+          "name is typed, before anything is saved.",
+        placeholders: {
+          lane: "The existing lane's display name, as the switcher shows it (data, not translated).",
+        },
+      },
+      "projectSettings.languages.laneShownAs": {
+        description:
+          "Small muted note on a lane row whose name another lane also uses, giving " +
+          "the label this lane is shown under elsewhere in the app — the name plus " +
+          "the suffix that tells the two apart. Not a sentence; no period.",
+        placeholders: {
+          label: "The lane's disambiguated display label, e.g. 'Tshangla · 2' (data, not translated).",
         },
       },
       "projectSettings.languages.archiveConfirm": {

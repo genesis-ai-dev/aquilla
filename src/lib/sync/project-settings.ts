@@ -568,7 +568,16 @@ export type CreateLaneResult =
 export async function createProjectLane(
   jwt: string,
   projectId: string,
-  input: { name: string; language: string; code?: string | null },
+  /** AQU-1784: `allowDuplicateName` accepts a display name that duplicates an
+   *  active lane's — sent by the languages screen, which shows the collision
+   *  inline before the save. Omitted everywhere else, where a duplicate is
+   *  still refused with `{ kind: "duplicate" }`. */
+  input: {
+    name: string
+    language: string
+    code?: string | null
+    allowDuplicateName?: boolean
+  },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CreateLaneResult> {
   let res: Response

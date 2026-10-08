@@ -957,9 +957,11 @@ describe('ProjectSetup bilingual import lane id', () => {
       `SELECT side, value, lane_id, target_lang FROM cells WHERE project_id = $1 AND side = 'target' ORDER BY value`,
       [PROJECT],
     )
+    // The lane id is the stamp. The projection target_lang column is left at
+    // its default by every writer (AQU-1611b); the tag lives on the lane row.
     expect(cells.rows).toEqual([
-      { side: 'target', value: 'Au revoir', lane_id: planned?.id, target_lang: 'fr' },
-      { side: 'target', value: 'Bonjour monde', lane_id: planned?.id, target_lang: 'fr' },
+      { side: 'target', value: 'Au revoir', lane_id: planned?.id, target_lang: '' },
+      { side: 'target', value: 'Bonjour monde', lane_id: planned?.id, target_lang: '' },
     ])
   })
 

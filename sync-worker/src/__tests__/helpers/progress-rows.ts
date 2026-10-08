@@ -35,12 +35,18 @@ export async function progressRowsForLane<T>(
     binds.push(opts.tag)
     extra += ` AND l.legacy_tag = $${binds.length}`
   }
-  const result = await pg.query<T>(
-    `SELECT p.* FROM file_section_progress p
+  const result = await pg.query<T & { lane_legacy_tag: string }>(
+    `SELECT p.*, COALESCE(l.legacy_tag, '') AS lane_legacy_tag
+       FROM file_section_progress p
        JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
       WHERE p.project_id = $1 AND l.role = $2${extra}
       ORDER BY p.file_id, p.scope, p.section_key`,
     binds,
   )
-  return result.rows
+  // The stored column is '' on a row this branch's writer inserted. Callers
+  // read target_lang as the lane's wire tag.
+  return result.rows.map((row) => {
+    const { lane_legacy_tag, ...rest } = row
+    return { ...rest, target_lang: lane_legacy_tag } as T
+  })
 }

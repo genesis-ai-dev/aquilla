@@ -194,7 +194,7 @@ describe('assignment.create — cells scope (AQU-1628)', () => {
 })
 
 describe('assignment.create — lane (AQU-538 §3.5)', () => {
-  it('writes targetLang to assignments.target_lang', async () => {
+  it('leaves assignments.target_lang at its default and mints the lane from the tag', async () => {
     const { db, snapshot } = await makeTestDb({ cells: seededCells() })
     const authed = await authorizeAssignment('assignment.create', {
       assignmentId: 'as-lane',
@@ -208,8 +208,10 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
     const result = handleAssignmentEvent(db, authed, 2100, 2)
     await db.batch(result.stmts)
 
-    const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-lane')
-    expect(row!.target_lang).toBe('es')
+    const tables = await snapshot()
+    const row = tables.assignments.find((a) => a.assignment_id === 'as-lane')
+    expect(row!.target_lang).toBe('')
+    expect(tables.lanes.find((l) => l.id === row!.lane_id)!.legacy_tag).toBe('es')
   })
 
   it('writes lane_id from the matching target lane when lanes exist', async () => {
@@ -231,7 +233,7 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
     await db.batch(handleAssignmentEvent(db, authed, 2100, 2).stmts)
 
     const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-lane-id')
-    expect(row!.target_lang).toBe('es')
+    expect(row!.target_lang).toBe('')
     expect(row!.lane_id).toBe('lane-es')
   })
 
@@ -274,8 +276,11 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
       targetLang: 'fr',
     })
     await db.batch(handleAssignmentEvent(db, repin, 4200, 5).stmts)
-    row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-re')
-    expect(row!.target_lang).toBe('fr')
+    const tables = await snapshot()
+    row = tables.assignments.find((a) => a.assignment_id === 'as-re')
+    // The column is whatever the row was written with. Reassign moves lane_id.
+    expect(row!.target_lang).toBe('es')
+    expect(tables.lanes.find((l) => l.id === row!.lane_id)!.legacy_tag).toBe('fr')
   })
 })
 

@@ -18,6 +18,7 @@ import {
 } from "../../../src/lib/lanes/read-wall"
 import { laneScopeIds, laneScopeTags } from "../../../src/lib/lanes/scope-ids"
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 
 export { laneReadWallEnabled, laneTagAllowed, visibilityCacheToken } from "../../../src/lib/lanes/read-wall"
 export type { VisibleLaneTags } from "../../../src/lib/lanes/read-wall"
@@ -97,12 +98,17 @@ export async function scopeReadClause(
   const lanes = await loadTargetLanes(db, projectId)
   const ids = [...laneScopeIds(values, lanes).ids]
   const tags = [...laneScopeTags(values, lanes)]
+  // The tag match resolves through the row's lane_id (lanes.legacy_tag), not
+  // the projection `target_lang` column: AQU-1611b leaves that column at its
+  // default ('') on every new row, so comparing it would let a '' tag match
+  // every lane and a real tag match none. Both queries that take this clause
+  // select from bare `cells`.
   const clause = scopedTargetVisibilityClause({
     ids,
     tags,
     sideExpr: "side",
     laneIdExpr: "lane_id",
-    targetLangExpr: "target_lang",
+    targetLangExpr: wireLegacyTagSql("cells"),
   })
   return { ...clause, token: visibilityCacheToken(new Set([...ids, ...tags])) }
 }

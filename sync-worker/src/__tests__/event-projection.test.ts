@@ -105,18 +105,17 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
     expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id)')
-    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=target_lang, 5=value,
-    // 6=value_html, 7=type, 8=canonical_ref, 9=anchor_cell_id, 10=event_id,
-    // 11=last_editor, 12=last_edit_at, 13=word_count, 14=content_hash
+    expect(sql).not.toContain('target_lang')
+    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=value,
+    // 5=value_html, 6=type, 7=canonical_ref, 8=anchor_cell_id, 9=event_id
     expect(args[0]).toBe('proj-1')
     expect(args[1]).toBe('file-a')
     expect(args[2]).toBe('cell-1')
     expect(args[3]).toBe('source')
-    expect(args[4]).toBe('') // AQU-538: source rows always on the default lane
-    expect(args[5]).toBe('In the beginning')
-    expect(args[7]).toBe('verse')
-    expect(args[8]).toBe('GEN 1:1')
-    expect(args[10]).toBe('evt-test-id')
+    expect(args[4]).toBe('In the beginning')
+    expect(args[6]).toBe('verse')
+    expect(args[7]).toBe('GEN 1:1')
+    expect(args[9]).toBe('evt-test-id')
   })
 })
 
@@ -134,11 +133,12 @@ describe('buildEventProjectionStmts — target.cell.create', () => {
       stmts,
     )
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
-    const { args } = cellsStmts[0]
+    const { args, sql } = cellsStmts[0]
+    expect(sql).not.toContain('target_lang')
     expect(args[3]).toBe('target')
-    expect(args[4]).toBe('')            // target_lang: default lane
-    expect(args[9]).toBe('cell-0')      // anchor_cell_id
-    expect(args[10]).toBe('evt-test-id') // event_id
+    expect(args[4]).toBe('hello')
+    expect(args[8]).toBe('cell-0')      // anchor_cell_id
+    expect(args[9]).toBe('evt-test-id') // event_id
   })
 })
 
@@ -166,16 +166,14 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET')
     expect(sql).toContain('event_id = excluded.event_id')
     expect(sql).toContain('source_event_id = excluded.source_event_id')
-    // bind order (mirrors the INSERT column list):
-    // 0=project_id, 1=file_id, 2=cell_id, 3=target_lang, 4=value,
-    // 5=value_html, 6=event_id, 7=source_event_id, 8=last_editor,
-    // 9=last_edit_at, 10=word_count, 11=content_hash
+    expect(sql).not.toContain('target_lang')
+    // 0=project_id, 1=file_id, 2=cell_id, 3=value, 4=value_html,
+    // 5=event_id, 6=source_event_id
     expect(args[0]).toBe('proj-1')
     expect(args[2]).toBe('cell-1')
-    expect(args[3]).toBe('') // AQU-538: default lane when targetLang absent
-    expect(args[4]).toBe('new text')
-    expect(args[6]).toBe('evt-test-id')
-    expect(args[7]).toBe('src-event-99')
+    expect(args[3]).toBe('new text')
+    expect(args[5]).toBe('evt-test-id')
+    expect(args[6]).toBe('src-event-99')
     const reconciliation = recorded.find(r => r.sql.includes('UPDATE contextual_drafts AS draft'))
     expect(reconciliation?.sql).toContain("draft.status = 'proposed'")
     expect(reconciliation?.sql).toContain('projected.event_id = ?')
@@ -191,7 +189,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       stmts,
     )
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
-    expect(cellsStmts[0].args[7]).toBe(null)
+    expect(cellsStmts[0].args[6]).toBe(null)
   })
 
   it('projects AI provenance and clears it on a human commit', () => {
@@ -217,8 +215,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     )
     const aiStmt = recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
     expect(aiStmt.sql).toContain('ai_draft')
-    expect(aiStmt.args[12]).toBe(1)
-    expect(JSON.parse(String(aiStmt.args[13]))).toEqual(provenance)
+    expect(aiStmt.args[11]).toBe(1)
+    expect(JSON.parse(String(aiStmt.args[12]))).toEqual(provenance)
 
     const human = makeD1Stub()
     buildEventProjectionStmts(
@@ -227,8 +225,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       [],
     )
     const humanStmt = human.recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
-    expect(humanStmt.args[12]).toBe(0)
-    expect(humanStmt.args[13]).toBeNull()
+    expect(humanStmt.args[11]).toBe(0)
+    expect(humanStmt.args[12]).toBeNull()
   })
 })
 

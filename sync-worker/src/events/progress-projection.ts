@@ -276,12 +276,11 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
 // left in half of them — silently, with no SQL error, because the types line up.
 // AQU-490's histogram pair is appended for the same reason. Add at the tail.
 //
-// AQU-1240's `lane_id` sits beside `target_lang` instead because that is where
-// each INSERT … SELECT below reads it: AQU-1599 made it a column of the `lanes`
-// CTE (so every grouping arm DOES carry it, as its leading column) rather than
-// a subquery resolving the tag, and it is selected right after the lane column
-// so the column list and every SELECT agree on its position by construction.
-const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
+// AQU-1599 made `lane_id` a column of the `lanes` CTE (so every grouping arm
+// carries it, as its leading column). Writers no longer fill `target_lang`
+// (AQU-1611b); a new progress row leaves that column at its default. The
+// SELECT lists below must stay aligned with this column list.
+const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, lane_id, total_count, filled_count,
        validator_histogram, structural_count, structural_filled_count,
        structural_validator_histogram, revision, updated_at,
        audio_count, audio_validated_count, last_edit_at,
@@ -368,7 +367,7 @@ export function fileProgressRecomputeStmt(
      INSERT INTO file_section_progress (
        ${PROGRESS_INSERT_COLUMNS_SQL}
      )
-     SELECT ?, ?, 'file', '', summary.lane, summary.lane_id,
+     SELECT ?, ?, 'file', '', summary.lane_id,
             summary.total_count, summary.filled_count,
             COALESCE(
               (SELECT jsonb_object_agg(validator_bucket::text, bucket_count)
@@ -571,7 +570,7 @@ export function sectionsProgressRecomputeStmt(
      INSERT INTO file_section_progress (
        ${PROGRESS_INSERT_COLUMNS_SQL}
      )
-     SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane, summaries.lane_id,
+     SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane_id,
             summaries.total_count, summaries.filled_count,
             COALESCE(histograms.validator_histogram, '{}'::jsonb),
             summaries.structural_count, summaries.structural_filled_count,
@@ -754,7 +753,7 @@ export function fullProgressRecomputeStmts(
        INSERT INTO file_section_progress (
          ${PROGRESS_INSERT_COLUMNS_SQL}
        )
-       SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane, summaries.lane_id,
+       SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane_id,
               summaries.total_count, summaries.filled_count,
               COALESCE(histograms.validator_histogram, '{}'::jsonb),
               summaries.structural_count, summaries.structural_filled_count,

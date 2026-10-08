@@ -1161,11 +1161,12 @@ describe('file progress follows the lanes that exist (AQU-1594)', () => {
       { id: 'srcsw001', project_id: P, role: 'source', legacy_tag: null },
       { id: 'tgtsw001', project_id: P, role: 'target', language: 'sw', legacy_tag: 'sw' },
     ])
-    // The source lane's own row (AQU-1599) carries '' in target_lang because its
-    // legacy_tag is NULL. It is the only '' row: no blank target lane is made up.
+    // One row per lane that exists: the source lane's own row (AQU-1599) and
+    // the sw lane's, keyed by lane_id. No blank-tag target lane is made up.
+    // The writer leaves target_lang at its default on every row (AQU-1611b).
     expect(rows).toEqual([
       { scope: 'file', target_lang: '', lane_id: 'srcsw001', total_count: 1, filled_count: 0 },
-      { scope: 'file', target_lang: 'sw', lane_id: 'tgtsw001', total_count: 1, filled_count: 0 },
+      { scope: 'file', target_lang: '', lane_id: 'tgtsw001', total_count: 1, filled_count: 0 },
     ])
   })
 

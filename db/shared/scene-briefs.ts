@@ -15,7 +15,7 @@
 // from either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
-import { wireLegacyTagSql } from "./lane-sql"
+import { targetLaneIdSql, wireLegacyTagSql } from "./lane-sql"
 import { liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
 
@@ -267,16 +267,17 @@ export async function proposeSceneBrief(
   })
   if (err) return { status: "validation_failed", message: err.message }
 
-  // AQU-1610: the lane is resolved to its id once, here; the tag is only
-  // what the un-dropped target_lang column stores.
+  // AQU-1610: the lane is resolved to its id once, here. The wire tag
+  // comes back from lanes.legacy_tag. The projection target_lang column
+  // is left at its default (AQU-1611b).
   const lane = await resolveLane(db, input.projectId, input)
   const row = await db
     .prepare(
       `INSERT INTO scene_briefs
-          (id, project_id, file_id, start_cell_id, end_cell_id, target_lang,
+          (id, project_id, file_id, start_cell_id, end_cell_id,
            construal, ambiguity_register, l1_summary, l1_generated_at,
            l1_model_id, status, provenance, created_by, lane_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 'proposed', ?::jsonb, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 'proposed', ?::jsonb, ?, ${lane.laneId ? "?" : targetLaneIdSql("?", "?")})
        RETURNING ${BRIEF_COLS}`,
     )
     .bind(
@@ -285,7 +286,6 @@ export async function proposeSceneBrief(
       input.fileId,
       input.startCellId,
       input.endCellId,
-      lane.targetLang,
       input.construal,
       // postgres.js infers both cast parameters as jsonb and applies its JSON
       // serializer. Keep them structured here: pre-stringifying would store
@@ -297,7 +297,7 @@ export async function proposeSceneBrief(
       input.l1ModelId ?? null,
       input.provenance ?? null,
       input.createdBy ?? null,
-      lane.laneId,
+      ...(lane.laneId ? [lane.laneId] : [input.projectId, lane.targetLang]),
     )
     .first<SceneBriefRow>()
   if (!row) return { status: "validation_failed", message: "failed to insert scene brief" }

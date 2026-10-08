@@ -39,8 +39,8 @@ function concept(overrides: Partial<Concept> & Pick<Concept, "id" | "sourceTerm"
   return { renderings: [], status: "active", ...overrides }
 }
 
-/** `source_language`/`target_language` are GENERATED columns over the settings
- *  JSON — they are set by putting the keys in the blob, never by insert. */
+/** Language keys live in the settings JSON. Migration 0156 dropped the
+ *  generated columns that used to project them, so this writes the blob only. */
 async function seedSettings(projectId: string, settings: unknown) {
   await db
     .prepare(

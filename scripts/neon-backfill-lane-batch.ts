@@ -220,8 +220,14 @@ async function loadSnapshot(client: Client, present: Set<string>, projectId?: st
             ${textCol(present, "projects", "source_link_lane_id")}
        FROM projects`,
   )
+  // 0156 dropped the generated columns (AQU-1595). The keys remain inside
+  // settings; this backfill is allowed to read them. It must not name the
+  // columns.
   const settings = await client.query<{ project_id: string; source_language: string | null; target_language: string | null }>(
-    `SELECT project_id, source_language, target_language FROM project_settings`,
+    `SELECT project_id,
+            (settings::jsonb)->>'sourceLanguage' AS source_language,
+            (settings::jsonb)->>'targetLanguage' AS target_language
+       FROM project_settings`,
   )
   const lanes = await client.query<{
     id: string

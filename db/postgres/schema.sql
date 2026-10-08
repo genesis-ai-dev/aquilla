@@ -285,20 +285,14 @@ CREATE TABLE project_settings (
     version    INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT now(),
     updated_by BIGINT,
-    -- Language pair extracted from the settings JSON at write time (0054).
-    -- settings blobs run to multiple MB; reads must use these columns, never
-    -- (settings::jsonb)->>'…' inline (org-dashboard timeout, see
-    -- getOrgPortfolio in auth-worker/src/services/org-permissions.ts).
-    source_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'sourceLanguage') STORED,
-    target_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'targetLanguage') STORED,
-    -- AQU-575: compact portfolio projections. Never load the multi-MB settings
-    -- blob merely to read validationCount or targetLanes.
+    -- AQU-575: compact portfolio projection. Never load the multi-MB settings
+    -- blob merely to read validationCount. Language and the lane registry are
+    -- lanes rows; 0156 dropped the generated projections of those keys.
     validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
     -- AQU-490: and the audio threshold, for the same reason — the per-member
     -- and portfolio rollups resolve it per project on paths that must not go
     -- near the blob.
     validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED,
-    target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED,
     -- AQU-1083: do structural cells count toward progress? NULL = unset, which
     -- falls through to the org's value and then to "yes" (0083).
     count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED,

@@ -276,8 +276,10 @@ export async function writeOrgBillingOverrides(
  * Target-lane counts for the org dashboard and the tenants table. One query
  * for every org asked about. `combined` is the sum of `byOrg`.
  *
- * A project with zero `lanes` rows counts as one target lane when
- * `target_language` is non-empty. Once any lane row exists, settings are ignored.
+ * A lane is a `lanes` row with role `target` and `archived_at` IS NULL, on a
+ * project that is not archived and not paused. A project with no such row
+ * counts as zero. The language is the lane row (AQU-1595); the dropped
+ * `project_settings` language columns are not a fallback.
  */
 export interface OrgTargetLaneCounts {
   byOrg: Map<number, number>
@@ -296,18 +298,10 @@ export async function countTargetLanesByOrg(
     const { results } = await db
       .prepare(
         `SELECT p.org_id AS org_id,
-                COALESCE(SUM(
-                  CASE
-                    WHEN COALESCE(lc.lane_rows, 0) > 0 THEN COALESCE(lc.active_targets, 0)
-                    WHEN NULLIF(BTRIM(ps.target_language), '') IS NOT NULL THEN 1
-                    ELSE 0
-                  END
-                ), 0) AS lane_count
+                COALESCE(SUM(COALESCE(lc.active_targets, 0)), 0) AS lane_count
            FROM projects p
-           LEFT JOIN project_settings ps ON ps.project_id = p.id
            LEFT JOIN (
              SELECT l.project_id,
-                    COUNT(*)::int AS lane_rows,
                     COUNT(*) FILTER (WHERE l.role = 'target' AND l.archived_at IS NULL)::int AS active_targets
                FROM lanes l
                JOIN projects lp ON lp.id = l.project_id

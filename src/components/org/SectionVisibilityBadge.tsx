@@ -200,9 +200,10 @@ export function SectionVisibilityBadge({
               <button
                 type="button"
                 data-testid="section-visibility-min-info"
-                className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground data-[state=open]:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 aria-label={t("org.sectionVisibilityBadge.whyOptionsOffAriaLabel")}
                 aria-expanded={hintOpen}
+                data-state={hintOpen ? "open" : "closed"}
                 aria-controls="section-visibility-min-hint"
                 onClick={() => setHintOpen((v) => !v)}
               >
@@ -230,10 +231,24 @@ export function SectionVisibilityBadge({
             </SelectContent>
           </Select>
           {description && <FieldDescription className="text-xs">{description}</FieldDescription>}
-          {someDisabled && belowMinSelectableHint && hintOpen && (
-            <FieldDescription id="section-visibility-min-hint" className="text-xs" data-testid="section-visibility-min-hint">
-              {belowMinSelectableHint}
-            </FieldDescription>
+          {/* Stays mounted so it can animate both ways: the 0fr→1fr grid row
+              grows to the text's own height without measuring it, and the
+              negative margin cancels the Field's gap while it is shut. */}
+          {someDisabled && belowMinSelectableHint && (
+            <div
+              className={cn(
+                "grid transition-[grid-template-rows,opacity,margin] duration-200 ease-out motion-reduce:transition-none",
+                hintOpen ? "grid-rows-[1fr] opacity-100" : "-mt-1.5 grid-rows-[0fr] opacity-0",
+              )}
+              data-state={hintOpen ? "open" : "closed"}
+              data-testid="section-visibility-min-hint"
+              aria-hidden={!hintOpen}
+              inert={!hintOpen}
+            >
+              <FieldDescription id="section-visibility-min-hint" className="min-h-0 overflow-hidden text-xs">
+                {belowMinSelectableHint}
+              </FieldDescription>
+            </div>
           )}
         </Field>
       </PopoverContent>

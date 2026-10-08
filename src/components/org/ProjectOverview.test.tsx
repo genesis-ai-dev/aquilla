@@ -1706,8 +1706,9 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     expect(patch).not.toHaveBeenCalled()
 
     // The why sits behind a circled-i, collapsed until clicked.
-    expect(screen.queryByTestId("section-visibility-min-hint")).not.toBeInTheDocument()
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "closed")
     fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent(
       "This card lists members, and the member list is set to “Maintainers and owners”. To go lower, lower it on the Members card or in Settings → Security first.",
     )
@@ -1719,6 +1720,7 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     expect(await screen.findByRole("option", { name: /maintainers and owners/i })).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByRole("option", { name: /owners only/i })).not.toHaveAttribute("aria-disabled", "true")
     fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent("“Owners only”")
   })
 

@@ -110,14 +110,15 @@ describe("SectionVisibilityBadge", () => {
     fireEvent.click(screen.getByTestId("section-visibility-badge"))
     const info = await screen.findByRole("button", { name: /why some options are unavailable/i })
     expect(info).toHaveAttribute("aria-expanded", "false")
-    expect(screen.queryByTestId("section-visibility-min-hint")).not.toBeInTheDocument()
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "closed")
 
     fireEvent.click(info)
     expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent("Lower the other setting first.")
 
     fireEvent.click(info)
-    expect(screen.queryByTestId("section-visibility-min-hint")).not.toBeInTheDocument()
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "closed")
   })
 
   it("shows no hint when every option is selectable", async () => {

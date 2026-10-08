@@ -1481,23 +1481,23 @@ describe("AQU-1566 portfolio counts only the files that count", () => {
         ('f-track', 'pa', 'Episode captions', 'timeline-content', 'vtt', 'f-ep', 'e4', 500, 0,  0,  0,  99999, NULL)`,
     )
     await sql(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, updated_at) VALUES
-        ('pa', 'f-ep',    'file', '', '',   6,   3,  '{}', 8000),
-        ('pa', 'f-ep',    'file', '', 'es', 6,   1,  '{}', 1000),
-        ('pa', 'f-del',   'file', '', '',   50,  50, '{}', 1),
-        ('pa', 'f-del',   'file', '', 'es', 50,  50, '{}', 1),
-        ('pa', 'f-cue',   'file', '', '',   40,  40, '{}', 1),
-        ('pa', 'f-cue',   'file', '', 'es', 40,  40, '{}', 1),
-        ('pa', 'f-track', 'file', '', '',   500, 0,  '{}', 1),
-        ('pa', 'f-track', 'file', '', 'es', 500, 0,  '{}', 1)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, updated_at) VALUES
+        ('pa', 'f-ep',    'file', '', 'deflane1', 6,   3,  '{}', 8000),
+        ('pa', 'f-ep',    'file', '', 'eslane01', 6,   1,  '{}', 1000),
+        ('pa', 'f-del',   'file', '', 'deflane1', 50,  50, '{}', 1),
+        ('pa', 'f-del',   'file', '', 'eslane01', 50,  50, '{}', 1),
+        ('pa', 'f-cue',   'file', '', 'deflane1', 40,  40, '{}', 1),
+        ('pa', 'f-cue',   'file', '', 'eslane01', 40,  40, '{}', 1),
+        ('pa', 'f-track', 'file', '', 'deflane1', 500, 0,  '{}', 1),
+        ('pa', 'f-track', 'file', '', 'eslane01', 500, 0,  '{}', 1)`,
     )
     await sql(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, ai_drafted) VALUES
-        ('pa', 'f-ep',    'c1', 'target', 'es', 'draft', 'e1', 1, 1),
-        ('pa', 'f-del',   'c1', 'target', 'es', 'draft', 'e2', 1, 1),
-        ('pa', 'f-del',   'c2', 'target', 'es', 'draft', 'e2', 1, 1),
-        ('pa', 'f-cue',   'q1', 'target', 'es', 'draft', 'e3', 1, 1),
-        ('pa', 'f-track', 't1', 'target', 'es', 'draft', 'e4', 1, 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at, ai_drafted) VALUES
+        ('pa', 'f-ep',    'c1', 'target', 'eslane01', 'draft', 'e1', 1, 1),
+        ('pa', 'f-del',   'c1', 'target', 'eslane01', 'draft', 'e2', 1, 1),
+        ('pa', 'f-del',   'c2', 'target', 'eslane01', 'draft', 'e2', 1, 1),
+        ('pa', 'f-cue',   'q1', 'target', 'eslane01', 'draft', 'e3', 1, 1),
+        ('pa', 'f-track', 't1', 'target', 'eslane01', 'draft', 'e4', 1, 1)`,
     )
     // A take on the episode, one on the deleted file, one on a cue of the cue
     // sheet (where a dubbing project's takes really live) and one on the

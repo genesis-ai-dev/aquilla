@@ -25,10 +25,10 @@ describe("computeProjectMetrics", () => {
         ('f-track', 'pa', 'Episode captions', 'timeline-content', 'f1', 'e4', 500, 0, 0, NULL)`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, updated_at) VALUES
-        ('pa', 'f1', 'file', '', '', 6, 3, '{}', 1),
-        ('pa', 'f-cue', 'file', '', '', 40, 40, '{}', 1),
-        ('pa', 'f-track', 'file', '', '', 500, 0, '{}', 1)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, updated_at) VALUES
+        ('pa', 'f1', 'file', '', 6, 3, '{}', 1),
+        ('pa', 'f-cue', 'file', '', 40, 40, '{}', 1),
+        ('pa', 'f-track', 'file', '', 500, 0, '{}', 1)`,
     ).run()
 
     const summary = await computeProjectMetrics(env.AQUILLA_PG, "pa")

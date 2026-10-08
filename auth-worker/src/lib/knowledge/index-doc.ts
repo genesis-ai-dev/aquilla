@@ -11,6 +11,7 @@ import type { AquillaDb } from "../../../../db/shim/postgres"
 import {
   getDocText, setIndexResult, type KnowledgeNode,
 } from "../../../../db/shared/knowledge"
+import { propagateKnowledgeDocs } from "../../../../db/shared/inherited-settings"
 
 export interface KbIndexEnv {
   OPENROUTER_API_KEY?: string
@@ -185,6 +186,13 @@ export async function indexKnowledgeDoc(
     const content = body.choices?.[0]?.message?.content ?? ""
     const { tree, docSummary } = applyEnrichment(nodes, content)
     await setIndexResult(db, docId, "ready", tree, docSummary)
+    if (doc.meta.projectId) {
+      await propagateKnowledgeDocs(db, doc.meta.projectId, {
+        updatedBy: doc.meta.createdBy,
+      }).catch((err) => {
+        console.error(`[knowledge] could not copy the index of ${docId} downstream:`, err)
+      })
+    }
   } catch (err) {
     // Log before the compensating write, so the original cause survives even
     // when that write is what fails.

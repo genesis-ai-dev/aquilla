@@ -31,6 +31,10 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
+import {
+  clearInheritedSettings,
+  seedInheritedSettings,
+} from "../../../db/shared/inherited-settings"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRoleIncludingArchived } from "../services/project-permissions"
@@ -141,6 +145,17 @@ const linkSourceSchema = z.object({
   // 400s otherwise. A new link always stores a concrete id. Existing rows may
   // still be null until AQU-1616's backfill; that null means the '' lane.
   laneId: z.string().min(1).max(256).optional(),
+  // AQU-1075: which settings this downstream copies. Omitted fields use the
+  // defaults (brief, knowledge documents, and workflow policy on; living
+  // memory, smart quotes, and AI instructions off).
+  inherit: z.object({
+    translationBrief: z.boolean().optional(),
+    knowledgeDocs: z.boolean().optional(),
+    workflowPolicy: z.boolean().optional(),
+    livingMemory: z.boolean().optional(),
+    smartQuotes: z.boolean().optional(),
+    systemPrompt: z.boolean().optional(),
+  }).optional(),
   // Each pair costs a read of both files' source lines before the link is
   // saved, so the cap is a Bible's worth of books rather than the selection's.
   replaceFiles: z.array(replaceFilePairSchema).min(1).max(200).optional(),
@@ -165,6 +180,7 @@ sourceLinking.post(
       fileIds,
       laneId,
       replaceFiles,
+      inherit,
     } = c.req.valid("json")
 
     // AQU-1559: deduped so the stored list is the set it is read as, and
@@ -405,6 +421,23 @@ sourceLinking.post(
     //   clone semantics (§2: "snapshot at birth"), not a side effect of
     //   detach. There is no later resync for clones, so this is the only
     //   chance to seed.
+    // AQU-1075: the choice is stored and the current values are copied now,
+    // under the link, after the row names its upstream. A later upstream save
+    // keeps a live link current. A failure here does not undo the link — the
+    // text mirror is the thing the caller is waiting on.
+    try {
+      await seedInheritedSettings(c.env.AQUILLA_PG, {
+        downstreamProjectId: projectId,
+        upstreamProjectId: sourceProjectId,
+        choice: inherit,
+        updatedBy: user.id,
+        blobs: c.env.SNAPSHOTS ?? null,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("inherited settings seed failed:", err)
+    }
+
     let seeded = false
     if (mode === "live") {
       seeded = await triggerLinkSeedSync(c.env, projectId)
@@ -965,6 +998,14 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   if (!detached) {
     console.error("detach-source UPDATE failed:", detachErr)
     return c.json({ error: "detach failed" }, 500)
+  }
+
+  // AQU-1075: the copied values stay; the choice does not, so a later re-link
+  // starts from the defaults instead of a detach left over from this one.
+  try {
+    await clearInheritedSettings(c.env.AQUILLA_PG, projectId, user.id)
+  } catch (err) {
+    console.error("inherited settings clear failed:", err)
   }
 
   // AQU-1560: a pending addition was for the link that just ended.

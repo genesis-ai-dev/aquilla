@@ -86,7 +86,7 @@ export async function resolveCellStates(
 
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, event_id, ai_drafted, value, hidden_at FROM cells
+      `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, event_id, ai_drafted, value, hidden_at FROM cells
        WHERE project_id = ?
          AND side IN ('source', 'target')
          AND (file_id, cell_id) IN (${placeholders})`,
@@ -97,6 +97,7 @@ export async function resolveCellStates(
       cell_id: string
       side: string
       target_lang: string | null
+      lane_id: string | null
       event_id: string
       ai_drafted: number | null
       value: string | null
@@ -124,7 +125,9 @@ export async function resolveCellStates(
       if (!s) continue
       if (r.side === 'target') {
         s.targetExists = true
-        if ((r.target_lang ?? '') === lane) {
+        // The external API asks by lanes.id. A staged plan from before
+        // AQU-1615 still asks by target_lang. Either match is this lane.
+        if (r.lane_id === lane || (r.target_lang ?? '') === lane) {
           s.targetHeadEventId = r.event_id
           s.targetAiDrafted = Number(r.ai_drafted ?? 0) === 1
           s.targetValue = r.value ?? null

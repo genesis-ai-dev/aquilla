@@ -1,16 +1,10 @@
-// AQU-1532 regression: an Agent API write whose laneId names the project's
-// primary target language returned 500 "DB batch failed".
+// AQU-1615: the external API addresses a target lane by lanes.id.
+// A language tag is not accepted. Omitting laneId is a 400 that names
+// GET /api/v1/external. The internal event path still 422s an unknown tag.
 //
-// The primary is the default lane (legacy_tag ''), so no lane row carries its
-// name. The projection looked up lane_id by the literal tag, got NULL, and the
-// cells.lane_id NOT NULL constraint failed. A regional lane beside its base
-// primary ("fr-CA" next to "French") failed the same way, because the lane
-// planner stripped the region and never created its row.
-//
-// CI missed it because the PGlite harness installs a test-only trigger that
-// mints any missing lane (db/shared/test-lane-fill.ts). Every test here turns
-// that trigger OFF, and drives the real agent sequence end to end:
-// CreateProject → PatchSettings targetLanes → PlanImport → SetTranslation.
+// CI missed an older 500 because the PGlite harness installs a test-only
+// trigger that mints any missing lane (db/shared/test-lane-fill.ts). Every test
+// here turns that trigger OFF.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -22,6 +16,7 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
+import { handleExternalReadRequest } from '../external/read-routes'
 import { handleEventsWriteRequest } from '../events/route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -130,29 +125,40 @@ async function setUpProject(
   targetLanguage: string,
   targetLanes: string[],
   variants?: { laneId: string; content: string }[],
-): Promise<{ fileId: string; cellId: string }> {
-  await apply([
-    { kind: 'CreateProject', name: 'Lane Project', orgId: ORG_ID, sourceLanguage: 'en', targetLanguage },
-  ])
-  const { rows } = await tdb.pg.query<{ version: number }>(
-    `SELECT version FROM project_settings WHERE project_id = $1`,
-    [PROJECT],
-  )
+): Promise<{ fileId: string; cellId: string; laneId: (language: string) => string }> {
+  const languages = [...new Set([targetLanguage, ...targetLanes].filter((language) => language !== ''))]
   await apply([
     {
-      kind: 'PatchSettings',
-      projectId: PROJECT,
-      ops: [{ key: 'targetLanes', value: targetLanes }],
-      ifMatchVersion: rows[0].version,
+      kind: 'CreateProject',
+      name: 'Lane Project',
+      orgId: ORG_ID,
+      lanes: [
+        { role: 'source', language: 'en' },
+        ...languages.map((language) => ({ role: 'target' as const, language })),
+      ],
     },
   ])
+  const lanes = await tdb.pg.query<{ id: string; language: string }>(
+    `SELECT id, language FROM lanes WHERE project_id = $1 AND role = 'target'`,
+    [PROJECT],
+  )
+  const byLanguage = new Map(lanes.rows.map((lane) => [lane.language, lane.id]))
+  const laneId = (language: string) => {
+    const id = byLanguage.get(language)
+    if (!id) throw new Error(`no target lane for ${language}`)
+    return id
+  }
+  const mapped = variants?.map((variant) => ({
+    ...variant,
+    laneId: byLanguage.get(variant.laneId) ?? variant.laneId,
+  }))
   const imported = await apply([
     {
       kind: 'PlanImport',
       fileName: 'gen.txt',
       fileType: 'txt',
       cells: [
-        { content: 'In the beginning', ...(variants ? { variants } : {}) },
+        { content: 'In the beginning', ...(mapped ? { variants: mapped } : {}) },
         { content: 'And the earth' },
       ],
     },
@@ -163,7 +169,7 @@ async function setUpProject(
       ORDER BY sequence_index LIMIT 1`,
     [PROJECT, fileId],
   )
-  return { fileId, cellId: source.rows[0].cell_id }
+  return { fileId, cellId: source.rows[0].cell_id, laneId }
 }
 
 async function targetRows(): Promise<{ target_lang: string; value: string; lane_id: string; legacy_tag: string }[]> {
@@ -186,61 +192,63 @@ async function setTranslation(fileId: string, cellId: string, value: string, lan
 }
 
 describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-fill trigger off)', () => {
-  it('laneId equal to the primary writes the default lane row', async () => {
-    const { fileId, cellId } = await setUpProject('bla', ['bla'])
-    const r = await setTranslation(fileId, cellId, 'primary text', 'bla')
+  it('laneId equal to the lane id writes the lane tagged with that language', async () => {
+    const { fileId, cellId, laneId } = await setUpProject('bla', ['bla'])
+    const lanes = await tdb.pg.query<{ legacy_tag: string }>(
+      `SELECT legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target'`,
+      [PROJECT],
+    )
+    expect(lanes.rows.map((lane) => lane.legacy_tag)).toEqual(['bla'])
+    const r = await setTranslation(fileId, cellId, 'primary text', laneId('bla'))
     expect(r.prepareStatus).toBe(200)
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(r.commit?.body.receipt.appliedCount).toBe(1)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'primary text', legacy_tag: '' }),
+      expect.objectContaining({ target_lang: '', value: 'primary text', legacy_tag: 'bla' }),
     ])
   })
 
-  it('a differently-cased primary ("BLA") also writes the default lane row', async () => {
+  it('a language tag, including a differently-cased one, is not a lane id', async () => {
     const { fileId, cellId } = await setUpProject('bla', ['bla'])
-    const r = await setTranslation(fileId, cellId, 'upper', 'BLA')
-    expect(r.prepareStatus).toBe(200)
-    expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
-    expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'upper', legacy_tag: '' }),
-    ])
+    const upper = await setTranslation(fileId, cellId, 'upper', 'BLA')
+    expect(upper.prepareStatus).toBe(400)
+    expect(upper.prep.error.message).toContain('lane does not exist')
+    expect(upper.prep.error.message).not.toContain('BLA')
+    const tag = await setTranslation(fileId, cellId, 'tag', 'bla')
+    expect(tag.prepareStatus).toBe(400)
+    expect(tag.prep.error.message).toContain('lane does not exist')
   })
 
-  it('an unregistered lane is still refused at prepare', async () => {
+  it('an unknown lane id is refused at prepare', async () => {
     const { fileId, cellId } = await setUpProject('bla', ['bla'])
     const r = await setTranslation(fileId, cellId, 'nope', 'bla-x')
     expect(r.prepareStatus).toBe(400)
     expect(r.prep.error.code).toBe('validation_failed')
-    expect(r.prep.error.message).toContain('unregistered lane "bla-x"')
+    expect(r.prep.error.message).toContain('lane does not exist')
   })
 
-  it('omitting laneId writes the default lane row', async () => {
+  it('omitting laneId is a 400 that names the discovery endpoint', async () => {
     const { fileId, cellId } = await setUpProject('bla', ['bla'])
     const r = await setTranslation(fileId, cellId, 'no lane')
-    expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
-    expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'no lane', legacy_tag: '' }),
-    ])
+    expect(r.prepareStatus).toBe(400)
+    expect(r.prep.error.message).toContain('GET /api/v1/external')
+    expect(await targetRows()).toEqual([])
   })
 
-  it('omitting laneId and naming the primary address the same slot', async () => {
-    const { fileId, cellId } = await setUpProject('bla', ['bla'])
+  it('a changeset that omits laneId on one command is refused before any write', async () => {
+    const { fileId, cellId, laneId } = await setUpProject('bla', ['bla'])
     const prep = await prepare([
       { kind: 'SetTranslation', fileId, cellId, value: 'first' },
-      { kind: 'SetTranslation', fileId, cellId, value: 'second', laneId: 'bla' },
+      { kind: 'SetTranslation', fileId, cellId, value: 'second', laneId: laneId('bla') },
     ])
-    expect(prep.status).toBe(200)
-    const done = await commit(prep.body)
-    expect(done.status, JSON.stringify(done.body)).toBe(200)
-    expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'second' }),
-    ])
+    expect(prep.status).toBe(400)
+    expect(prep.body.error.message).toContain('GET /api/v1/external')
+    expect(await targetRows()).toEqual([])
   })
 
-  it('a registered non-primary lane writes its own row', async () => {
-    const { fileId, cellId } = await setUpProject('bla', ['bla', 'es'])
-    const r = await setTranslation(fileId, cellId, 'hola', 'es')
+  it('a second target lane is addressed by its id', async () => {
+    const { fileId, cellId, laneId } = await setUpProject('bla', ['bla', 'es'])
+    const r = await setTranslation(fileId, cellId, 'hola', laneId('es'))
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
       expect.objectContaining({ target_lang: '', value: 'hola', legacy_tag: 'es' }),
@@ -248,14 +256,14 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
   })
 
   it('a regional lane beside its base primary (fr-CA next to French) gets its own row', async () => {
-    const { fileId, cellId } = await setUpProject('French', ['French', 'fr-CA'])
+    const { fileId, cellId, laneId } = await setUpProject('French', ['French', 'fr-CA'])
     const lanes = await tdb.pg.query<{ legacy_tag: string }>(
       `SELECT legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target' ORDER BY legacy_tag`,
       [PROJECT],
     )
-    expect(lanes.rows.map((l) => l.legacy_tag)).toEqual(['', 'fr-CA'])
+    expect(lanes.rows.map((l) => l.legacy_tag)).toEqual(['French', 'fr-CA'])
 
-    const r = await setTranslation(fileId, cellId, 'icitte', 'fr-CA')
+    const r = await setTranslation(fileId, cellId, 'icitte', laneId('fr-CA'))
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
       expect.objectContaining({ target_lang: '', value: 'icitte', legacy_tag: 'fr-CA' }),
@@ -287,6 +295,31 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     ])
     expect(await targetRows()).toEqual([])
   })
+
+  it('reads the project lanes and writes a lane id while the former default lane is archived', async () => {
+    const { fileId, cellId, laneId } = await setUpProject('bla', ['bla'])
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, name, legacy_tag, position, archived_at)
+       VALUES ('bridge01', $1, 'target', NULL, NULL, '', 9, now())`,
+      [PROJECT],
+    )
+    const res = (await handleExternalReadRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    expect(res.status).toBe(200)
+    const detail = (await res.json()) as { lanes: { id: string; language: string; role: string }[] }
+    const visible = detail.lanes.find((lane) => lane.id === laneId('bla'))
+    expect(visible).toEqual(expect.objectContaining({ language: 'bla', role: 'target' }))
+    expect(detail.lanes.some((lane) => lane.id === 'bridge01')).toBe(true)
+    const written = await setTranslation(fileId, cellId, 'via id', laneId('bla'))
+    expect(written.commit?.status, JSON.stringify(written.commit?.body)).toBe(200)
+    expect(await targetRows()).toEqual([
+      expect.objectContaining({ target_lang: '', value: 'via id', legacy_tag: 'bla' }),
+    ])
+  })
 })
 
 describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (lane-fill trigger off)', () => {
@@ -296,18 +329,18 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
       { laneId: 'es', content: 'variante' },
     ])
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: '', value: 'primary variant', legacy_tag: '' }),
+      expect.objectContaining({ target_lang: '', value: 'primary variant', legacy_tag: 'bla' }),
       expect.objectContaining({ target_lang: '', value: 'variante', legacy_tag: 'es' }),
     ])
   })
 
   it('an EmitEvents cell.validate naming the primary validates the default lane', async () => {
-    const { fileId, cellId } = await setUpProject('bla', ['bla'])
-    const written = await setTranslation(fileId, cellId, 'to validate')
+    const { fileId, cellId, laneId } = await setUpProject('bla', ['bla'])
+    const written = await setTranslation(fileId, cellId, 'to validate', laneId('bla'))
     expect(written.commit?.status).toBe(200)
 
     const done = await apply([
-      { kind: 'EmitEvents', events: [{ kind: 'cell.validate', fileId, cellId, laneId: 'bla', payload: {} }] },
+      { kind: 'EmitEvents', events: [{ kind: 'cell.validate', fileId, cellId, laneId: laneId('bla'), payload: {} }] },
     ])
     expect(done.receipt.appliedCount).toBe(1)
     const validators = await tdb.pg.query<{ target_lang: string; legacy_tag: string }>(
@@ -316,6 +349,6 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
         WHERE v.project_id = $1 AND v.cell_id = $2`,
       [PROJECT, cellId],
     )
-    expect(validators.rows).toEqual([{ target_lang: '', legacy_tag: '' }])
+    expect(validators.rows).toEqual([{ target_lang: '', legacy_tag: 'bla' }])
   })
 })

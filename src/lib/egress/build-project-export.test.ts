@@ -16,6 +16,7 @@ import {
   type BuildProjectExportDeps,
 } from "./build-project-export"
 import type { EgressFileRef, EgressOptions, EgressProjectSelection } from "./types"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const cell = (over: Partial<CellData> = {}): CellData => ({
   id: "c1", fileId: "f1", original: "Hello", translated: "Bonjour", context: "", group: "",
@@ -526,7 +527,7 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
 
     let finished = 0
     while (finished < totalUnits) {
-      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4))
+      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4), { timeout: STALL_WATCHDOG_MS })
       await new Promise((r) => setTimeout(r, 0))
       expect(pendingReleases).toHaveLength(4)
       expect(inFlight).toBe(4)
@@ -582,7 +583,7 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
       makeDeps({ loadCellFiles }),
     )
 
-    await vi.waitFor(() => expect(releases.size).toBe(4))
+    await vi.waitFor(() => expect(releases.size).toBe(4), { timeout: STALL_WATCHDOG_MS })
     for (const key of ["fr:fast", "de:fast", "fr:slow", "de:slow"]) releases.get(key)!()
 
     const { entries, report } = await pending

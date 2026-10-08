@@ -1,12 +1,7 @@
-// AQU-730 slice 0 — PRE-metadata-wall characterization baseline for GET
-// /api/v2/projects/:projectId/settings.
-//
-// These tests pin TODAY'S behavior: any project member receives the FULL
-// targetLanes registry regardless of project_member_scopes lane restrictions.
-// When metadata isolation lands (design §2), scoped members will see only
-// granted lanes — update this file deliberately; do not delete silently.
-//
-// See: docs/superpowers/specs/2026-09-10-lane-permissions-and-read-wall-design.md §2.
+// AQU-1039: GET /api/v2/projects/:projectId/settings honors lane scopes even
+// while LANE_READ_WALL is off (local and e2e). A contributor scoped to `es`
+// is not handed `fr` or `de`. An unscoped member still receives the full
+// registry — that case is the wall-off default, not this file.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
@@ -29,15 +24,16 @@ async function seedScopedContributor(): Promise<void> {
   )
     .bind(JSON.stringify({ sourceLanguage: "en", targetLanes: FULL_REGISTRY }))
     .run()
-  // Lane scope restricts writes on the sync-worker; settings GET is not filtered today.
+  // No lane rows: the stored scope value is the tag. Settings still drop the
+  // other labels. A filled `language` column is not required.
   await env.AQUILLA_PG.prepare(
     `INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_at)
      VALUES ('p1', 2, 'lane', 'es', 0)`,
   ).run()
 }
 
-describe("AQU-730 baseline — GET project settings metadata wall", () => {
-  it("returns the full targetLanes registry to a lane-scoped contributor", async () => {
+describe("AQU-1039 — GET project settings hides lanes outside a member's scope", () => {
+  it("returns only the scoped lane to a lane-scoped contributor", async () => {
     await seedScopedContributor()
     const res = await app.request(
       "/api/v2/projects/p1/settings",
@@ -46,6 +42,6 @@ describe("AQU-730 baseline — GET project settings metadata wall", () => {
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as { settings: { targetLanes?: string[] } }
-    expect(body.settings.targetLanes).toEqual(FULL_REGISTRY)
+    expect(body.settings.targetLanes).toEqual(["es"])
   })
 })

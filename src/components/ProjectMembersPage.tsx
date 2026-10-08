@@ -36,6 +36,9 @@ import {
   revokeAllProjectAccess, partitionMembers, type RevokeAllResult,
 } from "@/lib/frontier/members"
 import { createServerInvite } from "@/lib/sync/invites"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
+import { toast } from "@/components/ui/toast"
+import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
 import {
   ROLE,
   LINK_ROLE_OPTIONS,
@@ -51,7 +54,7 @@ import {
 } from "@/components/project-members/roster-origin"
 import { RoleLevelLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ProjectMember } from "@/lib/frontier/members"
@@ -82,9 +85,11 @@ const DEFAULT_EXPIRY_DAYS = 7
 
 export function MembersTab({
   projectId,
+  projectName,
   className = "mx-auto max-w-2xl space-y-6",
 }: {
   projectId: string
+  projectName?: string | null
   /** Layout wrapper classes; override when embedding outside the members page. */
   className?: string
 }) {
@@ -211,7 +216,7 @@ export function MembersTab({
           from={{ type: "project", id: projectId }}
           herePath={[{ type: "project", id: projectId, name: t("org.access.inspector.thisProject") }]}
         >
-          <UsernameWithAvatar username={m.username} />
+          <UsernameWithAvatar userId={m.userId} username={m.username} />
         </MemberInspectorTrigger>
         <GrantOriginBadge origin={origin} />
         <EffectiveRoleCell
@@ -390,6 +395,11 @@ export function MembersTab({
         <MemberMultiAddRow
           roleOptions={grantableRoles}
           defaultRole={ROLE.CONTRIBUTOR}
+          grantScope={{
+            kind: "project",
+            projectName: grantProjectName(t, projectName),
+            lanes: "all",
+          }}
           onAdd={handleAddMany}
           excludedUserIds={[...directGrantUserIds]}
           suggestions={
@@ -619,13 +629,15 @@ export function RevokeAllDialog({
 
 export function InviteLinkTab({
   projectId,
+  projectName,
   embedded = false,
 }: {
   projectId: string
+  projectName?: string | null
   /** When true (settings Card), drop the page-style max-width + duplicate title. */
   embedded?: boolean
 }) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
@@ -636,6 +648,17 @@ export function InviteLinkTab({
   const [copied, setCopied] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const wrapClass = embedded ? "space-y-4" : "mx-auto max-w-lg space-y-4"
+  const inviteCopy = describeGrant(t, {
+    link: inviteEmail.trim().length === 0,
+    names: inviteEmail.trim() ? [inviteEmail.trim()] : [],
+    roleLevel: inviteRole,
+    scope: {
+      kind: "project",
+      projectName: grantProjectName(t, projectName),
+      lanes: "all",
+    },
+    locale,
+  })
 
   async function handleCreate() {
     setEmailError(null)
@@ -666,6 +689,7 @@ export function InviteLinkTab({
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
       setIssuedUrl(url)
+      toast.add({ type: "success", title: inviteCopy.sentence })
     } finally {
       setBusy(false)
     }
@@ -819,12 +843,15 @@ export function InviteLinkTab({
           <p className="text-xs text-destructive">{serverError}</p>
         )}
 
+        <GrantScopeNotice sentence={inviteCopy.sentence} />
         <Button
           onClick={() => void handleCreate()}
           disabled={busy || !session?.jwt}
           className="w-full"
         >
-          {busy ? t("common.creating") : t("projectSettings.share.createInviteLinkButton")}
+          {busy
+            ? t("common.creating")
+            : grantButtonLabel(t, t("projectSettings.share.createInviteLinkButton"), inviteCopy.scopeEcho)}
         </Button>
       </div>
     </div>

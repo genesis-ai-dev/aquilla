@@ -5,9 +5,10 @@
 // read as the editor reads them, matched in JS). Default searches both cell
 // sides.
 
-import { readBlobConcepts } from "../../../../../sync-worker/src/events/migrate-concepts"
+import { readProjectConcepts, type StoredConcept } from "../../concepts-read"
 import { AliasMap } from "../compress"
-import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { resolveLane, resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { renderingsForLane } from "../../../../../src/lib/terminology/rendering-lane"
 import { notHiddenSql } from "../../hidden-cells-scope"
 import { clip } from "./read"
 import type { SearchHit, ToolOutcome } from "./types"
@@ -119,67 +120,9 @@ async function searchComments(
   }))
 }
 
-/** A key term, from the `concepts` table or the legacy settings key. */
-interface Term {
-  sourceTerm: string
-  status: "active" | "draft" | "deprecated"
-  renderings: { rendering: string; status: string }[]
-  notes: string | null
-}
-
-const RENDERING_STATUSES = new Set(["preferred", "admitted", "forbidden"])
-
-/** `renderings` is JSONB: an array through the shim, but a hand-written row can
- *  return text. A bad value gives no renderings instead of failing the whole
- *  search, as in the editor's read route. */
-function parseRenderings(raw: unknown): Term["renderings"] {
-  let value = raw
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value)
-    } catch {
-      return []
-    }
-  }
-  if (!Array.isArray(value)) return []
-  return value.flatMap((r: unknown) => {
-    const { rendering, status } = (r ?? {}) as { rendering?: unknown; status?: unknown }
-    return typeof rendering === "string" && typeof status === "string" && RENDERING_STATUSES.has(status)
-      ? [{ rendering, status }]
-      : []
-  })
-}
-
-/**
- * The project's key terms, read the way the editor reads them
- * (sync-worker/src/events/concepts-read-route.ts): the live rows of the
- * `concepts` table, which is the projection of `term.*` events. The legacy
- * `terminology` settings key (a bare Concept[]) is read only when the table has
- * no live rows, through the decoder the editor's fallback uses. The concepts
- * migration deletes that key, and a key left behind must not add terms next to
- * the table's or bring a deleted term back.
- */
-async function loadTerms(db: AquillaDb, projectId: string): Promise<Term[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT source_term, renderings, notes, status FROM concepts
-       WHERE project_id = ? AND deleted_at IS NULL
-       ORDER BY created_at ASC`,
-    )
-    .bind(projectId)
-    .all<{ source_term: string; renderings: unknown; notes: string | null; status: string }>()
-  if (results.length === 0) return readBlobConcepts(db, projectId)
-  return results.map((r) => ({
-    sourceTerm: r.source_term,
-    status: r.status === "active" || r.status === "deprecated" ? r.status : "draft",
-    renderings: parseRenderings(r.renderings),
-    notes: r.notes,
-  }))
-}
-
 /** Only an active concept compiles to rules (the editor's checks, autopilot's
  *  lint), so a draft or deprecated hit says that it is not enforced. */
-const TERM_STATUS_LABEL: Record<Term["status"], string> = {
+const TERM_STATUS_LABEL: Record<StoredConcept["status"], string> = {
   active: "active",
   draft: "draft, not enforced",
   deprecated: "deprecated, not enforced",
@@ -187,7 +130,7 @@ const TERM_STATUS_LABEL: Record<Term["status"], string> = {
 
 /** "[active] grace → gracia (preferred), suerte (forbidden) — notes". The
  *  status comes first, so a clipped line always keeps it. */
-function termSnippet(t: Term): string {
+function termSnippet(t: StoredConcept): string {
   const renderings = t.renderings.map((r) => `${r.rendering} (${r.status})`).join(", ")
   return `[${TERM_STATUS_LABEL[t.status]}] ${t.sourceTerm}` +
     (renderings ? ` → ${renderings}` : "") +
@@ -203,14 +146,28 @@ function termSnippet(t: Term): string {
 // it could suggest that rendering again. Each hit carries its status, so a
 // proposal or a retired term never reads as binding. Matching uses the text
 // the team wrote (source term, renderings, notes), not ids or status labels.
+//
+// The terms are read as the editor reads them, through the same function as
+// autopilot and the termbase subscription route (readProjectConcepts): the
+// live `concepts` rows, and the legacy settings key only while there are none.
+// The concepts migration deletes that key, so a key left behind never adds
+// terms next to the table's or brings a deleted term back.
 async function searchTerms(db: AquillaDb, q: string, ctx: SearchContext, limit: number): Promise<SearchHit[]> {
   const needle = q.toLowerCase()
   const hits: SearchHit[] = []
-  for (const term of await loadTerms(db, ctx.projectId)) {
+  const empty = await resolveLane(db, ctx.projectId, { targetLang: "" })
+  const active = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
+  for (const term of await readProjectConcepts(db, ctx.projectId)) {
+    const renderings = !empty.laneId
+      ? term.renderings
+      : !active.laneId
+        ? []
+        : renderingsForLane(term.renderings, active.laneId, empty.laneId)
+    const visible = renderings === term.renderings ? term : { ...term, renderings }
     if (hits.length >= limit) break
-    const text = [term.sourceTerm, ...term.renderings.map((r) => r.rendering), term.notes ?? ""]
+    const text = [visible.sourceTerm, ...visible.renderings.map((r) => r.rendering), visible.notes ?? ""]
     if (text.some((s) => s.toLowerCase().includes(needle))) {
-      hits.push({ cellId: "", side: "terms", snippet: termSnippet(term).slice(0, 200) })
+      hits.push({ cellId: "", side: "terms", snippet: termSnippet(visible).slice(0, 200) })
     }
   }
   return hits

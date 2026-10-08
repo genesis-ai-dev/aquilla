@@ -37,12 +37,16 @@ async function getJson(url: string, jwt: string, signal?: AbortSignal): Promise<
 export async function fetchTerminologyViolations(
   projectId: string,
   jwt: string,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; lane?: string } = {},
 ): Promise<TerminologyViolationsPage> {
+  const params = new URLSearchParams()
+  if (options.lane !== undefined) params.set("lane", options.lane)
+  const qs = params.toString()
   const body = await getJson(
-    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/terminology/violations`,
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/terminology/violations` +
+      (qs ? `?${qs}` : ""),
     jwt,
-    signal,
+    options.signal,
   )
   const page = parseTerminologyViolationsPage(body)
   if (!page) throw new TerminologyScanError(200, "unexpected violations payload")
@@ -68,12 +72,16 @@ export async function fetchConceptSuggestions(
   projectId: string,
   conceptId: string,
   jwt: string,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; lane?: string } = {},
 ): Promise<PredictedEquivalent[]> {
+  const params = new URLSearchParams()
+  if (options.lane !== undefined) params.set("lane", options.lane)
+  const qs = params.toString()
   const body = await getJson(
-    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/concepts/${encodeURIComponent(conceptId)}/suggestions`,
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/concepts/${encodeURIComponent(conceptId)}/suggestions` +
+      (qs ? `?${qs}` : ""),
     jwt,
-    signal,
+    options.signal,
   )
   const suggestions = parsePredictedEquivalents(body)
   if (!suggestions) throw new TerminologyScanError(200, "unexpected suggestions payload")

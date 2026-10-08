@@ -301,13 +301,12 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     }
 
     const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
-    const permanentlyRejected = new Map(
+    // 403 and every other 4xx but 401 (schema, unknown lane, …) won't
+    // succeed on a retry.
+    const refused = new Map(
       (body.rejected ?? [])
-        .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 403)
+        .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401)
         .map((r) => [r.id, r] as const),
-    )
-    const forbidden = new Set(
-      (body.rejected ?? []).filter((r) => r.status === 403).map((r) => r.id),
     )
     const staleById = new Map((body.stale ?? []).map((s) => [s.id, s]))
     const rowById = new Map(pending.map((r) => [r.id, r]))
@@ -330,14 +329,16 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         }
         continue
       }
-      if (acceptedIds.has(id) || permanentlyRejected.has(id)) {
+      if (acceptedIds.has(id)) {
         store.commit(events.eventDequeued({ id }))
         continue
       }
-      if (forbidden.has(id)) {
+      const refusal = refused.get(id)
+      if (refusal) {
         // Not retryable and not a staleness conflict — leave it visibly
         // stuck ("failed") rather than dequeuing (silent data loss) or
         // retrying forever (head-of-line blocking every future flush).
+        console.warn(`[offline] server refused queued write ${id}: ${refusal.status} ${refusal.reason}`)
         store.commit(events.eventQueueStatusSet({ id, status: "failed" }))
         continue
       }

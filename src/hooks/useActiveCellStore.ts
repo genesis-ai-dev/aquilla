@@ -25,6 +25,7 @@ import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells } from "@/lib/offline/offline-reads"
+import { subscribeToDiscardedOfflineCommits } from "@/lib/offline/refused-writes"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
@@ -3143,6 +3144,17 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     if (!enabled || !readyStore || !projectId || !fileId) return
     return subscribeToOfflineFileCells(readyStore, projectId, fileId, () => { void doFetch(true) })
   }, [projectId, fileId, enabled, offlineStore, doFetch])
+
+  // A refused offline edit the user discarded never reaches the `cells` table,
+  // so nothing above would retire its optimistic shadow — the discarded text
+  // would stay on screen as if saved.
+  useEffect(() => {
+    const readyStore = resolveOfflineStore(offlineStore, projectId)
+    if (!enabled || !readyStore || !projectId || !fileId) return
+    return subscribeToDiscardedOfflineCommits(readyStore, projectId, fileId, (cellId, value) => {
+      if (store.clearOptimisticIfValue(cellId, value)) void doFetch(true)
+    })
+  }, [projectId, fileId, enabled, offlineStore, store, doFetch])
 
   useEffect(() => () => {
     if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)

@@ -30,6 +30,7 @@
 // Errors use the standard external envelope { error: { code, message } }.
 
 import { externalError } from './errors'
+import { resolveExternalLaneParam } from './external-lane'
 import { mintInternalToken } from './read-routes'
 import { authenticateAndScope, type ExternalReadsEnv } from './read-auth'
 import { handleExportSourceRequest } from '../events/export-route'
@@ -99,13 +100,23 @@ export async function handleExternalExportRequest(
     await recordRateLimitEvent(env.AQUILLA_PG, 'external_export', identifier)
   }
 
-  // AQU-538: exports are lane-specific; an omitted lane means the default lane.
-  const lane = url.searchParams.get('lane')
+  // ?lane= is a lane id. The internal export still selects by the frozen tag.
+  if (!env.AQUILLA_PG) return externalError('job_failed', 'AQUILLA_PG not configured', 500)
+  const lane = await resolveExternalLaneParam(
+    env.AQUILLA_PG,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    url.searchParams.get('lane'),
+    'lane',
+  )
+  if (!lane.ok) return externalError('validation_failed', lane.message, 400)
 
   const token = await mintInternalToken(env, authed.ctx, projectId, fileId)
   const internalUrl = new URL(request.url)
   internalUrl.pathname = `/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/source`
-  internalUrl.search = lane === null ? '' : `?lane=${encodeURIComponent(lane)}`
+  internalUrl.search = `?lane=${encodeURIComponent(lane.lane.legacyTag ?? '')}`
 
   const internalRes = await handleExportSourceRequest(
     new Request(internalUrl.toString(), { headers: { Authorization: `Bearer ${token}` } }),

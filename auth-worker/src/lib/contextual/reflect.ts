@@ -337,7 +337,7 @@ export async function loadReflectionKnown(
   run: ContextualRun,
 ): Promise<{ known: ReflectionKnown; takenPaths: Set<string> }> {
   const [ctx, approved, proposed] = await Promise.all([
-    loadProjectContext(db, run.projectId),
+    loadProjectContext(db, run.projectId, { laneId: run.laneId, targetLang: run.targetLang }),
     listMemories(db, run.projectId, "approved"),
     listMemories(db, run.projectId, "proposed"),
   ])

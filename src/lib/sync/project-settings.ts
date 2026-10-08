@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
 import type {
@@ -12,6 +13,7 @@ import type {
 import type { Concept } from "@/lib/terminology/types"
 import type { CellUnit, LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
+import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
 
@@ -238,6 +240,14 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * AQU-1686: one explicit switch per Bible data enrichment
+   * (db/shared/bible-enrichments.ts). A missing id means that enrichment's
+   * default, and `bibleResourcesEnabled` off turns every one of them off.
+   * Maintainer floor, like the rest of the blob. Read server-side through the
+   * `bible_enrichments` generated column (auth-worker/src/lib/aquifer/gate.ts).
+   */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.
@@ -342,6 +352,12 @@ export interface ProjectWideSettings {
    * whole map: writers must send the full merged object.
    */
   fileGenres?: Record<string, string>
+  /**
+   * AQU-1075: which settings this project copies from its upstream, and which
+   * of those the maintainer has detached. Absent on a project that has not
+   * been offered the choice. The server owns `knowledgeDocCopies`.
+   */
+  inheritedFromLink?: InheritedFromLink
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -718,12 +734,20 @@ export async function fetchProjectSettings(
 
 /**
  * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
- * settings blob (no per-key merge) — send a complete blob. Per-key merge is
- * only available via the `useProjectSettings` hook and the Agent API
- * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
- * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
- * `{kind: "forbidden", required, role}`.
+ * settings blob (no per-key merge). The four retired lane keys are omitted
+ * here; the server rejects a body that includes them and keeps the stored
+ * copies. Per-key merge is only available via the `useProjectSettings` hook
+ * and the Agent API PatchSettings command. Caller must include
+ * `ifMatchVersion`; mismatched version returns `{kind: "conflict", latest}`.
+ * Sub-PROJECT_LEAD callers get `{kind: "forbidden", required, role}`.
  */
+/** Drop the retired language keys. The server rejects a body that includes them. */
+function settingsForPatch(settings: ProjectWideSettings): ProjectWideSettings {
+  const next: ProjectWideSettings = { ...settings }
+  for (const key of RETIRED_LANE_SETTINGS_KEYS) delete next[key]
+  return next
+}
+
 export async function patchProjectSettings(
   jwt: string,
   projectId: string,
@@ -738,7 +762,7 @@ export async function patchProjectSettings(
       {
         method: "PATCH",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ settings, ifMatchVersion }),
+        body: JSON.stringify({ settings: settingsForPatch(settings), ifMatchVersion }),
       },
     )
   } catch (e) {

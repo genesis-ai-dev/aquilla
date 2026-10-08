@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -48,11 +48,13 @@ export function PeerPresence({ peers: peersProp, store, onJumpToPeer, resolveCel
             >
               <AvatarGroup className="-space-x-1 *:data-[slot=avatar]:ring-background">
                 {visible.map((peer) => (
-                  <InitialsAvatar
+                  <UserChip
                     key={peer.peerId}
-                    name={peer.username}
-                    size="xs"
+                    username={peer.username}
+                    distinguishId={peer.peerId}
                     color={peer.color}
+                    size="xs"
+                    avatarOnly
                   />
                 ))}
                 {overflow > 0 && (
@@ -91,8 +93,14 @@ export function PeerPresence({ peers: peersProp, store, onJumpToPeer, resolveCel
                     setShowPopover(false)
                   }}
                 >
-                  <InitialsAvatar name={peer.username} size="xs" color={peer.color} />
-                  <span className="truncate">{peer.username}</span>
+                  <UserChip
+                    username={peer.username}
+                    distinguishId={peer.peerId}
+                    color={peer.color}
+                    size="xs"
+                    className="min-w-0"
+                    nameClassName="truncate text-xs font-normal"
+                  />
                   <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
                     {at ? `${at} · ` : ""}
                     {peer.isEditing

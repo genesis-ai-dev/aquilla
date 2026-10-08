@@ -32,7 +32,7 @@ import {
   planUnitStatus,
   type PlanUnit,
 } from "@/lib/plan/plan-status"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { PlanBar, PlanRule } from "./PlanBar"
@@ -489,17 +489,9 @@ export const PlanRow = memo(function PlanRow({
                 className="shrink-0 -space-x-1.5 *:data-[slot=avatar]:ring-background"
                 aria-label={t("org.projectOverview.plan.assignedTo")}
               >
-                {assignees.slice(0, shown).map((a) => {
-                  // A username is nullable on the wire. The numeric id is a poor
-                  // label but an honest one, and it still colours and initials
-                  // deterministically, so the same person keeps the same chip.
-                  const name = a.username ?? `#${a.userId}`
-                  return (
-                    <AppTooltip key={a.userId} content={name}>
-                      <InitialsAvatar name={name} size="xs" />
-                    </AppTooltip>
-                  )
-                })}
+                {assignees.slice(0, shown).map((a) => (
+                  <UserChip key={a.userId} userId={a.userId} username={a.username} avatarOnly size="xs" />
+                ))}
                 {overflow > 0 && (
                   <AvatarGroupCount
                     className="size-5 text-[9px] font-semibold"

@@ -145,6 +145,8 @@
     "neon:backfill:activity:prod": "tsx scripts/neon-target.ts production backfill-activity",
     "neon:backfill:lanes:dev": "tsx scripts/neon-target.ts dev backfill-lanes",
     "neon:backfill:lanes:prod": "tsx scripts/neon-target.ts production backfill-lanes",
+    "neon:repair-lane-grants:dev": "tsx scripts/neon-target.ts dev repair-lane-grants",
+    "neon:repair-lane-grants:prod": "tsx scripts/neon-target.ts production repair-lane-grants",
     "neon:verify:lanes:dev": "tsx scripts/neon-target.ts dev verify-lanes",
     "neon:verify:lanes:prod": "tsx scripts/neon-target.ts production verify-lanes",
     "migrate:users": "tsx scripts/migrate-users.ts",

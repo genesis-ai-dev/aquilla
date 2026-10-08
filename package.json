@@ -117,6 +117,7 @@
     "seams:eval": "tsx scripts/seam-eval.ts",
     "harmonizer:eval": "tsx scripts/harmonizer-eval.ts",
     "tags:eval": "tsx scripts/passage-tags-eval.ts",
+    "offline:fixture": "VITE_UPDATE_OFFLINE_EVENTLOG_FIXTURE=1 vitest run src/lib/offline/eventlog-compat.test.ts",
     "seed:extract": "tsx scripts/seed-extract.ts",
     "seed:fetch": "tsx scripts/seed-fetch.ts",
     "seed:load": "tsx scripts/seed-load.ts",

@@ -27,8 +27,11 @@
 -- Idempotent. A database loaded from schema.sql (columns already absent)
 -- is unchanged.
 --
--- scripts/neon-backfill-lanes.ts still reads these columns. It is the
--- backfill that runs BEFORE this migration and cannot run after it.
+-- scripts/neon-backfill-lanes.ts and scripts/neon-backfill-lane-batch.ts
+-- (AQU-1616) still read these columns. They are the backfills that run
+-- BEFORE this migration and cannot run after it: run the lane-batch
+-- backfill with --apply before `neon:apply`, which applies 0155 and 0156
+-- in filename order.
 
 DO $$
 DECLARE

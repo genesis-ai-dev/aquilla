@@ -285,20 +285,14 @@ CREATE TABLE project_settings (
     version    INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT now(),
     updated_by BIGINT,
-    -- Language pair extracted from the settings JSON at write time (0054).
-    -- settings blobs run to multiple MB; reads must use these columns, never
-    -- (settings::jsonb)->>'…' inline (org-dashboard timeout, see
-    -- getOrgPortfolio in auth-worker/src/services/org-permissions.ts).
-    source_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'sourceLanguage') STORED,
-    target_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'targetLanguage') STORED,
-    -- AQU-575: compact portfolio projections. Never load the multi-MB settings
-    -- blob merely to read validationCount or targetLanes.
+    -- AQU-575: compact portfolio projection. Never load the multi-MB settings
+    -- blob merely to read validationCount. Language and the lane registry are
+    -- lanes rows; 0156 dropped the generated projections of those keys.
     validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
     -- AQU-490: and the audio threshold, for the same reason — the per-member
     -- and portfolio rollups resolve it per project on paths that must not go
     -- near the blob.
     validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED,
-    target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED,
     -- AQU-1083: do structural cells count toward progress? NULL = unset, which
     -- falls through to the org's value and then to "yes" (0083).
     count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED,
@@ -312,7 +306,19 @@ CREATE TABLE project_settings (
     -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
     -- absent/false/garbage all collapse to the documented default (off).
     agent_react BOOLEAN
-      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED,
+    -- 0150 (AQU-1686): the Bible data switches the server reads — the aquifer
+    -- gate on every Bible request and agent run, and autopilot per run. NULL
+    -- means no explicit choice, which the gate derives from scripture files
+    -- (AQU-460). Reads `->>` as the gate always did, so "true"/"false" strings
+    -- count too. Keep the expression on one line: the dev-stack schema
+    -- reconciler (scripts/dev-stack-schema-parser.ts) drops lines nested in a
+    -- column's parentheses, and a truncated ALTER breaks every local boot.
+    bible_resources_enabled BOOLEAN
+      GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
+    -- One boolean per Bible data enrichment; readers validate it
+    -- (db/shared/bible-enrichments.ts readBibleEnrichments).
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 

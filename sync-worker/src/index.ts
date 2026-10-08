@@ -38,6 +38,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
+import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handlePlanRequest } from "./events/plan-route"
@@ -532,6 +533,11 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // AQU-1762: Agent API knowledge-base (reference document) upload / list.
+    // Bridged to auth-worker, which owns extraction + indexing.
+    const externalKnowledgeResponse = await handleExternalKnowledgeRequest(request, env)
+    if (externalKnowledgeResponse) return withCors(externalKnowledgeResponse, request)
 
     // AQU-1294: partner intake template + agent skills. Static text / pure
     // transforms, unauthenticated like the command docs below.

@@ -155,10 +155,16 @@ beforeEach(async () => {
     ],
   })
   bucket = makeStubBucket()
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1), ('eslane01', $1, 'target', 'es', 2)`,
+    [PROJECT],
+  )
 })
 
 function exportReq(token: string, opts: { lane?: string; fileId?: string; method?: string } = {}): Request {
-  const query = opts.lane === undefined ? '' : `?lane=${encodeURIComponent(opts.lane)}`
+  const lane = opts.lane === undefined ? 'deflane1' : opts.lane
+  const query = `?lane=${encodeURIComponent(lane)}`
   return new Request(
     `https://w/api/v1/external/projects/${PROJECT}/files/${opts.fileId ?? FILE}/export${query}`,
     { method: opts.method ?? 'GET', headers: { Authorization: `Bearer ${token}` } },
@@ -210,7 +216,7 @@ describe('GET .../files/:fileId/export (REST)', () => {
       projectId: PROJECT,
     })
 
-    const es = (await handleExternalExportRequest(exportReq(token, { lane: 'es' }), makeEnv()))!
+    const es = (await handleExternalExportRequest(exportReq(token, { lane: 'eslane01' }), makeEnv()))!
     const text = await es.text()
     expect(text).toContain('En el principio creó Dios los cielos y la tierra.')
     expect(text).not.toContain('Au commencement')
@@ -381,6 +387,7 @@ describe('export_file (MCP)', () => {
     const { payload, isError } = await callMcpTool(token, 'export_file', {
       projectId: PROJECT,
       fileId: FILE,
+      lane: 'deflane1',
     })
     expect(isError).toBe(false)
     expect(payload.fileName).toBe('GEN.SFM')
@@ -404,6 +411,7 @@ describe('export_file (MCP)', () => {
     const { payload, isError } = await callMcpTool(token, 'export_file', {
       projectId: PROJECT,
       fileId: FILE,
+      lane: 'deflane1',
     })
     expect(isError).toBe(true)
     expect((payload.error as { code: string }).code).toBe('permission_denied')
@@ -430,6 +438,7 @@ describe('export_file (MCP)', () => {
     const { payload, isError } = await callMcpTool(token, 'export_file', {
       projectId: PROJECT,
       fileId: FILE,
+      lane: 'deflane1',
     })
     expect(isError).toBe(true)
     const err = payload.error as { code: string; message: string; restPath: string }
@@ -454,6 +463,7 @@ describe('export_file (MCP)', () => {
     const { payload, isError } = await callMcpTool(token, 'export_file', {
       projectId: PROJECT,
       fileId: FILE,
+      lane: 'deflane1',
     })
     expect(isError).toBe(true)
     const err = payload.error as { code: string; maxBytes: number; restPath: string }
@@ -481,7 +491,7 @@ describe('export is discoverable (the cold-start contract)', () => {
   it('publishes export_file in the MCP tool catalog', async () => {
     const tool = MCP_TOOLS.find((t) => t.name === 'export_file')
     expect(tool).toBeDefined()
-    expect(tool?.inputSchema.required).toEqual(['projectId', 'fileId'])
+    expect(tool?.inputSchema.required).toEqual(['projectId', 'fileId', 'lane'])
 
     const token = await credToken({
       credentialId: CRED_MAINTAINER,

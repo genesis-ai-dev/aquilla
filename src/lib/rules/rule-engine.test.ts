@@ -3,6 +3,7 @@ import { checkRules, checkRulesForCell, rulesForLane, ruleLaneScope } from "./ru
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { RULE_LINT_PARITY_CASES } from "./__fixtures__/rule-lint-parity"
+import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
@@ -292,6 +293,41 @@ describe("rule engine — builtin variant", () => {
     const cell = makeCell({ id: "c1", original: "Hello world", translated: "Hello world", status: "validated" })
     const out = checkRulesForCell(cell, "f1", [rule])
     expect(out).toHaveLength(1)
+  })
+
+  // AQU-1736: the registry's own default rule set, through the engine, over the
+  // canonical plain `value` a cell stores (footnote nodes expanded back to raw
+  // `\f…\f*` — see src/lib/richtext/usfm-plain-text.ts). Composition, not the
+  // check function in isolation: a check that is not registered, not enabled by
+  // default, or not dispatched would pass its own unit test and still never
+  // reach a translator.
+  it("footnote-quote-mismatch reaches a cell through the default builtin rules", () => {
+    const rules = resolveBuiltinRules(undefined)
+    const note = "\\f + \\fr 5:11 \\fq persecute you \\ft Or: harass.\\f*"
+    const source = "Blessed are you when they persecute you."
+
+    const edited = makeCell({
+      id: "c1",
+      original: source,
+      translated: `Blessed are you when they harass you ${note}`,
+      status: "unvalidated",
+    })
+    const flagged = checkRulesForCell(edited, "f1", rules)
+      .filter((i) => i.ruleId === "builtin:footnote-quote-mismatch")
+    expect(flagged).toHaveLength(1)
+    expect(flagged[0].reason).toBe("builtin:footnote-quote-mismatch")
+    expect(flagged[0].spans[0]).toMatchObject({ side: "target", matchedText: "persecute you" })
+
+    const intact = makeCell({
+      id: "c1",
+      original: source,
+      translated: `Blessed are you when they persecute you ${note}`,
+      status: "unvalidated",
+    })
+    expect(
+      checkRulesForCell(intact, "f1", rules)
+        .filter((i) => i.ruleId === "builtin:footnote-quote-mismatch"),
+    ).toEqual([])
   })
 })
 

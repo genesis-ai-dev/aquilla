@@ -1024,6 +1024,7 @@ async function processSpan(
       // the concepts get scoped to this span's source text inside runSpan.
       briefParameters: shared.ctx.briefParameters,
       ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
+      ...(shared.ctx.termMatching ? { termMatching: shared.ctx.termMatching } : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
@@ -1080,7 +1081,8 @@ async function processSpan(
         })
         return proposed.brief.id
       },
-      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts),
+      lint: async (draft) =>
+        lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts, shared.ctx.termMatching),
       stage: async (draft) => {
         // Anti-clobber, checked as late as possible: a human may have typed
         // into one of these cells while the span was running. `pairs` is a
@@ -1396,7 +1398,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
 
   // Per-run context is loaded ONCE and shared by every span in the wave
   // (it was re-fetched per span before, which was pure overhead).
-  const ctx = await loadProjectContext(db, run.projectId)
+  const ctx = await loadProjectContext(db, run.projectId, {
+    laneId: run.laneId,
+    targetLang: run.targetLang,
+  })
   const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
     ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
     : []

@@ -36,7 +36,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div>
-          <UsernameWithAvatar username={username} nameClassName="text-sm font-semibold" />
+          <UsernameWithAvatar userId={userId} username={username} nameClassName="text-sm font-semibold" />
           <p className="mt-0.5 text-xs text-muted-foreground">
             {t("org.memberAccessDrillDown.heading")}
           </p>

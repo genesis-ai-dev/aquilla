@@ -4,12 +4,12 @@
 // server-side lint ever saw them. Autopilot could be punished for missing an
 // approved rendering it was never shown.
 //
-// Each test pins one of the three properties that makes the fix trustworthy:
-//   1. The any-of test ("use ANY approved rendering") is stated correctly.
-//      It cannot be expressed as a single-pattern lint rule, and the failure
-//      mode of getting it wrong is a check that silently never fires — the
-//      worst possible outcome for a check that exists to catch silent drift.
-//      Hit ids stay the client's, so findings remain attributable.
+// Each test pins one of the properties that make the fix trustworthy:
+//   1. The any-of test ("use ANY approved rendering") is stated correctly,
+//      because getting it wrong makes a check that silently never fires. The
+//      full verdict semantics are the editor's, pinned row by row in
+//      terminology-lint-parity.test.ts (AQU-1711). Hit ids stay the client's,
+//      so findings remain attributable.
 //   2. Term guidance is scoped to the span. A 900-entry termbase in a prompt
 //      buries the eight entries that matter for the passage in front of it.
 //   3. Readiness reports gaps honestly. A run with no context still produces
@@ -31,6 +31,7 @@ import {
 } from "../lib/contextual/project-context"
 import { computeContextReadiness } from "../lib/contextual/readiness"
 import { rulesForLane } from "../lib/agent/lint"
+import { seedUser } from "./helpers/db"
 
 const db = env.AQUILLA_PG
 
@@ -38,8 +39,8 @@ function concept(overrides: Partial<Concept> & Pick<Concept, "id" | "sourceTerm"
   return { renderings: [], status: "active", ...overrides }
 }
 
-/** `source_language`/`target_language` are GENERATED columns over the settings
- *  JSON — they are set by putting the keys in the blob, never by insert. */
+/** Language keys live in the settings JSON. Migration 0156 dropped the
+ *  generated columns that used to project them, so this writes the blob only. */
 async function seedSettings(projectId: string, settings: unknown) {
   await db
     .prepare(
@@ -233,8 +234,10 @@ describe("loadProjectContext", () => {
     )
 
     const ctx = await loadProjectContext(db, "proj-ctx-load")
-    expect(ctx.sourceLanguage).toBe("English")
-    expect(ctx.targetLanguage).toBe("Spanish")
+    // AQU-1595: a null lane language does not read settings.sourceLanguage
+    // or settings.targetLanguage. These keys are still in the blob.
+    expect(ctx.sourceLanguage).toBeUndefined()
+    expect(ctx.targetLanguage).toBeUndefined()
     expect(ctx.projectBriefL1).toContain("young readers")
     expect(ctx.briefParameters.audience).toBe("Youth")
     expect(ctx.concepts.map((c) => c.id)).toEqual(["c1"])
@@ -257,6 +260,18 @@ describe("loadProjectContext", () => {
   })
 
   it("picks up concepts from a subscribed org termbase", async () => {
+    // AQU-1721: a subscription counts only while its termbase is published and
+    // in the subscriber's org (the editor's rule), so both projects need rows.
+    // termbase-subscription-gate.test.ts covers the cases that do not count.
+    await seedUser(1, "owner")
+    await db.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Org', 1)").run()
+    await db
+      .prepare(
+        `INSERT INTO projects (id, name, org_id, created_by, org_published_termbase) VALUES
+          ('proj-upstream', 'Upstream', 1, 1, TRUE),
+          ('proj-subscriber', 'Subscriber', 1, 1, FALSE)`,
+      )
+      .run()
     await seedSettings("proj-upstream", {
       terminology: [
         {
@@ -362,6 +377,13 @@ describe("loadProjectContext", () => {
       sourceLanguage: "English",
       terminology: [{ id: "aqu1710-blob-down", sourceTerm: "grace", status: "active", renderings: [] }],
     })
+    // AQU-1595: the language is read off the lane row, not settings.sourceLanguage.
+    await db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+         VALUES ('ctxdnsrc', 'proj-ctx-concepts-down', 'source', 'English', NULL, 0)`,
+      )
+      .run()
     const conceptsDown = {
       prepare: (query: string) => {
         if (query.includes("FROM concepts")) throw new Error("concepts unavailable")

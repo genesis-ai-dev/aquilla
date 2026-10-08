@@ -172,6 +172,10 @@ export function selectTransportForFile(
         duration,
         rate: virtual.rate,
         volume: virtual.volume,
+        // Neither of the two non-queue transports can ever be on the
+        // audio-first programme clock — that clock only exists inside the
+        // queue. (AQU-1747)
+        programmeClock: false,
       },
       source: "virtual",
     }
@@ -207,6 +211,7 @@ export function selectTransportForFile(
       // queue's 1.5x would be a readout about a transport that is not sounding.
       rate: video.rate,
       volume: video.volume,
+      programmeClock: false, // see the virtual branch above (AQU-1747)
     },
     source: "video",
   }

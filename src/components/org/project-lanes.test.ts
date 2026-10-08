@@ -99,8 +99,11 @@ describe("withOptimisticLane (AQU-605)", () => {
   })
 
   it("appends a second lane of a language the row already shows", () => {
+    // The rows are the list (AQU-1595): displayLanes no longer invents a ''
+    // lane beside server rows, so the default lane is a row here like the rest.
     const p = baseProject({
       lanes: [
+        { lane: "", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: null },
         { lane: "Spanish", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: null },
       ],
     })

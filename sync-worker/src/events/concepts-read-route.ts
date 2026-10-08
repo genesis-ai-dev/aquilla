@@ -42,6 +42,8 @@ interface ConceptRowRaw {
 export interface ConceptRenderingOut {
   rendering: string
   status: 'preferred' | 'admitted' | 'forbidden'
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 /** Mirrors `TermMatchOptions` in src/lib/terminology/types.ts. */

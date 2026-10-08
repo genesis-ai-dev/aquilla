@@ -95,12 +95,12 @@ describe("countOrgTargetLanes — target lane rows (AQU-1598)", () => {
     expect(await countOrgTargetLanes(env.AQUILLA_PG, 1)).toBe(1)
   })
 
-  it("counts a project with no lanes rows as one when it has a target language", async () => {
+  it("counts a project with no lane rows as zero, settings language included", async () => {
     await seedOrg()
     await seedProject("a", { targetLanguage: "pt" })
     await seedProject("b", { targetLanguage: "   " })
     await seedProject("c", null)
-    expect(await countOrgTargetLanes(env.AQUILLA_PG, 1)).toBe(1)
+    expect(await countOrgTargetLanes(env.AQUILLA_PG, 1)).toBe(0)
   })
 
   it("counts the same language on two projects as two lanes", async () => {

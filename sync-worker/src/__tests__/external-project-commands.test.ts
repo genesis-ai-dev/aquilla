@@ -324,7 +324,7 @@ describe('CreateProject — accepted fields (AQU-1223)', () => {
     return rows.find((r) => r.project_id === projectId)
   }
 
-  it('seeds sourceLanguage + targetLanguage into the settings blob at version 1', async () => {
+  it('creates source and target lane rows and does not write the language settings keys', async () => {
     const env = makeEnv(tdb.db)
     await seedOrgMember(tdb, 1, 600)
     const credentialId = '00000000-0000-0000-0000-0000000000c1'
@@ -334,21 +334,25 @@ describe('CreateProject — accepted fields (AQU-1223)', () => {
 
     const { res, body } = await createProject(env, 'with-langs', token, credentialId, {
       kind: 'CreateProject', name: 'With Langs', orgId: ORG_ID,
-      sourceLanguage: 'en', targetLanguage: 'es',
+      lanes: [
+        { role: 'source', language: 'en' },
+        { role: 'target', language: 'es' },
+      ],
     })
     expect(res.status).toBe(200)
     expect(body.receipt.command).toBe('CreateProject')
 
-    const settings = await settingsRow('with-langs')
-    expect(settings).toBeDefined()
-    expect(JSON.parse(settings!.settings)).toMatchObject({ sourceLanguage: 'en', targetLanguage: 'es' })
-    // Version 1 is what the UI's create-then-patch(version 0) also produces, so
-    // a client that reads the version back and patches on top behaves the same
-    // whichever path created the project.
-    expect(settings!.version).toBe(1)
+    expect(await settingsRow('with-langs')).toBeUndefined()
+    const lanes = await tdb.pg.query<{ role: string; language: string; legacy_tag: string | null }>(
+      `SELECT role, language, legacy_tag FROM lanes WHERE project_id = 'with-langs' ORDER BY role`,
+    )
+    expect(lanes.rows).toEqual([
+      { role: 'source', language: 'en', legacy_tag: null },
+      { role: 'target', language: 'es', legacy_tag: 'es' },
+    ])
   })
 
-  it("accepts targetLanguage: '' for the source-only shape", async () => {
+  it('a source lane alone creates no target lane and no settings row', async () => {
     const env = makeEnv(tdb.db)
     await seedOrgMember(tdb, 1, 600)
     const credentialId = '00000000-0000-0000-0000-0000000000c2'
@@ -358,11 +362,14 @@ describe('CreateProject — accepted fields (AQU-1223)', () => {
 
     const { res } = await createProject(env, 'source-only', token, credentialId, {
       kind: 'CreateProject', name: 'Source Only', orgId: ORG_ID,
-      sourceLanguage: 'grc', targetLanguage: '',
+      lanes: [{ role: 'source', language: 'grc' }],
     })
     expect(res.status).toBe(200)
-    const settings = await settingsRow('source-only')
-    expect(JSON.parse(settings!.settings)).toMatchObject({ sourceLanguage: 'grc', targetLanguage: '' })
+    expect(await settingsRow('source-only')).toBeUndefined()
+    const lanes = await tdb.pg.query<{ role: string; language: string }>(
+      `SELECT role, language FROM lanes WHERE project_id = 'source-only' ORDER BY role`,
+    )
+    expect(lanes.rows).toEqual([{ role: 'source', language: 'grc' }])
   })
 
   it('the approval summary names the language pair being seeded', async () => {
@@ -373,9 +380,12 @@ describe('CreateProject — accepted fields (AQU-1223)', () => {
       orgId: String(ORG_ID), projectId: null,
     })
     const { body: prep } = await prepare(env, 'summarised', token, [
-      { kind: 'CreateProject', name: 'Summarised', orgId: ORG_ID, sourceLanguage: 'en', targetLanguage: 'fr' },
+      { kind: 'CreateProject', name: 'Summarised', orgId: ORG_ID, lanes: [
+        { role: 'source', language: 'en' },
+        { role: 'target', language: 'fr' },
+      ] },
     ])
-    expect(prep.summary.newProjectLanguages).toBe('en → fr')
+    expect(prep.summary.newProjectLanguages).toBe('source:en, target:fr')
   })
 
   it('a bare name + orgId create still works and writes NO settings row', async () => {
@@ -452,7 +462,7 @@ describe('CreateProject — accepted fields (AQU-1223)', () => {
       orgId: String(ORG_ID), projectId: null,
     })
     const { res, body } = await prepare(env, 'bad-lang', token, [
-      { kind: 'CreateProject', name: 'Bad Lang', orgId: ORG_ID, sourceLanguage: 42 },
+      { kind: 'CreateProject', name: 'Bad Lang', orgId: ORG_ID, lanes: [{ role: 'source', language: 42 }] },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
@@ -578,7 +588,7 @@ describe('UpdateProjectSettings — happy path + version guard', () => {
     })
 
     const { body: prep } = await prepare(env, 'proj-s', token, [
-      { kind: 'UpdateProjectSettings', projectId: 'proj-s', settings: { targetLanguage: 'de' }, ifMatchVersion: 1 },
+      { kind: 'UpdateProjectSettings', projectId: 'proj-s', settings: { systemPrompt: 'plain' }, ifMatchVersion: 1 },
     ])
     expect(prep.changeset.status).toBe('staged')
 
@@ -590,7 +600,7 @@ describe('UpdateProjectSettings — happy path + version guard', () => {
     const settings = await tdb.rows<{ project_id: string; settings: string; version: number }>('project_settings')
     const row = settings.find((s) => s.project_id === 'proj-s')!
     expect(row.version).toBe(2)
-    expect(JSON.parse(row.settings).targetLanguage).toBe('de')
+    expect(JSON.parse(row.settings).systemPrompt).toBe('plain')
   })
 
   it('ifMatchVersion drift at prepare → plan_stale', async () => {
@@ -618,7 +628,7 @@ describe('UpdateProjectSettings — happy path + version guard', () => {
 
     // Prepare pins version 1.
     const { body: prep } = await prepare(env, 'proj-s', token, [
-      { kind: 'UpdateProjectSettings', projectId: 'proj-s', settings: { targetLanguage: 'de' }, ifMatchVersion: 1 },
+      { kind: 'UpdateProjectSettings', projectId: 'proj-s', settings: { systemPrompt: 'plain' }, ifMatchVersion: 1 },
     ])
 
     // Someone else bumps the settings version between prepare and commit.
@@ -677,7 +687,7 @@ describe('UpdateProjectSettings — validation threshold is a POLICY key (AQU-92
     const { body: prep } = await prepare(env, 'proj-v', token, [
       {
         kind: 'UpdateProjectSettings', projectId: 'proj-v',
-        settings: { validationCount: 3, targetLanguage: 'de' }, ifMatchVersion: 1,
+        settings: { validationCount: 3, systemPrompt: 'plain' }, ifMatchVersion: 1,
       },
     ])
     const { res } = await commit(env, 'proj-v', token, prep.changeset.id)
@@ -754,7 +764,7 @@ describe('project commands — commit crash-retry idempotency', () => {
     })
 
     const { body: prep } = await prepare(env, 'retry-settings', token, [
-      { kind: 'UpdateProjectSettings', projectId: 'retry-settings', settings: { targetLanguage: 'de' }, ifMatchVersion: 1 },
+      { kind: 'UpdateProjectSettings', projectId: 'retry-settings', settings: { systemPrompt: 'plain' }, ifMatchVersion: 1 },
     ])
     const { res: res1, body: body1 } = await commit(env, 'retry-settings', token, prep.changeset.id)
     expect(res1.status).toBe(200)
@@ -776,7 +786,7 @@ describe('project commands — commit crash-retry idempotency', () => {
     const settings = await tdb.rows<{ project_id: string; version: number; settings: string }>('project_settings')
     const row = settings.find((s) => s.project_id === 'retry-settings')!
     expect(row.version).toBe(2)
-    expect(JSON.parse(row.settings).targetLanguage).toBe('de')
+    expect(JSON.parse(row.settings).systemPrompt).toBe('plain')
   })
 
   it('blocker 1: an UpdateProjectSettings retry where a DIFFERENT user bumped the version → plan_stale (not false success)', async () => {
@@ -793,7 +803,7 @@ describe('project commands — commit crash-retry idempotency', () => {
     })
 
     const { body: prep } = await prepare(env, 'stale-settings', token, [
-      { kind: 'UpdateProjectSettings', projectId: 'stale-settings', settings: { targetLanguage: 'de' }, ifMatchVersion: 1 },
+      { kind: 'UpdateProjectSettings', projectId: 'stale-settings', settings: { systemPrompt: 'plain' }, ifMatchVersion: 1 },
     ])
 
     // Put the changeset in the crash-retry state (committing), and simulate a
@@ -1062,7 +1072,7 @@ describe('blocker 4: receipt-only summary is renderable (no blind approval)', ()
       {
         kind: 'UpdateProjectSettings',
         projectId: 'summ-settings',
-        settings: { targetLanguage: 'de', cellsPerPage: 5 },
+        settings: { systemPrompt: 'plain', cellsPerPage: 5 },
         ifMatchVersion: 1,
       },
     ])
@@ -1071,7 +1081,7 @@ describe('blocker 4: receipt-only summary is renderable (no blind approval)', ()
     expect(prep.summary.ifMatchVersion).toBe(1)
     // Per-key preview of each new value (strings, truncated). Object rendered
     // explicitly by the approval page.
-    expect(prep.summary.settingsChanges.targetLanguage).toBe('de')
+    expect(prep.summary.settingsChanges.systemPrompt).toBe('plain')
     expect(prep.summary.settingsChanges.cellsPerPage).toBe('5')
   })
 
@@ -1132,7 +1142,7 @@ describe('blocker 2: committed receipts survive a stale-write / double commit', 
       orgId: null, projectId: 'twice-settings', mode: 'act',
     })
     const { body: prep } = await prepare(env, 'twice-settings', token, [
-      { kind: 'UpdateProjectSettings', projectId: 'twice-settings', settings: { targetLanguage: 'de' }, ifMatchVersion: 1 },
+      { kind: 'UpdateProjectSettings', projectId: 'twice-settings', settings: { systemPrompt: 'plain' }, ifMatchVersion: 1 },
     ])
 
     const { res: r1, body: b1 } = await commit(env, 'twice-settings', token, prep.changeset.id)

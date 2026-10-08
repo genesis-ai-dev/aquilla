@@ -41,8 +41,8 @@ async function storedSettings(): Promise<Record<string, unknown>> {
   return JSON.parse(row?.settings ?? "{}") as Record<string, unknown>
 }
 
-describe("project-settings create-wizard blob (AQU-1250)", () => {
-  it("stores sourceLanguage, targetLanguage, and targetLanes from one version-0 PATCH", async () => {
+describe("project-settings create-wizard blob (AQU-1250 / AQU-1595)", () => {
+  it("rejects a version-0 PATCH that includes the retired language keys", async () => {
     await seedProjectWithoutSettings()
 
     const res = await patchSettings({
@@ -50,28 +50,17 @@ describe("project-settings create-wizard blob (AQU-1250)", () => {
       targetLanguage: "French",
       targetLanes: ["es", "pt-BR"],
     })
-    expect(res.status).toBe(200)
-
-    const stored = await storedSettings()
-    expect(stored.sourceLanguage).toBe("English")
-    expect(stored.targetLanguage).toBe("French")
-    expect(stored.targetLanes).toEqual(["es", "pt-BR"])
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toMatch(/not settings/)
+    expect(await storedSettings()).toEqual({})
   })
 
-  it("replaces the blob on PATCH — a follow-up write with only targetLanes drops languages", async () => {
+  it("stores other settings and does not invent the retired keys", async () => {
     await seedProjectWithoutSettings()
 
-    expect((await patchSettings({
-      sourceLanguage: "English",
-      targetLanguage: "French",
-    })).status).toBe(200)
-
-    const wipe = await patchSettings({ targetLanes: ["es"] }, 1)
-    expect(wipe.status).toBe(200)
-
-    const stored = await storedSettings()
-    expect(stored.targetLanes).toEqual(["es"])
-    expect(stored.sourceLanguage).toBeUndefined()
-    expect(stored.targetLanguage).toBeUndefined()
+    const res = await patchSettings({ systemPrompt: "be terse" })
+    expect(res.status).toBe(200)
+    expect(await storedSettings()).toEqual({ systemPrompt: "be terse" })
   })
 })

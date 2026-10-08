@@ -204,8 +204,8 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
-      "Project lead (500) — project managers fix their own languages",
-    "settings.languageEdit.optionMaintainer": "Maintainer (600) — default",
+      "Project lead (500) — default. Project managers fix their own languages",
+    "settings.languageEdit.optionMaintainer": "Maintainer (600) — only maintainers change languages",
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
 

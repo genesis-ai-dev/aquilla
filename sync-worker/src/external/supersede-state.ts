@@ -90,17 +90,28 @@ async function readTargetValues(
   const { placeholders, binds } = pairBinds(pairs)
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, ${wireLegacyTagSql("cells")} AS target_lang, value, value_html FROM cells
+      `SELECT file_id, cell_id, ${wireLegacyTagSql("cells")} AS target_lang, lane_id, value, value_html FROM cells
         WHERE project_id = ? AND side = 'target'
           AND (file_id, cell_id) IN (${placeholders})`,
     )
     .bind(projectId, ...binds)
-    .all<{ file_id: string; cell_id: string; target_lang: string | null; value: string; value_html: string | null }>()
+    .all<{
+      file_id: string
+      cell_id: string
+      target_lang: string | null
+      lane_id: string | null
+      value: string
+      value_html: string | null
+    }>()
   for (const r of results) {
-    map.set(laneCellKey(r.file_id, r.cell_id, r.target_lang ?? ''), {
-      value: r.value,
-      valueHtml: r.value_html,
-    })
+    // New plans ask by lanes.id. A plan staged before AQU-1615 still asks by
+    // target_lang. Index both so either key finds this row.
+    const value = { value: r.value, valueHtml: r.value_html }
+    const tag = r.target_lang ?? ''
+    map.set(laneCellKey(r.file_id, r.cell_id, tag), value)
+    if (r.lane_id && r.lane_id !== tag) {
+      map.set(laneCellKey(r.file_id, r.cell_id, r.lane_id), value)
+    }
   }
   return map
 }
@@ -139,16 +150,25 @@ async function readValidators(
   const { placeholders, binds } = pairBinds(pairs)
   const { results } = await db
     .prepare(
-      `SELECT file_id, cell_id, ${wireLegacyTagSql("cell_validators")} AS target_lang, username FROM cell_validators
+      `SELECT file_id, cell_id, ${wireLegacyTagSql("cell_validators")} AS target_lang, lane_id, username FROM cell_validators
         WHERE project_id = ? AND (file_id, cell_id) IN (${placeholders})`,
     )
     .bind(projectId, ...binds)
-    .all<{ file_id: string; cell_id: string; target_lang: string | null; username: string }>()
+    .all<{
+      file_id: string
+      cell_id: string
+      target_lang: string | null
+      lane_id: string | null
+      username: string
+    }>()
   for (const r of results) {
-    const key = laneCellKey(r.file_id, r.cell_id, r.target_lang ?? '')
-    const set = map.get(key) ?? new Set<string>()
+    const tag = r.target_lang ?? ''
+    const tagKey = laneCellKey(r.file_id, r.cell_id, tag)
+    const idKey = r.lane_id ? laneCellKey(r.file_id, r.cell_id, r.lane_id) : tagKey
+    const set = map.get(tagKey) ?? map.get(idKey) ?? new Set<string>()
     set.add(r.username)
-    map.set(key, set)
+    map.set(tagKey, set)
+    if (r.lane_id && r.lane_id !== tag) map.set(idKey, set)
   }
   return map
 }

@@ -1205,7 +1205,7 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
     // is the only way a PM finds out before spending the run.
     let readiness: ContextReadiness | null = null
     try {
-      const context = await loadProjectContext(c.env.AQUILLA_PG, projectId)
+      const context = await loadProjectContext(c.env.AQUILLA_PG, projectId, lane)
       const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId, lane)
       readiness = computeContextReadiness({
         context,

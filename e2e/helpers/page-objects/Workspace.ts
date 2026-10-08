@@ -344,27 +344,58 @@ export class Workspace {
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
   }
 
+  /** Accessible name of the dialog still covering the workspace, so a stuck
+   *  import names itself instead of timing out on a click the overlay ate. */
+  private async openDialogAccessibleName(): Promise<string> {
+    const dialog = this.modalDialogs().first()
+    const labelled = (await dialog.getAttribute("aria-label").catch(() => null))?.trim()
+    if (labelled) return labelled
+    const title = (await dialog.locator('[data-slot="dialog-title"]').first().textContent().catch(() => null))?.trim()
+    if (title) return title
+    const heading = (await dialog.getByRole("heading").first().textContent().catch(() => null))?.trim()
+    return heading || "dialog"
+  }
+
   private async waitForImportSettled(): Promise<void> {
     // A hidden confirm button is only the transient "Uploading…" state, not a
     // success signal. Wait for the authoritative sidebar row, while surfacing
     // any import error immediately instead of timing out on an unrelated row.
+    // A file row under an open dialog is not settled: the overlay still eats
+    // the next click. If that overlay is still up when the wait ends, the
+    // error names the dialog.
     const fileActions = this.page
       .locator("aside")
       .locator('button[aria-label="File actions"]')
       .first()
     const importError = this.page.getByText(/^Import failed:/i).first()
+    const overlay = this.page.locator(
+      '[data-slot="dialog-overlay"][data-open], [data-slot="alert-dialog-overlay"][data-open]',
+    )
     let outcome = "pending"
-    await expect.poll(async () => {
-      if (await importError.isVisible()) {
-        outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
-        return "settled"
-      }
-      if (await fileActions.isVisible()) {
-        outcome = "success"
-        return "settled"
-      }
-      return "pending"
-    }, { timeout: 30_000 }).toBe("settled")
+    let blockedBy = ""
+    try {
+      await expect.poll(async () => {
+        if (await importError.isVisible().catch(() => false)) {
+          outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
+          return "settled"
+        }
+        const rowReady = await fileActions.isVisible().catch(() => false)
+        const overlayOpen = rowReady && await overlay.first().isVisible().catch(() => false)
+        if (rowReady && overlayOpen) {
+          blockedBy = await this.openDialogAccessibleName()
+          return "blocked"
+        }
+        if (rowReady) {
+          outcome = "success"
+          blockedBy = ""
+          return "settled"
+        }
+        return "pending"
+      }, { timeout: 30_000 }).toBe("settled")
+    } catch (error) {
+      if (blockedBy) throw new Error(`Import dialog still open: ${blockedBy}`)
+      throw error
+    }
     if (outcome.startsWith("error:")) throw new Error(outcome.slice("error:".length))
   }
 
@@ -1264,11 +1295,10 @@ export class Workspace {
   }
 
   /**
-   * AQU-602: the lane switcher is the TARGET language tag in the editor's
-   * column header (`data-testid="lane-switcher"`). It renders as a dropdown
-   * ONLY when the project has a second target lane — otherwise the tag is a
-   * static pill. The trigger carries `data-active-lane="<tag>"` (default lane
-   * is `""`). Opening it reveals `data-testid="lane-option-<tag>"` items.
+   * AQU-602 / AQU-1601: the lane switcher is the TARGET language tag in the
+   * editor's column header (`data-testid="lane-switcher"`). A maintainer sees
+   * it at one lane. The trigger carries `data-active-lane="<tag>"` (default
+   * lane is `""`). Opening it reveals `data-testid="lane-option-<tag>"` items.
    */
   laneSwitcher(): Locator {
     return this.page.getByTestId("lane-switcher")

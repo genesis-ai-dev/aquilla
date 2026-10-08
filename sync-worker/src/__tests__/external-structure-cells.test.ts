@@ -182,6 +182,7 @@ async function eventKinds(tdb: TestDb): Promise<string[]> {
 
 let tdb: TestDb
 let env: ReturnType<typeof makeEnv>
+let bridgeLane = ''
 
 // Three source cells in chain order a → b → c, with `b` translated.
 beforeEach(async () => {
@@ -213,6 +214,11 @@ beforeEach(async () => {
     ],
   })
   env = makeEnv(tdb.db)
+  const lane = await tdb.pg.query<{ id: string }>(
+    `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = ''`,
+    [PROJECT],
+  )
+  bridgeLane = lane.rows[0].id
 })
 
 // ── InsertCell ───────────────────────────────────────────────────────────────
@@ -396,7 +402,7 @@ describe('SplitCell', () => {
     await apply(env, token, {
       kind: 'SplitCell', fileId: FILE, cellId: 'b', newCellId: 'b2',
       offset: SPLIT_AT, targets: 'divide',
-      targetOffsets: [{ offset: 'El zorro marron rapido'.length }],
+      targetOffsets: [{ laneId: bridgeLane, offset: 'El zorro marron rapido'.length }],
     })
 
     const all = await cells(tdb)
@@ -419,7 +425,7 @@ describe('SplitCell', () => {
     await apply(env, token, {
       kind: 'SplitCell', fileId: FILE, cellId: 'b', newCellId: 'b2',
       offset: SPLIT_AT, targets: 'divide',
-      targetOffsets: [{ offset: 'El zorro marron rapido'.length }],
+      targetOffsets: [{ laneId: bridgeLane, offset: 'El zorro marron rapido'.length }],
     })
 
     for (const row of (await cells(tdb)).filter((r) => r.side === 'target')) {
@@ -476,7 +482,7 @@ describe('SplitCell', () => {
     const token = await memberToken(tdb, ROLE.PROJECT_LEAD)
     const { res, body } = await prepare(env, token, {
       kind: 'SplitCell', fileId: FILE, cellId: 'b', offset: SPLIT_AT, targets: 'divide',
-      targetOffsets: [{ offset: 9999 }],
+      targetOffsets: [{ laneId: bridgeLane, offset: 9999 }],
     })
     expect(res.status).toBe(400)
     expect(body.error?.message).toContain('past the end')
@@ -616,7 +622,7 @@ describe('structure commands — guards', () => {
     const token = await memberToken(tdb, ROLE.PROJECT_LEAD)
     const { res, body } = await prepare(env, token, [
       commands.InsertCell,
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'a', value: 'x' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'a', laneId: bridgeLane, value: 'x' },
     ])
     expect(res.status).toBe(400)
     expect(body.error?.message).toContain('only command')

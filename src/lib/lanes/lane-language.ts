@@ -12,7 +12,7 @@
  * blank, and an 8-hex lane id is never either answer.
  */
 
-import { laneDisplayName, laneLanguage } from "./lane-display"
+import { laneDisplayName, laneLanguage, type LaneLanguageSettings } from "./lane-display"
 import { isLaneId } from "./lane-id"
 
 /** The identity fields of a lane row (`ProjectLaneView` / `ProjectRecord.lanes`). */
@@ -43,15 +43,20 @@ function notALaneId(value: string | null | undefined, laneId: string): string | 
 /**
  * The language this lane translates into, or `null` when the row records none.
  *
- * `laneLanguage` comes first: the typed `language` column, and for a row that
- * predates it the stored name. A tag or code is used only when that is blank,
- * so editing the language (and leaving the old tag in place) is what the model
- * is told.
+ * Every answer comes from {@link laneLanguage}: the typed column, then
+ * name → tag → code. Settings are not read. An 8-hex lane id is never that
+ * answer.
  */
-export function laneRowLanguage(lane: LaneLanguageRow): string | null {
-  const typed = notALaneId(laneLanguage(lane), lane.id)
-  if (typed) return typed
-  return notALaneId(lane.legacyTag, lane.id) ?? notALaneId(lane.langCode, lane.id)
+export function laneRowLanguage(
+  lane: LaneLanguageRow,
+  settings?: LaneLanguageSettings | null,
+): string | null {
+  const resolved = laneLanguage(lane, {
+    settings,
+    role: lane.role,
+    legacyTag: lane.legacyTag,
+  })
+  return resolved || null
 }
 
 /**
@@ -86,10 +91,18 @@ function rowForTag(
 export function laneLanguageForTag(
   tag: string,
   lanes: readonly LaneLanguageRow[] | null | undefined,
+  settings?: LaneLanguageSettings | null,
 ): string | null {
   const row = rowForTag(tag, lanes)
-  if (row) return laneRowLanguage(row)
-  return tag.trim() || null
+  if (row) return laneRowLanguage(row, settings)
+  // No row: the tag is all a caller has (a server that predates lane rows),
+  // except an 8-hex id, which is never a language. `''` is the former default
+  // lane's tag, not a language, and settings are not consulted.
+  const resolved = laneLanguage(
+    { role: "target", language: null },
+    { settings, role: "target", legacyTag: tag },
+  )
+  return resolved || null
 }
 
 /**

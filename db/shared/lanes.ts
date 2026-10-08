@@ -47,6 +47,7 @@ import { planNewTargetLane, type ExistingLaneIdentity, type NewTargetLaneProblem
 import { laneNameProblem } from "../../src/lib/lanes/lane-name"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import { isLaneId, newLaneId } from "../../src/lib/lanes/lane-id"
+import { grantNewLaneStmt } from "./lane-grants"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
 // A fresh row stores the typed language and NO name or code: both are derived
@@ -434,28 +435,41 @@ export function ensureProjectLaneStmts(
   const kept = existing
     ? planned.filter(({ lane }) => !isDefaultLaneUnderAnotherName(lane.legacyTag ?? null, existing))
     : planned
-  return kept.map(({ lane, position }) => {
+  const stmts: AquillaStatement[] = []
+  for (const { lane, position } of kept) {
     if (lane.role === "source") {
-      return db.prepare(INSERT_SOURCE).bind(
-        lane.id ?? newLaneId(),
-        projectId,
-        lane.language,
-        lane.name ?? null,
-        lane.langCode ?? null,
-        position,
+      stmts.push(
+        db.prepare(INSERT_SOURCE).bind(
+          lane.id ?? newLaneId(),
+          projectId,
+          lane.language,
+          lane.name ?? null,
+          lane.langCode ?? null,
+          position,
+        ),
       )
+      continue
     }
     const legacyTag = lane.legacyTag ?? lane.language
-    return db.prepare(INSERT_TARGET).bind(
-      lane.id ?? newLaneId(),
-      projectId,
-      isLaneId(lane.language) ? "" : lane.language,
-      lane.name ?? null,
-      lane.langCode ?? null,
-      legacyTag,
-      position,
+    stmts.push(
+      db.prepare(INSERT_TARGET).bind(
+        lane.id ?? newLaneId(),
+        projectId,
+        isLaneId(lane.language) ? "" : lane.language,
+        lane.name ?? null,
+        lane.langCode ?? null,
+        legacyTag,
+        position,
+      ),
     )
-  })
+    // AQU-1781: a target lane nobody is granted is invisible to every member
+    // below Maintainer under the read wall. The grant rides the same batch, so
+    // the lane and the grants that make it readable commit together. Keyed by
+    // the tag because the INSERT above upserts: the row the batch ends up with
+    // may be one an earlier writer created.
+    stmts.push(grantNewLaneStmt(db, projectId, { legacyTag }, null))
+  }
+  return stmts
 }
 
 /** Load settings if the caller did not pass them, then apply the lane stmts. */

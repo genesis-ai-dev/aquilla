@@ -14328,6 +14328,7 @@ export function ProjectWorkspace() {
                       // the popover claiming "all caught up" beside a failed pill.
                       records={outboxInspectorRecords}
                       onRetryNow={outboxFlushNow}
+                      projectId={project?.id}
                     />
                   </div>
                 }

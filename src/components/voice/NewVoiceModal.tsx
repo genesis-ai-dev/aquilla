@@ -70,6 +70,7 @@ import {
   inworldDesignPreviewExt,
   isInworldDesignedVoiceId,
 } from "@/lib/audio/inworld-voice-design"
+import { explainVoiceRequestError } from "@/lib/audio/voice-request-error"
 import { publishInworldVoice } from "@/lib/sync/tts"
 import { projectTargetLaneLanguages } from "@/lib/audio/inworld-voices"
 import { needsInworldLanguagePicker, toInworldLanguage } from "@/lib/audio/inworld-languages"
@@ -358,7 +359,7 @@ function NewVoiceModalBody({
             designPreviewAudioId = id
           }
         } catch (e) {
-          setTakeError(e instanceof Error ? e.message : String(e))
+          setTakeError(explainVoiceRequestError(e instanceof Error ? e.message : String(e)))
           setSaving(false)
           return
         }

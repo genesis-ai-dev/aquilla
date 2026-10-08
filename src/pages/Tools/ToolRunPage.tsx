@@ -41,23 +41,23 @@ export function ToolRunPage() {
   return (
     <div className="flex h-dvh flex-col">
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <Button variant="ghost" size="sm" render={<Link to={`/project/${projectId}/tools`} />}>
+        <Button variant="ghost" size="sm" render={<Link to={`/project/${projectId}/extensions`} />}>
           <ArrowLeft className="size-4" aria-hidden />
-          {t("tools.backToTools")}
+          {t("extensions.backToList")}
         </Button>
         {tool && (
           <>
             <h1 className="text-sm font-semibold">{tool.name}</h1>
-            <Badge variant="outline">{t("tools.version", { version: tool.currentVersion })}</Badge>
+            <Badge variant="outline">{t("extensions.version", { version: tool.currentVersion })}</Badge>
           </>
         )}
       </div>
       {missing ? (
-        <p className="p-6 text-sm text-muted-foreground">{t("tools.run.notFound")}</p>
+        <p className="p-6 text-sm text-muted-foreground">{t("extensions.run.notFound")}</p>
       ) : !tool || !session || !project ? (
         <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
           <Spinner />
-          {t("tools.run.loading")}
+          {t("extensions.run.loading")}
         </div>
       ) : (
         <ToolFrame

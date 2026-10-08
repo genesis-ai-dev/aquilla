@@ -82,11 +82,11 @@ export function ToolActivityPanel({
   }
 
   return (
-    <section aria-label={t("tools.activity.heading")} className="mt-3 rounded-md border bg-muted/30 p-3 text-sm">
+    <section aria-label={t("extensions.activity.heading")} className="mt-3 rounded-md border bg-muted/30 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-medium">{t("tools.activity.heading")}</h3>
+        <h3 className="font-medium">{t("extensions.activity.heading")}</h3>
         <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-          {t("tools.activity.since")}
+          {t("extensions.activity.since")}
           <input
             type="datetime-local"
             className="rounded border bg-background px-1 py-0.5 text-foreground"
@@ -99,27 +99,27 @@ export function ToolActivityPanel({
         </label>
         <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
           <RefreshCw className="size-3.5" aria-hidden />
-          {t("tools.activity.refresh")}
+          {t("extensions.activity.refresh")}
         </Button>
       </div>
 
       {error && <p role="alert" className="mt-2 text-destructive">{error}</p>}
       {loading && !activity && <Spinner className="mt-2" />}
       {activity && activity.events.length === 0 && (
-        <p className="mt-2 text-muted-foreground">{t("tools.activity.empty")}</p>
+        <p className="mt-2 text-muted-foreground">{t("extensions.activity.empty")}</p>
       )}
       {activity && activity.events.length > 0 && (
-        <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto" aria-label={t("tools.activity.heading")}>
+        <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto" aria-label={t("extensions.activity.heading")}>
           {[...activity.events].reverse().map((e) => {
             const cell = e.ref ?? e.cellId?.slice(0, 8) ?? ""
             return (
               <li key={e.id} className="flex flex-wrap items-center gap-2 rounded bg-background px-2 py-1" data-testid="tool-activity-row">
                 <span className="font-medium">
                   {e.kind === "target.cell.commit"
-                    ? t("tools.activity.edit", { cell })
+                    ? t("extensions.activity.edit", { cell })
                     : e.kind === "cell.validate"
-                      ? t("tools.activity.validate", { cell })
-                      : t("tools.activity.other", { kind: e.kind, cell })}
+                      ? t("extensions.activity.validate", { cell })
+                      : t("extensions.activity.other", { kind: e.kind, cell })}
                 </span>
                 {e.value !== null && <span className="min-w-0 flex-1 truncate text-muted-foreground">{e.value}</span>}
                 <span className="text-xs text-muted-foreground">{e.author}</span>
@@ -127,12 +127,12 @@ export function ToolActivityPanel({
                 {e.verified ? (
                   <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
                     <BadgeCheck className="size-3.5" aria-hidden />
-                    {t("tools.activity.verified", { version: e.version ?? "?" })}
+                    {t("extensions.activity.verified", { version: e.version ?? "?" })}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-xs text-amber-600">
                     <ShieldAlert className="size-3.5" aria-hidden />
-                    {t("tools.activity.unverified")}
+                    {t("extensions.activity.unverified")}
                   </span>
                 )}
               </li>
@@ -140,16 +140,16 @@ export function ToolActivityPanel({
           })}
         </ul>
       )}
-      {activity?.truncated && <p className="mt-1 text-xs text-muted-foreground">{t("tools.activity.truncated")}</p>}
+      {activity?.truncated && <p className="mt-1 text-xs text-muted-foreground">{t("extensions.activity.truncated")}</p>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" onClick={prepareRevert} disabled={!activity || reverting || activity.events.length === 0}>
           <RotateCcw className="size-3.5" aria-hidden />
-          {t("tools.revert.button")}
+          {t("extensions.revert.button")}
         </Button>
         {pendingPlan && (
           <span role="group" className="flex items-center gap-2">
-            <span className="text-xs">{t("tools.revert.confirm", { count: pendingPlan.commits.length })}</span>
+            <span className="text-xs">{t("extensions.revert.confirm", { count: pendingPlan.commits.length })}</span>
             <Button size="sm" variant="destructive" onClick={() => void confirmRevert()} disabled={reverting}>
               {reverting && <Spinner className="size-3.5" />}
               {t("common.confirm")}
@@ -162,18 +162,18 @@ export function ToolActivityPanel({
         {outcome && (
           <span role="status" className="text-xs">
             {outcome.restored === 0 && outcome.unvalidated === 0 && outcome.plan.skipped.length === 0
-              ? t("tools.revert.nothing")
-              : t("tools.revert.done", { restored: outcome.restored })}
+              ? t("extensions.revert.nothing")
+              : t("extensions.revert.done", { restored: outcome.restored })}
           </span>
         )}
       </div>
       {outcome && outcome.plan.skipped.length > 0 && (
         <div className="mt-2 text-xs" role="status">
-          <p>{t("tools.revert.skippedHeading", { count: outcome.plan.skipped.length })}</p>
+          <p>{t("extensions.revert.skippedHeading", { count: outcome.plan.skipped.length })}</p>
           <ul className="ml-4 list-disc">
             {outcome.plan.skipped.map((s) => (
               <li key={`${s.fileId}:${s.cellId}:${s.targetLang}`}>
-                {t("tools.revert.skippedRow", { cell: s.cellId.slice(0, 8), by: s.by ?? "?" })}
+                {t("extensions.revert.skippedRow", { cell: s.cellId.slice(0, 8), by: s.by ?? "?" })}
               </li>
             ))}
           </ul>

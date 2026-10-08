@@ -9341,9 +9341,9 @@ export function ProjectWorkspace() {
         onClick: () => openOverlay("terminology") },
       { id: "memory", labelKey: "terminology.livingMemory.title" as const, icon: LIVING_MEMORY_ICON, pinned: true,
         onClick: () => openOverlay("memory") },
-      // Aquilla Tools (prototype): sandboxed, agent-built project tools.
-      { id: "tools", labelKey: "tools.title" as const, icon: Blocks, pinned: true,
-        onClick: () => { if (projectId) navigate(`/project/${projectId}/tools`) } },
+      // Smart Extensions (prototype): sandboxed, agent-built project extensions.
+      { id: "tools", labelKey: "extensions.title" as const, icon: Blocks, pinned: true,
+        onClick: () => { if (projectId) navigate(`/project/${projectId}/extensions`) } },
       // Project settings is a header cog beside Import. Audio/Media lens lives
       // in the header EditorModeToggle. Sharing lives in Settings → Members.
       // FRO-272: trash opens a dialog (project_lead+). Pinned in the same

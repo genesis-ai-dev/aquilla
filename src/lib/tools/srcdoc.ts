@@ -12,7 +12,7 @@
  * every network fetch. Production plan: serve tools from a dedicated origin
  * (tools.aquilla.app) with the CSP as a response header, and add that origin
  * to `frame-src` in public/_headers, worker/security-headers.ts and the Tauri
- * CSP; srcdoc then becomes a `src=` to that origin. See docs/TOOLS.md.
+ * CSP; srcdoc then becomes a `src=` to that origin. See docs/SMART-EXTENSIONS.md.
  */
 
 import { TOOL_RUNTIME_SOURCE } from "./runtime-source"

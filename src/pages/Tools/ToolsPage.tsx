@@ -74,7 +74,7 @@ export function ToolsPage() {
       const tool = await installTool(jwt, projectId, { ...candidate.input, grant })
       setCandidate(null)
       await refresh()
-      navigate(`/project/${projectId}/tools/${tool.id}`)
+      navigate(`/project/${projectId}/extensions/${tool.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -114,79 +114,79 @@ export function ToolsPage() {
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" render={<Link to={`/project/${projectId}/editor`} />}>
           <ArrowLeft className="size-4" aria-hidden />
-          {t("tools.backToEditor")}
+          {t("extensions.backToEditor")}
         </Button>
       </div>
       <header>
         <h1 className="flex items-center gap-2 text-xl font-semibold">
           <Blocks className="size-5" aria-hidden />
-          {t("tools.title")}
+          {t("extensions.title")}
           {project && <span className="text-muted-foreground">· {project.name}</span>}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("tools.subtitle")}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{t("extensions.subtitle")}</p>
       </header>
 
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       {jwt && <BuildToolCard projectId={projectId} jwt={jwt} onBuilt={onBuilt} />}
 
-      <section aria-label={t("tools.starters.heading")}>
-        <h2 className="mb-2 text-sm font-semibold">{t("tools.starters.heading")}</h2>
+      <section aria-label={t("extensions.starters.heading")}>
+        <h2 className="mb-2 text-sm font-semibold">{t("extensions.starters.heading")}</h2>
         {STARTERS.map((s) => (
           <div key={s.manifest.name} className="flex items-center gap-3 rounded-lg border bg-card p-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 font-medium">
                 {s.manifest.name}
-                <Badge variant="secondary">{t("tools.starters.badge")}</Badge>
+                <Badge variant="secondary">{t("extensions.starters.badge")}</Badge>
               </div>
               <p className="text-sm text-muted-foreground">{s.manifest.description}</p>
             </div>
             <Button
-              aria-label={`${t("tools.install")}: ${s.manifest.name}`}
+              aria-label={`${t("extensions.install")}: ${s.manifest.name}`}
               onClick={() => setCandidate({ manifest: s.manifest, input: { source: s.source, manifest: s.manifest, origin: "starter" } })}
             >
-              {t("tools.install")}
+              {t("extensions.install")}
             </Button>
           </div>
         ))}
       </section>
 
-      <section aria-label={t("tools.installed.heading")}>
-        <h2 className="mb-2 text-sm font-semibold">{t("tools.installed.heading")}</h2>
+      <section aria-label={t("extensions.installed.heading")}>
+        <h2 className="mb-2 text-sm font-semibold">{t("extensions.installed.heading")}</h2>
         {tools === null ? (
           <Spinner />
         ) : tools.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("tools.installed.empty")}</p>
+          <p className="text-sm text-muted-foreground">{t("extensions.installed.empty")}</p>
         ) : (
           <ul className="space-y-3">
             {tools.map((tool) => (
               <li key={tool.id} className="rounded-lg border bg-card p-3" data-testid="installed-tool" data-tool-name={tool.name}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{tool.name}</span>
-                  <Badge variant="outline">{t("tools.version", { version: tool.currentVersion })}</Badge>
-                  <Badge variant="outline" className="font-mono">{t("tools.codeHash", { hash: tool.codeHash.slice(0, 8) })}</Badge>
+                  <Badge variant="outline">{t("extensions.version", { version: tool.currentVersion })}</Badge>
+                  <Badge variant="outline" className="font-mono">{t("extensions.codeHash", { hash: tool.codeHash.slice(0, 8) })}</Badge>
                   <div className="ml-auto flex gap-2">
-                    <Button size="sm" render={<Link to={`/project/${projectId}/tools/${tool.id}`} />}>
+                    <Button size="sm" render={<Link to={`/project/${projectId}/extensions/${tool.id}`} />}>
                       <Play className="size-3.5" aria-hidden />
-                      {t("tools.open")}
+                      {t("extensions.open")}
                     </Button>
                     <Button size="sm" variant="outline" aria-pressed={activityFor === tool.id} onClick={() => setActivityFor(activityFor === tool.id ? null : tool.id)}>
                       <History className="size-3.5" aria-hidden />
-                      {t("tools.activity.heading")}
+                      {t("extensions.activity.heading")}
                     </Button>
-                    <Button size="sm" variant="ghost" aria-label={`${t("tools.remove")}: ${tool.name}`} onClick={() => void remove(tool)}>
+                    <Button size="sm" variant="ghost" aria-label={`${t("extensions.remove")}: ${tool.name}`} onClick={() => void remove(tool)}>
                       <Trash2 className="size-3.5" aria-hidden />
                     </Button>
                   </div>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{tool.description}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-muted-foreground">{t("tools.grants.label")}:</span>
-                  {tool.grantedScopes.length === 0 && <span className="text-muted-foreground">{t("tools.grants.none")}</span>}
+                  <span className="text-muted-foreground">{t("extensions.grants.label")}:</span>
+                  {tool.grantedScopes.length === 0 && <span className="text-muted-foreground">{t("extensions.grants.none")}</span>}
                   {tool.grantedScopes.map((scope) => (
                     <Badge key={scope} variant="secondary" className="gap-1" data-testid="tool-grant">
                       {scopeLabel(scope)}
-                      <button type="button" aria-label={t("tools.grants.revoke", { scope: scopeLabel(scope) })} onClick={() => void revoke(tool, scope)}>
+                      <button type="button" aria-label={t("extensions.grants.revoke", { scope: scopeLabel(scope) })} onClick={() => void revoke(tool, scope)}>
                         <X className="size-3" aria-hidden />
                       </button>
                     </Badge>

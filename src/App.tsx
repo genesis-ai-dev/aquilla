@@ -269,6 +269,12 @@ function RedirectToProjectMemory({ section }: { section?: string }) {
   return <Navigate to={`${projectMemoryPath(id!, section)}${search}`} replace />
 }
 
+/** Smart Extensions were "Tools" in the first prototype: keep old links working. */
+function RedirectToExtensions() {
+  const { id, toolId } = useParams<{ id: string; toolId?: string }>()
+  return <Navigate to={`/project/${id}/extensions${toolId ? `/${toolId}` : ""}`} replace />
+}
+
 function LazyRoute({ children, fallback = <RouteLoadingFallback /> }: { children: ReactNode; fallback?: ReactNode }) {
   return <Suspense fallback={fallback}>{children}</Suspense>
 }
@@ -454,8 +460,10 @@ function AppRoutes() {
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
         <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
-        <Route path="/project/:id/tools" element={<LazyRoute><ToolsPage /></LazyRoute>} />
-        <Route path="/project/:id/tools/:toolId" element={<LazyRoute><ToolRunPage /></LazyRoute>} />
+        <Route path="/project/:id/extensions" element={<LazyRoute><ToolsPage /></LazyRoute>} />
+        <Route path="/project/:id/extensions/:toolId" element={<LazyRoute><ToolRunPage /></LazyRoute>} />
+        <Route path="/project/:id/tools" element={<RedirectToExtensions />} />
+        <Route path="/project/:id/tools/:toolId" element={<RedirectToExtensions />} />
         <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/voice" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />

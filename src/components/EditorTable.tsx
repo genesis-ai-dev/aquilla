@@ -8724,7 +8724,7 @@ function EditorRow({
             ...(hasInlineTools ? [{
               value: "tools",
               icon: <Blocks className="h-3 w-3" />,
-              label: t("tools.inline.tab"),
+              label: t("extensions.inline.tab"),
               renderContent: () => <InlineToolsTab fileId={cell.fileId} cellId={cell.id} />,
             }] : []),
           ]}

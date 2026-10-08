@@ -9,13 +9,13 @@ export function useScopeLabel(): (scope: ToolScope) => string {
     (scope: ToolScope) => {
       switch (scope) {
         case "read:cells":
-          return t("tools.scope.readCells")
+          return t("extensions.scope.readCells")
         case "read:terms":
-          return t("tools.scope.readTerms")
+          return t("extensions.scope.readTerms")
         case "write:target":
-          return t("tools.scope.writeTarget")
+          return t("extensions.scope.writeTarget")
         case "write:validation":
-          return t("tools.scope.writeValidation")
+          return t("extensions.scope.writeValidation")
       }
     },
     [t],

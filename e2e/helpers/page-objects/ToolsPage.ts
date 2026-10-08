@@ -1,7 +1,7 @@
 import { expect, type FrameLocator, type Locator, type Page } from "@playwright/test"
 
 /**
- * Aquilla Tools (prototype): the Tools page (/project/:id/tools), a mounted
+ * Smart Extensions (prototype): the management page (/project/:id/extensions), a mounted
  * tool's sandboxed frame and its host-side permission prompt.
  */
 export class ToolsPage {
@@ -15,7 +15,7 @@ export class ToolsPage {
     const listed = this.page.waitForResponse(
       (r) => r.request().method() === "GET" && new URL(r.url()).pathname.endsWith(`/projects/${projectId}/tools`),
     )
-    await this.page.goto(`/project/${projectId}/tools`)
+    await this.page.goto(`/project/${projectId}/extensions`)
     expect((await listed).ok()).toBe(true)
   }
 
@@ -30,12 +30,12 @@ export class ToolsPage {
     )
     await dialog.getByRole("button", { name: "Install", exact: true }).click()
     expect((await installed).status()).toBe(201)
-    await this.page.waitForURL(/\/tools\/[0-9a-f-]{36}$/)
+    await this.page.waitForURL(/\/extensions\/[0-9a-f-]{36}$/)
   }
 
   /** The running tool's document (an opaque-origin sandboxed frame). */
   toolFrame(name: string): FrameLocator {
-    return this.page.frameLocator(`iframe[title="${name} (sandboxed tool)"]`)
+    return this.page.frameLocator(`iframe[title="${name} (sandboxed extension)"]`)
   }
 
   permissionPrompt(): Locator {

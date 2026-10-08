@@ -57,7 +57,7 @@ function ToolPicker({ tools, value, onChange }: { tools: ToolSummary[]; value: s
   const t = useT()
   return (
     <select
-      aria-label={t("tools.dock.pick")}
+      aria-label={t("extensions.dock.pick")}
       className="min-w-0 flex-1 rounded border bg-background px-1.5 py-1 text-xs"
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value)}
@@ -83,18 +83,18 @@ export function ToolsDockPanel() {
       <div className="flex items-center gap-1 border-b p-2">
         {panelTools.length > 0 && <ToolPicker tools={panelTools} value={selected} onChange={setPicked} />}
         {selected && (
-          <Button size="icon-xs" variant="ghost" aria-label={t("tools.dock.openFull")} render={<Link to={`/project/${ctx.projectId}/tools/${selected}`} />}>
+          <Button size="icon-xs" variant="ghost" aria-label={t("extensions.open")} render={<Link to={`/project/${ctx.projectId}/extensions/${selected}`} />}>
             <ExternalLink className="size-3.5" />
           </Button>
         )}
-        <Button size="icon-xs" variant="ghost" aria-label={t("tools.dock.manage")} render={<Link to={`/project/${ctx.projectId}/tools`} />}>
+        <Button size="icon-xs" variant="ghost" aria-label={t("extensions.dock.manage")} render={<Link to={`/project/${ctx.projectId}/extensions`} />}>
           <Settings2 className="size-3.5" />
         </Button>
       </div>
       {selected ? (
         <MountedTool key={selected} toolId={selected} mount="panel" className="flex min-h-0 flex-1 flex-col" />
       ) : (
-        <p className="p-3 text-xs text-muted-foreground">{t("tools.dock.empty")}</p>
+        <p className="p-3 text-xs text-muted-foreground">{t("extensions.dock.empty")}</p>
       )}
     </div>
   )
@@ -106,7 +106,7 @@ export function InlineToolsTab({ fileId, cellId }: { fileId: string; cellId: str
   const inlineTools = toolsFor(ctx?.tools ?? [], "inline")
   const [picked, setPicked] = useState<string | null>(null)
   const selected = inlineTools.find((tool) => tool.id === picked)?.id ?? inlineTools[0]?.id ?? null
-  if (!selected) return <p className="text-xs text-muted-foreground">{t("tools.inline.empty")}</p>
+  if (!selected) return <p className="text-xs text-muted-foreground">{t("extensions.inline.empty")}</p>
   return (
     <div className="flex flex-col gap-2" data-testid="tools-inline-tab">
       {inlineTools.length > 1 && <ToolPicker tools={inlineTools} value={selected} onChange={setPicked} />}

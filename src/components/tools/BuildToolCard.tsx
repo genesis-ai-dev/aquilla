@@ -60,29 +60,29 @@ export function BuildToolCard({
   const phaseText = (p: BuildPhase): string => {
     switch (p.kind) {
       case "generating":
-        return t("tools.build.phaseGenerating", { attempt: p.attempt + 1 })
+        return t("extensions.build.phaseGenerating", { attempt: p.attempt + 1 })
       case "linting":
-        return t("tools.build.phaseLinting")
+        return t("extensions.build.phaseLinting")
       case "smoke":
-        return t("tools.build.phaseSmoke")
+        return t("extensions.build.phaseSmoke")
       case "repairing":
-        return t("tools.build.phaseRepairing", { attempt: p.attempt + 1 })
+        return t("extensions.build.phaseRepairing", { attempt: p.attempt + 1 })
       case "done":
-        return t("tools.build.phaseDone", { attempts: p.attempts })
+        return t("extensions.build.phaseDone", { attempts: p.attempts })
       case "failed":
-        return t("tools.build.failed")
+        return t("extensions.build.failed")
     }
   }
 
   return (
-    <section aria-label={t("tools.build.heading")} className="rounded-lg border bg-card p-4">
+    <section aria-label={t("extensions.build.heading")} className="rounded-lg border bg-card p-4">
       <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
         <Hammer className="size-4" aria-hidden />
-        {t("tools.build.heading")}
+        {t("extensions.build.heading")}
       </h2>
       <Textarea
-        aria-label={t("tools.build.heading")}
-        placeholder={t("tools.build.placeholder")}
+        aria-label={t("extensions.build.heading")}
+        placeholder={t("extensions.build.placeholder")}
         value={request}
         onChange={(e) => setRequest(e.target.value)}
         rows={3}
@@ -91,9 +91,9 @@ export function BuildToolCard({
       <div className="mt-2 flex items-center gap-3">
         <Button onClick={() => void build()} disabled={running || request.trim().length === 0}>
           {running && <Spinner className="size-3.5" />}
-          {t("tools.build.submit")}
+          {t("extensions.build.submit")}
         </Button>
-        {last && <span className="text-xs text-muted-foreground">{t("tools.build.cost", { cost: last.cost.toFixed(2) })}</span>}
+        {last && <span className="text-xs text-muted-foreground">{t("extensions.build.cost", { cost: last.cost.toFixed(2) })}</span>}
       </div>
       {phases.length > 0 && (
         <ol className="mt-3 space-y-1 text-sm" aria-live="polite" data-testid="tool-build-progress">

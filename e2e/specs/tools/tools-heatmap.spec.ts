@@ -130,7 +130,7 @@ test("a tool bulk-harmonizes with attribution, and revert-since-T restores every
   await expect(card.getByTestId("tool-grant")).toContainText(["read files and cells", "read the termbase", "edit translations"])
   const activity = await tools.openActivity(TOOL)
   await expect(activity.getByTestId("tool-activity-row")).toHaveCount(3)
-  await expect(activity.getByTestId("tool-activity-row").first()).toContainText("Verified tool write (v1)")
+  await expect(activity.getByTestId("tool-activity-row").first()).toContainText("Verified extension write (v1)")
 
   await tools.revertSince(activity)
   await expect(activity.getByRole("status").first()).toContainText("Reverted 2 cell(s).")

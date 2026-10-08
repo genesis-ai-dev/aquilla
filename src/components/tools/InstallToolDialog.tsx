@@ -35,8 +35,8 @@ export function InstallToolDialog({
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onCancel() }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("tools.installDialog.title", { name: manifest.name })}</DialogTitle>
-          <DialogDescription>{t("tools.installDialog.body")}</DialogDescription>
+          <DialogTitle>{t("extensions.installDialog.title", { name: manifest.name })}</DialogTitle>
+          <DialogDescription>{t("extensions.installDialog.body")}</DialogDescription>
         </DialogHeader>
         <DialogBody>
           <ul className="space-y-2">
@@ -61,7 +61,7 @@ export function InstallToolDialog({
             {blocked.map((scope) => (
               <li key={scope} className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Checkbox checked={false} disabled />
-                {scopeLabel(scope)} · {t("tools.installDialog.blocked")}
+                {scopeLabel(scope)} · {t("extensions.installDialog.blocked")}
               </li>
             ))}
           </ul>
@@ -71,7 +71,7 @@ export function InstallToolDialog({
             {t("common.cancel")}
           </Button>
           <Button onClick={() => onInstall([...checked])} disabled={busy}>
-            {t("tools.install")}
+            {t("extensions.install")}
           </Button>
         </DialogFooter>
       </DialogContent>

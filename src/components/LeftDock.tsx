@@ -95,7 +95,7 @@ const TAB_META: TabMeta[] = [
   { id: "voices", icon: AudioLines, labelKey: "common.voices" },
   { id: "agent", icon: Bot, labelKey: "nav.dock.agentTab" },
   { id: "search", icon: Search, labelKey: "nav.search" },
-  { id: "tools", icon: Blocks, labelKey: "tools.title" },
+  { id: "tools", icon: Blocks, labelKey: "extensions.title" },
 ]
 
 // ---------------------------------------------------------------------------

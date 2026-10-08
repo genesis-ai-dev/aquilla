@@ -50,35 +50,47 @@ describe("laneLanguage", () => {
     ).toBe("")
   })
 
-  it("falls back to settings for the former default lane, then name, and never overrides a typed language (AQU-1593)", () => {
+  it("does not read settings when language is null (AQU-1595)", () => {
     const settings = { sourceLanguage: "English", targetLanguage: "Spanish" }
     expect(
       laneLanguage(
         { role: "target", language: null, name: null },
         { settings, role: "target", legacyTag: "" },
       ),
-    ).toBe("Spanish")
+    ).toBe("")
     expect(
       laneLanguage(
         { role: "target", language: "French", name: null },
         { settings, role: "target", legacyTag: "" },
       ),
     ).toBe("French")
+    expect(
+      laneLanguage(
+        { role: "target", language: null, name: "Bambara" },
+        { settings, role: "target", legacyTag: "" },
+      ),
+    ).toBe("Bambara")
   })
 
-  it("falls back to settings.sourceLanguage for an unbackfilled source lane (AQU-1593)", () => {
+  it("does not read settings.sourceLanguage for a source lane with a null language (AQU-1595)", () => {
     expect(
       laneLanguage(
         { role: "source", language: null, name: "Source" },
         { settings: { sourceLanguage: "Gom" }, role: "source", legacyTag: null },
       ),
-    ).toBe("Gom")
+    ).toBe("Source")
     expect(
       laneLanguage(
         { role: "source", language: "Koine Greek", name: null },
         { settings: { sourceLanguage: "English" }, role: "source", legacyTag: null },
       ),
     ).toBe("Koine Greek")
+    expect(
+      laneLanguage(
+        { role: "source", language: null, name: null },
+        { settings: { sourceLanguage: "Gom" }, role: "source", legacyTag: null },
+      ),
+    ).toBe("")
   })
 })
 

@@ -15,7 +15,7 @@ import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { laneChipLabel } from "./project-lanes"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolio } from "@/lib/frontier/portfolio"
+import { getPortfolio, portfolioTargetLabel } from "@/lib/frontier/portfolio"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -127,7 +127,7 @@ export function AssignedToMe() {
         ])
         if (cancelled) return
         const laneLabels = new Map(
-          portfolio.map((p) => [p.id, p.targetLanguage?.trim() ?? ""]),
+          portfolio.map((p) => [p.id, portfolioTargetLabel(p) ?? ""]),
         )
         setResult({ jwt, orgId: activeOrgId, rows: all, laneLabels, error: null })
       } catch (e) {

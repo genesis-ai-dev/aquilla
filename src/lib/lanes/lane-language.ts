@@ -43,9 +43,9 @@ function notALaneId(value: string | null | undefined, laneId: string): string | 
 /**
  * The language this lane translates into, or `null` when the row records none.
  *
- * Every answer comes from {@link laneLanguage}: the typed column, then the
- * migration fallback when `settings` are passed, then name → tag → code.
- * An 8-hex lane id is never that answer.
+ * Every answer comes from {@link laneLanguage}: the typed column, then
+ * name → tag → code. Settings are not read. An 8-hex lane id is never that
+ * answer.
  */
 export function laneRowLanguage(
   lane: LaneLanguageRow,
@@ -96,8 +96,8 @@ export function laneLanguageForTag(
   const row = rowForTag(tag, lanes)
   if (row) return laneRowLanguage(row, settings)
   // No row: the tag is all a caller has (a server that predates lane rows),
-  // except an 8-hex id, which is never a language. The former default lane
-  // (`''`) still resolves through settings inside `laneLanguage`.
+  // except an 8-hex id, which is never a language. `''` is the former default
+  // lane's tag, not a language, and settings are not consulted.
   const resolved = laneLanguage(
     { role: "target", language: null },
     { settings, role: "target", legacyTag: tag },

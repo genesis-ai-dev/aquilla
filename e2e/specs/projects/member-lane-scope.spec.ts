@@ -103,11 +103,12 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   const bobJwt = await jwtFor("bob")
   const aliceJwt = await jwtFor("alice")
   const bobSettings = await readProjectSettings(bobJwt, projectId)
-  const aliceSettings = await readProjectSettings(aliceJwt, projectId)
-  expect(aliceSettings.targetLanguage).toBe("fr")
-  expect(bobSettings.targetLanguage ?? "").toBe("")
-  // The lane rows are the registry (AQU-1594), so Bob's lane is checked there
+  // Languages are lane rows (AQU-1594 / AQU-1595): the settings blob carries
+  // none, so Alice's lanes are read from the rows. Bob's lane is checked there
   // below. The settings blob must still not hand him Alice's lane.
+  const aliceTargets = (await readProjectLanes(aliceJwt, projectId)).filter((lane) => lane.role === "target")
+  expect(aliceTargets.map((lane) => lane.legacyTag ?? "")).toEqual(expect.arrayContaining(["fr", "es"]))
+  expect(bobSettings.targetLanguage ?? "").toBe("")
   const bobLaneLabels = Array.isArray(bobSettings.targetLanes) ? bobSettings.targetLanes : []
   expect(bobLaneLabels).not.toContain("fr")
   const bobTargets = (await readProjectLanes(bobJwt, projectId)).filter((lane) => lane.role === "target")

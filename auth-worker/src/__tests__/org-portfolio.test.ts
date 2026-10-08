@@ -66,7 +66,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(byId.pb).toMatchObject({ audioCells: 0, recordedMs: 0 })
   })
 
-  it("AQU-523: surfaces the source/target language pair from project_settings, null when unset", async () => {
+  it("AQU-1595: the language pair comes from lane rows, not project_settings", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
@@ -82,14 +82,33 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     // MAX() over the 1:1 settings join must still collapse to one value.
     await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1), ('e2', 1, 'pa', 'file.create', 'wendi', '{}', 2000, 2000, 2), ('e3', 1, 'pb', 'file.create', 'wendi', '{}', 500, 500, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 100, 40, 1000), ('f2', 'pa', 'EXO', 'e2', 100, 10, 2000), ('f3', 'pb', 'MRK', 'e3', 50, 50, 500)").run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES
+        ('srcpa', 'pa', 'source', 'Greek', NULL),
+        ('tgtpa', 'pa', 'target', 'Bambara', '')`,
+    ).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { projects: Array<{ id: string; sourceLanguage: string | null; targetLanguage: string | null; totalCells: number }> }
+    const body = (await res.json()) as {
+      projects: Array<{
+        id: string
+        sourceLanguage?: string | null
+        targetLanguage?: string | null
+        totalCells: number
+        lanes: Array<{ role?: string; name?: string | null; lane: string }>
+      }>
+    }
     const byId = Object.fromEntries(body.projects.map((p) => [p.id, p]))
-    expect(byId.pa).toMatchObject({ sourceLanguage: "Greek", targetLanguage: "Bambara", totalCells: 200 })
-    expect(byId.pb).toMatchObject({ sourceLanguage: null, targetLanguage: null })
-    expect(byId.pc).toMatchObject({ sourceLanguage: null, targetLanguage: null })
+    expect(byId.pa.sourceLanguage).toBeUndefined()
+    expect(byId.pa.targetLanguage).toBeUndefined()
+    expect(byId.pa.totalCells).toBe(200)
+    expect(byId.pa.lanes.find((lane) => lane.role === "source")?.name).toBe("Greek")
+    expect(byId.pa.lanes.find((lane) => lane.role !== "source" && lane.lane === "")?.name).toBe("Bambara")
+    expect(byId.pb.lanes ?? []).toEqual([])
+    expect(byId.pc.lanes ?? []).toEqual([])
+    expect(byId.pb.sourceLanguage).toBeUndefined()
+    expect(byId.pc.targetLanguage).toBeUndefined()
   })
 
   it("AQU-538: per-lane aggregates from file_section_progress file-scope rows (default '' row always present)", async () => {
@@ -106,6 +125,11 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     // Two lanes of the same file. total_count is lane-independent (source rows).
     // '' lane: filled 15, histogram {0:30,1:10,2:5} → validated(>=2) = 5, updated 1500.
     // es lane: filled 2,  histogram {0:43,3:2}      → validated(>=2) = 2, updated 2600.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+        ('deflane1', 'pa', 'target', 'Default', '', 0),
+        ('eslane01', 'pa', 'target', 'es', 'es', 1)`,
+    ).run()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
         ('pa','f1','file','', '',   45, 15, ?, 1, 1500),
@@ -134,12 +158,16 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     // Lane registry carries 'swh' — no translations committed on it yet.
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
-    ).bind(JSON.stringify({ targetLanes: ["swh"] })).run()
+    ).bind(JSON.stringify({ targetLanes: ["swh", "ignored"] })).run()
+    // The lane rows are the list (AQU-1595): a settings-only tag is not a lane.
     // Only the default lane has TRANSLATIONS. AQU-1599: the lane-independent
     // denominator lives on the SOURCE lane's row, which the projection writes
     // for every file, so seed that too — it is what 'swh' borrows from.
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES ('srcpa', 'pa', 'source', 'Source', NULL, 0)",
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+        ('srcpa', 'pa', 'source', 'Source', NULL, 0),
+        ('deflane1', 'pa', 'target', 'Default', '', 1),
+        ('swhlane1', 'pa', 'target', 'swh', 'swh', 2)`,
     ).run()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
@@ -152,10 +180,13 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number; validatedCells: number; lastEditAt: number | null }> }> }
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; role?: string; laneId?: string | null; totalCells: number; filledCells: number; validatedCells: number; lastEditAt: number | null }> }> }
     const pa = body.projects.find((p) => p.id === "pa")!
-    // The source lane is a progress row, never a chip: nobody translates into it.
-    expect(pa.lanes.map((l) => l.lane)).toEqual(["", "swh"])
+    // The source lane is a progress row, never a chip: nobody translates into
+    // it. It rides along in the payload as role 'source' (AQU-1595) so the
+    // language pair is read from the row, and the chips skip it.
+    expect(pa.lanes.filter((l) => l.role !== "source").map((l) => l.lane)).toEqual(["", "swh"])
+    expect(pa.lanes.filter((l) => l.role === "source").map((l) => l.laneId)).toEqual(["srcpa"])
     const swh = pa.lanes.find((l) => l.lane === "swh")!
     // Denominator borrowed from the source lane's row; nothing translated yet.
     expect(swh).toMatchObject({ totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null })
@@ -187,9 +218,10 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number }> }>
+      projects: Array<{ id: string; lanes: Array<{ lane: string; role?: string; totalCells: number; filledCells: number }> }>
     }
-    const lanes = body.projects.find((p) => p.id === "pa")!.lanes
+    // The source lane rides along as role 'source' (AQU-1595); the chips are the rest.
+    const lanes = body.projects.find((p) => p.id === "pa")!.lanes.filter((l) => l.role !== "source")
     // 'swh' has a denominator although the ONLY lane with progress rows is the
     // former default one: the source lane's row holds it, so nothing about that
     // lane — archiving it included — can take it away.
@@ -211,7 +243,8 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     await env.AQUILLA_PG.prepare(
       `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
         ('srcpa', 'pa', 'source', 'Source', NULL, 0),
-        ('deflane', 'pa', 'target', 'Bambara', '', 1)`,
+        ('deflane', 'pa', 'target', 'Bambara', '', 1),
+        ('swhlane', 'pa', 'target', 'Swahili', 'swh', 2)`,
     ).run()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
@@ -260,6 +293,9 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, approved_count, last_edit_at) VALUES ('f1', 'pa', 'GEN', 'e1', 10, 3, 1000)").run()
     await env.AQUILLA_PG.prepare(
+      "INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES ('deflane1', 'pa', 'target', 'Default', '')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
       `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
         ('pa','f1','file','', '', 10, 4, ?, 1, 1200)`,
     ).bind(JSON.stringify({ "0": 6, "1": 4 })).run()
@@ -300,7 +336,8 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(byLane.sw.archived).toBe(true)
     expect(byLane.fr.archived).toBeUndefined()
     const pb = body.projects.find((p) => p.id === "pb")!
-    expect(pb.lanes.find((l) => l.lane === "sw")?.archived).toBe(true)
+    // settings.archivedLanes is not a lane. The sw row's archived_at is null.
+    expect(pb.lanes.find((l) => l.lane === "sw")?.archived).toBeUndefined()
     expect(pb.lanes.find((l) => l.lane === "")?.archived).toBeUndefined()
   })
 
@@ -346,11 +383,12 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { projects: Array<{ id: string; lanes: Array<{ lane: string; name?: string | null }> }> }
     const pa = body.projects.find((p) => p.id === "pa")!
-    expect(pa.lanes.map((l) => l.lane)).toEqual(["", "French"])
+    // French is only in settings.targetLanes. The lane row is the list.
+    expect(pa.lanes.map((l) => l.lane)).toEqual([""])
     expect(pa.lanes.find((l) => l.lane === "")?.name).toBe("Spanish")
   })
 
-  it("AQU-1473: a primary stored as a language code still collapses onto the default lane", async () => {
+  it("AQU-1595: two lanes of one language stay two lanes", async () => {
     await seedUser(1, "wendi")
     await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
@@ -358,12 +396,18 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_settings (project_id, settings) VALUES ('pa', ?)",
     ).bind(JSON.stringify({ targetLanguage: "es", targetLanes: ["Spanish"] })).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, language, legacy_tag, position) VALUES
+        ('deflane1', 'pa', 'target', 'Spanish', 'es', '', 0),
+        ('eslane01', 'pa', 'target', 'Spanish', 'Spanish', 'es', 1)`,
+    ).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { projects: Array<{ id: string; lanes?: Array<{ lane: string }> }> }
+    const body = (await res.json()) as { projects: Array<{ id: string; lanes?: Array<{ lane: string; laneId?: string | null }> }> }
     const pa = body.projects.find((p) => p.id === "pa")!
-    expect(pa.lanes ?? []).toEqual([])
+    expect(pa.lanes?.map((lane) => lane.laneId)).toEqual(["deflane1", "eslane01"])
+    expect(pa.lanes?.map((lane) => lane.lane)).toEqual(["", "es"])
   })
 
   it("AQU-490: validatedAudioCells counts votes against the threshold, distinct from coverage", async () => {
@@ -648,11 +692,10 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, "2026-09-01", 2, 1, 2, 1, 0, 99, 99, 99, 99]])
     // Driven FROM projects and left-joined to its settings, so a project with
     // no settings row still inherits the org's structural-cell answer.
-    const settingsQuery = preparedQueries.find((query) => query.includes("ps.target_lanes"))
+    const settingsQuery = preparedQueries.find((query) => query.includes("ps.validation_count AS validation_count"))
     expect(settingsQuery).toContain("ps.validation_count")
-    expect(settingsQuery).toContain("ps.target_lanes")
+    expect(settingsQuery).not.toContain("ps.target_lanes")
     expect(settingsQuery).toContain("COALESCE(ps.count_structural, os.count_structural, 'true')")
-    // Still reads the generated columns rather than parsing the blob.
     expect(settingsQuery).not.toContain("ps.settings AS settings")
   })
 
@@ -1199,8 +1242,6 @@ describe("AQU-1421 portfolio lane visibility", () => {
         validatedCells: 0,
         aiDraftedCells: 1,
         lastEditAt: 1000,
-        targetLanguage: null,
-        sourceLanguage: null,
         audioCells: 1,
         unitsTotal: 1,
       })
@@ -1212,7 +1253,6 @@ describe("AQU-1421 portfolio lane visibility", () => {
         totalCells: 80,
         aiDraftedCells: 5,
         lastEditAt: 9000,
-        targetLanguage: "Spanish",
         audioCells: 1,
         unitsTotal: 1,
       })
@@ -1352,8 +1392,8 @@ describe("AQU-1421 portfolio lane visibility", () => {
     expect(translator).toMatchObject({
       totalCells: 80,
       aiDraftedCells: 5,
-      targetLanguage: "Spanish",
     })
+    expect(translator.lanes.find((lane) => lane.lane === "")?.name).toBe("Spanish")
   })
 
   // The wall asks one question per project: is this caller a Maintainer on it,
@@ -1377,7 +1417,8 @@ describe("AQU-1421 portfolio lane visibility", () => {
       // (AD-12 max-wins), and the SQL totals come back with the lanes.
       await sql("UPDATE group_project_grants SET role_level = 600 WHERE group_id = 1 AND project_id = 'pa'")
       expect(await lanes()).toEqual(["", "es"])
-      expect(await rowFor(2)).toMatchObject({ totalCells: 80, aiDraftedCells: 5, targetLanguage: "Spanish" })
+      expect(await rowFor(2)).toMatchObject({ totalCells: 80, aiDraftedCells: 5 })
+      expect((await rowFor(2)).lanes.find((lane) => lane.lane === "")?.name).toBe("Spanish")
 
       // And a direct Maintainer row does it with the team back at Contributor.
       await sql("UPDATE group_project_grants SET role_level = 400 WHERE group_id = 1 AND project_id = 'pa'")

@@ -246,6 +246,13 @@ describe("subscribed termbase concepts (AQU-1715)", () => {
 
   it("drafts without subscribed terms, and says so, when the termbase read fails", async () => {
     await seedSubscription()
+    // AQU-1595: the source language is read off the lane row, not the blob.
+    await db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+         VALUES ('consumsrc', 'consumer', 'source', 'English', NULL, 0)`,
+      )
+      .run()
     await seedConcept("tb", { id: "grace", sourceTerm: "grace", renderings: [{ rendering: "gracia", status: "preferred" }] })
     const conceptsDown = {
       prepare: (query: string) => {

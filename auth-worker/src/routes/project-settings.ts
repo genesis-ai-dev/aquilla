@@ -79,6 +79,11 @@ import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shar
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
+import {
+  includesRetiredLaneSettings,
+  preserveRetiredLaneSettings,
+  RETIRED_LANE_SETTINGS_MESSAGE,
+} from "../../../db/shared/retired-lane-settings"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -287,12 +292,20 @@ projectSettings.on(
 
     const role = await resolveProjectRole(c.env, user, projectId)
     if (!role) return c.json({ error: "no access to project" }, 403)
+    // AQU-1595: the four language keys are lane rows, not settings. The same
+    // list and message the external commands use. An echo of a stored key is
+    // still "includes" — the client omits them, and the write below copies the
+    // stored values back so the blob is not rewritten.
+    if (includesRetiredLaneSettings(body.settings)) {
+      return c.json({ error: RETIRED_LANE_SETTINGS_MESSAGE }, 400)
+    }
     // AQU-1750: the caller's read-wall view, the same one its GET used. It
     // decides what the write may change and what every response may show.
     const { visible, lanes } = await visibleTagsForMember(
       c.env.AQUILLA_PG, c.env.LANE_READ_WALL, projectId, user.id, role.level,
     )
-    let settings = body.settings
+    const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    let settings = preserveRetiredLaneSettings(stored.settings, body.settings)
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
       // AQU-822 / AQU-1086: below the maintainer floor, the ONLY writes
       // allowed are a terminology-only one (gated by the org's configured
@@ -304,11 +317,12 @@ projectSettings.on(
       // The scopes are tested in this order because a no-op write (nothing
       // changed) satisfies both vacuously; keeping terminology first preserves
       // the pre-AQU-1086 behaviour for that case exactly.
-      const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
       // AQU-1750: behind the read wall this caller's body is an echo of a
       // filtered GET. Put back the lanes and primary language it could not
       // see before diffing, so the echo neither deletes them nor turns a
-      // one-key carve-out write into a language write. A client's
+      // one-key carve-out write into a language write. The retired keys were
+      // already copied back from the stored row above (AQU-1595), so for them
+      // this is a no-op; it stays as the wall's own guard. A client's
       // ifMatchVersion comes from an earlier read, so it is never newer than
       // `stored`: the version guard below saves onto this row or answers 409.
       const restored = restoreHiddenLaneSettings(stored.settings, settings, visible, lanes)
@@ -411,7 +425,6 @@ projectSettings.on(
     if (rawEnrichments !== undefined) {
       const problem = validateSettingsKeyValue("bibleEnrichments", rawEnrichments)
       if (problem) {
-        const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
         const before = stored.settings.bibleEnrichments
         if (JSON.stringify(before) !== JSON.stringify(rawEnrichments)) {
           return c.json({ error: problem }, 400)

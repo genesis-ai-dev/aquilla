@@ -264,9 +264,7 @@ async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boole
     import("@/lib/offline/offline-reads"),
     import("@/lib/offline/schema"),
   ])
-  // A store that won't open (e.g. a newer build owns it — see
-  // generation-guard.ts) has no ready projects: fall back to IndexedDB rather
-  // than lose the write. The failure is memoized, so warn once, not per write.
+  // Unopenable store (e.g. newer build owns it): queue in IndexedDB. Boot failure is memoized, so warn once.
   const store = await getOfflineStore().catch((error: unknown) => {
     if (!warnedOfflineStoreUnavailable) {
       warnedOfflineStoreUnavailable = true

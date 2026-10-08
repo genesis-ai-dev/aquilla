@@ -1,44 +1,7 @@
-// Keeps an older build's hands off offline data a newer build wrote.
-//
-// LiveStore rebuilds its state db from the eventlog whenever the schema hash
-// changes, and skips events it doesn't recognise. So after a rollback (or an
-// older build installed over a newer one) the old build would quietly drop
-// whatever the newer events carried — queued edits included — while still
-// trusting the newer build's sync cursors, then append its own events to the
-// same eventlog. Updating again wouldn't bring the dropped edits back cleanly.
-//
-// Instead, every build records the highest OFFLINE_DATA_GENERATION that has
-// opened this device's store, and a build older than that refuses to open it.
-// The app then behaves like the browser SPA (server reads, IndexedDB outbox)
-// until the user updates; the newer data stays untouched for that build.
-//
-// The marker is a file at the OPFS root, beside (not inside) LiveStore's
-// `livestore-<STORE_ID>@<format>` directory: clearing the site's data removes
-// both, but deleting only the store directory (LiveStore's resetPersistence,
-// or any recovery that drops it) leaves the marker behind — such a path must
-// also remove GENERATION_MARKER_FILE, or older builds keep refusing an empty
-// store.
-//
-// The marker is claimed before the store boots, so a newer build that crashes
-// on its first boot still locks older builds out. That's deliberate: the
-// newer build may have written before it crashed.
-//
-// Known gap, accepted: if the newer build was installed with edits still
-// queued (DesktopUpdatePrompt's "stuck" path) and the user then runs an older
-// one, those edits wait in the refused store until the next update. Online
-// edits the older build makes to the same cells win the head CAS meanwhile,
-// so the queued ones come back as conflicts (ConflictToast) to re-apply by
-// hand — logged server-side, not lost. The updater never downgrades, so
-// this needs a manually run old installer, and projects aren't shared that
-// way. If that changes, the newer build could record its pending projects in
-// the marker so the older build can say so (or block editing them).
-//
-// Only a positive "newer" reading refuses: a marker that can't be read fails
-// open, rather than shutting offline mode off for good. It is left as it is,
-// though — overwriting it could lower a newer build's claim.
+// Older builds must not open newer offline data: LiveStore would skip unknown events, queued edits included.
+// Accepted gap: edits queued before a manual downgrade wait (and may conflict) until the next update; see PR #1279.
 import { OFFLINE_DATA_GENERATION } from "./schema"
 
-/** Thrown by getOfflineStore() when this device's offline data comes from a newer build. */
 export class NewerOfflineDataError extends Error {
   readonly storedGeneration: number
   readonly buildGeneration: number
@@ -58,6 +21,7 @@ export interface GenerationMarker {
   write: (generation: number) => Promise<void>
 }
 
+// Sits beside LiveStore's store dir, not in it: deleting only that dir must delete this too.
 export const GENERATION_MARKER_FILE = "aquilla-offline.generation"
 
 export const opfsGenerationMarker: GenerationMarker = {
@@ -84,11 +48,6 @@ export const opfsGenerationMarker: GenerationMarker = {
   },
 }
 
-/**
- * Claims this device's offline data for this build before the store boots:
- * throws {@link NewerOfflineDataError} if a newer build has opened it, else
- * raises the marker to this build's generation (never lowers it).
- */
 export async function claimOfflineGeneration(
   marker: GenerationMarker = opfsGenerationMarker,
   buildGeneration: number = OFFLINE_DATA_GENERATION,
@@ -97,7 +56,7 @@ export async function claimOfflineGeneration(
   try {
     stored = await marker.read()
   } catch (error) {
-    // Don't rewrite it: an unreadable marker may hold a newer build's claim.
+    // Fail open, but don't overwrite: it may hold a newer build's claim.
     console.warn("[offline] couldn't read the offline data generation marker — opening the store anyway", error)
     return
   }

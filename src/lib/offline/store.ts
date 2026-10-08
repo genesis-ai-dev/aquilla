@@ -46,10 +46,7 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
 
 let storePromise: Promise<Store<typeof schema>> | undefined
 
-/**
- * Boots (once) and returns the offline store. Memoized — repeat calls return the same promise/instance.
- * Rejects with NewerOfflineDataError when a newer build owns this device's offline data (see generation-guard.ts).
- */
+/** Boots (once) and returns the offline store. Memoized — repeat calls return the same promise/instance. */
 export function getOfflineStore(
   createAdapter: CreateOfflineAdapter = defaultCreateAdapter,
   generationMarker: GenerationMarker = opfsGenerationMarker,
@@ -57,6 +54,7 @@ export function getOfflineStore(
   if (!isTauriRuntime()) {
     return Promise.reject(new Error("getOfflineStore() is only available in the Tauri desktop app"))
   }
+  // Claim before boot: a newer build that crashes mid-boot may already have written.
   storePromise ??= claimOfflineGeneration(generationMarker)
     .then(() => createAdapter())
     .then((adapter) => createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }))

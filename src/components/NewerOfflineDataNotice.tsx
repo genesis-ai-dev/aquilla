@@ -6,14 +6,7 @@ import { NewerOfflineDataError } from "@/lib/offline/generation-guard"
 
 const NEWER_OFFLINE_DATA_TOAST_ID = "offline-newer-data"
 
-/**
- * Invisible mount: tells the user when this build left the device's offline
- * data alone because a newer build wrote it (src/lib/offline/generation-guard.ts).
- * The app keeps working online meanwhile — edits go through the IndexedDB
- * outbox — and DesktopUpdatePrompt offers the update, which brings the data back.
- *
- * Rendered alongside the other invisible offline mounts in App.tsx.
- */
+/** Invisible mount: tells the user to update; DesktopUpdatePrompt offers the update itself. */
 export function NewerOfflineDataNotice(): null {
   const { error } = useOfflineStore()
   const t = useT()

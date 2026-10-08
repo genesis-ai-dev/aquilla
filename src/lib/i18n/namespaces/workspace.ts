@@ -44,8 +44,7 @@ export const workspace = defineNamespace({
     // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
-    // Tauri offline mode: a newer app version saved this device's offline
-    // data, so this older one leaves it alone (src/lib/offline/generation-guard.ts).
+    // Tauri: a newer build owns the offline data (src/lib/offline/generation-guard.ts).
     "workspace.offline.newerDataToast": "Your offline projects were saved by a newer version of Aquilla. Update the app to use them — until then, changes save only while you're online.",
     // Tauri desktop: a downloaded app update, held until the offline queue has
     // reached the server (src/components/DesktopUpdatePrompt.tsx).

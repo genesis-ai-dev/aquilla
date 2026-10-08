@@ -43,7 +43,7 @@ describe("claimOfflineGeneration", () => {
 
   it("opens anyway when the marker can't be read, without overwriting it", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
-    // Unreadable to this build, but it may still be a newer build's claim.
+    // Unreadable, but may be a newer build's claim.
     const marker = memoryMarker(3)
     marker.read = async () => {
       throw new Error("garbage")

@@ -7,7 +7,8 @@
 
 import { readProjectConcepts, type StoredConcept } from "../../concepts-read"
 import { AliasMap } from "../compress"
-import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { resolveLane, resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { renderingsForLane } from "../../../../../src/lib/terminology/rendering-lane"
 import { notHiddenSql } from "../../hidden-cells-scope"
 import { clip } from "./read"
 import type { SearchHit, ToolOutcome } from "./types"
@@ -154,11 +155,19 @@ function termSnippet(t: StoredConcept): string {
 async function searchTerms(db: AquillaDb, q: string, ctx: SearchContext, limit: number): Promise<SearchHit[]> {
   const needle = q.toLowerCase()
   const hits: SearchHit[] = []
+  const empty = await resolveLane(db, ctx.projectId, { targetLang: "" })
+  const active = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
   for (const term of await readProjectConcepts(db, ctx.projectId)) {
+    const renderings = !empty.laneId
+      ? term.renderings
+      : !active.laneId
+        ? []
+        : renderingsForLane(term.renderings, active.laneId, empty.laneId)
+    const visible = renderings === term.renderings ? term : { ...term, renderings }
     if (hits.length >= limit) break
-    const text = [term.sourceTerm, ...term.renderings.map((r) => r.rendering), term.notes ?? ""]
+    const text = [visible.sourceTerm, ...visible.renderings.map((r) => r.rendering), visible.notes ?? ""]
     if (text.some((s) => s.toLowerCase().includes(needle))) {
-      hits.push({ cellId: "", side: "terms", snippet: termSnippet(term).slice(0, 200) })
+      hits.push({ cellId: "", side: "terms", snippet: termSnippet(visible).slice(0, 200) })
     }
   }
   return hits

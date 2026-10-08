@@ -71,15 +71,11 @@ async function seedSharedCells(
   count: number,
 ): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, $3::text || '-' || g, 'source', '', 'Verse ' || g, 'hsrc-' || $3::text || '-' || g, 'lead', 1
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at) SELECT $1, $2, $3::text || '-' || g, 'source', 'Verse ' || g, 'hsrc-' || $3::text || '-' || g, 'lead', 1 FROM generate_series(1, $4::int) g`,
     [HOST, hostFile, book, count],
   )
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, $3::text || '-' || g, 'target', '', 'Verset ' || g, 'dtgt-' || $3::text || '-' || g, 'translator', 1
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at) SELECT $1, $2, $3::text || '-' || g, 'target', 'Verset ' || g, 'dtgt-' || $3::text || '-' || g, 'translator', 1 FROM generate_series(1, $4::int) g`,
     [DONOR, donorFile, book, count],
   )
 }
@@ -87,9 +83,7 @@ async function seedSharedCells(
 /** Donor translations of cells the host does not have — reported as skipped. */
 async function seedDonorOnlyCells(t: TestDb, donorFile: string, count: number): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, 'orphan-' || g, 'target', '', 'Orphelin ' || g, 'dtgt-orphan-' || g, 'translator', 1
-       FROM generate_series(1, $3::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at) SELECT $1, $2, 'orphan-' || g, 'target', 'Orphelin ' || g, 'dtgt-orphan-' || g, 'translator', 1 FROM generate_series(1, $3::int) g`,
     [DONOR, donorFile, count],
   )
 }
@@ -101,11 +95,12 @@ interface LaneFileRow {
 
 async function hostLaneFiles(t: TestDb): Promise<LaneFileRow[]> {
   const r = await t.pg.query<LaneFileRow>(
-    `SELECT file_id, COUNT(*)::int AS cells
-       FROM cells
-      WHERE project_id = $1 AND side = 'target' AND target_lang = $2
-      GROUP BY file_id
-      ORDER BY file_id`,
+    `SELECT c.file_id, COUNT(*)::int AS cells
+       FROM cells c
+       JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1 AND c.side = 'target' AND l.legacy_tag = $2
+      GROUP BY c.file_id
+      ORDER BY c.file_id`,
     [HOST, LANE],
   )
   return r.rows
@@ -171,9 +166,12 @@ describe("mergeSibling — a donor past what one statement can carry", () => {
       // count — first and last cell of the larger file, i.e. both ends of the
       // chunked write.
       const ends = await t.pg.query<{ cell_id: string; value: string; event_id: string; source_event_id: string }>(
-        `SELECT cell_id, value, event_id, source_event_id FROM cells
-          WHERE project_id = $1 AND side = 'target' AND target_lang = $2 AND cell_id IN ('mat-1', 'mat-3500')
-          ORDER BY cell_id`,
+        `SELECT c.cell_id, c.value, c.event_id, c.source_event_id
+           FROM cells c
+           JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+          WHERE c.project_id = $1 AND c.side = 'target' AND l.legacy_tag = $2
+            AND c.cell_id IN ('mat-1', 'mat-3500')
+          ORDER BY c.cell_id`,
         [HOST, LANE],
       )
       expect(ends.rows).toEqual([
@@ -203,7 +201,9 @@ describe("mergeSibling — a donor past what one statement can carry", () => {
       expect(pending.rows).toHaveLength(0)
       // The host's default lane and the donor are untouched.
       const hostDefault = await t.pg.query(
-        `SELECT 1 FROM cells WHERE project_id = $1 AND side = 'target' AND target_lang = ''`,
+        `SELECT 1 FROM cells c
+           JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+          WHERE c.project_id = $1 AND c.side = 'target' AND l.role = 'target' AND l.legacy_tag = ''`,
         [HOST],
       )
       expect(hostDefault.rows).toHaveLength(0)

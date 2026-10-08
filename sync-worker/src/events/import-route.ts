@@ -38,6 +38,7 @@ import {
   type PersistedEvent,
 } from './event-projection'
 import { ensureBlankTargetBridgeStmt } from '../../../db/shared/lanes'
+import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
@@ -829,6 +830,10 @@ export async function handleBulkImportRequest(
     // same batch. A project that already has any target lane inserts nothing.
     if (targetEvents.some((event) => laneOfEvent(event.kind, event.payload) === '')) {
       stmts.push(ensureBlankTargetBridgeStmt(db, body.projectId))
+      // AQU-1781: that bridge is a brand new target lane on a project that had
+      // none, so no member below Maintainer holds a grant for it. Grant it in
+      // the same batch, or the import lands in a lane only Maintainers can read.
+      stmts.push(grantNewLaneStmt(db, body.projectId, { legacyTag: '' }, null))
     }
     for (let i = 0; i < targetEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkTargetCellCommitStmt(db, targetEvents.slice(i, i + BULK_ROWS)))

@@ -65,16 +65,14 @@ async function seedCell(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'source', '', 'lnsource', ?, ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at) VALUES (?, ?, ?, 'source', 'lnsource', ?, ?, 0)`,
     )
     .bind(PROJECT, FILE, cellId, `source ${cellId}`, `ev-s-${cellId}`)
     .run()
   for (const t of opts.targets ?? []) {
     await db
       .prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, validated, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'target', '', ?, ?, ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, validated, event_id, last_edit_at) VALUES (?, ?, ?, 'target', ?, ?, ?, ?, 0)`,
       )
       .bind(PROJECT, FILE, cellId, t.laneId, t.value, t.validated ?? 0, `ev-t-${cellId}-${t.laneId}`)
       .run()
@@ -233,98 +231,5 @@ describe("the drafts read takes a lane id", () => {
     expect((await drafts(jwt, `laneId=${LANE_UNTAGGED}`)).map((d) => d.text)).toEqual(["runasimipi"])
     // The id wins over a tag naming the other lane.
     expect((await drafts(jwt, `laneId=${LANE_UNTAGGED}&targetLang=`)).map((d) => d.text)).toEqual(["runasimipi"])
-  })
-})
-
-/**
- * AQU-1610: the Workers deploy separately from migration 0151, in either
- * order, so for one window the running code meets the OTHER world's indexes.
- * A QA walk on the preview (shared development database, un-migrated) caught
- * exactly that: every staged draft failed with *"there is no unique or
- * exclusion constraint matching the ON CONFLICT specification"* and the run
- * reported zero proposals.
- *
- * These rebuild the three live-row indexes in their PRE-0151 shape and then
- * run the same writers, so the fallback cannot rot.
- */
-describe("the writers survive a database migration 0151 has not reached", () => {
-  beforeEach(async () => {
-    await db.prepare("DROP INDEX IF EXISTS contextual_drafts_live").run()
-    await db
-      .prepare(
-        `CREATE UNIQUE INDEX contextual_drafts_live
-           ON contextual_drafts(project_id, file_id, cell_id, target_lang)
-         WHERE status = 'proposed'`,
-      )
-      .run()
-    await db.prepare("DROP INDEX IF EXISTS scene_briefs_live").run()
-    await db
-      .prepare(
-        `CREATE UNIQUE INDEX scene_briefs_live
-           ON scene_briefs(project_id, file_id, start_cell_id, end_cell_id, target_lang)
-         WHERE status = 'approved'`,
-      )
-      .run()
-    await db.prepare("DROP INDEX IF EXISTS contextual_runs_active").run()
-    await db
-      .prepare(
-        `CREATE UNIQUE INDEX contextual_runs_active
-           ON contextual_runs(project_id, file_id, target_lang)
-         WHERE status IN ('running','pausing','paused','parked','waiting')`,
-      )
-      .run()
-  })
-
-  it("stages drafts rather than failing the ON CONFLICT specification", async () => {
-    await seedCell("c1")
-    const run = await createRun(db, { projectId: PROJECT, fileId: FILE, laneId: LANE_DEFAULT })
-    if (run.status !== "ok") throw new Error("unreachable")
-
-    const staged = await insertDrafts(db, {
-      projectId: PROJECT, fileId: FILE, runId: run.run.id,
-      drafts: [{ cellId: "c1", text: "en español" }],
-    })
-    expect(staged.map((d) => d.text)).toEqual(["en español"])
-    expect(await countDrafts(db, PROJECT, FILE, { laneId: LANE_DEFAULT })).toMatchObject({ proposed: 1 })
-
-    // A re-propose still supersedes rather than colliding.
-    const again = await insertDrafts(db, {
-      projectId: PROJECT, fileId: FILE, runId: run.run.id,
-      drafts: [{ cellId: "c1", text: "otra vez" }],
-    })
-    expect(again.map((d) => d.text)).toEqual(["otra vez"])
-  })
-
-  it("approves a sibling lane's scene brief rather than colliding with the holder it cannot see", async () => {
-    const spanish = await proposeSceneBrief(db, {
-      projectId: PROJECT, fileId: FILE, startCellId: "c1", endCellId: "c2",
-      laneId: LANE_DEFAULT, construal: "Spanish reading",
-    })
-    const quechua = await proposeSceneBrief(db, {
-      projectId: PROJECT, fileId: FILE, startCellId: "c1", endCellId: "c2",
-      laneId: LANE_UNTAGGED, construal: "Quechua reading",
-    })
-    if (spanish.status !== "ok" || quechua.status !== "ok") throw new Error("unreachable")
-    expect((await reviewSceneBrief(db, { id: spanish.brief.id, action: "approve" })).status).toBe("ok")
-
-    // Both lanes spell their tag '', so on this database the span key cannot
-    // tell them apart. Archiving by lane_id would leave the Spanish brief in
-    // the slot and the approve would hit the unique index; archiving by the
-    // key actually in force supersedes it, which is the pre-0151 behaviour
-    // this window has to keep — a refusal here is a run that cannot finish.
-    expect((await reviewSceneBrief(db, { id: quechua.brief.id, action: "approve" })).status).toBe("ok")
-    const approved = await listSceneBriefs(db, PROJECT, { status: "approved" })
-    expect(approved.map((b) => b.construal)).toEqual(["Quechua reading"])
-  })
-
-  it("reports the former default lane's run as active_exists, not a database error", async () => {
-    const first = await createRun(db, { projectId: PROJECT, fileId: FILE, laneId: LANE_DEFAULT })
-    if (first.status !== "ok") throw new Error("unreachable")
-    // Both lanes spell their tag '', and the pre-0151 index is keyed on it, so
-    // the second lane's run is refused by the database. The caller still gets
-    // the domain answer rather than a raw constraint error — the honest one
-    // for this database, which cannot hold both runs until 0151 lands.
-    const second = await createRun(db, { projectId: PROJECT, fileId: FILE, laneId: LANE_UNTAGGED })
-    expect(second).toEqual({ status: "active_exists", runId: first.run.id })
   })
 })

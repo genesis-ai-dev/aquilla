@@ -34,6 +34,7 @@ import {
 import { contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
 import { assignDeclaredLanguages, readDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { laneIdResolveFromColSql } from './lane-id-sql'
+import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { ROLE } from './role-policy'
 import type { EventPayloads } from './types'
@@ -589,13 +590,13 @@ function buildGatedSourceUpsert(
   binds.push(fileClaim.projectId, fileClaim.fileId, fileClaim.cellId, fileClaim.parentKey, fileEventId)
   return db.prepare(
     `INSERT INTO cells (
-       project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+       project_id, file_id, cell_id, side, value, value_html, type,
        canonical_ref, anchor_cell_id, event_id, source_event_id,
        last_editor, last_edit_at, validated, word_count, content_hash,
        start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
        lane_id
      )
-     SELECT v.project_id, v.file_id, v.cell_id, 'source', '', v.value, v.value_html, v.type,
+     SELECT v.project_id, v.file_id, v.cell_id, 'source', v.value, v.value_html, v.type,
        v.canonical_ref, v.anchor_cell_id, v.event_id, NULL,
        v.author, v.server_ts::bigint, 0, v.word_count::integer, v.content_hash,
        v.start_ms::bigint, v.end_ms::bigint, v.medium, v.sequence_index::double precision,
@@ -660,13 +661,13 @@ function buildTargetEventInsert(
          SELECT 1 FROM cells source
           WHERE source.project_id = v.project_id AND source.file_id = v.file_id
             AND source.cell_id = v.cell_id AND source.side = 'source'
-            AND source.target_lang = '' AND source.event_id = v.parent_id
+            AND source.event_id = v.parent_id
        )
        AND NOT EXISTS (
          SELECT 1 FROM cells target
           WHERE target.project_id = v.project_id AND target.file_id = v.file_id
             AND target.cell_id = v.cell_id AND target.side = 'target'
-            AND target.target_lang = v.target_lang
+            AND target.lane_id = ${laneIdResolveFromColSql('target', 'v.project_id', 'v.target_lang')}
        )
      ON CONFLICT (id) DO NOTHING`,
   ).bind(...binds)
@@ -692,12 +693,12 @@ function buildGatedTargetInsert(
   binds.push(fileClaim.projectId, fileClaim.fileId, fileClaim.cellId, fileClaim.parentKey, fileEventId)
   return db.prepare(
     `INSERT INTO cells (
-       project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+       project_id, file_id, cell_id, side, value, value_html, type,
        canonical_ref, anchor_cell_id, event_id, source_event_id,
        last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted,
        lane_id
      )
-     SELECT v.project_id, v.file_id, v.cell_id, 'target', v.target_lang, v.value,
+     SELECT v.project_id, v.file_id, v.cell_id, 'target', v.value,
        v.value_html, NULL, NULL, NULL, v.event_id, v.source_event_id,
        v.author, v.server_ts::bigint, 0, v.word_count::integer, v.content_hash, 0,
        ${laneIdResolveFromColSql('target', 'v.project_id', 'v.target_lang')}
@@ -710,7 +711,7 @@ function buildGatedTargetInsert(
          SELECT 1 FROM cells source
           WHERE source.project_id = v.project_id AND source.file_id = v.file_id
             AND source.cell_id = v.cell_id AND source.side = 'source'
-            AND source.target_lang = '' AND source.event_id = v.source_event_id
+            AND source.event_id = v.source_event_id
        )
      ON CONFLICT(project_id, file_id, cell_id, lane_id) DO NOTHING`,
   ).bind(...binds)
@@ -816,7 +817,7 @@ export async function handleImportReconcileRequest(
     `SELECT cell_id, event_id, value, value_html, type, canonical_ref, anchor_cell_id,
             start_ms, end_ms, sequence_index, medium, metadata
        FROM cells
-      WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''`,
+      WHERE project_id = ? AND file_id = ? AND side = 'source'`,
   ).bind(body.projectId, body.fileId).all<{
     cell_id: string
     event_id: string
@@ -933,7 +934,7 @@ export async function handleImportReconcileRequest(
   const finalCellByIncomingCell = new Map(plan.cells.map((cell) => [cell.originalCellId, cell.finalCellId]))
 
   const existingTargetRows = await db.prepare(
-    `SELECT cell_id, target_lang FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'`,
+    `SELECT cell_id, ${wireLegacyTagSql("cells")} AS target_lang FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'`,
   ).bind(body.projectId, body.fileId).all<{ cell_id: string; target_lang: string }>()
   const existingTargets = new Set(existingTargetRows.results.map((row) => `${row.cell_id}\0${row.target_lang}`))
   const targetEvents: PersistedEvent<'target.cell.commit'>[] = []

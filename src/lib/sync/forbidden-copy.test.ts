@@ -37,6 +37,17 @@ describe("forbiddenReasonCopy", () => {
     )
   })
 
+  it("AQU-1788: never shows the downgrade gate's internal reason verbatim", () => {
+    // The flusher re-mints and retries this one, so the banner normally gets
+    // the ordinary role floor instead. When a retry is refused on the same
+    // grounds, the copy still has to mean something to the person.
+    const copy = forbiddenReasonCopy("role downgraded since token was issued")
+    expect(copy).not.toMatch(/token/i)
+    expect(copy).toBe(
+      "your access level changed while you were working, so this change wasn't saved",
+    )
+  })
+
   it("maps a self-validation refusal", () => {
     expect(forbiddenReasonCopy("self-validation is not allowed on this project")).toMatch(
       /self-validation was off for this project at the time/i,

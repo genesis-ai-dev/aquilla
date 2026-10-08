@@ -33,7 +33,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 // AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
 // link and the first-position fallback that replaces the old `''` one.
@@ -161,6 +161,7 @@ import {
   nextPaintGate,
   runReconnectResync,
   runAfterPushedLinkSync,
+  editorConceptsForLane,
   workspaceTerminology,
   timelinePlayReady,
 } from "./project-workspace-helpers"
@@ -466,6 +467,7 @@ import { textValidationScope, textVoteGate } from "@/lib/review/text-validation-
 import { useConcepts } from "@/hooks/useConcepts"
 import { useSubscribedConcepts } from "@/hooks/useSubscribedConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import type { ConceptDraft } from "@/lib/terminology/types"
 import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
@@ -2216,6 +2218,20 @@ export function ProjectWorkspace() {
     () => (project?.lanes ?? []).filter((lane) => lane.role === "target"),
     [project?.lanes],
   )
+  // Checks, glosser seeds, and backtranslation hints follow the active lane.
+  // The glossary's own record stays the full concept list so a save in one
+  // lane cannot wipe another lane's renderings.
+  const laneLocalConcepts = useMemo(
+    () => conceptsForLaneTag(localConcepts, activeLane, laneRows),
+    [localConcepts, activeLane, laneRows],
+  )
+  // AQU-1721: Check file also reads the subscribed termbases; their renderings
+  // follow the lane by the same rule (useRules applies it to both lists), and
+  // arrive already mapped onto this project's lanes (AQU-1777).
+  const laneEditorConcepts = useMemo(
+    () => editorConceptsForLane(surfaceConcepts.editor, localConcepts, laneLocalConcepts, activeLane, laneRows),
+    [surfaceConcepts.editor, localConcepts, laneLocalConcepts, activeLane, laneRows],
+  )
   // The DEFAULT (`''`) lane's language, for labels that always name that lane.
   // AQU-583: the per-file target is not consulted.
   const activeTargetLanguage = resolveActiveTargetLanguage("", null, project, laneRows)
@@ -2223,6 +2239,10 @@ export function ProjectWorkspace() {
   // tag can be. Shared with the completion target below so the editor labels
   // a lane with the same language it asks the model to translate into.
   const laneLabels = useMemo(() => laneLabelsByTag(laneRows), [laneRows])
+  // AQU-1784: a lane's code override, the suffix that tells two lanes showing
+  // the same label apart in the switcher, the TARGET pill and the import
+  // destination picker.
+  const laneCodes = useMemo(() => laneCodesByTag(laneRows), [laneRows])
   // AQU-602: the target language of the ACTIVE lane, so switching lanes
   // switches what the editor reads/writes/translates into (source stays
   // shared). The completion path was already lane-aware; this routes the
@@ -2321,10 +2341,11 @@ export function ProjectWorkspace() {
     return laneComboboxOptions({
       lanes: switchable,
       laneLabels,
+      laneCodes,
       defaultLaneLabel: laneLabels[""] || activeTargetLanguage || "Target",
       archivedLanes: archivedLaneTags,
     })
-  }, [project?.syncRole?.level, availableLanes, scopedLanes, laneLabels, activeTargetLanguage, archivedLaneTags])
+  }, [project?.syncRole?.level, availableLanes, scopedLanes, laneLabels, laneCodes, activeTargetLanguage, archivedLaneTags])
   // AQU-538 deep link: `/project/:id/editor?lane=<lane>` — PM surfaces link into
   // the editor at the lane they were viewing. Read the param ONCE per project
   // (after the lane registry loads so an unknown lane can be told apart from a
@@ -4966,7 +4987,7 @@ export function ProjectWorkspace() {
     // AQU-609: every consumer of this instance's `rules` evaluates against the
     // active lane's cell view, so lane-scoped rules for other lanes drop here.
     activeLane,
-    localConcepts,
+    laneLocalConcepts,
   )
 
   // AQU-934: style-rule library + applicability graph. The resolver answers
@@ -5971,7 +5992,7 @@ export function ProjectWorkspace() {
   const getGlosser = useCallback((): Glosser => {
     // AQU-1006 follow-up: from the concepts projection, not the retired
     // `project.terminology` settings key.
-    const terminology = localConcepts
+    const terminology = laneLocalConcepts
     const alignmentSeeds = project?.alignmentSeeds
     const cached = glosserCacheRef.current
     if (
@@ -6003,7 +6024,7 @@ export function ProjectWorkspace() {
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, localConcepts, project?.alignmentSeeds])
+  }, [corpusCells, backtranslationCache, laneLocalConcepts, project?.alignmentSeeds])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
@@ -6152,7 +6173,7 @@ export function ProjectWorkspace() {
         // controlled-vocabulary source headwords for the renderings the
         // translator chose. The service derives the relevant hints from
         // the cell's source text; behavior is unchanged when nothing matches.
-        concepts: localConcepts,
+        concepts: laneLocalConcepts,
         sourceText: effectiveSourceText(cell),
       })
       if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
@@ -6163,7 +6184,7 @@ export function ProjectWorkspace() {
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, localConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
+  }, [isBacktranslationConfigured, project?.completionSettings, activeSourceLanguage, activeLaneTargetLanguage, laneLocalConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
 
   /**
    * On-demand statistical gloss for the BT tab's collapsed "statistical
@@ -6781,7 +6802,7 @@ export function ProjectWorkspace() {
         rules,
         // AQU-1721: its term scan reads concepts, not `rules`, so the
         // subscribed termbases come in here as well.
-        concepts: surfaceConcepts.editor,
+        concepts: laneEditorConcepts,
         termMatching: project?.termMatching,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
@@ -6791,7 +6812,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, surfaceConcepts.editor, project?.termMatching])
+  }, [activeFileId, checkRunning, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -13466,6 +13487,7 @@ export function ProjectWorkspace() {
             <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
               <GlossaryEditorContent
                 files={projectFiles}
+                activeLane={activeLane}
                 // The projection-folded record: `project.terminology` is the retired
                 // settings blob, so a glossary handed the raw record shows the blob
                 // and never a term that was created through the event log.
@@ -14044,6 +14066,7 @@ export function ProjectWorkspace() {
             onLaneChange={setActiveLane}
             defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
             laneLabels={laneLabels}
+            laneCodes={laneCodes}
             // AQU-583: the TARGET tag is the discoverable entry point to change
             // the target language — deep-link to settings filtered to the
             // Project Info + Languages sections (both carry the "target language"
@@ -14469,6 +14492,7 @@ export function ProjectWorkspace() {
                       // the popover claiming "all caught up" beside a failed pill.
                       records={outboxInspectorRecords}
                       onRetryNow={outboxFlushNow}
+                      projectId={project?.id}
                     />
                   </div>
                 }
@@ -14692,6 +14716,7 @@ export function ProjectWorkspace() {
           username={currentUsername}
           getToken={getTokenForFile}
           sourceLanguage={activeSourceLanguage ?? ""} targetLanguage={activeLaneTargetLanguage ?? ""}
+          lanes={project.lanes}
           targetLang={activeLane}
           identityToken={frontierSession?.jwt}
           onImported={handleImported}

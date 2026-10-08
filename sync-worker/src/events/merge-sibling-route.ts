@@ -49,6 +49,7 @@ import {
   listProjectLanes,
   retryingLaneIdCollision,
 } from '../../../db/shared/lanes'
+import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
 import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import {
   chooseDonorLane,
@@ -282,9 +283,17 @@ export async function mergeSibling(
   // leaves no empty lane behind, and a re-run finds the record and reuses it.
   // AQU-1606: that statement mints an id. A global collision rolls the batch
   // back, so the same statements run again with a new id and nothing is written twice.
-  const lead = Math.min(BATCH_LIMIT - 1, allStmts.length)
+  // AQU-1781: the fold's lane is new to the host, so nobody holds a grant for
+  // it — under the read wall every host member below Maintainer would read an
+  // empty lane. The grant statement follows the lane statement in the same
+  // batch, keyed by the tag because the lane statement keeps an existing record.
+  const laneStmts = [
+    ensureTargetLaneStmt(db, hostProjectId, lane),
+    grantNewLaneStmt(db, hostProjectId, { legacyTag: lane }, null),
+  ]
+  const lead = Math.min(BATCH_LIMIT - laneStmts.length, allStmts.length)
   await retryingLaneIdCollision(() =>
-    runFoldBatch(db, [ensureTargetLaneStmt(db, hostProjectId, lane), ...allStmts.slice(0, lead)]),
+    runFoldBatch(db, [...laneStmts, ...allStmts.slice(0, lead)]),
   )
   for (let i = lead; i < allStmts.length; i += BATCH_LIMIT) {
     await runFoldBatch(db, allStmts.slice(i, i + BATCH_LIMIT))

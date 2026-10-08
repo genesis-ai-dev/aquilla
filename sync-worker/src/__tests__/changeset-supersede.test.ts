@@ -70,8 +70,7 @@ async function statusOf(tdb: TestDb, id: string): Promise<string> {
 /** A human writes the target cell by hand: new chain head, new value. */
 async function humanCommitsTarget(tdb: TestDb, value: string, eventId: string): Promise<void> {
   await tdb.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-     VALUES ($1, $2, $3, 'target', '', $4, $5, 2)
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES ($1, $2, $3, 'target', $4, $5, 2)
      ON CONFLICT (project_id, file_id, cell_id, lane_id)
      DO UPDATE SET value = EXCLUDED.value, event_id = EXCLUDED.event_id`,
     [PROJECT, FILE, CELL, value, eventId],
@@ -171,8 +170,7 @@ describe('SetTranslation — drift that IS the plan', () => {
     await humanCommitsTarget(tdb, 'hola', 'human-evt-1')
     // …and the es lane moved for some other reason, so the plan is drifted.
     await tdb.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-       VALUES ($1, $2, $3, 'target', 'es', 'otra', 'es-evt-1', 3)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id) VALUES ($1, $2, $3, 'target', 'otra', 'es-evt-1', 3, (SELECT aquilla_test_resolve_target_lane($1, 'es')))`,
       [PROJECT, FILE, CELL],
     )
 
@@ -204,8 +202,7 @@ describe('SetTranslation — drift that IS the plan', () => {
 describe('EmitEvents — validation a human already gave', () => {
   beforeEach(async () => {
     await tdb.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-       VALUES ($1, $2, $3, 'target', '', 'borrador', 'tgt-evt-1', 2)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES ($1, $2, $3, 'target', 'borrador', 'tgt-evt-1', 2)`,
       [PROJECT, FILE, CELL],
     )
   })
@@ -225,8 +222,7 @@ describe('EmitEvents — validation a human already gave', () => {
       [PROJECT, FILE, CELL],
     )
     await tdb.pg.query(
-      `INSERT INTO cell_validators (project_id, file_id, cell_id, target_lang, event_id, username, decided_ts)
-       VALUES ($1, $2, $3, '', 'tgt-evt-2', $4, 3)`,
+      `INSERT INTO cell_validators (project_id, file_id, cell_id, event_id, username, decided_ts) VALUES ($1, $2, $3, 'tgt-evt-2', $4, 3)`,
       [PROJECT, FILE, CELL, username],
     )
   }

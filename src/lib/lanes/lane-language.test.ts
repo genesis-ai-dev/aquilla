@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest"
 import {
+  laneCodesByTag,
   laneLabelForTag,
   laneLabelsByTag,
+  laneLabelSuffixesById,
   laneLanguageForTag,
   laneRowLabel,
   laneRowLanguage,
@@ -183,5 +185,71 @@ describe("the source lane is never a tag match", () => {
 
   it("resolves the default lane's language from the default target row", () => {
     expect(laneLanguageForTag("", lanes)).toBe("Spanish")
+  })
+})
+
+describe("laneCodesByTag (AQU-1784)", () => {
+  it("keys a lane's code OVERRIDE by its tag", () => {
+    expect(
+      laneCodesByTag([
+        row({ id: "defa0001", language: "Tshangla", langCode: "tsj", legacyTag: "" }),
+        row({ id: "a3f09c1e", language: "Tshangla", legacyTag: "a3f09c1e" }),
+      ]),
+    ).toEqual({ "": "tsj" })
+  })
+
+  it("canonicalizes the override's case, as every code reader does", () => {
+    expect(
+      laneCodesByTag([row({ id: "a3f09c1e", language: "Spanish", langCode: "ES-mx", legacyTag: "a3f09c1e" })]),
+    ).toEqual({ a3f09c1e: "es-MX" })
+  })
+
+  it("leaves out a lane with no override, whose DERIVED code distinguishes nothing", () => {
+    // Two lanes of one language derive the same code, so a derived code is
+    // useless as the suffix that tells them apart.
+    expect(
+      laneCodesByTag([
+        row({ id: "aaaa0001", language: "Spanish", legacyTag: "Spanish" }),
+        row({ id: "bbbb0002", language: "Spanish", legacyTag: "bbbb0002" }),
+      ]),
+    ).toEqual({})
+  })
+
+  it("ignores the source lane, whose NULL tag would read as the default lane's", () => {
+    expect(
+      laneCodesByTag([
+        row({ id: "50dce001", role: "source", language: "English", langCode: "en", legacyTag: null }),
+      ]),
+    ).toEqual({})
+  })
+})
+
+describe("laneLabelSuffixesById (AQU-1784)", () => {
+  it("numbers the lanes that read the same, keyed by id, in the order given", () => {
+    expect(
+      laneLabelSuffixesById([
+        row({ id: "aaaa0001", language: "Tshangla", legacyTag: "Tshangla" }),
+        row({ id: "bbbb0002", language: "Tshangla", legacyTag: "bbbb0002" }),
+        row({ id: "cccc0003", language: "Dzongkha", legacyTag: "Dzongkha" }),
+      ]),
+    ).toEqual({ bbbb0002: "2" })
+  })
+
+  it("prefers a colliding lane's code override", () => {
+    expect(
+      laneLabelSuffixesById([
+        row({ id: "aaaa0001", language: "Tshangla", legacyTag: "Tshangla" }),
+        row({ id: "bbbb0002", language: "Tshangla", langCode: "tsj", legacyTag: "bbbb0002" }),
+      ]),
+    ).toEqual({ bbbb0002: "tsj" })
+  })
+
+  it("compares the DISPLAY name, so a name override settles the collision", () => {
+    expect(
+      laneLabelSuffixesById([
+        row({ id: "aaaa0001", language: "Tshangla", legacyTag: "Tshangla" }),
+        row({ id: "bbbb0002", language: "Tshangla", name: "Tshangla East", legacyTag: "bbbb0002" }),
+      ]),
+    ).toEqual({})
   })
 })

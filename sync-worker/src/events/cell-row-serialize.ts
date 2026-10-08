@@ -13,10 +13,12 @@
 // byte-identity test in events-route.test.ts guards against drift meanwhile).
 
 import type { AiDraftProvenance } from "./types"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 
-/** Projection columns read for every cell row, in wire order. */
+/** Projection columns read for every cell row, in wire order.
+ *  `target_lang` is the lane's legacy tag, not the projection column. */
 export const CELL_ROW_COLUMNS =
-  "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
+  `cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, value, value_html, type, canonical_ref, anchor_cell_id, ` +
   "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
   "endorsement_count, start_ms, end_ms, " +
   "medium, sequence_index, transcription, camera_state, metadata, lane_id, hidden_at"

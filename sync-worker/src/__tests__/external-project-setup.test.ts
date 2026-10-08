@@ -953,13 +953,15 @@ describe('ProjectSetup bilingual import lane id', () => {
       [PROJECT],
     )
     expect(lanes.rows).toEqual([{ id: planned?.id, legacy_tag: 'fr', language: 'fr' }])
-    const cells = await tdb.pg.query<{ side: string; value: string; lane_id: string; target_lang: string }>(
-      `SELECT side, value, lane_id, target_lang FROM cells WHERE project_id = $1 AND side = 'target' ORDER BY value`,
+    const cells = await tdb.pg.query<{ side: string; value: string; lane_id: string }>(
+      `SELECT side, value, lane_id FROM cells WHERE project_id = $1 AND side = 'target' ORDER BY value`,
       [PROJECT],
     )
+    // The lane id is the stamp; the tag lives on the lane row (the projection
+    // target_lang column is gone, AQU-1611c).
     expect(cells.rows).toEqual([
-      { side: 'target', value: 'Au revoir', lane_id: planned?.id, target_lang: 'fr' },
-      { side: 'target', value: 'Bonjour monde', lane_id: planned?.id, target_lang: 'fr' },
+      { side: 'target', value: 'Au revoir', lane_id: planned?.id },
+      { side: 'target', value: 'Bonjour monde', lane_id: planned?.id },
     ])
   })
 

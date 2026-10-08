@@ -75,16 +75,15 @@ async function seedTargetCell(
   targetLang = "",
 ): Promise<void> {
   await db.prepare(
-    `INSERT INTO cells
-        (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-     VALUES (?, ?, ?, 'target', ?, ?, ?, 0)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
   ).bind(
     PROJECT,
     FILE,
     cellId,
-    targetLang,
     value,
     `ev-${cellId}-${targetLang || "default"}`,
+    PROJECT,
+    targetLang,
   ).run()
 }
 
@@ -307,13 +306,13 @@ describe("durable sanitized activity", () => {
           return { rows: runRow ? [runRow] : [], rowCount: runRow ? 1 : 0 }
         }
         if (sql.includes("INSERT INTO contextual_runs")) {
-          roleParam = params[5]
+          roleParam = params[4]
           runRow = {
-            id: params[0], project_id: params[1], file_id: params[2], target_lang: params[3],
-            status: "running", initiated_by: params[4], role_snapshot: params[5], span_cursor: null,
+            id: params[0], project_id: params[1], file_id: params[2], target_lang: "",
+            status: "running", initiated_by: params[3], role_snapshot: params[4], span_cursor: null,
             done_spans: 0, total_spans: 0, failed_spans: 0, units_spent: 0, calls_spent: 0,
-            lane_id: params[9],
-            last_error: null, steering_cursor: null, anchor_cell_id: params[6], scope_group: params[7],
+            lane_id: params[8],
+            last_error: null, steering_cursor: null, anchor_cell_id: params[5], scope_group: params[6],
             created_at: "2026-08-11T00:00:00.000Z", updated_at: "2026-08-11T00:00:00.000Z",
           }
           return { rows: [runRow], rowCount: 1 }
@@ -326,8 +325,8 @@ describe("durable sanitized activity", () => {
         if (sql.includes("UPDATE contextual_drafts")) return { rows: [], rowCount: 0 }
         if (sql.includes("INSERT INTO contextual_drafts")) {
           draftId = String(params[0])
-          verdictParam = params[8]
-          provenanceParam = params[9]
+          verdictParam = params[7]
+          provenanceParam = params[8]
           return { rows: [], rowCount: 1 }
         }
         if (sql.includes("SELECT id, run_id") && sql.includes("FROM contextual_drafts")) {

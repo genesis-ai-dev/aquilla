@@ -81,7 +81,7 @@ export function LaneChips({
     <span className={cn("inline-flex min-w-0 max-w-full flex-wrap items-center gap-1", className)}>
       {visible.map((lane) => (
         <LaneChip
-          key={lane.lane || "__default__"}
+          key={lane.laneId || lane.lane || "__default__"}
           projectId={projectId}
           lane={lane}
           defaultLaneLabel={defaultLaneLabel}

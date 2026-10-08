@@ -65,7 +65,7 @@ export async function hiddenCellsForFile(
       .prepare(
         `SELECT cell_id, canonical_ref
            FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND hidden_at IS NOT NULL`,
       )
       .bind(projectId, fileId)

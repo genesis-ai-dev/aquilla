@@ -938,7 +938,7 @@ async function loadDelta(
         `SELECT file_id, cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
                 start_ms, end_ms, metadata, tombstoned_at
            FROM cells
-          WHERE project_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND side = 'source'
             AND (file_id, cell_id) IN (${placeholders})`,
     )
     const liveByKey = new Map(liveRows.map((r) => [`${r.file_id}\0${r.cell_id}`, r]))
@@ -1144,7 +1144,9 @@ async function loadUpstreamTargetCurrentState(
     [upstreamProjectId, laneTag],
     (placeholders) =>
       `SELECT file_id, cell_id, event_id, value, value_html, validated FROM cells
-       WHERE project_id = ? AND side = 'target' AND target_lang = ? AND (file_id, cell_id) IN (${placeholders})`,
+       WHERE project_id = ? AND side = 'target'
+         AND lane_id = (SELECT id FROM public.lanes WHERE project_id = cells.project_id AND role = 'target' AND legacy_tag = ?)
+         AND (file_id, cell_id) IN (${placeholders})`,
   )
   for (const r of results) {
     state.set(`${r.file_id}\0${r.cell_id}`, {

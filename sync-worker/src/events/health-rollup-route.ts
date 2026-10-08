@@ -87,7 +87,7 @@ async function loadFileCellsForRollup(
     "FROM cells s " +
     "LEFT JOIN cells t " +
     "  ON t.project_id = s.project_id AND t.file_id = s.file_id " +
-    "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ? " +
+    "  AND t.cell_id = s.cell_id AND t.side = 'target' AND t.lane_id = (SELECT id FROM public.lanes WHERE project_id = t.project_id AND role = 'target' AND legacy_tag = ?) " +
     "WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source' " +
     "LIMIT ?"
   const res = await db

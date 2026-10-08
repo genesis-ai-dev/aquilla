@@ -97,6 +97,7 @@ import {
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
 import { loadLinkFileIds } from "../services/source-linking"
+import { applyDirectAddLaneGrants } from "../services/lane-grants"
 import { createProjectShared } from "../../../db/shared/projects"
 import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
@@ -1611,6 +1612,13 @@ async function grantProjectMemberOne(
   )
     .bind(projectId, target.id, role, callerUserId)
     .run()
+
+  // AQU-1782: the membership row alone leaves a below-Maintainer member with
+  // no lane grants, so under the read wall they see no target lane, no target
+  // cells and 0% progress while the lead sees everything. Grants are written
+  // through the same planner invite acceptance uses, and a role change rewrites
+  // the level on the rows the member already has.
+  await applyDirectAddLaneGrants(env.AQUILLA_PG, projectId, target.id, role, callerUserId)
   await auditMembershipChange(env, actor, {
     action: roleBefore === null ? "project.member.grant" : "project.member.role",
     where: { scope: "project", projectId },

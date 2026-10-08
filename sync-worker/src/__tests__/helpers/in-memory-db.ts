@@ -94,8 +94,12 @@ export interface CellRow {
   cell_id: string
   side: 'source' | 'target'
   /** AQU-538: target-language lane. '' (or absent, for legacy fixtures) =
-   *  default lane; always ''/absent on source rows. */
+   *  default lane; always ''/absent on source rows.
+   *  A projection write after AQU-1611b leaves this at '' and records the
+   *  lane on `lane_tag` instead. */
   target_lang?: string
+  /** Lane tag the writer resolved. Not the projection column. */
+  lane_tag?: string
   value: string
   value_html?: string | null
   type?: string | null
@@ -119,8 +123,12 @@ export interface ValidatorRow {
   project_id: string
   file_id: string
   cell_id: string
-  /** AQU-538 (0055): target-language lane of the validation ('' = default). */
+  /** AQU-538 (0055): target-language lane of the validation ('' = default).
+   *  A projection write after AQU-1611b leaves this '' and records the lane
+   *  on `lane_tag`. */
   target_lang: string
+  /** Lane tag the writer resolved. Not the projection column. */
+  lane_tag?: string
   /** The validated commit's event_id (renamed from edit_event_id in 0012). */
   event_id: string
   username: string
@@ -184,9 +192,25 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     )
   }
 
-  /** AQU-538: '' and absent are the same (default) lane. */
+  /**
+   * Lane the row belongs to. A projection write stores the tag on `lane_tag`
+   * and leaves `target_lang` at ''. A fixture that still writes the column
+   * is read from there.
+   */
   function laneOf(c: CellRow): string {
-    return c.target_lang ?? ''
+    return c.lane_tag ?? c.target_lang ?? ''
+  }
+
+  function validatorLane(v: ValidatorRow): string {
+    return v.lane_tag ?? v.target_lang ?? ''
+  }
+
+  /** Tag bound into `legacy_tag = ?` by laneIdResolveSql. '' when the SQL has none. */
+  function resolveLaneTag(normalized: string, args: unknown[]): string {
+    const at = normalized.indexOf('legacy_tag = ?')
+    if (at < 0) return ''
+    const qs = normalized.slice(0, at).match(/\?/g)
+    return ((qs ? args[qs.length] : '') as string) ?? ''
   }
 
   /** Extract the quoted kinds from an `... AND kind IN ('a', 'b', ...) ...` clause. */
@@ -458,7 +482,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // ── GET /cell-validators read route (AQU-538: per-lane; AQU-1240 dual-read) ─
     // Two shapes: all lanes (no ?lane=) or a single lane (dual-read by tag).
     if (
-      /^SELECT event_id, username, decided_ts, target_lang(?:, lane_id)? FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \?/.test(
+      /SELECT event_id, username, decided_ts, (?:target_lang|COALESCE\(\(SELECT l\.legacy_tag FROM public\.lanes l WHERE l\.project_id = cell_validators\.project_id AND l\.id = cell_validators\.lane_id\), ''\) AS target_lang)(?:, lane_id)? FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \?/.test(
         normalized,
       )
     ) {
@@ -475,21 +499,21 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
             v.project_id === projectId &&
             v.file_id === fileId &&
             v.cell_id === cellId &&
-            (lane === null || (v.target_lang ?? "") === lane),
+            (lane === null || validatorLane(v) === lane),
         )
         .sort((a, b) => b.decided_ts - a.decided_ts)
         .map((v) => ({
           event_id: v.event_id,
           username: v.username,
           decided_ts: v.decided_ts,
-          target_lang: v.target_lang ?? "",
+          target_lang: validatorLane(v),
           lane_id: null,
         }))
     }
 
     // ── GET /cells/audit-stats — cells select ──────────────────────────
     if (
-      /SELECT cell_id, side, content_hash, last_edit_at, event_id\s+AS last_edit_event_id, source_event_id FROM cells WHERE project_id = \? AND file_id = \?/.test(
+      /SELECT cell_id, side, (?:content_hash|COALESCE\(\(SELECT l\.legacy_tag FROM public\.lanes l WHERE l\.project_id = cells\.project_id AND l\.id = cells\.lane_id\), ''\) AS target_lang, lane_id, content_hash), last_edit_at, event_id\s+AS last_edit_event_id, source_event_id FROM cells WHERE project_id = \? AND file_id = \?/.test(
         normalized,
       )
     ) {
@@ -500,6 +524,8 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
         .map((c) => ({
           cell_id: c.cell_id,
           side: c.side,
+          target_lang: laneOf(c),
+          lane_id: (c as { lane_id?: string | null }).lane_id ?? null,
           content_hash: c.content_hash ?? null,
           last_edit_at: c.last_edit_at,
           last_edit_event_id: c.event_id,
@@ -618,7 +644,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // timecode-aware and older column lists. The hasTimecodes check below conditionally
     // includes start_ms/end_ms in the returned rows.
     if (
-      /^SELECT cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, endorsement_count/.test(
+      /SELECT cell_id, side, (?:target_lang|COALESCE\(\(SELECT l\.legacy_tag FROM public\.lanes l WHERE l\.project_id = cells\.project_id AND l\.id = cells\.lane_id\), ''\) AS target_lang), value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, endorsement_count/.test(
         normalized,
       )
     ) {
@@ -702,6 +728,24 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const cid = args[2] as string
       db.cells = db.cells.filter(
         (c) => !(c.project_id === pid && c.file_id === fid && c.cell_id === cid),
+      )
+      return []
+    }
+
+    // AQU-1611: the delete matches `side = ?` and, for a target row, the lane
+    // whose legacy_tag is the following bind. Source rows match on side alone.
+    // Bind order: project, file, cell, side, lane-project, legacy tag.
+    if (/^DELETE FROM cells WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \? AND \(side = 'source' OR \(lane_id = \(SELECT id FROM public\.lanes WHERE project_id = \? AND role = 'target' AND legacy_tag = \?\)\)/.test(normalized)) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const side = args[3] as string
+      const lane = (args[5] as string) ?? ""
+      db.cells = db.cells.filter(
+        (c) => !(
+          c.project_id === pid && c.file_id === fid && c.cell_id === cid && c.side === side
+          && (side === "source" || laneOf(c) === lane)
+        ),
       )
       return []
     }
@@ -790,6 +834,79 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
+    // ── INSERT cells (target.cell.commit UPSERT — target_lang column omitted) ─
+    // Bind order: 0=project_id, 1=file_id, 2=cell_id, 3=value, 4=value_html,
+    //             5=event_id, 6=source_event_id, 7=last_editor, 8=last_edit_at,
+    //             9=word_count, 10=content_hash, 11=ai_drafted, 12=ai_draft.
+    // The lane tag is the legacy_tag bind of laneIdResolveSql, not a column.
+    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, ai_draft\s*\) SELECT \?, \?, \?, 'target', \?,/.test(
+      normalized,
+    )) {
+      const projectId = args[0] as string
+      const fileId = args[1] as string
+      const cellId = args[2] as string
+      const lane = resolveLaneTag(normalized, args)
+      const value = args[3] as string
+      const valueHtml = args[4] as string | null
+      const eventId = args[5] as string
+      const sourceEventId = args[6] as string | null
+      const lastEditor = args[7] as string | null
+      const lastEditAt = args[8] as number
+      const wordCount = args[9] as number
+      const contentHash = args[10] as string | null
+      const aiDrafted = args[11] as number
+      const aiDraft = typeof args[12] === 'string'
+        ? JSON.parse(args[12] as string) as Record<string, unknown>
+        : null
+
+      const existing = db.cells.find(
+        (c) =>
+          c.project_id === projectId &&
+          c.file_id === fileId &&
+          c.cell_id === cellId &&
+          c.side === 'target' &&
+          laneOf(c) === lane,
+      )
+      if (!existing) {
+        db.cells.push({
+          project_id: projectId,
+          file_id: fileId,
+          cell_id: cellId,
+          side: 'target',
+          target_lang: '',
+          lane_tag: lane,
+          value,
+          value_html: valueHtml,
+          type: null,
+          canonical_ref: null,
+          anchor_cell_id: null,
+          event_id: eventId,
+          source_event_id: sourceEventId,
+          last_editor: lastEditor,
+          last_edit_at: lastEditAt,
+          validated: 0,
+          word_count: wordCount,
+          content_hash: contentHash,
+          ai_drafted: aiDrafted,
+          ai_draft: aiDraft,
+        })
+      } else {
+        existing.lane_tag = lane
+        existing.value = value
+        existing.value_html = valueHtml
+        existing.event_id = eventId
+        existing.source_event_id = sourceEventId
+        existing.last_editor = lastEditor
+        existing.last_edit_at = lastEditAt
+        existing.word_count = wordCount
+        existing.content_hash = contentHash
+        existing.validated = 0
+        existing.ai_drafted = aiDrafted
+        existing.ai_draft = aiDraft
+      }
+      return []
+    }
+
     // ── INSERT cells (target.cell.commit UPSERT — literal 'target', lane bind) ─
     // Production shape (event-projection.ts commit case): INSERT … SELECT with
     // an optional chain-claims EXISTS gate. The fake ignores the gate (treats
@@ -860,6 +977,117 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
         existing.validated = 0
         existing.ai_drafted = aiDrafted
         existing.ai_draft = aiDraft
+      }
+      return []
+    }
+
+    // ── INSERT cells (cell create — target_lang column omitted) ─────────
+    // Same bind layout as the pre-AQU-1611b create, minus the target_lang
+    // bind: side is args[3], value starts at args[4]. The lane tag, when
+    // this is a target row, is the legacy_tag bind.
+    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash/.test(
+      normalized,
+    ) && !normalized.includes('ai_drafted, ai_draft')) {
+      // Bulk target commit: side is the literal 'target', value is args[3].
+      if (/\(\?, \?, \?, 'target', \?/.test(normalized)) {
+        const lane = resolveLaneTag(normalized, args)
+        const row: CellRow = {
+          project_id: args[0] as string,
+          file_id: args[1] as string,
+          cell_id: args[2] as string,
+          side: 'target',
+          target_lang: '',
+          lane_tag: lane,
+          value: args[3] as string,
+          value_html: args[4] as string | null,
+          type: null,
+          canonical_ref: null,
+          anchor_cell_id: null,
+          event_id: args[5] as string,
+          source_event_id: args[6] as string | null,
+          last_editor: args[7] as string | null,
+          last_edit_at: args[8] as number,
+          validated: 0,
+          word_count: args[9] as number,
+          content_hash: args[10] as string | null,
+          ai_drafted: args[11] as number,
+        }
+        const existing = db.cells.find(
+          (c) =>
+            c.project_id === row.project_id &&
+            c.file_id === row.file_id &&
+            c.cell_id === row.cell_id &&
+            c.side === 'target' &&
+            laneOf(c) === lane,
+        )
+        if (!existing) db.cells.push(row)
+        else {
+          existing.lane_tag = lane
+          existing.value = row.value
+          existing.value_html = row.value_html
+          existing.event_id = row.event_id
+          existing.source_event_id = row.source_event_id
+          existing.last_editor = row.last_editor
+          existing.last_edit_at = row.last_edit_at
+          existing.word_count = row.word_count
+          existing.content_hash = row.content_hash
+          existing.validated = 0
+          existing.ai_drafted = row.ai_drafted
+        }
+        return []
+      }
+      const hasTimecodes = normalized.includes('start_ms') && normalized.includes('end_ms')
+      const v = 4
+      const lane = resolveLaneTag(normalized, args)
+      const row: CellRow = {
+        project_id: args[0] as string,
+        file_id: args[1] as string,
+        cell_id: args[2] as string,
+        side: args[3] as 'source' | 'target',
+        target_lang: '',
+        lane_tag: lane,
+        value: args[v] as string,
+        value_html: args[v + 1] as string | null,
+        type: args[v + 2] as string | null,
+        canonical_ref: args[v + 3] as string | null,
+        anchor_cell_id: args[v + 4] as string | null,
+        event_id: args[v + 5] as string,
+        source_event_id: null,
+        last_editor: args[v + 6] as string | null,
+        last_edit_at: args[v + 7] as number,
+        validated: 0,
+        word_count: args[v + 8] as number,
+        content_hash: args[v + 9] as string | null,
+        start_ms: hasTimecodes ? (args[v + 10] as number | null) : null,
+        end_ms: hasTimecodes ? (args[v + 11] as number | null) : null,
+      }
+      const existing = db.cells.find(
+        (c) =>
+          c.project_id === row.project_id &&
+          c.file_id === row.file_id &&
+          c.cell_id === row.cell_id &&
+          laneOf(c) === laneOf(row),
+      )
+      if (!existing) {
+        db.cells.push(row)
+      } else {
+        existing.lane_tag = lane
+        existing.side = row.side
+        existing.value = row.value
+        existing.value_html = row.value_html
+        existing.type = row.type
+        existing.canonical_ref = row.canonical_ref
+        existing.anchor_cell_id = row.anchor_cell_id
+        existing.event_id = row.event_id
+        existing.source_event_id = null
+        existing.last_editor = row.last_editor
+        existing.last_edit_at = row.last_edit_at
+        existing.word_count = row.word_count
+        existing.content_hash = row.content_hash
+        if (hasTimecodes) {
+          existing.start_ms = row.start_ms
+          existing.end_ms = row.end_ms
+        }
       }
       return []
     }
@@ -992,6 +1220,33 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       return []
     }
 
+    // AQU-1611: side, then the lane lookup (project, legacy tag).
+    if (/^UPDATE cells SET anchor_cell_id = \?, event_id = \?, last_editor = \?, last_edit_at = \? WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \? AND \(side = 'source' OR \(lane_id = \(SELECT id FROM public\.lanes WHERE project_id = \? AND role = 'target' AND legacy_tag = \?\)\)/.test(
+      normalized,
+    )) {
+      const anchor = args[0] as string | null
+      const eventId = args[1] as string
+      const lastEditor = args[2] as string | null
+      const lastEditAt = args[3] as number
+      const projectId = args[4] as string
+      const fileId = args[5] as string
+      const cellId = args[6] as string
+      const side = args[7] as string
+      const lane = (args[9] as string) ?? ""
+      const cell = db.cells.find(
+        (c) =>
+          c.project_id === projectId && c.file_id === fileId && c.cell_id === cellId
+          && c.side === side && (side === "source" || laneOf(c) === lane),
+      )
+      if (cell) {
+        cell.anchor_cell_id = anchor
+        cell.event_id = eventId
+        cell.last_editor = lastEditor
+        cell.last_edit_at = lastEditAt
+      }
+      return []
+    }
+
     // ── UPDATE cells (reorder) ──────────────────────────────────────────
     // AQU-538: side + lane scoped; the optional chain-claims gate is ignored.
     if (/^UPDATE cells SET anchor_cell_id = \?, event_id = \?, last_editor = \?, last_edit_at = \? WHERE project_id = \? AND file_id = \? AND cell_id = \? AND side = \? AND target_lang = \?/.test(
@@ -1085,22 +1340,28 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // event_id, username, decided_ts. AQU-1240 splice: after target_lang,
     // laneIdResolveBinds (project_id, tag) then event_id/username/decided_ts.
     if (/^INSERT INTO cell_validators/.test(normalized)) {
+      const writesTag = /^INSERT INTO cell_validators \([^)]*\btarget_lang\b/.test(normalized)
       const hasLaneId = normalized.includes('lane_id')
+      const lane = writesTag ? ((args[3] as string) ?? '') : resolveLaneTag(normalized, args)
+      // Writer shape: project, file, cell, then laneIdResolveBinds (project, tag),
+      // then event_id, username, decided_ts.
+      const eventIdx = writesTag ? (hasLaneId ? 6 : 4) : 5
       const row: ValidatorRow = {
         project_id: args[0] as string,
         file_id: args[1] as string,
         cell_id: args[2] as string,
-        target_lang: (args[3] as string) ?? "",
-        event_id: (hasLaneId ? args[6] : args[4]) as string,
-        username: (hasLaneId ? args[7] : args[5]) as string,
-        decided_ts: (hasLaneId ? args[8] : args[6]) as number,
+        target_lang: writesTag ? lane : '',
+        lane_tag: lane,
+        event_id: args[eventIdx] as string,
+        username: args[eventIdx + 1] as string,
+        decided_ts: args[eventIdx + 2] as number,
       }
       const idx = db.cell_validators.findIndex(
         (v) =>
           v.project_id === row.project_id &&
           v.file_id === row.file_id &&
           v.cell_id === row.cell_id &&
-          (v.target_lang ?? "") === row.target_lang &&
+          validatorLane(v) === validatorLane(row) &&
           v.username === row.username,
       )
       if (idx === -1) {
@@ -1108,6 +1369,29 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       } else if (row.decided_ts > db.cell_validators[idx].decided_ts) {
         db.cell_validators[idx] = row
       }
+      return []
+    }
+
+    if (
+      /^DELETE FROM cell_validators WHERE project_id = \? AND file_id = \? AND cell_id = \? AND \(lane_id = \(SELECT id FROM public\.lanes WHERE project_id = \? AND role = 'target' AND legacy_tag = \?\)\) AND username = \?$/.test(
+        normalized,
+      )
+    ) {
+      const pid = args[0] as string
+      const fid = args[1] as string
+      const cid = args[2] as string
+      const lane = (args[4] as string) ?? ""
+      const user = args[5] as string
+      db.cell_validators = db.cell_validators.filter(
+        (v) =>
+          !(
+            v.project_id === pid &&
+            v.file_id === fid &&
+            v.cell_id === cid &&
+            validatorLane(v) === lane &&
+            v.username === user
+          ),
+      )
       return []
     }
 
@@ -1128,7 +1412,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
             v.project_id === pid &&
             v.file_id === fid &&
             v.cell_id === cid &&
-            (v.target_lang ?? "") === lane &&
+            validatorLane(v) === lane &&
             v.username === user
           ),
       )
@@ -1142,18 +1426,19 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // 3=cell_id, 4=target_lang (subquery), 5=project_id, 6=file_id, 7=cell_id,
     // 8=target_lang (WHERE).
     if (/^UPDATE cells SET validated/.test(normalized)) {
+      const viaLane = normalized.includes("legacy_tag = ?")
       const threshold = Math.max(1, (args[0] as number) ?? 1)
-      const projectId = args[5] as string
-      const fileId = args[6] as string
-      const cellId = args[7] as string
-      const lane = (args[8] as string) ?? ""
+      const projectId = (viaLane ? args[6] : args[5]) as string
+      const fileId = (viaLane ? args[7] : args[6]) as string
+      const cellId = (viaLane ? args[8] : args[7]) as string
+      const lane = ((viaLane ? args[10] : args[8]) as string) ?? ""
       const cell = db.cells.find(
         (c) =>
           c.project_id === projectId &&
           c.file_id === fileId &&
           c.cell_id === cellId &&
           c.side === "target" &&
-          (c.target_lang ?? "") === lane,
+          laneOf(c) === lane,
       )
       if (cell) {
         const count = db.cell_validators.filter(
@@ -1161,7 +1446,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
             v.project_id === projectId &&
             v.file_id === fileId &&
             v.cell_id === cellId &&
-            (v.target_lang ?? "") === lane &&
+            validatorLane(v) === lane &&
             v.event_id === cell.event_id,
         ).length
         cell.validated = count >= threshold ? 1 : 0

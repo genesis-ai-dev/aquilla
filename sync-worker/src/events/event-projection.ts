@@ -118,7 +118,6 @@ export function buildBulkTargetCellCommitStmt(
       event.projectId,
       event.fileId,
       event.cellId,
-      lane,
       value,
       payload.valueHtml ?? null,
       event.id,
@@ -128,16 +127,16 @@ export function buildBulkTargetCellCommitStmt(
       countWords(value),
       contentHash(value),
       payload.ai_suggestion ? 1 : 0,
-      // AQU-1240 slice 5: resolve this row's opaque lane_id from (project, tag).
+      // Lane identity is lane_id. The projection target_lang column is not filled.
       ...laneIdResolveBinds('target', event.projectId, lane),
     )
   }
   const placeholders = Array(rows.length)
-    .fill(`(?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ${laneIdResolveSql('target')})`)
+    .fill(`(?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ${laneIdResolveSql('target')})`)
     .join(',\n')
   return db.prepare(
     `INSERT INTO cells (
-      project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+      project_id, file_id, cell_id, side, value, value_html, type,
       canonical_ref, anchor_cell_id, event_id, source_event_id,
       last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, lane_id
     ) VALUES ${placeholders}
@@ -493,15 +492,15 @@ export function buildBulkSourceCellCreateStmt(
       ...laneIdResolveBinds('source', event.projectId, ''),
     )
   }
-  // AQU-538: bulk import is source-only; source rows always live on the
-  // default lane (target_lang = '', a literal — no bind).
+  // Bulk import is source-only. The row's lane_id is the project's source
+  // lane. The projection target_lang column is left at its default.
   const placeholders = Array(rows.length)
-    .fill(`(?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql('source')})`)
+    .fill(`(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql('source')})`)
     .join(',\n')
   return db
     .prepare(
       `INSERT INTO cells (
-        project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+        project_id, file_id, cell_id, side, value, value_html, type,
         canonical_ref, anchor_cell_id, event_id, source_event_id,
         last_editor, last_edit_at, validated, word_count, content_hash,
         start_ms, end_ms,
@@ -589,6 +588,30 @@ export function coerceIntegerMsPayload(event: PersistedEvent): PersistedEvent {
   return fixed === null ? event : { ...event, payload: fixed }
 }
 
+/**
+ * Stamp a missing rendering `laneId` with the project's target lane whose
+ * `legacy_tag` is `''`. Same rule as `renderingLaneId` in
+ * src/lib/terminology/rendering-lane.ts: a non-empty laneId is kept, and
+ * when that lane row does not exist yet the rendering is stored unchanged.
+ *
+ * Two binds, in order: the renderings JSON text, then `project_id`.
+ * `jsonb_agg` of an empty array is NULL, so the COALESCE keeps `[]`.
+ */
+const STAMP_RENDERINGS_SQL = `(SELECT COALESCE(jsonb_agg(
+    CASE
+      WHEN COALESCE(elem->>'laneId', '') <> '' THEN elem
+      WHEN empty_lane.id IS NULL THEN elem
+      ELSE jsonb_set(elem, '{laneId}', to_jsonb(empty_lane.id), true)
+    END
+    ORDER BY ord
+  ), '[]'::jsonb)
+  FROM jsonb_array_elements(?::text::jsonb) WITH ORDINALITY AS rendering_elem(elem, ord)
+  LEFT JOIN LATERAL (
+    SELECT id FROM lanes
+    WHERE project_id = ? AND role = 'target' AND legacy_tag = ''
+    LIMIT 1
+  ) empty_lane ON TRUE)`
+
 export function buildEventProjectionStmts(
   db: AquillaDb,
   rawEvent: PersistedEvent,
@@ -658,15 +681,17 @@ export function buildEventProjectionStmts(
   // are emitted BEFORE the `cells` DELETE — they run in batch order, so the row
   // whose head they are testing is still there when they ask.
   const HEAD_EXISTS =
-    'EXISTS (SELECT 1 FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ? AND event_id = ?)'
+    `EXISTS (SELECT 1 FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND event_id = ?
+       AND (side = 'source' OR ${targetLaneDualReadSql()}))`
   const dependentGateAnd = gate ? ` AND ${GATE_EXISTS} AND ${HEAD_EXISTS}` : ''
-  /** Binds for `dependentGateAnd`. The side and lane are the caller's, so the
-   *  subquery tests the SAME row the accompanying `cells` write does. */
+  /** Binds for `dependentGateAnd`. Source rows match on `side` alone. A target
+   *  row matches the lane whose legacy_tag is the event's tag. */
   const dependentGateBindsFor = (side: string, lane: string): unknown[] =>
     gate
       ? [
           gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id,
-          gate.projectId, gate.fileId, gate.cellId, side, lane, event.parentId,
+          gate.projectId, gate.fileId, gate.cellId, side, event.parentId,
+          ...targetLaneDualReadBinds(gate.projectId, lane),
         ]
       : []
 
@@ -720,21 +745,21 @@ export function buildEventProjectionStmts(
       // row already exists for this key. No-op when this is a genuine first
       // insert.
 
-      // AQU-538: the lane is part of the row key. '' for source creates and
+      // The lane is part of the row key via lane_id. '' for source creates and
       // default-lane target creates; a non-'' target lane creates that lane's
-      // own row beside its siblings.
+      // own row beside its siblings. The projection target_lang column is not filled.
       const lane = laneOfEvent(event.kind, p)
       stmts.push(
         db
           .prepare(
             `INSERT INTO cells (
-              project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+              project_id, file_id, cell_id, side, value, value_html, type,
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms,
               medium, sequence_index, transcription, camera_state, metadata,
               lane_id
-            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql(side)}${gateWhere}
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql(side)}${gateWhere}
             ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
@@ -762,7 +787,6 @@ export function buildEventProjectionStmts(
             event.fileId,
             cellId,
             side,
-            lane,
             value,
             valueHtml,
             type,
@@ -814,7 +838,7 @@ export function buildEventProjectionStmts(
                metadata = (COALESCE(metadata, '{}'::jsonb) || ?::text::jsonb),
                value_html = CASE WHEN ?::text IS NULL THEN value_html ELSE ?::text END
              WHERE project_id = ? AND file_id = ? AND cell_id = ?
-               AND side = 'source' AND target_lang = ''`,
+               AND side = 'source'`,
           )
           .bind(
             metadataJson,
@@ -831,9 +855,15 @@ export function buildEventProjectionStmts(
             .prepare(
               `UPDATE cells SET value_html = ?
                WHERE project_id = ? AND file_id = ? AND cell_id = ?
-                 AND side = 'target' AND target_lang = ''`,
+                 AND side = 'target' AND ${targetLaneDualReadSql()}`,
             )
-            .bind(p.targetHtml, event.projectId, event.fileId, event.cellId),
+            .bind(
+              p.targetHtml,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              ...targetLaneDualReadBinds(event.projectId, ''),
+            ),
         )
       }
       return ['cells']
@@ -857,7 +887,7 @@ export function buildEventProjectionStmts(
           .prepare(
             `UPDATE cells SET anchor_cell_id = ?
              WHERE project_id = ? AND file_id = ? AND cell_id = ?
-               AND side = 'source' AND target_lang = ''`,
+               AND side = 'source'`,
           )
           .bind(p.anchorCellId ?? null, event.projectId, event.fileId, event.cellId),
       )
@@ -889,7 +919,7 @@ export function buildEventProjectionStmts(
           .prepare(
             `UPDATE cells SET hidden_at = ?
              WHERE project_id = ? AND file_id = ? AND cell_id = ?
-               AND side = 'source' AND target_lang = ''`,
+               AND side = 'source'`,
           )
           .bind(
             p.hidden ? event.serverTs : null,
@@ -950,11 +980,11 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `INSERT INTO cells (
-                project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+                project_id, file_id, cell_id, side, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 ai_drafted, ai_draft, lane_id
-              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
+              ) SELECT ?, ?, ?, 'target', ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
               ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
@@ -974,7 +1004,6 @@ export function buildEventProjectionStmts(
               event.projectId,
               event.fileId,
               event.cellId,
-              lane,
               value,
               valueHtml,
               event.id,
@@ -1315,9 +1344,14 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `DELETE FROM cell_validators
-               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?${dependentGateAnd}`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND ${targetLaneDualReadSql()}${dependentGateAnd}`,
             )
-            .bind(...dependentBinds, lane, ...dependentGateBinds),
+            .bind(
+              ...dependentBinds,
+              ...targetLaneDualReadBinds(event.projectId, lane),
+              ...dependentGateBinds,
+            ),
         )
         stmts.push(
           db
@@ -1340,9 +1374,17 @@ export function buildEventProjectionStmts(
         db
           .prepare(
             `DELETE FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ?${gateAnd}`,
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?
+               AND (side = 'source' OR ${targetLaneDualReadSql()})${gateAnd}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, side, lane, ...gateBinds),
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            side,
+            ...targetLaneDualReadBinds(event.projectId, lane),
+            ...gateBinds,
+          ),
       )
 
       if (!opts?.deferFileCounters)
@@ -1380,7 +1422,8 @@ export function buildEventProjectionStmts(
               event_id       = ?,
               last_editor    = ?,
               last_edit_at   = ?
-            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ?${gateAnd}`,
+            WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ?
+              AND (side = 'source' OR ${targetLaneDualReadSql()})${gateAnd}`,
           )
           .bind(
             p.anchorCellId ?? null,
@@ -1391,7 +1434,7 @@ export function buildEventProjectionStmts(
             event.fileId,
             event.cellId,
             side,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
             ...gateBinds,
           ),
       )
@@ -1426,8 +1469,8 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `INSERT INTO cell_validators (
-                project_id, file_id, cell_id, target_lang, lane_id, event_id, username, decided_ts
-              ) VALUES (?, ?, ?, ?, ${laneIdResolveSql('target')}, ?, ?, ?)
+                project_id, file_id, cell_id, lane_id, event_id, username, decided_ts
+              ) VALUES (?, ?, ?, ${laneIdResolveSql('target')}, ?, ?, ?)
               ON CONFLICT(project_id, file_id, cell_id, lane_id, username)
               DO UPDATE SET
                 event_id   = excluded.event_id,
@@ -1439,7 +1482,6 @@ export function buildEventProjectionStmts(
               event.projectId,
               event.fileId,
               event.cellId,
-              lane,
               ...laneIdResolveBinds('target', event.projectId, lane),
               p.editEventId,
               event.author,
@@ -1466,9 +1508,15 @@ export function buildEventProjectionStmts(
             .prepare(
               `DELETE FROM cell_validators
                 WHERE project_id = ? AND file_id = ? AND cell_id = ?
-                  AND target_lang = ? AND username = ?`,
+                  AND ${targetLaneDualReadSql()} AND username = ?`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, lane, targetUsername),
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              ...targetLaneDualReadBinds(event.projectId, lane),
+              targetUsername,
+            ),
         )
       }
 
@@ -1483,9 +1531,14 @@ export function buildEventProjectionStmts(
             .prepare(
               `UPDATE cells SET ai_drafted = 0, ai_draft = NULL
                WHERE project_id = ? AND file_id = ? AND cell_id = ?
-                 AND side = 'target' AND target_lang = ?`,
+                 AND side = 'target' AND ${targetLaneDualReadSql()}`,
             )
-            .bind(event.projectId, event.fileId, event.cellId, lane),
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              ...targetLaneDualReadBinds(event.projectId, lane),
+            ),
         )
       }
 
@@ -1507,22 +1560,22 @@ export function buildEventProjectionStmts(
               WHERE project_id  = ?
                 AND file_id     = ?
                 AND cell_id     = ?
-                AND target_lang = ?
+                AND ${targetLaneDualReadSql()}
                 AND event_id    = cells.event_id
             )
             WHERE project_id = ? AND file_id = ? AND cell_id = ?
-              AND side = 'target' AND target_lang = ?`,
+              AND side = 'target' AND ${targetLaneDualReadSql()}`,
           )
           .bind(
             validationThreshold,
             event.projectId,
             event.fileId,
             event.cellId,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
             event.projectId,
             event.fileId,
             event.cellId,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
           ),
       )
 
@@ -1560,21 +1613,21 @@ export function buildEventProjectionStmts(
               WHERE project_id  = ?
                 AND file_id     = ?
                 AND cell_id     = ?
-                AND target_lang = ?
+                AND ${targetLaneDualReadSql()}
                 AND event_id    = cells.event_id
             )
             WHERE project_id = ? AND file_id = ? AND cell_id = ?
-              AND side = 'target' AND target_lang = ?`,
+              AND side = 'target' AND ${targetLaneDualReadSql()}`,
           )
           .bind(
             event.projectId,
             event.fileId,
             event.cellId,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
             event.projectId,
             event.fileId,
             event.cellId,
-            lane,
+            ...targetLaneDualReadBinds(event.projectId, lane),
           ),
       )
       if (!opts?.deferFileCounters)
@@ -2347,7 +2400,7 @@ case 'cell.audio.attach': {
             `INSERT INTO concepts (
               concept_id, project_id, source_term, renderings, notes,
               status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
+            ) VALUES (?, ?, ?, ${STAMP_RENDERINGS_SQL}, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
             ON CONFLICT(concept_id) DO NOTHING`,
           )
           .bind(
@@ -2355,6 +2408,7 @@ case 'cell.audio.attach': {
             event.projectId,
             p.sourceTerm,
             JSON.stringify(p.renderings ?? []),
+            event.projectId,
             p.notes ?? null,
             p.status,
             p.caseSensitive ? 1 : 0,
@@ -2375,12 +2429,21 @@ case 'cell.audio.attach': {
       // table exists at all. `renderings` is the deliberate exception: a
       // rendering list has no per-item identity to merge on, so it replaces
       // wholesale when present and is left untouched when absent.
+      // Absent renderings bind a single NULL into COALESCE so the column is
+      // left alone. Present renderings are stamped; that expression is never
+      // NULL (an empty list becomes '[]'), so it replaces the column.
+      const renderingsSql = p.renderings === undefined
+        ? 'COALESCE(?::text::jsonb, renderings)'
+        : STAMP_RENDERINGS_SQL
+      const renderingBinds = p.renderings === undefined
+        ? [null]
+        : [JSON.stringify(p.renderings), event.projectId]
       stmts.push(
         db
           .prepare(
             `UPDATE concepts SET
                source_term    = COALESCE(?, source_term),
-               renderings     = COALESCE(?::text::jsonb, renderings),
+               renderings     = ${renderingsSql},
                notes          = COALESCE(?, notes),
                case_sensitive = COALESCE(?, case_sensitive),
                match_options  = COALESCE(?::text::jsonb, match_options),
@@ -2389,7 +2452,7 @@ case 'cell.audio.attach': {
           )
           .bind(
             p.sourceTerm ?? null,
-            p.renderings === undefined ? null : JSON.stringify(p.renderings),
+            ...renderingBinds,
             p.notes ?? null,
             p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
             p.match === undefined ? null : JSON.stringify(p.match),
@@ -2930,11 +2993,11 @@ case 'cell.audio.attach': {
           db
             .prepare(
               `INSERT INTO cells (
-                project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+                project_id, file_id, cell_id, side, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
                 upstream_event_id, upstream_seq, tombstoned_at, lane_id
-              ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?, ${laneIdResolveSql('source')})
+              ) VALUES (?, ?, ?, 'source', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?, ${laneIdResolveSql('source')})
               ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
                 event_id          = excluded.event_id,
                 last_editor       = excluded.last_editor,
@@ -2998,13 +3061,13 @@ case 'cell.audio.attach': {
         db
           .prepare(
             `INSERT INTO cells (
-              project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+              project_id, file_id, cell_id, side, value, value_html, type,
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
               upstream_event_id, upstream_seq, tombstoned_at, hidden_at${upstreamCellCol}, lane_id
             ) VALUES (
-              ?, ?, ?, 'source', '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
+              ?, ?, ?, 'source', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, NULL, ?${upstreamCellVal}, ${laneIdResolveSql('source')}
             )

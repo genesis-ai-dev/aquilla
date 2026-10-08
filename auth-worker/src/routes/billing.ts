@@ -170,8 +170,8 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
     if (err instanceof StripeConfigError) {
       return c.json({ error: "stripe_unconfigured", message: err.message }, 503)
     }
-    const message = err instanceof Error ? err.message : "Checkout failed"
-    return c.json({ error: "stripe_error", message }, 502)
+    console.error("[billing] checkout failed:", err)
+    return c.json({ error: "stripe_error", message: "Checkout failed" }, 502)
   }
 })
 
@@ -195,8 +195,8 @@ billing.post("/orgs/:orgId/billing/portal", authMiddleware, async (c) => {
     if (err instanceof StripeConfigError) {
       return c.json({ error: "stripe_unconfigured", message: err.message }, 503)
     }
-    const message = err instanceof Error ? err.message : "Portal failed"
-    return c.json({ error: "stripe_error", message }, 502)
+    console.error("[billing] portal failed:", err)
+    return c.json({ error: "stripe_error", message: "Portal failed" }, 502)
   }
 })
 

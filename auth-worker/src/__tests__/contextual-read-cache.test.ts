@@ -234,8 +234,7 @@ describe("GET /contextual/overview|runs|activity through the cache", () => {
 
     // 2. Review: the draft flips to applied with no live frame at all.
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-       VALUES (?, ?, 'c1', 'target', '', 'Au commencement', 'ev-review-c1', 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES (?, ?, 'c1', 'target', 'Au commencement', 'ev-review-c1', 0)`,
     ).bind(PROJECT, FILE).run()
     const { drafts } = (await (await get(`/drafts?fileId=${FILE}`, viewer)).json()) as { drafts: { id: string }[] }
     const review = await post(`/drafts/${drafts[0].id}/review`, contrib, { action: "applied" })

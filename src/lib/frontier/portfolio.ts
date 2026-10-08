@@ -47,6 +47,8 @@ export interface PortfolioLane {
   position?: number
   /** AQU-1458. Absent on older servers, which means "not archived". */
   archived?: boolean
+  /** Source rows are for the language pair. Chips list target lanes only. */
+  role?: "source" | "target"
 }
 
 export interface PortfolioProject {
@@ -122,12 +124,41 @@ export interface PortfolioProject {
  * when only one side is set, and null when neither is — callers render nothing
  * in that case rather than a broken "→" or empty label.
  */
+const LANE_PLACEHOLDER_LABELS = new Set(["Source", "Untitled lane"])
+
+function laneLabelText(lane: PortfolioLane | undefined): string | null {
+  const name = lane?.name?.trim()
+  if (!name || LANE_PLACEHOLDER_LABELS.has(name)) return null
+  return name
+}
+
+/** Source language from the source lane row, else a payload that still sends the field. */
+export function portfolioSourceLabel(p: {
+  lanes?: PortfolioLane[]
+  sourceLanguage?: string | null
+}): string | null {
+  const fromLane = laneLabelText(p.lanes?.find((lane) => lane.role === "source"))
+  return fromLane || p.sourceLanguage?.trim() || null
+}
+
+/** The former default lane's label, else a payload that still sends targetLanguage. */
+export function portfolioTargetLabel(p: {
+  lanes?: PortfolioLane[]
+  targetLanguage?: string | null
+}): string | null {
+  const fromLane = laneLabelText(
+    p.lanes?.find((lane) => lane.role !== "source" && lane.lane === ""),
+  )
+  return fromLane || p.targetLanguage?.trim() || null
+}
+
 export function languagePairLabel(p: {
+  lanes?: PortfolioLane[]
   sourceLanguage?: string | null
   targetLanguage?: string | null
 }): string | null {
-  const source = p.sourceLanguage?.trim() || null
-  const target = p.targetLanguage?.trim() || null
+  const source = portfolioSourceLabel(p)
+  const target = portfolioTargetLabel(p)
   if (source && target) return `${source} → ${target}`
   return target ?? source ?? null
 }

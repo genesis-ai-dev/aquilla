@@ -451,7 +451,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     console.error("Sandbox import parsing failed:", error)
     return c.json({
       error: "import_parser_failed",
-      message: error instanceof Error ? error.message : String(error),
+      message: "The sandbox parser could not produce a valid import",
     }, 502)
   } finally {
     await Promise.allSettled([

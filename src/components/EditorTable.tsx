@@ -29,7 +29,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
-import { laneComboboxOptions } from "@/components/lane-options"
+import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
+import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -213,6 +214,7 @@ import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { findConceptMatches } from "@/lib/terminology/match"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
@@ -755,6 +757,13 @@ interface EditorTableProps {
    * Falls back to the tag (or `defaultLaneLabel` for `''`) when a row has no name.
    */
   laneLabels?: Readonly<Record<string, string>>
+  /**
+   * AQU-1784: code OVERRIDES by lane tag (`laneCodesByTag`). Two lanes that
+   * display the same string are told apart by a suffix — the lane's code when
+   * it has one, otherwise its position among the colliding lanes — so the
+   * switcher and the TARGET pill name them differently.
+   */
+  laneCodes?: Readonly<Record<string, string>>
   /** AQU-583: opens the project's language settings so the target language is
    *  changeable from the TARGET column header. When provided, the target-language
    *  tag is always actionable — a single-lane project shows a clickable pill, a
@@ -1050,7 +1059,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
@@ -1100,18 +1109,38 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   chapterNavTrailing,
 }, ref) {
   const t = useT()
-  // The switcher trigger and the closed pill name the lane the same way.
-  // A renamed lane wins; otherwise the tag. The default lane falls back to
-  // the project's target language, then to the "set a language" prompt.
-  const activeLaneLabel =
-    (laneLabels?.[activeLane]
-      ?? (activeLane ? activeLane : project.targetLanguage))
-    || t("editor.lane.setTargetLanguage")
   // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
   // lane-limited member over the lanes the read wall left them (`scopedLanes`).
   // One lane is enough (AQU-1601). "Add lane" is maintainer-only.
   const canManageLanes = canSwitchLanes(project.syncRole?.level)
   const switchableLanes = canManageLanes ? lanes : scopedLanes
+  // AQU-1784: one label list for the switcher AND the closed pill, computed
+  // over the lanes THIS reader can see. Two lanes that resolve to the same
+  // string get a suffix here; a member with no lane scope sees only the lane
+  // they are in, so a lone lane never collides and never hints at a sibling
+  // the read wall hides (AQU-1421).
+  const laneOptionList = useMemo(
+    () =>
+      laneOptionLabels({
+        lanes: switchableLanes ?? [activeLane],
+        laneLabels,
+        laneCodes,
+        defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
+        archivedLanes,
+      }),
+    [switchableLanes, activeLane, laneLabels, laneCodes, defaultLaneLabel, archivedLanes, t],
+  )
+  // The switcher trigger and the closed pill name the lane the same way.
+  // A renamed lane wins; otherwise the tag. The default lane falls back to
+  // the project's target language, then to the "set a language" prompt — a
+  // base the option list does not share, so the pill keeps its own and
+  // borrows only the collision suffix.
+  const activeLaneLabel = withLaneLabelSuffix(
+    (laneLabels?.[activeLane]
+      ?? (activeLane ? activeLane : project.targetLanguage))
+    || t("editor.lane.setTargetLanguage"),
+    laneOptionList.find((option) => option.value === activeLane)?.suffix ?? null,
+  )
   const showLaneSwitcher = Boolean(onLaneChange && switchableLanes && switchableLanes.length >= 1)
   const showAddLane = canManageLanes && !!onAddLane
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
@@ -3020,12 +3049,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={laneComboboxOptions({
-                  lanes: switchableLanes,
-                  laneLabels,
-                  defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
-                  archivedLanes,
-                })}
+                options={toLaneComboboxOptions(laneOptionList)}
                 value={activeLane}
                 onValueChange={onLaneChange}
                 searchPlaceholder={t("editor.lane.searchPlaceholder")}
@@ -5598,7 +5622,11 @@ function EditorRow({
   const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
-  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+  const terminologyConcepts = conceptsForLaneTag(
+    project.terminology ?? EMPTY_CONCEPTS,
+    activeLane,
+    project.lanes ?? [],
+  )
   const showTargetKeyTermHighlights =
     targetKeyTermHighlightMode === "always" ||
     (targetKeyTermHighlightMode === "focused" && isRowFocused)

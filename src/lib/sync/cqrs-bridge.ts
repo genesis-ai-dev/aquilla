@@ -11,6 +11,7 @@ import {
   makeSyncTokenMinter,
   type ProjectBootstrap,
   type SyncTokenCallbacks,
+  type SyncTokenMintOptions,
   type SyncTokenMintResult,
 } from "./sync-token"
 
@@ -103,22 +104,36 @@ export function buildProjectAwareMinter(
   getJwt: () => string | null,
   apiUrl?: string,
   callbacks: SyncTokenCallbacks = {},
-): (projectId: string, fileId: string) => Promise<SyncTokenMintResult> {
-  const perProject = new Map<string, (fileId: string) => Promise<SyncTokenMintResult>>()
-  return (projectId: string, fileId: string) => {
+): (
+  projectId: string,
+  fileId: string,
+  opts?: SyncTokenMintOptions,
+) => Promise<SyncTokenMintResult> {
+  const perProject = new Map<
+    string,
+    (fileId: string, opts?: SyncTokenMintOptions) => Promise<SyncTokenMintResult>
+  >()
+  return (projectId: string, fileId: string, opts?: SyncTokenMintOptions) => {
     let forProject = perProject.get(projectId)
     if (!forProject) {
-      const cache = new Map<string, () => Promise<SyncTokenMintResult>>()
-      forProject = (fid: string) => {
+      const cache = new Map<
+        string,
+        (opts?: SyncTokenMintOptions) => Promise<SyncTokenMintResult>
+      >()
+      forProject = (fid: string, mintOpts?: SyncTokenMintOptions) => {
         let minter = cache.get(fid)
         if (!minter) {
           minter = makeSyncTokenMinter(getJwt, projectId, fid, {}, apiUrl, callbacks)
           cache.set(fid, minter)
         }
-        return minter()
+        // AQU-1788: the per-(project,file) minter owns the token cache, so a
+        // forced re-mint has to reach THIS closure — rebuilding the minter
+        // here instead would throw away nothing the caller can observe and
+        // leave the flusher unable to pick up a lowered role.
+        return minter(mintOpts)
       }
       perProject.set(projectId, forProject)
     }
-    return forProject(fileId)
+    return forProject(fileId, opts)
   }
 }

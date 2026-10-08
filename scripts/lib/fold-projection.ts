@@ -8,20 +8,24 @@
 // can COPY them to Neon in a handful of round-trips.
 //
 // Correctness contract: foldProjection(events) must produce the SAME cells /
-// cell_validators / files / comments rows that the canonical per-event replay
-// would. That is asserted byte-for-byte in fold-projection.test.ts against the
-// real buildEventProjectionStmts path running on PGlite (same Postgres engine).
+// cell_validators / files / comments / concepts rows that the canonical
+// per-event replay would. That is asserted byte-for-byte in
+// fold-projection.test.ts against the real buildEventProjectionStmts path
+// running on PGlite (same Postgres engine).
 //
-// Scope: the legacy GitLab import only emits six event kinds (verified against
-// the imported 14.4M-event corpus):
+// The legacy GitLab import only emits six event kinds (verified against the
+// imported 14.4M-event corpus):
 //   source.cell.create, target.cell.commit, cell.validate,
 //   file.create, comment.create, comment.resolve
-// There are NO deletes, reorders, source-commits, unvalidates, waivers, audio,
-// or backtranslations — so cells/validators are only ever added or updated,
-// never removed. Any other kind throws (fail loud) rather than silently drop.
+// term.* is folded too (AQU-1508): concepts are project-level and renderings
+// are stamped with the legacy_tag '' lane the same way the SQL projector
+// does. The bulk builder does not INSERT concepts; the fold still has to
+// agree with a replay so a project that has term events does not abort.
+// Any other kind throws (fail loud) rather than silently drop.
 
 import { contentHash, CHAIN_MUTATING_KINDS, laneOfEvent } from "../../sync-worker/src/events/event-projection"
 import { assignDeclaredLanguages } from "../../db/shared/file-declared-languages"
+import { stampRenderingLanes } from "../../src/lib/terminology/rendering-lane"
 
 export interface FoldEvent {
   id: string
@@ -42,6 +46,17 @@ export interface ProjectionRows {
   cell_validators: Row[]
   files: Row[]
   comments: Row[]
+  concepts: Row[]
+}
+
+export interface FoldOptions {
+  /**
+   * Id of the project's target lane whose `legacy_tag` is `''`. The SQL
+   * projector looks this up; the fold is pure, so the caller passes the same
+   * id. Omit it (or pass null) when that row does not exist yet — renderings
+   * are then left unstamped, matching the SQL.
+   */
+  legacyEmptyLaneId?: string | null
 }
 
 function countWords(text: string): number {
@@ -66,7 +81,7 @@ const childKey = (e: FoldEvent) => {
  * replay, then apply the AD-2 first-child-of-parent winner rule exactly as
  * rebuild.ts does.
  */
-export function foldProjection(events: FoldEvent[]): ProjectionRows {
+export function foldProjection(events: FoldEvent[], options?: FoldOptions): ProjectionRows {
   const sorted = [...events].sort(
     (a, b) => a.serverSeq - b.serverSeq || a.serverTs - b.serverTs || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   )
@@ -76,6 +91,8 @@ export function foldProjection(events: FoldEvent[]): ProjectionRows {
   const validators = new Map<string, Row>()
   const files = new Map<string, Row>()
   const comments = new Map<string, Row>()
+  const concepts = new Map<string, Row>()
+  const legacyEmptyLaneId = options?.legacyEmptyLaneId ?? null
 
   for (const e of sorted) {
     // AD-2: first chain event at a (project,file,cell,parent) slot wins; later
@@ -91,7 +108,7 @@ export function foldProjection(events: FoldEvent[]): ProjectionRows {
       if (!winner) winningChildAt.set(k, e.id)
       else if (winner !== e.id) continue
     }
-    apply(e, { cells, validators, files, comments })
+    apply(e, { cells, validators, files, comments, concepts, legacyEmptyLaneId })
   }
 
   // Derive cells.validated / endorsement_count from the final validator set:
@@ -101,13 +118,15 @@ export function foldProjection(events: FoldEvent[]): ProjectionRows {
   // AQU-538: endorsement is counted per (cell, lane, chain-head) so a lane's
   // validators never leak into another lane's validated flag.
   const endorsements = new Map<string, number>()
-  for (const v of validators.values()) {
-    const k = `${v.project_id}\0${v.file_id}\0${v.cell_id}\0${v.target_lang}\0${v.event_id}`
+  for (const [key, v] of validators) {
+    const lane = key.split("\0")[3] ?? ""
+    const k = `${v.project_id}\0${v.file_id}\0${v.cell_id}\0${lane}\0${v.event_id}`
     endorsements.set(k, (endorsements.get(k) ?? 0) + 1)
   }
-  for (const c of cells.values()) {
+  for (const [key, c] of cells) {
     if (c.side !== "target") continue
-    const n = endorsements.get(`${c.project_id}\0${c.file_id}\0${c.cell_id}\0${c.target_lang}\0${c.event_id}`) ?? 0
+    const lane = key.split("\0")[4] ?? ""
+    const n = endorsements.get(`${c.project_id}\0${c.file_id}\0${c.cell_id}\0${lane}\0${c.event_id}`) ?? 0
     c.endorsement_count = n
     c.validated = n > 0 ? 1 : 0
   }
@@ -117,6 +136,7 @@ export function foldProjection(events: FoldEvent[]): ProjectionRows {
     cell_validators: [...validators.values()],
     files: [...files.values()],
     comments: [...comments.values()],
+    concepts: [...concepts.values()],
   }
 }
 
@@ -125,6 +145,16 @@ interface State {
   validators: Map<string, Row>
   files: Map<string, Row>
   comments: Map<string, Row>
+  concepts: Map<string, Row>
+  legacyEmptyLaneId: string | null
+}
+
+function stampedRenderings(raw: unknown, legacyEmptyLaneId: string | null): unknown[] {
+  const list = Array.isArray(raw) ? raw : []
+  return stampRenderingLanes(
+    list.filter((item): item is { laneId?: string | null } => !!item && typeof item === "object"),
+    legacyEmptyLaneId,
+  )
 }
 
 function apply(e: FoldEvent, s: State): void {
@@ -140,7 +170,6 @@ function apply(e: FoldEvent, s: State): void {
         file_id: e.fileId,
         cell_id: cellId,
         side: "source",
-        target_lang: "",
         value,
         value_html: (p.valueHtml as string) ?? null,
         type: (p.type as string) ?? null,
@@ -178,7 +207,6 @@ function apply(e: FoldEvent, s: State): void {
         file_id: e.fileId,
         cell_id: e.cellId,
         side: "target",
-        target_lang: lane,
         type: null,
         canonical_ref: null,
         anchor_cell_id: null,
@@ -219,7 +247,6 @@ function apply(e: FoldEvent, s: State): void {
         project_id: e.projectId,
         file_id: e.fileId,
         cell_id: e.cellId,
-        target_lang: lane,
         event_id: (p.editEventId as string) ?? null,
         username: e.author,
         decided_ts: e.serverTs,
@@ -283,6 +310,60 @@ function apply(e: FoldEvent, s: State): void {
         updated_at: e.serverTs,
         deleted_at: null,
       })
+      return
+    }
+    case "term.create": {
+      const conceptId = p.conceptId as string
+      // ON CONFLICT(concept_id) DO NOTHING — first create wins.
+      if (s.concepts.has(conceptId)) return
+      s.concepts.set(conceptId, {
+        concept_id: conceptId,
+        project_id: e.projectId,
+        source_term: p.sourceTerm as string,
+        renderings: stampedRenderings(p.renderings, s.legacyEmptyLaneId),
+        notes: (p.notes as string) ?? null,
+        status: p.status as string,
+        case_sensitive: p.caseSensitive ? 1 : 0,
+        match_options: p.match === undefined ? null : p.match,
+        created_by: e.author,
+        created_at: e.serverTs,
+        updated_at: e.serverTs,
+        deleted_at: null,
+      })
+      return
+    }
+    case "term.update": {
+      const row = s.concepts.get(p.conceptId as string)
+      if (!row || row.deleted_at != null) return
+      if (typeof p.sourceTerm === "string") row.source_term = p.sourceTerm
+      if (p.renderings !== undefined) row.renderings = stampedRenderings(p.renderings, s.legacyEmptyLaneId)
+      if (typeof p.notes === "string") row.notes = p.notes
+      if (typeof p.caseSensitive === "boolean") row.case_sensitive = p.caseSensitive ? 1 : 0
+      if (p.match !== undefined) row.match_options = p.match
+      row.updated_at = e.serverTs
+      return
+    }
+    case "term.delete": {
+      const row = s.concepts.get(p.conceptId as string)
+      if (!row || row.deleted_at != null) return
+      row.deleted_at = e.serverTs
+      row.updated_at = e.serverTs
+      return
+    }
+    case "term.approve": {
+      const row = s.concepts.get(p.conceptId as string)
+      if (!row || row.deleted_at != null) return
+      if (row.status !== "draft" && row.status !== "deprecated") return
+      row.status = "active"
+      row.updated_at = e.serverTs
+      return
+    }
+    case "term.reject": {
+      const row = s.concepts.get(p.conceptId as string)
+      if (!row || row.deleted_at != null) return
+      if (p.mode === "deprecate") row.status = "deprecated"
+      else row.deleted_at = e.serverTs
+      row.updated_at = e.serverTs
       return
     }
     case "comment.resolve": {

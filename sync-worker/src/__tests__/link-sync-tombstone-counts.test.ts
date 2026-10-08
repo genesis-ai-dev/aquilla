@@ -96,8 +96,7 @@ async function seedUpstreamFile(t: TestDb): Promise<void> {
 /** A downstream translator's work on one mirrored cell: a validated draft. */
 async function translateDownstream(t: TestDb, cellId: string, value: string): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, validated, word_count)
-     VALUES ($1, $2, $3, 'target', '', $4, $5, 'translator', 2, 1, 2)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, word_count) VALUES ($1, $2, $3, 'target', $4, $5, 'translator', 2, 1, 2)`,
     [DOWNSTREAM, DOWNSTREAM_FILE, cellId, value, `evt-down-${cellId}`],
   )
 }

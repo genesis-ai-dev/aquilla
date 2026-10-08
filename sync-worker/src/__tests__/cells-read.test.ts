@@ -916,7 +916,7 @@ describe("project incarnation (AQU-943)", () => {
       .run()
     await db
       .prepare(
-        "INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, anchor_cell_id, event_id, last_editor, last_edit_at, validated, word_count) VALUES (?, ?, ?, 'target', '', ?, NULL, ?, 'alice', 1, 0, 1)",
+        "INSERT INTO cells (project_id, file_id, cell_id, side, value, anchor_cell_id, event_id, last_editor, last_edit_at, validated, word_count) VALUES (?, ?, ?, 'target', ?, NULL, ?, 'alice', 1, 0, 1)",
       )
       .bind("proj-a", "file-x", "c1", opts.value, `ev-${opts.epoch}`)
       .run()
@@ -1364,7 +1364,7 @@ describe("AQU-1160: chain-order cache", () => {
       .run()
     await db
       .prepare(
-        "INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash) VALUES (?, ?, ?, 'target', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 1, NULL)",
+        "INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash) VALUES (?, ?, ?, 'target', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 1, NULL)",
       )
       .bind("proj-a", "file-x", "c0", "v0", "e0", "alice", 1700000000001)
       .run()
@@ -1500,7 +1500,7 @@ it("reads narrow ordering on a cold page and keeps intervening edits visible to 
   let changed = false
   db.prepare = (sql: string) => {
     const statement = prepare(sql)
-    if (!sql.startsWith("SELECT cell_id, side, target_lang, anchor_cell_id, event_id FROM cells")) return statement
+    if (!sql.startsWith("SELECT cells.cell_id, cells.side, cells.lane_id, COALESCE(wl.legacy_tag, '') AS target_lang, cells.anchor_cell_id, cells.event_id FROM cells")) return statement
     const bind = statement.bind.bind(statement)
     statement.bind = (...args: unknown[]) => {
       const bound = bind(...args)
@@ -1525,7 +1525,7 @@ it("reads narrow ordering on a cold page and keeps intervening edits visible to 
   const response = (await handleCellsReadRequest(request("side=target&limit=1"), envWith(db)))!
   const page = await response.json() as { cells: { cellId: string; value: string }[]; maxServerSeq: number }
   expect(orderingRows).toHaveLength(4)
-  expect(Object.keys(orderingRows[0]).sort()).toEqual(["anchor_cell_id", "cell_id", "event_id", "side", "target_lang"])
+  expect(Object.keys(orderingRows[0]).sort()).toEqual(["anchor_cell_id", "cell_id", "event_id", "lane_id", "side", "target_lang"])
   expect(page.cells).toHaveLength(1)
   expect(page.cells[0].value).toBe("edited during read")
   expect(page.maxServerSeq).toBe(1)

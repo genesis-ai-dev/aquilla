@@ -42,6 +42,10 @@ export async function syncMemberLaneGrants(
     .bind(projectId, targetUserId)
     .first<{ role_level: number }>()
   if (!membership) return
+  // Every target lane, archived included, and that matters for an unscoped
+  // member: AQU-1781 grants a newly created lane only to someone who already
+  // holds every OTHER lane, archived ones too. Leaving the archived lanes out
+  // here would make the member's next lane silently skip them (AQU-1783).
   const lanes = await loadTargetLaneIdentities(db, projectId)
   if (lanes.length === 0) return
   const plan = planLaneGrants({

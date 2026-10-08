@@ -1034,6 +1034,15 @@ export const org = defineNamespace({
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New lane code",
     // "Add" → common.add (identical text)
     "org.memberLaneScopeEditor.saveScopesButton": "Save scopes",
+    // AQU-1783: the read wall decides from lane GRANTS, not from these scopes,
+    // so the inspector reports the grants rather than claiming "full access".
+    "org.memberLaneScopeEditor.grantsLegend": "Lanes they can read",
+    "org.memberLaneScopeEditor.laneNoAccess": "no access",
+    "org.memberLaneScopeEditor.grantGapWarning":
+      "This member is unscoped, but has no grant for every lane. The lanes marked \u201cno access\u201d read as empty for them.",
+    "org.memberLaneScopeEditor.grantAllButton": "Grant all current lanes",
+    "org.memberLaneScopeEditor.grantAllHint": "Takes effect for them within 15 minutes, or on their next sign-in.",
+    "org.memberLaneScopeEditor.visibleByRole": "Every lane is visible to this member through their role.",
 
     // -- MemberMultiAddRow: shared staged-multi-add affordance (AQU-734) --
     "org.memberMultiAddRow.peopleToAddAriaLabel": "People to add",

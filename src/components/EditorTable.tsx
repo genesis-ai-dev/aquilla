@@ -63,7 +63,13 @@ import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commi
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
-import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
+import { HighlightedText, buildHighlightsFromExamples, type HealthDisplaySpan } from "./HighlightedText"
+import {
+  buildDraftHealthSpans,
+  clipDraftHealthExcerpt,
+  resolveDraftHealthExamples,
+} from "@/lib/completion/draft-health-spans"
+import { useHealthScoreColorCoding } from "@/lib/store/health-score-color-coding-pref"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
@@ -4827,6 +4833,7 @@ function textNodePositionForOffset(
 function TargetReadText({
   text,
   ranges,
+  healthSpans = [],
   concepts,
   onRangeClick,
   onTermChipClick,
@@ -4836,6 +4843,7 @@ function TargetReadText({
 }: {
   text: string
   ranges: RangeHighlight[]
+  healthSpans?: HealthDisplaySpan[]
   concepts: Concept[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
@@ -4851,6 +4859,7 @@ function TargetReadText({
         text={text}
         concepts={concepts}
         ranges={ranges}
+        healthSpans={healthSpans}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
         showKeyTermHighlights={showKeyTermHighlights}
@@ -4890,6 +4899,7 @@ function TargetReadText({
           text={seg.text}
           concepts={concepts}
           ranges={clipRangesToSegment(ranges, seg)}
+          healthSpans={clipRangesToSegment(healthSpans, seg)}
           onRangeClick={onRangeClick}
           onTermChipClick={onTermChipClick}
           showKeyTermHighlights={showKeyTermHighlights}
@@ -4905,6 +4915,7 @@ export function TargetDecoratedText({
   text,
   concepts,
   ranges,
+  healthSpans = [],
   onRangeClick,
   onTermChipClick,
   showKeyTermHighlights = false,
@@ -4912,6 +4923,7 @@ export function TargetDecoratedText({
   text: string
   concepts: Concept[]
   ranges: RangeHighlight[]
+  healthSpans?: HealthDisplaySpan[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   showKeyTermHighlights?: boolean
@@ -4950,6 +4962,7 @@ export function TargetDecoratedText({
         text={text}
         highlights={EMPTY_HIGHLIGHTS}
         ranges={ranges}
+        healthSpans={healthSpans}
         showEvidence={false}
         onRangeClick={onRangeClick}
       />
@@ -4967,6 +4980,7 @@ export function TargetDecoratedText({
           text={before}
           highlights={EMPTY_HIGHLIGHTS}
           ranges={clipRangesToTextSlice(ranges, cursor, match.start)}
+          healthSpans={clipRangesToTextSlice(healthSpans, cursor, match.start)}
           showEvidence={false}
           onRangeClick={onRangeClick}
         />,
@@ -5000,6 +5014,7 @@ export function TargetDecoratedText({
             text={matchedText}
             highlights={EMPTY_HIGHLIGHTS}
             ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
+            healthSpans={clipRangesToTextSlice(healthSpans, match.start, match.end)}
             showEvidence={false}
             onRangeClick={onRangeClick}
           />
@@ -5011,26 +5026,27 @@ export function TargetDecoratedText({
 
   if (cursor < text.length) {
     parts.push(
-      <HighlightedText
-        key="t-tail"
-        text={text.slice(cursor)}
-        highlights={EMPTY_HIGHLIGHTS}
-        ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
-        showEvidence={false}
-        onRangeClick={onRangeClick}
-      />,
+        <HighlightedText
+          key="t-tail"
+          text={text.slice(cursor)}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
+          healthSpans={clipRangesToTextSlice(healthSpans, cursor, text.length)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />,
     )
   }
 
   return <span>{parts}</span>
 }
 
-function clipRangesToTextSlice(
-  ranges: readonly RangeHighlight[],
+function clipRangesToTextSlice<T extends { start: number; end: number }>(
+  ranges: readonly T[],
   sliceStart: number,
   sliceEnd: number,
-): RangeHighlight[] {
-  const out: RangeHighlight[] = []
+): T[] {
+  const out: T[] = []
   for (const range of ranges) {
     const start = Math.max(range.start, sliceStart)
     const end = Math.min(range.end, sliceEnd)
@@ -5205,6 +5221,7 @@ function EditorRow({
   // preference is on, the same rows also carry a solid leading-edge accent.
   // Per-row subscription, like the media-cursor and presence hooks above it.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
+  const healthScoreColorCoding = useHealthScoreColorCoding()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -5764,6 +5781,40 @@ function EditorRow({
     }
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+  const healthDisplaySpans = useMemo<HealthDisplaySpan[]>(() => {
+    if (!healthScoreColorCoding || !cell.aiDrafted) return []
+    const draftText = liveTargetText ?? visibleTranslated
+    if (!draftText?.trim()) return []
+    const examples = resolveDraftHealthExamples({
+      live: cellExamples,
+      persisted: cell.aiDraft?.exampleTexts,
+      exampleIds: cell.aiDraft?.exampleIds,
+      lookup: (id) => {
+        const view = previewCellStore?.getCellView(id)
+        if (!view?.translated.trim()) return undefined
+        return { source: view.original, target: view.translated }
+      },
+    })
+    return buildDraftHealthSpans(draftText, examples).map((span) => ({
+      ...span,
+      title: span.kind === "supported" && span.exampleSource != null && span.exampleTarget != null
+        ? t("editor.health.citedExample", {
+            source: clipDraftHealthExcerpt(span.exampleSource),
+            target: clipDraftHealthExcerpt(span.exampleTarget),
+          })
+        : undefined,
+    }))
+  }, [
+    healthScoreColorCoding,
+    cell.aiDrafted,
+    cell.aiDraft?.exampleIds,
+    cell.aiDraft?.exampleTexts,
+    cellExamples,
+    liveTargetText,
+    visibleTranslated,
+    previewCellStore,
+    t,
+  ])
   const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // AQU-1484: the commit path below validates a human edit by itself, and that
@@ -7907,6 +7958,7 @@ function EditorRow({
                     }}
                     ariaLabel={editorAriaLabel}
                     onEscapeToGrid={onEscapeToGrid}
+                    healthSpans={healthDisplaySpans}
                   />
                 ) : (
                   <EditorTargetReadSurface
@@ -7992,6 +8044,7 @@ function EditorRow({
                           <TargetReadText
                             text={visibleTranslated}
                             ranges={targetRanges}
+                            healthSpans={healthDisplaySpans}
                             concepts={terminologyConcepts}
                             onRangeClick={openInlineRule}
                             onTermChipClick={handleTermChipClick}

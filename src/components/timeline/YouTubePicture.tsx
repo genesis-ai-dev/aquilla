@@ -31,8 +31,16 @@ declare module "react" {
 type Props = VideoHTMLAttributes<HTMLVideoElement> & { ref: RefObject<HTMLVideoElement | null> }
 /** The element forces YouTube's own captions on (cc_load_policy=1). The pane
  *  draws its captions itself, from the cells, so YouTube's must not stack on
- *  top of them. */
-const PLAYER_CONFIG = { cc_load_policy: 0 }
+ *  top of them.
+ *
+ *  `origin` is required once enablejsapi is on. Without it the iframe player
+ *  answers error 150 ("embedding not allowed") and the pane shows "This video
+ *  could not be loaded" for a video that plays fine. The library leaves origin
+ *  commented out; the page has to supply its own. */
+function playerConfig(): Record<string, string | number> {
+  const origin = typeof window !== "undefined" ? window.location.origin : ""
+  return origin ? { cc_load_policy: 0, origin } : { cc_load_policy: 0 }
+}
 
 type Handler = (e: SyntheticEvent<HTMLVideoElement>) => void
 
@@ -84,7 +92,7 @@ export function YouTubePicture({ ref, src, ...rest }: Props) {
     <youtube-video
       {...(attrs as VideoHTMLAttributes<HTMLVideoElement>)}
       ref={ref}
-      config={PLAYER_CONFIG}
+      config={playerConfig()}
       // Canonical form: the element's own matcher misses some share-link shapes.
       src={id ? `https://www.youtube.com/watch?v=${id}` : src}
     />

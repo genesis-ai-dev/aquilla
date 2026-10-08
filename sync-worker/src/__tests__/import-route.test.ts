@@ -554,6 +554,67 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     expect(cellRows).toHaveLength(CELL_COUNT)
   })
 
+  it('creates project lanes and stamps cells.lane_id without the test filler (local /__dev__ seed shape)', async () => {
+    // Production and `pnpm dev` do not install aquilla_test_fill_lane_id.
+    // Without ensureProjectLanes, the lane_id subquery is NULL and Postgres
+    // rejects the cells INSERT — the UI error is HTTP 500 "DB batch failed".
+    const token = await leadToken()
+    const { db, rows, pg } = await makeTestDb()
+    await pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+
+    const req = await makeImportRequest(token, {
+      idPrefix: 'nolanes',
+      cellCount: 2,
+      includeFile: true,
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+    expect(await res?.json()).toMatchObject({ accepted: 2 })
+
+    // Source cells only and no target language on the file, so the only lane
+    // is the source lane: no blank target lane is invented (AQU-1594).
+    const lanes = await rows<{ id: string; role: string; legacy_tag: string | null }>('lanes')
+    expect(lanes.map((lane) => [lane.role, lane.legacy_tag])).toEqual([['source', null]])
+    const cells = await rows<{ lane_id: string | null }>('cells')
+    expect(cells).toHaveLength(2)
+    expect(cells.map((c) => c.lane_id)).toEqual([lanes[0].id, lanes[0].id])
+  })
+
+  it('leaves a project that already has lanes alone, whatever the file names as its languages', async () => {
+    // The '' bridge is how most projects hold their default lane. Asking for
+    // lanes again from the file's target language would add a "Spanish" lane
+    // beside it on every import into such a project.
+    const token = await leadToken()
+    const { db, rows, pg } = await makeTestDb()
+    await pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+        ('5e5e5e01', $1, 'source', 'English', NULL, 0),
+        ('5e5e5e02', $1, 'target', 'Spanish', '', 1)`,
+      [PROJECT_ID],
+    )
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: {
+          id: 'haslanes-file-evt',
+          name: 'haslanes.usfm',
+          fileType: 'usfm',
+          sourceLanguage: 'English',
+          targetLanguage: 'Spanish',
+        },
+        cells: [{ id: 'haslanes-evt-0', cellId: 'haslanes-cell-0', value: 'In the beginning' }],
+      }),
+    })
+    expect((await handleBulkImportRequest(req, makeEnv(db)))?.status).toBe(200)
+
+    const lanes = await rows<{ id: string }>('lanes')
+    expect(lanes.map((lane) => lane.id).sort()).toEqual(['5e5e5e01', '5e5e5e02'])
+  })
+
   it('cells projection carries derived columns (word_count, content_hash) like the dispatcher', async () => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import { test, expect } from "../../helpers/multi-user"
 import { Glossary } from "../../helpers/page-objects/Glossary"
 import { readProjectSettings } from "../../helpers/frontier-api"
@@ -37,7 +38,7 @@ const VARIANT_POINTING = "הָאָֽרֶץ"
 test("pointed term matches variant pointing and prefixes; exclusion sticks", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), {
     name: `Forms ${Date.now()}`,
-    fixturePath: new URL("../../fixtures/genesis-1-pointed.md", import.meta.url).pathname,
+    fixturePath: fileURLToPath(new URL("../../fixtures/genesis-1-pointed.md", import.meta.url)),
   })
   await openSeededProject(alice, seeded)
 

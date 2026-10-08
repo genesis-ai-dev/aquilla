@@ -10,7 +10,7 @@
 import { useState } from "react"
 import { Languages, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -112,12 +112,12 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
     }
   }
 
-  async function handleAdd() {
+  async function handleAdd(language?: string) {
     if (!snapshot) {
       setError(t("org.addLanguagePopover.loadError"))
       return
     }
-    const trimmed = value.trim()
+    const trimmed = (language ?? value).trim()
     const validationError = validateNewLane(
       t,
       trimmed,
@@ -193,13 +193,22 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
           </div>
         ) : (
           <div className="flex items-end gap-2">
-            <Input
+            <LanguageComboboxInput
               autoFocus
               value={value}
-              onChange={(e) => {
-                setValue(e.target.value)
+              onValueChange={(next) => {
+                setValue(next)
                 setError(null)
               }}
+              onEnterSelect={(name) => {
+                setValue(name)
+                setError(null)
+                void handleAdd(name)
+              }}
+              exclude={[
+                snapshot.defaultTargetLanguage,
+                ...snapshot.laneLanguages,
+              ].filter((language) => language.trim().length > 0)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault()

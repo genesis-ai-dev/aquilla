@@ -54,23 +54,24 @@ export const projectSettings = defineNamespace({
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
     "projectSettings.create.namePlaceholder": "My Translation Project",
-    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
+    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English…",
     "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
-    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
+    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
     "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.bulkTargetLanguagesHint":
       "That's all {max} boxes. Add any remaining languages here, separated by commas.",
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
-      "Swahili, Yoruba, Hausa, zh-Hant…",
+      "Swahili, Yoruba, Hausa, Traditional Han…",
     "projectSettings.create.bulkTargetLanguagesCount": plural({
       one: "Adds {count} more lane.",
       other: "Adds {count} more lanes.",
     }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
-      "Any label works — a BCP-47 tag, a language name, or a register description " +
-      "(e.g. \"Grade 7 English\", \"conversational Swahili\").",
+      "Type a language name or a description (e.g. \"Grade 7 English\", " +
+      "\"conversational Swahili\"). The language code is filled in from the name, " +
+      "and you can edit that code if it is wrong.",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
     "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
     "projectSettings.create.shapeSelfContained": plural({
@@ -184,9 +185,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.extraLanguagesDescription":
       "Optional — add more target languages for this project (e.g. dialect variants " +
       "or parallel drafts of the same source).",
-    "projectSettings.create.extraLanguagesPlaceholder": "e.g. fr-CA",
+    "projectSettings.create.extraLanguagesPlaceholder": "e.g. Traditional Han",
     "projectSettings.create.extraLanguagesRemoveAriaLabel": "Remove {lang}",
-    "projectSettings.create.extraLanguagesEmptyError": "Enter a language tag.",
+    "projectSettings.create.extraLanguagesEmptyError": "Enter a language name.",
     "projectSettings.create.extraLanguagesTooLongError": "Must be {max} characters or fewer.",
     "projectSettings.create.extraLanguagesDuplicatePrimaryError":
       "This is already the primary target language.",
@@ -1033,7 +1034,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
     "projectSettings.languages.addLaneLabel": "Add a target lane",
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
-    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
+    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
     "projectSettings.languages.addLaneButton": "Add lane",
     "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",

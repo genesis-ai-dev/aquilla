@@ -452,7 +452,7 @@ export const editor = defineNamespace({
     "editor.bibles.removeVersion": "Remove {version}",
     "editor.bibles.scrollToVerse": "Scroll to a verse to see its text.",
     "editor.bibles.noTextForRef": "No text for {ref} in this version.",
-    "editor.bibles.searchPlaceholder": "Search versions (e.g. 'eng', 'BSB')",
+    "editor.bibles.searchPlaceholder": "Search versions (e.g. 'English', 'BSB')",
     "editor.bibles.searchLabel": "Search Bible versions",
     "editor.bibles.failedToLoad": "Failed to load: {error}",
     "editor.bibles.retryVersion": "Retry {version}",
@@ -3761,7 +3761,7 @@ export const editor = defineNamespace({
       "editor.bibles.searchPlaceholder": {
         description:
           "Placeholder in the search field of the add-translation picker. The two " +
-          "quoted items are examples of what to type — a language code and a " +
+          "quoted items are examples of what to type — a language name and a " +
           "translation abbreviation; keep them as-is and translate only the framing " +
           "words.",
       },

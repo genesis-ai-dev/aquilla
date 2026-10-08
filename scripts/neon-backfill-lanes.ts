@@ -42,6 +42,7 @@
 //
 // Flags: --apply  --project <id>  --limit <n>  --verbose
 //        --statement-timeout <pg interval>  --lock-timeout <pg interval>
+import { retryingLaneIdCollision } from '../db/shared/lanes'
 import { resolveProjectRoleIncludingArchivedShared } from '../db/shared/project-roles'
 import { makePostgres, type AquillaDb } from '../db/shim/postgres'
 import { planLanesForProject, type LaneRolePlan } from '../src/lib/lanes/backfill-plan'
@@ -363,7 +364,12 @@ async function main(): Promise<void> {
     await db.exec(`SET lock_timeout = '${lockTimeout}'`)
     await requireBackfillTables(db)
 
-    let sql = `SELECT p.id, ps.source_language, ps.target_language, ps.target_lanes
+    // 0156 dropped the generated columns. The keys remain inside settings;
+    // this backfill is allowed to read them. It must not name the columns.
+    let sql = `SELECT p.id,
+                      (ps.settings::jsonb)->>'sourceLanguage' AS source_language,
+                      (ps.settings::jsonb)->>'targetLanguage' AS target_language,
+                      (ps.settings::jsonb)->'targetLanes' AS target_lanes
                  FROM projects p
                  LEFT JOIN project_settings ps ON ps.project_id = p.id`
     const binds: unknown[] = []
@@ -413,11 +419,13 @@ async function main(): Promise<void> {
 
       if (apply) {
         for (const [i, l] of plan.entries()) {
-          if (l.role === 'source') {
-            await db.prepare(INSERT_SOURCE).bind(newLaneId(), p.id, l.name, l.langCode, i).run()
-          } else {
-            await db.prepare(INSERT_TARGET).bind(newLaneId(), p.id, l.name, l.langCode, l.legacyTag, i).run()
-          }
+          await retryingLaneIdCollision(async () => {
+            if (l.role === 'source') {
+              await db.prepare(INSERT_SOURCE).bind(newLaneId(), p.id, l.name, l.langCode, i).run()
+            } else {
+              await db.prepare(INSERT_TARGET).bind(newLaneId(), p.id, l.name, l.langCode, l.legacyTag, i).run()
+            }
+          })
         }
         for (const table of TARGET_ONLY_TABLES) {
           const r = await db.prepare(targetOnlyUpdate(table)).bind(p.id).run()

@@ -103,8 +103,7 @@ async function seedCell(
   if (opts?.target !== undefined) {
     await db
       .prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated, target_lang)
-         VALUES (?, ?, ?, 'target', ?, ?, ?, ?, 0, 0, ?)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated, lane_id) VALUES (?, ?, ?, 'target', ?, ?, ?, ?, 0, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
       )
       .bind(
         PROJECT,
@@ -114,6 +113,7 @@ async function seedCell(
         ref,
         `ev-tgt-${fileId}-${cellId}-${opts.targetLang ?? "default"}`,
         `ev-src-${fileId}-${cellId}`,
+        PROJECT,
         opts.targetLang ?? "",
       )
       .run()
@@ -516,9 +516,7 @@ describe("listAutopilotCandidateFiles", () => {
       await seedCell(`retry-cell-${suffix}`, `GEN ${index}:1`, "retry", { fileId })
       initialRuns.push(
         db.prepare(
-          `INSERT INTO contextual_runs
-              (id, project_id, file_id, target_lang, status, created_at, updated_at)
-           VALUES (?, ?, ?, '', 'failed', ?::timestamptz, ?::timestamptz)`,
+          `INSERT INTO contextual_runs (id, project_id, file_id, status, created_at, updated_at) VALUES (?, ?, ?, 'failed', ?::timestamptz, ?::timestamptz)`,
         ).bind(
           `initial-retry-${suffix}`,
           PROJECT,
@@ -540,9 +538,7 @@ describe("listAutopilotCandidateFiles", () => {
     // moves forward, so the two files deferred last time become oldest-first.
     await db.batch(firstBatch.map((candidate, index) =>
       db.prepare(
-        `INSERT INTO contextual_runs
-            (id, project_id, file_id, target_lang, status, created_at, updated_at)
-         VALUES (?, ?, ?, '', 'failed', ?::timestamptz, ?::timestamptz)`,
+        `INSERT INTO contextual_runs (id, project_id, file_id, status, created_at, updated_at) VALUES (?, ?, ?, 'failed', ?::timestamptz, ?::timestamptz)`,
       ).bind(
         `second-retry-${String(index + 1).padStart(2, "0")}`,
         PROJECT,

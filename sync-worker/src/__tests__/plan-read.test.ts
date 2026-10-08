@@ -145,9 +145,28 @@ describe("GET .../plan — lane behaviour", () => {
     expect(body.units[0]).toMatchObject({
       totalCount: 10,   // lane-independent — falls back
       filledCount: 0,   // lane-specific — does not
-      audioCount: 4,    // lane-independent — audio hangs off the cell
+      audioCount: 4,    // no lane row yet — the only row's audio
       lastEditAt: 999,
     })
+  })
+
+  it("reads audio from the requested lane, and the old '' row when the source lane has none", async () => {
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: "srclane1", project_id: P, role: "source", name: "English", legacy_tag: null },
+        { id: "deflane1", project_id: P, role: "target", name: "Spanish", legacy_tag: "" },
+        { id: "eslane01", project_id: P, role: "target", name: "Spanish Team", legacy_tag: "es" },
+      ],
+      files: [file("f1", { cell_count: 1 })],
+      file_section_progress: [
+        progress("f1", "file", "", { lane_id: "deflane1", total_count: 10, filled_count: 1, audio_count: 4 }),
+        progress("f1", "file", "", { lane_id: "eslane01", target_lang: "es", total_count: 10, filled_count: 7, audio_count: 9 }),
+      ],
+    })
+    const es = (await (await get(db, { lane: "es" })).json()) as PlanResponse
+    expect(es.units[0]).toMatchObject({ filledCount: 7, audioCount: 9, totalCount: 10 })
+    const untouched = (await (await get(db, { lane: "fr" })).json()) as PlanResponse
+    expect(untouched.units[0]).toMatchObject({ filledCount: 0, audioCount: 4, totalCount: 10 })
   })
 
   it("falls back to the file's cell_count when no projection row exists yet", async () => {

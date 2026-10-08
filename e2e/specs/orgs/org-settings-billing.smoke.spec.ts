@@ -9,6 +9,10 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
 test.beforeEach(async () => { await resetBackend() })
 
 test("org billing settings preserves access while new pricing is unavailable", async ({ alice }) => {
+  // Pin the unavailable-price branch independently of local Stripe credentials.
+  await alice.route("**/api/v2/orgs/*/billing/offers", route =>
+    route.fulfill({ status: 503, contentType: "application/json",
+      body: JSON.stringify({ error: "prices_unavailable" }) }))
   await alice.goto(orgRoute(alice, "/settings"))
   await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible()
   await alice.getByRole("link", { name: /Billing & usage/i }).click()

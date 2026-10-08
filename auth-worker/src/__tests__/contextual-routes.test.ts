@@ -129,6 +129,15 @@ async function seedWorld(): Promise<{ lead: string; contrib: string; viewer: str
   )
     .bind(PROJECT, JSON.stringify(READY_SETTINGS))
     .run()
+  // AQU-1595: the start gate reads both languages off the lane rows, not the
+  // settings blob. Seed them before the cells so the test trigger attaches the
+  // cells to these rows instead of minting language-less ones.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+     VALUES ('ctxr-src', ?, 'source', 'English', NULL, 0), ('ctxr-tgt', ?, 'target', 'Swahili', '', 1)`,
+  )
+    .bind(PROJECT, PROJECT)
+    .run()
   // A tiny file so the kicked loop has real work: one chapter, two cells.
   for (const [cellId, ref, text] of [
     ["c1", "MRK 1:1", "In the beginning"],
@@ -226,7 +235,11 @@ describe("POST /contextual/runs", () => {
   // before a single model call is billed.
   it("refuses to start without the project's languages and any brief, naming what is missing", async () => {
     const { contrib } = await seedWorld()
-    await setSettings({ sourceLanguage: "", targetLanguage: "", translationBrief: {} })
+    await setSettings({ translationBrief: {} })
+    // AQU-1595: languages live on the lane rows. Blank them there.
+    await env.AQUILLA_PG.prepare("UPDATE lanes SET language = NULL, name = NULL WHERE project_id = ?")
+      .bind(PROJECT)
+      .run()
 
     const blocked = await req("POST", "/runs", contrib, { fileId: FILE })
     expect(blocked.status).toBe(400)
@@ -248,6 +261,11 @@ describe("POST /contextual/runs", () => {
 
     // Supplying the missing context unblocks it without any other change.
     await setSettings({})
+    await env.AQUILLA_PG.prepare(
+      "UPDATE lanes SET language = CASE role WHEN 'source' THEN 'English' ELSE 'Swahili' END WHERE project_id = ?",
+    )
+      .bind(PROJECT)
+      .run()
     const started = await req("POST", "/runs", contrib, { fileId: FILE })
     expect(started.status).toBe(201)
     if (_test.lastLoop) await _test.lastLoop
@@ -1100,9 +1118,7 @@ describe("draft listing + review handshake", () => {
     expect(JSON.stringify(pendingBody)).not.toContain(drafts[0].text)
 
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells
-          (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'target', '', ?, ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES (?, ?, ?, 'target', ?, ?, 0)`,
     ).bind(
       PROJECT,
       FILE,
@@ -1213,10 +1229,7 @@ async function seedFanoutFiles(count: number): Promise<void> {
          VALUES (?, ?, ?, 'usfm', ?, 1)`,
       ).bind(fileId, PROJECT, `Book ${suffix}`, `ev-file-${suffix}`),
       env.AQUILLA_PG.prepare(
-        `INSERT INTO cells
-            (project_id, file_id, cell_id, side, target_lang, value,
-             canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'source', '', ?, ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at) VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
       ).bind(
         PROJECT,
         fileId,
@@ -1243,10 +1256,7 @@ async function seedFairnessFiles(): Promise<void> {
     for (const chapter of [1, 2]) {
       statements.push(
         env.AQUILLA_PG.prepare(
-          `INSERT INTO cells
-              (project_id, file_id, cell_id, side, target_lang, value,
-               canonical_ref, event_id, last_edit_at)
-           VALUES (?, ?, ?, 'source', '', ?, ?, ?, 0)`,
+          `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at) VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
         ).bind(
           PROJECT,
           fileId,
@@ -1527,11 +1537,8 @@ describe("GET /contextual/overview", () => {
     const { viewer } = await seedWorld()
     for (const cellId of ["c1", "c2"]) {
       await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells
-            (project_id, file_id, cell_id, side, target_lang, value, canonical_ref,
-             event_id, source_event_id, last_edit_at, validated)
-         VALUES (?, ?, ?, 'target', 'fr', 'traduit', 'MRK 1:1', ?, ?, 0, 1)`,
-      ).bind(PROJECT, FILE, cellId, `ev-fr-${cellId}`, `ev-${cellId}`).run()
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated, lane_id) VALUES (?, ?, ?, 'target', 'traduit', 'MRK 1:1', ?, ?, 0, 1, (SELECT aquilla_test_resolve_target_lane(?, 'fr')))`,
+      ).bind(PROJECT, FILE, cellId, `ev-fr-${cellId}`, `ev-${cellId}`, PROJECT).run()
     }
     const response = await req("GET", "/overview", viewer)
     const body = await response.json() as {

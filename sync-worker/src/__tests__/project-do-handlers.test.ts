@@ -10,7 +10,9 @@ import {
   presenceFrameOwnerConnId,
   presenceSnapshot,
   PRESENCE_DRAFT_THROTTLE_MS,
+  PRESENCE_HEARTBEAT_TTL_MS,
   resolveConnId,
+  selectStaleConnections,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
   sweepOrphanedPresence,
@@ -817,8 +819,9 @@ describe("sweepOrphanedPresence (AQU-1374)", () => {
   })
 
   it("keeps every row that still has a live socket, idle or not", () => {
-    // No heartbeat exists on the client (presence.update is sent on change
-    // only), so a stale `ts` must never be grounds for eviction.
+    // The client publishes presence on change only, so a stale `ts` must never
+    // be grounds for eviction here — liveness of a still-connected socket is
+    // the heartbeat sweep's business (selectStaleConnections, AQU-1791).
     const presence = new Map<string, PresenceState>([
       ["tab-a", { connId: "tab-a", userId: "alice", ts: 1 }],
       ["tab-b", { connId: "tab-b", userId: "alice", ts: 1 }],
@@ -949,5 +952,75 @@ describe("resolveConnId", () => {
     expect(resolveConnId("bad id!", live)).toMatch(uuid)
     expect(resolveConnId("short", live)).toMatch(uuid)
     expect(resolveConnId("client-conn-0001", live)).toMatch(uuid)
+  })
+
+  describe("same-tab takeover (AQU-1791)", () => {
+    const owned = new Map<string, { connId: string; userId: string }>([
+      ["ws1", { connId: "tab-of-fatimah", userId: "fatimah" }],
+    ])
+
+    it("hands a returning tab back the connId its own dead socket still holds", () => {
+      // The dirty-disconnect case: the old socket is still in the map because
+      // no close frame ever arrived. Minting a fresh id here is what left the
+      // ghost row behind.
+      expect(resolveConnId("tab-of-fatimah", owned, "fatimah")).toBe("tab-of-fatimah")
+    })
+
+    it("refuses another user's connId, so presence cannot be evicted by guessing", () => {
+      expect(resolveConnId("tab-of-fatimah", owned, "mallory")).toMatch(/^[0-9a-f-]{36}$/)
+    })
+
+    it("still refuses a collision when the caller passes no identity", () => {
+      expect(resolveConnId("tab-of-fatimah", owned)).toMatch(/^[0-9a-f-]{36}$/)
+    })
+  })
+})
+
+describe("selectStaleConnections (AQU-1791)", () => {
+  const conn = (
+    connId: string,
+    overrides: Partial<{ userId: string; lastSeenAt: number; heartbeatSeen: boolean }> = {},
+  ) => ({
+    connId,
+    userId: overrides.userId ?? "fatimah",
+    lastSeenAt: overrides.lastSeenAt ?? 0,
+    heartbeatSeen: overrides.heartbeatSeen ?? true,
+  })
+
+  const now = 10 * 60 * 1000
+
+  it("retires a heartbeating socket that went silent past the TTL", () => {
+    // The half-open case AQU-1374's orphan sweep cannot see: the socket is
+    // still connected as far as the DO knows, so its presence row looks live.
+    const stale = selectStaleConnections(
+      [conn("ghost", { lastSeenAt: now - PRESENCE_HEARTBEAT_TTL_MS - 1 })],
+      now,
+    )
+    expect(stale.map((c) => c.connId)).toEqual(["ghost"])
+  })
+
+  it("keeps a socket whose last frame is still inside the TTL", () => {
+    expect(
+      selectStaleConnections([conn("live", { lastSeenAt: now - PRESENCE_HEARTBEAT_TTL_MS })], now),
+    ).toEqual([])
+  })
+
+  it("never retires a client that has not proven it heartbeats", () => {
+    // A client predating the `ping` heartbeat is silent by design; evicting it
+    // would drop a live user from the roster every TTL.
+    expect(
+      selectStaleConnections([conn("old-client", { lastSeenAt: 0, heartbeatSeen: false })], now),
+    ).toEqual([])
+  })
+
+  it("retires only the dead socket of a user whose other tab is still alive", () => {
+    const stale = selectStaleConnections(
+      [
+        conn("tab-a", { lastSeenAt: now - PRESENCE_HEARTBEAT_TTL_MS - 1 }),
+        conn("tab-b", { lastSeenAt: now - 1_000 }),
+      ],
+      now,
+    )
+    expect(stale.map((c) => c.connId)).toEqual(["tab-a"])
   })
 })

@@ -21,7 +21,7 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { altClickModifierLabel, isApplePlatform } from "@/lib/platform"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { UserChip } from "@/components/UserChip"
 import { MentionTextarea } from "@/components/MentionTextarea"
 import type { MentionCandidate } from "@/lib/comments/mention-suggest"
 import type { CommentThread as ThreadData } from "@/lib/parsers/types"
@@ -223,7 +223,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             className="p-2"
           >
             <div className="flex items-center gap-1.5 text-xs">
-              <UsernameWithAvatar username={m.author} size="xs" nameClassName="text-xs" />
+              <UserChip username={m.author} size="xs" nameClassName="text-xs" />
               <span className="text-muted-foreground">
                 <DateTooltip
                   value={m.timestamp}

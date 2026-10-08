@@ -14,7 +14,8 @@ profile or fall back from an unknown branch.
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
 `/sync/*` through the sync Worker. The identity Worker also owns
 `/.well-known/oauth-authorization-server/*`, the RFC 8414 discovery location for
-its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`). Staging is retired from the deployable
+its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`), and
+`/.well-known/openai-apps-challenge`, OpenAI's plugin domain check. Staging is retired from the deployable
 application contract; development is the only non-production live environment.
 
 `config/cloudflare-deployments.json` is the machine-readable source for Worker
@@ -131,8 +132,8 @@ its job. Keep this section in step with that manifest — a contract test assert
 | --- | --- | --- | --- |
 | Web (production) | `.` (repo root) | `aquilla-web` | `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE` |
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
-| Identity (production) | `auth-worker` | `aquilla-identity` | `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
-| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN` |
+| Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET` |
+| Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN` |
 | Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
 

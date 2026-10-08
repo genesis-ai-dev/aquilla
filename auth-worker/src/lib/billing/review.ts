@@ -5,9 +5,10 @@ import type { BillingPlanReview, BillingPlanSelection } from '../../../../db/sha
 /** Preview only: no cohort assignment, payment, entitlement, or usage mutation. */
 export function reviewBillingPlan(
   workspace: BillingWorkspace, selection: BillingPlanSelection, offers: BillingOffers,
+  checkoutEnabled = false,
 ): BillingPlanReview {
   const base = { workspace: { orgId: workspace.orgId, name: workspace.name,
-    scope: workspace.scope }, checkoutEnabled: false as const }
+    scope: workspace.scope }, checkoutEnabled: false }
   if (workspace.eligibility.reason !== 'ready') {
     return { ...base, ready: false, reason: workspace.eligibility.reason }
   }
@@ -19,6 +20,6 @@ export function reviewBillingPlan(
   if (!offers.available || !offers.priceVersion || !offers.entitlementVersion || !offer) {
     throw new Error('Plan prices are unavailable')
   }
-  return { ...base, ready: true, offer, priceVersion: offers.priceVersion,
+  return { ...base, checkoutEnabled, ready: true, offer, priceVersion: offers.priceVersion,
     entitlementVersion: offers.entitlementVersion }
 }

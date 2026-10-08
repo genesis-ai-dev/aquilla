@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Download, CheckSquare, Upload, Mic, Wand2 } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2 } from "lucide-react"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
@@ -57,7 +57,12 @@ export const workspaceActions: WorkspaceAction[] = [
     // affordance (WorkspaceHeaderActions) rather than vanishing; `isAvailable`
     // is what makes the click itself refuse. Fails OPEN on an unknown role, so
     // local/legacy projects with no syncRole are unaffected.
-    isAvailable: (c) => roleAllows(c, "file.create"),
+    //
+    // AQU-1365: the same dialog now also brings in a translation of a file
+    // already in the project, which only commits target cells
+    // (`target.cell.commit`, CONTRIBUTOR 400). So the action opens from
+    // Contributor up; the dialog greys out New source text below Project lead.
+    isAvailable: (c) => roleAllows(c, "file.create") || roleAllows(c, "target.cell.commit"),
     isDefault: (c) => c.activeFileId == null,
     run: (_c, args) => args.openImport(),
   },
@@ -147,6 +152,15 @@ export const workspaceActions: WorkspaceAction[] = [
       // "Validate" key stays for the agent card, whose per-row button is not
       // text-specific and whose accessible name already carries the reference.
       confirmLabelKey: "editor.selection.validateText",
+      // Same summary as the body: a run that would validate nothing (no
+      // permission, nothing here, nothing eligible) cannot be confirmed. The
+      // walk on 10-02 ticked the box, pressed "Validate text" and got only the
+      // body's sentence back as an error toast.
+      canConfirm: (c) => {
+        if (!c.activeFileId) return false
+        const summary = c.batchValidateSummary?.()
+        return !!summary && summary.validatable.length > 0
+      },
     },
     run: (_c, args) => args.runBatchValidate(),
   },
@@ -187,14 +201,6 @@ export const workspaceActions: WorkspaceAction[] = [
       return !!p && p.total > 0 && p.validated === p.total
     },
     run: (_c, args) => args.runExport(),
-  },
-  {
-    // AQU-503: the label must carry the word "target" so PMs looking for the
-    // "Target Import" option can find it — this file-scoped importer populates
-    // the open file's TARGET column, distinct from the primary "Import" (source).
-    id: "import-into-file", labelKey: "nav.workspaceActions.importIntoFile", icon: Upload, group: "secondary",
-    isAvailable: (c) => c.activeFileId != null,
-    run: (_c, args) => args.runImportIntoFile(),
   },
   {
     id: "transcribe-all", labelKey: "nav.workspaceActions.transcribeAll.label", icon: Mic, group: "secondary",

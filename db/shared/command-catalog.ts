@@ -58,13 +58,13 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = [
     tier: 'prepared',
     agentReachable: true,
     paramsDoc: `### SetTranslation
-Params: \`{ fileId, cellId, value, valueHtml?, laneId? }\` — batch many per changeset.
+Params: \`{ fileId, cellId, value, valueHtml?, laneId }\` — batch many per changeset. \`laneId\` is required.
 Compiles to \`target.cell.commit\` through the /events perimeter.
 Gotchas:
-- \`laneId\` must already be registered in the project's targetLanes (register via PatchSettings first); omit for the default lane.
+- \`laneId\` is \`lanes.id\`, from GET /api/v1/external/projects/:projectId (\`lanes\`). A language tag is not accepted. Omitting it is \`validation_failed\` and names the discovery endpoint.
 - Duplicate (cell, lane) targets in one changeset dedupe with a warning — last wins.
 - Committing resets the cell's validation state by design.
-Example: \`{ "kind": "SetTranslation", "fileId": "f1", "cellId": "c3", "value": "En el principio…" }\``,
+Example: \`{ "kind": "SetTranslation", "fileId": "f1", "cellId": "c3", "laneId": "a1b2c3d4", "value": "En el principio…" }\``,
   },
   {
     kind: 'LinkMedia',
@@ -86,12 +86,13 @@ Gotcha: upload the artifact first (REST artifact endpoint with \`x-artifact-kind
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### PlanImport
-Params: \`{ fileName, fileType, artifactId?, manifest?, cells: [{ content, canonicalRef?, … }] }\`.
+Params: \`{ fileName, fileType, artifactId?, manifest?, sourceTextDirection?, targetTextDirection?, cells: [{ content, canonicalRef?, … }] }\`.
 Sole command in its changeset; cap 5000 cells. Compiles to \`file.create\` + N \`source.cell.create\`.
 Gotchas:
 - Prefer parsing an uploaded artifact server-side (artifact parse endpoint / preview_import) and staging from its results, so the original is preserved for round-trip export.
 - Cells may carry per-lane \`variants\` for multi-language imports.
-- Duplicate file names are a staleness precondition — prepare warns, commit re-checks.`,
+- Duplicate file names are a staleness precondition — prepare warns, commit re-checks.
+- \`sourceTextDirection\` / \`targetTextDirection\` (\`"ltr"\`/\`"rtl"\`) stamp THIS ONE FILE and are for the exception only. For a whole RTL project set the project-level \`targetTextDirection\` with PatchSettings instead (AQU-1471) — an absent override resolves to that setting, then to the language, on every read.`,
   },
   {
     kind: 'CreateProject',
@@ -101,11 +102,11 @@ Gotchas:
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### CreateProject
-Params: \`{ name, projectId?, orgId?, sourceLanguage?, targetLanguage? }\` — sole command; forced ask-mode regardless of credential mode.
+Params: \`{ name, projectId?, orgId?, lanes? }\` — sole command; forced ask-mode regardless of credential mode.
 Requires org MAINTAINER (600) on the target org; project-scoped credentials can never create projects.
 The field set is CLOSED: any other key is \`validation_failed\` naming it. Nothing is silently ignored.
 - \`name\` must be a REAL name, not a placeholder: derive it from what you are importing (the source folder or file name, the publication/curriculum title, the language pair), or ask the human. Content-free names ("default", "untitled", "new project", "unnamed", …) are rejected with \`validation_failed\` — the name is what humans see in the workspace forever after.
-- \`sourceLanguage\` / \`targetLanguage\` seed the settings blob at creation (landing at settings version 1, exactly as the UI's create-then-patch does). Send \`targetLanguage: ""\` for a source-only project.
+- \`lanes\` is \`[{ role: "source" | "target", language, name?, code? }]\`. They become lane rows. The four project-level language keys are not written. Omit \`lanes\` for a source lane with no language.
 - Every OTHER settings key goes through \`PatchSettings\` after the create — it owns the version guard and the per-key role floors a create cannot honor.
 - Membership is not set here: use the \`InviteMember\` / \`SetRole\` family. A \`members\` field is rejected, not swallowed.
 - There is no project \`description\` field in the product; sending one is rejected.
@@ -180,14 +181,15 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
     paramsDoc: `### PatchSettings
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
 Floors: \`terminology\` needs the org's termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600.
-Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
+Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
 ${POLICY_DIRECTION_DOC}
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
 Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
 - \`ifMatchVersion\` must equal the live settings version at prepare AND commit (plan_stale on drift) — read it first.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
-Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "targetLanes", "value": ["es","pt"] }], "ifMatchVersion": 7 }\``,
+- RTL projects: set \`targetTextDirection: "rtl"\` ONCE here rather than per file (AQU-1471). It is the project's DEFAULT — resolution is per-file-row → this setting → the language — so it covers every file, present and future, and a file that really runs the other way keeps its own override. \`"auto"\`, and an absent key, mean "take it from the language", which already answers Arabic/Hebrew/Persian/Urdu/… by name or ISO code; set it explicitly when the language name is one Aquilla cannot read.
+Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "systemPrompt", "value": "Be concise." }], "ifMatchVersion": 7 }\``,
   },
   {
     kind: 'SetBrief',
@@ -234,24 +236,26 @@ Example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "ifMatchVersio
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### ProjectSetup
-Params: \`{ projectId, settings?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only (like SetBrief, not offered through the MCP prepare tools). ALWAYS ask-mode: one changeset, one approval URL, one commit.
+Params: \`{ projectId, settings?, lanes?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only (like SetBrief, not offered through the MCP prepare tools). ALWAYS ask-mode: one changeset, one approval URL, one commit.
 The server expands it into a fixed step order and chains the version guards ITSELF, which is why \`plan_stale\` cannot occur inside a plan:
 1. \`settings\` — non-policy keys, one write.
 2. \`settings\` — policy keys, restrictive direction only, re-checked against the LIVE blob at commit.
 3. \`brief\` — \`{ parameters?, freeformNotes? }\`, merged into the live brief exactly as SetBrief does, then the L1 summary is re-rendered so it reaches the copilot.
 4. \`members\` — \`[{ username, role }]\`, upsert (invite a new person, re-role a member) through the Membership gate.
-5. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport.
+5. \`lanes\` — \`[{ role, language, name?, code? }]\`, created as lane rows before the settings write. \`settings.sourceLanguage\`, \`targetLanguage\`, \`targetLanes\`, and \`archivedLanes\` are rejected.
+6. \`imports\` — \`[{ artifactId, fileName, fileType?, resultIndex?, sourceLanguage?, targetLanguage?, sourceTextDirection?, targetTextDirection?, laneId? }]\`, in array order: each artifact is parsed server-side and applied as a PlanImport. \`laneId\` is required when the artifact already has translations, and it is a lane id.
 6. The verification receipt (below).
 Gotchas:
 - The project must already EXIST. The spec's \`project\` create-in-plan block is NOT supported — artifacts are project-scoped, so a plan carrying imports cannot target a project that does not exist yet. Passing \`project\` is \`validation_failed\` with \`details.field: "project"\`: create it with CreateProject (its own approval) first.
-- Never guess these four — they come from the partner, not from you: \`settings.sourceLanguage\`, \`settings.targetLanguage\`, \`brief.parameters.sourceTexts\`, \`brief.parameters.keyTerms\`. See the \`project-setup\` skill.
+- Never guess the lane languages or these brief fields — they come from the partner, not from you: \`lanes[].language\`, \`brief.parameters.sourceTexts\`, \`brief.parameters.keyTerms\`. See the \`project-setup\` skill.
 - Every prepare rejection NAMES the offending field in \`details.field\`: unknown/mistyped settings key, a policy write that would loosen, an unknown brief section, a duplicate \`fileName\` inside the plan or against an existing active file.
 - Limits: \`imports\` ≤ 10 (each ≤ the PlanImport cell cap), \`members\` ≤ 25.
 - Floor is the MAX of the constituent floors (MAINTAINER, plus the org's termbase/language floors when those keys are named).
+- Text direction (AQU-1471): put \`targetTextDirection: "rtl"\` in the plan's \`settings\` block for an RTL project — the receipt's \`importTextDirection\` then reports the direction the plan's files will actually render in, resolved against the settings this plan LEAVES BEHIND (per-import override → the setting → the language). A per-import \`sourceTextDirection\`/\`targetTextDirection\` is for the odd file that runs against the project.
 - Failure semantics: the commit stops at the first failing step and returns \`job_failed\` with \`details.receipt\` (\`completedSteps\`, \`failedStep\`). Applied steps STAY applied; committing the same changeset again resumes at the failed step and skips the rest. Steps whose end-state already existed at prepare are marked \`superseded\` and reported as \`superseded_step\` warnings.
 - Policy keys a human loosened between prepare and commit are DROPPED (the rest of the plan still applies) and listed in \`verification.policyKeysNotApplied\`.
 - Receipt carries \`verification: { settingsVersion, members[{username,role}], files[{fileId,name,cellCount,cellsWithMarkup}], briefReachesCopilot, briefDetails, policyKeysNotApplied }\`. \`briefReachesCopilot\` is a FRESHNESS claim, not an emptiness one: with a \`brief\` block it is true only if the L1 summary was re-rendered inside this commit AND the real prompt-preview run on the first source cell of the first created file carries it. If it is false, \`briefDetails.reason\` says why and the brief is NOT reaching the AI — run RegenerateBriefSummary. \`briefDetails.truncated\` means the summary hit the 1600-char cap and dropped some committed sections; it can accompany a \`true\`.
-Example: \`{ "kind": "ProjectSetup", "projectId": "p1", "settings": { "sourceLanguage": "ru", "targetLanguage": "sty", "contributeToGlobalTm": false }, "brief": { "parameters": { "audience": "Rural youth" } }, "members": [{ "username": "gulsifa", "role": 600 }], "imports": [{ "artifactId": "01a0…", "fileName": "Acts", "fileType": "usfm" }] }\``,
+Example: \`{ "kind": "ProjectSetup", "projectId": "p1", "lanes": [{ "role": "source", "language": "ru" }, { "role": "target", "language": "sty" }], "settings": { "contributeToGlobalTm": false }, "brief": { "parameters": { "audience": "Rural youth" } }, "members": [{ "username": "gulsifa", "role": 600 }], "imports": [{ "artifactId": "01a0…", "fileName": "Acts", "fileType": "usfm" }] }\``,
   },
   {
     kind: 'UpdateProjectSettings',
@@ -359,7 +363,7 @@ Validation guardrails (\`cell.validate\` / \`cell.unvalidate\`; AQU-1184) — th
 - **AI-drafted text cannot be validated through this API.** A \`cell.validate\` whose cell is still an unreviewed machine draft (\`ai_drafted\`) is rejected at prepare with \`validation_failed\` naming that cell, and it rejects the WHOLE plan. This mirrors the in-app rule that AI output is reviewed one cell at a time. To validate such a cell, a human edits or validates it in the app first (either clears the marker); an agent cannot clear it on its own behalf.
 - **Explicit cells only.** Every event names one \`(fileId, cellId)\`. There is no wildcard, glob, range, \`"*"\`, or "validate all" form — such a value is simply a cell id that does not exist, and prepare rejects the plan.
 - **Every staged validation is itemized for the approver.** The effect summary lists each cell id with the text as the server reads it, so approval endorses specific sentences, not a count. Validations are testimony tier: review UIs confirm them per item and never bulk-apply them.
-- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not.
+- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not. When the policy refuses only some events, the commit applies the rest and lists each refusal in \`receipt.warnings\` as \`{ code: "rejected", fileId, cellId, message }\` naming the refused line; when it refuses every event, the commit fails and \`error.details.rejected\` names each line the same way.
 Example: \`{ "kind": "EmitEvents", "events": [{ "kind": "term.create", "payload": { "sourceTerm": "covenant", "renderings": [{ "rendering": "заповіт", "status": "preferred" }], "status": "draft" } }] }\``,
   },
   {
@@ -598,14 +602,14 @@ Params: \`{ fileId, cellId, offset, targets: "blank" | "divide", targetOffsets?,
 The original keeps \`value.slice(0, offset)\` (a \`source.cell.commit\`, so its chain head advances); a new cell carrying \`value.slice(offset)\` is created directly after it.
 \`targets\` is required and never inferred:
 - \`"blank"\` deletes the existing translations outright.
-- \`"divide"\` cuts each lane's translation at an explicit offset — \`targetOffsets: [{ laneId?, offset }]\` must name EVERY lane that has a translation, or the plan is rejected. A lane you leave out is never silently blanked.
+- \`"divide"\` cuts each lane's translation at an explicit offset — \`targetOffsets: [{ laneId, offset }]\` must name EVERY visible lane that has a translation, by lane id, or the plan is rejected. A lane you leave out is never silently blanked.
 VALIDATION: both halves come out unvalidated either way — 'blank' removes the target rows that held the validation, and 'divide' re-commits them, which resets validation because the chain head moved.
 Gotchas:
 - \`offset\` must be inside the text (both halves non-empty), else validation_failed at prepare.
 - Refused on cells carrying structured source/target HTML — a plain-text offset cannot cut markup safely; use \`"blank"\` and re-translate.
 - Refused on a file with preserved export slots (IDML/OOXML), and on a cell addressed by canonical ref in a file whose original source is kept for lossless export: the second half cannot reuse the ref, so it would vanish from the deliverable.
 - The second half inherits the original's \`type\` but NOT its canonical ref.
-Example: \`{ "kind": "SplitCell", "fileId": "f1", "cellId": "c3", "offset": 42, "targets": "divide", "targetOffsets": [{ "offset": 51 }] }\``,
+Example: \`{ "kind": "SplitCell", "fileId": "f1", "cellId": "c3", "offset": 42, "targets": "divide", "targetOffsets": [{ "laneId": "a1b2c3d4", "offset": 51 }] }\``,
   },
   {
     kind: 'DraftCells',
@@ -615,15 +619,15 @@ Example: \`{ "kind": "SplitCell", "fileId": "f1", "cellId": "c3", "offset": 42, 
     tier: 'prepared',
     agentReachable: true,
     paramsDoc: `### DraftCells
-Params: \`{ fileId, cellIds: [...], laneId?, instructions? }\` — sole command in its changeset.
+Params: \`{ fileId, cellIds: [...], laneId, instructions? }\` — sole command in its changeset. \`laneId\` is required.
 Asks the APP to draft instead of writing the text yourself, so the output carries this project's terminology, few-shot pairs and translation brief. Drafting runs once, at prepare; the generated text is materialized into \`target.cell.commit\` events marked \`ai_drafted\`, exactly like an in-app draft — so a human reviews it as AI work, and \`aiDraft\` is visible in cell reads until they edit or validate it.
 Gotchas:
 - \`cellIds\` is EXPLICIT and non-empty. Wildcards ("*", "all") are rejected — there is no "draft everything".
 - Cap per changeset = the project's configured completion batch size (default 10, max 50). Over-cap requests are rejected naming the cap; split the work across changesets.
 - Spend meters through the org's credit ledger on the agent rail. An exhausted org fails with \`rate_limited\` and NOTHING is staged.
 - No auto-commit: the result is a staged changeset like any other, subject to the same approval gate and one-hour expiry.
-- \`laneId\` must already be registered in the project's targetLanes; omit for the default lane.
-Example: \`{ "kind": "DraftCells", "fileId": "f1", "cellIds": ["c3", "c4", "c5"] }\``,
+- \`laneId\` is \`lanes.id\` from GET /api/v1/external/projects/:projectId. A language tag is not accepted. Omitting it is \`validation_failed\` and names the discovery endpoint.
+Example: \`{ "kind": "DraftCells", "fileId": "f1", "cellIds": ["c3", "c4", "c5"], "laneId": "a1b2c3d4" }\``,
   },
 ] as const
 

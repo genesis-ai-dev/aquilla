@@ -191,6 +191,39 @@ describe("HighlightedText zero-width and clamped ranges", () => {
   })
 })
 
+describe("HighlightedText health spans (#946)", () => {
+  it("paints supported and guessed spans without changing the text", () => {
+    const { container } = render(
+      <HighlightedText
+        text="Espiritu Santo came"
+        healthSpans={[
+          { start: 0, end: 14, kind: "supported", title: "Holy Spirit → Espiritu Santo" },
+          { start: 15, end: 19, kind: "guessed" },
+        ]}
+      />,
+    )
+    expect(container.textContent).toBe("Espiritu Santo came")
+    expect(container.querySelector('[data-health-span="supported"]')?.textContent).toBe("Espiritu Santo")
+    expect(container.querySelector('[data-health-span="supported"]')?.getAttribute("title")).toBe(
+      "Holy Spirit → Espiritu Santo",
+    )
+    expect(container.querySelector('[data-health-span="guessed"]')?.textContent).toBe("came")
+  })
+
+  it("keeps a violation underline on top of a health wash", () => {
+    const { container } = render(
+      <HighlightedText
+        text="Espiritu Santo"
+        ranges={[r(0, 8, "rule-1")]}
+        healthSpans={[{ start: 0, end: 14, kind: "supported" }]}
+      />,
+    )
+    expect(container.textContent).toBe("Espiritu Santo")
+    const health = container.querySelector('[data-health-span="supported"]')
+    expect(health?.querySelector('[data-rule-id="rule-1"]')?.textContent).toBe("Espiritu")
+  })
+})
+
 describe("HighlightedText evidence tokens (Unicode)", () => {
   it("highlights accented Latin tokens", () => {
     const { container } = render(

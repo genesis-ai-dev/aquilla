@@ -124,7 +124,8 @@ const TOOL_SPECS: McpToolSpec[] = [
     description:
       'Fetch a single project by id after checking the credential scope and that the owner ' +
       'has at least VIEWER role on it. Returns { id, name, org_id, archived, role, settings, ' +
-      'settingsVersion, settingsUpdatedAt } or a not_found / scope_denied / permission_denied ' +
+      'settingsVersion, settingsUpdatedAt, lanes } — lanes are { id, name, language, role } ' +
+      'for the lanes this caller may use — or a not_found / scope_denied / permission_denied ' +
       'tool error. `settingsVersion` is the live project-settings version — read it here ' +
       'before staging a PatchSettings/UpdateProjectSettings command, whose ifMatchVersion ' +
       'must equal it or prepare returns plan_stale. (REST: GET .../projects/:projectId.)',
@@ -166,7 +167,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); ' +
       'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
-      'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+      'validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, ' +
+      'validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, ' +
       'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
       'RESTRICTIVE direction ONLY (AQU-1282): an op that TIGHTENS oversight stages like any ' +
       'other write (still ask-mode, still human-approved), and one that would LOOSEN it ' +
@@ -186,7 +188,7 @@ const TOOL_SPECS: McpToolSpec[] = [
           items: {
             type: 'object',
             properties: {
-              key: { type: 'string', description: 'Top-level settings key, e.g. "targetLanes".' },
+              key: { type: 'string', description: 'Top-level settings key, e.g. "systemPrompt". sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings.' },
               value: { description: 'Any JSON value; replaces that key wholesale.' },
             },
             required: ['key', 'value'],
@@ -329,11 +331,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       'Read project content. Omit fileId to LIST the project\'s files; provide fileId to ' +
       'READ that file\'s cells (source + target). Supports incremental reads: pass since ' +
       '(a server sequence) to fetch only changed cells, and limit/cursor for pagination. ' +
-      'Multi-language projects: a cell can carry one target per LANE (a language tag ' +
-      'registered in the project\'s settings.targetLanes, e.g. "es", "pt" — see ' +
-      'get_capabilities.multiLanguage). Pass lane to filter target cells to one lane ' +
-      '(source cells are always included); omit it to get every lane — each target row ' +
-      'carries its targetLang. Every cell row carries `hidden` (AQU-1426): `true` means a ' +
+      'Multi-language projects: a cell can carry one target per lane. Pass lane, a lane id ' +
+      'from get_project\'s lanes array (not a language tag). It is required. Each target ' +
+      'row carries its laneId. Every cell row carries `hidden` (AQU-1426): `true` means a ' +
       'Project Lead PARKED that cell — it is out of the editor and out of every export, it ' +
       'is not work, and you should not draft or report it. Bring one back with the ShowCell ' +
       'command, or park one with HideCell. Returns { data, nextCursor, ... }. Use this ' +
@@ -349,7 +349,7 @@ const TOOL_SPECS: McpToolSpec[] = [
         lane: {
           type: 'string',
           description:
-            'Target-language lane filter (e.g. "es"). Only target cells in this lane are returned; omit for all lanes.',
+            'Required lane id (lanes.id from get_project). A language tag is not accepted.',
         },
       },
       required: ['projectId'],
@@ -416,7 +416,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'block (project/org rules plus terminology), the retrieved few-shot examples, and the ' +
       'preceding approved-target discourse window — as both the assembled system+user ' +
       'messages and the same content labeled by origin. Args: projectId, cellId, optional ' +
-      'targetLang (target-language lane tag; "" = default lane) and fileId (only needed when ' +
+      'targetLang (required lane id from get_project, not a language tag) and fileId (only needed when ' +
       'the same cellId exists in more than one file). This is the verification half of prompt ' +
       'tuning: after PatchSettings changes systemPrompt / completionSettings / ' +
       'translationBrief / rules, or after a terminology entry lands, call this on a ' +
@@ -433,14 +433,14 @@ const TOOL_SPECS: McpToolSpec[] = [
         cellId: { type: 'string', description: 'Cell id to preview the prompt for.' },
         targetLang: {
           type: 'string',
-          description: 'Target-language lane tag. Omit or "" for the project default lane.',
+          description: 'Required lane id (lanes.id from get_project). A language tag is not accepted.',
         },
         fileId: {
           type: 'string',
           description: 'Disambiguates a cellId present in more than one file.',
         },
       },
-      required: ['projectId', 'cellId'],
+      required: ['projectId', 'cellId', 'targetLang'],
       additionalProperties: false,
     },
   },
@@ -515,7 +515,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'health or coverage yourself from read_content: your denominators will not match ' +
       'theirs. Args: projectId; optional fileId to scope to one file, lane for one ' +
       'target-language lane, limit/offset to page the per-file list. Returns ' +
-      '{ projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
+      '{ laneId, projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
       'nextCursor }. health is null for a file with no translated cells (not started, ' +
       'not unhealthy). Errors: scope_denied (403) if your credential is scoped to a ' +
       'different project, not_found (404) for an unknown fileId, rate_limited (429).',
@@ -524,7 +524,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       properties: {
         ...projectIdProp,
         fileId: { type: 'string', description: 'Scope to one file; omit for the whole project (up to 200 files).' },
-        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        lane: { type: 'string', description: 'Required lane id (lanes.id from get_project). A language tag is not accepted.' },
         limit: { type: 'number', description: 'Per-file page size.' },
         offset: { type: 'number', description: 'Per-file page offset.' },
       },
@@ -551,7 +551,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       properties: {
         ...projectIdProp,
         fileId: { type: 'string', description: 'Scope the scan to one file; omit for the whole project.' },
-        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        lane: { type: 'string', description: 'Required lane id (lanes.id from get_project). A language tag is not accepted.' },
         onlyDrift: { type: 'boolean', description: 'Return only concepts that have flagged cells.' },
         limit: { type: 'number', description: 'Findings page size.' },
         offset: { type: 'number', description: 'Findings page offset.' },
@@ -709,13 +709,9 @@ const TOOL_SPECS: McpToolSpec[] = [
         translations: {
           type: 'array',
           description:
-            'SetTranslation entries to stage. Each may name a target-language lane via ' +
-            'laneId to write one of a multi-language project\'s targets (e.g. "es", "pt"); ' +
-            'omit laneId for the default lane. The project\'s primary targetLanguage IS the ' +
-            'default lane, so passing it as laneId also writes the default lane. Any other ' +
-            'lane must already be registered in the ' +
-            'project\'s settings.targetLanes (via UpdateProjectSettings) or prepare returns ' +
-            'validation_failed — see get_capabilities.multiLanguage for the full workflow.',
+            'SetTranslation entries to stage. laneId is required and is a lane id from ' +
+            'get_project (lanes[].id), not a language tag. Omitting it, or passing a tag, ' +
+            'is validation_failed. See get_capabilities.multiLanguage.',
           items: {
             type: 'object',
             properties: {
@@ -726,10 +722,10 @@ const TOOL_SPECS: McpToolSpec[] = [
               laneId: {
                 type: 'string',
                 description:
-                  'Target-language lane (a registered settings.targetLanes tag, e.g. "es"). Omit it, or pass the project\'s primary targetLanguage, for the default lane.',
+                  'Required lane id (lanes.id from get_project). A language tag is not accepted.',
               },
             },
-            required: ['cellId', 'fileId', 'value'],
+            required: ['cellId', 'fileId', 'value', 'laneId'],
             additionalProperties: false,
           },
         },
@@ -825,14 +821,14 @@ const TOOL_SPECS: McpToolSpec[] = [
                   laneId: {
                     type: 'string',
                     description:
-                      'Target-language lane (a registered settings.targetLanes tag). Omit it, or pass the project\'s primary targetLanguage, for the default lane.',
+                      'Required lane id (lanes.id from get_project). A language tag is not accepted.',
                   },
                   instructions: {
                     type: 'string',
                     description: 'Optional extra steer for this batch, passed to the drafting prompt.',
                   },
                 },
-                required: ['kind', 'fileId', 'cellIds'],
+                required: ['kind', 'fileId', 'cellIds', 'laneId'],
                 additionalProperties: false,
               },
               {
@@ -891,7 +887,7 @@ const TOOL_SPECS: McpToolSpec[] = [
                     items: {
                       type: 'object',
                       properties: {
-                        laneId: { type: 'string', description: 'Omit for the default lane.' },
+                        laneId: { type: 'string', description: 'Required lane id (lanes.id from get_project). A language tag is not accepted.' },
                         offset: { type: 'number' },
                       },
                       required: ['offset'],
@@ -1013,6 +1009,23 @@ const TOOL_SPECS: McpToolSpec[] = [
           type: 'number',
           description: 'Which parsed file to stage when the parse yields several (multi-book USFM); required in that case.',
         },
+        sourceTextDirection: {
+          type: 'string',
+          enum: ['ltr', 'rtl'],
+          description:
+            'Per-file source text direction (AQU-1471). OMIT IT for an ordinary import: direction ' +
+            "resolves to the project's sourceTextDirection setting and then to the source language, " +
+            'so a whole RTL project is one patch_settings call rather than one override per file. ' +
+            'Send it only for a file that runs against its project.',
+        },
+        targetTextDirection: {
+          type: 'string',
+          enum: ['ltr', 'rtl'],
+          description:
+            'Per-file target text direction (AQU-1471) — same rule as sourceTextDirection: for an ' +
+            "Arabic/Hebrew/Persian/Urdu project set the project's targetTextDirection setting once " +
+            'instead, and leave this unset.',
+        },
         excludeFrontMatter: {
           type: 'boolean',
           description:
@@ -1033,8 +1046,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'handed back to Paratext). Reconstructs the file from the ORIGINAL artifact ' +
       'preserved at import time with the current translations substituted in; ' +
       'untranslated segments keep their source text so the output stays valid. Args: ' +
-      'projectId, fileId (from read_content), lane (optional — which target-language ' +
-      'lane to export; omit for the default lane). Returns { fileName, contentType, ' +
+      'projectId, fileId (from read_content), lane (required lane id from get_project). Returns { fileName, contentType, ' +
       'exportMode, lossyVerseCount, bytes, content } where `content` is the file text. ' +
       'Read the fidelity fields before delivering: exportMode "round-trip" means ' +
       'translations were injected, "raw-original"/"raw-sidecar" means the file has no ' +
@@ -1056,10 +1068,10 @@ const TOOL_SPECS: McpToolSpec[] = [
         lane: {
           type: 'string',
           description:
-            'Target-language lane to export (e.g. "es"). Omit for the default lane.',
+            'Required lane id (lanes.id from get_project). A language tag is not accepted.',
         },
       },
-      required: ['projectId', 'fileId'],
+      required: ['projectId', 'fileId', 'lane'],
       additionalProperties: false,
     },
   },

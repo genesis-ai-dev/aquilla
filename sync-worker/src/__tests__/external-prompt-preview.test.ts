@@ -36,6 +36,7 @@ interface PreviewBody {
   fileId: string
   cellId: string
   targetLang: string
+  laneId?: string
   sourceLanguage: string
   targetLanguage: string
   sourceText: string
@@ -179,6 +180,10 @@ async function seedBase(testDb: TestDb) {
     sourceLanguage: "English",
     targetLanguage: "French",
   })
+  await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+  )
 }
 
 async function preview(
@@ -187,8 +192,11 @@ async function preview(
   cellId = "cell-live",
   qs = "",
 ): Promise<{ status: number; body: PreviewBody }> {
+  const query = qs.includes("targetLang=")
+    ? qs
+    : `${qs}${qs.includes("?") ? "&" : "?"}targetLang=deflane1`
   const res = await handleExternalReadRequest(
-    req(`/api/v1/external/projects/proj-a/cells/${cellId}/prompt-preview${qs}`, token),
+    req(`/api/v1/external/projects/proj-a/cells/${cellId}/prompt-preview${query}`, token),
     env(testDb),
   )
   expect(res).not.toBeNull()
@@ -391,6 +399,114 @@ describe("external prompt preview", () => {
       )
       const { body } = await preview(testDb, token)
       expect(body.parts.rules).toBe("")
+    })
+
+    // AQU-1721: the editor compiles subscribed termbases ahead of the project's
+    // own concepts (useRules), so a preview without them would not match the
+    // real call. These run the same gate the editor's read (route #8) and
+    // autopilot apply.
+    async function insertConcept(id: string, projectId: string, status: string, rendering: string, createdAt = 1) {
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ($1, $2, 'covenant', $3, $4, 0, $5, $5)`,
+        [id, projectId, JSON.stringify([{ rendering, status: "preferred" }]), status, createdAt],
+      )
+    }
+    async function subscribe(termbaseProjectId: string, priority: number) {
+      await testDb.pg.query(
+        `INSERT INTO project_termbase_subscriptions (project_id, termbase_project_id, priority) VALUES ('proj-a', $1, $2)`,
+        [termbaseProjectId, priority],
+      )
+    }
+
+    it("compiles a subscribed termbase's active concepts ahead of the project's own (AQU-1721)", async () => {
+      await testDb.pg.query(`UPDATE projects SET org_published_termbase = TRUE WHERE id = 'proj-b'`)
+      await subscribe("proj-b", 0)
+      await insertConcept("up-later", "proj-b", "active", "pacte", 2)
+      await insertConcept("up-first", "proj-b", "active", "accord", 1)
+      await insertConcept("up-draft", "proj-b", "draft", "contrat")
+      await insertConcept("own", "proj-a", "active", "alliance")
+
+      const { body } = await preview(testDb, token)
+      // Subscribed first, each termbase oldest first; a draft compiles to nothing.
+      expect(body.parts.injectedTerms.map((t) => t.conceptId)).toEqual(["up-first", "up-later", "own"])
+      expect(body.parts.rules).toContain("accord")
+      expect(body.parts.rules).toContain("alliance")
+      expect(body.parts.rules).not.toContain("contrat")
+    })
+
+    it("leaves out an unpublished, trashed, deleted or other-org termbase (AQU-1721)", async () => {
+      await testDb.pg.query(`INSERT INTO organizations (id, name, owner_user_id) VALUES (20, 'Org B', 1)`)
+      await testDb.pg.query(
+        `INSERT INTO projects (id, name, org_id, created_by, org_published_termbase, archived_at) VALUES
+          ('tb-trashed', 'Trashed', 10, 1, TRUE, now()),
+          ('tb-other-org', 'Other org', 20, 1, TRUE, NULL)`,
+      )
+      // proj-b exists in the same org but is not published. tb-deleted has no
+      // project row: deleting a project cascades to none of these rows.
+      for (const [i, tb] of ["proj-b", "tb-trashed", "tb-other-org", "tb-deleted"].entries()) {
+        await subscribe(tb, i)
+        await insertConcept(`c-${tb}`, tb, "active", `r-${tb}`)
+      }
+
+      const { body } = await preview(testDb, token)
+      expect(body.parts.injectedTerms).toEqual([])
+      expect(body.parts.rules).toBe("")
+    })
+
+    // AQU-1777: a termbase's renderings carry ITS lane ids. The preview maps
+    // them onto this project's lanes by language before its lane filter, as
+    // route #8 does for the editor, so a lane's preview injects exactly what
+    // that lane's editor compiles.
+    it("maps a subscribed termbase's lane-stamped renderings onto this project's lanes (AQU-1777)", async () => {
+      await testDb.pg.query(`UPDATE projects SET org_published_termbase = TRUE WHERE id = 'proj-b'`)
+      await subscribe("proj-b", 0)
+      // This project: the `''` lane is French; a Spanish lane tagged with its own id.
+      await testDb.pg.query(
+        `UPDATE lanes SET language = 'French' WHERE project_id = 'proj-a' AND id = 'deflane1'`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('c0ffee01', 'proj-a', 'target', 'Spanish', NULL, 'es', 'c0ffee01', 2)`,
+      )
+      // The termbase: a French `''` lane and a Spanish lane, spelled as a code.
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES
+           ('tb000f7a', 'proj-b', 'target', 'French', NULL, 'fr', '', 1),
+           ('tb000e5a', 'proj-b', 'target', 'es', NULL, 'es', 'es', 2)`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ('up-cov', 'proj-b', 'covenant', $1, 'active', 0, 1, 1)`,
+        [
+          JSON.stringify([
+            { rendering: "alliance", status: "preferred", laneId: "tb000f7a" },
+            { rendering: "pacto", status: "preferred", laneId: "tb000e5a" },
+            // Stamped with a lane the termbase no longer has: applies nowhere.
+            { rendering: "patto", status: "admitted", laneId: "tb000111" },
+          ]),
+        ],
+      )
+      await insertConcept("own", "proj-a", "active", "testament")
+
+      const french = await preview(testDb, token)
+      expect(french.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
+        ["up-cov", ["alliance"]],
+        ["own", ["testament"]],
+      ])
+      expect(french.body.parts.rules).toContain("alliance")
+      expect(french.body.parts.rules).not.toContain("pacto")
+      expect(french.body.parts.rules).not.toContain("patto")
+
+      const spanish = await preview(testDb, token, "cell-live", "?targetLang=c0ffee01")
+      // The project's own unstamped rendering belongs to its `''` lane, so the
+      // Spanish lane lists the concept with nothing to enforce (AQU-1508).
+      expect(spanish.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
+        ["up-cov", ["pacto"]],
+        ["own", []],
+      ])
+      expect(spanish.body.parts.rules).toContain("pacto")
+      expect(spanish.body.parts.rules).not.toContain("alliance")
     })
 
     it("injects project rules from settings", async () => {
@@ -636,6 +752,94 @@ describe("external prompt preview", () => {
         env(testDb),
       )
       expect(res!.status).toBe(401)
+    })
+  })
+
+  // AQU-1586: `?targetLang=` carries a lane's `legacy_tag`, which is an EVENT
+  // KEY, not a language. `planNewTargetLane` sets that tag to the lane's opaque
+  // 8-hex id whenever the language string is already taken by a sibling or
+  // matches the project default — so passing it through as the target language
+  // asked the model to translate "into a3f09c1e". The language lives on the
+  // lane ROW, and the preview must report what the editor would really send.
+  describe("the target language comes from the lane row", () => {
+    beforeEach(async () => {
+      await insertCell(testDb, { cellId: "cell-live", seq: 3, source: "God saw the light" })
+    })
+
+    it("resolves a lane tagged with its own id to the lane's language", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('a3f09c1e', 'proj-a', 'target', 'Spanish', 'Spanish (Mexico team)', 'es', 'a3f09c1e', 1)`,
+      )
+      const { status, body } = await preview(testDb, token, "cell-live", "?targetLang=a3f09c1e")
+      expect(status).toBe(200)
+      expect(body.targetLang).toBe("a3f09c1e")
+      expect(body.targetLanguage).toBe("Spanish")
+      // And the assembled prompt carries the language, not the key.
+      expect(body.messages[0].content).toContain("Spanish")
+      expect(body.messages[0].content).not.toContain("a3f09c1e")
+    })
+
+    it("leaves a lane whose tag IS a language exactly as it was", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('frc00002', 'proj-a', 'target', 'fr-CA', 'French (Canada)', 'fra', 'fr-CA', 1)`,
+      )
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=frc00002")
+      expect(body.targetLanguage).toBe("fr-CA")
+    })
+
+    it("sends the default lane's stored language, not the project setting", async () => {
+      await testDb.pg.query(
+        `UPDATE lanes SET language = 'French' WHERE project_id = 'proj-a' AND id = 'deflane1'`,
+      )
+      await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "Spanish" })
+      const { body } = await preview(testDb, token, "cell-live")
+      expect(body.laneId).toBe("deflane1")
+      expect(body.targetLang).toBe("")
+      expect(body.targetLanguage).toBe("French")
+    })
+
+    it("sends the language after it is edited", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('c0ffee01', 'proj-a', 'target', 'Yoruba', NULL, 'yo', 'Yoruba', 1)`,
+      )
+      await testDb.pg.query(
+        `UPDATE lanes SET language = 'Yoruba (Oyo)' WHERE project_id = 'proj-a' AND id = 'c0ffee01'`,
+      )
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=c0ffee01")
+      expect(body.targetLanguage).toBe("Yoruba (Oyo)")
+    })
+
+    it("does not treat an unknown id as a language or as the project target (AQU-1615)", async () => {
+      const { status, body } = await preview(testDb, token, "cell-live", "?targetLang=b0b0b0b0")
+      expect(status).toBe(400)
+      const error = body as unknown as { error: { message: string } }
+      expect(error.error.message).toContain("lane does not exist")
+      expect(error.error.message).not.toContain("b0b0b0b0")
+    })
+
+    it("uses settings for an unbackfilled source lane and not for a typed one (AQU-1593)", async () => {
+      // Project creation already inserts the one source lane.
+      await testDb.pg.query(
+        `UPDATE lanes SET language = NULL, name = 'Source', lang_code = NULL
+          WHERE project_id = 'proj-a' AND role = 'source'`,
+      )
+      const unbackfilled = await preview(testDb, token, "cell-live")
+      expect(unbackfilled.body.sourceLanguage).toBe("English")
+      await testDb.pg.query(
+        `UPDATE lanes SET language = 'Koine Greek' WHERE project_id = 'proj-a' AND role = 'source'`,
+      )
+      const typed = await preview(testDb, token, "cell-live")
+      expect(typed.body.sourceLanguage).toBe("Koine Greek")
+    })
+
+    it("still inherits the project target for the default lane", async () => {
+      const { body } = await preview(testDb, token, "cell-live")
+      expect(body.laneId).toBe("deflane1")
+      expect(body.targetLang).toBe("")
+      expect(body.targetLanguage).toBe("French")
     })
   })
 })

@@ -3,12 +3,17 @@
 // Mounted at /api/v2/projects in src/index.ts as a sibling router to
 // routes/projects.ts / routes/source-linking.ts.
 //
-//   POST /:projectId/merge-sibling   { donorProjectId, lane }
+//   POST /:projectId/merge-sibling   { donorProjectId, lane, donorLaneId? }
 //
 // Folds a legacy single-pair "sibling" project (the donor) into the host as
-// one additional target-language LANE. The host keeps its existing lanes; the
-// donor's DEFAULT-lane translations become the host's new `lane`. Requires
+// one additional target-language LANE. The host keeps its existing lanes; one
+// donor lane's translations become the host's new `lane`. Requires
 // project_lead (500)+ on BOTH projects (you must own both to combine them).
+//
+// AQU-1602: `donorLaneId` names the donor lane to fold, by `lanes.id`. Omit it
+// and the fold takes the donor's single active lane — the legacy pair project
+// this tool exists for. A donor with several active lanes comes back 400 with
+// the candidates, so the operator chooses rather than the server guessing.
 //
 // Flow (design decision 7 — FINAL):
 //   1. Authorize 500+ on host AND donor; validate the lane + donor state.
@@ -38,6 +43,7 @@ import { triggerMergeSiblingFold } from "../services/merge-sibling"
 import { mergeSettingsArray } from "./project-settings"
 import { listProjectLanes } from "../../../db/shared/lanes"
 import { laneNameProblem } from "../../../src/lib/lanes/lane-name"
+import { laneDisplayName } from "../../../src/lib/lanes/lane-display"
 
 const mergeSibling = new Hono<AuthHonoEnv>()
 
@@ -47,6 +53,8 @@ const MAX_LANE_LEN = 64
 const mergeSiblingSchema = z.object({
   donorProjectId: z.string().min(1).max(256),
   lane: z.string().min(1).max(256),
+  /** AQU-1602: `lanes.id` on the DONOR. Omitted = its single active lane. */
+  donorLaneId: z.string().min(1).max(256).optional(),
 })
 
 // ── project_settings helpers (mirror routes/project-settings.ts internals) ──
@@ -124,7 +132,7 @@ mergeSibling.post(
   async (c) => {
     const user = c.get("user")
     const hostId = c.req.param("projectId") as string
-    const { donorProjectId } = c.req.valid("json")
+    const { donorProjectId, donorLaneId } = c.req.valid("json")
     const lane = c.req.valid("json").lane.trim()
 
     // Lane validation: non-empty (post-trim), bounded length.
@@ -172,7 +180,8 @@ mergeSibling.post(
       )
     }
 
-    // Lane must not already be registered on the host.
+    // Exact tag only. A second lane of the same language is legal; a display
+    // name another lane already shows is refused just below.
     const hostSettings = await loadProjectSettings(c.env, hostId)
     const existingLanes = readTargetLanes(hostSettings.settings)
     if (existingLanes.includes(lane)) {
@@ -188,7 +197,11 @@ mergeSibling.post(
     const nameProblem = laneNameProblem({
       laneId: "",
       name: lane,
-      others: hostLanes.filter((row) => row.legacyTag !== lane),
+      // AQU-1592: compare against what each host lane DISPLAYS — a lane that
+      // stores only a language still shows that language, so it collides.
+      others: hostLanes
+        .filter((row) => row.legacyTag !== lane)
+        .map((row) => ({ id: row.id, name: laneDisplayName(row) })),
     })
     if (nameProblem === "duplicate") {
       return c.json({ error: `a lane named "${lane}" already exists on the host project` }, 400)
@@ -201,9 +214,15 @@ mergeSibling.post(
       hostProjectId: hostId,
       donorProjectId,
       lane,
+      donorLaneId,
       caller: { userId: user.id, donorRoleSource: donorRole.source },
     })
     if (!fold.ok) {
+      // AQU-1602: a 400 is the donor-lane refusal — the caller picks a lane and
+      // runs the merge again. Nothing was written, so the donor stays live.
+      if (fold.status === 400) {
+        return c.json({ error: fold.error, donorLanes: fold.donorLanes ?? [] }, 400)
+      }
       return c.json({ error: fold.error }, fold.status === 500 ? 500 : 502)
     }
 
@@ -213,6 +232,15 @@ mergeSibling.post(
     // write, and re-reads the settings rather than overwrite a change made
     // while the fold ran. If it fails the donor stays live; the fold is
     // idempotent, so running the merge again finishes the job.
+    //
+    // AQU-1602 asked for this registry write to go. It stays for now because
+    // POST /:projectId/lanes — the canonical way a lane is created (AQU-1418) —
+    // still makes it, for the readers that have not moved to lane rows yet
+    // (the contextual project context, the external API's PatchSettings).
+    // Billing counts lanes rows (AQU-1595). Dropping the registry write here
+    // alone would make a merged lane the only lane missing from them.
+    // AQU-1595 removes the
+    // four settings keys everywhere, once those readers are on lane rows.
     const registered = await mergeSettingsArray(
       c.env.AQUILLA_PG,
       hostId,
@@ -250,7 +278,14 @@ mergeSibling.post(
       c.env,
       donorProjectId,
       donorSettings,
-      { ...donorSettings.settings, mergedInto: hostId, mergedLane: lane },
+      {
+        ...donorSettings.settings,
+        mergedInto: hostId,
+        mergedLane: lane,
+        // AQU-1602: which of the donor's lanes was folded, for the banner on
+        // the archived donor and for anyone auditing the merge later.
+        mergedFromLaneId: fold.result.donorLaneId ?? null,
+      },
       user.id,
     )
 
@@ -258,6 +293,11 @@ mergeSibling.post(
       hostId,
       donorProjectId,
       lane,
+      // AQU-1602: both ends of the fold, by `lanes.id`, so a caller can address
+      // the new host lane (and record which donor lane it came from) without
+      // going back through the legacy tag.
+      donorLaneId: fold.result.donorLaneId ?? null,
+      hostLaneId: fold.result.hostLaneId ?? null,
       merged: fold.result.merged,
       skipped: fold.result.skipped,
       actions: {

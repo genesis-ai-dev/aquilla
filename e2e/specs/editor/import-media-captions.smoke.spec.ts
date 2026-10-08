@@ -223,7 +223,7 @@ test("attaching captions adds a track and counted overwrite preserves source aud
     "1\n00:00:01,000 --> 00:00:02,500\nReplacement wording.",
   ) })
   await alice.getByLabel("Destination track").selectOption({ label: "Reviewed caption track" })
-  await expect(alice.getByText("1 segment currently in this track will be overwritten.")).toBeVisible()
+  await expect(alice.getByText("1 segment in this track will be overwritten.")).toBeVisible()
   await expect(alice.getByRole("button", { name: "Overwrite caption track" })).toBeDisabled()
   await alice.getByRole("checkbox", { name: "Overwrite the existing content in this track" }).check()
   await ws.confirmCaptionTrack(true)

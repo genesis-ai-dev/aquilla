@@ -60,13 +60,15 @@ import { resolveCellStates } from './preconditions'
 import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
+import { linkMediaTelemetry, reviewTelemetryAllowed, sendReviewTelemetry, telemetrySourceFor } from './review-telemetry'
+import { locateEvents, locateRejections, rejectedWarnings } from './rejected-warnings'
 import { loadChangeset } from './store'
 import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
 import { assertCredentialMayWrite, assertCredentialScope, mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
-import { laneIdResolveSql } from '../events/lane-id-sql'
+import { artifactBindingConflictColumn, laneIdResolveSql } from '../events/lane-id-sql'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
 import type { RawEvent } from '../events/types'
@@ -79,14 +81,14 @@ import type {
   ReceiptOnlyReceipt,
   StoredChangeset,
 } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import {
   createProjectShared,
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
-import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
+import { stampStoredLaneId } from './external-lane'
 import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -97,11 +99,6 @@ import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/sh
  *  never header-derived: only the session routes pass it, as a code parameter. */
 function readChannel(request: Request): ProvenanceChannel {
   return request.headers.get('x-aquilla-channel') === 'mcp' ? 'mcp' : 'rest'
-}
-
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
 }
 
 /** Who is committing, under which ownership rule, on which channel (AQU-926).
@@ -131,7 +128,7 @@ export async function handleCommit(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
   const identifier = `credential:${cred.credentialId}`
@@ -551,18 +548,16 @@ export async function commitChangesetCore(
   const plannedSet = new Map(
     (cs.plannedIds?.setTranslation ?? []).map((p) => [laneCellKey(p.fileId, p.cellId, p.laneId), p.eventId]),
   )
-  // AQU-1532: a changeset staged before prepare canonicalized lane ids can
-  // still name the primary language; stamp it as the default lane.
-  const targetLanguage = [...commandByCell.values()].some((c) => c.laneId)
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
-    : null
+  // A current plan stores lanes.id. An older staged plan may still store a
+  // tag; stampStoredLaneId writes that tag as targetLang and does not alias it.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
   const clientTs = Date.now()
   for (const pre of cs.preconditions) {
-    const stored = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
-    if (!stored) continue
-    const cmd = withCanonicalLaneId(stored, targetLanguage)
+    const cmd = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
+    if (!cmd) continue
+    const laneStamp = stampStoredLaneId(cmd.laneId, laneRows)
     const ev: RawEvent<'target.cell.commit'> = {
       id: plannedSet.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId)) ?? uuidv7(),
       schemaVersion: 1,
@@ -575,9 +570,9 @@ export async function commitChangesetCore(
       payload: {
         value: cmd.value,
         ...(cmd.valueHtml !== undefined ? { valueHtml: cmd.valueHtml } : {}),
-        // AQU-538: stamp the lane so the projection lands the commit on its
-        // own (cell, target_lang) row and chain slot.
-        ...(cmd.laneId ? { targetLang: cmd.laneId } : {}),
+        // targetLang is the frozen event key (the lane's legacy_tag). laneId
+        // is lanes.id so resolveEventLane agrees.
+        ...laneStamp,
         // AQU-1186: a DraftCells expansion carries the copilot's provenance,
         // so the projection sets ai_drafted = 1 and the cell reads back as a
         // pending AI draft — identical to an in-app draft. Only the server
@@ -621,12 +616,15 @@ export async function commitChangesetCore(
   }
 
   // If nothing applied but the perimeter rejected events, surface the reason.
+  // AQU-1571: each refusal names the file and line it was about, the same way
+  // the receipt warnings below do when only some events are refused.
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -637,9 +635,7 @@ export async function commitChangesetCore(
 
   // ── Receipt ───────────────────────────────────────────────────────────────
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, where))
   for (const eid of [...staleFromPerimeter, ...staleSource]) {
     warnings.push({ code: 'stale_pin', fileId: '', cellId: '', message: `event ${eid} landed stale` })
   }
@@ -752,6 +748,12 @@ export async function applyPlanImport(
       kind: cmd.fileType.toLowerCase() === 'tmx' ? 'translation-memory' : cmd.fileType,
       ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
       ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+      // AQU-1471: stamped ONLY when the command named one. The project-level
+      // default is resolved on every read (db/shared/text-direction.ts), so
+      // copying it onto the row here would silently turn a project default into
+      // 49 per-file overrides and freeze them against a later language change.
+      ...(cmd.sourceTextDirection !== undefined ? { sourceTextDirection: cmd.sourceTextDirection } : {}),
+      ...(cmd.targetTextDirection !== undefined ? { targetTextDirection: cmd.targetTextDirection } : {}),
       importManifest: compiled.fileSummary,
     },
     clientTs,
@@ -818,18 +820,15 @@ export async function applyPlanImport(
 
   // Explicit target variants reuse the same source unit and name their lane.
   // The source event id is both the first target-chain parent and the staleness
-  // pin, matching browser bilingual imports.
-  // AQU-1532: a variant naming the primary language writes the default lane.
-  const namesALane = compiled.units.some((unit) => (unit.cell.variants ?? []).some((v) => v.laneId))
-  const targetLanguage = namesALane
-    ? settingsTargetLanguage((await loadProjectSettings(db, projectId)).settings)
-    : null
+  // pin, matching browser bilingual imports. laneId on a current plan is
+  // lanes.id; an older staged tag is stamped as targetLang only.
+  const laneRows = (await loadProjectSettings(db, projectId)).lanes ?? []
   const targetEvents: RawEvent<'target.cell.commit'>[] = []
   compiled.units.forEach((unit, cellIndex) => {
     const sourceEvent = cellEvents[cellIndex]
     const planned = plannedImport?.cells[cellIndex]
     for (const [variantIndex, stored] of (unit.cell.variants ?? []).entries()) {
-      const variant = { ...stored, laneId: canonicalLaneId(stored.laneId, targetLanguage) }
+      const laneStamp = stampStoredLaneId(stored.laneId, laneRows)
       targetEvents.push({
         id: planned?.variantEventIds?.[variantIndex] ?? uuidv7(),
         schemaVersion: 1,
@@ -840,10 +839,10 @@ export async function applyPlanImport(
         parentId: sourceEvent.id,
         author: cred.username,
         payload: {
-          value: variant.content,
-          ...(variant.contentHtml !== undefined ? { valueHtml: variant.contentHtml } : {}),
+          value: stored.content,
+          ...(stored.contentHtml !== undefined ? { valueHtml: stored.contentHtml } : {}),
           sourceEventId: sourceEvent.id,
-          ...(variant.laneId ? { targetLang: variant.laneId } : {}),
+          ...laneStamp,
         },
         clientTs,
       })
@@ -903,7 +902,7 @@ export async function applyPlanImport(
       error: errorResponse(
         anyForbidden ? 'permission_denied' : 'job_failed',
         'no events were applied',
-        { rejected },
+        { rejected: locateRejections(rejected, locateEvents(allEvents)) },
       ),
     }
   }
@@ -952,20 +951,20 @@ export async function applyPlanImport(
         .run()
     }
 
+    const conflictColumn = await artifactBindingConflictColumn(db)
     await db
       .prepare(
         `INSERT INTO artifact_bindings (
-           id, project_id, artifact_id, file_id, binding_role, target_lang,
+           id, project_id, artifact_id, file_id, binding_role,
            member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
-         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
-         ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+         ) VALUES (?, ?, ?::uuid, ?, 'source', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ${laneIdResolveSql('source')})
+         ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
          DO UPDATE SET
            profile_id = excluded.profile_id,
            profile_version = excluded.profile_version,
            fidelity = excluded.fidelity,
            manifest = excluded.manifest,
            recipe = excluded.recipe,
-           lane_id = COALESCE(excluded.lane_id, artifact_bindings.lane_id),
            updated_at = now()`,
       )
       .bind(
@@ -1017,9 +1016,7 @@ export async function applyPlanImport(
   }
 
   const warnings: ChangesetWarning[] = [...(opts.baseWarnings ?? [])]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, locateEvents(allEvents)))
 
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
@@ -1149,24 +1146,22 @@ async function commitCreateProject(
   const confirmationId = gate.confirmationId
 
   // Apply — MANDATORY writeCreatorMembership: true (see JSDoc above).
-  const { inserted } = await createProjectShared(db, {
-    projectId,
-    name: cmd.name,
-    orgId,
-    createdBy: cred.userId,
-    writeCreatorMembership: true,
-    // AQU-1223: the language pair rides the create instead of being dropped.
-    // Sent only when the command carried one, so a bare name+orgId create still
-    // writes no settings row at all.
-    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
-      ? {
-          settingsSeed: {
-            ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
-            ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
-          },
-        }
-      : {}),
-  })
+  let inserted: boolean
+  try {
+    const created = await createProjectShared(db, {
+      projectId,
+      name: cmd.name,
+      orgId,
+      createdBy: cred.userId,
+      writeCreatorMembership: true,
+      // Lanes become rows. The four project-level language keys are not written.
+      ...(cmd.lanes !== undefined ? { lanes: cmd.lanes } : {}),
+    })
+    inserted = created.inserted
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'could not create the project lanes'
+    return errorResponse('validation_failed', message)
+  }
 
   if (!inserted) {
     // The id already exists. Distinguish a genuine race (someone else claimed it
@@ -1315,6 +1310,8 @@ async function commitLinkMedia(
 
   const eventsByFile = new Map<string, RawEvent[]>()
   const allEventIds: string[] = []
+  // AQU-1572: which cell each attach event lands on, for the telemetry below.
+  const attaches: { eventId: string; fileId: string; cellId: string }[] = []
 
   for (const cmd of cmds) {
     // Re-check the artifact: still present, still audio, same project.
@@ -1403,6 +1400,7 @@ async function commitLinkMedia(
     // attach must precede select in the batch so the projection sees the row
     // before the select re-affirms it.
     allEventIds.push(attachId, selectId)
+    attaches.push({ eventId: attachId, fileId: cmd.fileId, cellId: cmd.cellId })
     const list = eventsByFile.get(cmd.fileId)
     if (list) list.push(attachEvent, selectEvent)
     else eventsByFile.set(cmd.fileId, [attachEvent, selectEvent])
@@ -1432,12 +1430,13 @@ async function commitLinkMedia(
 
   // Nothing applied but events were rejected — surface the reason (an observer
   // credential is 403'd by the perimeter since cell.audio.* needs CONTRIBUTOR).
+  const where = locateEvents([...eventsByFile.values()].flat())
   if (acceptedIds.size === 0 && rejected.length > 0) {
     const anyForbidden = rejected.some((r) => r.status === 403)
     return errorResponse(
       anyForbidden ? 'permission_denied' : 'job_failed',
       'no events were applied',
-      { rejected },
+      { rejected: locateRejections(rejected, where) },
     )
   }
 
@@ -1453,9 +1452,7 @@ async function commitLinkMedia(
   }
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
-  for (const r of rejected) {
-    warnings.push({ code: 'rejected', fileId: '', cellId: '', message: `${r.id}: ${r.reason}` })
-  }
+  warnings.push(...rejectedWarnings(rejected, where))
 
   const receipt: ChangesetReceipt = {
     eventIds: appliedIds,
@@ -1473,6 +1470,23 @@ async function commitLinkMedia(
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
+
+  // AQU-1572: one `audio attached` per line whose attach landed. After the
+  // terminal write, and before the partial-failure reply: a partly rejected
+  // changeset is still committed, and its accepted attaches are real. A
+  // session commit reports only with the person's analytics switch on.
+  if (reviewTelemetryAllowed(request, channel)) {
+    sendReviewTelemetry(
+      env,
+      ctx,
+      cred.username,
+      linkMediaTelemetry(
+        projectId,
+        attaches.filter((a) => acceptedIds.has(a.eventId)),
+        telemetrySourceFor(channel),
+      ),
+    )
+  }
 
   if (rejected.length > 0) {
     return errorResponse('job_failed', 'link-media partially failed — some events were rejected', {
@@ -1546,6 +1560,9 @@ async function commitUpdateProjectSettings(
     settings: cmd.settings,
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    // The four language keys are rejected at validation. Do not let a leftover
+    // key on the stored blob mint a lane row (AQU-1615).
+    registerLanes: false,
   })
 
   if (result.status === 'conflict') {

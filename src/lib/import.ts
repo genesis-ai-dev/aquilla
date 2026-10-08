@@ -21,7 +21,7 @@ import { proxyOrigin } from "./net/resource-proxy"
 // This module runs outside React (plain import-pipeline code, no hooks), so it
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
-import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
+import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
@@ -65,6 +65,7 @@ import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
   bindSourceArtifact,
+  isSourceUploadRoleRefusal,
   uploadSourceOriginal,
 } from "./sync/source-upload"
 import {
@@ -84,6 +85,7 @@ import { parseTnTsv } from "./parsers/translation-notes"
 import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
 import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
+import { reimportKeysFor } from "./import/reimport-keys"
 import { getBookName } from "./file-labeling/bible-book-names"
 import {
   aquillaImportMetadata,
@@ -227,7 +229,9 @@ export function matchEBibleToSourceCells(
     const currentText = cell.translated ?? ""
     // AD-2 parentId: chain off existing targetEventId if present, else off the
     // source cell's sourceEventId (genesis target commit). Fallback to empty
-    // string only when neither is available (rare legacy cells with no event id).
+    // string only when neither is available (rare legacy cells with no event id,
+    // or a lane whose cells have not finished loading). "" means "unchainable"
+    // and applyEBibleTargetImport refuses to apply such a cell (AQU-1669).
     const parentId = resolveTargetCommitParent({
       targetEventId: cell.targetEventId,
       sourceEventId: cell.sourceEventId,
@@ -297,7 +301,10 @@ export async function prepareEBibleTargetImport(
  * Cells with hasConflict=true and not in selectedCellIds are kept (skipped).
  *
  * parentId handling: each MatchedCell already carries the correct AD-2 parentId
- * (targetEventId ?? sourceEventId), so commits are always properly chained.
+ * (targetEventId ?? sourceEventId), so commits are always properly chained. A
+ * selected cell that resolved to neither (parentId "") cannot be chained at
+ * all, and AQU-1669 is what dropping those quietly cost: this throws instead,
+ * so the caller can roll its optimistic patch back and show the failure.
  */
 export async function applyEBibleTargetImport(
   matchResult: EBibleMatchResult,
@@ -320,56 +327,53 @@ export async function applyEBibleTargetImport(
     byFile.set(m.fileId, arr)
   }
 
+  // AQU-1669: a selected cell whose AD-2 parent never resolved (parentId "" —
+  // no targetEventId and no sourceEventId) used to be dropped right here, with
+  // the drop folded into `committedCount`. When that silently emptied the whole
+  // batch the caller still reported success: the artifact upload below was
+  // skipped (`groups.length > 0` was false), no commit was enqueued, and the
+  // dialog closed over an optimistic patch nobody ever undid — the translations
+  // sat in the editor looking saved and were gone on reopen, with no warning.
+  // A cell the user explicitly selected is never safe to drop quietly, so fail
+  // the whole apply loudly instead and let handleApply roll the patch back.
+  const unchainable = toCommit.filter((cell) => !cell.parentId)
+  if (unchainable.length > 0) {
+    throw new Error(
+      t("importExport.errors.unchainableTargetCells", {
+        count: unchainable.length,
+        total: toCommit.length,
+      }),
+    )
+  }
+
   const groups = [...byFile].map(([fileId, cells]) => ({
     fileId,
-    commits: cells
-      .filter((cell) => cell.parentId)
-      .map((cell) => ({
-        id: uuidv7(),
-        cellId: cell.cellId,
-        parentId: cell.parentId!,
-        value: cell.incomingText,
-      })),
+    commits: cells.map((cell) => ({
+      id: uuidv7(),
+      cellId: cell.cellId,
+      parentId: cell.parentId,
+      value: cell.incomingText,
+    })),
   })).filter((group) => group.commits.length > 0)
+  // Every selected cell is chainable by the guard above, so this is exactly the
+  // count the user approved — never a quietly reduced one (AQU-1669).
   const committedCount = groups.reduce((count, group) => count + group.commits.length, 0)
 
   // Preserve the exact target-side input before queuing any edits. One
   // immutable artifact can bind to several Aquilla files, and the active lane
   // is part of every binding so later audit/export never confuses languages.
+  //
+  // AQU-1365: the artifact routes sit at Project lead (500), but a target
+  // import only needs Contributor (400) for its commits, and the Import
+  // button now opens a translation import for Contributors. A role refusal
+  // (403) therefore skips the preserved copy and still imports the text;
+  // any other failure still stops the import before a commit is queued.
   const sourceArtifact = ctx.sourceArtifact ?? matchResult.sourceArtifact
   if (sourceArtifact && groups.length > 0) {
-    const [firstFileId, ...otherFileIds] = groups.map((group) => group.fileId)
-    const artifactId = uuidv7()
-    await uploadSourceOriginal({
-      projectId: ctx.projectId,
-      fileId: firstFileId,
-      artifactId,
-      bytes: sourceArtifact.bytes,
-      format: sourceArtifact.format,
-      artifactName: sourceArtifact.name,
-      bindingRole: "target",
-      targetLang: ctx.targetLang,
-      profileId: `builtin:target-${sourceArtifact.format}`,
-      profileVersion: "1",
-      fidelity: "preserved-only",
-      updateSourceSidecar: false,
-      getToken: ctx.getToken,
-      signal: ctx.signal,
-    })
-    for (const fileId of otherFileIds) {
-      await bindSourceArtifact({
-        projectId: ctx.projectId,
-        fileId,
-        artifactId,
-        memberPath: sourceArtifact.name,
-        profileId: `builtin:target-${sourceArtifact.format}`,
-        profileVersion: "1",
-        fidelity: "preserved-only",
-        bindingRole: "target",
-        targetLang: ctx.targetLang,
-        getToken: ctx.getToken,
-        signal: ctx.signal,
-      })
+    try {
+      await preserveTargetArtifact(sourceArtifact, groups.map((group) => group.fileId), ctx)
+    } catch (error) {
+      if (!isSourceUploadRoleRefusal(error)) throw error
     }
   }
 
@@ -388,6 +392,47 @@ export async function applyEBibleTargetImport(
 
   const skippedCount = matchResult.matched.length - committedCount
   return { committedCount, skippedCount }
+}
+
+/** Upload a target import's original once and bind it to every file it fills. */
+async function preserveTargetArtifact(
+  sourceArtifact: TargetImportArtifact,
+  fileIds: readonly string[],
+  ctx: Pick<ImportContext, "projectId" | "getToken" | "signal" | "targetLang">,
+): Promise<void> {
+  const [firstFileId, ...otherFileIds] = fileIds
+  const artifactId = uuidv7()
+  await uploadSourceOriginal({
+    projectId: ctx.projectId,
+    fileId: firstFileId,
+    artifactId,
+    bytes: sourceArtifact.bytes,
+    format: sourceArtifact.format,
+    artifactName: sourceArtifact.name,
+    bindingRole: "target",
+    targetLang: ctx.targetLang,
+    profileId: `builtin:target-${sourceArtifact.format}`,
+    profileVersion: "1",
+    fidelity: "preserved-only",
+    updateSourceSidecar: false,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
+  for (const fileId of otherFileIds) {
+    await bindSourceArtifact({
+      projectId: ctx.projectId,
+      fileId,
+      artifactId,
+      memberPath: sourceArtifact.name,
+      profileId: `builtin:target-${sourceArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      bindingRole: "target",
+      targetLang: ctx.targetLang,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+  }
 }
 
 export type MaculaImportPhase = "parse" | "save" | "morph"
@@ -470,6 +515,11 @@ export interface ImportContext {
   targetLang?: string
   /** Identity JWT used only for AI-assisted classification of unknown text. */
   identityToken?: string
+  /** AQU-1720: what one imported cell is for docx/txt/md. `paragraph` keeps a
+   *  paragraph whole (one dubbing clip per cell); absent/`sentence` segments it
+   *  as before. Forwarded to `prepareImportFile` when this context drives the
+   *  parse itself (no pre-`prepared` result from the dialog's preview). */
+  cellUnit?: CellUnit
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
@@ -509,7 +559,7 @@ export interface ImportContext {
 
 type PrepareImportContext = Pick<
   ImportContext,
-  "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal"
+  "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal" | "cellUnit"
 > & {
   onIdmlProgress?: (progress: IdmlProgress) => void
   /** AQU-634: USFM front-matter opt-out forwarded into parseFile. */
@@ -722,7 +772,7 @@ export async function prepareImportFile(
             extensionType,
             extensionType === "idml"
               ? { signal: ctx.signal, onIdmlProgress: ctx.onIdmlProgress }
-              : undefined,
+              : { cellUnit: ctx.cellUnit },
           ),
         )
       }
@@ -764,6 +814,7 @@ export async function prepareImportFile(
       }
       const prepared = preparedParsedFile(file, fileType, await parseFile(file, fileType, {
         excludeFrontMatter: ctx.excludeFrontMatter,
+        cellUnit: ctx.cellUnit,
       }))
       if (analysisError) {
         prepared.results = prepared.results.map((result) => ({
@@ -795,6 +846,7 @@ export async function prepareImportFile(
     if (sniffedType) {
       return preparedParsedFile(file, sniffedType, await parseFile(file, sniffedType, {
         excludeFrontMatter: ctx.excludeFrontMatter,
+        cellUnit: ctx.cellUnit,
       }))
     }
     if (!ctx.identityToken) {
@@ -1578,12 +1630,7 @@ export async function emitParsedFile(
   ctx: ImportContext,
   normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
-  const reimportKeys = [
-    result.bookCode?.trim().toUpperCase(),
-    result.name.trim().toLowerCase(),
-    result.originalName?.trim().toLowerCase(),
-  ].filter((key): key is string => Boolean(key))
-  const existingFileId = reimportKeys
+  const existingFileId = reimportKeysFor(result)
     .map((key) => ctx.reimportFileIds?.get(key))
     .find((id): id is string => Boolean(id))
   const fileId = existingFileId ?? uuidv7()
@@ -2510,6 +2557,12 @@ export interface ParseFileOptions {
    *  intro-block front matter from the imported cells (AQU-634). Default:
    *  false (import front matter). */
   excludeFrontMatter?: boolean
+  /** docx/txt/md: what one imported cell is (AQU-1720). `paragraph` emits one
+   *  cell per non-empty paragraph — no sentence split, no length cap — which is
+   *  the unit a dubbing project generates one voice clip for. Formats whose
+   *  cell identity is fixed by the format (USFM verses, subtitle cues,
+   *  key/value resources) ignore it. Default: `sentence`. */
+  cellUnit?: CellUnit
 }
 
 export async function parseFile(
@@ -2535,7 +2588,12 @@ export async function parseFile(
       // USFM split live in parse-text-formats.ts (worker-safe core).
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)
-      const parsed = await parseTextFormatOffMainThread({ fileType, text, name: file.name })
+      const parsed = await parseTextFormatOffMainThread({
+        fileType,
+        text,
+        name: file.name,
+        cellUnit: options?.cellUnit,
+      })
       return parsed.map((result) => ({
         ...result,
         rawBytes: bytes,
@@ -2581,7 +2639,7 @@ export async function parseFile(
     }
     case "docx": {
       const buffer = await file.arrayBuffer()
-      const strings = await extractDocxStrings(buffer)
+      const strings = await extractDocxStrings(buffer, { cellUnit: options?.cellUnit })
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "docx" }]
     }

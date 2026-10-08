@@ -26,6 +26,15 @@ vi.mock("@/lib/agent/agent-mode", async () => {
   return { ...actual, fetchAgentMode: vi.fn(async () => null), patchAgentMode: vi.fn() }
 })
 
+// AQU-1653: the toolbar's chat menu lists this user's saved chats on mount.
+// These tests are about the review loop, not chat history — keep that read
+// on-machine (runsFromTurns stays real; nothing here depends on it).
+vi.mock("@/lib/agent/session-history", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agent/session-history")>()),
+  listAgentSessions: vi.fn(async () => []),
+  fetchAgentSession: vi.fn(),
+}))
+
 vi.mock("./AgentDockView", async () => {
   const { agentSessionStore: storeOf } = await import("@/lib/agent/session-store")
   const { proposalsOf } = await import("@/lib/agent/run-state")
@@ -441,7 +450,13 @@ describe("AgentWorkbench review loop", () => {
     }
   })
 
-  it("confirms chat reset without undoing or deleting already-applied events", async () => {
+  // AQU-1653: this used to be "confirms chat reset…" — the menu item was
+  // destructive, so a confirmation dialog stood between it and the user. The
+  // chat is now saved server-side and reopenable from the same menu, so "New
+  // chat" fires directly. The invariant that mattered is unchanged and is what
+  // this still asserts: starting a new chat clears the CONVERSATION (session
+  // id, runs, review decisions) and touches nothing that was already applied.
+  it("starts a new chat without undoing or deleting already-applied events", async () => {
     await primeSessionWithDraftRun()
     const props = workbenchProps()
     const onApplied = vi.fn<NonNullable<AgentWorkbenchProps["agent"]["onApplied"]>>()
@@ -460,22 +475,19 @@ describe("AgentWorkbench review loop", () => {
     const eventCount = await outboxRecordCountAllOwners()
     expect(before.decided.size).toBe(2)
 
-    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
-    let dialog = await screen.findByRole("alertdialog", { name: "Reset chat?" })
+    // AQU-1774: New chat is a labelled button on this surface, not a menu
+    // item. Opening the chats menu beside it changes nothing — only the
+    // button does.
+    fireEvent.click(screen.getByRole("button", { name: "Previous chats" }))
+    expect(await screen.findByRole("menuitem", { name: "No previous chats" })).toBeInTheDocument()
     expect(store.getState().sessionId).toBe(before.sessionId)
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
     expect(store.getState().runs).toEqual(before.runs)
     expect(store.getState().decided).toEqual(before.decided)
 
-    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
-    dialog = await screen.findByRole("alertdialog", { name: "Reset chat?" })
-    fireEvent.click(within(dialog).getByRole("button", { name: "Reset chat" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
-    await waitFor(() => expect(screen.getByRole("button", { name: "Chat options" })).toHaveFocus())
-    expect(store.getState().sessionId).not.toBe(before.sessionId)
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }))
+    await waitFor(() => expect(store.getState().sessionId).not.toBe(before.sessionId))
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     expect(store.getState().runs).toEqual([])
     expect(store.getState().decided.size).toBe(0)
     expect(await getOutboxRecords(appliedIds)).toEqual(appliedRecords)
@@ -483,20 +495,23 @@ describe("AgentWorkbench review loop", () => {
     expect(screen.getByRole("tab", { name: "Review drafts" })).toHaveAttribute("aria-selected", "true")
   })
 
-  it.each(["project", "account"])("dismisses reset confirmation when its %s changes", async (scope) => {
+  // AQU-1653: with the confirmation gone, the hazard this guards is the one
+  // that was always underneath it — a chat action surviving the menu's remount
+  // key and landing on a DIFFERENT project's or user's conversation. The menu
+  // is keyed on (projectId, author); an open menu must not outlive either.
+  it.each(["project", "account"])("leaves the previous chat untouched when its %s changes", async (scope) => {
     await primeSessionWithDraftRun()
     const props = workbenchProps()
     const view = render(<AgentWorkbench {...props} />)
     const before = agentSessionStore(PROJECT, "alice").getState()
-    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
-    expect(await screen.findByRole("alertdialog", { name: "Reset chat?" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Previous chats" }))
+    expect(await screen.findByRole("menuitem", { name: "No previous chats" })).toBeInTheDocument()
 
     const next = workbenchProps()
     if (scope === "project") next.agent.projectId = `${PROJECT}-other`
     else next.agent.author = "bob"
     view.rerender(<AgentWorkbench {...next} />)
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "No previous chats" })).not.toBeInTheDocument())
     expect(agentSessionStore(PROJECT, "alice").getState().sessionId).toBe(before.sessionId)
     expect(agentSessionStore(PROJECT, "alice").getState().runs).toEqual(before.runs)
   })
@@ -577,7 +592,11 @@ describe("AgentWorkbench unified view navigation", () => {
     expect(within(toolbar).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
     expect(within(toolbar).getByRole("tab", { name: "Document" })).toBeInTheDocument()
     expect(within(toolbar).getByRole("tab", { name: "Project knowledge" })).toBeInTheDocument()
-    expect(within(toolbar).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
+    // AQU-1774: the chat actions read as words on this row — no icon-only
+    // "Chat options", and nothing still calling itself a "New session".
+    expect(within(toolbar).getByRole("button", { name: "New chat" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("button", { name: "Previous chats" })).toBeInTheDocument()
+    expect(within(toolbar).queryByRole("button", { name: "Chat options" })).not.toBeInTheDocument()
     expect(within(toolbar).queryByRole("button", { name: /New session/ })).not.toBeInTheDocument()
     expect(within(toolbar).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
 
@@ -596,7 +615,7 @@ describe("AgentWorkbench unified view navigation", () => {
 
     const header = screen.getByTestId("agent-toolbar-row")
     expect(within(header).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
-    expect(within(header).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
+    expect(within(header).getByRole("button", { name: "New chat" })).toBeInTheDocument()
     expect(within(header).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
 
     fireEvent.click(memoryTab)
@@ -629,9 +648,9 @@ describe("AgentWorkbench editor chrome (AQU-980)", () => {
     expect(textTab).toHaveClass("px-2", "py-1")
     expect(audioTab).toHaveClass("px-2", "py-1")
     // The view switch and the mode switch share one row; the session actions
-    // (Chat options, Back to editor) follow the mode switch.
+    // (New chat, Previous chats, Back to editor) follow the mode switch.
     expect(within(row).getByRole("tab", { name: "Conversation" })).toHaveAttribute("aria-selected", "true")
-    const chatOptions = within(row).getByRole("button", { name: "Chat options" })
+    const chatOptions = within(row).getByRole("button", { name: "New chat" })
     expect(agentMode.compareDocumentPosition(chatOptions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     fireEvent.click(textTab)
     expect(onLensChange).toHaveBeenCalledWith("text")

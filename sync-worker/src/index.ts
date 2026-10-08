@@ -38,6 +38,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
+import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handlePlanRequest } from "./events/plan-route"
@@ -97,6 +98,7 @@ import { makePostgres } from "../../db/shim/postgres"
 import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 
@@ -532,6 +534,11 @@ const worker = {
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
 
+    // AQU-1762: Agent API knowledge-base (reference document) upload / list.
+    // Bridged to auth-worker, which owns extraction + indexing.
+    const externalKnowledgeResponse = await handleExternalKnowledgeRequest(request, env)
+    if (externalKnowledgeResponse) return withCors(externalKnowledgeResponse, request)
+
     // AQU-1294: partner intake template + agent skills. Static text / pure
     // transforms, unauthenticated like the command docs below.
     const externalSetupTemplateResponse = await handleExternalSetupTemplateRequest(request)
@@ -581,11 +588,11 @@ export default {
     try {
       response = await worker.fetch(request, env, ctx)
     } catch (err) {
-      const url = new URL(request.url)
+      const path = redactLogPath(new URL(request.url).pathname)
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${url.pathname}`, {
+        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${path}`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.duration_ms": Date.now() - startedAt,
           "error.message": err instanceof Error ? err.message : String(err),
         }),
@@ -594,14 +601,17 @@ export default {
     }
     const durationMs = Date.now() - startedAt
     if (durationMs >= SLOW_REQUEST_MS) {
-      const url = new URL(request.url)
+      // OPS-42: `redactLogPath`, not `url.pathname` — [slow-request] fires on
+      // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+      // access-link redeem that merely ran slowly would log a live token.
+      const path = redactLogPath(new URL(request.url).pathname)
       console.warn(
-        `[slow-request] ${request.method} ${url.pathname} took ${durationMs}ms (status ${response.status})`,
+        `[slow-request] ${request.method} ${path} took ${durationMs}ms (status ${response.status})`,
       )
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${url.pathname} (${durationMs}ms)`, {
+        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${path} (${durationMs}ms)`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.status": response.status,
           "http.duration_ms": durationMs,
         }),

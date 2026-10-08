@@ -68,6 +68,39 @@ export const FLAGS: Record<string, FeatureFlagDefinition> = {
     // next-passage button findable only by someone who already knew.
     default: true,
   },
+  smartEdits: {
+    labelKey: "smartEdits.flagLabel",
+    descriptionKey: "smartEdits.flagDescription",
+    // Off until the replay eval (scripts/smart-edits-eval.ts) has been run on
+    // real project history and the display thresholds tuned from it. The tiers
+    // it gates are the edit memory (free) and a Jev check (fractions of a cent).
+    default: false,
+  },
+  harmonizer: {
+    labelKey: "harmonizer.flagLabel",
+    descriptionKey: "harmonizer.flagDescription",
+    // Off until checked against real passages: it asks Jev about every passage
+    // where a quotation is left open, and its suggestions sit beside smart
+    // edits in the editor (it rides the same passage request, so it also needs
+    // `smartEdits` on).
+    default: false,
+  },
+  smartEditsLlm: {
+    labelKey: "smartEdits.llmFlagLabel",
+    descriptionKey: "smartEdits.llmFlagDescription",
+    // Opt-in by design: an LLM suggestion spends real credits, so it is only
+    // ever offered to someone who switched this on.
+    default: false,
+  },
+  bibleData: {
+    labelKey: "bibleData.experiment.label",
+    descriptionKey: "bibleData.experiment.description",
+    // AQU-1685: off until someone opts in on their device. Every Bible data
+    // surface (the enrichment rows in the Bible data card, Voices, Who's Who,
+    // the Context tab, Bible data checks) reads it through
+    // src/lib/bible-data/experiment.ts, and shows only while a Bible is open.
+    default: false,
+  },
 }
 
 /**

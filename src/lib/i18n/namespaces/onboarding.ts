@@ -92,6 +92,8 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
     "onboarding.wizard.setupAriaLabel": "Account setup",
     "onboarding.wizard.stepProgress": "Step {step} of {total}",
+    "onboarding.wizard.billingAfterSetup": "Your selected plan and billing interval will be reviewed after setup. No purchase occurs during setup.",
+    "onboarding.wizard.billingInvalid": "This plan selection is unavailable. You can finish setup and choose a plan later.",
 
     // ═══════════════════════════════════════════════════════════════════════
     // Product tour (ProductTour.tsx) — TOUR_STEPS content + chrome
@@ -342,14 +344,15 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.shareLinkHint":
       "Anyone with the link joins as a contributor after signing in. Use this when you don't have the recipient's username yet.",
 
-    // — ComingSoonStep + its two checklist entries —
-    "onboarding.checklist.comingSoon.badge": "Coming soon",
-    "onboarding.checklist.comingSoon.standards.title": "Upload project standards",
-    "onboarding.checklist.comingSoon.standards.description":
+    // — LinkStep: optional steps that open the surface where the work happens —
+    "onboarding.checklist.standards.title": "Set project standards",
+    "onboarding.checklist.standards.description":
       "Style guides and translation standards the AI will follow.",
-    "onboarding.checklist.comingSoon.glossary.title": "Import terminology / translation memory",
-    "onboarding.checklist.comingSoon.glossary.description":
-      "Existing TM or term lists to keep terminology consistent.",
+    "onboarding.checklist.standards.actionLabel": "Open standards",
+    "onboarding.checklist.glossary.title": "Import terminology",
+    "onboarding.checklist.glossary.description":
+      "Existing term lists (CSV, TBX, LIFT) to keep terminology consistent.",
+    "onboarding.checklist.glossary.actionLabel": "Open terminology",
 
     // ═══════════════════════════════════════════════════════════════════════
     // System prompt nudge (editor banner)
@@ -598,6 +601,14 @@ export const onboarding = defineNamespace({
           step: "Current step number (1-based).",
           total: "Total number of steps in the wizard (8).",
         },
+      },
+      "onboarding.wizard.billingAfterSetup": {
+        description:
+          "Note above the onboarding wizard when the user arrived from a pricing link with a plan already chosen. The plan is reviewed after setup; nothing is bought during setup.",
+      },
+      "onboarding.wizard.billingInvalid": {
+        description:
+          "Alert above the onboarding wizard when the pricing link the user arrived from names a plan or billing interval that does not exist. Setup can still be finished.",
       },
       "onboarding.tour.skipAriaLabel": {
         description: "Accessible name of the small X button that dismisses the whole product tour.",

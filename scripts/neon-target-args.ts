@@ -18,12 +18,14 @@ export type NeonTargetCommand =
   | "backfill-progress"
   | "backfill-activity"
   | "backfill-lanes"
+  | "backfill-lane-batch"
   | "verify-lanes"
 
 export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
   if (command === "backfill-activity") return "scripts/neon-backfill-activity.ts"
   if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
+  if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "verify-lanes") return "scripts/neon-verify-lanes.ts"
   return "scripts/neon-migrate.ts"
 }

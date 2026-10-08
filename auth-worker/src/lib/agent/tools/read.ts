@@ -8,13 +8,16 @@
 // via files.book_code.
 
 import { PLAN_UNIT_FILE_PREDICATE } from "../../../../../db/shared/plan-units"
+import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
 import { AliasMap } from "../compress"
+import { lintDraft, loadLintRules, rulesForLane, type LintHit } from "../lint"
 import {
   parseRefRange,
   resolveFileByBook,
   selectCellPairs,
   statusOf,
   type CellPair,
+  type CellStatus,
   type RefRange,
 } from "./select-cells"
 import type { FileCandidate, PassageRow, ToolOutcome } from "./types"
@@ -31,7 +34,9 @@ export interface ReadContext {
   projectId: string
   /** Focused file (:file). */
   focusedFileId?: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
 }
@@ -350,8 +355,43 @@ async function refNotice(db: AquillaDb, projectId: string, fileId: string, ref: 
   return `notice: ref "${ref}" matched nothing in file "${row?.name ?? fileId}", so the whole file is in scope, in file order. Tell the user this; do not claim you handled "${ref}".`
 }
 
-export function pairToRow(pair: CellPair, fileId: string): PassageRow {
-  const status = statusOf(pair)
+type ReadStatus = CellStatus | "flagged"
+
+/**
+ * filter:'flagged' — the QA-sweep playbook's "rule violations": drafted or
+ * translated cells whose target breaks an enabled project rule for this lane
+ * (the lint emit-stage runs on staged drafts), less any rule a person waived
+ * on that cell. Untranslated, stale and validated cells keep their status, as
+ * validated already outranks stale. Builtin checks stay client-side (lint.ts).
+ */
+async function ruleFlags(
+  db: AquillaDb,
+  ctx: ReadContext,
+  fileId: string,
+  pairs: CellPair[],
+  laneTag: string,
+): Promise<Map<string, LintHit[]>> {
+  const flags = new Map<string, LintHit[]>()
+  // `rule.lane` is the legacy tag, not `lanes.id`. The run may name the lane
+  // by either spelling; the tag is what the editor stored.
+  const rules = rulesForLane(await loadLintRules(db, ctx.projectId), laneTag)
+  if (rules.length === 0) return flags
+  const { results } = await db
+    .prepare(`SELECT cell_id, rule_id FROM cell_waivers WHERE project_id = ? AND file_id = ?`)
+    .bind(ctx.projectId, fileId)
+    .all<{ cell_id: string; rule_id: string }>()
+  const waived = new Map<string, Set<string>>()
+  for (const w of results ?? []) waived.set(w.cell_id, (waived.get(w.cell_id) ?? new Set<string>()).add(w.rule_id))
+  for (const p of pairs) {
+    const status = statusOf(p)
+    if (status !== "drafted" && status !== "translated") continue
+    const hits = lintDraft(rules, p.source, p.target).filter((h) => !waived.get(p.cellId)?.has(h.ruleId))
+    if (hits.length > 0) flags.set(p.cellId, hits)
+  }
+  return flags
+}
+
+export function pairToRow(pair: CellPair, fileId: string, status: ReadStatus = statusOf(pair)): PassageRow {
   return {
     cellId: pair.cellId,
     fileId,
@@ -380,8 +420,13 @@ export async function executeRead(db: AquillaDb, args: ReadArgs, ctx: ReadContex
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
   const offset = Math.max(Number(args.offset) || 0, 0)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, targetLang: ctx.lane })
-  const filtered = filter === "all" ? all : all.filter((p) => statusOf(p) === filter)
+  const lane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: lane.laneId })
+  // Rules live in the project settings blob (can be megabytes), so only the
+  // filter that needs them loads them; every other read is unchanged.
+  const flags = filter === "flagged" ? await ruleFlags(db, ctx, scope.fileId, all, lane.targetLang) : new Map<string, LintHit[]>()
+  const statusFor = (p: CellPair): ReadStatus => (flags.has(p.cellId) ? "flagged" : statusOf(p))
+  const filtered = filter === "all" ? all : all.filter((p) => statusFor(p) === filter)
   const page = filtered.slice(offset, offset + limit)
 
   const notice = scope.notice ? `${scope.notice}\n` : ""
@@ -401,11 +446,13 @@ export async function executeRead(db: AquillaDb, args: ReadArgs, ctx: ReadContex
       [
         ctx.aliases.alias(p.cellId, "c"),
         p.canonicalRef ?? "∅",
-        statusOf(p),
+        statusFor(p),
         clip(p.source),
         p.target ? clip(p.target) : "∅",
       ].join("|"),
     )
+    // The playbook's waive step needs the rule id, so name every rule that fired.
+    for (const h of flags.get(p.cellId) ?? []) lines.push(`  rule "${h.ruleName}" (id ${h.ruleId}) — ${h.message}`)
   }
   const remaining = filtered.length - offset - page.length
   lines.push(
@@ -417,6 +464,6 @@ export async function executeRead(db: AquillaDb, args: ReadArgs, ctx: ReadContex
   return {
     ok: true,
     text: notice + lines.join("\n"),
-    data: { cells: page.map((p) => pairToRow(p, scope.fileId)) },
+    data: { cells: page.map((p) => pairToRow(p, scope.fileId, statusFor(p))) },
   }
 }

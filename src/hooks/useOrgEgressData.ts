@@ -14,7 +14,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
-import { getPortfolio, type PortfolioLane, type PortfolioProject } from "@/lib/frontier/portfolio"
+import {
+  getPortfolio,
+  portfolioSourceLabel,
+  portfolioTargetLabel,
+  type PortfolioLane,
+  type PortfolioProject,
+} from "@/lib/frontier/portfolio"
 import { displayLanes } from "@/components/org/project-lanes"
 
 export interface EgressFileRow {
@@ -83,10 +89,10 @@ function buildLaneOptions(
     const pf = portfolioById.get(p.id)
     for (const l of pf ? displayLanes(pf) : [FALLBACK_DEFAULT_LANE]) {
       if (l.lane === "") {
-        const t = pf?.targetLanguage?.trim()
+        const t = l.name?.trim() || (pf ? portfolioTargetLabel(pf) : "") || ""
         if (t) defaultLabels.add(t)
       } else {
-        named.add(l.lane)
+        named.add(l.name?.trim() || l.lane)
       }
     }
   }
@@ -152,8 +158,8 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
       const projectMeta = new Map<string, EgressProjectMeta>()
       for (const p of projectsRes.projects) {
         const pf = portfolioById.get(p.id)
-        const sourceLanguage = pf?.sourceLanguage?.trim() ?? ""
-        const targetLanguage = pf?.targetLanguage?.trim() ?? ""
+        const sourceLanguage = pf ? portfolioSourceLabel(pf) ?? "" : ""
+        const targetLanguage = pf ? portfolioTargetLabel(pf) ?? "" : ""
         projectMeta.set(p.id, {
           projectId: p.id,
           projectName: p.name,
@@ -170,8 +176,12 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
             projectId: p.id,
             projectName: p.name,
             cellCount: f.cellCount,
-            sourceLanguage: f.sourceLanguage?.trim() || sourceLanguage,
-            targetLanguage: f.targetLanguage?.trim() || targetLanguage,
+            // AQU-1596: the project's (lane-sourced) languages, never the
+            // file's own declared claim — an egress row that named a different
+            // language from its project's is exactly the disagreement this
+            // ticket removes.
+            sourceLanguage,
+            targetLanguage,
             lanes,
             hasAudio: (pf?.audioCells ?? 0) > 0,
             lastEditAt: pf?.lastEditAt ?? null,

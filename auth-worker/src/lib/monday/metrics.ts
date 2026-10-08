@@ -2,7 +2,9 @@
 //
 // Sources (shared Postgres — the sync worker maintains these projections):
 //   * file_section_progress (scope='file') — totals/filled + validator
-//     histogram per (file, lane). Aggregated across all lanes (v1), falling
+//     histogram per (file, TARGET lane; the source lane's row is the
+//     lane-independent denominator and is left out). Aggregated across all
+//     target lanes (v1), falling
 //     back to files.cell_count/filled_count/approved_count when a file has no
 //     progress rows yet (pre-backfill). That fallback only stands on a project
 //     with at most one target lane — see `singleLane` below (AQU-1620).
@@ -16,6 +18,7 @@
 //     events table is unreachable.
 
 import { ROLE } from "../../types"
+import { countedFileSql } from "../../../../db/shared/counted-files"
 
 export interface MondayEntityMetrics {
   completion_pct: number
@@ -180,11 +183,14 @@ export async function computeProjectMetrics(
 
   const filesResult = await db
     .prepare(
-      `SELECT id, name, cell_count, filled_count, approved_count,
-              structural_cell_count, structural_filled_count, structural_approved_count
-         FROM files
-        WHERE project_id = ? AND deleted_at IS NULL
-        ORDER BY name ASC`,
+      // AQU-1626: `files f` aliased so the counted-file rule can apply. A cue
+      // sheet or a caption track is machinery, not a deliverable, so it must
+      // not be pushed to Monday as a row for a partner to chase.
+      `SELECT f.id, f.name, f.cell_count, f.filled_count, f.approved_count,
+              f.structural_cell_count, f.structural_filled_count, f.structural_approved_count
+         FROM files f
+        WHERE f.project_id = ? AND ${countedFileSql('f')}
+        ORDER BY f.name ASC`,
     )
     .bind(projectId)
     .all<FileRow>()
@@ -192,10 +198,24 @@ export async function computeProjectMetrics(
 
   const progressResult = await db
     .prepare(
-      `SELECT file_id, total_count, filled_count, validator_histogram,
-              structural_count, structural_filled_count, structural_validator_histogram
-         FROM file_section_progress
-        WHERE project_id = ? AND scope = 'file'`,
+      // AQU-1599: TARGET lanes only, and only lanes that are still active.
+      // The projection also writes a row for the project's source lane — the
+      // lane-independent denominator — and the rollup below sums `total_count`
+      // over every row it is handed, so including it would add the source-cell
+      // count to the board's total a second time. An archived lane's row is
+      // the same kind of extra: the board would count work nobody is still
+      // planning.
+      `SELECT fsp.file_id AS file_id, fsp.total_count AS total_count,
+              fsp.filled_count AS filled_count,
+              fsp.validator_histogram AS validator_histogram,
+              fsp.structural_count AS structural_count,
+              fsp.structural_filled_count AS structural_filled_count,
+              fsp.structural_validator_histogram AS structural_validator_histogram
+         FROM file_section_progress fsp
+         JOIN lanes l
+           ON l.project_id = fsp.project_id AND l.id = fsp.lane_id AND l.role = 'target'
+          AND l.archived_at IS NULL
+        WHERE fsp.project_id = ? AND fsp.scope = 'file'`,
     )
     .bind(projectId)
     .all<ProgressRow>()

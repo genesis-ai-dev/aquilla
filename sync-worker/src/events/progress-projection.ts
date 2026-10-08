@@ -1,5 +1,4 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
-import { laneIdResolveFromColSql } from './lane-id-sql'
 import { structuralPredicateSql } from './structural-cells'
 import { visibleSourceSql } from './hidden-cells-scope'
 import { liveSourceSql } from './tombstoned-cells-scope'
@@ -10,8 +9,14 @@ import { liveSourceSql } from './tombstoned-cells-scope'
 // defined — the definition simply now lives where both workers can reach it.
 import {
   bookKeyExpr,
+  inheritedKeysSql,
+  PLAN_KEYS_TABLE,
+  planKeysJoinSql,
+  planKeysRefreshSql,
   sectionKeyExpr,
   TIMELINE_SECTION_MS,
+  unitBookKeyExpr,
+  unitSectionKeyExpr,
 } from '../../../db/shared/plan-keys'
 // AQU-490 moved the per-cell audio rollup out for the same reason, and with
 // more cause: auth-worker held two hand-copies of it, and this change altered
@@ -23,21 +28,26 @@ export { bookKeyExpr, sectionKeyExpr, TIMELINE_SECTION_MS, AUDIO_CTE_SQL }
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
 
 /**
- * AQU-1261 — why every lane join below compares the BARE column.
+ * AQU-1591 — the audio CTE is joined on `lane` as well as `cell_id`. Audio used
+ * to have no lane at all, so a single `a.cell_id = s.cell_id` was the whole
+ * join and every lane of a file reported the same takes; now a take belongs to
+ * one lane and the join has to say which. `a.lane` is a CTE column, so the
+ * index note below does not apply to it.
  *
- * `cells.target_lang` is `TEXT NOT NULL DEFAULT ''` (migration 0057) and is the
- * fourth column of `idx_cells_file_scan(project_id, file_id, side, target_lang,
- * cell_id)`. So `t.target_lang = lanes.lane` is an indexable equality that
- * lands on the full five-column tuple.
+ * AQU-1611 — the lane join compares the BARE `lane_id` column.
  *
- * Wrapping it — `COALESCE(t.target_lang, '') = lanes.lane` — is a no-op on the
- * data (the column cannot be NULL) but makes the predicate non-indexable:
- * Postgres can only use the `(project_id, file_id, side)` prefix, so it pairs
- * `lanes × source cells` against EVERY target row in the file and filters
- * afterwards. On a 10k-cell file one recompute rejected 4,009,599 candidate
- * pairs that way, and those scans ran against the same rows concurrent writers
- * were locking. Keep the comparison bare; `progress-lane-join.test.ts` fails
- * if a COALESCE comes back.
+ * `idx_cells_file_scan` is `(project_id, file_id, side, lane_id, cell_id)`
+ * (migration 0154). `t.lane_id = lanes.lane_id` is an indexable equality on
+ * that full tuple. The source lane's id matches no target row, which is what
+ * `join_tag` being NULL used to do for the tag column.
+ *
+ * Wrapping it — `COALESCE(t.lane_id, '') = lanes.lane_id` — changes no result
+ * (`lane_id` is NOT NULL) but makes the predicate non-indexable: Postgres
+ * stops at `(project_id, file_id, side)` and pairs every target row in the
+ * file. On a 10k-cell file one recompute rejected millions of candidate pairs
+ * that way. Keep the comparison bare; `progress-lane-join.test.ts` fails if a
+ * COALESCE comes back. The audio join stays on `join_tag`: a take with no
+ * lane yet still reads as the `''` tag, before and after the AQU-1616 backfill.
  */
 
 /**
@@ -55,6 +65,74 @@ export const HAS_BOOKS_CTE_SQL = `SELECT EXISTS (
         WHERE b.project_id = ? AND b.file_id = ? AND b.side = 'source'
           AND COALESCE(b.canonical_ref, '') ~ '^\\S+ \\d+:\\d+'
      ) AS v`
+
+/**
+ * AQU-1493: where each line with no verse reference of its own is counted —
+ * a line added in the editor in the chapter of the line above it (front matter
+ * of the file's first book at the top), a heading in the chapter of the verse
+ * below it (see `inheritedKeysSql`). Read from `cell_plan_keys`, which the full
+ * recompute's first statement writes (`planKeysRefreshSql`); `paired` and
+ * friends join it as `ik`.
+ */
+const PLAN_KEYS_JOIN = (alias: string) => planKeysJoinSql(alias, 'ik')
+
+/** The section / book a source cell `alias` counts toward on the plan. */
+const UNIT_SECTION_KEY = (alias: string) => unitSectionKeyExpr(alias, 'ik')
+const UNIT_BOOK_KEY = (alias: string) => unitBookKeyExpr(alias, 'ik')
+
+/**
+ * AQU-1493: the files whose stored placements (`cell_plan_keys`) are not what
+ * the walk says now — `scripts/neon-backfill-progress.ts --unreferenced-lines`
+ * re-projects exactly these, which rewrites the placements and every progress
+ * row counted from them in one batch. Selects (project_id, id); binds nothing;
+ * starts with WITH, so a caller combining it with another query must
+ * parenthesise it.
+ *
+ * Compares the walk with the stored rows cell by cell rather than looking for
+ * a symptom in the progress rows, so it catches every stale shape alike:
+ * production before AQU-1493 (no rows at all, and lines counted in no
+ * chapter), rows from before the placements were stored (this PR's earlier
+ * builds), and any later change to the rule itself, since the walk is always
+ * the current code's. A file the backfill has just re-projected agrees by
+ * construction and is never selected again, so the dev stack can run it on
+ * every boot.
+ *
+ * Candidates are Scripture files (a book row, and a verse-shaped reference —
+ * the walk's own gate) holding at least one line with no reference. The
+ * DISTINCT comes first so those two probes run once per FILE: run per book row
+ * they scanned a 27-book New Testament 27 times to reject it.
+ */
+export const UNREFERENCED_LINES_STALE_FILES_SQL = `WITH candidates AS MATERIALIZED (
+             SELECT f.project_id, f.file_id
+               FROM (
+                 SELECT DISTINCT b.project_id, b.file_id
+                   FROM file_section_progress b
+                  WHERE b.scope = 'book'
+               ) f
+              WHERE EXISTS (
+                  SELECT 1 FROM cells u
+                   WHERE u.project_id = f.project_id AND u.file_id = f.file_id AND u.side = 'source'
+                     AND TRIM(SPLIT_PART(COALESCE(u.canonical_ref, ''), ':', 1)) = ''
+                )
+                AND EXISTS (
+                  SELECT 1 FROM cells v
+                   WHERE v.project_id = f.project_id AND v.file_id = f.file_id AND v.side = 'source'
+                     AND COALESCE(v.canonical_ref, '') ~ '^\\S+ \\d+:\\d+'
+                )
+           ), walked AS (
+             ${inheritedKeysSql('SELECT project_id, file_id FROM candidates')}
+           ), stored AS (
+             SELECT k.project_id, k.file_id, k.cell_id, k.section_key, k.place_ref, k.depth
+               FROM ${PLAN_KEYS_TABLE} k
+               JOIN candidates c ON c.project_id = k.project_id AND c.file_id = k.file_id
+           )
+           SELECT DISTINCT COALESCE(w.project_id, st.project_id) AS project_id,
+                  COALESCE(w.file_id, st.file_id) AS id
+             FROM walked w
+             FULL JOIN stored st
+               ON st.project_id = w.project_id AND st.file_id = w.file_id AND st.cell_id = w.cell_id
+            WHERE (w.section_key, w.place_ref, w.depth)
+                  IS DISTINCT FROM (st.section_key, st.place_ref, st.depth)`
 
 /**
  * The per-cell audio facts each statement's `paired` CTE takes from the CTE
@@ -136,6 +214,44 @@ const AUDIO_HISTOGRAM_SQL = `jsonb_object_agg(audio_validator_bucket::text, buck
               jsonb_object_agg(audio_validator_bucket::text, structural_bucket_count)
                 FILTER (WHERE structural_bucket_count > 0) AS structural_audio_validator_histogram`
 
+/**
+ * AQU-1599: the project's REAL lanes — one row each, the SOURCE lane included.
+ *
+ * This replaced `SELECT DISTINCT target_lang FROM cells UNION SELECT ''`, which
+ * manufactured a `''` lane whether or not one existed and could only ever
+ * discover a lane that already had target cells in THIS file. Three things
+ * follow from enumerating `lanes` instead:
+ *
+ *   - The source lane gets a progress row, and that row is where the
+ *     lane-independent numbers live (total_count, structural_count, the source
+ *     side's newest edit). Readers took them from the `''` row before, so
+ *     archiving the former default lane took the plan board's totals with it.
+ *   - A registered lane with no target cells yet gets its own 0%-translated
+ *     row instead of being invisible until somebody translated in it.
+ *   - A tag with no `lanes` row is not projected at all. It could not be
+ *     before either: `file_section_progress.lane_id` is NOT NULL (0106) and is
+ *     part of the primary key (0114), so such a row had no id to be written
+ *     under. Every project create / settings PATCH / migrate path runs
+ *     `ensureProjectLaneStmts` (db/shared/lanes.ts), so the rows are there.
+ *
+ * `join_tag` is NULL on the source lane and the tag on every target lane.
+ * The cells join below pairs on `lane_id`, so the source lane matches no
+ * target row. `join_tag` remains the audio join's key (see the note above).
+ * A tag comparison on the cells join would also borrow the default target
+ * lane's translations for the source lane, whose stored tag is ''.
+ *
+ * Archived lanes are enumerated too: archiving is a soft display decision, and
+ * a lane that comes back must not come back with its counts zeroed.
+ *
+ * Binds: project id.
+ */
+const PROJECT_LANES_CTE_SQL = `SELECT id AS lane_id,
+              role,
+              COALESCE(legacy_tag, '') AS lane,
+              CASE WHEN role = 'target' THEN COALESCE(legacy_tag, '') END AS join_tag
+         FROM public.lanes
+        WHERE project_id = ?`
+
 /** The shared tail of every upsert: which columns a recompute overwrites. */
 const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
        filled_count = excluded.filled_count,
@@ -148,7 +264,6 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
        audio_count = excluded.audio_count,
        audio_validated_count = excluded.audio_validated_count,
        last_edit_at = excluded.last_edit_at,
-       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id),
        structural_audio_count = excluded.structural_audio_count,
        structural_audio_validated_count = excluded.structural_audio_validated_count,
        audio_validator_histogram = excluded.audio_validator_histogram,
@@ -161,11 +276,11 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
 // left in half of them — silently, with no SQL error, because the types line up.
 // AQU-490's histogram pair is appended for the same reason. Add at the tail.
 //
-// AQU-1240's `lane_id` sits beside `target_lang` instead because it is NOT a
-// summary column: no `UNION ALL` arm carries it. Each INSERT … SELECT below
-// resolves it inline (laneIdResolveFromColSql) right after the lane column, so
-// the column list and every SELECT agree on its position by construction.
-const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
+// AQU-1599 made `lane_id` a column of the `lanes` CTE (so every grouping arm
+// carries it, as its leading column). Writers no longer fill `target_lang`
+// (AQU-1611b); a new progress row leaves that column at its default. The
+// SELECT lists below must stay aligned with this column list.
+const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, lane_id, total_count, filled_count,
        validator_histogram, structural_count, structural_filled_count,
        structural_validator_histogram, revision, updated_at,
        audio_count, audio_validated_count, last_edit_at,
@@ -177,11 +292,13 @@ const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, ta
  * projection rows. Source rows define the denominator; target-only rows are
  * intentionally ignored to preserve the existing sidebar semantics.
  *
- * AQU-538: one row per target-language lane. The denominator (source rows) is
- * lane-independent, so every lane shares the same total_count; each lane's
- * filled_count / validator histogram derives from that lane's target rows. The
- * default lane ('') is ALWAYS produced (via the UNION) so N=1 projects keep a
- * byte-identical '' row even before any lane exists.
+ * AQU-538: one row per lane. The denominator (source rows) is lane-independent,
+ * so every lane shares the same total_count; each target lane's filled_count /
+ * validator histogram derives from that lane's own target rows.
+ *
+ * AQU-1599: "every lane" means every row of `lanes`, source lane included, and
+ * the source lane's row is the one readers take the lane-independent numbers
+ * from. There is no manufactured '' row any more — see PROJECT_LANES_CTE_SQL.
  */
 export function fileProgressRecomputeStmt(
   db: AquillaDb,
@@ -191,14 +308,11 @@ export function fileProgressRecomputeStmt(
 ): AquillaStatement {
   return db.prepare(
     `WITH lanes AS (
-       SELECT DISTINCT COALESCE(target_lang, '') AS lane
-         FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'target'
-       UNION SELECT ''
+       ${PROJECT_LANES_CTE_SQL}
      ), audio AS (
        ${AUDIO_CTE_SQL}
      ), paired AS (
-       SELECT lanes.lane AS lane,
+       SELECT lanes.lane_id AS lane_id, lanes.lane AS lane,
               s.cell_id,
               CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
               CASE WHEN ${structuralPredicateSql('s')} THEN 1 ELSE 0 END AS structural,
@@ -212,8 +326,8 @@ export function fileProgressRecomputeStmt(
           AND t.file_id = s.file_id
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
-          AND t.target_lang = lanes.lane
-         LEFT JOIN audio a ON a.cell_id = s.cell_id
+          AND t.lane_id = lanes.lane_id
+         LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
           -- both the numerator and the denominator in one move, for every scope this
@@ -224,17 +338,17 @@ export function fileProgressRecomputeStmt(
           AND ${visibleSourceSql('s')}
           AND ${liveSourceSql('s')}
      ), buckets AS (
-       SELECT lane, validator_bucket, COUNT(*)::integer AS bucket_count,
+       SELECT lane_id, lane, validator_bucket, COUNT(*)::integer AS bucket_count,
               ${STRUCTURAL_BUCKET_SQL}
          FROM paired
-        GROUP BY lane, validator_bucket
+        GROUP BY lane_id, lane, validator_bucket
      ), audio_buckets AS (
-       SELECT lane, audio_validator_bucket, ${AUDIO_BUCKET_SQL}
+       SELECT lane_id, lane, audio_validator_bucket, ${AUDIO_BUCKET_SQL}
          FROM paired
         WHERE audio_validator_bucket IS NOT NULL
-        GROUP BY lane, audio_validator_bucket
+        GROUP BY lane_id, lane, audio_validator_bucket
      ), summary AS (
-       SELECT lane,
+       SELECT lane_id, lane,
               COUNT(*)::integer AS total_count,
               COALESCE(SUM(filled), 0)::integer AS filled_count,
               ${STRUCTURAL_SUMMARY_SQL},
@@ -243,7 +357,7 @@ export function fileProgressRecomputeStmt(
               NULLIF(MAX(last_edit_at), 0) AS last_edit_at,
               ${STRUCTURAL_AUDIO_SUMMARY_SQL}
          FROM paired
-        GROUP BY lane
+        GROUP BY lane_id, lane
      ), watermark AS (
        SELECT GREATEST(
          COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
@@ -253,19 +367,18 @@ export function fileProgressRecomputeStmt(
      INSERT INTO file_section_progress (
        ${PROGRESS_INSERT_COLUMNS_SQL}
      )
-     SELECT ?, ?, 'file', '', summary.lane,
-            ${laneIdResolveFromColSql('target', '?', 'summary.lane')},
+     SELECT ?, ?, 'file', '', summary.lane_id,
             summary.total_count, summary.filled_count,
             COALESCE(
               (SELECT jsonb_object_agg(validator_bucket::text, bucket_count)
-                 FROM buckets WHERE buckets.lane = summary.lane),
+                 FROM buckets WHERE buckets.lane_id = summary.lane_id),
               '{}'::jsonb
             ),
             summary.structural_count, summary.structural_filled_count,
             COALESCE(
               (SELECT jsonb_object_agg(validator_bucket::text, structural_bucket_count)
                  FROM buckets
-                WHERE buckets.lane = summary.lane AND structural_bucket_count > 0),
+                WHERE buckets.lane_id = summary.lane_id AND structural_bucket_count > 0),
               '{}'::jsonb
             ),
             watermark.revision, ?,
@@ -273,24 +386,24 @@ export function fileProgressRecomputeStmt(
             summary.structural_audio_count, summary.structural_audio_validated_count,
             COALESCE(
               (SELECT jsonb_object_agg(audio_validator_bucket::text, bucket_count)
-                 FROM audio_buckets WHERE audio_buckets.lane = summary.lane),
+                 FROM audio_buckets WHERE audio_buckets.lane_id = summary.lane_id),
               '{}'::jsonb
             ),
             COALESCE(
               (SELECT jsonb_object_agg(audio_validator_bucket::text, structural_bucket_count)
                  FROM audio_buckets
-                WHERE audio_buckets.lane = summary.lane AND structural_bucket_count > 0),
+                WHERE audio_buckets.lane_id = summary.lane_id AND structural_bucket_count > 0),
               '{}'::jsonb
             )
        FROM summary CROSS JOIN watermark
      ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
   ).bind(
-    projectId, fileId,
-    projectId, fileId,
-    projectId, fileId,
-    projectId, fileId, projectId,
-    projectId, fileId, projectId, updatedAt,
+    projectId,                      // lanes
+    projectId, fileId,              // audio
+    projectId, fileId,              // paired
+    projectId, fileId, projectId,   // watermark
+    projectId, fileId, updatedAt,   // insert
   )
 }
 
@@ -331,8 +444,9 @@ export function sectionsProgressRecomputeStmt(
   // AQU-1093: a touched cell dirties BOTH its chapter section and its book, so
   // the affected set carries each key and the two branches filter on their own.
   const affected = uniqueCellIds.length > 0
-    ? `SELECT DISTINCT ${sectionKeyExpr('src')} AS section_key, ${bookKeyExpr('src')} AS book_key
+    ? `SELECT DISTINCT ${UNIT_SECTION_KEY('src')} AS section_key, ${UNIT_BOOK_KEY('src')} AS book_key
            FROM cells src
+           ${PLAN_KEYS_JOIN('src')}
           WHERE src.project_id = ? AND src.file_id = ? AND src.side = 'source'
             AND src.cell_id IN (${uniqueCellIds.map(() => '?').join(', ')})`
     : ''
@@ -341,28 +455,27 @@ export function sectionsProgressRecomputeStmt(
   const affectedCte = affected ? `, affected AS (${affected})` : ''
 
   const binds: unknown[] = [
-    projectId, fileId,           // lanes
+    projectId,                   // lanes
     projectId, fileId,           // audio
     projectId, fileId,           // has_books
     projectId, fileId,           // paired
   ]
   if (uniqueCellIds.length > 0) binds.push(projectId, fileId, ...uniqueCellIds)
-  binds.push(projectId, fileId, projectId, projectId, fileId, projectId, updatedAt)
+  // watermark (events, then the rebuilt counter), then the insert's own
+  // project/file and its updated_at stamp.
+  binds.push(projectId, fileId, projectId, projectId, fileId, updatedAt)
 
   return db.prepare(
     `WITH lanes AS (
-       SELECT DISTINCT COALESCE(target_lang, '') AS lane
-         FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'target'
-       UNION SELECT ''
+       ${PROJECT_LANES_CTE_SQL}
      ), audio AS (
        ${AUDIO_CTE_SQL}
      ), has_books AS (
        ${HAS_BOOKS_CTE_SQL}
      ), paired AS MATERIALIZED (
-       SELECT lanes.lane AS lane,
-              ${sectionKeyExpr('s')} AS section_key,
-              ${bookKeyExpr('s')} AS book_key,
+       SELECT lanes.lane_id AS lane_id, lanes.lane AS lane,
+              ${UNIT_SECTION_KEY('s')} AS section_key,
+              ${UNIT_BOOK_KEY('s')} AS book_key,
               CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
               CASE WHEN ${structuralPredicateSql('s')} THEN 1 ELSE 0 END AS structural,
               LEAST(COALESCE(t.endorsement_count, 0), ${MAX_VALIDATOR_HISTOGRAM_BUCKET}) AS validator_bucket,
@@ -375,8 +488,9 @@ export function sectionsProgressRecomputeStmt(
           AND t.file_id = s.file_id
           AND t.cell_id = s.cell_id
           AND t.side = 'target'
-          AND t.target_lang = lanes.lane
-         LEFT JOIN audio a ON a.cell_id = s.cell_id
+          AND t.lane_id = lanes.lane_id
+         LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
+         ${PLAN_KEYS_JOIN('s')}
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
           -- AQU-1424: a parked cell is not work. Dropping it HERE takes it out of
           -- both the numerator and the denominator in one move, for every scope this
@@ -387,7 +501,7 @@ export function sectionsProgressRecomputeStmt(
           AND ${visibleSourceSql('s')}
           AND ${liveSourceSql('s')}
      )${affectedCte}, summaries AS (
-       SELECT lane, 'section'::text AS scope, section_key,
+       SELECT lane_id, lane, 'section'::text AS scope, section_key,
               COUNT(*)::integer AS total_count,
               COALESCE(SUM(filled), 0)::integer AS filled_count,
               ${STRUCTURAL_SUMMARY_SQL},
@@ -397,9 +511,9 @@ export function sectionsProgressRecomputeStmt(
               ${STRUCTURAL_AUDIO_SUMMARY_SQL}
          FROM paired
         WHERE section_key <> '' ${sectionFilter}
-        GROUP BY lane, section_key
+        GROUP BY lane_id, lane, section_key
        UNION ALL
-       SELECT lane, 'book'::text, book_key,
+       SELECT lane_id, lane, 'book'::text, book_key,
               COUNT(*)::integer,
               COALESCE(SUM(filled), 0)::integer,
               ${STRUCTURAL_SUMMARY_SQL},
@@ -409,44 +523,44 @@ export function sectionsProgressRecomputeStmt(
               ${STRUCTURAL_AUDIO_SUMMARY_SQL}
          FROM paired
         WHERE book_key <> '' AND (SELECT v FROM has_books) ${bookFilter}
-        GROUP BY lane, book_key
+        GROUP BY lane_id, lane, book_key
      ), bucket_counts AS (
-       SELECT lane, 'section'::text AS scope, section_key, validator_bucket,
+       SELECT lane_id, lane, 'section'::text AS scope, section_key, validator_bucket,
               COUNT(*)::integer AS bucket_count,
               ${STRUCTURAL_BUCKET_SQL}
          FROM paired
         WHERE section_key <> '' ${sectionFilter}
-        GROUP BY lane, section_key, validator_bucket
+        GROUP BY lane_id, lane, section_key, validator_bucket
        UNION ALL
-       SELECT lane, 'book'::text, book_key, validator_bucket, COUNT(*)::integer,
+       SELECT lane_id, lane, 'book'::text, book_key, validator_bucket, COUNT(*)::integer,
               ${STRUCTURAL_BUCKET_SQL}
          FROM paired
         WHERE book_key <> '' AND (SELECT v FROM has_books) ${bookFilter}
-        GROUP BY lane, book_key, validator_bucket
+        GROUP BY lane_id, lane, book_key, validator_bucket
      ), histograms AS (
-       SELECT lane, scope, section_key,
+       SELECT lane_id, lane, scope, section_key,
               jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram,
               ${STRUCTURAL_HISTOGRAM_SQL}
          FROM bucket_counts
-        GROUP BY lane, scope, section_key
+        GROUP BY lane_id, lane, scope, section_key
      ), audio_bucket_counts AS (
-       SELECT lane, 'section'::text AS scope, section_key, audio_validator_bucket,
+       SELECT lane_id, lane, 'section'::text AS scope, section_key, audio_validator_bucket,
               ${AUDIO_BUCKET_SQL}
          FROM paired
         WHERE section_key <> '' AND audio_validator_bucket IS NOT NULL ${sectionFilter}
-        GROUP BY lane, section_key, audio_validator_bucket
+        GROUP BY lane_id, lane, section_key, audio_validator_bucket
        UNION ALL
-       SELECT lane, 'book'::text, book_key, audio_validator_bucket,
+       SELECT lane_id, lane, 'book'::text, book_key, audio_validator_bucket,
               ${AUDIO_BUCKET_SQL}
          FROM paired
         WHERE book_key <> '' AND audio_validator_bucket IS NOT NULL
           AND (SELECT v FROM has_books) ${bookFilter}
-        GROUP BY lane, book_key, audio_validator_bucket
+        GROUP BY lane_id, lane, book_key, audio_validator_bucket
      ), audio_histograms AS (
-       SELECT lane, scope, section_key,
+       SELECT lane_id, lane, scope, section_key,
               ${AUDIO_HISTOGRAM_SQL}
          FROM audio_bucket_counts
-        GROUP BY lane, scope, section_key
+        GROUP BY lane_id, lane, scope, section_key
      ), watermark AS (
        SELECT GREATEST(
          COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
@@ -456,8 +570,7 @@ export function sectionsProgressRecomputeStmt(
      INSERT INTO file_section_progress (
        ${PROGRESS_INSERT_COLUMNS_SQL}
      )
-     SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
-            ${laneIdResolveFromColSql('target', '?', 'summaries.lane')},
+     SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane_id,
             summaries.total_count, summaries.filled_count,
             COALESCE(histograms.validator_histogram, '{}'::jsonb),
             summaries.structural_count, summaries.structural_filled_count,
@@ -469,11 +582,11 @@ export function sectionsProgressRecomputeStmt(
             COALESCE(audio_histograms.structural_audio_validator_histogram, '{}'::jsonb)
        FROM summaries
        LEFT JOIN histograms
-         ON histograms.lane = summaries.lane
+         ON histograms.lane_id = summaries.lane_id
         AND histograms.scope = summaries.scope
         AND histograms.section_key = summaries.section_key
        LEFT JOIN audio_histograms
-         ON audio_histograms.lane = summaries.lane
+         ON audio_histograms.lane_id = summaries.lane_id
         AND audio_histograms.scope = summaries.scope
         AND audio_histograms.section_key = summaries.section_key
        CROSS JOIN watermark
@@ -489,27 +602,31 @@ export function fullProgressRecomputeStmts(
   updatedAt: number,
 ): AquillaStatement[] {
   return [
+    // AQU-1493: FIRST, where each line with no reference counts — the one
+    // place `cell_plan_keys` is written. Everything after it in this batch,
+    // and every incremental recompute and reader until the next full one,
+    // joins those rows instead of walking the anchor chain again.
+    db.prepare(planKeysRefreshSql()).bind(projectId, fileId, projectId, fileId),
     db.prepare(
-      // AQU-538: per-lane. `lanes` enumerates every target lane present (always
-      // incl. '') so each source cell is paired against that lane's target row;
-      // summaries/histograms group by lane and the upsert keys the 5-col PK.
+      // AQU-538: per-lane. `lanes` enumerates the project's lanes (AQU-1599:
+      // from the `lanes` table, source lane included) so each source cell is
+      // paired against that lane's target row; summaries/histograms group by
+      // lane id and the upsert keys the 5-col PK.
       //
       // AQU-1093/1096: `paired` additionally carries the cell's BOOK key, its
       // audio state, and its newest edit, so one pass over the file produces
       // file, section AND book rows. Grouping keys carry `scope` because a
       // book-only ref ("TIT") collides with its own section key.
       `WITH lanes AS (
-         SELECT DISTINCT COALESCE(target_lang, '') AS lane
-           FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'
-         UNION SELECT ''
+         ${PROJECT_LANES_CTE_SQL}
        ), audio AS (
          ${AUDIO_CTE_SQL}
        ), has_books AS (
          ${HAS_BOOKS_CTE_SQL}
        ), paired AS MATERIALIZED (
-         SELECT lanes.lane AS lane,
-                ${sectionKeyExpr('s')} AS section_key,
-                ${bookKeyExpr('s')} AS book_key,
+         SELECT lanes.lane_id AS lane_id, lanes.lane AS lane,
+                ${UNIT_SECTION_KEY('s')} AS section_key,
+                ${UNIT_BOOK_KEY('s')} AS book_key,
                 CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
                 CASE WHEN ${structuralPredicateSql('s')} THEN 1 ELSE 0 END AS structural,
                 LEAST(
@@ -525,8 +642,9 @@ export function fullProgressRecomputeStmts(
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
-            AND t.target_lang = lanes.lane
-           LEFT JOIN audio a ON a.cell_id = s.cell_id
+            AND t.lane_id = lanes.lane_id
+           LEFT JOIN audio a ON a.cell_id = s.cell_id AND a.lane = lanes.join_tag
+           ${PLAN_KEYS_JOIN('s')}
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             -- AQU-1424: see the note on the other paired CTEs — parked cells leave
             -- progress entirely, numerator and denominator together. So do cells the
@@ -534,7 +652,7 @@ export function fullProgressRecomputeStmts(
             AND ${visibleSourceSql('s')}
             AND ${liveSourceSql('s')}
        ), summaries AS (
-         SELECT lane,
+         SELECT lane_id, lane,
                 'file'::text AS scope,
                 ''::text AS section_key,
                 COUNT(*)::integer AS total_count,
@@ -545,9 +663,9 @@ export function fullProgressRecomputeStmts(
                 NULLIF(MAX(last_edit_at), 0) AS last_edit_at,
                 ${STRUCTURAL_AUDIO_SUMMARY_SQL}
            FROM paired
-          GROUP BY lane
+          GROUP BY lane_id, lane
          UNION ALL
-         SELECT lane,
+         SELECT lane_id, lane,
                 'section'::text AS scope,
                 section_key,
                 COUNT(*)::integer,
@@ -559,9 +677,9 @@ export function fullProgressRecomputeStmts(
                 ${STRUCTURAL_AUDIO_SUMMARY_SQL}
            FROM paired
           WHERE section_key <> ''
-          GROUP BY lane, section_key
+          GROUP BY lane_id, lane, section_key
          UNION ALL
-         SELECT lane,
+         SELECT lane_id, lane,
                 'book'::text AS scope,
                 book_key,
                 COUNT(*)::integer,
@@ -573,59 +691,59 @@ export function fullProgressRecomputeStmts(
                 ${STRUCTURAL_AUDIO_SUMMARY_SQL}
            FROM paired
           WHERE book_key <> '' AND (SELECT v FROM has_books)
-          GROUP BY lane, book_key
+          GROUP BY lane_id, lane, book_key
        ), bucket_counts AS (
-         SELECT lane, 'file'::text AS scope, ''::text AS section_key,
+         SELECT lane_id, lane, 'file'::text AS scope, ''::text AS section_key,
                 validator_bucket, COUNT(*)::integer AS bucket_count,
                 ${STRUCTURAL_BUCKET_SQL}
            FROM paired
-          GROUP BY lane, validator_bucket
+          GROUP BY lane_id, lane, validator_bucket
          UNION ALL
-         SELECT lane, 'section'::text, section_key, validator_bucket, COUNT(*)::integer,
+         SELECT lane_id, lane, 'section'::text, section_key, validator_bucket, COUNT(*)::integer,
                 ${STRUCTURAL_BUCKET_SQL}
            FROM paired
           WHERE section_key <> ''
-          GROUP BY lane, section_key, validator_bucket
+          GROUP BY lane_id, lane, section_key, validator_bucket
          UNION ALL
-         SELECT lane, 'book'::text, book_key, validator_bucket, COUNT(*)::integer,
+         SELECT lane_id, lane, 'book'::text, book_key, validator_bucket, COUNT(*)::integer,
                 ${STRUCTURAL_BUCKET_SQL}
            FROM paired
           WHERE book_key <> '' AND (SELECT v FROM has_books)
-          GROUP BY lane, book_key, validator_bucket
+          GROUP BY lane_id, lane, book_key, validator_bucket
        ), histograms AS (
-         SELECT lane,
+         SELECT lane_id, lane,
                 scope,
                 section_key,
                 jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram,
                 ${STRUCTURAL_HISTOGRAM_SQL}
            FROM bucket_counts
-          GROUP BY lane, scope, section_key
+          GROUP BY lane_id, lane, scope, section_key
        ), audio_bucket_counts AS (
-         SELECT lane, 'file'::text AS scope, ''::text AS section_key,
+         SELECT lane_id, lane, 'file'::text AS scope, ''::text AS section_key,
                 audio_validator_bucket, ${AUDIO_BUCKET_SQL}
            FROM paired
           WHERE audio_validator_bucket IS NOT NULL
-          GROUP BY lane, audio_validator_bucket
+          GROUP BY lane_id, lane, audio_validator_bucket
          UNION ALL
-         SELECT lane, 'section'::text, section_key, audio_validator_bucket,
+         SELECT lane_id, lane, 'section'::text, section_key, audio_validator_bucket,
                 ${AUDIO_BUCKET_SQL}
            FROM paired
           WHERE section_key <> '' AND audio_validator_bucket IS NOT NULL
-          GROUP BY lane, section_key, audio_validator_bucket
+          GROUP BY lane_id, lane, section_key, audio_validator_bucket
          UNION ALL
-         SELECT lane, 'book'::text, book_key, audio_validator_bucket,
+         SELECT lane_id, lane, 'book'::text, book_key, audio_validator_bucket,
                 ${AUDIO_BUCKET_SQL}
            FROM paired
           WHERE book_key <> '' AND audio_validator_bucket IS NOT NULL
             AND (SELECT v FROM has_books)
-          GROUP BY lane, book_key, audio_validator_bucket
+          GROUP BY lane_id, lane, book_key, audio_validator_bucket
        ), audio_histograms AS (
-         SELECT lane,
+         SELECT lane_id, lane,
                 scope,
                 section_key,
                 ${AUDIO_HISTOGRAM_SQL}
            FROM audio_bucket_counts
-          GROUP BY lane, scope, section_key
+          GROUP BY lane_id, lane, scope, section_key
        ), watermark AS (
          SELECT GREATEST(
            COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
@@ -635,8 +753,7 @@ export function fullProgressRecomputeStmts(
        INSERT INTO file_section_progress (
          ${PROGRESS_INSERT_COLUMNS_SQL}
        )
-       SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
-              ${laneIdResolveFromColSql('target', '?', 'summaries.lane')},
+       SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane_id,
               summaries.total_count, summaries.filled_count,
               COALESCE(histograms.validator_histogram, '{}'::jsonb),
               summaries.structural_count, summaries.structural_filled_count,
@@ -648,23 +765,23 @@ export function fullProgressRecomputeStmts(
               COALESCE(audio_histograms.structural_audio_validator_histogram, '{}'::jsonb)
          FROM summaries
          LEFT JOIN histograms
-           ON histograms.lane = summaries.lane
+           ON histograms.lane_id = summaries.lane_id
           AND histograms.scope = summaries.scope
           AND histograms.section_key = summaries.section_key
          LEFT JOIN audio_histograms
-           ON audio_histograms.lane = summaries.lane
+           ON audio_histograms.lane_id = summaries.lane_id
           AND audio_histograms.scope = summaries.scope
           AND audio_histograms.section_key = summaries.section_key
          CROSS JOIN watermark
        ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
          ${PROGRESS_UPSERT_SET_SQL}`,
     ).bind(
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId,
-      projectId, fileId, projectId,
-      projectId, fileId, projectId, updatedAt,
+      projectId,                      // lanes
+      projectId, fileId,              // audio
+      projectId, fileId,              // has_books
+      projectId, fileId,              // paired
+      projectId, fileId, projectId,   // watermark
+      projectId, fileId, updatedAt,   // insert
     ),
     db.prepare(
       // Prune sections/books whose cells are gone, and every book row once the
@@ -681,11 +798,17 @@ export function fullProgressRecomputeStmts(
       // and any date or Done mark stored against the book became unreachable.
       // Compute the surviving keys once. The previous correlated CASE made
       // Postgres scan source cells again for every chapter/book/lane row.
+      //
+      // AQU-1493: by the keys the insert COUNTED each cell under, inherited
+      // ones included. A line with no reference can be the only visible cell
+      // left in its chapter (the verses around it parked), and the insert
+      // above has just written that chapter's row for it.
       `WITH source_keys AS MATERIALIZED (
-         SELECT DISTINCT ${sectionKeyExpr('source')} AS section_key,
-                ${bookKeyExpr('source')} AS book_key,
+         SELECT DISTINCT ${UNIT_SECTION_KEY('source')} AS section_key,
+                ${UNIT_BOOK_KEY('source')} AS book_key,
                 COALESCE(source.canonical_ref, '') ~ '^\\S+ \\d+:\\d+' AS is_scripture
            FROM cells source
+           ${PLAN_KEYS_JOIN('source')}
           WHERE source.project_id = ? AND source.file_id = ? AND source.side = 'source'
             -- AQU-1424: a section whose every cell is now parked has no surviving key,
             -- so its progress row is deleted rather than left behind at a stale count

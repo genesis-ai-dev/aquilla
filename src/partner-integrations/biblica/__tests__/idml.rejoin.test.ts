@@ -89,6 +89,23 @@ async function importBiblicaCells(
   }
 }
 
+/** Write specific protected slots, the way a translator fills some runs and leaves others. */
+function fillSlots(cell: CellData, texts: Record<number, string>): void {
+  const container = document.createElement("div")
+  container.innerHTML = cell.translatedHtml ?? cell.originalHtml ?? ""
+  const paragraph = container.firstElementChild
+  if (!(paragraph instanceof HTMLParagraphElement)) {
+    throw new Error(`Cell ${cell.id} is not one canonical IDML paragraph`)
+  }
+  for (const [index, text] of Object.entries(texts)) {
+    const slot = paragraph.querySelector<HTMLElement>(`span[data-idml-slot="${index}"]`)
+    if (!slot) throw new Error(`Cell ${cell.id} is missing slot ${index}`)
+    slot.textContent = text
+  }
+  cell.translatedHtml = paragraph.outerHTML
+  cell.translated = paragraph.textContent ?? ""
+}
+
 /** Translate a cell by upper-casing the text inside its protected slots. */
 function translate(cell: CellData): void {
   cell.translatedHtml = cell.originalHtml?.replace(/>[^<>]+</g, (match) => match.toUpperCase())
@@ -302,6 +319,49 @@ describe("IDML export of a note block that was imported as several cells", () =>
     // apostrophe into the Marathi text.
     expect(story).not.toContain("<Content>ʼ</Content>")
     expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
+  })
+
+  it("clears the untranslated English tail after a structural apostrophe", async () => {
+    const { bytes, cells } = await importBiblicaCells([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "JOS")),
+      paragraph(
+        "p-n",
+        "intro%3aipi",
+        run("k_xt", "Aaron")
+          + run("source%20serif", "ʼ")
+          + run("k_xt", "s walking stick"),
+      ),
+    ])
+    const cell = cells[0]!
+    fillSlots(cell, { 0: "O cajado de Arão:" })
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain("<Content>O cajado de Arão:</Content>")
+    expect(story).not.toContain("s walking stick")
+    expect(story).not.toContain("<Content>ʼ</Content>")
+  })
+
+  it("writes leftover bold punctuation into the following plain run", async () => {
+    const { bytes, cells } = await importBiblicaCells([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      paragraph(
+        "p-n",
+        "intro%3aipi",
+        run("k_xt", "David") + run("$ID/[No character style]", ". The king of Israel."),
+      ),
+    ])
+    const cell = cells[0]!
+    fillSlots(cell, { 0: "Davi.", 1: " O rei de Israel." })
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain("<Content>Davi</Content>")
+    expect(story).toContain("<Content>. O rei de Israel.</Content>")
+    expect(story).not.toContain("<Content>Davi.</Content>")
+    expect(story).toContain("k_xt")
   })
 
   it("writes a translated front/back matter volume back into its layout paragraphs", async () => {

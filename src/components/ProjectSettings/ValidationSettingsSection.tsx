@@ -76,6 +76,11 @@ interface Props {
   repetitionPropagationRow?: ReactNode
   /** Tooltip shown on hover when disabled is true. */
   disabledTooltip?: ReactNode
+  /**
+   * AQU-1075: "from <upstream>" plus Detach when workflow policy is still
+   * being copied. Rendered above the text group.
+   */
+  notice?: ReactNode
   onChange: (
     updates: Partial<
       Pick<
@@ -117,6 +122,7 @@ export function ValidationSettingsSection({
   allowSelfValidationAudio = true,
   disabled = false,
   disabledTooltip,
+  notice,
   structuralCellsRow,
   repetitionPropagationRow,
   onChange,
@@ -143,199 +149,207 @@ export function ValidationSettingsSection({
   }
 
   return (
-    <SettingsGroup label={t("projectSettings.section.validation")}>
-      <SettingsRow
-        label={<label htmlFor="validation-count">{t("projectSettings.validation.requiredTextLabel")}</label>}
-        description={t("projectSettings.validation.requiredTextDescription")}
-        control={
-          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            <Input
-              id="validation-count"
-              type="number"
-              min={1}
-              max={15}
-              disabled={disabled}
-              value={validationCount}
-              onChange={(e) => onChange({ validationCount: clamp(e.target.value) })}
-              className="w-24 bg-background"
-              aria-label={t("projectSettings.validation.requiredTextLabel")}
-            />
-          </DisabledFieldTooltip>
-        }
-      />
-      <SettingsRow
-        label={<label htmlFor="validation-count-audio">{t("projectSettings.validation.requiredAudioLabel")}</label>}
-        description={t("projectSettings.validation.requiredAudioAppliesNote")}
-        control={
-          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            <Input
-              id="validation-count-audio"
-              type="number"
-              min={1}
-              max={15}
-              // AQU-490: never gated on "audio exists". That gate read a
-              // device-local latch and locked a fully dubbed project's
-              // threshold on any browser that had not itself recorded; the
-              // number is a policy the projection applies at read time and
-              // is harmless to set before the first take.
-              disabled={disabled}
-              value={validationCountAudio}
-              onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
-              className="w-24 bg-background"
-              aria-label={t("projectSettings.validation.requiredAudioLabel")}
-            />
-          </DisabledFieldTooltip>
-        }
-      />
-      <SettingsRow
-        label={<label htmlFor="validation-role-floor">{t("projectSettings.validation.minRoleLabel")}</label>}
-        description={t("projectSettings.validation.minRoleDescription")}
-        control={
-          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            <Select
-              items={ROLE_OPTIONS}
-              disabled={disabled}
-              value={validationRoleFloor}
-              onValueChange={(v) =>
-                onChange({
-                  validationRoleFloor: (v ?? validationRoleFloor) as ValidationRoleFloor,
-                })
-              }
-            >
-              <SelectTrigger
-                id="validation-role-floor"
-                className="w-48 bg-background"
-                aria-label={t("projectSettings.validation.minRoleLabel")}
+    <>
+      {notice}
+      <SettingsGroup label={t("projectSettings.validation.textGroup")}>
+        <SettingsRow
+          label={<label htmlFor="validation-count">{t("projectSettings.validation.requiredTextLabel")}</label>}
+          description={t("projectSettings.validation.requiredTextDescription")}
+          control={
+            <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+              <Input
+                id="validation-count"
+                type="number"
+                min={1}
+                max={15}
+                disabled={disabled}
+                value={validationCount}
+                onChange={(e) => onChange({ validationCount: clamp(e.target.value) })}
+                className="w-24 bg-background"
+                aria-label={t("projectSettings.validation.requiredTextLabel")}
+              />
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          label={<label htmlFor="validation-role-floor">{t("projectSettings.validation.minRoleLabel")}</label>}
+          description={t("projectSettings.validation.minRoleDescription")}
+          control={
+            <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+              <Select
+                items={ROLE_OPTIONS}
+                disabled={disabled}
+                value={validationRoleFloor}
+                onValueChange={(v) =>
+                  onChange({
+                    validationRoleFloor: (v ?? validationRoleFloor) as ValidationRoleFloor,
+                  })
+                }
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {ROLE_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </DisabledFieldTooltip>
-        }
-      />
-      <SettingsRow
-        label={<label htmlFor="allow-self-validation">{t("projectSettings.validation.allowSelfLabel")}</label>}
-        description={t("projectSettings.validation.allowSelfDescription")}
-        control={
+                <SelectTrigger
+                  id="validation-role-floor"
+                  className="w-48 bg-background"
+                  aria-label={t("projectSettings.validation.minRoleLabel")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {ROLE_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          label={<label htmlFor="allow-self-validation">{t("projectSettings.validation.allowSelfLabel")}</label>}
+          description={t("projectSettings.validation.allowSelfDescription")}
+          control={
+            <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+              <Switch
+                id="allow-self-validation"
+                disabled={disabled}
+                checked={allowSelfValidation}
+                onCheckedChange={(checked) => onChange({ allowSelfValidation: checked })}
+                aria-label={t("projectSettings.validation.allowSelfLabel")}
+              />
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          label={
+            <label htmlFor="validation-named-users">
+              {t("projectSettings.validation.namedValidatorsLabel")} <OptionalMark />
+            </label>
+          }
+          description={t("projectSettings.validation.namedValidatorsDescription")}
+          block
+        >
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            <Switch
-              id="allow-self-validation"
+            <MemberMultiSelect
+              id="validation-named-users"
+              members={namedUserItems}
+              value={validationNamedUsers}
               disabled={disabled}
-              checked={allowSelfValidation}
-              onCheckedChange={(checked) => onChange({ allowSelfValidation: checked })}
-              aria-label={t("projectSettings.validation.allowSelfLabel")}
+              placeholder={t("projectSettings.validation.namedValidatorsPlaceholder")}
+              aria-label={t("projectSettings.validation.namedValidatorsLabel")}
+              onValueChange={(next) => onChange({ validationNamedUsers: next })}
             />
           </DisabledFieldTooltip>
-        }
-      />
-      <SettingsRow
-        label={
-          <label htmlFor="validation-named-users">
-            {t("projectSettings.validation.namedValidatorsLabel")} <OptionalMark />
-          </label>
-        }
-        description={t("projectSettings.validation.namedValidatorsDescription")}
-        block
-      >
-        <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-          <MemberMultiSelect
-            id="validation-named-users"
-            members={namedUserItems}
-            value={validationNamedUsers}
-            disabled={disabled}
-            placeholder={t("projectSettings.validation.namedValidatorsPlaceholder")}
-            aria-label={t("projectSettings.validation.namedValidatorsLabel")}
-            onValueChange={(next) => onChange({ validationNamedUsers: next })}
-          />
-        </DisabledFieldTooltip>
-      </SettingsRow>
+        </SettingsRow>
+        {/* Both slot rows are about text: whether headings count toward its
+            progress, and whether a validated translation spreads to repeats. */}
+        {structuralCellsRow}
+        {repetitionPropagationRow}
+      </SettingsGroup>
       {/* AQU-490: the audio policy, beside the text policy rather than folded
           into it. Sam's ruling is that these are SEPARATE settings — a
           project can want two ears on a recording and one on a translation,
-          or trust a different set of people with each — so the surface has to
-          make the separation visible rather than imply a shared rule. */}
-      <SettingsRow
-        label={<label htmlFor="validation-role-floor-audio">{t("projectSettings.validation.minRoleAudioLabel")}</label>}
-        description={t("projectSettings.validation.minRoleAudioDescription")}
-        control={
-          <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            <Select
-              items={ROLE_OPTIONS}
-              disabled={disabled}
-              value={validationRoleFloorAudio}
-              onValueChange={(v) =>
-                onChange({
-                  validationRoleFloorAudio: (v ?? validationRoleFloorAudio) as ValidationRoleFloor,
-                })
-              }
-            >
-              <SelectTrigger
-                id="validation-role-floor-audio"
-                className="w-48 bg-background"
-                aria-label={t("projectSettings.validation.minRoleAudioLabel")}
+          or trust a different set of people with each. Since 2026-10-03 each
+          has its own card: one card mixing the two read as one muddled rule
+          (Sam, PR 1 test pass). */}
+      <SettingsGroup label={t("projectSettings.validation.audioGroup")}>
+        <SettingsRow
+          label={<label htmlFor="validation-count-audio">{t("projectSettings.validation.requiredAudioLabel")}</label>}
+          description={t("projectSettings.validation.requiredAudioAppliesNote")}
+          control={
+            <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+              <Input
+                id="validation-count-audio"
+                type="number"
+                min={1}
+                max={15}
+                // AQU-490: never gated on "audio exists". That gate read a
+                // device-local latch and locked a fully dubbed project's
+                // threshold on any browser that had not itself recorded; the
+                // number is a policy the projection applies at read time and
+                // is harmless to set before the first take.
+                disabled={disabled}
+                value={validationCountAudio}
+                onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
+                className="w-24 bg-background"
+                aria-label={t("projectSettings.validation.requiredAudioLabel")}
+              />
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          label={<label htmlFor="validation-role-floor-audio">{t("projectSettings.validation.minRoleAudioLabel")}</label>}
+          description={t("projectSettings.validation.minRoleAudioDescription")}
+          control={
+            <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+              <Select
+                items={ROLE_OPTIONS}
+                disabled={disabled}
+                value={validationRoleFloorAudio}
+                onValueChange={(v) =>
+                  onChange({
+                    validationRoleFloorAudio: (v ?? validationRoleFloorAudio) as ValidationRoleFloor,
+                  })
+                }
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {ROLE_OPTIONS.map((o) => (
-                    <SelectItem key={`audio-${o.value}`} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </DisabledFieldTooltip>
-        }
-      />
-      <SettingsRow
-        label={<label htmlFor="allow-self-validation-audio">{t("projectSettings.validation.allowSelfAudioLabel")}</label>}
-        description={t("projectSettings.validation.allowSelfAudioDescription")}
-        control={
+                <SelectTrigger
+                  id="validation-role-floor-audio"
+                  className="w-48 bg-background"
+                  aria-label={t("projectSettings.validation.minRoleAudioLabel")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {ROLE_OPTIONS.map((o) => (
+                      <SelectItem key={`audio-${o.value}`} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          label={<label htmlFor="allow-self-validation-audio">{t("projectSettings.validation.allowSelfAudioLabel")}</label>}
+          description={t("projectSettings.validation.allowSelfAudioDescription")}
+          control={
+            <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
+              <Switch
+                id="allow-self-validation-audio"
+                disabled={disabled}
+                checked={allowSelfValidationAudio}
+                onCheckedChange={(checked) => onChange({ allowSelfValidationAudio: checked })}
+                aria-label={t("projectSettings.validation.allowSelfAudioLabel")}
+              />
+            </DisabledFieldTooltip>
+          }
+        />
+        <SettingsRow
+          label={
+            <label htmlFor="validation-named-users-audio">
+              {t("projectSettings.validation.namedValidatorsAudioLabel")} <OptionalMark />
+            </label>
+          }
+          description={t("projectSettings.validation.namedValidatorsAudioDescription")}
+          block
+        >
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            <Switch
-              id="allow-self-validation-audio"
+            <MemberMultiSelect
+              id="validation-named-users-audio"
+              members={namedUserItems}
+              value={validationNamedUsersAudio}
               disabled={disabled}
-              checked={allowSelfValidationAudio}
-              onCheckedChange={(checked) => onChange({ allowSelfValidationAudio: checked })}
-              aria-label={t("projectSettings.validation.allowSelfAudioLabel")}
+              placeholder={t("projectSettings.validation.namedValidatorsPlaceholder")}
+              aria-label={t("projectSettings.validation.namedValidatorsAudioLabel")}
+              onValueChange={(next) => onChange({ validationNamedUsersAudio: next })}
             />
           </DisabledFieldTooltip>
-        }
-      />
-      <SettingsRow
-        label={
-          <label htmlFor="validation-named-users-audio">
-            {t("projectSettings.validation.namedValidatorsAudioLabel")} <OptionalMark />
-          </label>
-        }
-        description={t("projectSettings.validation.namedValidatorsAudioDescription")}
-        block
-      >
-        <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-          <MemberMultiSelect
-            id="validation-named-users-audio"
-            members={namedUserItems}
-            value={validationNamedUsersAudio}
-            disabled={disabled}
-            placeholder={t("projectSettings.validation.namedValidatorsPlaceholder")}
-            aria-label={t("projectSettings.validation.namedValidatorsAudioLabel")}
-            onValueChange={(next) => onChange({ validationNamedUsersAudio: next })}
-          />
-        </DisabledFieldTooltip>
-      </SettingsRow>
-      {structuralCellsRow}
-      {repetitionPropagationRow}
-    </SettingsGroup>
+        </SettingsRow>
+      </SettingsGroup>
+    </>
   )
 }

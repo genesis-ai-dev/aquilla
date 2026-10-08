@@ -11,6 +11,7 @@ import {
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
   Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
+  Plus,
   Pilcrow,
   PilcrowRight,
   X,
@@ -23,10 +24,13 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react"
+import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
+import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
+import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -38,6 +42,9 @@ import {
   useCellView,
 } from "@/hooks/useActiveCellStore"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
+import {
+  audioColumnFor, fileHasAudio, fileLastSeenWithAudio, rememberFileAudio, type AudioColumn,
+} from "@/lib/audio/file-has-audio"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
@@ -56,7 +63,13 @@ import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commi
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
-import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
+import { HighlightedText, buildHighlightsFromExamples, type HealthDisplaySpan } from "./HighlightedText"
+import {
+  buildDraftHealthSpans,
+  clipDraftHealthExcerpt,
+  resolveDraftHealthExamples,
+} from "@/lib/completion/draft-health-spans"
+import { useHealthScoreColorCoding } from "@/lib/store/health-score-color-coding-pref"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
@@ -102,6 +115,7 @@ import { activeWordRange, findActiveTimingIndex } from "@/lib/audio/timings"
 import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
+import { startRowFlash } from "@/lib/editor/row-flash"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -131,7 +145,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { CellPresenceBadges } from "./CellPresenceBadges"
-import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { InlineAiError } from "./InlineAiError"
@@ -182,6 +195,7 @@ import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { namedCellRef } from "@/lib/cell-named-ref"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
@@ -206,12 +220,14 @@ import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { findConceptMatches } from "@/lib/terminology/match"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
+import { textValidationBlock, textValidationScope } from "@/lib/review/text-validation-policy"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
@@ -247,6 +263,8 @@ import {
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import { isFlagEnabled } from "@/lib/features/flags"
+import { SmartEditsProvider, useSmartEditsForCell, useSmartEditsPassage } from "@/hooks/useSmartEdits"
 import {
   useCellPresence,
   type CellPresencePeer,
@@ -263,6 +281,8 @@ import {
 //   window.__perfDumpRowRenders()   → console.table of the same
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
+/** How long focus must rest on an empty cell before its draft retrieval starts (AQU-617). */
+const COMPLETION_PREFETCH_DWELL_MS = 300
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
@@ -391,6 +411,8 @@ export function applyRowOverlays(
     audioEntry?: CellAudioEntry
     backtranslation?: BacktranslationRecord
     projectId?: string | null
+    /** Legacy tag of the lane on screen. '' is the default lane. */
+    lane?: string
   },
 ): CellData {
   let next = cell
@@ -441,7 +463,7 @@ export function applyRowOverlays(
     }
   }
 
-  return overlayBacktranslation(next, options.backtranslation, options.projectId)
+  return overlayBacktranslation(next, options.backtranslation, options.projectId, options.lane ?? "")
 }
 
 function areNumberArraysEqual(a: number[], b: number[]): boolean {
@@ -449,17 +471,19 @@ function areNumberArraysEqual(a: number[], b: number[]): boolean {
   return a.every((value, index) => value === b[index])
 }
 if (typeof window !== "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfRowRenders = rowRenders
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfDumpRowRenders = () => {
+  const perfHandles = window as typeof window & {
+    __perfRowRenders?: Map<string, number>
+    __perfDumpRowRenders?: () => void
+    __perfResetRowRenders?: () => void
+  }
+  perfHandles.__perfRowRenders = rowRenders
+  perfHandles.__perfDumpRowRenders = () => {
     const obj: Record<string, number> = {}
     for (const [k, v] of rowRenders) obj[k] = v
     // eslint-disable-next-line no-console
     console.table(obj)
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).__perfResetRowRenders = () => rowRenders.clear()
+  perfHandles.__perfResetRowRenders = () => rowRenders.clear()
 }
 
 /** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
@@ -711,10 +735,10 @@ interface EditorTableProps {
   activeLane?: string
   /**
    * AQU-602: all selectable target lanes, default lane FIRST as `''` (callers
-   * build `['', ...targetLanes]`). When more than one is offered AND
+   * build `['', ...targetLanes]`). When at least one is offered AND
    * `onLaneChange` is provided, the TARGET language tag in the column header
-   * becomes a dropdown that switches the active lane. With one lane (or no
-   * handler) the tag stays a static pill — byte-identical to the N=1 header.
+   * is a dropdown that switches the active lane (AQU-1601: one lane is named,
+   * not hidden). With no lanes (or no handler) the tag stays a static pill.
    */
   lanes?: string[]
   /** AQU-601: archived lane tags (a subset of `lanes`). Archived lanes are
@@ -726,8 +750,9 @@ interface EditorTableProps {
    *  is used. Omit to keep the tag non-interactive. */
   onLaneChange?: (lane: string) => void
   /** The lanes a lane-limited member below MAINTAINER may switch between
-   *  (`scopedLanesFor`). With two or more, they get the switcher — offering
-   *  only those lanes — which AQU-608 otherwise keeps from their role. */
+   *  (`scopedLanesFor`): only the lanes the read wall left them. One is
+   *  enough for the switcher (AQU-1601) — a single non-default lane used to
+   *  be reachable only by typing `?lane=`. They never get "Add lane". */
   scopedLanes?: string[] | null
   /** Human label for the default (`''`) lane in the TARGET tag dropdown — the
    *  project/file's default target-language name. Non-default lanes label
@@ -738,6 +763,13 @@ interface EditorTableProps {
    * Falls back to the tag (or `defaultLaneLabel` for `''`) when a row has no name.
    */
   laneLabels?: Readonly<Record<string, string>>
+  /**
+   * AQU-1784: code OVERRIDES by lane tag (`laneCodesByTag`). Two lanes that
+   * display the same string are told apart by a suffix — the lane's code when
+   * it has one, otherwise its position among the colliding lanes — so the
+   * switcher and the TARGET pill name them differently.
+   */
+  laneCodes?: Readonly<Record<string, string>>
   /** AQU-583: opens the project's language settings so the target language is
    *  changeable from the TARGET column header. When provided, the target-language
    *  tag is always actionable — a single-lane project shows a clickable pill, a
@@ -746,6 +778,12 @@ interface EditorTableProps {
    *  language" affordance. Omit to keep the tag a static pill (the pre-AQU-583
    *  behaviour). */
   onEditTargetLanguage?: () => void
+  /**
+   * AQU-1601: opens Languages settings to add a lane. Rendered in the
+   * switcher only for a maintainer (`canSwitchLanes`). A lane-scoped member
+   * does not get this entry even if a caller passes it.
+   */
+  onAddLane?: () => void
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /**
@@ -854,6 +892,9 @@ interface EditorTableProps {
    *  user around the file. Omit to keep errors sticky (legacy callers). */
   onClearCellErrors?: (cellId: string) => void
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
+  /** AQU-617: start a draft's few-shot retrieval early, when an empty cell is
+   *  focused, so a Draft click goes straight to generation. */
+  onPrefetchCompletion?: (cell: CellData) => void
   onCompleteBatch: (cells: CellData[]) => void
   /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
    *  `cellId` as one model call. Omit to keep the rail button hidden
@@ -888,11 +929,16 @@ interface EditorTableProps {
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
    *  tab's collapsed reference section. */
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
   onSeekToCue?: (cellId: string) => void
+  /** AQU-1118: the row whose line is playing right now (the bottom bar's
+   *  current line), so its "Play from this cue" button shows Pause. */
+  playingCueCellId?: string | null
+  /** AQU-1118: what that Pause does — stops whatever is playing this file. */
+  onPauseCue?: () => void
   /**
    * AQU-646 round 8: add and remove lines from the TABLE, mirroring the
    * gestures the timeline already offers. Undefined in every arrangement but
@@ -1008,11 +1054,11 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels,
-  onEditTargetLanguage,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
+  onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
-  onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
+  onCompleteSingle, onPrefetchCompletion, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
@@ -1021,6 +1067,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
+  playingCueCellId = null,
+  onPauseCue,
   sourceLineEditing,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
@@ -1055,16 +1103,40 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   chapterNavTrailing,
 }, ref) {
   const t = useT()
+  // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
+  // lane-limited member over the lanes the read wall left them (`scopedLanes`).
+  // One lane is enough (AQU-1601). "Add lane" is maintainer-only.
+  const canManageLanes = canSwitchLanes(project.syncRole?.level)
+  const switchableLanes = canManageLanes ? lanes : scopedLanes
+  // AQU-1784: one label list for the switcher AND the closed pill, computed
+  // over the lanes THIS reader can see. Two lanes that resolve to the same
+  // string get a suffix here; a member with no lane scope sees only the lane
+  // they are in, so a lone lane never collides and never hints at a sibling
+  // the read wall hides (AQU-1421).
+  const laneOptionList = useMemo(
+    () =>
+      laneOptionLabels({
+        lanes: switchableLanes ?? [activeLane],
+        laneLabels,
+        laneCodes,
+        defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
+        archivedLanes,
+      }),
+    [switchableLanes, activeLane, laneLabels, laneCodes, defaultLaneLabel, archivedLanes, t],
+  )
   // The switcher trigger and the closed pill name the lane the same way.
   // A renamed lane wins; otherwise the tag. The default lane falls back to
-  // the project's target language, then to the "set a language" prompt.
-  const activeLaneLabel =
+  // the project's target language, then to the "set a language" prompt — a
+  // base the option list does not share, so the pill keeps its own and
+  // borrows only the collision suffix.
+  const activeLaneLabel = withLaneLabelSuffix(
     (laneLabels?.[activeLane]
       ?? (activeLane ? activeLane : project.targetLanguage))
-    || t("editor.lane.setTargetLanguage")
-  // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
-  // lane-limited member over their own lanes only (`scopedLanesFor`).
-  const switchableLanes = canSwitchLanes(project.syncRole?.level) ? lanes : scopedLanes
+    || t("editor.lane.setTargetLanguage"),
+    laneOptionList.find((option) => option.value === activeLane)?.suffix ?? null,
+  )
+  const showLaneSwitcher = Boolean(onLaneChange && switchableLanes && switchableLanes.length >= 1)
+  const showAddLane = canManageLanes && !!onAddLane
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
   // repair path treats any hand-edited source cell as damage and overwrites
   // it, so the "Edit source" affordance must stay off. Loading counts as
@@ -1073,9 +1145,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     project.id,
     project.syncRole?.level ?? null,
   )
-  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel } = useEditorCapabilities(project, {
+  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel: roleReadOnlyLabel } = useEditorCapabilities(project, {
     hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
   })
+  // AQU-1571: the reviewer banner promised "you can validate" even where the
+  // project's minimum role or named-validator list shuts this reader out of
+  // text validation, while every check below it said "unavailable" (walk
+  // 10-02). The banner now asks the same rule the checks do.
+  const readOnlyLabel =
+    roleReadOnlyLabel && !canEdit && canValidate
+    && !textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate
+      ? t("editor.readOnly.reviewerNoTextValidation")
+      : roleReadOnlyLabel
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -1355,11 +1436,32 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(project.id, audioFileId)
+  // AQU-1591: and in THIS lane. A take belongs to the language it performs, so
+  // the rows show the active lane's dubs plus the shared programme audio — not
+  // whatever every other language has recorded on the same lines.
+  const { byCellId: audioByCellId, hasLoaded: audioLoaded } =
+    useFileAudioAttachments(project.id, audioFileId, activeLane)
   // Until the file's recordings have been read — and in a dubbing file, its
   // heard lines' too — an empty answer means "not read yet", and each row's
   // audio check shows a placeholder instead of claiming there is no audio.
   const audioChecking = !audioLoaded || heardLinesLoading
+  // AQU-1495: the audio column is drawn only on a file that has audio (Sam,
+  // 2026-10-01) — the selection bar's rule, from the same helper. A read
+  // that has not come back says nothing either way: the map may still be the
+  // previous file's. While anything is unread the placeholder holds the slot
+  // only where audio is expected — a dubbing file, whose heard lines are still
+  // arriving, or a file last seen with audio — so a text-only file never
+  // pulses on every line.
+  const audioMemoryKey = audioFileId ? `${project.id}/${audioFileId}` : null
+  const hasAudio = fileHasAudio(audioLoaded ? audioByCellId : null, heardLinesLoading ? null : linkedTakesByCell)
+  const audioColumn = audioColumnFor({
+    hasAudio,
+    checking: audioChecking,
+    expectAudio: heardLinesLoading || (audioMemoryKey !== null && fileLastSeenWithAudio(audioMemoryKey)),
+  })
+  useEffect(() => {
+    if (audioMemoryKey && !audioChecking) rememberFileAudio(audioMemoryKey, hasAudio)
+  }, [audioMemoryKey, audioChecking, hasAudio])
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
   // ordered file the Text/Audio toggle is a medium-LAYER switch — Text layer
@@ -1380,6 +1482,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
     setActiveEditorCellId(null)
   }, [activeEditorCellId, displayCellIds])
+
+  // AQU-617: once focus settles on an empty cell, start its draft retrieval.
+  // The dwell keeps arrowing through rows from firing a search per row.
+  useEffect(() => {
+    if (!activeEditorCellId || !onPrefetchCompletion || !isCompletionAvailable) return
+    const timer = setTimeout(() => {
+      const cell = cellStore.getCellView(activeEditorCellId)
+      if (cell && !cell.translated.trim()) onPrefetchCompletion(cell)
+    }, COMPLETION_PREFETCH_DWELL_MS)
+    return () => clearTimeout(timer)
+  }, [activeEditorCellId, cellStore, onPrefetchCompletion, isCompletionAvailable])
 
   // AQU-669: drop the focus pin if its cell scrolls out of the list / lane —
   // a pin can't belong to a row that no longer renders.
@@ -1576,17 +1689,25 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor, programmaticListScroll])
 
   // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
-  // both defer to the next frame (the list may still be scrolling, so the DOM
-  // node may not exist yet).
+  // both go through here.
+  //
+  // AQU-1493: through `startRowFlash`, which waits until the row is actually
+  // on screen and paints the pulse as an attribute React does not own. The old
+  // body added a CLASS one frame after the scroll, so a row whose className
+  // React rewrote a moment later (the row strip arriving with the line-editing
+  // permission) lost its pulse after ~30ms, and a row far down the file pulsed
+  // off screen while the list was still settling. See lib/editor/row-flash.ts.
+  // One pulse at a time: a new one takes the last one off its row.
+  //
+  // Deliberately NOT cancelled on unmount. A pulse ends by itself (a bounded
+  // wait, then 1.8s), and an unmount cleanup is exactly what StrictMode
+  // replays on a freshly mounted table — right after the workspace's
+  // deep-link effect has asked for the pulse, so every link that opened the
+  // editor lost its pulse in dev.
+  const rowFlashCancelRef = useRef<(() => void) | null>(null)
   const flashCellDom = useCallback((cellId: string) => {
-    requestAnimationFrame(() => {
-      const root = getListQueryRoot()
-      if (!root) return
-      const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
-      if (!el) return
-      el.classList.add("codex-search-flash")
-      window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
-    })
+    rowFlashCancelRef.current?.()
+    rowFlashCancelRef.current = startRowFlash(getListQueryRoot, cellId)
   }, [getListQueryRoot])
 
   // AQU-646 round 8: two short beats on a set of rows, with NO selection — the
@@ -2366,6 +2487,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         audioEntry={audioEntry}
         backtranslation={backtranslation}
         projectId={project.id}
+        lane={activeLane}
       >
         {(cell) => {
           const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
@@ -2447,10 +2569,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // per row would re-render every rendered row on every store bump,
           // which is the whole-file churn round 6 went into removing.
           const neighbourTimes = timestampNeighbours(index, displayCellIds, cellStore, isTimeOrdered && hasTiming(cell))
+          // AQU-1118 (Sam, Oct 7): the line that is playing is marked on the
+          // row itself, and the mark moves from row to row with playback. The
+          // Pause icon alone sat in a closed ⋯ menu, so the move was invisible.
+          const cuePlayingRow = playingCueCellId != null && playingCueCellId === cell.id
           return (
       <div
         data-cell-id={cell.id}
         data-index={index}
+        data-cue-playing={cuePlayingRow ? "true" : undefined}
+        aria-current={cuePlayingRow ? "time" : undefined}
         data-untimed={untimedInTimeLens ? "true" : undefined}
         data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
@@ -2463,6 +2591,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           isScriptureRow && "border-s-2 border-sky-400/70",
           showParagraphBoundary && "mt-3",
+          // A bar drawn OVER the row's start edge rather than a border, so the
+          // row's content never shifts as the mark moves from row to row.
+          cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
         {isScriptureRow && (
@@ -2501,7 +2632,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           project={project}
           cell={cell}
           linkedTakes={linkedTakes}
-          audioChecking={audioChecking}
+          audioColumn={audioColumn}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
@@ -2567,6 +2698,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
           onSeekToCue={onSeekToCue}
+          cuePlaying={playingCueCellId != null && playingCueCellId === cell.id}
+          onPauseCue={onPauseCue}
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
@@ -2627,7 +2760,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onClearCellErrors,
     activeLane,
     audioByCellId,
-    audioChecking,
+    audioColumn,
     audioLens,
     castGutter,
     ttsSettings,
@@ -2697,6 +2830,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onReleaseCell,
     onSaveBacktranslation,
     onSeekToCue,
+    playingCueCellId,
+    onPauseCue,
     previews,
     project,
     ruleMap,
@@ -2773,7 +2908,35 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
   }
 
+  // Smart edits (flag `smartEdits`): one passage request around the active
+  // cell; rows read their own suggestions through SmartEditsProvider.
+  const smartEditsContext = useSmartEditsPassage({
+    enabled: isFlagEnabled(project, "smartEdits"),
+    llmEnabled: isFlagEnabled(project, "smartEditsLlm"),
+    harmonizerEnabled: isFlagEnabled(project, "harmonizer"),
+    projectId: project.id,
+    lane: activeLane,
+    cellIds: displayCellIds,
+    activeCellId: activeEditorCellId,
+    activeText: readAtVersion(cellStoreVersion, () =>
+      activeEditorCellId ? cellStore.getCellView(activeEditorCellId)?.translated : undefined),
+    getCell: (id) => {
+      const view = cellStore.getCellView(id)
+      return view
+        ? {
+            fileId: view.fileId,
+            cellId: id,
+            source: effectiveSourceText(view),
+            target: view.translated,
+            ...(view.context ? { ref: view.context } : {}),
+            validated: view.status === "validated",
+          }
+        : null
+    },
+  })
+
   return (
+    <SmartEditsProvider value={smartEditsContext}>
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       {showStripNav && stripNavSlot
         ? createPortal(
@@ -2841,30 +3004,31 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {/* The two validation columns under this heading, told apart —
                 text, then audio — since a validated line shows the same green
                 check in both (Sam, 2026-09-28; the Text and Audio views). */}
-            {(audioLens || !castGutter) && <CheckMarks />}
+            {(audioLens || !castGutter) && <CheckMarks audioColumn={audioColumn} />}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
-                • >1 lane (+ change handler) → a dropdown that switches the active
-                  lane; with `onEditTargetLanguage` it also gets a "Change target
-                  language…" item so the language is reachable here, not buried in
-                  Settings. The switcher does NOT require a default target to be
-                  set — with extra lanes registered but no default language yet the
-                  dropdown still opens (trigger reads "Set target language"), so the
-                  named lanes stay reachable and the default can be set from here.
+                • ≥1 lane (+ change handler) → a dropdown that switches the active
+                  lane (AQU-1601: one lane is named, plus "Add lane…" for a
+                  maintainer). With `onEditTargetLanguage` it also gets a "Change
+                  target language…" item so the language is reachable here, not
+                  buried in Settings. The switcher does NOT require a default
+                  target to be set — with extra lanes registered but no default
+                  language yet the dropdown still opens (trigger reads "Set target
+                  language"), so the named lanes stay reachable and the default
+                  can be set from here.
                 • otherwise, with `onEditTargetLanguage` → a clickable pill (or a
                   "Set target language" prompt when none is set yet) opening the
                   language settings.
                 • with neither handler → the original static pill (byte-identical
                   to the pre-AQU-583 header for callers that pass no handlers).
                 AQU-608: lane switching is a maintainer-and-above affordance —
-                below maintainer the control stays a static pill so translators
-                keep to their assigned lane (a lane-limited member switches among
-                their own lanes only). The pill uses the same lane name as the
-                switcher. */}
-            {switchableLanes &&
-            switchableLanes.length > 1 &&
-            onLaneChange ? (
+                below maintainer, a member with no lane scope keeps a static pill
+                so translators stay on their assigned lane. A lane-limited member
+                gets the switcher over only the lanes the read wall left them,
+                including when that list has one lane (AQU-1601), and no "Add
+                lane". The pill uses the same lane name as the switcher. */}
+            {showLaneSwitcher && switchableLanes && onLaneChange ? (
               /* AQU-609: the switcher is a searchable combobox — client
                  projects carry 150+ lanes, and lane switching is a combobox
                  by explicit client request. Archived-lane semantics (AQU-601)
@@ -2872,13 +3036,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={switchableLanes.map((lane) => ({
-                  value: lane,
-                  label: laneLabels?.[lane]
-                    || (lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane),
-                  archived: isLaneArchived(lane, archivedLanes),
-                  testId: lane,
-                }))}
+                options={toLaneComboboxOptions(laneOptionList)}
                 value={activeLane}
                 onValueChange={onLaneChange}
                 searchPlaceholder={t("editor.lane.searchPlaceholder")}
@@ -2901,22 +3059,42 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   </button>
                 }
                 footer={
-                  onEditTargetLanguage
+                  onEditTargetLanguage || showAddLane
                     ? (close) => (
-                        /* AQU-583: manage the default target language from the
-                           switcher. */
-                        <button
-                          type="button"
-                          data-testid="edit-target-language"
-                          onClick={() => {
-                            close()
-                            onEditTargetLanguage()
-                          }}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-                        >
-                          <Languages className="h-3.5 w-3.5" />
-                          {t("editor.lane.changeTargetLanguageItem")}
-                        </button>
+                        <>
+                          {onEditTargetLanguage ? (
+                            /* AQU-583: manage the default target language from the
+                               switcher. */
+                            <button
+                              type="button"
+                              data-testid="edit-target-language"
+                              onClick={() => {
+                                close()
+                                onEditTargetLanguage()
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                            >
+                              <Languages className="h-3.5 w-3.5" />
+                              {t("editor.lane.changeTargetLanguageItem")}
+                            </button>
+                          ) : null}
+                          {showAddLane ? (
+                            /* AQU-1601: one lane still offers a way to add another.
+                               Lane-scoped members do not get this. */
+                            <button
+                              type="button"
+                              data-testid="add-lane"
+                              onClick={() => {
+                                close()
+                                onAddLane?.()
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              {t("editor.lane.addLaneItem")}
+                            </button>
+                          ) : null}
+                        </>
                       )
                     : undefined
                 }
@@ -3013,6 +3191,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div className="flex-1" />
       )}
     </div>
+    </SmartEditsProvider>
   )
 })
 
@@ -3491,6 +3670,7 @@ interface CellStoreRowProps {
   audioEntry?: CellAudioEntry
   backtranslation?: BacktranslationRecord
   projectId?: string | null
+  lane?: string
   children: (cell: CellData) => React.ReactNode
 }
 
@@ -3500,13 +3680,14 @@ function CellStoreRow({
   audioEntry,
   backtranslation,
   projectId,
+  lane,
   children,
 }: CellStoreRowProps) {
   const cell = useCellView(cellStore, cellId)
   const hydratedCell = useMemo(() => {
     if (!cell) return null
-    return applyRowOverlays(cell, { audioEntry, backtranslation, projectId })
-  }, [audioEntry, backtranslation, cell, projectId])
+    return applyRowOverlays(cell, { audioEntry, backtranslation, projectId, lane })
+  }, [audioEntry, backtranslation, cell, lane, projectId])
 
   if (!hydratedCell) return null
   return <>{children(hydratedCell)}</>
@@ -3530,8 +3711,8 @@ interface MemoizedRowProps {
   /** The heard lines performing this row that hold a recording — see
    *  `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
-  /** The file's recordings have not been read yet — see `audioChecking`. */
-  audioChecking: boolean
+  /** What the audio column shows — see `audioColumn` on the table. */
+  audioColumn: AudioColumn
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -3652,10 +3833,13 @@ interface MemoizedRowProps {
   backtranslationErrors?: Map<string, string>
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
+  /** AQU-1118: this row's line is the one playing. */
+  cuePlaying?: boolean
+  onPauseCue?: () => void
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
   contentNumber: number
@@ -3725,7 +3909,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, audioChecking, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
+    cell, linkedTakes, audioColumn, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3756,7 +3940,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     prevStartSec, nextStartSec, timedFile,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
-    onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
+    onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     audioLens, onOpenAudioSetup,
@@ -3847,7 +4031,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         project={project}
         cell={cell}
         linkedTakes={linkedTakes}
-        audioChecking={audioChecking}
+        audioColumn={audioColumn}
         isEditorActive={isEditorActive}
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
@@ -3903,6 +4087,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
         onSeekToCue={onSeekToCue}
+        cuePlaying={cuePlaying}
+        onPauseCue={onPauseCue}
         rowIndex={rowIndex}
         contentNumber={contentNumber}
         lineNumbersEnabled={lineNumbersEnabled}
@@ -3970,9 +4156,9 @@ interface EditorRowProps {
   /** The heard lines performing this row that hold a recording, in film order
    *  — see `linkedTakesByCell` on the table's props. */
   linkedTakes?: LinkedTake[]
-  /** The file's recordings have not been read yet: the audio check shows a
-   *  placeholder rather than "no audio". */
-  audioChecking: boolean
+  /** The file's audio column: absent on a file with no audio, a placeholder
+   *  while its recordings are read, else the line's audio check. */
+  audioColumn: AudioColumn
   isEditorActive: boolean
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
@@ -4077,7 +4263,7 @@ interface EditorRowProps {
   backtranslationError?: string
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
-  getStatisticalBt?: (translatedText: string) => string
+  getStatisticalBt?: (translatedText: string, cellId: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
   getAlignmentModel?: () => import("@/lib/completion/interlinear").AlignmentModel | null
@@ -4085,6 +4271,10 @@ interface EditorRowProps {
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
   onSeekToCue?: (cellId: string) => void
+  /** AQU-1118: this row's line is the one playing, so its "Play from this
+   *  cue" button shows Pause and stops playback. */
+  cuePlaying?: boolean
+  onPauseCue?: () => void
   onDragStart: () => void
   onDragEnter: () => void
   onSelectionPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
@@ -4643,6 +4833,7 @@ function textNodePositionForOffset(
 function TargetReadText({
   text,
   ranges,
+  healthSpans = [],
   concepts,
   onRangeClick,
   onTermChipClick,
@@ -4652,6 +4843,7 @@ function TargetReadText({
 }: {
   text: string
   ranges: RangeHighlight[]
+  healthSpans?: HealthDisplaySpan[]
   concepts: Concept[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
@@ -4667,6 +4859,7 @@ function TargetReadText({
         text={text}
         concepts={concepts}
         ranges={ranges}
+        healthSpans={healthSpans}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
         showKeyTermHighlights={showKeyTermHighlights}
@@ -4706,6 +4899,7 @@ function TargetReadText({
           text={seg.text}
           concepts={concepts}
           ranges={clipRangesToSegment(ranges, seg)}
+          healthSpans={clipRangesToSegment(healthSpans, seg)}
           onRangeClick={onRangeClick}
           onTermChipClick={onTermChipClick}
           showKeyTermHighlights={showKeyTermHighlights}
@@ -4721,6 +4915,7 @@ export function TargetDecoratedText({
   text,
   concepts,
   ranges,
+  healthSpans = [],
   onRangeClick,
   onTermChipClick,
   showKeyTermHighlights = false,
@@ -4728,6 +4923,7 @@ export function TargetDecoratedText({
   text: string
   concepts: Concept[]
   ranges: RangeHighlight[]
+  healthSpans?: HealthDisplaySpan[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   showKeyTermHighlights?: boolean
@@ -4766,6 +4962,7 @@ export function TargetDecoratedText({
         text={text}
         highlights={EMPTY_HIGHLIGHTS}
         ranges={ranges}
+        healthSpans={healthSpans}
         showEvidence={false}
         onRangeClick={onRangeClick}
       />
@@ -4783,6 +4980,7 @@ export function TargetDecoratedText({
           text={before}
           highlights={EMPTY_HIGHLIGHTS}
           ranges={clipRangesToTextSlice(ranges, cursor, match.start)}
+          healthSpans={clipRangesToTextSlice(healthSpans, cursor, match.start)}
           showEvidence={false}
           onRangeClick={onRangeClick}
         />,
@@ -4816,6 +5014,7 @@ export function TargetDecoratedText({
             text={matchedText}
             highlights={EMPTY_HIGHLIGHTS}
             ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
+            healthSpans={clipRangesToTextSlice(healthSpans, match.start, match.end)}
             showEvidence={false}
             onRangeClick={onRangeClick}
           />
@@ -4827,26 +5026,27 @@ export function TargetDecoratedText({
 
   if (cursor < text.length) {
     parts.push(
-      <HighlightedText
-        key="t-tail"
-        text={text.slice(cursor)}
-        highlights={EMPTY_HIGHLIGHTS}
-        ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
-        showEvidence={false}
-        onRangeClick={onRangeClick}
-      />,
+        <HighlightedText
+          key="t-tail"
+          text={text.slice(cursor)}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
+          healthSpans={clipRangesToTextSlice(healthSpans, cursor, text.length)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />,
     )
   }
 
   return <span>{parts}</span>
 }
 
-function clipRangesToTextSlice(
-  ranges: readonly RangeHighlight[],
+function clipRangesToTextSlice<T extends { start: number; end: number }>(
+  ranges: readonly T[],
   sliceStart: number,
   sliceEnd: number,
-): RangeHighlight[] {
-  const out: RangeHighlight[] = []
+): T[] {
+  const out: T[] = []
   for (const range of ranges) {
     const start = Math.max(range.start, sliceStart)
     const end = Math.min(range.end, sliceEnd)
@@ -4971,7 +5171,7 @@ function MetadataFieldLabels({
 const NO_TOKEN = () => Promise.resolve(null)
 
 function EditorRow({
-  project, cell, linkedTakes, audioChecking, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, audioColumn, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
@@ -4987,6 +5187,8 @@ function EditorRow({
   getFootnoteDetails,
   openCommentCount,
   onSeekToCue,
+  cuePlaying = false,
+  onPauseCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
@@ -5019,6 +5221,7 @@ function EditorRow({
   // preference is on, the same rows also carry a solid leading-edge accent.
   // Per-row subscription, like the media-cursor and presence hooks above it.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
+  const healthScoreColorCoding = useHealthScoreColorCoding()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -5035,7 +5238,13 @@ function EditorRow({
   // Combine the role capability with the per-cell scope check so an out-of-scope
   // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
   // members (empty scopes) → always in scope, so this is a no-op for them.
-  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
+  // AQU-1571: and the project's own text rules, which the server enforces on
+  // every vote — its minimum role and named-validator list ("policy"), and
+  // "Allow self-validation" off on a line whose latest change in this lane is
+  // the viewer's ("self"). Mirrored here so the check is greyed with the
+  // reason instead of sending a vote that comes back as a red "1 failed".
+  const textBlock = textValidationBlock(cell, project, { roleLevel: project.syncRole?.level ?? null, username })
+  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane) && textBlock === null
   // AQU-777: this cell's own attachments, read out of the file-wide map the
   // workspace provides. EMPTY_ATTACHMENTS is a module constant, not a fresh
   // [], so a cell with none keeps a stable identity across renders.
@@ -5240,6 +5449,7 @@ function EditorRow({
    *  (Sam, 2026-08-25: nothing is left silent) but only one can be heard. */
   const audioHome = audioHomes?.[0] ?? null
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
+  const { suggestions: smartEdits, feedback: onSmartEditFeedback, askLlm: onAskLlmEdits } = useSmartEditsForCell(cell.id, visibleTranslated)
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
   const idmlConfiguration = useMemo(
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
@@ -5402,7 +5612,11 @@ function EditorRow({
   const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
-  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+  const terminologyConcepts = conceptsForLaneTag(
+    project.terminology ?? EMPTY_CONCEPTS,
+    activeLane,
+    project.lanes ?? [],
+  )
   const showTargetKeyTermHighlights =
     targetKeyTermHighlightMode === "always" ||
     (targetKeyTermHighlightMode === "focused" && isRowFocused)
@@ -5567,6 +5781,40 @@ function EditorRow({
     }
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+  const healthDisplaySpans = useMemo<HealthDisplaySpan[]>(() => {
+    if (!healthScoreColorCoding || !cell.aiDrafted) return []
+    const draftText = liveTargetText ?? visibleTranslated
+    if (!draftText?.trim()) return []
+    const examples = resolveDraftHealthExamples({
+      live: cellExamples,
+      persisted: cell.aiDraft?.exampleTexts,
+      exampleIds: cell.aiDraft?.exampleIds,
+      lookup: (id) => {
+        const view = previewCellStore?.getCellView(id)
+        if (!view?.translated.trim()) return undefined
+        return { source: view.original, target: view.translated }
+      },
+    })
+    return buildDraftHealthSpans(draftText, examples).map((span) => ({
+      ...span,
+      title: span.kind === "supported" && span.exampleSource != null && span.exampleTarget != null
+        ? t("editor.health.citedExample", {
+            source: clipDraftHealthExcerpt(span.exampleSource),
+            target: clipDraftHealthExcerpt(span.exampleTarget),
+          })
+        : undefined,
+    }))
+  }, [
+    healthScoreColorCoding,
+    cell.aiDrafted,
+    cell.aiDraft?.exampleIds,
+    cell.aiDraft?.exampleTexts,
+    cellExamples,
+    liveTargetText,
+    visibleTranslated,
+    previewCellStore,
+    t,
+  ])
   const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // AQU-1484: the commit path below validates a human edit by itself, and that
@@ -5704,6 +5952,7 @@ function EditorRow({
         canValidate,
         allowSelfValidation: project.allowSelfValidation,
         roleLevel: project.syncRole?.level ?? null,
+        scopeCanValidate: textValidationScope(project, { roleLevel: project.syncRole?.level ?? null, username }).canValidate,
       })) {
         void emitCellValidate({
           projectId: project.id,
@@ -5715,6 +5964,9 @@ function EditorRow({
           // landed on the MAIN language: editing Spanish silently validated the
           // German row, and a member limited to Spanish had it refused.
           targetLang: activeLane,
+          // AQU-1572: the vote your own edit casts for itself, not a review.
+          auto: true,
+          surface: "cell",
         }).then(() => {
           // AQU-1484: validated — the repetitions are owed this text. Paid
           // right here when the commit came from a settled gesture (the blur
@@ -5752,7 +6004,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -6046,6 +6298,12 @@ function EditorRow({
       console.warn("[validate] aborting: cell out of the caller's assigned scope")
       return false
     }
+    // AQU-1571: the same for the project's text rules (see `textBlock`). Only
+    // on the way in: the server never gates taking your own vote back.
+    if (validated && textBlock) {
+      console.warn("[validate] aborting: the project's validation rules refuse this vote:", textBlock)
+      return false
+    }
     // AQU-646: `getPendingTargetEventId` covers the take case. Recording emits an
     // empty target commit to create the row, and the projection has not come
     // back by the time the control appears — without this, validating a
@@ -6067,6 +6325,7 @@ function EditorRow({
         editEventId,
         author: username,
         targetLang: activeLane,
+        surface: "cell", // AQU-1572
       })
       await onCellCommitted?.(cell.id)
       // AQU-1391: only on the way IN. Un-validating a cell must not push its
@@ -6080,7 +6339,7 @@ function EditorRow({
       setWriteError("Couldn't save this change locally — copy your text and reload.")
       return false
     }
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, onValidated, getPendingTargetEventId])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, textBlock, onCellCommitted, onValidated, getPendingTargetEventId])
 
   // AQU-1333: close the activation window — always through here, so the row can
   // never be left as a stray editing host competing with the real editor.
@@ -6660,8 +6919,8 @@ function EditorRow({
   // without waiting on a collapsed expander.
   const statisticalGloss = useMemo(() => {
     if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) return ""
-    return getStatisticalBt?.(visibleTranslated) ?? ""
-  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt])
+    return getStatisticalBt?.(visibleTranslated, cell.id) ?? ""
+  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
@@ -6815,11 +7074,8 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
-  // Human references help people and DOM agents identify a cell. Importers
-  // also store opaque UUIDs as canonical refs; those carry no useful context.
-  const namedRef = [cell.context, ...(cell.globalReferences ?? [])]
-    .map((value) => value?.trim())
-    .find((value) => value && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
+  // Human references help people and DOM agents identify a cell.
+  const namedRef = namedCellRef(cell)
   const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
   const validationControl = (
     <TargetValidationControl
@@ -6832,6 +7088,7 @@ function EditorRow({
       validationRequirement={readValidationCount(project)}
       canValidate={canValidate}
       canValidateThisCell={canValidateThisCell}
+      blockedReason={textBlock}
       onValidationChange={emitValidationChange}
     />
   )
@@ -6881,6 +7138,7 @@ function EditorRow({
         audioId,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: username,
+        surface: "cell", // AQU-1572
       })
       // AQU-490: this handler used to emit and return, and looked fine — the
       // control paints an optimistic vote and the underlying read never moved
@@ -6895,17 +7153,18 @@ function EditorRow({
     }
   }
 
-  // AQU-490: no switch, no project setting, no file-level gate. Audio
-  // validation sits in this gutter beside text validation wherever a line has
-  // a recording, on every project — Sam's ruling of 2026-09-21, replacing the
-  // opt-in switch he had asked for a day earlier. The control decides for
-  // itself: a line with no recording draws an empty slot, exactly as a cell
-  // with no text carries no text control.
-  const audioValidationControl = (
+  // AQU-490: no switch and no project setting. Audio validation sits in this
+  // gutter beside text validation wherever a line has a recording — Sam's
+  // ruling of 2026-09-21, replacing the opt-in switch he had asked for a day
+  // earlier. The control decides for itself: a line with no recording draws a
+  // faded mic. AQU-1495 (Sam, 2026-10-01): the column itself is drawn only on
+  // a file with audio, so removing the last recording takes it away, and a
+  // text-only file never shows one.
+  const audioValidationControl = audioColumn === "off" ? null : (
     <AudioValidationControl
       cellRef={cellRef}
       takes={audioValidationLine.takes}
-      checking={audioChecking}
+      checking={audioColumn === "checking"}
       currentUsername={username}
       validationRequirement={readValidationCountAudio(project)}
       // Scope-narrowed, like the text control beside it. The project-wide
@@ -7495,6 +7754,11 @@ function EditorRow({
                   idmlParagraphStyleId={idmlParagraphStyleId}
                   concepts={terminologyConcepts}
                   termMatching={project.termMatching}
+                  // AQU-1757: the same underlines as the plain path. The spans
+                  // index the text the checks read, not the markup.
+                  ranges={sourceRanges}
+                  rangeText={effectiveSourceText(cell)}
+                  onRangeClick={openInlineRule}
                 />
               </div>
             ) : (
@@ -7660,6 +7924,7 @@ function EditorRow({
                     textDirection={targetCellDirection}
                     directionMode={targetDirectionMode}
                     lang={project.targetLanguage || undefined}
+                    smartQuotes={project.smartQuotes}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -7673,6 +7938,9 @@ function EditorRow({
                     onRuleClick={openInlineRule}
                     onRuleHover={handleRuleHover}
                     onLiveTextChange={setLiveTargetText}
+                    smartEdits={smartEdits}
+                    onSmartEditFeedback={onSmartEditFeedback}
+                    onAskLlmEdits={onAskLlmEdits}
                     audioTimings={highlightTimings}
                     audioCurrentTime={highlightTime ?? (hasAudio ? audioController.currentTime : undefined)}
                     onSeekToTime={hasAudio ? audioController.seek : undefined}
@@ -7690,6 +7958,7 @@ function EditorRow({
                     }}
                     ariaLabel={editorAriaLabel}
                     onEscapeToGrid={onEscapeToGrid}
+                    healthSpans={healthDisplaySpans}
                   />
                 ) : (
                   <EditorTargetReadSurface
@@ -7775,6 +8044,7 @@ function EditorRow({
                           <TargetReadText
                             text={visibleTranslated}
                             ranges={targetRanges}
+                            healthSpans={healthDisplaySpans}
                             concepts={terminologyConcepts}
                             onRangeClick={openInlineRule}
                             onTermChipClick={handleTermChipClick}
@@ -7837,7 +8107,6 @@ function EditorRow({
                        any existing target text peeking through the dimmed
                        editor underneath. */
                     <div className="m-auto flex items-center gap-1.5 rounded-md bg-card px-2.5 py-1 text-muted-foreground">
-                      <Spinner className="size-3.5" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
                           ? t("editor.ai.lookingUpExamples")
@@ -7864,6 +8133,18 @@ function EditorRow({
                   onAccept={(text) => handleEditorCommit({ value: text, valueHtml: text })}
                 />
               )}
+              {/* AQU-1640: costly draft wait. The bar follows `isLoading` and
+                  does not hold the draft — the preview and the commit show as
+                  soon as they exist, and this only finishes the graphic. */}
+              <FillsTwiceIndicator
+                pending={isLoading}
+                label={
+                  loadingPhase === "searching"
+                    ? t("editor.ai.lookingUpExamples")
+                    : t("editor.ai.generatingTranslation")
+                }
+                className="absolute inset-x-2 bottom-1 z-10"
+              />
             </EditorTargetCellWell>
             </div>
             {hasInlineFootnotes && (
@@ -8255,13 +8536,24 @@ function EditorRow({
                 onOpenHistory={onOpenHistory}
               />
 
-              {onSeekToCue && (
+              {/* AQU-1118: while this row's line is the one playing, the
+                  button shows Pause and stops playback; pressing it again
+                  plays from this line. "Playing" is the bottom bar's own
+                  current line, so the row and the bar always agree. */}
+              {onSeekToCue && (cuePlaying && onPauseCue ? (
+                <RailButton
+                  icon={<Pause className="h-3.5 w-3.5" />}
+                  tooltip={t("editor.cue.pause")}
+                  onClick={onPauseCue}
+                  toneClass="text-primary hover:text-primary/80"
+                />
+              ) : (
                 <RailButton
                   icon={<Play className="h-3.5 w-3.5" />}
                   tooltip={t("editor.cue.playFrom")}
                   onClick={() => onSeekToCue(cell.id)}
                 />
-              )}
+              ))}
             </CellActionRail>
           </div>
         </div>

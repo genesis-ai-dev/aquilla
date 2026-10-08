@@ -237,6 +237,35 @@ describe("recordCredit", () => {
     expect(row?.units).toBe(3)
   })
 
+  it("stores fractional units as whole units — intent: units is an INTEGER column; hosted " +
+    "transcription passed its WAV duration (2.067 s) straight through, Postgres rejected the " +
+    "upsert (22P02) and the graceful degrade silently dropped the org's usage row", async () => {
+    await recordCredit(env.AQUILLA_PG, 1, 1, "llm", 0.03, 2.067)
+
+    const row = await env.AQUILLA_PG
+      .prepare("SELECT raw_cost_cents, units FROM org_credit_usage_daily WHERE org_id=1 AND user_id=1 AND rail='llm' AND date_utc=?")
+      .bind(today())
+      .first<{ raw_cost_cents: number; units: number }>()
+
+    expect(row).not.toBeNull()
+    expect(row?.raw_cost_cents).toBeCloseTo(0.03, 9)
+    // A partial unit consumed is a unit billed — ceil, exactly as creditsFor does.
+    expect(row?.units).toBe(3)
+  })
+
+  it("keeps the cost row when units is not a finite number — intent: raw_cost_cents is the " +
+    "$-truth; a bad units value must cost the ledger zero units, never the whole row", async () => {
+    await recordCredit(env.AQUILLA_PG, 1, 1, "agent", 4, Number.NaN)
+
+    const row = await env.AQUILLA_PG
+      .prepare("SELECT raw_cost_cents, units FROM org_credit_usage_daily WHERE org_id=1 AND user_id=1 AND rail='agent' AND date_utc=?")
+      .bind(today())
+      .first<{ raw_cost_cents: number; units: number }>()
+
+    expect(row?.raw_cost_cents).toBe(4)
+    expect(row?.units).toBe(0)
+  })
+
   it("degrades silently when the table is missing — intent: migration-not-yet-applied must never crash a route", async () => {
     await pg.exec("DROP TABLE IF EXISTS org_credit_usage_daily")
     // Should not throw.

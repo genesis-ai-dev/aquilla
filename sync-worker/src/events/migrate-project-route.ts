@@ -11,7 +11,7 @@
 // deterministic id and (group_id, project_id).
 
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
-import { ensureProjectLaneStmts } from '../../../db/shared/lanes'
+import { ensureProjectLaneStmts, retryingLaneIdCollision } from '../../../db/shared/lanes'
 import { projectIdFor } from '../../../src/lib/migrate/ids'
 
 const PATH = '/migrate/project'
@@ -108,31 +108,31 @@ export async function handleMigrateProjectRequest(
   }
 
   const db = env.AQUILLA_PG
-  const stmts: AquillaStatement[] = [
-    db
-      .prepare(
-        `INSERT INTO projects (id, name, org_id, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-         ON CONFLICT(id) DO NOTHING`,
-      )
-      .bind(body.projectId, body.name, body.orgId, body.ownerUserId),
-  ]
-  if (typeof body.teamId === 'number') {
-    stmts.push(
-      db
-        .prepare(
-          `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, granted_at)
-           VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-           ON CONFLICT(group_id, project_id) DO NOTHING`,
-        )
-        .bind(body.teamId, body.projectId, body.roleLevel ?? 400, body.ownerUserId),
-    )
-  }
-
-  stmts.push(...ensureProjectLaneStmts(db, body.projectId))
-
   try {
-    await db.batch(stmts)
+    await retryingLaneIdCollision(async () => {
+      const stmts: AquillaStatement[] = [
+        db
+          .prepare(
+            `INSERT INTO projects (id, name, org_id, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT(id) DO NOTHING`,
+          )
+          .bind(body.projectId, body.name, body.orgId, body.ownerUserId),
+      ]
+      if (typeof body.teamId === 'number') {
+        stmts.push(
+          db
+            .prepare(
+              `INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by, granted_at)
+               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(group_id, project_id) DO NOTHING`,
+            )
+            .bind(body.teamId, body.projectId, body.roleLevel ?? 400, body.ownerUserId),
+        )
+      }
+      stmts.push(...ensureProjectLaneStmts(db, body.projectId))
+      await db.batch(stmts)
+    })
   } catch (err) {
     console.error("[migrate-project] upsert failed:", err)
     return Response.json({ error: "project upsert failed" }, { status: 500 })

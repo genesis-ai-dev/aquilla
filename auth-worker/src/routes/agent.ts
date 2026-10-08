@@ -37,6 +37,7 @@ import { parseAquiferOp } from "../lib/agent/aquifer-guard"
 import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
 import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
+import { languagesForLanes, loadLaneRows } from "../lib/read-lane-language"
 import { insertAgentRun, finishAgentRun, listAgentRuns } from "../lib/agent/runs"
 import { makePostgres } from "../../../db/shim/postgres"
 import {
@@ -44,6 +45,9 @@ import {
   resolveRunCostCapCents,
 } from "../lib/agent/frames"
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
+import { callerMayReadLane } from "../../../db/shared/lane-visibility"
+import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
+import { languageOfTargetLane } from "../../../db/shared/lane-language"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
@@ -187,7 +191,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "read",
         description:
-          "Aligned source/target rows for a file or ref range, in display order, with per-cell status (untranslated | drafted | stale | validated | translated). Start most tasks here.",
+          "Aligned source/target rows for a file or ref range, in display order, with per-cell status (untranslated | drafted | stale | validated | translated). filter 'flagged' lists drafted/translated cells that break an enabled project rule nobody waived, naming the rule. Start most tasks here.",
         parameters: {
           type: "object",
           properties: {
@@ -451,6 +455,11 @@ function buildTools(bibleResourcesEnabled: boolean) {
   return tools
 }
 
+/** Exposed for tests: the tool schemas exactly as the model sees them, so a
+ *  contract test can run every `read` filter the schema offers. Production
+ *  code never reads this. */
+export const _test = { buildTools }
+
 // ── Request body ────────────────────────────────────────────────────────────
 
 // Translator profile: all fields optional free-text. The zod `.max` is a
@@ -529,6 +538,32 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   const role = await resolveProjectRole(c.env, user, body.projectId)
   if (!role) {
     return c.json({ error: "forbidden", message: "No access to this project" }, 403)
+  }
+
+  // `context.lane` is an id or a legacy tag. Resolve it once, then apply the
+  // same read wall the sync worker uses. An empty lane is the default target.
+  const requestedLane = (body.context?.lane ?? "").trim()
+  let resolvedLaneId = ""
+  if (requestedLane) {
+    const resolved = await resolveLaneIdOrTag(c.env.AQUILLA_PG, body.projectId, requestedLane)
+    if (!resolved.laneId) {
+      return c.json(
+        { error: "validation_failed", message: "That lane is not a target lane on this project." },
+        400,
+      )
+    }
+    resolvedLaneId = resolved.laneId
+  }
+  const laneVisible = await callerMayReadLane(
+    c.env.AQUILLA_PG,
+    c.env.LANE_READ_WALL,
+    body.projectId,
+    user.id,
+    role.level,
+    resolvedLaneId ? { laneId: resolvedLaneId } : { targetLang: "" },
+  )
+  if (!laneVisible) {
+    return c.json({ error: "forbidden", message: "No access to that lane" }, 403)
   }
 
   // Volumetric floor: unlike the guards below, this actually blocks (see
@@ -641,7 +676,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage, waitUntil, resolvedLaneId })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -720,6 +755,13 @@ interface LoopArgs {
   usage?: AgentUsageMeter
   /** Keeps the telemetry flush alive past the response. */
   waitUntil?: (p: Promise<unknown>) => void
+  /** Lane id resolved from `context.lane` (id or legacy tag). `""` is the default lane. */
+  resolvedLaneId: string
+}
+
+function parseSettingsObject(raw: unknown): Record<string, unknown> {
+  const value = typeof raw === "string" ? (() => { try { return JSON.parse(raw) as unknown } catch { return null } })() : raw
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
 function parseToolArgs(raw: string): Record<string, unknown> {
@@ -732,15 +774,15 @@ function parseToolArgs(raw: string): Record<string, unknown> {
 }
 
 /** Telemetry lane: a `targetLang`/`lane` string in the call args wins over the
- *  project's target language. */
-function pickLane(rawArgs: string, projectTarget: string | undefined): string | undefined {
+ *  lane the user is working in. Never a language name. */
+function pickLane(rawArgs: string, activeLane: string | undefined): string | undefined {
   const args = parseToolArgs(rawArgs)
   if (typeof args.targetLang === "string") return args.targetLang
   if (typeof args.lane === "string") return args.lane
-  return projectTarget
+  return activeLane
 }
 
-async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage, waitUntil }: LoopArgs): Promise<void> {
+async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage, waitUntil, resolvedLaneId }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -754,7 +796,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     roleLevel,
     fileId: body.context?.fileId,
     cellId: body.context?.cellId,
-    lane: body.context?.lane ?? "",
+    lane: resolvedLaneId,
     aliases,
   }
 
@@ -776,18 +818,20 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings::jsonb ->> 'sourceLanguage' AS source_language,
-              settings::jsonb ->> 'targetLanguage' AS target_language,
+      `SELECT settings,
               settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
        FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ source_language: string | null; target_language: string | null; brief_summary: string | null }>()
+      .first<{ settings: unknown; brief_summary: string | null }>()
     if (settings) {
-      languages = {
-        sourceLanguage: settings.source_language ?? undefined,
-        targetLanguage: settings.target_language ?? undefined,
-      }
+      const parsed = parseSettingsObject(settings.settings)
+      const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
+      languages = languagesForLanes(lanes, parsed, body.context?.lane ?? "")
+      const fromLane = resolvedLaneId
+        ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
+        : null
+      if (fromLane) languages = { ...languages, targetLanguage: fromLane }
       briefSummary = settings.brief_summary ?? undefined
     }
   } catch {
@@ -868,6 +912,10 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   const meter = makeCostMeter(env, env.AQUILLA_PG)
   // PostHog events (AQU-1467): counts only, one batch POST at the end of the run.
   const telemetry = makeAgentTelemetry(env, { runId, projectId: body.projectId, userId: user.id, orgId, model })
+  // AQU-1670: every staging batch reports its cell count and duration. Wired
+  // here rather than passed down each call site, so the `draft` tool's staging
+  // is measured on the same event as a hand `emit`.
+  stageCtx.onStageOutcome = (outcome) => telemetry.stageOutcome(outcome)
 
   // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
   // container id.
@@ -1217,7 +1265,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         telemetry.toolRun({
           tool: call.function.name,
           args: parseToolArgs(call.function.arguments),
-          lane: pickLane(call.function.arguments, languages.targetLanguage),
+          lane: pickLane(call.function.arguments, body.context?.lane ?? ""),
           ok: resultOk ?? toolOk,
           data: resultData,
           resultText: result,

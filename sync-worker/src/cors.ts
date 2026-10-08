@@ -48,7 +48,20 @@ const CORS_HEADERS: Record<string, string> = {
     "X-Artifact-Id",
     "X-Artifact-Name",
     "X-Artifact-Binding-Role",
+    // X-Artifact-Target-Lang: sent by the same source PUT whenever the import
+    // has a target lane, which is any lane but the default one (the default
+    // lane's tag is "", so the client omits the header and the preflight
+    // passed). Missing here, every target import into a NON-default lane died
+    // in the browser with "Failed to fetch" and wrote nothing — invisible for
+    // as long as the default lane was the only one anyone imported into
+    // (AQU-1631).
+    "X-Artifact-Target-Lang",
     "X-Artifact-Member-Path",
+    // X-Doc-Name: the knowledge-base (reference document) upload's filename
+    // header, percent-encoded (AQU-1762). Same header the identity host already
+    // allows for the in-app upload, so a browser-based agent console can reach
+    // POST /api/v1/external/projects/:id/knowledge too.
+    "X-Doc-Name",
     "X-Artifact-Profile-Id",
     "X-Artifact-Profile-Version",
     "X-Artifact-Fidelity",

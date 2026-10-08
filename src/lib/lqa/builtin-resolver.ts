@@ -26,12 +26,15 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "target-equals-source": "rules.builtin.targetEqualsSource.name",
   "placeholder-integrity": "rules.builtin.placeholderIntegrity.name",
   "number-integrity": "rules.builtin.numberIntegrity.name",
+  "number-integrity-extra": "rules.builtin.numberIntegrityExtra.name",
   "end-punctuation-mismatch": "rules.builtin.endPunctuationMismatch.name",
   "punctuation-integrity": "rules.builtin.punctuationIntegrity.name",
   "double-space": "rules.builtin.doubleSpace.name",
   "repeated-word": "rules.builtin.repeatedWord.name",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.name",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.name",
+  "capitalization": "rules.builtin.capitalization.name",
+  "footnote-quote-mismatch": "rules.builtin.footnoteQuoteMismatch.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -39,16 +42,19 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "target-equals-source": "rules.builtin.targetEqualsSource.description",
   "placeholder-integrity": "rules.builtin.placeholderIntegrity.description",
   "number-integrity": "rules.builtin.numberIntegrity.description",
+  "number-integrity-extra": "rules.builtin.numberIntegrityExtra.description",
   "end-punctuation-mismatch": "rules.builtin.endPunctuationMismatch.description",
   "punctuation-integrity": "rules.builtin.punctuationIntegrity.description",
   "double-space": "rules.builtin.doubleSpace.description",
   "repeated-word": "rules.builtin.repeatedWord.description",
   "unpaired-symbols": "rules.builtin.unpairedSymbols.description",
   "abbreviation-mismatch": "rules.builtin.abbreviationMismatch.description",
+  "capitalization": "rules.builtin.capitalization.description",
+  "footnote-quote-mismatch": "rules.builtin.footnoteQuoteMismatch.description",
 }
 
 /**
- * Display name for any `TranslationRule` — translated for the ten built-in
+ * Display name for any `TranslationRule` — translated for the built-in
  * checks (app-authored chrome; resolved off the `builtin:` id prefix),
  * returned verbatim for a user or org rule (their OWN name is content and
  * must never be translated).

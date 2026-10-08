@@ -23,7 +23,23 @@
 
 const TOKEN_RE = /[\p{L}\p{N}\p{M}]+/gu
 
+export interface TextToken {
+  /** Lowercased token text. */
+  text: string
+  start: number
+  end: number
+}
+
 /** Split a string into lowercase Unicode tokens. */
 export function tokenize(s: string): string[] {
   return Array.from(s.matchAll(TOKEN_RE), (m) => m[0].toLowerCase())
+}
+
+/** Same tokens as `tokenize`, with the source offsets #946's span matcher needs. */
+export function tokenizeWithOffsets(s: string): TextToken[] {
+  return Array.from(s.matchAll(TOKEN_RE), (m) => ({
+    text: m[0].toLowerCase(),
+    start: m.index,
+    end: m.index + m[0].length,
+  }))
 }

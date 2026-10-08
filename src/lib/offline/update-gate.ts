@@ -7,6 +7,7 @@
 // never unsent edits — even if the new build's offline schema couldn't read
 // them.
 import type { Store } from "@livestore/livestore"
+import { outboxFailedCount, outboxPendingCount } from "@/lib/sync/outbox"
 import { tables, type schema } from "./schema"
 
 /**
@@ -32,13 +33,34 @@ export type UpdateGate =
   | { kind: "sending"; count: number }
   /** Not draining — offer to update anyway; the rows stay queued on this device. */
   | { kind: "stuck"; count: number }
+  /**
+   * The offline store failed to open, so its queue can't be read. Warn and
+   * offer to update anyway rather than claim everything has sent.
+   */
+  | { kind: "unknown" }
 
 export function readOfflineQueue(store: Store<typeof schema>): OfflineQueueSnapshot {
   const rows = store.query(tables.eventQueue.select("status"))
   return { count: rows.length, failed: rows.filter((status) => status === "failed").length }
 }
 
-export function evaluateUpdateGate(queue: OfflineQueueSnapshot, graceOver: boolean): UpdateGate {
+/**
+ * The IndexedDB outbox (src/lib/sync/outbox.ts). In the desktop app it still
+ * carries every write the offline store doesn't take — comments, cell
+ * create/delete/reorder, and any edit to a project that isn't downloaded.
+ */
+export async function readOutboxQueue(): Promise<OfflineQueueSnapshot> {
+  const [count, failed] = await Promise.all([outboxPendingCount(), outboxFailedCount()])
+  return { count, failed }
+}
+
+export function addQueues(a: OfflineQueueSnapshot, b: OfflineQueueSnapshot): OfflineQueueSnapshot {
+  return { count: a.count + b.count, failed: a.failed + b.failed }
+}
+
+/** `queue` is null when the offline store failed to open and can't be read. */
+export function evaluateUpdateGate(queue: OfflineQueueSnapshot | null, graceOver: boolean): UpdateGate {
+  if (!queue) return { kind: "unknown" }
   if (queue.count === 0) return { kind: "clear" }
   // A failed row won't be retried on its own, so there's nothing to wait for.
   if (queue.failed > 0 || graceOver) return { kind: "stuck", count: queue.count }

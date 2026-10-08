@@ -2,7 +2,7 @@ import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
 import { describe, expect, it } from "vitest"
 import { events, schema } from "./schema"
-import { evaluateUpdateGate, readOfflineQueue } from "./update-gate"
+import { addQueues, evaluateUpdateGate, readOfflineQueue } from "./update-gate"
 
 let storeId = 0
 
@@ -60,5 +60,15 @@ describe("evaluateUpdateGate", () => {
 
   it("is stuck straight away when a row has failed, since it won't be retried", () => {
     expect(evaluateUpdateGate({ count: 2, failed: 1 }, false)).toEqual({ kind: "stuck", count: 2 })
+  })
+
+  it("is unknown when the offline store couldn't be read", () => {
+    expect(evaluateUpdateGate(null, false)).toEqual({ kind: "unknown" })
+  })
+})
+
+describe("addQueues", () => {
+  it("sums both counts", () => {
+    expect(addQueues({ count: 2, failed: 1 }, { count: 3, failed: 0 })).toEqual({ count: 5, failed: 1 })
   })
 })

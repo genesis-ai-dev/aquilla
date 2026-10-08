@@ -13,6 +13,7 @@
  *   500 project_lead, 600 maintainer, 700 owner.
  */
 
+import { RETIRED_LANE_SETTINGS_KEYS } from "../../db/shared/retired-lane-settings"
 import { postIdempotentJson } from "./idempotent-request"
 
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
@@ -125,13 +126,42 @@ export async function readProjectSettings(
   return stored.settings ?? {}
 }
 
+/**
+ * A settings body that names a retired lane key is not a language write.
+ * Dropping the key and continuing would look like the language was set.
+ * The in-app client omits stored copies (`settingsForPatch`); a caller that
+ * still passes one has to create or patch a lane instead.
+ */
+function assertSettingsOmitRetiredLaneKeys(settings: Record<string, unknown>): void {
+  const retired = RETIRED_LANE_SETTINGS_KEYS.filter((key) => key in settings)
+  if (retired.length === 0) return
+  throw new Error(
+    `${retired.join(", ")} are not settings. ` +
+      "Create a target lane with POST /api/v2/projects/:projectId/lanes " +
+      "({ name, language, code? }) or set a lane's language with " +
+      "PATCH /api/v2/projects/:projectId/lanes/:laneId ({ language, code? }).",
+  )
+}
+
+/** Stored blobs may still hold the retired keys. Echoing them back is a 400. */
+function withoutRetiredLaneSettings(
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...settings }
+  for (const key of RETIRED_LANE_SETTINGS_KEYS) delete next[key]
+  return next
+}
+
 /** PUT /api/v2/projects/:projectId/settings — merge keys into a project's
- * settings. Caller needs maintainer+ (the route's own floor). */
+ * settings. Caller needs maintainer+ (the route's own floor). Retired lane
+ * keys are omitted from the stored blob and rejected if the caller passes
+ * them (AQU-1595). */
 export async function updateProjectSettings(
   jwt: string,
   projectId: string,
   settings: Record<string, unknown>,
 ): Promise<void> {
+  assertSettingsOmitRetiredLaneKeys(settings)
   const current = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
     { headers: authHeaders(jwt) },
@@ -146,7 +176,7 @@ export async function updateProjectSettings(
       method: "PUT",
       headers: authHeaders(jwt),
       body: JSON.stringify({
-        settings: { ...(stored.settings ?? {}), ...settings },
+        settings: { ...withoutRetiredLaneSettings(stored.settings ?? {}), ...settings },
         ifMatchVersion: stored.version ?? 0,
       }),
     },
@@ -161,6 +191,8 @@ export interface ProjectLane {
   id: string
   role: "source" | "target"
   name: string
+  /** Freeform language the user typed. Null or "" means the lane has none yet. */
+  language?: string | null
   langCode: string | null
   legacyTag: string | null
   archivedAt: string | null
@@ -176,6 +208,96 @@ export async function readProjectLanes(jwt: string, projectId: string): Promise<
   )
   if (!r.ok) throw new Error(`read lanes failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { lanes?: ProjectLane[] }).lanes ?? []
+}
+
+function laneLanguageIsEmpty(lane: ProjectLane): boolean {
+  return typeof lane.language !== "string" || lane.language.trim() === ""
+}
+
+/** POST /api/v2/projects/:projectId/lanes — one target lane.
+ * Body matches createLaneSchema: { name, language, code? }. */
+export async function createProjectLane(
+  jwt: string,
+  projectId: string,
+  input: { name: string; language: string; code?: string | null },
+): Promise<ProjectLane> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/lanes`,
+    { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(input) },
+  )
+  if (!r.ok) throw new Error(`create lane failed: HTTP ${r.status} — ${await r.text()}`)
+  const body = (await r.json()) as { lane?: ProjectLane }
+  if (!body.lane) throw new Error("create lane failed: response had no lane")
+  return body.lane
+}
+
+/** PATCH /api/v2/projects/:projectId/lanes/:laneId — language, name, or code.
+ * Source and target rows both take this. */
+export async function patchProjectLane(
+  jwt: string,
+  projectId: string,
+  laneId: string,
+  patch: { name?: string | null; language?: string; code?: string | null },
+): Promise<ProjectLane> {
+  const r = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}`,
+    { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify(patch) },
+  )
+  if (!r.ok) throw new Error(`patch lane failed: HTTP ${r.status} — ${await r.text()}`)
+  const body = (await r.json()) as { lane?: ProjectLane }
+  if (!body.lane) throw new Error("patch lane failed: response had no lane")
+  return body.lane
+}
+
+/**
+ * Languages live on lane rows, not in the settings blob (AQU-1595).
+ *
+ * The project create already inserted one source lane. When that row's
+ * language is empty, this patches it. It does not create a source lane — a
+ * second one is not a thing this API can express, and a missing row is a
+ * failed seed rather than a silent gap. One target lane is created with
+ * POST …/lanes; its `legacy_tag` must be the language, not `''`. The brief,
+ * when given, is the only settings PUT.
+ */
+export async function setProjectLanguagePair(
+  jwt: string,
+  projectId: string,
+  opts: {
+    sourceLanguage: string
+    sourceCode?: string
+    targetLanguage: string
+    targetCode?: string
+    translationBrief?: Record<string, unknown>
+  },
+): Promise<void> {
+  const lanes = await readProjectLanes(jwt, projectId)
+  const source = lanes.find((lane) => lane.role === "source")
+  if (!source) {
+    throw new Error(
+      `project ${projectId} has no source lane. A new project already has one (AQU-1594); ` +
+        "refusing to create a second source lane.",
+    )
+  }
+  if (laneLanguageIsEmpty(source)) {
+    await patchProjectLane(jwt, projectId, source.id, {
+      language: opts.sourceLanguage,
+      ...(opts.sourceCode === undefined ? {} : { code: opts.sourceCode }),
+    })
+  }
+  const target = await createProjectLane(jwt, projectId, {
+    name: "",
+    language: opts.targetLanguage,
+    ...(opts.targetCode === undefined ? {} : { code: opts.targetCode }),
+  })
+  if (target.legacyTag !== opts.targetLanguage) {
+    throw new Error(
+      `target lane legacy_tag was ${JSON.stringify(target.legacyTag)}; ` +
+        `the first target's legacy_tag must be its language (${JSON.stringify(opts.targetLanguage)}), not ''.`,
+    )
+  }
+  if (opts.translationBrief !== undefined) {
+    await updateProjectSettings(jwt, projectId, { translationBrief: opts.translationBrief })
+  }
 }
 
 /** PATCH /api/v2/projects/:projectId/lanes/:laneId — rename a target lane, as
@@ -199,7 +321,17 @@ export async function renameProjectLane(
 export async function linkProjectToSource(
   jwt: string,
   projectId: string,
-  args: { sourceProjectId: string; mode: "clone" | "live"; consumes?: "source" | "target"; gate?: "head" | "validated" },
+  args: {
+    sourceProjectId: string
+    mode: "clone" | "live"
+    consumes?: "source" | "target"
+    gate?: "head" | "validated"
+    /** AQU-1559: the UPSTREAM file ids to follow; omit for the whole project. */
+    fileIds?: string[]
+    /** AQU-1605: which of the upstream's lanes to consume (`lanes.id`). Omit for
+     *  its former default lane, which is what every link read before that slice. */
+    laneId?: string
+  },
 ): Promise<{ seeded: boolean }> {
   const r = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/link-source`,

@@ -1,11 +1,13 @@
 // AQU-1647: pointer dragging for the editor file sidebar.
 //
 // Which slot a drop landed on lives in `file-list-dnd-model`; the numbers
-// written for that slot still come from `planFileMove`. Changing groups is
-// "Move to corpus…", which asks first. Keyboard reordering stays on Move up /
-// Move down; there is no keyboard sensor, and the library's space-bar
-// instructions are cleared so a screen reader is not told about a gesture
-// this list does not offer.
+// written for that slot still come from `planFileMove` / `planFileInsert`.
+// AQU-1702 made a drop on another group a move INTO it, so the frame marks
+// itself as the drop target and the row under the pointer shows the slot;
+// "Move to corpus…" remains the non-drag path. Keyboard reordering stays on
+// Move up / Move down; there is no keyboard sensor, and the library's
+// space-bar instructions are cleared so a screen reader is not told about a
+// gesture this list does not offer.
 //
 // The grip is the only thing that starts a drag. The row itself stays a
 // click (and the sidebar stays a scroll). The lifted row is a copy that
@@ -54,10 +56,17 @@ const accessibility = {
   },
 }
 
-// Hovering a different group reports overIndex -1. Shifting rows then would
-// preview a move we are about to refuse.
-const sameGroupVerticalStrategy: SortingStrategy = (args) => {
-  if (args.overIndex < 0) return null
+// Two cases the library's own math cannot express for this list:
+//
+//   * `overIndex < 0` — the pointer is over another group, so nothing in THIS
+//     group moves.
+//   * `activeIndex < 0` (AQU-1702) — the dragged file belongs to another
+//     group, so it is not in this context's items. The library would shift the
+//     rows above the pointer upwards, as if the active row had left a gap
+//     here. It did not: the newcomer is arriving. The insertion line marks the
+//     slot instead of a shift that lies about which rows are moving.
+const sidebarSortingStrategy: SortingStrategy = (args) => {
+  if (args.overIndex < 0 || args.activeIndex < 0) return null
   return verticalListSortingStrategy(args)
 }
 
@@ -162,20 +171,36 @@ function ActiveFileReorder({
   )
 }
 
+/**
+ * AQU-1702: how the group reads while a file is held over it. `target` is the
+ * group the file will join on release; `refused` is a drop this group cannot
+ * accept (see `planFileRegroup`) and is paired with the message the list
+ * renders inside the frame.
+ */
+export type GroupDropState = "target" | "refused" | null
+
+const groupDropClass: Record<"target" | "refused", string> = {
+  target: "rounded-xl ring-1 ring-primary/60 bg-primary/5",
+  refused: "rounded-xl ring-1 ring-border bg-muted/40",
+}
+
 export function CorpusGroupFrame({
   droppable,
   label,
+  dropState,
   groupRef,
   children,
 }: {
   droppable: boolean
   label: string
+  dropState?: GroupDropState
   groupRef: (element: HTMLDivElement | null) => void
   children: ReactNode
 }) {
-  if (!droppable) return <div ref={groupRef}>{children}</div>
+  const className = cn("transition-colors", dropState && groupDropClass[dropState])
+  if (!droppable) return <div ref={groupRef} className={className}>{children}</div>
   return (
-    <DroppableCorpusGroup label={label} groupRef={groupRef}>
+    <DroppableCorpusGroup label={label} className={className} groupRef={groupRef}>
       {children}
     </DroppableCorpusGroup>
   )
@@ -202,10 +227,12 @@ export function GroupFileRows({
 
 export function DroppableCorpusGroup({
   label,
+  className,
   groupRef,
   children,
 }: {
   label: string
+  className?: string
   groupRef: (element: HTMLDivElement | null) => void
   children: ReactNode
 }) {
@@ -218,6 +245,7 @@ export function DroppableCorpusGroup({
         groupRef(element)
       }}
       data-reorder-group={label}
+      className={className}
     >
       {children}
     </div>
@@ -234,9 +262,24 @@ export function SidebarSortableGroup({
   children: ReactNode
 }) {
   return (
-    <SortableContext id={`sidebar-sort:${label}`} items={fileIds} strategy={sameGroupVerticalStrategy}>
+    <SortableContext id={`sidebar-sort:${label}`} items={fileIds} strategy={sidebarSortingStrategy}>
       {children}
     </SortableContext>
+  )
+}
+
+/**
+ * AQU-1702: a 2px rule where a file arriving from another group will land.
+ * The rows do not slide apart for it (see `sidebarSortingStrategy`), so this
+ * line is the only thing that says which slot the drop takes.
+ */
+function InsertionLine() {
+  return (
+    <span
+      aria-hidden
+      data-insert-slot=""
+      className="absolute inset-x-1 -top-px z-10 h-0.5 rounded-full bg-primary"
+    />
   )
 }
 
@@ -246,6 +289,7 @@ export function FileListRow({
   group,
   draggable,
   handleLabel,
+  insertBefore = false,
   children,
 }: {
   sortable: boolean
@@ -254,13 +298,26 @@ export function FileListRow({
   draggable: boolean
   /** Accessible name for the grip. Null when this row cannot start a drag. */
   handleLabel: string | null
+  /** Show the AQU-1702 insertion line above this row. */
+  insertBefore?: boolean
   children: ReactNode
 }) {
   if (!sortable) {
-    return <div className="group/file-slot relative">{children}</div>
+    return (
+      <div className="group/file-slot relative">
+        {insertBefore && <InsertionLine />}
+        {children}
+      </div>
+    )
   }
   return (
-    <SortableFileSlot id={id} group={group} draggable={draggable} handleLabel={handleLabel}>
+    <SortableFileSlot
+      id={id}
+      group={group}
+      draggable={draggable}
+      handleLabel={handleLabel}
+      insertBefore={insertBefore}
+    >
       {children}
     </SortableFileSlot>
   )
@@ -271,12 +328,14 @@ function SortableFileSlot({
   group,
   draggable,
   handleLabel,
+  insertBefore,
   children,
 }: {
   id: string
   group: string
   draggable: boolean
   handleLabel: string | null
+  insertBefore: boolean
   children: ReactNode
 }) {
   const data = useMemo(() => ({ group }), [group])
@@ -303,6 +362,7 @@ function SortableFileSlot({
         isDragging && "pointer-events-none opacity-0",
       )}
     >
+      {insertBefore && <InsertionLine />}
       {draggable && handleLabel && (
         <span
           ref={setActivatorNodeRef}

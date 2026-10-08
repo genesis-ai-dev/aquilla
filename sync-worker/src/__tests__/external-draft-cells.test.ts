@@ -100,7 +100,7 @@ async function commit(env: ReturnType<typeof makeEnv>, token: string, id: string
 }
 
 function draftCmd(cellIds: string[], extra: Record<string, unknown> = {}) {
-  return [{ kind: 'DraftCells', fileId: FILE, cellIds, ...extra }]
+  return [{ kind: 'DraftCells', fileId: FILE, cellIds, laneId: 'deflane1', ...extra }]
 }
 
 function provenance(model = 'test/model') {
@@ -154,7 +154,7 @@ async function seed(cellCount: number, settings: Record<string, unknown> | null)
     event_id: `src-evt-${i + 1}`,
     last_edit_at: 1,
   }))
-  return makeTestDb({
+  const db = await makeTestDb({
     projects: [{ id: PROJECT, name: 'P', created_by: 99, org_id: null }],
     files: [{ project_id: PROJECT, id: FILE, name: 'f.usfm', created_at: 1, updated_at: 1 }],
     cells,
@@ -170,6 +170,12 @@ async function seed(cellCount: number, settings: Record<string, unknown> | null)
         }
       : {}),
   })
+  await db.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
+  return db
 }
 
 beforeEach(() => {
@@ -204,7 +210,7 @@ describe('DraftCells — validation', () => {
   })
 
   it('de-duplicates repeated cell ids rather than drafting one cell twice', () => {
-    const result = validateCommands([{ kind: 'DraftCells', fileId: FILE, cellIds: ['c1', 'c1', 'c2'] }])
+    const result = validateCommands([{ kind: 'DraftCells', fileId: FILE, cellIds: ['c1', 'c1', 'c2'], laneId: 'deflane1' }])
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('unreachable')
     expect(result.commands[0]).toMatchObject({ kind: 'DraftCells', cellIds: ['c1', 'c2'] })
@@ -212,7 +218,7 @@ describe('DraftCells — validation', () => {
 
   it('never lets a caller self-assert AI provenance on a SetTranslation', () => {
     const result = validateCommands([
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'c1', value: 'mine', aiDraft: provenance() },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'c1', laneId: 'deflane1', value: 'mine', aiDraft: provenance() },
     ])
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('unreachable')
@@ -357,8 +363,8 @@ describe('DraftCells — staged, never auto-committed', () => {
     const calls = draftEverything()
 
     const { res, body } = await prepare(env, token, [
-      { kind: 'DraftCells', fileId: FILE, cellIds: ['c1'] },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'c2', value: 'mine' },
+      { kind: 'DraftCells', fileId: FILE, cellIds: ['c1'], laneId: 'deflane1' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'c2', laneId: 'deflane1', value: 'mine' },
     ])
 
     expect(res.status).toBe(400)

@@ -17,6 +17,7 @@ import type { SyncTokenClaims } from "../auth"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 import { notHiddenSql, visibleSourceSql } from "./hidden-cells-scope"
 import { inCountedFileSql } from "../../../db/shared/counted-files"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 
 // ---------------------------------------------------------------------------
 // Branded type — the permission gate
@@ -488,7 +489,7 @@ export async function querySimilarSourceCells(
 
   const parts: string[] = [
     "SELECT c.cell_id AS cell_id, c.file_id AS file_id, c.value AS source_value,",
-    "       t.value AS target_value, t.target_lang AS target_lang,",
+    "       t.value AS target_value, " + wireLegacyTagSql("t") + " AS target_lang,",
     "       ts_rank(c.value_tsv, to_tsquery('simple', ?)) AS rank",
     "FROM cells c",
     "JOIN cells t",

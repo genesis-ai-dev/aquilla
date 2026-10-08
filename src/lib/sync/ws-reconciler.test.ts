@@ -4,6 +4,7 @@ import {
   createLinkUpstreamChangedHandler,
   createReconnectResyncHandler,
   createScopedRefreshScheduler,
+  CONNECTION_SUPERSEDED_CLOSE_CODE,
   createWsReconciler,
   fileInventoryChanged,
   isOwnWriteEcho,
@@ -589,6 +590,80 @@ describe("createWsReconciler", () => {
     expect(second).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
     expect(second).not.toBe(first)
     r.close()
+  })
+
+  it("reuses one connId per tab when a storage key is given, so a reconnect replaces its row", async () => {
+    // AQU-1791: a fresh id per socket meant a reconnect — the normal outcome
+    // of a dropped link — asked the DO for a NEW presence row while the dead
+    // socket's row was still there, listing one person 2–3× as "viewing".
+    sessionStorage.clear()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.p",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    const first = new URL(FakeWebSocket.instances[0].url).searchParams.get("connId")
+    expect(first).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBe(first)
+    FakeWebSocket.instances[0].open()
+
+    r.reconnect()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(new URL(FakeWebSocket.instances[1].url).searchParams.get("connId")).toBe(first)
+    r.close()
+
+    // A different project in the same tab is a different presence row.
+    const other = createWsReconciler({
+      projectId: "q",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.q",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(new URL(FakeWebSocket.instances[2].url).searchParams.get("connId")).not.toBe(first)
+    other.close()
+    sessionStorage.clear()
+  })
+
+  it("rotates its tab connId when another connection supersedes it", async () => {
+    // A duplicated browser tab inherits the original's sessionStorage, so both
+    // would present one connId and take it from each other forever. The loser
+    // of a 4409 close gives the id up.
+    sessionStorage.clear()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.p",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    const ws = FakeWebSocket.instances[0]
+    const first = new URL(ws.url).searchParams.get("connId")
+    ws.open()
+    ws.close(CONNECTION_SUPERSEDED_CLOSE_CODE, "connection superseded")
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBeNull()
+
+    await vi.waitFor(() => expect(FakeWebSocket.instances.length).toBe(2))
+    const second = new URL(FakeWebSocket.instances[1].url).searchParams.get("connId")
+    expect(second).not.toBe(first)
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBe(second)
+    r.close()
+    sessionStorage.clear()
   })
 
   it("delivers parsed server frames to onMessage", async () => {

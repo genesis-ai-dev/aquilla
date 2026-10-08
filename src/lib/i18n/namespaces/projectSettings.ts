@@ -54,23 +54,24 @@ export const projectSettings = defineNamespace({
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
     "projectSettings.create.namePlaceholder": "My Translation Project",
-    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
+    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English…",
     "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
-    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
+    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
     "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.bulkTargetLanguagesHint":
       "That's all {max} boxes. Add any remaining languages here, separated by commas.",
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
-      "Swahili, Yoruba, Hausa, zh-Hant…",
+      "Swahili, Yoruba, Hausa, Traditional Han…",
     "projectSettings.create.bulkTargetLanguagesCount": plural({
       one: "Adds {count} more lane.",
       other: "Adds {count} more lanes.",
     }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
-      "Any label works — a BCP-47 tag, a language name, or a register description " +
-      "(e.g. \"Grade 7 English\", \"conversational Swahili\").",
+      "Type a language name or a description (e.g. \"Grade 7 English\", " +
+      "\"conversational Swahili\"). The language code is filled in from the name, " +
+      "and you can edit that code if it is wrong.",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
     "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
     "projectSettings.create.shapeSelfContained": plural({
@@ -125,6 +126,22 @@ export const projectSettings = defineNamespace({
       "targets, e.g. French → Chaluba).",
     "projectSettings.create.validationLinkConsumesRequired":
       "Choose which corpus should become this project's source",
+    // ── AQU-1605: which of the upstream's lanes a chain link consumes. Only
+    // asked for "One of its Targets" — the sibling case consumes the upstream's
+    // one source lane, so there is nothing to choose. Offered only for the lanes
+    // the user may see, and pre-filled when that is a single lane.
+    "projectSettings.create.upstreamLaneLabel": "Which of its translations?",
+    "projectSettings.create.upstreamLanePlaceholder": "Choose a translation…",
+    "projectSettings.create.upstreamLaneUnnamed": "Untitled lane",
+    "projectSettings.create.upstreamLaneLoading": "Loading translations…",
+    "projectSettings.create.upstreamLaneNone":
+      "This project has no translation you can use as a source. Choose its source " +
+      "instead, or ask for access to one of its translations.",
+    "projectSettings.create.upstreamLaneLoadError":
+      "Couldn't load this project's translations.",
+    "projectSettings.create.upstreamLaneRetry": "Try again",
+    "projectSettings.create.validationUpstreamLaneRequired":
+      "Choose which of the upstream project's translations to use",
     // ── AQU-1561: which of the upstream's files the new project brings in.
     // Same question the Source & sync link flow asks, so the list itself reuses
     // `projectSettings.linkSource.selectAllFiles` / `fileClashBadge` — only the
@@ -168,9 +185,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.extraLanguagesDescription":
       "Optional — add more target languages for this project (e.g. dialect variants " +
       "or parallel drafts of the same source).",
-    "projectSettings.create.extraLanguagesPlaceholder": "e.g. fr-CA",
+    "projectSettings.create.extraLanguagesPlaceholder": "e.g. Traditional Han",
     "projectSettings.create.extraLanguagesRemoveAriaLabel": "Remove {lang}",
-    "projectSettings.create.extraLanguagesEmptyError": "Enter a language tag.",
+    "projectSettings.create.extraLanguagesEmptyError": "Enter a language name.",
     "projectSettings.create.extraLanguagesTooLongError": "Must be {max} characters or fewer.",
     "projectSettings.create.extraLanguagesDuplicatePrimaryError":
       "This is already the primary target language.",
@@ -418,6 +435,15 @@ export const projectSettings = defineNamespace({
       "When on, USFM imports drop the book name, running header, TOC, main title, and " +
       "introduction paragraphs. Section headings and Psalm titles still import. Off " +
       "(the default) imports front matter as translatable cells.",
+    "projectSettings.import.cellUnitLabel": "Import cell unit",
+    "projectSettings.import.cellUnitDescription":
+      "What one cell is when a Word, text, or Markdown file is imported. " +
+      "\u201cSentence\u201d splits long paragraphs into shorter cells \u2014 right for subtitles and " +
+      "documents. \u201cParagraph\u201d keeps each paragraph whole, with no sentence splitting and " +
+      "no length limit \u2014 right for dubbing, where one cell becomes one voice clip. " +
+      "Formats that define their own cells (USFM verses, subtitle cues) are unaffected.",
+    "projectSettings.import.cellUnitOptionSentence": "Sentence (split long paragraphs)",
+    "projectSettings.import.cellUnitOptionParagraph": "Paragraph (one cell per paragraph)",
 
     // ── User card ──
     "projectSettings.user.usernameLabel": "Username",
@@ -668,6 +694,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.consumesTranslations": "consumes translations",
     "projectSettings.sourceLink.consumesSource": "consumes source",
     "projectSettings.sourceLink.gateLabel": "gate: {value}",
+    // AQU-1605: which of the upstream's translations the link consumes.
+    "projectSettings.sourceLink.laneLabel": "translation: {value}",
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
@@ -754,6 +782,22 @@ export const projectSettings = defineNamespace({
       other:
         "Their source text will be replaced with the source project's current " +
         "text. Their translations, validations and comments stay.",
+    }),
+    // AQU-1679: an added upstream file can instead follow INTO a file this
+    // project already has — the link flow's replace option, here too.
+    "projectSettings.sourceLink.chooseFilesReplaceHeading": plural({
+      one: "Replace the source in this file you already have:",
+      other: "Replace the source in these files you already have:",
+    }),
+    "projectSettings.sourceLink.chooseFilesReplaceBody": plural({
+      one:
+        "It stays the same file, with its translations, validations and comments " +
+        "on the same lines. Its source text becomes the source project's, and it " +
+        "receives the source project's changes from then on. No second copy is added.",
+      other:
+        "They stay the same files, with their translations, validations and comments " +
+        "on the same lines. Their source text becomes the source project's, and they " +
+        "receive the source project's changes from then on. No second copies are added.",
     }),
     "projectSettings.sourceLink.chooseFilesAddHeading": plural({
       one: "Add this file:",
@@ -930,15 +974,37 @@ export const projectSettings = defineNamespace({
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.defaultTargetNote": "The default (unnamed) lane. Change it on Project Info, above.",
     "projectSettings.languages.additionalLanesLabel": "Additional target lanes",
     "projectSettings.languages.additionalLanesDescription":
       "Extra target-language lanes for this project — e.g. dialect variants or " +
       "parallel drafts of the same source.",
     "projectSettings.languages.laneNameLabel": "Lane name",
     "projectSettings.languages.laneNamePlaceholder": "Name this lane",
+    // AQU-1592: a lane stores the language the user typed, an OPTIONAL display
+    // name, and an OPTIONAL code override. The name's placeholder is the
+    // language itself, because that is what the lane shows when no name is set.
+    "projectSettings.languages.laneLanguageLabel": "Lane language",
+    "projectSettings.languages.laneLanguagePlaceholder": "Language this lane translates into",
+    "projectSettings.languages.laneLanguageRequiredError":
+      "A lane needs a language. Type the language it translates into.",
+    "projectSettings.languages.laneAdvancedToggle": "Advanced",
+    "projectSettings.languages.laneCodeLabel": "Language code",
+    "projectSettings.languages.laneCodeNote":
+      "Leave blank to derive the code from the language. Set it only when the " +
+      "derived code is wrong.",
+    "projectSettings.languages.laneCodeDerivedPlaceholder": "Derived from the language",
+    "projectSettings.languages.laneCodeMalformedError":
+      "That is not a valid language code. Use a BCP 47 tag such as \"es\" or \"es-MX\".",
     "projectSettings.languages.duplicateNameError":
       "Another lane already has this name. Change one of them.",
+    // AQU-1784: adding a lane that reads the same as an active one is allowed —
+    // two teams may translate into one language — so this warns before the save
+    // rather than refusing it afterwards, and says how the pair will be told
+    // apart once both exist.
+    "projectSettings.languages.duplicateNameNotice":
+      "\"{lane}\" already reads the same as another active lane. You can still add " +
+      "it — the lane switcher will number them.",
+    "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
     "projectSettings.languages.nameTooLongError": "That name is too long.",
     "projectSettings.languages.noAdditionalLanes": "No additional lanes yet.",
     "projectSettings.languages.archiveConfirm":
@@ -968,7 +1034,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
     "projectSettings.languages.addLaneLabel": "Add a target lane",
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
-    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
+    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
     "projectSettings.languages.addLaneButton": "Add lane",
     "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",
@@ -1016,6 +1082,29 @@ export const projectSettings = defineNamespace({
     //    in MondayIntegrationSection.tsx scoped this trio to a dedicated later
     //    wave; this is that wave. "Monday"/"Monday.com" is the product's own
     //    name and stays as-is in every locale.
+    "projectSettings.monday.overviewConnectDescription": "Your organization is connected. Link a board to share this project's progress.",
+    "projectSettings.monday.overviewOpenBoard": "Open board in Monday",
+    "projectSettings.monday.overviewConfigureLink": "Configure link",
+    "projectSettings.monday.overviewLinkBoard": "Link a board",
+    "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
+    "projectSettings.monday.wizardDoneNeedsAttentionTitle": "Board linked — sync needs attention",
+    "projectSettings.monday.wizardRecommendation": plural({
+      one: "Recommended: one item per {granularity}, with {mappedCount} progress column.",
+      other: "Recommended: one item per {granularity}, with {mappedCount} progress columns.",
+    }, "mappedCount"),
+    "projectSettings.monday.wizardPreviewBoardLink": "Preview board in Monday",
+    "projectSettings.monday.wizardHideCustomization": "Hide customization",
+    "projectSettings.monday.wizardShowCustomization": "Customize data and columns",
+    "projectSettings.monday.wizardFindBoardManually": "Find {name} in Monday. The direct board link is unavailable.",
+    "projectSettings.monday.connectionCheckFailed": "Could not check the Monday connection. Try again.",
+    "projectSettings.monday.retryAction": "Retry",
+    "projectSettings.monday.orgNextLinkProjectsTitle": "Next: link your projects",
+    "projectSettings.monday.orgNextLinkProjectsDescription": "Your organization is connected. Choose a project to review its recommended board and progress columns. You only authorize Monday once for this organization.",
+    "projectSettings.monday.orgProjectsLoading": "Loading projects…",
+    "projectSettings.monday.orgProjectsRetry": "Retry projects",
+    "projectSettings.monday.orgNoAccessibleProjects": "No accessible projects in this organization.",
+    "projectSettings.monday.orgSetUpOrManageBoard": "Set up or manage board",
+    "projectSettings.monday.orgViewIntegration": "View Monday integration",
     "projectSettings.monday.boardSyncLabel": "Board sync",
     "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
@@ -1106,6 +1195,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.termMatching.preset.arabic": "Arabic",
     "projectSettings.termMatching.preset.swahili": "Swahili",
     "projectSettings.termMatching.preset.turkish": "Turkish",
+
+    // ── AQU-1075: settings copied from the upstream project ──
+    "projectSettings.inherit.title": "Settings from {upstream}",
+    "projectSettings.inherit.description":
+      "This project keeps a copy of what you turn on. When {upstream} saves one of them, the copy updates, and so does the next project in the chain. Detach a field to keep your own.",
+    "projectSettings.inherit.linkTitle": "Copy these from the upstream project",
+    "projectSettings.inherit.linkDescription":
+      "Turn on what this project should receive. You can detach any of them later in its settings.",
+    "projectSettings.inherit.field.translationBrief": "Translation brief",
+    "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
+    "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
+    "projectSettings.inherit.field.workflowPolicyDetail":
+      "Validation count and role floors, self-validation, autopilot and agent mode, structural-cell counting, and check penalties.",
+    "projectSettings.inherit.field.livingMemory": "Living-memory notes",
+    "projectSettings.inherit.field.smartQuotes": "Smart quotes",
+    "projectSettings.inherit.field.systemPrompt": "AI instructions",
+    "projectSettings.inherit.fromUpstream": "from {upstream}",
+    "projectSettings.inherit.detach": "Detach",
   },
   context: {
     _context: {
@@ -1680,6 +1787,16 @@ export const projectSettings = defineNamespace({
           value: "The rendered projectSettings.sourceLink.gateValidatedOnly or gateEveryCommit string — insert exactly as given.",
         },
       },
+      "projectSettings.sourceLink.laneLabel": {
+        description:
+          "Small badge naming WHICH of the upstream project's translations a chain " +
+          "(consumes-target) link reads — shown beside the corpus and gate badges on " +
+          "the confirm step of the linking flow. 'translation' here means one of the " +
+          "upstream's target languages, not the act of translating.",
+        placeholders: {
+          value: "The lane's own name as the upstream project set it (a language name such as 'Quebec French'), inserted as given and never translated.",
+        },
+      },
       "projectSettings.sourceLink.scopeSomeFiles": {
         description:
           "Small badge on the Source link card saying how many of the upstream project's files this link follows, for a link made with only some of them picked.",
@@ -1699,6 +1816,25 @@ export const projectSettings = defineNamespace({
         description: "Instruction above the detach-confirmation input, naming the exact word the user must type.",
         placeholders: {
           word: "The literal, untranslated confirmation word 'DETACH' the user must type verbatim — styled bold-monospace by the caller. Never translate this word: the input is validated against the exact English literal.",
+        },
+      },
+      "projectSettings.languages.duplicateNameNotice": {
+        description:
+          "Notice under the add-lane fields when the lane being added would read " +
+          "the same as a lane the project already has. Not an error — adding it is " +
+          "allowed, and the lane switcher then numbers the pair. Appears while the " +
+          "name is typed, before anything is saved.",
+        placeholders: {
+          lane: "The existing lane's display name, as the switcher shows it (data, not translated).",
+        },
+      },
+      "projectSettings.languages.laneShownAs": {
+        description:
+          "Small muted note on a lane row whose name another lane also uses, giving " +
+          "the label this lane is shown under elsewhere in the app — the name plus " +
+          "the suffix that tells the two apart. Not a sentence; no period.",
+        placeholders: {
+          label: "The lane's disambiguated display label, e.g. 'Tshangla · 2' (data, not translated).",
         },
       },
       "projectSettings.languages.archiveConfirm": {
@@ -1779,6 +1915,19 @@ export const projectSettings = defineNamespace({
         description: "Body text of the confirmation dialog before unlinking the project's Monday board.",
         placeholders: {
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
+        },
+      },
+      "projectSettings.monday.wizardRecommendation": {
+        description: "Summary line in the Monday setup wizard review step: the recommended item granularity and how many progress columns are mapped.",
+        placeholders: {
+          granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
+          mappedCount: "How many progress columns are mapped to project metrics.",
+        },
+      },
+      "projectSettings.monday.wizardFindBoardManually": {
+        description: "Fallback note in the Monday setup wizard when Monday returned no direct board URL, telling the user to find the board by name.",
+        placeholders: {
+          name: "The linked board's name (data, not translated), or the board id if no name is known.",
         },
       },
       "projectSettings.monday.oneItemPerLabel": {
@@ -2006,6 +2155,20 @@ export const projectSettings = defineNamespace({
           "replaced with the source project's current text — the lead may have been editing " +
           "it in the meantime — while the translations on it are kept. Both halves matter.",
       },
+      "projectSettings.sourceLink.chooseFilesReplaceHeading": {
+        description:
+          "Heading in the Choose files confirm step over the list of files the project " +
+          "already has whose source the added upstream files will replace (AQU-1679). Ends " +
+          "in a colon; names follow. Kept apart from the add heading: these files are not " +
+          "arriving, they are being joined to the link.",
+      },
+      "projectSettings.sourceLink.chooseFilesReplaceBody": {
+        description:
+          "Under the replace list: the file keeps its identity and everything on it " +
+          "(translations, validations, comments) line by line; only its source text " +
+          "becomes the source project's, and it follows the source project afterwards. " +
+          "Says explicitly that no second copy is added \u2014 the thing a lead fears here.",
+      },
       "projectSettings.sourceLink.chooseFilesAddHeading": {
         description:
           "Heading over the list of files being added that this project never held. Ends in " +
@@ -2231,6 +2394,62 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.termMatching.preset.turkish": {
         description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.inherit.title": {
+        description:
+          "Heading of the inherited-settings card in Project Settings, shown only when this project is linked to an upstream. Names the upstream.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.description": {
+        description:
+          "Explanation under that heading: turned-on fields are copies that update when the upstream saves, including further down a chain, and Detach keeps a local copy.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.linkTitle": {
+        description:
+          "Heading of the same choice on the link confirm step, before the link exists. The checkboxes under it are what this new link will copy.",
+      },
+      "projectSettings.inherit.linkDescription": {
+        description:
+          "One sentence under that heading: the choice can be changed later, per field, from the downstream project's settings.",
+      },
+      "projectSettings.inherit.field.translationBrief": {
+        description: "Checkbox label. The translation brief is copied from the upstream when this is on.",
+      },
+      "projectSettings.inherit.field.knowledgeDocs": {
+        description: "Checkbox label. The upstream project's knowledge-base documents are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicy": {
+        description:
+          "Checkbox label. Validation counts, role floors, self-validation, autopilot, agent mode, structural-cell counting, and check penalties are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicyDetail": {
+        description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",
+      },
+      "projectSettings.inherit.field.livingMemory": {
+        description: "Checkbox label. Living-memory notes are copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.smartQuotes": {
+        description: "Checkbox label. The smart-quotes switch is copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.systemPrompt": {
+        description:
+          "Checkbox label. AI instructions (the system prompt) are copied when this is on. Off by default, because those instructions usually name the language pair.",
+      },
+      "projectSettings.inherit.fromUpstream": {
+        description:
+          "Shown beside a field that is still being copied, both in the inherited-settings card and next to the field itself.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.detach": {
+        description:
+          "Button beside a field that is still being copied. Stops future updates of that field and keeps the current copy.",
       },
     },
   },

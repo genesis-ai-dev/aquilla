@@ -41,10 +41,11 @@ export interface BiblicaStudyNotesParseResult {
  * Parse a Biblica study-Bible IDML package into study-note cells.
  *
  * The package is parsed with the shared `generic` profile so nothing is lost or
- * reinterpreted, then filtered to the note paragraphs and the `head:*` headings
- * the layout sets around the verses. Scripture is deliberately left out: it is
- * set from the publisher's Bible files, not translated here. Verse runs still
- * drive each note's book and chapter-range label.
+ * reinterpreted, then filtered to the note paragraphs, the `head:*` headings
+ * the layout sets around the verses, and the book's printed name (`meta:h` /
+ * `meta:toc1–3`). Scripture is deliberately left out: it is set from the
+ * publisher's Bible files, not translated here. Verse runs still drive each
+ * note's book and chapter-range label.
  *
  * The study Bible's front and back matter ships as separate volumes with no
  * scripture in them at all, which is how they are recognized. They set their
@@ -66,9 +67,10 @@ export async function extractBiblicaStudyNoteStrings(
       ? { splitSentences: options.splitSentences }
       : {}),
     frontBackMatter,
-    // A book volume's scripture is content: every verse becomes a cell so it
-    // can be edited or swapped. A front/back volume holds none at all.
-    includeScripture: !frontBackMatter,
+    // Bible text stays out of the import. It is swapped in later from the
+    // publisher's scripture files, so a book volume and a front/back volume
+    // both leave it off.
+    includeScripture: false,
   })
 
   const bookCodes: string[] = []

@@ -62,8 +62,10 @@ export async function handleCellAudioReadRequest(
   const fileId = decodeURIComponent(match[2])
 
   // AQU-1591. `lane` is read with `has`, not truthiness: `?lane=` names the
-  // DEFAULT lane (legacy_tag ''), which is a real lane and a different request
-  // from "every lane". The cells read spells the absent case the same way.
+  // former default target lane (legacy_tag ''), a different request from
+  // "every lane". Source audio is not that lane. It is the source lane, and
+  // it is returned with every lane request, including when this project has
+  // no '' target row (AQU-1594).
   const laneRequested = url.searchParams.has("lane")
   const lane = url.searchParams.get("lane") ?? ""
   const laneFilterSql = laneRequested ? `AND ${audioLaneDualReadSql("a")}` : ""
@@ -78,9 +80,23 @@ export async function handleCellAudioReadRequest(
 
   const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
   if (laneRequested && !(await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, lane))) {
-    return Response.json({ cells: {} }, { headers: { "Cache-Control": "private, no-store" } })
+    // A missing '' target lane is not an empty file. The programme clip lives
+    // on the source lane and must still come back; only a real lane the caller
+    // was not granted reads as nothing.
+    const blankTarget = lane === ""
+      ? await env.AQUILLA_PG.prepare(
+          `SELECT 1 AS ok FROM lanes
+            WHERE project_id = ? AND role = 'target' AND legacy_tag = ''
+            LIMIT 1`,
+        ).bind(projectId).first<{ ok: number }>()
+      : { ok: 1 }
+    if (blankTarget) {
+      return Response.json({ cells: {} }, { headers: { "Cache-Control": "private, no-store" } })
+    }
   }
   // A dub with no lane_id yet is the '' lane's, as in audioLaneDualReadSql.
+  // Source clips are not: they carry role = 'source' and the source lane's id,
+  // so this COALESCE never has to invent a '' target row for them.
   const wall = targetVisibilityClause({
     laneIds: await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes),
     sideExpr: "a.role",

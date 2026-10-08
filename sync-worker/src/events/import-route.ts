@@ -34,8 +34,11 @@ import {
   buildBulkSourceCellCreateStmt,
   buildBulkTargetCellCommitStmt,
   fileCountersRecomputeStmt,
+  laneOfEvent,
   type PersistedEvent,
 } from './event-projection'
+import { dataTargetTagsFromEvents, ensureBlankTargetBridgeStmt, ensureProjectLanes } from '../../../db/shared/lanes'
+import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
@@ -471,6 +474,10 @@ export async function handleBulkImportRequest(
             audioId: attachment.audioId,
             url: attachment.url,
             slot: attachment.slot,
+            // The shared programme clip. It performs the source, so it belongs
+            // to the source lane — not to a '' target lane the project may
+            // not have (AQU-1594).
+            role: 'source',
             ...(attachment.mimeType !== undefined ? { mimeType: attachment.mimeType } : {}),
             ...(attachment.voiceId !== undefined ? { voiceId: attachment.voiceId } : {}),
             ...(attachment.referenceAudioId !== undefined ? { referenceAudioId: attachment.referenceAudioId } : {}),
@@ -739,6 +746,38 @@ export async function handleBulkImportRequest(
     })
   }
 
+  // AQU-1240: projection resolves cells.lane_id from `lanes`. Projects created
+  // by /__dev__/seed (and any path that skipped createProjectShared) have no
+  // rows there, so the subquery is NULL and the NOT NULL column 500s the
+  // whole chunk as "DB batch failed". Codex ingest already calls this;
+  // /import did not. Only a project with no lane rows at all: one that has
+  // lanes keeps them, because asking again from the file's languages would
+  // add a tagged lane beside a '' bridge, or a '' lane beside a tagged one
+  // (AQU-1594). The default-target bridge below covers projects that have lanes.
+  try {
+    const anyLane = await db
+      .prepare(`SELECT 1 AS present FROM lanes WHERE project_id = ? LIMIT 1`)
+      .bind(body.projectId)
+      .first<{ present: number }>()
+    if (!anyLane) {
+      await ensureProjectLanes(db, body.projectId, {
+        settings: body.file
+          ? {
+              sourceLanguage: body.file.sourceLanguage,
+              targetLanguage: body.file.targetLanguage,
+            }
+          : undefined,
+        dataTargetTags: dataTargetTagsFromEvents(targetEvents),
+      })
+    }
+  } catch (err) {
+    console.error('[import] ensure lanes failed:', err)
+    return withCors(
+      Response.json({ error: 'DB batch failed' }, { status: 500 }),
+      request,
+    )
+  }
+
   try {
     // One counter bump reserves a contiguous server_seq block for every event
     // in this request (file.create first, then cells in payload order — the
@@ -776,6 +815,16 @@ export async function handleBulkImportRequest(
     // explicit completion request after every concurrent chunk settles.
     for (let i = 0; i < cellEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkSourceCellCreateStmt(db, cellEvents.slice(i, i + BULK_ROWS)))
+    }
+    // A default-lane target cell addresses ''. On a project with no target
+    // lane, create that bridge before the cell rows resolve lane_id, in this
+    // same batch. A project that already has any target lane inserts nothing.
+    if (targetEvents.some((event) => laneOfEvent(event.kind, event.payload) === '')) {
+      stmts.push(ensureBlankTargetBridgeStmt(db, body.projectId))
+      // AQU-1781: that bridge is a brand new target lane on a project that had
+      // none, so no member below Maintainer holds a grant for it. Grant it in
+      // the same batch, or the import lands in a lane only Maintainers can read.
+      stmts.push(grantNewLaneStmt(db, body.projectId, { legacyTag: '' }, null))
     }
     for (let i = 0; i < targetEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkTargetCellCommitStmt(db, targetEvents.slice(i, i + BULK_ROWS)))

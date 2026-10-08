@@ -203,7 +203,7 @@ describe('org membership — validation', () => {
     const token = await ownerToken(tdb)
     const { res, body } = await prepare(env, token, [
       { kind: 'AddOrgMember', orgId: ORG_ID, username: 'bob', role: 400 },
-      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
+      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'deflane1', value: 'v' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

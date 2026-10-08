@@ -116,11 +116,11 @@ const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
-// AQU-1086: languageEditMinRole is the second write-gating permission-policy
-// key (who may change a project's source/target language and its extra target
-// lanes). Same OWNER-only write gate; its default is MAINTAINER — today's
-// behaviour — so an org opts IN to project-lead language editing. See
-// DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
+// AQU-1086 / AQU-984: languageEditMinRole is the second write-gating
+// permission-policy key (who may change a project's source/target language
+// and its extra target lanes). Same OWNER-only write gate. Absent, the floor
+// is PROJECT_LEAD; a stored value, including an explicit MAINTAINER, is kept.
+// See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
 // gate) and in auth-worker/src/services/org-permissions.ts (the server
 // default) — all three must agree.
 const LANGUAGE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
@@ -471,8 +471,8 @@ export function useOrgSettings(
     return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
 
-  // AQU-1086: effective language-edit floor — explicit org setting, or the
-  // MAINTAINER default when unset / out of the role ladder.
+  // AQU-1086 / AQU-984: effective language-edit floor — explicit org setting,
+  // or PROJECT_LEAD when unset / out of the role ladder.
   const languageEditMinRole = resolveLanguageEditFloor(
     typeof server?.settings?.languageEditMinRole === "number"
       ? (server.settings.languageEditMinRole as number)

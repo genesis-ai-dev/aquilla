@@ -95,23 +95,24 @@
 // saved, that the files have not arrived, and a "Try again" — and `onLinked`
 // does not fire until the files are actually in.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
-import {
-  UpstreamFileChoiceList,
-  type ReplaceMatchState,
-} from "@/components/UpstreamFileChoiceList"
+import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
 import { LinkSeedFailedNotice } from "@/components/LinkSeedFailedNotice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
+import { useReplaceFileChoices } from "@/hooks/useReplaceFileChoices"
 import { ROLE } from "@/lib/frontier/roles"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
-import { fetchLinkFileMatches } from "@/lib/sync/link-file-match"
+import { INHERIT_DEFAULTS, type InheritFieldId } from "@/lib/sync/inherited-settings"
+import { InheritedSettingsChoice } from "@/components/ProjectSettings/InheritedSettingsChoice"
+import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
+import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import {
   selectedClashNames,
   summarizeFileSelection,
@@ -186,6 +187,13 @@ export function LinkSourceFlow({
   // of upstream (the question is about the corpus, not the project), and reset
   // after a successful link so a re-link following a Detach asks again.
   const [consumes, setConsumes] = useState<LinkConsumes>("")
+  const [inheritReceive, setInheritReceive] = useState({ ...INHERIT_DEFAULTS })
+  const [inheritDetached, setInheritDetached] = useState<Partial<Record<InheritFieldId, boolean>>>({})
+  // AQU-1605: which of the upstream's translations this chain link consumes.
+  // Only asked for consumes='target'; reset whenever the upstream or the corpus
+  // answer changes, so a lane picked for one upstream can never be sent with
+  // another.
+  const [laneId, setLaneId] = useState("")
   const [linking, setLinking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // AQU-1544: the link request succeeded but neither the server's seed nor
@@ -209,14 +217,6 @@ export function LinkSourceFlow({
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   // Bumped by "Try again" so the effect re-runs for the same upstream.
   const [previewAttempt, setPreviewAttempt] = useState(0)
-  // AQU-1679: the upstream file ids set to replace the source of the project's
-  // own same-named file, and what the server said about each pair. Both are
-  // dropped with the selection — they describe one upstream's files.
-  const [replaceFileIds, setReplaceFileIds] = useState<Set<string>>(new Set())
-  const [replaceMatches, setReplaceMatches] = useState<Map<string, ReplaceMatchState>>(new Map())
-  // Which comparison is the current one per file: an answer that arrives after
-  // the option was turned off and on again must not overwrite the newer ask.
-  const replaceAsk = useRef(new Map<string, number>())
 
   // Never offer this project itself (the server 400s on a self-link), and
   // never an archived one.
@@ -229,6 +229,47 @@ export function LinkSourceFlow({
   )
 
   const jwt = session?.jwt
+  // `previewFiles` is empty both before the preview lands and for an upstream
+  // with no files — neither shows a list, and only the second links. Memoized
+  // so the folds below are not re-run on every render by a fresh array
+  // identity (and so the React Compiler sees a stable dependency).
+  const previewFiles = useMemo(() => preview?.files ?? [], [preview])
+  // AQU-1679: the upstream file ids set to replace the source of the project's
+  // own same-named file, and what the server said about each pair. Dropped
+  // with the selection — they describe one upstream's files. The ask-and-settle
+  // logic is shared with "Choose files" (useReplaceFileChoices).
+  const {
+    replaceFileIds,
+    matches: replaceMatches,
+    toggleReplace,
+    reset: resetReplace,
+    isUnresolved: replaceIsUnresolved,
+  } = useReplaceFileChoices({ jwt, projectId, sourceProjectId: reviewing, files: previewFiles })
+
+  // AQU-1605: the upstream lanes this caller may consume. Asked only for the
+  // chain case — a link that consumes the upstream's SOURCE has one lane to read
+  // and nothing to choose.
+  const laneChoices = useUpstreamLaneChoices(jwt, chosen, consumes === "target")
+  const laneOptions = laneChoices.lanes
+  // Pre-fill a single lane (AQU-1419: no forced chooser at one lane), and drop a
+  // pick the lane list no longer holds — a different upstream, or one whose
+  // lanes this user's grants have since narrowed.
+  useEffect(() => {
+    if (!laneOptions) return
+    if (laneOptions.length === 1) {
+      setLaneId(laneOptions[0]!.id)
+      return
+    }
+    setLaneId((current) => (laneOptions.some((lane) => lane.id === current) ? current : ""))
+  }, [laneOptions])
+
+  // AQU-1605: the chosen lane's name, for the confirm step — which no longer has
+  // the picker on screen. Empty when the list has not landed or nothing is
+  // picked, in which case the badge is simply not shown.
+  const chosenLaneLabel = useMemo(
+    () => (laneOptions ?? []).find((lane) => lane.id === laneId)?.label ?? "",
+    [laneOptions, laneId],
+  )
 
   // The upstream's name from the picker is the fallback heading while the
   // preview loads or after it fails — the confirm step must name the project
@@ -249,8 +290,7 @@ export function LinkSourceFlow({
         if (cancelled) return
         setPreview(result)
         setSelectedFileIds(new Set(result.files.map((f) => f.id)))
-        setReplaceFileIds(new Set())
-        setReplaceMatches(new Map())
+        resetReplace()
       })
       .catch(() => {
         // The message is a fixed sentence, not the server's: a count the user
@@ -261,17 +301,16 @@ export function LinkSourceFlow({
     return () => {
       cancelled = true
     }
-  }, [reviewing, jwt, projectId, previewAttempt])
+  }, [reviewing, jwt, projectId, previewAttempt, resetReplace])
 
   const backToPicker = useCallback(() => {
     setReviewing(null)
     setPreview(null)
     setPreviewFailed(false)
     setSelectedFileIds(new Set())
-    setReplaceFileIds(new Set())
-    setReplaceMatches(new Map())
+    resetReplace()
     setError(null)
-  }, [])
+  }, [resetReplace])
 
   const toggleFile = useCallback((fileId: string) => {
     setSelectedFileIds((current) => {
@@ -283,16 +322,12 @@ export function LinkSourceFlow({
   }, [])
 
   // AQU-1559: what the confirm step says and sends, all read off the checked
-  // rows. `previewFiles` is empty both before the preview lands and for an
-  // upstream with no files — neither shows a list, and only the second links.
-  // Memoized so the folds below are not re-run on every render by a fresh array
-  // identity (and so the React Compiler sees a stable dependency).
+  // rows.
   //
   // AQU-1561: the folds moved to `lib/sync/link-source-preview.ts`, beside the
   // row type they read, and the list itself to `UpstreamFileChoiceList`, which
   // Create New Project renders too — the two flows ask the same question and
   // must keep answering it the same way.
-  const previewFiles = useMemo(() => preview?.files ?? [], [preview])
   const { selectedCount, allSelected: allFilesSelected, nothingSelected } = useMemo(
     () => summarizeFileSelection(previewFiles, selectedFileIds),
     [previewFiles, selectedFileIds],
@@ -322,36 +357,7 @@ export function LinkSourceFlow({
   }, [previewFiles, selectedFileIds, replacing])
   // A replace the server has not cleared — still comparing, could not compare,
   // or not the same material — holds the link back; the row says which.
-  const replaceUnresolved = replacing.some((f) => {
-    const state = replaceMatches.get(f.id)
-    return state?.status !== "ready" || !state.match.canReplace
-  })
-
-  const toggleReplace = useCallback(
-    (fileId: string, replace: boolean) => {
-      setReplaceFileIds((current) => {
-        const next = new Set(current)
-        if (replace) next.add(fileId)
-        else next.delete(fileId)
-        return next
-      })
-      const ask = (replaceAsk.current.get(fileId) ?? 0) + 1
-      replaceAsk.current.set(fileId, ask)
-      const ownFileId = previewFiles.find((f) => f.id === fileId)?.clashFileId
-      if (!replace || !ownFileId || !reviewing || !jwt) return
-      const settle = (state: ReplaceMatchState) => {
-        if (replaceAsk.current.get(fileId) !== ask) return
-        setReplaceMatches((current) => new Map(current).set(fileId, state))
-      }
-      settle({ status: "loading" })
-      void fetchLinkFileMatches(jwt, projectId, reviewing, [
-        { upstreamFileId: fileId, fileId: ownFileId },
-      ])
-        .then(([match]) => settle(match ? { status: "ready", match } : { status: "failed" }))
-        .catch(() => settle({ status: "failed" }))
-    },
-    [previewFiles, reviewing, jwt, projectId],
-  )
+  const replaceUnresolved = replaceIsUnresolved(replacing.map((f) => f.id))
 
   async function handleLink() {
     // AQU-1526: the upstream under review, not the picker's value — what gets
@@ -369,6 +375,11 @@ export function LinkSourceFlow({
         sourceProjectId: reviewing,
         mode: "live",
         consumes,
+        // AQU-1605: the chain case names its lane; the sibling case consumes the
+        // upstream's source lane, which is not a choice and is left to the
+        // server to record.
+        ...(consumes === "target" && laneId ? { laneId } : {}),
+        inherit: inheritReceive,
         // AQU-1559: every file left checked means "follow the whole project" —
         // the request omits the list entirely, so the upstream's later files
         // keep arriving, exactly as before this slice. A subset sends the picked
@@ -398,11 +409,11 @@ export function LinkSourceFlow({
       const seeded = result.seeded !== false || (await triggerLinkSync(jwt, projectId))
       setChosen("")
       setConsumes("")
+      setLaneId("")
       setReviewing(null)
       setPreview(null)
       setSelectedFileIds(new Set())
-      setReplaceFileIds(new Set())
-      setReplaceMatches(new Map())
+      resetReplace()
       if (!seeded) {
         // Parked for the page behind this flow too: an Import dialog dismissed
         // from here must not leave the workspace looking healthy.
@@ -587,7 +598,26 @@ export function LinkSourceFlow({
               })}
             </Badge>
           )}
+          {/* AQU-1605: and WHICH translation. The picker that chose it is off
+              screen by now, so without this the confirm step reads identically
+              for every lane of the upstream. */}
+          {consumes === "target" && chosenLaneLabel && (
+            <Badge variant="outline">
+              {t("projectSettings.sourceLink.laneLabel", { value: chosenLaneLabel })}
+            </Badge>
+          )}
         </div>
+        <InheritedSettingsChoice
+          title={t("projectSettings.inherit.linkTitle")}
+          description={t("projectSettings.inherit.linkDescription")}
+          receive={inheritReceive}
+          detached={inheritDetached}
+          disabled={linking}
+          onChange={(next) => {
+            setInheritReceive(next.receive)
+            setInheritDetached(next.detached)
+          }}
+        />
         <p className="text-xs text-muted-foreground">
           {replacing.length > 0
             ? t("projectSettings.linkSource.additiveNoteReplacing")
@@ -631,6 +661,7 @@ export function LinkSourceFlow({
           value={chosen}
           onValueChange={(value) => {
             setChosen(value)
+            setLaneId("")
             setError(null)
           }}
           placeholder={t("projectSettings.linkSource.pickerPlaceholder")}
@@ -649,6 +680,7 @@ export function LinkSourceFlow({
             value={consumes || null}
             onValueChange={(value) => {
               setConsumes((value ?? "") as LinkConsumes)
+              setLaneId("")
               setError(null)
             }}
             className="gap-2"
@@ -684,6 +716,21 @@ export function LinkSourceFlow({
           </RadioGroup>
         </Field>
       )}
+      {/* AQU-1605: which translation of the upstream becomes this project's
+          source. Only the chain case asks it. */}
+      {chosen && consumes === "target" && (
+        <UpstreamLaneChoiceField
+          id="link-source-lane"
+          lanes={laneOptions}
+          failed={laneChoices.failed}
+          value={laneId}
+          onValueChange={(next) => {
+            setLaneId(next)
+            setError(null)
+          }}
+          onRetry={laneChoices.retry}
+        />
+      )}
       {projectsError ? (
         <p className="text-sm text-destructive">{projectsError}</p>
       ) : (
@@ -704,7 +751,10 @@ export function LinkSourceFlow({
           // AQU-1528: no corpus answer, no way forward — and since the
           // confirm step is only reachable through here, the link action is
           // unavailable until one is chosen too.
-          disabled={!chosen || !consumes || linking || !session}
+          // AQU-1605: and no lane answer, no way forward either — a chain link
+          // must name the translation it consumes rather than let the server
+          // fall back to whichever lane carries the empty legacy tag.
+          disabled={!chosen || !consumes || linking || !session || (consumes === "target" && !laneId)}
           onClick={() => setReviewing(chosen)}
         >
           {t("projectSettings.linkSource.reviewButton")}

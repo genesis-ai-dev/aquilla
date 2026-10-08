@@ -36,6 +36,8 @@ import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
+import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
+import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -86,6 +88,9 @@ const ProjectSettingsDialog = lazy(() =>
 // the main content area. These top-level lazy imports are intentionally removed.
 const OrgAccessPage = lazy(() =>
   import("@/pages/OrgAccessPage").then((m) => ({ default: m.OrgAccessPage })),
+)
+const OrgAccessAuditPage = lazy(() =>
+  import("@/pages/OrgAccessAuditPage").then((m) => ({ default: m.OrgAccessAuditPage })),
 )
 const MembersPage = lazy(() =>
   import("@/pages/MembersPage").then((m) => ({ default: m.MembersPage })),
@@ -312,6 +317,8 @@ export default function App() {
           <ConflictToast />
           <OfflineLeaderWatchdog />
           <DesktopUpdatePrompt />
+          <OfflineProjectAccessWatch />
+          <OfflineRefusedWritesNotice />
           {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
           <SessionExpiredBanner />
           {/* AQU-1322: admin step-up dialog; renders nothing until a 403 "elevation required" lands. */}
@@ -412,6 +419,7 @@ function AppRoutes() {
           <Route path="members" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="access" element={<OrgLazyRoute><OrgAccessPage /></OrgLazyRoute>} />
+          <Route path="access-audit" element={<OrgLazyRoute><OrgAccessAuditPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
           <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />

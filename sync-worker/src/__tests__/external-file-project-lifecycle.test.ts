@@ -140,6 +140,11 @@ beforeEach(async () => {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
 })
 
 // ── RenameFile ───────────────────────────────────────────────────────────────
@@ -228,7 +233,7 @@ describe('RenameFile', () => {
 
     const mixed = await prepare(env, contributor.token, [
       { kind: 'RenameFile', fileId: FILE, name: 'x' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'y' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'y' },
     ])
     expect(mixed.res.status).toBe(400)
     expect(mixed.body.error.message).toContain('cannot be mixed')
@@ -294,7 +299,7 @@ describe('RenameProject', () => {
 
     const notSole = await prepare(env, maintainer.token, [
       { kind: 'RenameProject', projectId: PROJECT, name: 'x' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'y' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'y' },
     ])
     expect(notSole.res.status).toBe(400)
     expect(notSole.body.error.message).toContain('must be the only command')

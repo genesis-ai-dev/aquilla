@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest"
 import {
   cellNumberLabel,
   chapterLabelFromCanonical,
+  formatVerseReference,
   importDisplayLabel,
   parseScriptureReference,
+  parseVerseReference,
   verseLabelFromCanonical,
   verseRangeLabel,
 } from "./scripture-reference"
@@ -224,5 +226,35 @@ describe("navigation verse ranges", () => {
     expect(read.mock.calls).toEqual([["1"], ["31215"]])
     // Read fresh boundaries on every call; no stale text/lane/order cache.
     expect(verseRangeLabel([...ids].reverse(), read)).toBe("31215–1")
+  })
+})
+
+// A target import's reference column is written by someone else, in whatever
+// spelling their tool or their habit uses (AQU-1375).
+describe("parseVerseReference", () => {
+  it("reads a verse however it is spelled, into the app's own spelling", () => {
+    for (const spelling of ["GEN 1:4", "gen 1:4", "GEN 1.4", "Genesis 1:4", "genesis 1.4", "Genesis1:4", "GEN 01:04"]) {
+      expect(formatVerseReference(parseVerseReference(spelling)!), spelling).toBe("GEN 1:4")
+    }
+  })
+
+  it("reads numbered books, alias names, verse letters and bridges", () => {
+    expect(formatVerseReference(parseVerseReference("1 Samuel 3:2")!)).toBe("1SA 3:2")
+    expect(formatVerseReference(parseVerseReference("1sa 3:2")!)).toBe("1SA 3:2")
+    expect(formatVerseReference(parseVerseReference("Psalm 23:1")!)).toBe("PSA 23:1")
+    expect(formatVerseReference(parseVerseReference("Song of Songs 2:1")!)).toBe("SNG 2:1")
+    expect(formatVerseReference(parseVerseReference("MAT 12:4A")!)).toBe("MAT 12:4a")
+    expect(parseVerseReference("GEN 1:1–2")).toEqual({ bookCode: "GEN", chapter: 1, verse: "1", toVerse: "2" })
+  })
+
+  it("reads nothing that isn't a verse of a known book", () => {
+    for (const value of ["GNE 1:3", "Genesis", "GEN 1", "MAT 1:s1", "GEN 1:h:1", "Row 4", "", null, undefined]) {
+      expect(parseVerseReference(value), String(value)).toBeNull()
+    }
+  })
+
+  it("leaves the strict parser's answers as they were", () => {
+    expect(parseScriptureReference("Genesis 1:4")).toBeNull()
+    expect(parseScriptureReference("GEN 1.4")).toBeNull()
   })
 })

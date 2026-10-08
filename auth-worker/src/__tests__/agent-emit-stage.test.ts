@@ -520,10 +520,9 @@ describe("stageEvents — lanes (AQU-1447)", () => {
   it("chains on lane B's own head once lane B has a commit", async () => {
     const LANE_B_HEAD = "77777777-7777-4777-8777-777777777777"
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'target', ?, 'Am Anfang', 'GEN 1:1', ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', 'Am Anfang', 'GEN 1:1', ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
     )
-      .bind(PROJECT, FILE, CELL, LANE_B, LANE_B_HEAD)
+      .bind(PROJECT, FILE, CELL, LANE_B_HEAD, PROJECT, LANE_B)
       .run()
     const result = await stageEvents(
       env.AQUILLA_PG,
@@ -535,6 +534,23 @@ describe("stageEvents — lanes (AQU-1447)", () => {
     expect(event.payload.targetLang).toBe(LANE_B)
   })
 
+  it("stages a commit from a lane id with that id and the lane's legacy tag", async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('a3f09c1e', ?, 'target', 'French', 'fr', 'fr', 2)`,
+    )
+      .bind(PROJECT)
+      .run()
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "Au commencement", targetLang: "a3f09c1e" } }],
+      ctx({ lane: "a3f09c1e" }),
+    )
+    const event = result.proposal!.events[0]
+    expect(event.payload.laneId).toBe("a3f09c1e")
+    expect(event.payload.targetLang).toBe("fr")
+  })
+
   it("leaves the default lane unchanged: chains on its head, no targetLang, model-written targetLang stripped", async () => {
     const result = await stageEvents(
       env.AQUILLA_PG,
@@ -544,6 +560,89 @@ describe("stageEvents — lanes (AQU-1447)", () => {
     const event = result.proposal!.events[0]
     expect(event.parentId).toBe(TARGET_HEAD)
     expect(event.payload).not.toHaveProperty("targetLang")
+  })
+})
+
+// AQU-609: a rule with scope "lane" governs only its own lane, so lane-scoped
+// rules must not lint other lanes' drafts. Staging feeds every NEEDS REVIEW
+// line back to the model as an instruction to redraft — a rule pinned to "fr"
+// firing on an "es" or default-lane draft would make the model rewrite text
+// that was correct for its own lane.
+describe("stageEvents — lane-scoped lint rules (AQU-609)", () => {
+  const FR = "fr"
+  const RULE_NAME = "French lane: no 'beginnito'"
+  // Fresh per call: staging writes provenance and targetLang into the payload.
+  const draft = () => [
+    { kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "En el beginnito" } },
+  ]
+
+  beforeEach(async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(
+        PROJECT,
+        JSON.stringify({
+          rules: [
+            {
+              id: "r-fr",
+              name: RULE_NAME,
+              enabled: true,
+              scope: "lane",
+              lane: FR,
+              check: { type: "target-forbids", targetPattern: "beginnito*" },
+            },
+          ],
+        }),
+      )
+      .run()
+  })
+
+  it.each([
+    ["another lane", "es"],
+    ["the default lane", ""],
+  ])("does not lint a draft staged into %s against a rule pinned to a different lane", async (_where, lane) => {
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).not.toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).not.toContain(RULE_NAME)
+  })
+
+  it("still lints a draft staged into the rule's own lane", async () => {
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane: FR }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).toContain(RULE_NAME)
+  })
+
+  // The copilot passes lanes.id. The rule is still pinned to the legacy tag,
+  // so filtering on the id would drop the rule the editor shows for this lane.
+  it("lints by the lane row's tag when the run names the lane by id", async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('a3f09c1e', ?, 'target', 'French', 'fr', 'fr', 2)`,
+    )
+      .bind(PROJECT)
+      .run()
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane: "a3f09c1e" }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).toContain(RULE_NAME)
+  })
+
+  it("does not apply that rule when the run names a different lane by id", async () => {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES ('a3f09c1e', ?, 'target', 'French', 'fr', 'fr', 2),
+              ('b4e10d2f', ?, 'target', 'Spanish', 'es', 'es', 3)`,
+    )
+      .bind(PROJECT, PROJECT)
+      .run()
+    const result = await stageEvents(env.AQUILLA_PG, draft(), ctx({ lane: "b4e10d2f" }))
+    expect(result.proposal).not.toBeNull()
+    expect(result.modelVerdictBlock).not.toContain("NEEDS REVIEW")
+    expect(result.modelVerdictBlock).not.toContain(RULE_NAME)
   })
 })
 

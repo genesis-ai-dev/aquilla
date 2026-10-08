@@ -22,8 +22,9 @@
 // writer.
 
 import { AliasMap } from "./compress"
+import { resolveLaneIdOrTag, type ResolvedLane } from "../../../../db/shared/lane-ref"
 import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
-import { loadLintRules, lintDraft } from "./lint"
+import { loadLintRules, lintDraft, rulesForLane } from "./lint"
 import { cellEditingFloorFromSettings, isCellEditingKind } from "../../../../db/shared/cell-editing-floor"
 
 // ── Wire contract (must match the plan doc byte-for-byte) ───────────────────
@@ -84,7 +85,9 @@ export interface EmitStageContext {
   /** Focused file/cell for :file / :cell resolution. */
   fileId?: string
   cellId?: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
   /** AQU-1670: optional telemetry sink for the stage-outcome event. Never
@@ -173,9 +176,10 @@ function pairKey(fileId: string, cellId: string): string {
 }
 
 /** Split one cell's rows by side. AQU-1447: the target row is the ACTIVE
- *  lane's, never another lane's head; source rows always live at
- *  target_lang = '' (see selectCellPairs). Both SQL shapes below already
- *  filter to those two rows, so this only has to pick them apart. */
+ *  lane's, never another lane's head. AQU-1610: "the active lane" is its id;
+ *  a source row is `side = 'source'` whatever lane it sits in (see
+ *  selectCellPairs). Both SQL shapes below already filter to those two rows,
+ *  so this only has to pick them apart. */
 function splitPair(rows: readonly CellRow[]): CellPair {
   return {
     source: rows.find((r) => r.side === "source") ?? null,
@@ -188,15 +192,15 @@ async function fetchCellPair(
   projectId: string,
   fileId: string,
   cellId: string,
-  lane: string,
+  laneId: string | null,
 ): Promise<CellPair> {
   const { results } = await db
     .prepare(
       `SELECT side, event_id, value, canonical_ref FROM cells
        WHERE project_id = ? AND file_id = ? AND cell_id = ?
-         AND ((side = 'source' AND target_lang = '') OR (side = 'target' AND target_lang = ?))`,
+         AND (side = 'source' OR (side = 'target' AND lane_id = ?))`,
     )
-    .bind(projectId, fileId, cellId, lane)
+    .bind(projectId, fileId, cellId, laneId)
     .all<CellRow>()
   return splitPair(results ?? [])
 }
@@ -229,18 +233,18 @@ const PREFETCH_BACKOFF_MS = [100, 300]
 async function fetchCellPairChunk(
   db: AquillaDb,
   projectId: string,
-  lane: string,
+  laneId: string | null,
   cells: readonly { fileId: string; cellId: string }[],
 ): Promise<Map<string, CellPair>> {
   const placeholders = cells.map(() => "(?, ?)").join(", ")
-  const binds: unknown[] = [projectId, lane]
+  const binds: unknown[] = [projectId, laneId]
   for (const c of cells) binds.push(c.fileId, c.cellId)
 
   const { results } = await db
     .prepare(
       `SELECT file_id, cell_id, side, event_id, value, canonical_ref FROM cells
        WHERE project_id = ?
-         AND ((side = 'source' AND target_lang = '') OR (side = 'target' AND target_lang = ?))
+         AND (side = 'source' OR (side = 'target' AND lane_id = ?))
          AND (file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
@@ -272,7 +276,7 @@ async function fetchCellPairChunk(
 async function prefetchCellPairs(
   db: AquillaDb,
   projectId: string,
-  lane: string,
+  laneId: string | null,
   cells: readonly { fileId: string; cellId: string }[],
 ): Promise<{ pairs: Map<string, CellPair>; failed: boolean }> {
   const pairs = new Map<string, CellPair>()
@@ -284,7 +288,7 @@ async function prefetchCellPairs(
     let ok = false
     for (let attempt = 0; attempt < PREFETCH_ATTEMPTS; attempt++) {
       try {
-        for (const [key, pair] of await fetchCellPairChunk(db, projectId, lane, chunk)) {
+        for (const [key, pair] of await fetchCellPairChunk(db, projectId, laneId, chunk)) {
           pairs.set(key, pair)
         }
         ok = true
@@ -321,7 +325,7 @@ class CellPairReader {
   constructor(
     private readonly db: AquillaDb,
     private readonly projectId: string,
-    private readonly lane: string,
+    private readonly laneId: string | null,
     private readonly pairs: Map<string, CellPair>,
   ) {
     this.prefetched = pairs.size
@@ -332,7 +336,7 @@ class CellPairReader {
     const hit = this.pairs.get(key)
     if (hit) return hit
     this.fallbackQueries++
-    const pair = await fetchCellPair(this.db, this.projectId, fileId, cellId, this.lane)
+    const pair = await fetchCellPair(this.db, this.projectId, fileId, cellId, this.laneId)
     this.pairs.set(key, pair)
     return pair
   }
@@ -369,7 +373,9 @@ async function stageOne(
    * `stageEvents` and threaded in — `undefined` when the batch contains no
    * kind that needs it, so an ordinary drafting emit never reads settings.
    */
-  cellEditingFloor?: number | null,
+  cellEditingFloor: number | null | undefined,
+  /** Resolved once per batch. `laneId` keys cell reads; `targetLang` is the legacy tag. */
+  lane: ResolvedLane,
 ): Promise<Verdict> {
   if (typeof raw !== "object" || raw === null || typeof raw.kind !== "string") {
     return { kind: "rejected", reason: "each event needs a string `kind`" }
@@ -542,9 +548,12 @@ async function stageOne(
         // Provenance injection (AQU-292): machine-drafted, attributable to the run.
         payload.ai_suggestion = true
         payload.agent_run_id = ctx.runId
-        // AQU-1447: the lane rides on payload.targetLang; absent = default lane.
+        // The lane is resolved once for the batch. `laneId` is the row;
+        // `targetLang` is its legacy tag (absent when that tag is '').
         // The run's lane always wins over anything the model wrote.
-        if (ctx.lane) payload.targetLang = ctx.lane
+        if (lane.laneId) payload.laneId = lane.laneId
+        else delete payload.laneId
+        if (lane.targetLang) payload.targetLang = lane.targetLang
         else delete payload.targetLang
         payload.sourceEventId = pair.source?.event_id ?? null
         sourceValue = pair.source?.value
@@ -701,10 +710,15 @@ export async function stageEvents(
 
   // Deterministic lint on staged drafts: load the project's enabled rules once
   // per emit so the MODEL sees violations and can redraft before the user does.
+  // The run names the lane by id (AQU-1610). Lane-scoped rules are pinned to
+  // the legacy tag the editor stores (`rule.lane`, '' for the former default
+  // lane), so the filter uses that tag — the same spelling contextual drafts
+  // already pass as `run.targetLang`.
   const anyCommit = rawEvents.some(
     (r) => (r as RawEmitEvent)?.kind === "target.cell.commit",
   )
-  const lintRules = anyCommit ? await loadLintRules(db, ctx.projectId) : []
+  const lane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
+  const lintRules = anyCommit ? rulesForLane(await loadLintRules(db, ctx.projectId), lane.targetLang) : []
   const lintLines: string[] = []
 
   // Same once-per-emit discipline as the lint rules above: only read settings
@@ -720,17 +734,17 @@ export async function stageEvents(
   const prefetch = await prefetchCellPairs(
     db,
     ctx.projectId,
-    ctx.lane,
+    lane.laneId,
     collectBatchCells(rawEvents, ctx),
   )
-  const pairs = new CellPairReader(db, ctx.projectId, ctx.lane, prefetch.pairs)
+  const pairs = new CellPairReader(db, ctx.projectId, lane.laneId, prefetch.pairs)
 
   for (let i = 0; i < rawEvents.length; i++) {
     const raw = rawEvents[i] as RawEmitEvent
     const kind = typeof raw?.kind === "string" ? raw.kind : "?"
     let verdict: Verdict
     try {
-      verdict = await stageOne(pairs, raw, ctx, cellEditingFloor)
+      verdict = await stageOne(pairs, raw, ctx, cellEditingFloor, lane)
     } catch (err) {
       verdict = { kind: "rejected", reason: `stage error: ${err instanceof Error ? err.message : String(err)}` }
     }

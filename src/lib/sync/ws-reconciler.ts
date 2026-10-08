@@ -248,6 +248,18 @@ export interface WsReconcilerOptions {
   heartbeatIntervalMs?: number
   /** A socket that receives nothing within this long of a ping is dead. */
   heartbeatTimeoutMs?: number
+  /**
+   * AQU-1791: sessionStorage key under which this reconciler keeps its
+   * presence `connId`, so every socket this TAB opens for this project reuses
+   * one id (see tabConnId). Omit it and each socket gets a fresh random id.
+   *
+   * Only the channel that publishes presence should pass a key: two
+   * reconcilers sharing one key in one tab would each take the other's row
+   * over on the server and fight (the DO treats a same-user collision as a
+   * returning tab). The workspace's project channel passes one; the agent
+   * review and offline adapter sockets do not.
+   */
+  connIdStorageKey?: string
 }
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────
@@ -336,6 +348,57 @@ export function newConnId(): string {
   const c = (globalThis as { crypto?: Crypto }).crypto
   if (c?.randomUUID) return c.randomUUID()
   return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
+
+/**
+ * AQU-1791: the DO's close code for "another connection of yours took this
+ * presence identity over" (sync-worker `project-do.ts`). A duplicated browser
+ * tab inherits the original's sessionStorage, so both would present the same
+ * connId and take it from each other forever; the loser rotates its stored id,
+ * which settles the pair after one round.
+ */
+export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
+
+/** Forget a tab's stored presence key so the next connect mints a fresh one. */
+function rotateTabConnId(key: string): void {
+  try {
+    ;(globalThis as { sessionStorage?: Storage }).sessionStorage?.removeItem(key)
+  } catch {
+    /* unavailable — the next connect mints one anyway */
+  }
+}
+
+/**
+ * AQU-1791: one presence key per TAB (per `key`), not per socket.
+ *
+ * A fresh id on every socket meant a reconnect — the normal outcome of a VPN
+ * drop, a sleeping laptop or a carrier handover on the field teams' links —
+ * asked the DO for a *new* presence row while the old socket's row was still
+ * there, so one person in one tab was listed two or three times as "viewing".
+ * Re-presenting the same id lets the DO recognise the returning tab and
+ * replace its row instead (see resolveConnId in the sync-worker).
+ *
+ * sessionStorage is per tab and survives a reload, which is exactly the scope
+ * a presence row should have. When it is unavailable (private mode, blocked
+ * site data, a non-browser host) this degrades to the old per-socket id rather
+ * than throwing — the server's heartbeat sweep still clears the ghost.
+ */
+export function tabConnId(key: string): string {
+  let store: Storage | undefined
+  try {
+    store = (globalThis as { sessionStorage?: Storage }).sessionStorage
+    const existing = store?.getItem(key)
+    if (existing && /^[A-Za-z0-9_-]{8,64}$/.test(existing)) return existing
+  } catch {
+    /* unavailable — fall through to a per-socket id */
+  }
+  const minted = newConnId()
+  try {
+    store?.setItem(key, minted)
+  } catch {
+    /* unavailable — the id is still fine for this socket */
+  }
+  return minted
 }
 
 /**
@@ -469,7 +532,9 @@ export function createWsReconciler(
     }
 
     let ws: WebSocket
-    const socketConnId = newConnId()
+    const socketConnId = options.connIdStorageKey
+      ? tabConnId(options.connIdStorageKey)
+      : newConnId()
     try {
       const url = buildProjectWsUrl(
         options.baseUrl,
@@ -524,6 +589,11 @@ export function createWsReconciler(
     }
     ws.onclose = (closeEvent: CloseEvent) => {
       if (socket === ws) stopHeartbeat()
+      // AQU-1791: our presence identity was taken over by another connection
+      // claiming to be this tab — give it up and reconnect under a fresh one.
+      if (closeEvent.code === CONNECTION_SUPERSEDED_CLOSE_CODE && options.connIdStorageKey) {
+        rotateTabConnId(options.connIdStorageKey)
+      }
       safeEmit(() => handlers.onClose?.(closeEvent))
       socket = null
       scheduleReconnect()

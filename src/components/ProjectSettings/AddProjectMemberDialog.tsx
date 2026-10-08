@@ -18,6 +18,7 @@ import { toUserFacingError } from "@/lib/errors/user-error"
 import type { UseProjectMembers } from "@/hooks/useProjectMembers"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { formatScopePath } from "@/lib/access/scope-path"
+import { grantProjectName } from "@/lib/access/grant-scope-sentence"
 import type { ScopePath } from "@/lib/access/types"
 
 type AddDialogTab = "members" | "invite"
@@ -114,6 +115,10 @@ export function AddProjectMemberDialog({
     () => grantableProjectRoles(callerLevel),
     [callerLevel],
   )
+  const projectName = grantProjectName(
+    t,
+    scopePath?.find((crumb) => crumb.type === "project" && !crumb.hidden)?.name,
+  )
 
   const handleAddMany = useCallback(async (usernames: string[], role: number) => {
     const results = await addMany(usernames.map((username) => ({ username, role })))
@@ -164,6 +169,7 @@ export function AddProjectMemberDialog({
             <MemberMultiAddRow
               roleOptions={grantableRoles}
               defaultRole={ROLE.CONTRIBUTOR}
+              grantScope={{ kind: "project", projectName, lanes: "all" }}
               onAdd={async (usernames, role) => {
                 const outcomes = await handleAddMany(usernames, role)
                 if (outcomes.some((o) => o.ok)) onAdded?.()
@@ -198,7 +204,7 @@ export function AddProjectMemberDialog({
             )}
           </TabsContent>
           <TabsContent value="invite">
-            <InviteLinkTab projectId={projectId} embedded />
+            <InviteLinkTab projectId={projectId} projectName={projectName} embedded />
           </TabsContent>
         </Tabs>
       </DialogContent>

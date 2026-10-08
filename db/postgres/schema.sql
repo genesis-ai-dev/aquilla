@@ -188,6 +188,16 @@ CREATE TABLE projects (
     -- history up to the cursor, then moves them into source_link_file_ids and
     -- clears this, in one statement.
     source_link_backfill TEXT,
+    -- AQU-1605: which UPSTREAM LANE this link consumes (migration 0138), by
+    -- `lanes.id` (globally unique since AQU-1606). NULL = the upstream's
+    -- `legacy_tag = ''` lane, which is what every link consumed before this
+    -- slice, so a row that predates AQU-1616's backfill keeps today's
+    -- behaviour. For `source_link_consumes = 'target'` it selects which of the
+    -- upstream's translations become this project's source; for 'source' it
+    -- records the upstream's source lane and changes no query (source rows are
+    -- the one source lane). No FK: the lane belongs to another project and
+    -- an unresolvable one fails the fold closed rather than the write.
+    source_link_lane_id  TEXT,
     -- AQU-1679: files of THIS project that stand in for upstream files
     -- (migration 0140). NULL = none. A JSON object {"files": {<upstream file
     -- id>: <this project's file id>…}, "pending": [<upstream file id>…]}: the
@@ -275,20 +285,14 @@ CREATE TABLE project_settings (
     version    INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT now(),
     updated_by BIGINT,
-    -- Language pair extracted from the settings JSON at write time (0054).
-    -- settings blobs run to multiple MB; reads must use these columns, never
-    -- (settings::jsonb)->>'…' inline (org-dashboard timeout, see
-    -- getOrgPortfolio in auth-worker/src/services/org-permissions.ts).
-    source_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'sourceLanguage') STORED,
-    target_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'targetLanguage') STORED,
-    -- AQU-575: compact portfolio projections. Never load the multi-MB settings
-    -- blob merely to read validationCount or targetLanes.
+    -- AQU-575: compact portfolio projection. Never load the multi-MB settings
+    -- blob merely to read validationCount. Language and the lane registry are
+    -- lanes rows; 0156 dropped the generated projections of those keys.
     validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
     -- AQU-490: and the audio threshold, for the same reason — the per-member
     -- and portfolio rollups resolve it per project on paths that must not go
     -- near the blob.
     validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED,
-    target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED,
     -- AQU-1083: do structural cells count toward progress? NULL = unset, which
     -- falls through to the org's value and then to "yes" (0083).
     count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED,
@@ -302,7 +306,19 @@ CREATE TABLE project_settings (
     -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
     -- absent/false/garbage all collapse to the documented default (off).
     agent_react BOOLEAN
-      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED,
+    -- 0150 (AQU-1686): the Bible data switches the server reads — the aquifer
+    -- gate on every Bible request and agent run, and autopilot per run. NULL
+    -- means no explicit choice, which the gate derives from scripture files
+    -- (AQU-460). Reads `->>` as the gate always did, so "true"/"false" strings
+    -- count too. Keep the expression on one line: the dev-stack schema
+    -- reconciler (scripts/dev-stack-schema-parser.ts) drops lines nested in a
+    -- column's parentheses, and a truncated ALTER breaks every local boot.
+    bible_resources_enabled BOOLEAN
+      GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
+    -- One boolean per Bible data enrichment; readers validate it
+    -- (db/shared/bible-enrichments.ts readBibleEnrichments).
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -612,20 +628,13 @@ CREATE TABLE cells (
     -- translations stay attached, and the mirror finds it through this. NULL
     -- everywhere else, including ordinary mirrored rows.
     upstream_cell_id  TEXT,
-    -- AQU-538: target-language lane (migration 0054). '' = the file's single
-    -- configured target language (every pre-lane row, and the default lane for
-    -- projects that never add a second language — N=1 back-compat). Source-side
-    -- rows are ALWAYS '' (the source is shared by all lanes; that is the point
-    -- of the TMS-style model). Non-'' lanes are BCP-47-ish tags chosen by the
-    -- add-a-language flow; the projection treats the value as opaque.
-    target_lang       TEXT NOT NULL DEFAULT '',
     -- AQU-1240: opaque lane this row belongs to (lanes.id). Required.
     -- Writers resolve it from `lanes`; the backfill fills rows that predate that
     -- (migrations 0104–0111 enforce NOT NULL on databases created before this).
     lane_id           TEXT NOT NULL,
     -- AQU-1422: reversible "park this cell" flag (migration 0116). Epoch-ms when
     -- the cell was hidden, NULL when visible. Set by source.cell.visibility.set
-    -- on the SHARED SOURCE ROW ONLY (side='source', target_lang='') — hiding is
+    -- on the SHARED SOURCE ROW ONLY (side='source') — hiding is
     -- per cell, not per lane, so every consumer resolves a cell's visibility
     -- from that one row rather than from its own side. Storing it per row would
     -- strand a target row created AFTER the hide (a collaborator's in-flight
@@ -638,8 +647,8 @@ CREATE TABLE cells (
     hidden_at         BIGINT,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
-    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag:
-    -- '' on source rows (not a lane) and the lane's legacy_tag on target rows.
+    -- Identity is lane_id (AQU-1420). The projection target_lang column was
+    -- dropped in 0155; the lane's legacy tag lives on lanes.legacy_tag.
     PRIMARY KEY (project_id, file_id, cell_id, lane_id)
 );
 
@@ -658,6 +667,16 @@ CREATE INDEX IF NOT EXISTS idx_cells_tombstoned
   ON cells(project_id, file_id)
   WHERE tombstoned_at IS NOT NULL;
 
+-- Target cells still carrying an untouched machine draft (migration 0137).
+-- The org dashboard counts them per lane for callers behind the read wall
+-- (aiDraftedByLane in auth-worker/src/services/org-permissions.ts), and
+-- without this that count read every target cell of every project on the
+-- page. Few rows carry the flag at a time, so the index stays small. The
+-- predicate is spelled out literally in that query and must match it.
+CREATE INDEX IF NOT EXISTS idx_cells_ai_drafted
+  ON cells(project_id, file_id)
+  WHERE side = 'target' AND ai_drafted = 1;
+
 -- AQU-517: compact derived progress. One file row plus one row per meaningful
 -- canonical section; validator_histogram keys are exact endorsement counts,
 -- capped at 15 (the 15 key means 15+).
@@ -668,7 +687,6 @@ CREATE TABLE file_section_progress (
     -- Bible book, the unit the project dashboard plans by.
     scope               TEXT NOT NULL,
     section_key         TEXT NOT NULL DEFAULT '',
-    target_lang         TEXT NOT NULL DEFAULT '',
     lane_id             TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
     total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
     filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
@@ -706,7 +724,7 @@ CREATE TABLE file_section_progress (
     structural_audio_validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
-    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag.
+    -- Identity is lane_id (AQU-1420). Projection target_lang dropped in 0155.
     PRIMARY KEY (project_id, file_id, scope, section_key, lane_id),
     CONSTRAINT file_section_progress_scope_check CHECK (scope IN ('file', 'section', 'book')),
     CONSTRAINT file_section_progress_shape_check CHECK (
@@ -718,7 +736,22 @@ CREATE TABLE file_section_progress (
 );
 
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
-CREATE INDEX idx_file_section_progress_lane_id ON file_section_progress(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
+
+-- AQU-1493: where each line with no verse reference counts on the plan, as last
+-- projected (0145). Written ONLY by the full progress recompute's first
+-- statement (db/shared/plan-keys.ts `planKeysRefreshSql`), which every path
+-- that moves lines or changes a reference or type already runs; read by the
+-- incremental recompute, the chapter card, "Go to first ...", assignments.
+-- One row per unreferenced source cell of a Scripture file.
+CREATE TABLE cell_plan_keys (
+    project_id  TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
+    section_key TEXT NOT NULL,
+    place_ref   TEXT NOT NULL DEFAULT '',
+    depth       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (project_id, file_id, cell_id)
+);
 
 -- AQU-1094/1095: per-unit planning metadata — the target date a manager plans
 -- against and the explicit mark that a unit is finished. section_key is '' for
@@ -758,12 +791,11 @@ CREATE TABLE cell_validators (
     project_id  TEXT NOT NULL,
     file_id     TEXT NOT NULL,
     cell_id     TEXT NOT NULL,
-    target_lang TEXT NOT NULL DEFAULT '',
     lane_id     TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
     event_id    TEXT NOT NULL,
     username    TEXT NOT NULL,
     decided_ts  BIGINT NOT NULL,
-    -- Identity is lane_id (AQU-1420). target_lang stays as the legacy tag.
+    -- Identity is lane_id (AQU-1420). Projection target_lang dropped in 0155.
     PRIMARY KEY (project_id, file_id, cell_id, lane_id, username)
 );
 
@@ -912,6 +944,10 @@ CREATE TABLE cell_backtranslations (
     event_id        TEXT NOT NULL,
     server_seq      BIGINT,
     created_at      BIGINT NOT NULL,
+    -- AQU-1589: lanes.id of this reading. Nullable until the AQU-1616 backfill.
+    -- NULL belongs to the target lane whose legacy_tag is '' — rows written
+    -- before this column. Writers resolve the event's tag, never a lane name.
+    lane_id         TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
 
@@ -1006,11 +1042,9 @@ CREATE TABLE assignments (
     assignee_user_id BIGINT NOT NULL,
     scope_kind       TEXT NOT NULL,
     scope_label      TEXT NOT NULL,
-    -- AQU-538 (§3.5 / migration 0057): target-language lane this assignment is
-    -- pinned to. '' = the default lane (every pre-lane assignment). Not part of
-    -- the PK — assignment_id stays the key; a lane is a property of the unit.
-    target_lang      TEXT NOT NULL DEFAULT '',
-    lane_id          TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
+    -- AQU-1240: lanes.id of the lane this assignment is pinned to.
+    -- assignment_id stays the key; a lane is a property of the unit.
+    lane_id          TEXT NOT NULL,
     cells_total      INTEGER NOT NULL DEFAULT 0,
     deadline         TEXT,
     note             TEXT,
@@ -1025,6 +1059,21 @@ CREATE TABLE assignment_cells (
     file_id       TEXT NOT NULL,
     cell_id       TEXT NOT NULL,
     PRIMARY KEY (assignment_id, file_id, cell_id)
+);
+
+-- AQU-1629 (migration 0147): the RANGE an assignment was given, so a
+-- range-scoped assignment's membership can be re-resolved on every read
+-- instead of being frozen at creation. One row per (assignment, file,
+-- chapter); `chapter = ''` means the whole file. Written by assignment.create
+-- for 'books' and 'chapters' scopes only — an explicit line selection ('cells'
+-- scope, AQU-1628) writes none, because a selection is exactly the lines the
+-- manager picked and must not silently acquire new ones. Readers join
+-- `assignment_member_cells` below, never either table directly.
+CREATE TABLE IF NOT EXISTS assignment_scopes (
+    assignment_id TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    chapter       TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (assignment_id, file_id, chapter)
 );
 
 CREATE TABLE diarization_jobs (
@@ -1085,9 +1134,10 @@ CREATE INDEX assignment_cells_by_assignment ON assignment_cells(assignment_id);
 -- cells?" — that the plan inspector's per-unit read joins by. cell_id rides
 -- along because that join pairs straight onto `cells` on (file_id, cell_id).
 CREATE INDEX assignment_cells_by_file ON assignment_cells(file_id, cell_id);
+-- AQU-1629 (0147): the scope-side twin of the lookup above.
+CREATE INDEX IF NOT EXISTS idx_assignment_scopes_file ON assignment_scopes(file_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
-CREATE INDEX idx_assignments_lane_id ON assignments(project_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE deleted = 0;
 -- AQU-1591 (migration 0135): the lane-scoped form of the index above — the
 -- per-file audio read and the progress audio CTE both filter on the lane now.
@@ -1096,19 +1146,20 @@ CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
 CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
+-- AQU-1589: latest reading per cell within one lane. NULL lane_id stays in the
+-- index so the pre-backfill default-lane read is covered too.
+CREATE INDEX idx_cell_bt_lane ON cell_backtranslations(project_id, file_id, cell_id, lane_id, created_at DESC);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
-CREATE INDEX idx_cell_validators_lane_id ON cell_validators(project_id, file_id, cell_id, lane_id) WHERE lane_id IS NOT NULL;
 -- "Which takes have I validated?" — a per-viewer question the editor asks for a
 -- whole file at once, which the primary key's leading columns cannot answer.
 CREATE INDEX idx_cell_audio_validators_user ON cell_audio_validators(project_id, username);
 CREATE INDEX idx_cell_waivers_file ON cell_waivers(project_id, file_id);
 CREATE INDEX idx_cells_decay_drags ON cells(project_id, endorsement_count);
 CREATE INDEX idx_cells_file_order ON cells(project_id, file_id, side, anchor_cell_id);
--- AQU-1160: backs the cell-page-read chain-cache's bounded page fetch
--- ((side, target_lang, cell_id) tuple lookup) — see 0083_cells_scan_index.sql.
-CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang, cell_id);
--- AQU-1240 slice 7: dual-read prefers lane_id once backfill has populated it.
-CREATE INDEX idx_cells_lane_id ON cells(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
+-- AQU-1611 (0154): the cells page fetch and the progress recompute look up
+-- (project, file, side, lane_id, cell_id). The partial idx_cells_lane_id from
+-- 0098 is redundant with this index and with cells_pkey.
+CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, lane_id, cell_id);
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
 -- AQU-1464: newest target edit in ONE lane across every file, for the archive
 -- confirmation's "last change in this lane" lookup. The two indexes above lead
@@ -1317,12 +1368,27 @@ CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
 -- legacy_tag is the immutable cutover target_lang ('' for default, NULL for
 -- source) that makes rename-safe replay resolve history by tag, never by name.
 -- position / archived_at are additive (display order / soft-archive).
+--
+-- AQU-1592 — identity is "store only what the user typed":
+--   * language  — the freeform language the maintainer typed, never derived.
+--                 What the AI is told and what "same language?" comparisons
+--                 read. Nullable only until the AQU-1616 backfill fills the
+--                 rows that predate 0152 (readers fall back to `name`).
+--   * name      — OPTIONAL display override; NOT unique (the UI disambiguates).
+--                 NULL means "display the language"; the "Source" / "Untitled
+--                 lane" placeholders are derived at read time, never stored.
+--   * lang_code — OPTIONAL BCP 47 override of the code derived from `language`
+--                 ("Advanced" disclosure). NULL means derive at read time; the
+--                 derived value is never written back.
+-- Readers must go through laneDisplayName / laneLanguageCode
+-- (src/lib/lanes/lane-display.ts) rather than touching these columns directly.
 CREATE TABLE IF NOT EXISTS lanes (
     id          TEXT        NOT NULL,   -- opaque 8-hex, globally unique, app-generated (see src/lib/lanes/lane-id.ts)
     project_id  TEXT        NOT NULL,
     role        TEXT        NOT NULL CHECK (role IN ('source', 'target')),
-    name        TEXT        NOT NULL,
-    lang_code   TEXT,
+    language    TEXT,                   -- 0152: freeform, required for new rows
+    name        TEXT,                   -- 0152: nullable display override
+    lang_code   TEXT,                   -- 0152: nullable BCP 47 override
     legacy_tag  TEXT,
     position    INTEGER     NOT NULL DEFAULT 0,   -- stable display order
     archived_at TIMESTAMPTZ,
@@ -1481,7 +1547,6 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     file_id         TEXT NOT NULL,
     binding_role    TEXT NOT NULL
                       CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
-    target_lang     TEXT NOT NULL DEFAULT '',
     lane_id         TEXT NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
     member_path     TEXT NOT NULL DEFAULT '',
     profile_id      TEXT NOT NULL,
@@ -1492,7 +1557,10 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     recipe          JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path),
+    -- AQU-1611: the lane, not its language tag, is the row's identity.
+    -- 0134 added this unique; 0155 dropped the tag-keyed one with the column.
+    CONSTRAINT artifact_bindings_lane_member_key
+      UNIQUE (artifact_id, file_id, binding_role, lane_id, member_path),
     CONSTRAINT artifact_bindings_artifact_project_fkey
       FOREIGN KEY (artifact_id, project_id)
       REFERENCES artifacts(id, project_id)
@@ -1652,7 +1720,7 @@ CREATE TABLE IF NOT EXISTS integration_item_links (
 -- + optional condensed L1 summary, keyed by endpoint cell UUIDs (never
 -- ordinals). Rows move proposed → approved → archived (superseded) / rejected;
 -- the partial UNIQUE index keeps exactly one approved brief per (project, file,
--- span, target_lang). `human_edited` pins a row a human touched so the agent
+-- span, lane). `human_edited` pins a row a human touched so the agent
 -- channel can never overwrite it; `stale_since`/`stale_reason` are the instant
 -- staleness marker (NULL stale_since = fresh).
 CREATE TABLE IF NOT EXISTS scene_briefs (
@@ -1661,7 +1729,6 @@ CREATE TABLE IF NOT EXISTS scene_briefs (
   file_id text NOT NULL,
   start_cell_id text NOT NULL,      -- endpoint UUIDs, never ordinals
   end_cell_id text NOT NULL,
-  target_lang text NOT NULL DEFAULT '',
   lane_id text NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
   construal text NOT NULL,          -- L2: situation/participants/tenor/moves markdown
   ambiguity_register jsonb NOT NULL DEFAULT '[]',
@@ -1680,7 +1747,7 @@ CREATE TABLE IF NOT EXISTS scene_briefs (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS scene_briefs_live
-  ON scene_briefs(project_id, file_id, start_cell_id, end_cell_id, target_lang)
+  ON scene_briefs(project_id, file_id, start_cell_id, end_cell_id, lane_id)
   WHERE status='approved';
 CREATE INDEX IF NOT EXISTS scene_briefs_lookup
   ON scene_briefs(project_id, file_id, start_cell_id);
@@ -1724,13 +1791,12 @@ CREATE INDEX IF NOT EXISTS file_segmentation_project
 -- steering inbox (consumed, never deleted). contextual_drafts: staged span
 -- drafts awaiting review (v1 deviation: NOT the changesets table); a
 -- re-propose supersedes the old proposed row in the same batch. Each
--- proposal carries target_lang so sibling language lanes keep independent
+-- proposal carries lane_id so sibling language lanes keep independent
 -- review queues.
 CREATE TABLE IF NOT EXISTS contextual_runs (
   id text PRIMARY KEY,                  -- uuidv7 (time-ordered; client store compares lexicographically)
   project_id text NOT NULL,
   file_id text NOT NULL,
-  target_lang text NOT NULL DEFAULT '', -- lane ('' = the file's single target language)
   lane_id text NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
   status text NOT NULL DEFAULT 'running'
     CHECK (status IN ('running','pausing','paused','parked','waiting','done','failed','terminated')),
@@ -1768,7 +1834,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
 -- One ACTIVE run per (project, file, lane). Partial UNIQUE both serves the
 -- pill's hydrate lookup and enforces createRun's refuse-double-active.
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_runs_active
-  ON contextual_runs(project_id, file_id, target_lang)
+  ON contextual_runs(project_id, file_id, lane_id)
   WHERE status IN ('running','pausing','paused','parked','waiting');
 -- Stranded-run sweeper: 'running' with a quiet heartbeat (dead driver) or
 -- 'parked' with spans still on the cursor (loop hit its wave cap).
@@ -1781,7 +1847,7 @@ CREATE INDEX IF NOT EXISTS contextual_runs_scope_group
 CREATE INDEX IF NOT EXISTS contextual_runs_project_time
   ON contextual_runs(project_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time
-  ON contextual_runs(project_id, file_id, target_lang, created_at DESC, id DESC);
+  ON contextual_runs(project_id, file_id, lane_id, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS contextual_steering (
   id text PRIMARY KEY,                  -- uuidv7
@@ -1803,7 +1869,6 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   project_id text NOT NULL,
   file_id text NOT NULL,
   cell_id text NOT NULL,
-  target_lang text NOT NULL DEFAULT '', -- lane ('' = project default); copied from the owning run
   lane_id text NOT NULL, -- AQU-1240: lanes.id; see cells.lane_id
   scene_brief_id text,
   text text NOT NULL,
@@ -1819,7 +1884,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
 -- first (same batch) so this index never conflicts. Sibling languages on the
 -- same cell keep independent review queues (0075).
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_drafts_live
-  ON contextual_drafts(project_id, file_id, cell_id, target_lang)
+  ON contextual_drafts(project_id, file_id, cell_id, lane_id)
   WHERE status = 'proposed';
 CREATE INDEX IF NOT EXISTS contextual_drafts_run
   ON contextual_drafts(run_id, status);
@@ -2199,7 +2264,7 @@ CREATE TABLE IF NOT EXISTS workspace_plan_entitlements (
   CHECK ((scope = 'team') = (offer IN ('team', 'team_20x')))
 );
 
--- AQU-837: sandbox rehearsal only. One unresolved checkout per workspace.
+-- AQU-1491: sandbox or live identity, with one unresolved checkout per workspace.
 -- Never delete/reuse an attempt to recover an ambiguous Stripe response.
 CREATE TABLE IF NOT EXISTS workspace_checkout_attempts (
   id TEXT PRIMARY KEY,
@@ -2218,7 +2283,7 @@ CREATE TABLE IF NOT EXISTS workspace_checkout_attempts (
   CONSTRAINT workspace_checkout_resolution_check
     CHECK ((resolved_at IS NULL AND resolution IS NULL)
       OR (resolved_at IS NOT NULL AND resolution IS NOT NULL AND resolution = 'expired')),
-  sandbox BOOLEAN NOT NULL DEFAULT TRUE CHECK (sandbox = TRUE)
+  sandbox BOOLEAN NOT NULL DEFAULT TRUE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS workspace_checkout_pending_org
   ON workspace_checkout_attempts (org_id) WHERE resolved_at IS NULL;
@@ -2344,6 +2409,8 @@ ALTER TABLE artifact_bindings     ADD CONSTRAINT artifact_bindings_lane_id_fkey 
 ALTER TABLE scene_briefs          ADD CONSTRAINT scene_briefs_lane_id_fkey          FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE contextual_runs       ADD CONSTRAINT contextual_runs_lane_id_fkey       FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE contextual_drafts     ADD CONSTRAINT contextual_drafts_lane_id_fkey     FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
+-- AQU-1589: nullable until AQU-1616. Enforced on new writes; a NULL member is exempt.
+ALTER TABLE cell_backtranslations ADD CONSTRAINT cell_backtranslations_lane_id_fkey FOREIGN KEY (project_id, lane_id) REFERENCES lanes (project_id, id);
 ALTER TABLE project_member_lane_roles ADD CONSTRAINT project_member_lane_roles_lane_fkey FOREIGN KEY (project_id, lane) REFERENCES lanes (project_id, id);
 
 -- AQU-1352 P1 (migration 0119): one read shape for every org/project grant.
@@ -2382,3 +2449,169 @@ CREATE OR REPLACE VIEW access_grants WITH (security_invoker = true) AS
          gm.added_by::BIGINT, gm.added_at
     FROM group_members gm
    WHERE gm.role_level IS NOT NULL;
+
+-- Smart edits: the project's edit memory (0130_smart_edits.sql).
+CREATE TABLE IF NOT EXISTS smart_edit_observations (
+  project_id text NOT NULL,
+  id text NOT NULL,
+  lane text NOT NULL,                  -- payload targetLang ('' = default lane)
+  file_id text NOT NULL,
+  cell_id text NOT NULL,
+  after_event_id text NOT NULL,
+  before_event_id text NOT NULL,
+  author text NOT NULL,
+  ts bigint NOT NULL,                  -- after event server_ts
+  before_origin text NOT NULL CHECK (before_origin IN ('human', 'ai', 'machine')),
+  bulk_key text,                       -- replace-all: counted once, not per cell
+  old text NOT NULL,
+  old_norm text NOT NULL,
+  new text NOT NULL,
+  new_norm text NOT NULL,
+  left_ctx text NOT NULL,              -- JSON array of normalized tokens
+  right_ctx text NOT NULL,             -- JSON array of normalized tokens
+  source_norms text NOT NULL,          -- JSON array of normalized source tokens
+  source_text text NOT NULL,
+  before_text text NOT NULL,
+  after_text text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (project_id, id)
+);
+CREATE INDEX IF NOT EXISTS smart_edit_observations_old
+  ON smart_edit_observations(project_id, lane, old_norm);
+
+CREATE TABLE IF NOT EXISTS smart_edit_state (
+  project_id text PRIMARY KEY,
+  -- Events with server_ts <= this have been mined. Always <= now - the settle
+  -- window, so a commit still being typed is never mined half-finished.
+  mined_through bigint NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE IF NOT EXISTS smart_edit_feedback (
+  id text PRIMARY KEY,
+  project_id text NOT NULL,
+  lane text NOT NULL,
+  user_id text NOT NULL,
+  file_id text NOT NULL,
+  cell_id text NOT NULL,
+  old_norm text NOT NULL,
+  new_norm text NOT NULL,
+  action text NOT NULL CHECK (action IN ('accept', 'dismiss')),
+  tier text NOT NULL CHECK (tier IN ('memory', 'jev', 'llm')),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS smart_edit_feedback_old
+  ON smart_edit_feedback(project_id, lane, old_norm);
+
+-- Migration 0146 (AQU-1656): AI intervention audit trail. One row per cell per
+-- model call; the prompt + raw output live in R2 at `trace_key`. `id` is also
+-- written into the committed draft's `ai_draft.interventionId`.
+CREATE TABLE IF NOT EXISTS ai_interventions (
+  id text PRIMARY KEY,
+  project_id text NOT NULL,
+  call_id text NOT NULL,
+  lane text NOT NULL DEFAULT '',
+  file_id text NOT NULL,
+  cell_id text NOT NULL,
+  kind text NOT NULL CHECK (kind IN ('draft', 'smart_edit', 'harmonize')),
+  mode text NOT NULL,
+  outcome text NOT NULL DEFAULT 'applied',
+  model text NOT NULL,
+  provider text NOT NULL,
+  based_on_event_id text,
+  output text NOT NULL,
+  example_cell_ids text NOT NULL DEFAULT '[]',
+  scores text,
+  trace_key text,
+  user_id text NOT NULL,
+  created_at bigint NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ai_interventions_cell_idx
+  ON ai_interventions (project_id, cell_id, created_at DESC);
+
+-- AQU-1629 (migration 0147): an assignment's live cell membership — what every
+-- assignment reader joins instead of `assignment_cells`.
+--
+-- A range scope ('books' / 'chapters') is re-resolved against the live `cells`
+-- projection on every read — a chapter by the plan board's own chapter key
+-- (AQU-1493), the rule assignment.create resolves with — so a line added to an assigned file or chapter
+-- joins the assignment instead of leaving the assignee's progress reading done
+-- over a chapter that still has open work. An explicit line selection keeps the
+-- frozen list.
+--
+-- It carries the source cell's grouping columns (canonical_ref / start_ms /
+-- type, the inputs to db/shared/plan-keys.ts) so a reader that needs them joins
+-- `cells` once through the view instead of twice. Measured: that holds the
+-- progress counts at parity with reading `assignment_cells` directly and the
+-- plan inspector's two reads to about 2x with no sequential scan, where an
+-- id-only view cost 5x and one.
+CREATE OR REPLACE VIEW assignment_member_cells WITH (security_invoker = true) AS
+  -- An explicit line selection ('cells' scope, AQU-1628), and any assignment
+  -- 0147's backfill could not reach: the frozen snapshot. Intersected with live
+  -- source cells HERE rather than in each reader, which is where AQU-1068 put
+  -- it — so a cell removed from the file still drops out, and no reader has to
+  -- remember to do it.
+  SELECT a.project_id, ac.assignment_id, c.file_id, c.cell_id,
+         c.canonical_ref, c.start_ms, c.type
+    FROM assignment_cells ac
+    JOIN assignments a ON a.assignment_id = ac.assignment_id
+    JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+                AND c.cell_id = ac.cell_id AND c.side = 'source'
+   WHERE NOT EXISTS (
+     SELECT 1 FROM assignment_scopes s WHERE s.assignment_id = ac.assignment_id
+   )
+  UNION ALL
+  -- A range scope ('books' / 'chapters'), resolved live on every read.
+  SELECT a.project_id, s.assignment_id, c.file_id, c.cell_id,
+         c.canonical_ref, c.start_ms, c.type
+    FROM assignment_scopes s
+    JOIN assignments a ON a.assignment_id = s.assignment_id
+    JOIN cells c ON c.project_id = a.project_id AND c.file_id = s.file_id
+                AND c.side = 'source'
+    -- AQU-1493: where a line with no reference is counted on the plan, as the
+    -- full progress recompute last stored it (cell_plan_keys, 0145). No row
+    -- for a referenced line, nor for an unreferenced one no recompute has
+    -- placed yet.
+    LEFT JOIN cell_plan_keys ik ON ik.project_id = c.project_id AND ik.file_id = c.file_id
+                               AND ik.cell_id = c.cell_id
+   WHERE (
+     s.chapter = ''
+     -- A chapter scope takes the cells the plan board counts in that chapter,
+     -- by the board's own key — the same rule assignment.create resolves the
+     -- snapshot with (AQU-1493), so a heading, or a line added with no
+     -- reference, is in the chapter the board shows it in rather than left
+     -- out. This is `unitSectionKeyExpr` from db/shared/plan-keys.ts written
+     -- out, and it must stay identical to it: a cell's chapter from its own
+     -- reference ("GEN 1" from "GEN 1:1"), else the stored placement, else
+     -- the key sectionKeyExpr gives it (a media cell's time bucket, or '').
+     -- Equality on the key keeps "GEN 1" out of "GEN 11" without a LIKE
+     -- anchor, and a line with no reference and no placement ('') matches no
+     -- chapter — it is still in a whole-file scope.
+     OR COALESCE(
+          NULLIF(TRIM(SPLIT_PART(COALESCE(c.canonical_ref, ''), ':', 1)), ''),
+          ik.section_key,
+          CASE
+            WHEN TRIM(SPLIT_PART(COALESCE(c.canonical_ref, ''), ':', 1)) <> ''
+              THEN TRIM(SPLIT_PART(COALESCE(c.canonical_ref, ''), ':', 1))
+            WHEN c.start_ms IS NOT NULL
+              THEN 't:' || LPAD(((c.start_ms / 300000) * 300000)::text, 12, '0')
+            ELSE ''
+          END
+        ) = s.chapter
+   )
+   -- Each cell appears once. A cell has exactly one chapter key, so two named
+   -- chapters cannot both match it, and the PK makes a (file, chapter) pair
+   -- unique — so the only way to double-count is a whole-file row sitting
+   -- beside a chapter row for the same file. The whole-file row wins; the
+   -- chapter rows it covers drop out. The write path never mixes the two, and
+   -- this keeps the view right if anything ever does.
+   AND (s.chapter = '' OR NOT EXISTS (
+     SELECT 1 FROM assignment_scopes w
+      WHERE w.assignment_id = s.assignment_id AND w.file_id = s.file_id
+        AND w.chapter = ''
+   ));
+
+-- AQU-1491: runtime grants, distinct from legacy word/credit allowances.
+ALTER TABLE org_billing ADD COLUMN weekly_allowance BIGINT
+  CHECK (weekly_allowance >= 0 AND weekly_allowance <= 10000000);

@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { getUnitAssignments, resolveTargetLaneId } from "../services/assignments"
 import type { Env } from "../types"
+import { planKeysRefreshSql } from "../../../db/shared/plan-keys"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const testEnv = env as unknown as Env
@@ -27,6 +28,15 @@ async function laneIdFor(tag: string): Promise<string> {
   // progress assertion below into a zero that looks like a product bug.
   if (id === "") throw new Error(`no target lane for tag '${tag}' in project pa`)
   return id
+}
+
+/**
+ * AQU-1493: store where each line with no reference counts, as the full
+ * progress recompute does for every projected file (`cell_plan_keys`). The
+ * readers under test join those rows rather than walking the chain.
+ */
+async function storePlanKeys(fileId: string): Promise<void> {
+  await testEnv.AQUILLA_PG.prepare(planKeysRefreshSql()).bind("pa", fileId, "pa", fileId).run()
 }
 
 // Org 1: wendi (owner 700), anna + bob (contributors 400), outsider (nobody).
@@ -85,12 +95,7 @@ async function seedUnit(): Promise<void> {
       ('pa','f1','x2','source','s','e-pa',1,'EXO 1:2')`,
   ).run()
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, endorsement_count, validated) VALUES
-      ('pa','f1','g1','target','',  'draft','e-pa',1,1,1),
-      ('pa','f1','g2','target','',  'draft','e-pa',1,0,0),
-      ('pa','f1','x1','target','',  'draft','e-pa',1,0,0),
-      ('pa','f1','g1','target','es','borrador','e-pa',1,1,1),
-      ('pa','f1','g2','target','es','borrador','e-pa',1,1,1)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, endorsement_count, validated, lane_id) VALUES ('pa', 'f1', 'g1', 'target', 'draft', 'e-pa', 1, 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'g2', 'target', 'draft', 'e-pa', 1, 0, 0, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'x1', 'target', 'draft', 'e-pa', 1, 0, 0, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'g1', 'target', 'borrador', 'e-pa', 1, 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', 'es'))), ('pa', 'f1', 'g2', 'target', 'borrador', 'e-pa', 1, 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', 'es')))`,
   ).run()
 
   await env.AQUILLA_PG.prepare(
@@ -102,11 +107,7 @@ async function seedUnit(): Promise<void> {
   ).run()
 
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES
-      ('as-anna',      'pa', 2, 'books', 'Genesis', '', 3, '2026-10-01', 1, 1000, NULL, NULL),
-      ('as-bob',       'pa', 3, 'books', 'Exodus',  '', 2, NULL,         1, 1100, NULL, NULL),
-      ('as-anna-old',  'pa', 2, 'books', 'Genesis', '', 1, NULL,         1,  900, 1500, NULL),
-      ('as-cara-done', 'pa', 4, 'books', 'Genesis', '', 1, NULL,         1,  950, NULL, 1600)`,
+    `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES ('as-anna', 'pa', 2, 'books', 'Genesis', 3, '2026-10-01', 1, 1000, NULL, NULL), ('as-bob', 'pa', 3, 'books', 'Exodus', 2, NULL, 1, 1100, NULL, NULL), ('as-anna-old', 'pa', 2, 'books', 'Genesis', 1, NULL, 1, 900, 1500, NULL), ('as-cara-done', 'pa', 4, 'books', 'Genesis', 1, NULL, 1, 950, NULL, 1600)`,
   ).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
@@ -401,6 +402,74 @@ describe("per-chapter coverage on a unit's assignments", () => {
     const byId = new Map(rows.map((r) => [r.assignmentId, r]))
     expect(byId.get("as-anna")!.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2"])
     expect(byId.get("as-bob")!.chapters.map((c) => c.key)).toEqual(["EXO 1"])
+  })
+})
+
+describe("lines added with no reference (AQU-1493)", () => {
+  // The projection counts a line with no canonical_ref in the chapter (and so
+  // the book) of the line above it — the anchor chain, the editor's order. A
+  // person assigned that line has to have it counted here too, under the same
+  // bar.
+  async function seedAddedLines(): Promise<void> {
+    await seedUnit()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO files (id, project_id, name, event_id) VALUES ('f2', 'pa', 'genesis.usfm', 'e-pa')",
+    ).run()
+    // f2: GEN 1:1, then a line added below it. f1 (GEN + EXO): a line added
+    // below EXO 1:1.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id) VALUES
+        ('pa','f2','h1','source','s','e-pa',1,'GEN 1:1',NULL),
+        ('pa','f2','h2','source','s','e-pa',1,NULL,'h1'),
+        ('pa','f1','n1','source','s','e-pa',1,NULL,'x1')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, created_by, created_at, unassigned_at, completed_at) VALUES ('as-gen-only', 'pa', 2, 'cells', 'Genesis', 2, NULL, 1, 2000, NULL, NULL), ('as-added-exo', 'pa', 3, 'cells', 'added', 1, NULL, 1, 2100, NULL, NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
+        ('as-gen-only','f2','h1'), ('as-gen-only','f2','h2'),
+        ('as-added-exo','f1','n1')`,
+    ).run()
+    await storePlanKeys("f1")
+    await storePlanKeys("f2")
+  }
+
+  it("counts the added line toward the book of the line above it", async () => {
+    await seedAddedLines()
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f2", "GEN", await laneIdFor(""))
+    expect(anna.assignmentId).toBe("as-gen-only")
+    expect(anna.cellsTotal).toBe(2)
+    // …and in that line's chapter, so the panel can name it.
+    expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2]])
+  })
+
+  it("counts a chapter's opening heading in that chapter, not the one above", async () => {
+    // A heading with no reference counts with the verse BELOW it — the one it
+    // introduces — so anna's GEN 2 holds "The Seventh Day" and 2:1.
+    await seedUnit()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, anchor_cell_id, type) VALUES
+        ('pa','f1','hg2','source','s','e-pa',1,NULL,'g2','heading')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE cells SET anchor_cell_id = 'hg2' WHERE project_id = 'pa' AND file_id = 'f1' AND cell_id = 'g3' AND side = 'source'",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna','f1','hg2')",
+    ).run()
+    await storePlanKeys("f1")
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
+    expect(anna.assignmentId).toBe("as-anna")
+    expect(anna.chapters.map((c) => [c.key, c.total])).toEqual([["GEN 1", 2], ["GEN 2", 2]])
+  })
+
+  it("follows the line above in a file of several books", async () => {
+    await seedAddedLines()
+    const exo = await getUnitAssignments(testEnv, "pa", "f1", "EXO", await laneIdFor(""))
+    expect(exo.map((r) => r.assignmentId)).toContain("as-added-exo")
+    const gen = await getUnitAssignments(testEnv, "pa", "f1", "GEN", await laneIdFor(""))
+    expect(gen.map((r) => r.assignmentId)).not.toContain("as-added-exo")
   })
 })
 

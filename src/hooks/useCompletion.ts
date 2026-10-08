@@ -5,7 +5,7 @@
 // Tab/Esc accept/reject step. The streaming preview is shown only while
 // generating.
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useRef } from "react"
 
 /** AQU-1025: examples/previews/errors/completing are per (cell, lane). The
  *  source cell id is shared across lanes, so a cell-id-only map kept showing
@@ -71,12 +71,15 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { mergeInRunDraftContext, gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import type { ModelCallRecord, RecordModelCall } from "@/lib/ai-interventions/client"
 import { measureTranslationEvidence, type TranslationEvidenceSnapshot } from "@/lib/completion/translate-as-read"
 import {
   idmlCompletionPromptSource,
   idmlCompletionSystemAddendum,
   normalizeProtectedCompletionWithRepair,
 } from "@/lib/idml/completion"
+import { alignIdmlStyles, cellCanAlignStyles } from "@/lib/idml/align-styles"
+import { t } from "@/lib/i18n/standalone"
 
 // Cap per LLM call. Above this we split into independent review packages.
 // Tuned for typical context windows; revisit if real selections start brushing
@@ -107,6 +110,9 @@ function toGroupingCell(cell: CellData): GroupingCell {
 // temperature (unless the project is already hotter) so the new candidate
 // differs. Scoped to regenerate only — first-draft generation is unchanged.
 const REGENERATE_TEMPERATURE = 0.8
+
+/** How long a focus-time few-shot prefetch stays usable by a draft (AQU-617). */
+const EVIDENCE_PREFETCH_TTL_MS = 30_000
 
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
@@ -238,6 +244,9 @@ export function useCompletion(
   /** Style-rule instructions in force for one cell, resolved from the
    *  applicability graph (AQU-934). Omitted → no style block is injected. */
   styleInstructionsFor?: (cell: CellData) => string[],
+  /** AQU-1656: audit trail for each model call that committed a draft.
+   *  Fire-and-forget — never awaited, never fails a draft. */
+  recordModelCall?: RecordModelCall,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -286,9 +295,32 @@ export function useCompletion(
     () => typeof allCells === "function" ? allCells() : allCells ?? [],
     [allCells],
   )
-  const prepareSingleEvidence = useCallback(async (cell: CellData): Promise<PreparedSingleEvidence> => {
+  // AQU-617: few-shot retrieval is the one round trip a sparkle pays before
+  // generation can start. The editor starts it when a cell is focused; a draft
+  // of the same cell, source and lane soon after reuses that in-flight result
+  // once, so a regenerate still retrieves fresh.
+  const prefetchedSearch = useRef<{ key: string; search: SearchFn; at: number; result: Promise<ScoredPair[]> } | null>(null)
+  const searchKey = useCallback((cell: CellData) => {
     const sourceText = effectiveSourceText(cell)
     const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
+    return { sourceText, topK, key: `${cell.id}\u0000${topK}\u0000${sourceText}` }
+  }, [effectiveSettings.top_k])
+  const prefetchSingleEvidence = useCallback((cell: CellData) => {
+    const { sourceText, topK, key } = searchKey(cell)
+    const held = prefetchedSearch.current
+    if (held && held.key === key && held.search === search && Date.now() - held.at < EVIDENCE_PREFETCH_TTL_MS) return
+    const result = search(sourceText, topK, cell.id)
+    result.catch(() => {}) // a failure surfaces when a draft consumes it
+    prefetchedSearch.current = { key, search, at: Date.now(), result }
+  }, [search, searchKey])
+
+  const prepareSingleEvidence = useCallback(async (cell: CellData): Promise<PreparedSingleEvidence> => {
+    const { sourceText, topK, key } = searchKey(cell)
+    const held = prefetchedSearch.current
+    const prefetched = held && held.key === key && held.search === search && Date.now() - held.at < EVIDENCE_PREFETCH_TTL_MS
+      ? held.result
+      : null
+    if (prefetched) prefetchedSearch.current = null
     let found: ScoredPair[] = []
     try {
       // AQU-153: branching search ranks SOURCE cells, so an untranslated cell
@@ -296,7 +328,7 @@ export function useCompletion(
       // retrieval boundary, so the evidence panel's count and the prompt pool
       // both mean "real source→target pairs" rather than trusting whatever
       // filter the retriever was asked for.
-      found = retainTranslationPairs(await search(sourceText, topK, cell.id))
+      found = retainTranslationPairs(await (prefetched ?? search(sourceText, topK, cell.id)))
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -319,24 +351,30 @@ export function useCompletion(
       precedingContext,
       snapshot: measureTranslationEvidence(sourceText, approvedExamples),
     }
-  }, [draftContext.precedingTargetCells, effectiveSettings.top_k, getAllCells, search])
+  }, [draftContext.precedingTargetCells, getAllCells, search, searchKey])
 
   const draftProvenance = useCallback((
     mode: AiDraftProvenance["mode"],
-    exampleIds: string[],
-    approvedExampleCount: number,
+    approvedExamples: readonly ValidatedPair[],
     evidence?: TranslationEvidenceSnapshot,
+    interventionId?: string,
   ): AiDraftProvenance => ({
+    ...(interventionId ? { interventionId } : {}),
     model: modelName,
     provider,
     promptVersion: `${PROMPT_VERSION}:${promptFingerprint(effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}`,
-    exampleIds,
+    exampleIds: uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
+    exampleTexts: approvedExamples.map((example, index) => ({
+      cellId: example.cellId ?? `example-${index}`,
+      source: example.source,
+      target: example.target,
+    })),
     generatedAt: Date.now(),
     mode,
     projectState: {
       sourceLanguage,
       targetLanguage,
-      approvedExampleCount,
+      approvedExampleCount: approvedExamples.length,
       ...(evidence ? {
         evidenceCoverage: evidence.coverage,
         evidenceWeight: evidence.weight,
@@ -502,17 +540,33 @@ export function useCompletion(
         setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
         return false
       }
+      const mode = opts?.mode ?? "single"
+      const exampleIds = uniqueExampleIds(approvedExamples.map((example) => example.cellId))
+      const interventionId = crypto.randomUUID()
+      const committedText = completed.valueHtml ?? completed.value
       await commitCompletedCell?.(
         cell,
-        completed.valueHtml ?? completed.value,
+        committedText,
         llmAuthor,
-        draftProvenance(
-          opts?.mode ?? "single",
-          uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
-          approvedExamples.length,
-          evidence.snapshot,
-        ),
+        draftProvenance(mode, approvedExamples, evidence.snapshot, interventionId),
       )
+      recordModelCall?.({
+        callId: interventionId,
+        kind: "draft",
+        mode,
+        model: modelName,
+        provider,
+        messages,
+        rawOutput: result,
+        cells: [{
+          interventionId,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          basedOnEventId: cell.targetEventId ?? null,
+          output: committedText,
+          exampleCellIds: exampleIds,
+        }],
+      })
       setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
       setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
       return true
@@ -533,7 +587,104 @@ export function useCompletion(
       setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
+
+  // Move an existing translation into the source cell's style runs. The model
+  // does not rewrite the words; a placement that would change them is refused.
+  const alignCellStyles = useCallback(async (
+    cell: CellData,
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    if (!isConfigured || !isAvailable) return false
+    setErrors((p) => {
+      if (!p.has(lk(cell.id))) return p
+      const next = new Map(p)
+      next.delete(lk(cell.id))
+      return next
+    })
+    if (!cellCanAlignStyles(cell)) {
+      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+      setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnavailable")))
+      return false
+    }
+    setCompleting((p) => new Map(p).set(lk(cell.id), "aligning"))
+    try {
+      // AQU-1656: kept for the AI intervention trail, like every other draft.
+      let sentMessages: ModelCallRecord["messages"] = []
+      let rawOutput = ""
+      const aligned = await alignIdmlStyles(cell, async (messages) => {
+        sentMessages = messages
+        rawOutput = await complete({
+          settings: { ...effectiveSettings, temperature: 0 },
+          session,
+          messages: [...messages],
+          stream: false,
+          signal,
+        })
+        return rawOutput
+      })
+      if (!aligned.changed) {
+        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnchanged")))
+        return false
+      }
+      posthog.capture("ai styles aligned", {
+        provider,
+        model: modelName,
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+      })
+      const interventionId = crypto.randomUUID()
+      const committedText = aligned.completion.valueHtml ?? aligned.completion.value
+      await commitCompletedCell?.(
+        cell,
+        committedText,
+        modelName,
+        {
+          interventionId,
+          model: modelName,
+          provider,
+          promptVersion: "align-styles-v1",
+          exampleIds: [],
+          generatedAt: Date.now(),
+          mode: "align-styles",
+          projectState: {
+            sourceLanguage,
+            targetLanguage,
+            approvedExampleCount: 0,
+          },
+        },
+      )
+      recordModelCall?.({
+        callId: interventionId,
+        kind: "draft",
+        mode: "align-styles",
+        model: modelName,
+        provider,
+        messages: sentMessages,
+        rawOutput,
+        cells: [{
+          interventionId,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          basedOnEventId: cell.targetEventId ?? null,
+          output: committedText,
+          exampleCellIds: [],
+        }],
+      })
+      setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+      return true
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        return false
+      }
+      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+      setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+      return false
+    }
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -847,8 +998,9 @@ export function useCompletion(
                 author: llmAuthor,
                 provenance: draftProvenance(
                   "batch",
-                  uniqueExampleIds(batchApprovedExamples.map((example) => example.cellId)),
-                  batchApprovedExamples.length,
+                  batchApprovedExamples,
+                  undefined,
+                  crypto.randomUUID(),
                 ),
               })
             } catch (err) {
@@ -946,6 +1098,29 @@ export function useCompletion(
           incrementBatchCompletionFailed(runId, 1)
         }
 
+        // AQU-1656: one trail record per model call, covering only the cells
+        // that actually committed.
+        const recorded = preparedDrafts.filter((_, i) => commitResults[i]?.status === "fulfilled")
+        if (recorded.length > 0) {
+          recordModelCall?.({
+            callId: crypto.randomUUID(),
+            kind: "draft",
+            mode: "batch",
+            model: modelName,
+            provider,
+            messages,
+            rawOutput: result,
+            cells: recorded.map((d) => ({
+              interventionId: d.provenance.interventionId ?? crypto.randomUUID(),
+              fileId: d.cell.fileId,
+              cellId: d.cell.id,
+              basedOnEventId: d.cell.targetEventId ?? null,
+              output: d.text,
+              exampleCellIds: d.provenance.exampleIds,
+            })),
+          })
+        }
+
         // If we broke out of the inner loop due to supersession, stop chunks.
         if (isBatchCompletionCancelled(runId)) break
 
@@ -990,7 +1165,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -1148,6 +1323,8 @@ export function useCompletion(
 
       // 6. Fan out: commit each mapped cell via the EXISTING commitCompletedCell path.
       const llmAuthor = modelName
+      const paragraphExampleIds = uniqueExampleIds(approvedExamples.map((example) => example.cellId))
+      const recordedCells: ModelCallRecord["cells"] = []
       for (const { cellId, text } of mapped) {
         const cell = draftCells.find((c) => c.id === cellId)
         if (!cell) continue
@@ -1175,19 +1352,38 @@ export function useCompletion(
             signal,
           }),
         )
+        const interventionId = crypto.randomUUID()
+        const committedText = completed.valueHtml ?? completed.value
         await commitCompletedCell?.(
           cell,
-          completed.valueHtml ?? completed.value,
+          committedText,
           llmAuthor,
-          draftProvenance(
-            "paragraph",
-            uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
-            approvedExamples.length,
-          ),
+          draftProvenance("paragraph", approvedExamples, undefined, interventionId),
         )
         committedIds.add(cellId)
+        recordedCells.push({
+          interventionId,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          basedOnEventId: cell.targetEventId ?? null,
+          output: committedText,
+          exampleCellIds: paragraphExampleIds,
+        })
         setPreviews((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
+      }
+
+      if (recordedCells.length > 0) {
+        recordModelCall?.({
+          callId: crypto.randomUUID(),
+          kind: "draft",
+          mode: "paragraph",
+          model: modelName,
+          provider,
+          messages,
+          rawOutput: result,
+          cells: recordedCells,
+        })
       }
 
       posthog.capture("ai paragraph translation completed", {
@@ -1224,7 +1420,7 @@ export function useCompletion(
         setErrors((p) => new Map(p).set(lk(c.id), msg))
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the
@@ -1256,5 +1452,5 @@ export function useCompletion(
   const completingForLane = useMemo(() => sliceCompletionLaneMap(completing, lane), [completing, lane])
   const errorsForLane = useMemo(() => sliceCompletionLaneMap(errors, lane), [errors, lane])
 
-  return { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
+  return { completeSingle, alignCellStyles, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
 }

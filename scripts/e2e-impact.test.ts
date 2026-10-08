@@ -47,6 +47,8 @@ describe("changed-file E2E impact selection", () => {
     for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
       "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql", "db/postgres/migrations/0093_workspace_checkout_attempts.sql",
       "db/postgres/migrations/0095_workspace_subscription_state.sql",
+      "db/postgres/migrations/0148_weekly_allowance_overrides.sql",
+      "db/postgres/migrations/0149_live_workspace_checkout.sql",
       "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/transcription.ts", "auth-worker/src/routes/agent.ts", "auth-worker/src/routes/contextual.ts", "db/shared/workspace-access.ts",
       "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
       expect(selectAffectedE2E([file], specs).specs).toContain(
@@ -82,6 +84,22 @@ describe("changed-file E2E impact selection", () => {
   })
   it("runs a changed smoke spec directly", () => {
     expect(selectAffectedE2E([specs[3]], specs).specs).toEqual([specs[3]])
+  })
+
+  it("does not treat the word popover as a feature match", () => {
+    const withPresence = [
+      ...specs,
+      "e2e/specs/collab/member-presence-popover.smoke.spec.ts",
+    ]
+    const selected = selectAffectedE2E(
+      ["src/components/org/AddLanguagePopover.tsx"],
+      withPresence,
+    ).specs
+    expect(selected).not.toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
+    expect(selectAffectedE2E(
+      ["src/components/collab/MemberPresence.tsx"],
+      withPresence,
+    ).specs).toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
   })
 
   it("maps domain code to a sentinel and close filename matches", () => {

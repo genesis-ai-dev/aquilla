@@ -23,14 +23,10 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { summarizeFileSelection } from "@/lib/sync/link-file-selection"
-import type { LinkFileMatch } from "@/lib/sync/link-file-match"
 import type { LinkSourcePreviewFile } from "@/lib/sync/link-source-preview"
+import type { ReplaceMatchState } from "@/hooks/useReplaceFileChoices"
 
-/** AQU-1679: where the comparison of one file pair has got to. */
-export type ReplaceMatchState =
-  | { status: "loading" }
-  | { status: "failed" }
-  | { status: "ready"; match: LinkFileMatch }
+export type { ReplaceMatchState }
 
 export interface UpstreamFileReplaceChoice {
   /** The upstream file ids set to replace the project's own same-named file. */
@@ -133,8 +129,9 @@ export function UpstreamFileChoiceList({
 }
 
 /** AQU-1679: what replacing this file's source will do, in the server's own
- *  numbers — or why it cannot be done. */
-function ReplaceMatchNote({ state }: { state: ReplaceMatchState | undefined }) {
+ *  numbers — or why it cannot be done. Shared with "Choose files"
+ *  (ChooseLinkedFilesDialog), which offers the same option on an existing link. */
+export function ReplaceMatchNote({ state }: { state: ReplaceMatchState | undefined }) {
   const t = useT()
   if (!state || state.status === "loading") {
     return (

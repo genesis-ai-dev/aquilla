@@ -4,11 +4,12 @@
 // human ever reads the proposal — the client's proposal-card lint is for the
 // user; this one is for the agent.
 //
-// Scope: the two project-rule types that judge draft text. Term-regex
-// semantics are mirrored from src/lib/terminology/match.ts (inflectional `*`
-// → \p{L}*, letter-class lookaround word boundaries, case-insensitive
-// Unicode) — keep the two in lockstep. Builtin/algorithmic checks need the
-// full lqa registry and stay client-side for now.
+// Scope: the two project-rule types that judge draft text, evaluated exactly
+// as the editor's checkRule (src/lib/rules/rule-engine.ts) evaluates them, so
+// the agent is told about the violations the person sees and no others
+// (AQU-1705). Both test suites run the shared verdict table in
+// src/lib/rules/__fixtures__/rule-lint-parity.ts. Builtin/algorithmic checks
+// need the full lqa registry and stay client-side for now.
 
 export interface LintRule {
   id: string
@@ -26,8 +27,8 @@ export interface LintRule {
   lane?: string
   enabled: boolean
   check:
-    | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
-    | { type: "target-forbids"; targetPattern: string }
+    | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
+    | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
     | { type: string; [k: string]: unknown }
 }
 
@@ -46,41 +47,72 @@ export interface LintHit {
   message: string
 }
 
-// ── Term regex (mirror of src/lib/terminology/match.ts) ─────────────────────
+// ── Rule patterns (mirror of checkRule in src/lib/rules/rule-engine.ts) ─────
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-const LEAD_BOUNDARY = "(?<!\\p{L})"
-const TRAIL_BOUNDARY = "(?!\\p{L})"
-const WILDCARD = "\\p{L}*"
-
-export function termToRegexSource(term: string): string | null {
-  const trimmed = term.trim()
-  if (!trimmed) return null
-  const hasLeadingStar = trimmed.startsWith("*")
-  const hasTrailingStar = trimmed.endsWith("*")
-  const body = trimmed.split("*").map(escapeRegex).join(WILDCARD)
-  const lead = hasLeadingStar ? "" : LEAD_BOUNDARY
-  const trail = hasTrailingStar ? "" : TRAIL_BOUNDARY
-  return `${lead}${body}${trail}`
-}
-
-function buildTermRegex(term: string): RegExp | null {
-  const src = termToRegexSource(term)
-  if (src === null) return null
+/**
+ * Compile a rule pattern the way the editor does. Patterns are raw regexes:
+ * the rule editor stores regex by default and escapes literal-mode text
+ * itself, and `term:` rules carry the term matcher's output
+ * (src/lib/terminology/compile-core.ts). Flags match the editor: `i` unless
+ * the rule is caseSensitive, and `u` only for `term:` rules, whose \p{L}
+ * classes need it — adding `u` to a user regex can make a valid pattern
+ * invalid.
+ */
+export function compileRulePattern(rule: LintRule, pattern: string): RegExp | null {
+  const caseFlag = rule.check.caseSensitive === true ? "" : "i"
+  const unicodeFlag = rule.id.startsWith("term:") ? "u" : ""
+  // ReDoS guard: this runs in the worker request path. Skip oversized patterns
+  // and the classic nested-quantifier shape `(a+)+` / `(a*)*` / `(a|b+){2,}`.
+  if (!unicodeFlag && (pattern.length > 1000 || /\([^()]*[+*][^()]*\)\s*(?:[+*]|\{\d+,\d*\})/.test(pattern))) {
+    return null
+  }
   try {
-    return new RegExp(src, "iu")
+    return new RegExp(pattern, `g${caseFlag}${unicodeFlag}`)
   } catch {
     return null // malformed user pattern — never break staging over lint
   }
 }
 
-function matches(haystack: string, term: string): boolean {
-  if (!haystack) return false
-  const re = buildTermRegex(term)
-  return re !== null && re.test(haystack)
+/** Instances, counted as the editor counts them: non-empty matches. `re` must
+ *  carry the `g` flag; matchAll works on a copy, so `re` can be reused. */
+export function countMatches(text: string, re: RegExp): number {
+  let n = 0
+  for (const m of text.matchAll(re)) if (m[0].length > 0) n++
+  return n
+}
+
+/** Why a rule fails a draft. Counts are the editor's: non-empty matches. */
+export type RuleViolation =
+  | { type: "target-forbids" }
+  | { type: "source-requires-target"; sourceCount: number; targetCount: number }
+
+/**
+ * Judge one draft against one rule, as the editor's checkRule does. Both
+ * lints decide with this: lintDraft for project rules, and lintTerminology
+ * (contextual/project-context.ts) for the `term:` rules it compiles
+ * (AQU-1711). Null when the rule passes or does not apply.
+ */
+export function ruleViolation(rule: LintRule, sourceText: string, afterText: string): RuleViolation | null {
+  const c = rule.check
+  if (c.type === "target-forbids" && typeof c.targetPattern === "string") {
+    return compileRulePattern(rule, c.targetPattern)?.test(afterText) ? { type: "target-forbids" } : null
+  }
+  if (
+    c.type === "source-requires-target" &&
+    typeof c.sourcePattern === "string" &&
+    typeof c.targetPattern === "string"
+  ) {
+    const sourceRe = compileRulePattern(rule, c.sourcePattern)
+    const targetRe = compileRulePattern(rule, c.targetPattern)
+    const sourceCount = sourceRe ? countMatches(sourceText, sourceRe) : 0
+    if (!targetRe || sourceCount === 0) return null
+    // Like the editor: one rendering per source instance, so too few and
+    // too many are both violations.
+    const targetCount = countMatches(afterText, targetRe)
+    return targetCount === sourceCount ? null : { type: "source-requires-target", sourceCount, targetCount }
+  }
+  // Other rule types (source-target-match, builtin) stay client-side.
+  return null
 }
 
 // ── Rules loading ────────────────────────────────────────────────────────────
@@ -113,32 +145,24 @@ export async function loadLintRules(db: SettingsDb, projectId: string): Promise<
 
 /** Lint one staged draft: after-text against the project's enabled rules. */
 export function lintDraft(rules: LintRule[], sourceText: string, afterText: string): LintHit[] {
-  if (!afterText) return []
+  // Like the editor, rules do not judge an empty translation.
+  if (!afterText.trim()) return []
   const hits: LintHit[] = []
   for (const rule of rules) {
-    const c = rule.check
-    if (c.type === "target-forbids" && typeof c.targetPattern === "string") {
-      if (matches(afterText, c.targetPattern)) {
-        hits.push({
-          ruleId: rule.id,
-          ruleName: rule.name,
-          message: `forbidden in target: "${c.targetPattern}"`,
-        })
-      }
-    } else if (
-      c.type === "source-requires-target" &&
-      typeof c.sourcePattern === "string" &&
-      typeof c.targetPattern === "string"
-    ) {
-      if (matches(sourceText, c.sourcePattern) && !matches(afterText, c.targetPattern)) {
-        hits.push({
-          ruleId: rule.id,
-          ruleName: rule.name,
-          message: `source contains "${c.sourcePattern}" but target is missing "${c.targetPattern}"`,
-        })
-      }
-    }
-    // Other rule types (source-target-match, builtin) stay client-side.
+    const violation = ruleViolation(rule, sourceText, afterText)
+    if (!violation) continue
+    // ruleViolation judged these patterns, so both are strings here.
+    const { sourcePattern, targetPattern } = rule.check as { sourcePattern?: string; targetPattern?: string }
+    hits.push({
+      ruleId: rule.id,
+      ruleName: rule.name,
+      message:
+        violation.type === "target-forbids"
+          ? `forbidden in target: "${targetPattern}"`
+          : violation.targetCount === 0
+            ? `source contains "${sourcePattern}" but target is missing "${targetPattern}"`
+            : `counts don't add up: "${sourcePattern}" ×${violation.sourceCount} in the source, "${targetPattern}" ×${violation.targetCount} in the target`,
+    })
   }
   return hits
 }

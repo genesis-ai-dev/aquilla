@@ -497,7 +497,7 @@ function CommentMessageRow({
               ref={highlightRef}
               data-comment-id={message.id}
               data-focused={lit ? "true" : undefined}
-              className={cn("p-2", lit && "ring-1 ring-inset ring-primary")}
+              className={cn("group/comment p-2", lit && "ring-1 ring-inset ring-primary")}
             />
           }
         >
@@ -527,7 +527,7 @@ function CommentMessageRow({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  className="ms-auto"
+                  className="ms-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/comment:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:aria-expanded:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:data-popup-open:opacity-100"
                   aria-label={t("comments.thread.actionsAria")}
                   onClick={(event) => event.stopPropagation()}
                 />

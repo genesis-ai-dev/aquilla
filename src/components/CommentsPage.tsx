@@ -275,7 +275,7 @@ function CommentThreadCard({
           const canMutate = isOwn && comment.deletedAt == null
           const editing = editingId === comment.commentId
           return (
-            <li key={comment.commentId} className="p-2">
+            <li key={comment.commentId} className="group/comment p-2">
               {index === 0 && (
                 <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                   <CellPlace root={root} place={place} fileMap={fileMap} t={t} />
@@ -311,7 +311,7 @@ function CommentThreadCard({
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          className="ms-auto"
+                          className="ms-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/comment:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:aria-expanded:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:data-popup-open:opacity-100"
                           aria-label={t("comments.thread.actionsAria")}
                         >
                           <MoreHorizontal />

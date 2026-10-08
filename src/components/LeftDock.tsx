@@ -23,6 +23,7 @@ import {
   Files,
   Bot,
   Search,
+  Blocks,
   AudioLines,
   PanelLeftOpen,
 } from "lucide-react"
@@ -51,6 +52,9 @@ export interface LeftDockProps {
   /** Slot rendered when "voices" tab is active. When omitted, the Voices tab
    *  is hidden (e.g. a project without the Audio lens available). */
   voicesPanel?: ReactNode
+  /** Slot rendered when the "tools" tab is active (Aquilla Tools panel
+   *  mounts). Hidden when omitted. */
+  toolsPanel?: ReactNode
   /** Badge on the agent tab (e.g. unread) */
   agentBadge?: number
   /**
@@ -91,6 +95,7 @@ const TAB_META: TabMeta[] = [
   { id: "voices", icon: AudioLines, labelKey: "common.voices" },
   { id: "agent", icon: Bot, labelKey: "nav.dock.agentTab" },
   { id: "search", icon: Search, labelKey: "nav.search" },
+  { id: "tools", icon: Blocks, labelKey: "tools.title" },
 ]
 
 // ---------------------------------------------------------------------------
@@ -187,6 +192,7 @@ export function LeftDock({
   agentPanel,
   searchPanel,
   voicesPanel,
+  toolsPanel,
   agentBadge,
   defaultTab = "files",
   surfaceTab,
@@ -243,6 +249,7 @@ export function LeftDock({
     agent: agentPanel,
     search: searchPanel,
     voices: voicesPanel,
+    tools: toolsPanel,
   }
   // Only surface tabs whose panel slot is provided (Voices is conditional).
   const visibleTabs = TAB_META.filter((t) => panels[t.id] != null)

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { ToolsMountProvider } from "./tools/ToolsMountContext"
 
 /**
  * Route element for **every** `/project/:id/...` workspace surface.
@@ -19,5 +20,7 @@ import type { ReactNode } from "react"
  * belongs in here, keyed on the path — never as a wrapper on one surface.
  */
 export function ProjectWorkspaceRoute({ children }: { children: ReactNode }) {
-  return <>{children}</>
+  // Aquilla Tools (prototype): panel and inline tool mounts read the
+  // project's installed tools from here.
+  return <ToolsMountProvider>{children}</ToolsMountProvider>
 }

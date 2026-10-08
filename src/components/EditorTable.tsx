@@ -23,7 +23,9 @@ import {
   VolumeX,
   Eye,
   EyeOff,
+  Blocks,
 } from "lucide-react"
+import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -5197,6 +5199,8 @@ function EditorRow({
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
   const t = useT()
+  // Aquilla Tools (prototype): inline tool mounts under this cell.
+  const hasInlineTools = useHasInlineTools()
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
   // AQU-1259: the reviewer's opt-in scanning view. AQU-599's inset ring and
   // speech-bubble badge below already say "this row has an open comment" once
@@ -8717,6 +8721,12 @@ function EditorRow({
                   },
                 ]
               : []),
+            ...(hasInlineTools ? [{
+              value: "tools",
+              icon: <Blocks className="h-3 w-3" />,
+              label: t("tools.inline.tab"),
+              renderContent: () => <InlineToolsTab fileId={cell.fileId} cellId={cell.id} />,
+            }] : []),
           ]}
         />
       </div>

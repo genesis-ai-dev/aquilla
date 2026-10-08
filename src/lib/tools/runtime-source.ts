@@ -102,6 +102,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       project: boot.project || null,
       user: boot.user || null,
       mount: boot.mount || "page",
+      cell: boot.cell || null,
     }),
     files: {
       list: function () { return call("files.list"); },

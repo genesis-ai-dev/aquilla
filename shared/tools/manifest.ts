@@ -34,8 +34,10 @@ export function isToolScope(value: unknown): value is ToolScope {
   return typeof value === "string" && (TOOL_SCOPES as readonly string[]).includes(value)
 }
 
-/** Where a tool can be mounted. `page` is always available. */
-export type ToolMount = "page" | "panel"
+/** Where a tool can be mounted. `page` is always available; `panel` is the
+ *  editor's left dock; `inline` is a tab under one cell (the tool gets that
+ *  cell as `aquilla.context.cell`). */
+export type ToolMount = "page" | "panel" | "inline"
 
 export interface ToolManifest {
   name: string
@@ -87,7 +89,7 @@ export function validateManifest(input: unknown): ManifestValidation {
   const rawMounts = Array.isArray(input.mounts) ? input.mounts : ["page"]
   const mounts: ToolMount[] = []
   for (const m of rawMounts) {
-    if (m === "page" || m === "panel") {
+    if (m === "page" || m === "panel" || m === "inline") {
       if (!mounts.includes(m)) mounts.push(m)
     } else {
       errors.push(`unknown mount: ${String(m)}`)

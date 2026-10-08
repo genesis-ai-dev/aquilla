@@ -65,6 +65,12 @@ export const tools = defineNamespace({
     "tools.revert.nothing": "Nothing to revert.",
     "tools.run.loading": "Loading tool…",
     "tools.run.notFound": "This tool was not found.",
+    "tools.dock.empty": "No tools can open here yet. Tools that support the side panel appear in this list.",
+    "tools.dock.manage": "Manage tools",
+    "tools.dock.pick": "Choose a tool",
+    "tools.dock.openFull": "Open full page",
+    "tools.inline.tab": "Tools",
+    "tools.inline.empty": "No installed tool works on a single cell yet.",
   },
   context: {
     _context: {

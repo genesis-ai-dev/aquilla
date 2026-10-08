@@ -315,4 +315,42 @@ describe("CommentThread — author mark and focused reply", () => {
       vi.useRealTimers()
     }
   })
+
+  it("highlights only the thread that holds the linked comment", () => {
+    const elsewhere = makeThread()
+    elsewhere.id = "thread-2"
+    elsewhere.messages = [
+      {
+        id: "thread-2",
+        author: "Alice",
+        authorType: "user",
+        text: "somewhere else",
+        timestamp: new Date("2026-01-01T00:00:00Z").toISOString(),
+      },
+    ]
+    render(
+      <>
+        <CommentThread
+          thread={makeThread()}
+          currentTranslated="Bonjour"
+          onReply={noop}
+          onResolve={noop}
+          onReopen={noop}
+          highlightCommentId="thread-1"
+        />
+        <CommentThread
+          thread={elsewhere}
+          currentTranslated="Bonjour"
+          onReply={noop}
+          onResolve={noop}
+          onReopen={noop}
+          highlightCommentId="thread-1"
+        />
+      </>,
+    )
+    const named = screen.getByText("Is this rendering right?").closest(".rounded-lg")
+    const other = screen.getByText("somewhere else").closest(".rounded-lg")
+    expect(named?.className).toContain("border-primary")
+    expect(other?.className).not.toContain("border-primary")
+  })
 })

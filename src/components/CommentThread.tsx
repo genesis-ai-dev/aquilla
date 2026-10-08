@@ -109,17 +109,21 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isStale = isThreadStale(thread.createdForTranslated, currentTranslated)
   const resolved = thread.status === "resolved"
-  const [expanded, setExpanded] = useState(() => !resolved || highlightCommentId != null)
+  // The drawer hands every thread the same link id. Only the thread that
+  // actually holds that comment should open and recolor.
+  const highlightedHere =
+    highlightCommentId != null && thread.messages.some((message) => message.id === highlightCommentId)
+  const [expanded, setExpanded] = useState(() => !resolved || highlightedHere)
   const wasResolvedRef = useRef(resolved)
   useEffect(() => {
     const becameResolved = !wasResolvedRef.current && thread.status === "resolved"
     wasResolvedRef.current = thread.status === "resolved"
-    if (highlightCommentId) {
+    if (highlightedHere) {
       setExpanded(true)
       return
     }
     if (becameResolved) setExpanded(false)
-  }, [thread.status, highlightCommentId])
+  }, [thread.status, highlightedHere])
   const authors = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(
     [...new Set(thread.messages.map((message) => message.author).filter(Boolean))],
   )
@@ -143,9 +147,9 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
 
   // The ring is a wayfinding flash, not a permanent selection. It leaves
   // after a few seconds; the comment stays where the scroll put it.
-  const [litCommentId, setLitCommentId] = useState<string | null>(highlightCommentId ?? null)
+  const [litCommentId, setLitCommentId] = useState<string | null>(highlightedHere ? highlightCommentId : null)
   useEffect(() => {
-    if (!highlightCommentId) {
+    if (!highlightedHere || !highlightCommentId) {
       setLitCommentId(null)
       return
     }
@@ -154,14 +158,14 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
       setLitCommentId((current) => (current === highlightCommentId ? null : current))
     }, COMMENT_HIGHLIGHT_MS)
     return () => window.clearTimeout(timer)
-  }, [highlightCommentId])
+  }, [highlightCommentId, highlightedHere])
 
   // A link that names one reply has to move that reply into view. Remember
   // the id we already scrolled so a re-render of the same thread does not
   // yank the list back while the reader is looking further down.
   const scrolledIdRef = useRef<string | null>(null)
   useLayoutEffect(() => {
-    if (!highlightCommentId) {
+    if (!highlightedHere) {
       scrolledIdRef.current = null
       return
     }
@@ -169,7 +173,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
     if (!el || scrolledIdRef.current === highlightCommentId) return
     scrolledIdRef.current = highlightCommentId
     scrollCommentIntoView(el)
-  }, [highlightCommentId, thread.messages])
+  }, [highlightCommentId, highlightedHere, thread.messages])
 
   function handleReply() {
     if (!replyText.trim()) return

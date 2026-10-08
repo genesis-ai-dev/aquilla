@@ -157,10 +157,10 @@ test("comments page empty state, filters, search, and resolved surface session",
     await postBtn.click()
     await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
 
-    const resolveBtn = alice.getByRole("button", { name: /^Resolve$/i })
-    await expect(resolveBtn).toBeVisible({ timeout: 5_000 })
-    await resolveBtn.click()
-    await expect(alice.getByRole("button", { name: /Reopen/i })).toBeVisible({
+    const drawer = alice.locator('[data-testid="comments-drawer"]')
+    await drawer.getByRole("button", { name: "Comment actions" }).click()
+    await alice.getByRole("menuitem", { name: "Resolve thread" }).click()
+    await expect(drawer.getByRole("button", { name: /1 resolved comment from/i })).toBeVisible({
       timeout: 5_000,
     })
 
@@ -171,25 +171,24 @@ test("comments page empty state, filters, search, and resolved surface session",
     await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
     await expect(showResolvedSwitch).not.toBeChecked()
 
-    const reopenBtn = alice.getByRole("button", { name: /^Reopen$/i }).first()
+    const summary = alice.getByRole("button", { name: /1 resolved comment from/i })
     await showResolvedSwitch.click()
     await expect(async () => {
       await alice.getByRole("button", { name: /^Refresh$/i }).click()
-      await expect(reopenBtn).toBeVisible({ timeout: 1_000 })
+      await expect(summary).toBeVisible({ timeout: 1_000 })
     }).toPass({ timeout: 15_000 })
 
-    const chevron = reopenBtn.locator("..").getByRole("button").last()
     if (!(await alice.getByText(commentText).isVisible())) {
-      await chevron.click()
+      await summary.click()
     }
     await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
 
     await alice.getByRole("button", { name: /^Filters$/i }).click()
     await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
     await showResolvedSwitch.click()
-    await expect(reopenBtn).not.toBeVisible({ timeout: 5_000 })
+    await expect(summary).not.toBeVisible({ timeout: 5_000 })
 
     await showResolvedSwitch.click()
-    await expect(reopenBtn).toBeVisible({ timeout: 5_000 })
+    await expect(summary).toBeVisible({ timeout: 5_000 })
   })
 })

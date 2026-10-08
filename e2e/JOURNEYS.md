@@ -366,8 +366,9 @@ UI chrome that used to be one smoke file per click is covered under
   wall had walled off. The verdict rule is `src/lib/lanes/grant-gap.test.ts` (all granted /
   gap / deliberate scoping / a grant below Viewer / Maintainer-by-role / wall off); the three
   rendered states, the "no access" marker and the one-click regrant are in
-  `MemberLaneScopeEditor.test.tsx`; the endpoint payload, the lead-only gate and the regrant
-  equalling the current non-archived lane set are in
+  `MemberLaneScopeEditor.test.tsx`; the endpoint payload, the lead-only gate, the regrant
+  granting every target lane (archived included) and a lane created after the regrant still
+  reaching the member (AQU-1781) are in
   `auth-worker/src/__tests__/member-scopes-lane-grants.test.ts`. No smoke: the gap is a
   two-table DISAGREEMENT, so a walk only shows it with the read wall on (`LANE_READ_WALL`,
   unset locally and in e2e) AND two browser contexts whose grants have been made to drift —

@@ -15,11 +15,6 @@
  * no rows. Below Viewer (100) gets none. No lane scopes means today's
  * behavior (every current target lane) and is preserved with one row per
  * lane. A later lane does not pick those rows up.
- *
- * AQU-1783: which lanes "every lane" means is `fanOutLanes` when the caller
- * passes it. A lane SCOPE still resolves against the whole of `lanes`,
- * archived rows included — a member deliberately scoped to a lane that was
- * archived afterwards must keep that grant, not silently lose it.
  */
 
 import type { LaneIdentity } from './read-wall'
@@ -46,25 +41,14 @@ export interface LaneGrantPlan {
 export function planLaneGrants(input: {
   roleLevel: number
   laneScopes: readonly string[]
-  /** Every target lane, archived included — what a lane scope resolves against. */
   lanes: readonly LaneIdentity[]
-  /**
-   * The lanes an UNSCOPED member is granted. Defaults to `lanes`, which is the
-   * backfill's behavior. The scope-save route passes the project's CURRENT
-   * (non-archived) lanes, because "grant all current lanes" must not hand back
-   * a lane the project has retired (AQU-1783).
-   */
-  fanOutLanes?: readonly { id: string }[]
 }): LaneGrantPlan {
   if (input.roleLevel >= MAINTAINER || input.roleLevel < VIEWER) {
     return { grants: [], skipped: [] }
   }
   if (input.laneScopes.length === 0) {
     return {
-      grants: (input.fanOutLanes ?? input.lanes).map((lane) => ({
-        laneId: lane.id,
-        level: input.roleLevel,
-      })),
+      grants: input.lanes.map((lane) => ({ laneId: lane.id, level: input.roleLevel })),
       skipped: [],
     }
   }

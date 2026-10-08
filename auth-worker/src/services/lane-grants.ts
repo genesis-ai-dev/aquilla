@@ -22,7 +22,7 @@
 // nothing to point a grant at, and the AQU-730 backfill fills both tables
 // later.
 
-import { loadCurrentTargetLanes, loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
 
 /**
@@ -42,16 +42,16 @@ export async function syncMemberLaneGrants(
     .bind(projectId, targetUserId)
     .first<{ role_level: number }>()
   if (!membership) return
+  // Every target lane, archived included, and that matters for an unscoped
+  // member: AQU-1781 grants a newly created lane only to someone who already
+  // holds every OTHER lane, archived ones too. Leaving the archived lanes out
+  // here would make the member's next lane silently skip them (AQU-1783).
   const lanes = await loadTargetLaneIdentities(db, projectId)
   if (lanes.length === 0) return
-  // AQU-1783: an unscoped member is granted the project's CURRENT lanes. A
-  // scope still resolves against every lane, archived included, so a member
-  // deliberately scoped to a since-archived lane keeps that grant.
   const plan = planLaneGrants({
     roleLevel: Number(membership.role_level),
     laneScopes: laneIds,
     lanes,
-    fanOutLanes: await loadCurrentTargetLanes(db, projectId),
   })
   await db
     .prepare("DELETE FROM project_member_lane_roles WHERE project_id = ? AND user_id = ?")

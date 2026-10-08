@@ -73,30 +73,4 @@ describe('planLaneGrants', () => {
     })
     expect(plan.grants).toEqual([{ laneId: 'lane-yo', level: 400 }])
   })
-
-  // AQU-1783: "grant all current lanes" must not hand back a retired lane,
-  // but a scope naming one must still resolve, or a deliberate grant is lost.
-  it('fans an unscoped member out over fanOutLanes when given', () => {
-    const plan = planLaneGrants({
-      roleLevel: 400,
-      laneScopes: [],
-      lanes,
-      fanOutLanes: [{ id: 'lane-default' }, { id: 'lane-fr' }],
-    })
-    expect(plan.grants).toEqual([
-      { laneId: 'lane-default', level: 400 },
-      { laneId: 'lane-fr', level: 400 },
-    ])
-  })
-
-  it('still resolves a scope naming a lane that fanOutLanes leaves out', () => {
-    const plan = planLaneGrants({
-      roleLevel: 400,
-      laneScopes: ['yo'],
-      lanes,
-      fanOutLanes: [{ id: 'lane-default' }],
-    })
-    expect(plan.grants).toEqual([{ laneId: 'lane-yo', level: 400 }])
-    expect(plan.skipped).toEqual([])
-  })
 })

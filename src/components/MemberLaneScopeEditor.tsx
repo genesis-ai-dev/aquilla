@@ -199,7 +199,8 @@ export function MemberLaneScopeEditor({
 
   /**
    * AQU-1783: repair a grant gap in one click. An empty lane-scope set is the
-   * write that makes `planLaneGrants` grant every current lane, so this saves
+   * write that makes `planLaneGrants` grant every lane (archived ones too, so
+   * a lane created later still reaches them — AQU-1781), so this saves
    * the member's FILE scopes alone — today's accidental repair, made explicit.
    * Offered for unscoped members only: re-granting a deliberately scoped
    * member would silently widen their access.

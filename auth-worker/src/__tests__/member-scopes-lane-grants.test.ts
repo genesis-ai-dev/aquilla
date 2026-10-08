@@ -13,8 +13,11 @@
 //     `laneAccess` — the project's whole lane set is the sibling-lane leak
 //     AQU-1421 closes.
 //   * A project with no target lane rows keeps the plain `{ scopes }` shape.
-//   * The regrant (an empty lane-scope PUT) leaves the grants EQUAL to the
-//     current non-archived lane set, and the PUT reports them back.
+//   * The regrant (an empty lane-scope PUT) grants every target lane, the
+//     archived one included, and the PUT reports them back. Archived lanes
+//     count because AQU-1781 grants a lane created later only to members who
+//     already hold every other lane — so a lane created after the regrant
+//     still reaches the member.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
@@ -44,7 +47,10 @@ async function seedProject(): Promise<void> {
   ).run()
 }
 
-/** French and Spanish are current; Tagalog is archived and must not appear. */
+/**
+ * French and Spanish are current; Tagalog is archived, so it is never one of
+ * the inspector's target lanes (though an unscoped member still holds it).
+ */
 async function seedLanes(): Promise<void> {
   await env.AQUILLA_PG.prepare(
     `INSERT INTO lanes (id, project_id, role, language, name, legacy_tag, position, archived_at)
@@ -140,7 +146,7 @@ describe("AQU-1783 member-scopes GET — the inspector's grant payload", () => {
 })
 
 describe("AQU-1783 member-scopes PUT — the one-click regrant", () => {
-  it("an empty lane-scope set leaves the grants equal to the current lane set", async () => {
+  it("an empty lane-scope set grants every target lane, the archived one included", async () => {
     await seedLanes()
     // Start from the broken state: one grant, two current lanes.
     await env.AQUILLA_PG.prepare(
@@ -156,14 +162,46 @@ describe("AQU-1783 member-scopes PUT — the one-click regrant", () => {
       env,
     )
     expect(res.status).toBe(200)
-    // Every CURRENT lane is granted. The archived lane is not re-granted.
-    expect(await laneRolesFor(2)).toEqual(["lane-es", "lane-fr"])
+    // Every lane is granted, archived Tagalog too: without it, AQU-1781 would
+    // treat the member as limited and skip them for every lane created later.
+    expect(await laneRolesFor(2)).toEqual(["lane-es", "lane-fr", "lane-tl"])
     // The response carries the refreshed grants, so the inspector's list can
-    // update without a page reload.
+    // update without a page reload. The inspector itself lists current lanes
+    // only, so the archived grant does not show there.
     const body = (await res.json()) as { scopes: unknown[]; laneAccess?: LaneAccess }
-    expect(body.laneAccess?.grants.map((g) => g.laneId).sort()).toEqual(["lane-es", "lane-fr"])
+    expect(body.laneAccess?.grants.map((g) => g.laneId).sort()).toEqual([
+      "lane-es",
+      "lane-fr",
+      "lane-tl",
+    ])
+    expect(body.laneAccess?.targetLanes.map((lane) => lane.id)).toEqual(["lane-fr", "lane-es"])
     // The member's file scope is untouched by the lane regrant.
     expect(body.scopes).toEqual([{ kind: "file", value: "f1" }])
+  })
+
+  it("a lane created after the regrant still reaches the member", async () => {
+    await seedLanes()
+    const regrant = await app.request(
+      "/api/v2/projects/proj-g/members/2/scopes",
+      { method: "PUT", headers: authHeader(await jwtFor("lead")), body: JSON.stringify({ scopes: [] }) },
+      env,
+    )
+    expect(regrant.status).toBe(200)
+    const created = await app.request(
+      "/api/v2/projects/proj-g/lanes",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("owner")),
+        body: JSON.stringify({ name: "", language: "German" }),
+      },
+      env,
+    )
+    expect(created.status).toBe(201)
+    const german = await env.AQUILLA_PG.prepare(
+      "SELECT id FROM lanes WHERE project_id = 'proj-g' AND role = 'target' AND language = 'German'",
+    ).first<{ id: string }>()
+    expect(german).not.toBeNull()
+    expect(await laneRolesFor(2)).toContain(german?.id)
   })
 
   it("a lane-scoped save still grants only that lane", async () => {

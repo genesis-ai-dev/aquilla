@@ -26,7 +26,12 @@ export async function headParentFor(
   const lane = side === "target" && typeof payload.targetLang === "string" ? payload.targetLang : ""
   const r = await t.pg.query<{ event_id: string }>(
     `SELECT event_id FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = $4 AND target_lang = $5`,
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = $4
+        AND lane_id = (
+          SELECT id FROM lanes
+           WHERE project_id = $1 AND role = $4
+             AND legacy_tag IS NOT DISTINCT FROM CASE WHEN $4 = 'source' THEN NULL ELSE $5 END
+        )`,
     [projectId, fileId, cellId, side, lane],
   )
   return r.rows[0]?.event_id ?? null

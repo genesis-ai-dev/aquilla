@@ -3,6 +3,8 @@
 // bare "N failed" pill. The server reason strings are stable and come from:
 //   - sync-worker/src/events/authorize.ts  (enforceScopes): `lane '…' not in
 //     scope for …`, `file '…' not in scope for …`, `role too low for …`
+//   - sync-worker/src/events/route.ts (AQU-1788, downgrade gate): `role
+//     downgraded since token was issued`
 //   - sync-worker/src/events/route.ts (FRO-189): `role too low to validate …`,
 //     `user '…' is not in the project's validator allowlist`,
 //     `self-validation is not allowed on this project`,
@@ -64,6 +66,14 @@ export function forbiddenReasonCopy(reason: string): string {
   }
   if (r.includes("validator allowlist")) {
     return "you weren't on this project's validator allowlist"
+  }
+  // AQU-1788: the downgrade gate's reason is an internal statement about the
+  // TOKEN, not about the member — the flusher now re-mints and retries once,
+  // so the reason that reaches the banner is normally the ordinary role floor
+  // or "membership revoked" instead. This only fires when the retry was
+  // refused on the same grounds, and must still not read as jargon.
+  if (r.includes("role downgraded since token was issued")) {
+    return "your access level changed while you were working, so this change wasn't saved"
   }
   // AQU-1462: a caller who may not know the lane exists. The reason carries
   // no lane name, so this copy must not invent one.

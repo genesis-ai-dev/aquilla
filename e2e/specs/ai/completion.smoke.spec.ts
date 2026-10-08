@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url"
 import { test, expect } from "../../helpers/multi-user"
 import { applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import { jwtFor, openSeededProject, readProjectedCells, seedProjectWithFile } from "../../helpers/seed-project"
@@ -69,7 +70,7 @@ test("Draft all persists one ten-cell model package in one events request", asyn
   test.setTimeout(90_000)
   const seeded = await seedProjectWithFile(await jwtFor("alice"), {
     name: `AI batch ${Date.now()}`,
-    fixturePath: new URL("../../fixtures/ten-cells.md", import.meta.url).pathname,
+    fixturePath: fileURLToPath(new URL("../../fixtures/ten-cells.md", import.meta.url)),
   })
   const ws = await openSeededProject(alice, seeded)
 

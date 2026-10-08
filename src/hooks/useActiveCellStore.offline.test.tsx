@@ -52,6 +52,22 @@ vi.mock("@/lib/offline/offline-reads", () => ({
   },
 }))
 
+let discardSubscribers: Array<(cellId: string, value: string) => void> = []
+
+vi.mock("@/lib/offline/refused-writes", () => ({
+  subscribeToDiscardedOfflineCommits: (
+    _store: unknown,
+    _projectId: string,
+    _fileId: string,
+    onDiscarded: (cellId: string, value: string) => void,
+  ) => {
+    discardSubscribers.push(onDiscarded)
+    return () => {
+      discardSubscribers = discardSubscribers.filter((fn) => fn !== onDiscarded)
+    }
+  },
+}))
+
 import { fetchCellsByIds, fetchCellsDelta, streamFileCells } from "@/lib/sync/cells-read"
 import { useActiveCellStore } from "./useActiveCellStore"
 
@@ -195,5 +211,23 @@ describe("useActiveCellStore (Tauri offline read branch)", () => {
     })
 
     expect(result.current.store.getCellView("c1")?.translated).toBe("predicted")
+  })
+
+  it("drops a discarded refused edit and shows the stored value again", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [row("c1", "source", "src"), row("c1", "target", "old")]
+
+    const { result } = renderStore()
+    await waitFor(() => expect(result.current.store.getCellView("c1")?.translated).toBe("old"))
+
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "refused" }) })
+    expect(result.current.store.getCellView("c1")?.translated).toBe("refused")
+
+    act(() => {
+      for (const fn of discardSubscribers) fn("c1", "refused")
+    })
+
+    await waitFor(() => expect(result.current.store.getCellView("c1")?.translated).toBe("old"))
   })
 })

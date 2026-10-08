@@ -50,6 +50,7 @@ import { Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lu
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 /** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PANEL_MAX_H =
@@ -354,12 +355,10 @@ export function ProjectTable({
   projects,
   now,
   showOrg,
-  defaultLaneLabelByProjectId,
 }: {
   projects: PortfolioProjectRow[]
   now: number
   showOrg: boolean
-  defaultLaneLabelByProjectId?: Map<string, string>
 }) {
   const { t } = useI18n()
   return (
@@ -401,9 +400,9 @@ export function ProjectTable({
         </div>
         <div className="divide-y">
           {projects.map((p) => {
-            const tpct = Math.round(translatedPct(p) * 100)
-            const pct = Math.round(validatedPct(p) * 100)
-            const apct = Math.round(audioPct(p) * 100)
+            const tpct = progressPercentOfFraction(translatedPct(p))
+            const pct = progressPercentOfFraction(validatedPct(p))
+            const apct = progressPercentOfFraction(audioPct(p))
             const dstatus = deadlineStatus(p, now)
             return (
               <Link
@@ -484,7 +483,7 @@ export function ProjectTable({
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p)}
                     maxVisible={2}
                     className="w-full"
                   />
@@ -782,14 +781,6 @@ export function OrgHome() {
   // Hide org-rollup chrome when there is nothing to roll up — a project-only
   // invitee still gets the same projects table, just without fake 0/0/0 stats.
   const showOrgRollup = orgs.length > 0
-  // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
-  // target language. This all-orgs view has no per-file language hints to join,
-  // so the map stays empty — AQU-606: `resolveDefaultLaneLabel` reads the
-  // project-level `targetLanguage` off the row itself, so the chip still shows
-  // the real language and only a genuinely untargeted project falls back to the
-  // neutral placeholder.
-  const defaultLaneLabelByProjectId = new Map<string, string>()
-
   const orgSummaries: OrgPortfolioSummary[] = orgs
     .map((org) => {
       const row = aggregateByOrgId.get(org.id)
@@ -881,8 +872,8 @@ export function OrgHome() {
               <div className={STAT_TILE_GRID}>
                 <StatTile label={t("org.orgHome.organizations")} value={orgs.length} />
                 <StatTile label={t("nav.projects")} value={rollup.projectCount} />
-                <StatTile label={t("org.orgHome.avgTranslated")} value={`${Math.round(avgTranslatedPct * 100)}%`} />
-                <StatTile label={t("org.orgHome.avgValidated")} value={`${Math.round(avgValidatedPct * 100)}%`} />
+                <StatTile label={t("org.orgHome.avgTranslated")} value={`${progressPercentOfFraction(avgTranslatedPct)}%`} />
+                <StatTile label={t("org.orgHome.avgValidated")} value={`${progressPercentOfFraction(avgValidatedPct)}%`} />
                 <StatTile label={t("org.orgHome.stalled")} value={stalledCount} />
                 <StatTile
                   label={t("org.orgHome.overdue")}
@@ -945,7 +936,6 @@ export function OrgHome() {
                         showOrg
                         layout="embedded"
                         testId="project-table"
-                        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
                         initialLens={statusFilter === "attention" ? "attention" : projectLens}
                         searchValue={projectQuery}
                         onSearchChange={setProjectQuery}

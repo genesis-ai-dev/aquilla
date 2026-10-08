@@ -298,6 +298,39 @@ describe('the per-file read honours the lane read wall', () => {
   })
 })
 
+describe('a source clip on a project with no blank target lane (AQU-1594)', () => {
+  beforeEach(async () => {
+    await h.pg.exec(`DELETE FROM lanes WHERE id = '${DEFAULT_LANE}'`)
+  })
+
+  it('lands on the source lane and shows in the tagged lane, including a request for ""', async () => {
+    await attach('programme', { role: 'source' })
+    expect((await takes())[0]).toMatchObject({ lane_id: SRC_LANE, role: 'source' })
+    const tags = await h.pg.query<{ legacy_tag: string | null }>(
+      `SELECT legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target' ORDER BY legacy_tag`,
+      [P],
+    )
+    expect(tags.rows.map((row) => row.legacy_tag)).toEqual(['fr'])
+    expect(visibleIds(await read('fr'))).toEqual(['programme'])
+    expect(visibleIds(await read(''))).toEqual(['programme'])
+    // A reader granted only the tagged lane still hears the clip, even when
+    // they ask for the '' lane this project does not have.
+    expect(visibleIds(await read('fr', [FR_LANE]))).toEqual(['programme'])
+    expect(visibleIds(await read('', [FR_LANE]))).toEqual(['programme'])
+  })
+
+  it('does not mint a blank lane for a dub that names none', async () => {
+    await attach('take-omitted')
+    expect((await takes())[0].lane_id).toBeNull()
+    const tags = await h.pg.query<{ legacy_tag: string | null }>(
+      `SELECT legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target'`,
+      [P],
+    )
+    expect(tags.rows.map((row) => row.legacy_tag)).toEqual(['fr'])
+    expect(visibleIds(await read('fr'))).toEqual([])
+  })
+})
+
 describe('a vote carries the lane of the take it is on', () => {
   it('copies lane_id from cell_audio, not from the voter’s lane', async () => {
     await attach('take-fr', { lane: 'fr' })

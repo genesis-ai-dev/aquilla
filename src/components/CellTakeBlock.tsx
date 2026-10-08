@@ -42,6 +42,8 @@ import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
+import { laneLanguageForTag } from "@/lib/lanes/lane-language"
+import { laneLanguage } from "@/lib/lanes/lane-display"
 import { remapTranscriptTimings } from "@/lib/audio/correct-transcript"
 import { learnFromTranscriptCorrection } from "@/lib/store/transcript-corrections-store"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
@@ -214,7 +216,14 @@ function CellTakeBlockView({
     if (!selectedAudioId) return
     // The ASR language follows the AUDIO, by provenance: an imported media
     // segment is source speech, every take voices the target text.
-    const language = isSourceSegmentSelected(owner) ? project.sourceLanguage : project.targetLanguage
+    const sourceLane = project.lanes?.find((lane) => lane.role === "source")
+    const language = isSourceSegmentSelected(owner)
+      ? laneLanguage(sourceLane ?? { role: "source" }, {
+          settings: project,
+          role: "source",
+          legacyTag: sourceLane?.legacyTag ?? null,
+        })
+      : laneLanguageForTag(targetLang ?? "", project.lanes, project) ?? undefined
     // THIS take, on its own slot: the transcriber reads the cell's selected
     // recording, which for a take on an added track is a different take —
     // that block used to transcribe the default track's recording instead.
@@ -232,7 +241,7 @@ function CellTakeBlockView({
     // takes are drawn from.
     await onCommitted?.(owner.id)
     notifyAudioAttachmentsChanged(owner.fileId)
-  }, [owner, selectedAudioId, attachment?.slot, session, project.id, project.sourceLanguage, project.targetLanguage, onCommitted])
+  }, [owner, selectedAudioId, attachment?.slot, session, project, targetLang, onCommitted])
 
   // Deletable even when it is the line's only take (Sam, 2026-09-29) — the
   // same removal as the takes lists. Nothing is chosen in its place: the line

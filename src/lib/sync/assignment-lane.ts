@@ -43,3 +43,76 @@ export function selectValueForLane(lane: string | null | undefined): string {
   if (isDefaultLaneValue(lane)) return DEFAULT_LANE_SELECT_VALUE
   return (lane ?? "").trim()
 }
+
+export interface AssignmentLaneItem {
+  /** Select value. The default lane is {@link DEFAULT_LANE_SELECT_VALUE}, never `''`. */
+  value: string
+  label: string
+}
+
+/**
+ * Lane options for an assign surface (AQU-1601).
+ *
+ * The default lane is always an option. A project with one lane names it;
+ * hiding the field there taught people there was nothing to add. AQU-581: a
+ * non-empty `allowedTags` list keeps only those raw tags (`''` is the default
+ * lane). An empty list is not a filter — a lead keeps every lane.
+ */
+export function buildLaneItems(input: {
+  targetLanes?: readonly string[] | null
+  laneLabels?: Readonly<Record<string, string>> | null
+  defaultLaneLabel?: string | null
+  defaultLaneFallback: string
+  allowedTags?: readonly string[] | null
+}): AssignmentLaneItem[] {
+  const extra = (input.targetLanes ?? []).filter((lane) => !isDefaultLaneValue(lane))
+  const defaultLabel =
+    input.laneLabels?.[""]?.trim() ||
+    input.defaultLaneLabel?.trim() ||
+    input.defaultLaneFallback
+  const all: AssignmentLaneItem[] = [
+    { value: DEFAULT_LANE_SELECT_VALUE, label: defaultLabel },
+    ...extra.map((lane) => ({
+      value: lane,
+      label: input.laneLabels?.[lane]?.trim() || lane,
+    })),
+  ]
+  const allowed = (input.allowedTags ?? []).filter((tag) => tag != null)
+  if (allowed.length === 0) return all
+  return all.filter((item) => allowed.includes(laneTagForAssignment(item.value) ?? ""))
+}
+
+/**
+ * Which option an assign field opens on (AQU-1601).
+ *
+ * One option is that option. Several options pre-fill only from the lane the
+ * user arrived from. Arriving from all lanes (`arrivedLane === null`) pre-fills
+ * nothing — the first option is not a silent default.
+ */
+export function initialAssignmentLane(
+  items: readonly { value: string }[],
+  arrivedLane: string | null,
+): string | null {
+  if (items.length === 1) return items[0]!.value
+  if (items.length === 0 || arrivedLane === null) return null
+  const value = selectValueForLane(arrivedLane)
+  return items.some((item) => item.value === value) ? value : null
+}
+
+/**
+ * The lane row id for a tag the picker already chose.
+ *
+ * Matching is on `legacy_tag` (`''` is the default lane), the frozen event
+ * key. The id is what the assignment sends. No row (the project has not been
+ * backfilled yet) returns undefined so the tag still goes out alone.
+ */
+export function laneIdForTag(
+  tag: string | null | undefined,
+  lanes: readonly { id: string; legacyTag: string | null }[] | null | undefined,
+): string | undefined {
+  if (!lanes || lanes.length === 0) return undefined
+  const want = isDefaultLaneValue(tag) ? "" : (tag ?? "").trim()
+  const matches = lanes.filter((lane) => (lane.legacyTag ?? "") === want)
+  if (matches.length !== 1) return undefined
+  return matches[0]!.id
+}

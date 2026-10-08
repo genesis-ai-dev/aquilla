@@ -105,18 +105,17 @@ describe('buildEventProjectionStmts — source.cell.create', () => {
     const { sql, args } = cellsStmts[0]
     expect(sql).toContain('INSERT INTO cells')
     expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id)')
-    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=target_lang, 5=value,
-    // 6=value_html, 7=type, 8=canonical_ref, 9=anchor_cell_id, 10=event_id,
-    // 11=last_editor, 12=last_edit_at, 13=word_count, 14=content_hash
+    expect(sql).not.toContain('target_lang')
+    // 0=project_id, 1=file_id, 2=cell_id, 3=side, 4=value,
+    // 5=value_html, 6=type, 7=canonical_ref, 8=anchor_cell_id, 9=event_id
     expect(args[0]).toBe('proj-1')
     expect(args[1]).toBe('file-a')
     expect(args[2]).toBe('cell-1')
     expect(args[3]).toBe('source')
-    expect(args[4]).toBe('') // AQU-538: source rows always on the default lane
-    expect(args[5]).toBe('In the beginning')
-    expect(args[7]).toBe('verse')
-    expect(args[8]).toBe('GEN 1:1')
-    expect(args[10]).toBe('evt-test-id')
+    expect(args[4]).toBe('In the beginning')
+    expect(args[6]).toBe('verse')
+    expect(args[7]).toBe('GEN 1:1')
+    expect(args[9]).toBe('evt-test-id')
   })
 })
 
@@ -134,11 +133,12 @@ describe('buildEventProjectionStmts — target.cell.create', () => {
       stmts,
     )
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
-    const { args } = cellsStmts[0]
+    const { args, sql } = cellsStmts[0]
+    expect(sql).not.toContain('target_lang')
     expect(args[3]).toBe('target')
-    expect(args[4]).toBe('')            // target_lang: default lane
-    expect(args[9]).toBe('cell-0')      // anchor_cell_id
-    expect(args[10]).toBe('evt-test-id') // event_id
+    expect(args[4]).toBe('hello')
+    expect(args[8]).toBe('cell-0')      // anchor_cell_id
+    expect(args[9]).toBe('evt-test-id') // event_id
   })
 })
 
@@ -166,16 +166,14 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     expect(sql).toContain('ON CONFLICT(project_id, file_id, cell_id, lane_id) DO UPDATE SET')
     expect(sql).toContain('event_id = excluded.event_id')
     expect(sql).toContain('source_event_id = excluded.source_event_id')
-    // bind order (mirrors the INSERT column list):
-    // 0=project_id, 1=file_id, 2=cell_id, 3=target_lang, 4=value,
-    // 5=value_html, 6=event_id, 7=source_event_id, 8=last_editor,
-    // 9=last_edit_at, 10=word_count, 11=content_hash
+    expect(sql).not.toContain('target_lang')
+    // 0=project_id, 1=file_id, 2=cell_id, 3=value, 4=value_html,
+    // 5=event_id, 6=source_event_id
     expect(args[0]).toBe('proj-1')
     expect(args[2]).toBe('cell-1')
-    expect(args[3]).toBe('') // AQU-538: default lane when targetLang absent
-    expect(args[4]).toBe('new text')
-    expect(args[6]).toBe('evt-test-id')
-    expect(args[7]).toBe('src-event-99')
+    expect(args[3]).toBe('new text')
+    expect(args[5]).toBe('evt-test-id')
+    expect(args[6]).toBe('src-event-99')
     const reconciliation = recorded.find(r => r.sql.includes('UPDATE contextual_drafts AS draft'))
     expect(reconciliation?.sql).toContain("draft.status = 'proposed'")
     expect(reconciliation?.sql).toContain('projected.event_id = ?')
@@ -191,7 +189,7 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       stmts,
     )
     const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
-    expect(cellsStmts[0].args[7]).toBe(null)
+    expect(cellsStmts[0].args[6]).toBe(null)
   })
 
   it('projects AI provenance and clears it on a human commit', () => {
@@ -217,8 +215,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
     )
     const aiStmt = recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
     expect(aiStmt.sql).toContain('ai_draft')
-    expect(aiStmt.args[12]).toBe(1)
-    expect(JSON.parse(String(aiStmt.args[13]))).toEqual(provenance)
+    expect(aiStmt.args[11]).toBe(1)
+    expect(JSON.parse(String(aiStmt.args[12]))).toEqual(provenance)
 
     const human = makeD1Stub()
     buildEventProjectionStmts(
@@ -227,8 +225,8 @@ describe('buildEventProjectionStmts — target.cell.commit', () => {
       [],
     )
     const humanStmt = human.recorded.find((row) => row.sql.includes('INSERT INTO cells'))!
-    expect(humanStmt.args[12]).toBe(0)
-    expect(humanStmt.args[13]).toBeNull()
+    expect(humanStmt.args[11]).toBe(0)
+    expect(humanStmt.args[12]).toBeNull()
   })
 })
 
@@ -345,8 +343,8 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells'))
     expect(cellsStmts[0].sql).toContain('DELETE FROM cells')
     expect(cellsStmts[0].sql).toContain('side = ?')
-    // AQU-538: trailing bind is the target lane ('' = default).
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', ''])
+    // AQU-1611: side, then the lane lookup (project, legacy tag). '' is the default lane.
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', ''])
   })
 
   it('source.cell.delete binds side=source', () => {
@@ -356,8 +354,9 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     // Two now: the cascade's lane rows (literal side = 'target') and the
     // source row itself (parameterised side = ?).
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells') && !r.sql.includes("side = 'target'"))
-    // AQU-538: source rows always live on the default lane ('').
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source', ''])
+    // AQU-1611: source matches on side. The lane lookup binds are still supplied
+    // (project, tag '') because the predicate is `side = 'source' OR lane_id = …`.
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source', 'proj-1', ''])
   })
 
   it('target.cell.delete with targetLang deletes only that lane', () => {
@@ -365,8 +364,9 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', { targetLang: 'fr' }), stmts)
     const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells'))
-    expect(cellsStmts[0].sql).toContain('target_lang = ?')
-    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
+    expect(cellsStmts[0].sql).toContain('legacy_tag = ?')
+    expect(cellsStmts[0].sql).toContain('lane_id =')
+    expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', 'fr'])
   })
 })
 
@@ -383,8 +383,9 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
     expect(recorded[0].sql).toContain('side = ?')
     expect(recorded[0].args[0]).toBe('cell-7')
     expect(recorded[0].args[1]).toBe('evt-test-id') // event_id
-    // AQU-538: last two positional args are the bound `side` and lane.
-    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('target')
+    // AQU-1611: the tail is side, then the lane lookup (project, legacy tag).
+    expect(recorded[0].args[recorded[0].args.length - 3]).toBe('target')
+    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('proj-1')
     expect(recorded[0].args[recorded[0].args.length - 1]).toBe('')
   })
 
@@ -396,7 +397,8 @@ describe('buildEventProjectionStmts — *.cell.reorder', () => {
       makeEvent('source.cell.reorder', { anchorCellId: 'cell-9' }),
       stmts,
     )
-    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('source')
+    expect(recorded[0].args[recorded[0].args.length - 3]).toBe('source')
+    expect(recorded[0].args[recorded[0].args.length - 2]).toBe('proj-1')
     expect(recorded[0].args[recorded[0].args.length - 1]).toBe('')
   })
 })
@@ -439,7 +441,11 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
       //     `SELECT ...` form used for chain-claim gating (target.cell.commit),
       //  3. a parametrised `side = ?` with the matching value in args
       //     (deletes, reorders).
-      const litMatch = sql.match(/side\s*=\s*'(source|target)'/)
+      // A literal `side = 'source' OR …` is the source-row short-circuit
+      // (AQU-1611), not the mutation's side. The mutation's own side is the
+      // bound `side = ?` (deletes, reorders) or a side literal that is not
+      // that OR.
+      const litMatch = sql.match(/side\s*=\s*'(source|target)'(?!\s*OR)/)
       const valuesMatch = sql.match(/(?:VALUES\s*\(|\)\s*SELECT\s)[^)]*'(source|target)'/)
       if (litMatch) {
         expect(litMatch[1]).toBe(expectedSide)
@@ -668,10 +674,50 @@ describe('buildEventProjectionStmts — file.create', () => {
     expect(recorded[0].sql).toContain('INSERT INTO files')
     expect(recorded[0].args[0]).toBe('file-a')
     expect(recorded[0].args[2]).toBe('Genesis')
+    // AQU-1596: the payload field name is wire history, but what lands in
+    // `meta` says what it actually is — the language this file *declared*,
+    // which is import information and never the language of a lane.
     expect(JSON.parse(recorded[0].args.at(-1) as string)).toEqual({
-      sourceLanguage: 'en',
+      declaredSourceLanguage: 'en',
       aquillaImport: { version: 1, profileId: 'builtin:usfm-lossless' },
     })
+  })
+
+  it('records both declared languages and writes neither legacy key (AQU-1596)', () => {
+    const { db, recorded } = makeD1Stub()
+    buildEventProjectionStmts(
+      db,
+      makeEvent('file.create', {
+        name: 'Genesis',
+        fileType: 'codex',
+        sourceLanguage: 'hbo',
+        targetLanguage: 'fra',
+      }, { cellId: null }),
+      [],
+    )
+    const meta = JSON.parse(recorded[0].args.at(-1) as string)
+    expect(meta).toEqual({ declaredSourceLanguage: 'hbo', declaredTargetLanguage: 'fra' })
+    expect(meta).not.toHaveProperty('sourceLanguage')
+    expect(meta).not.toHaveProperty('targetLanguage')
+  })
+
+  it('leaves a legacy key already in projectionMeta untouched beside the declared one (AQU-1596)', () => {
+    const { db, recorded } = makeD1Stub()
+    buildEventProjectionStmts(
+      db,
+      makeEvent('file.create', {
+        name: 'Genesis',
+        fileType: 'codex',
+        sourceLanguage: 'hbo',
+        projectionMeta: { sourceLanguage: 'eng', orderedBy: 'time' },
+      }, { cellId: null }),
+      [],
+    )
+    const meta = JSON.parse(recorded[0].args.at(-1) as string)
+    // History is never rewritten: the old key stays, the declared key wins on read.
+    expect(meta.sourceLanguage).toBe('eng')
+    expect(meta.declaredSourceLanguage).toBe('hbo')
+    expect(meta.orderedBy).toBe('time')
   })
 })
 
@@ -1083,11 +1129,17 @@ describe('source.cell.delete — dependent cleanup', () => {
   it("a target delete's cleanup tests the TARGET row's head, not the source's", () => {
     // The gate must follow the row the accompanying write targets, or a lane
     // delete would be gated on a row it is not touching.
-    const validators = gatedDeleteStmts('target.cell.delete', { targetLang: 'fr' })
-      .filter((r) => r.sql.includes('cell_validators'))
+    const recorded = gatedDeleteStmts('target.cell.delete', { targetLang: 'fr' })
+    const validators = recorded.filter((r) => r.sql.includes('cell_validators'))
     expect(validators).toHaveLength(1)
     expect(validators[0].args).toContain('target')
     expect(validators[0].args).toContain('fr')
+    const backtranslations = recorded.filter((r) => r.sql.includes('cell_backtranslations'))
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].sql).toContain('FROM chain_claims')
+    expect(backtranslations[0].sql).toContain('FROM cells WHERE')
+    expect(backtranslations[0].args).toContain('target')
+    expect(backtranslations[0].args).toContain('fr')
   })
 
   // AQU-1068 review round: the translations are the SOURCE delete's business.
@@ -1119,8 +1171,9 @@ describe('source.cell.delete — dependent cleanup', () => {
     // act as removing the cell.
     const rows = sqlFor(deleteStmts('target.cell.delete', { targetLang: 'fr' }), 'DELETE FROM cells')
     expect(rows).toHaveLength(1)
-    expect(rows[0].sql).toContain('target_lang = ?')
-    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
+    expect(rows[0].sql).toContain('legacy_tag = ?')
+    expect(rows[0].sql).toContain('lane_id =')
+    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'proj-1', 'fr'])
   })
 
   it('clears every lane of validators for the cell', () => {
@@ -1187,13 +1240,27 @@ describe('source.cell.delete — dependent cleanup', () => {
     const recorded = deleteStmts('target.cell.delete', { targetLang: 'fr' })
     const validators = sqlFor(recorded, 'cell_validators')
     expect(validators).toHaveLength(1)
-    expect(validators[0].sql).toContain('target_lang = ?')
-    expect(validators[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'fr'])
+    expect(validators[0].sql).toContain('legacy_tag = ?')
+    expect(validators[0].sql).toContain('lane_id =')
+    expect(validators[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', 'fr'])
+    const backtranslations = sqlFor(recorded, 'cell_backtranslations')
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].sql).toContain('legacy_tag = ?')
+    expect(backtranslations[0].sql).toContain("lane_id IS NULL AND ? = ''")
+    // Named lane: the NULL-lane (default) rows are not selected.
+    expect(backtranslations[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', 'fr', 'fr'])
     // The cell itself survives a lane delete, so its takes, pairings and
     // comments must all survive with it.
     for (const table of ['cell_audio', 'cell_links', 'UPDATE comments', 'cell_waivers', 'cell_word_morph']) {
       expect(sqlFor(recorded, table), table).toHaveLength(0)
     }
+  })
+
+  it('a default-lane target delete also removes NULL-lane back-translations', () => {
+    const recorded = deleteStmts('target.cell.delete', {})
+    const backtranslations = sqlFor(recorded, 'cell_backtranslations')
+    expect(backtranslations).toHaveLength(1)
+    expect(backtranslations[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', '', ''])
   })
 
   it('gates every dependent write on the chain claim, like the cells write', () => {

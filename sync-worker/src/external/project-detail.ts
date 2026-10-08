@@ -16,7 +16,8 @@
 // query, not a gate.
 
 import { loadProjectSettings } from '../../../db/shared/projects'
-import { filterSettingsBlobForMember } from '../../../db/shared/lane-visibility'
+import { filterSettingsBlobForMember, visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { laneContextFrom, lanesVisibleToCaller } from './external-lane'
 
 export interface ExternalProjectDetail {
   id: string
@@ -32,6 +33,9 @@ export interface ExternalProjectDetail {
    *  0 when the project has no settings row yet (the first write creates it). */
   settingsVersion: number
   settingsUpdatedAt: string | null
+  /** Lanes this caller may see. A hidden lane is absent, same as one that
+   *  does not exist. `id` is what writes pass as laneId. */
+  lanes: { id: string; name: string; language: string; role: 'source' | 'target' }[]
 }
 
 interface ProjectDetailRow {
@@ -66,6 +70,17 @@ export async function loadProjectDetail(
   const visibleSettings = viewer
     ? await filterSettingsBlobForMember(db, viewer.flag, projectId, viewer.userId, role, settings.settings)
     : settings.settings
+  const { visible } = viewer
+    ? await visibleTagsForMember(db, viewer.flag, projectId, viewer.userId, role)
+    : { visible: null }
+  const lanes = lanesVisibleToCaller(
+    laneContextFrom(settings.lanes ?? [], settings.settings, visible),
+  ).map((lane) => ({
+    id: lane.id,
+    name: lane.name,
+    language: lane.language,
+    role: lane.role,
+  }))
   return {
     id: row.id,
     name: row.name,
@@ -75,5 +90,6 @@ export async function loadProjectDetail(
     settings: visibleSettings,
     settingsVersion: settings.version,
     settingsUpdatedAt: settings.updatedAt,
+    lanes,
   }
 }

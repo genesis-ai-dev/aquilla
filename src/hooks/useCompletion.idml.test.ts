@@ -264,7 +264,8 @@ describe("useCompletion IDML protected-output boundary", () => {
       slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "MONDE" }],
     }), bodies)
     const commit = vi.fn().mockResolvedValue(undefined)
-    const { result } = renderCompletion(cell, commit)
+    const record = vi.fn()
+    const { result } = renderCompletion(cell, commit, record)
     search.mockClear()
 
     let saved = false
@@ -291,6 +292,22 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(request.temperature).toBe(0)
     expect(request.messages[0]?.content).toContain("Do not translate")
     expect(request.messages.some((message) => message.content.includes("protected-anchor"))).toBe(false)
+    // AQU-1656: the align draft leaves its prompt and reply in the AI trail.
+    const provenance = commit.mock.calls[0]![3] as { interventionId?: string }
+    expect(provenance.interventionId).toBeTruthy()
+    expect(record).toHaveBeenCalledTimes(1)
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      callId: provenance.interventionId,
+      kind: "draft",
+      mode: "align-styles",
+      messages: request.messages,
+      rawOutput: JSON.stringify({ slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "MONDE" }] }),
+      cells: [expect.objectContaining({
+        interventionId: provenance.interventionId,
+        cellId: cell.id,
+        output: committedHtml,
+      })],
+    }))
     expect(result.current.completing.get(cell.id)).toBeUndefined()
   })
 
@@ -309,7 +326,8 @@ describe("useCompletion IDML protected-output boundary", () => {
       slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "LE MONDE" }],
     }), [])
     const commit = vi.fn().mockResolvedValue(undefined)
-    const { result } = renderCompletion(cell, commit)
+    const record = vi.fn()
+    const { result } = renderCompletion(cell, commit, record)
 
     let saved = true
     await act(async () => {
@@ -318,11 +336,16 @@ describe("useCompletion IDML protected-output boundary", () => {
 
     expect(saved).toBe(false)
     expect(commit).not.toHaveBeenCalled()
+    expect(record).not.toHaveBeenCalled()
     expect(result.current.errors.get(cell.id)).toMatch(/changed the wording/)
   })
 })
 
-function renderCompletion(cell: ReturnType<typeof completionCell>, commit: ReturnType<typeof vi.fn>) {
+function renderCompletion(
+  cell: ReturnType<typeof completionCell>,
+  commit: ReturnType<typeof vi.fn>,
+  record?: ReturnType<typeof vi.fn>,
+) {
   return renderHook(() => useCompletion(
     SETTINGS,
     "English",
@@ -335,6 +358,10 @@ function renderCompletion(cell: ReturnType<typeof completionCell>, commit: Retur
     [cell] as never,
     undefined,
     DEFAULT_DRAFT_CONTEXT,
+    "",
+    undefined,
+    undefined,
+    record as never,
   ))
 }
 

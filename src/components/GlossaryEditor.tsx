@@ -9,8 +9,9 @@
  * in lib/terminology/store and the delta against the last known termbase is
  * what goes on the wire.
  *
- * The Concept[] model is unchanged, so blots / prompt-injection / violation
- * compilation (which read active concepts) need no changes.
+ * The stored list holds every lane's renderings. This surface shows and
+ * edits only the active lane's slice, then merges that slice back so a
+ * save cannot wipe another lane.
  */
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
@@ -59,6 +60,13 @@ import { emitConceptDelta } from "@/lib/terminology/events-delta"
 import type { PredictedEquivalent } from "@/lib/terminology/equivalents"
 import { exportConceptsCsv } from "@/lib/terminology/csv"
 import { exportConceptsTbx } from "@/lib/terminology/tbx"
+import {
+  conceptsForLaneTag,
+  laneIdForLegacyTag,
+  legacyEmptyLaneId,
+  renderingsForLane,
+  replaceLaneRenderings,
+} from "@/lib/terminology/rendering-lane"
 import { importTermbaseFile } from "@/lib/terminology/import-format"
 import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
@@ -86,6 +94,12 @@ interface GlossaryEditorProps {
   conceptsError?: string | null
   conceptsLoading?: boolean
   refreshConcepts?: () => void | Promise<void>
+  /**
+   * Legacy tag of the lane this glossary is showing. `''` is the former
+   * default lane. The stored concept list stays complete; only the visible
+   * renderings, and the writes that replace them, are scoped to this lane.
+   */
+  activeLane?: string
 }
 
 function conceptsEqual(a: Concept[], b: Concept[]): boolean {
@@ -114,6 +128,7 @@ export function GlossaryEditor({
   conceptsError: workspaceConceptsError,
   conceptsLoading: workspaceConceptsLoading,
   refreshConcepts: workspaceRefreshConcepts,
+  activeLane = "",
 }: GlossaryEditorProps = {}) {
   const t = useT()
   const { id } = useParams<{ id: string }>()
@@ -185,6 +200,10 @@ export function GlossaryEditor({
   const pendingWritesRef = useRef(0)
   const [optimisticConcepts, setOptimisticConcepts] = useState<Concept[] | null>(null)
   const concepts = optimisticConcepts ?? serverConcepts
+  const visibleConcepts = useMemo(
+    () => conceptsForLaneTag(concepts, activeLane, project?.lanes ?? []),
+    [concepts, activeLane, project?.lanes],
+  )
   useEffect(() => {
     if (pendingWritesRef.current > 0 && !conceptsEqual(serverConcepts, conceptsRef.current)) return
     conceptsRef.current = serverConcepts
@@ -243,8 +262,8 @@ export function GlossaryEditor({
     (termbaseUnknown ? t("terminology.editor.loadFailedDisabledTooltip") : null)
 
   const { active, suggested, archived } = useMemo(
-    () => partitionConcepts(concepts),
-    [concepts],
+    () => partitionConcepts(visibleConcepts),
+    [visibleConcepts],
   )
 
   const [showArchived, setShowArchived] = useState(false)
@@ -262,10 +281,11 @@ export function GlossaryEditor({
     projectId: id ?? null,
     getToken,
     enabled: view === "violations",
+    lane: activeLane,
   })
   const selectedConcept = useMemo(
-    () => concepts.find((concept) => concept.id === selectedConceptId) ?? null,
-    [concepts, selectedConceptId],
+    () => visibleConcepts.find((concept) => concept.id === selectedConceptId) ?? null,
+    [visibleConcepts, selectedConceptId],
   )
   // AQU-1192: the detail page, Violations, Suggest terms, and suggested
   // renderings each ask the sync-worker for a result. None of them downloads
@@ -275,6 +295,7 @@ export function GlossaryEditor({
     conceptId: selectedConceptId,
     getToken,
     enabled: Boolean(selectedConceptId),
+    lane: activeLane,
   })
   useEffect(() => {
     setPredictedSuggestions(undefined)
@@ -346,6 +367,30 @@ export function GlossaryEditor({
   const guard = () => guardWith(canManage, t("terminology.editor.errorRequiresProjectLead"))
   const suggestGuard = () => guardWith(canSuggest, t("terminology.editor.errorBlocked"))
 
+  // Writes replace one lane's slice. With no `''` lane row yet, the list is
+  // still the whole termbase, which is today's behavior.
+  const mergeRenderings = useCallback(
+    (full: TermRendering[], nextSlice: TermRendering[]): TermRendering[] => {
+      const lanes = project?.lanes ?? []
+      const emptyId = legacyEmptyLaneId(lanes)
+      if (!emptyId) return nextSlice
+      const activeId = laneIdForLegacyTag(activeLane, lanes)
+      if (!activeId) return full
+      return replaceLaneRenderings(full, activeId, emptyId, nextSlice)
+    },
+    [project?.lanes, activeLane],
+  )
+  const laneSlice = useCallback(
+    (full: TermRendering[]): TermRendering[] => {
+      const lanes = project?.lanes ?? []
+      const emptyId = legacyEmptyLaneId(lanes)
+      const activeId = emptyId ? laneIdForLegacyTag(activeLane, lanes) : null
+      if (!emptyId || !activeId) return full
+      return renderingsForLane(full, activeId, emptyId)
+    },
+    [project?.lanes, activeLane],
+  )
+
   const onEditSource = useCallback(
     (cid: string, sourceTerm: string) => {
       const p = guard()
@@ -359,10 +404,10 @@ export function GlossaryEditor({
       if (!p) return
       const concept = (p.terminology ?? []).find((c) => c.id === cid)
       if (!concept) return
-      const next = setPrimaryRendering(concept, text)
-      void persist(updateConcept(p, cid, { renderings: next.renderings }))
+      const next = setPrimaryRendering({ ...concept, renderings: laneSlice(concept.renderings) }, text)
+      void persist(updateConcept(p, cid, { renderings: mergeRenderings(concept.renderings, next.renderings) }))
     },
-    [project, canManage, persist],
+    [project, canManage, persist, laneSlice, mergeRenderings],
   )
   const onEditRenderings = useCallback(
     (cid: string, update: (current: TermRendering[]) => TermRendering[]) => {
@@ -370,9 +415,10 @@ export function GlossaryEditor({
       if (!p) return
       const concept = (p.terminology ?? []).find((item) => item.id === cid)
       if (!concept) return
-      void persist(updateConcept(p, cid, { renderings: update(concept.renderings) }))
+      const nextSlice = update(laneSlice(concept.renderings))
+      void persist(updateConcept(p, cid, { renderings: mergeRenderings(concept.renderings, nextSlice) }))
     },
-    [project, canManage, persist],
+    [project, canManage, persist, laneSlice, mergeRenderings],
   )
   const onEditNotes = useCallback(
     (cid: string, notes: string) => {
@@ -430,7 +476,13 @@ export function GlossaryEditor({
       setError(t("terminology.editor.errorSourceAndRenderingRequired"))
       return
     }
-    const renderings: TermRendering[] = [{ rendering, status: "preferred" }]
+    const lanes = project?.lanes ?? []
+    const activeId = laneIdForLegacyTag(activeLane, lanes)
+    const renderings: TermRendering[] = [{
+      rendering,
+      status: "preferred",
+      ...(legacyEmptyLaneId(lanes) && activeId ? { laneId: activeId } : {}),
+    }]
     // AQU-872: at or above the termbase floor the term goes in enforced; below
     // it the same form files a DRAFT, which lands in the Suggested group for a
     // manager to approve and compiles to no rules in the meantime. Adding it
@@ -442,7 +494,7 @@ export function GlossaryEditor({
     setNewSource("")
     setNewRendering("")
     setAddOpen(false)
-  }, [project, canManage, canSuggest, persist, newSource, newRendering])
+  }, [project, canManage, canSuggest, persist, newSource, newRendering, activeLane])
 
   function handleAddOpenChange(open: boolean) {
     setAddOpen(open)
@@ -492,7 +544,9 @@ export function GlossaryEditor({
       try {
         const token = await getToken("any")
         if (!token) throw new Error(t("terminology.editor.suggestFailed"))
-        const suggestions = await fetchConceptSuggestions(project.id, selectedConcept.id, token)
+        const suggestions = await fetchConceptSuggestions(project.id, selectedConcept.id, token, {
+          lane: activeLane,
+        })
         setPredictedSuggestions(suggestions)
       } catch (err) {
         setError(err instanceof Error ? err.message : t("terminology.editor.suggestFailed"))
@@ -500,7 +554,7 @@ export function GlossaryEditor({
         setSuggestionsLoading(false)
       }
     })()
-  }, [project, selectedConcept, getToken, t])
+  }, [project, selectedConcept, getToken, t, activeLane])
 
   const handleOpenDetails = useCallback((conceptId: string) => {
     setSearchParams((current) => {
@@ -530,12 +584,16 @@ export function GlossaryEditor({
       const concept = (p.terminology ?? []).find((item) => item.id === conceptId)
       const normalized = target.trim().toLocaleLowerCase()
       if (!concept || !normalized) return
-      if (concept.renderings.some((item) => item.rendering.trim().toLocaleLowerCase() === normalized)) return
+      const slice = laneSlice(concept.renderings)
+      if (slice.some((item) => item.rendering.trim().toLocaleLowerCase() === normalized)) return
       void persist(updateConcept(p, conceptId, {
-        renderings: [...concept.renderings, { rendering: target.trim(), status: "admitted" }],
+        renderings: mergeRenderings(concept.renderings, [
+          ...slice,
+          { rendering: target.trim(), status: "admitted" },
+        ]),
       }))
     },
-    [project, canManage, persist],
+    [project, canManage, persist, laneSlice, mergeRenderings],
   )
 
   // AQU-1337: a merge is the survivor's union-merged renderings/notes plus the
@@ -570,14 +628,25 @@ export function GlossaryEditor({
             setError(t("terminology.editor.errorImportFailed"))
             return
           }
-          void persist({ terminology: [...(p.terminology ?? []), ...imported] })
+          const lanes = project?.lanes ?? []
+          const activeId = laneIdForLegacyTag(activeLane, lanes)
+          const stamp = legacyEmptyLaneId(lanes) && activeId
+          const stamped = stamp
+            ? imported.map((concept) => ({
+                ...concept,
+                renderings: concept.renderings.map((rendering) =>
+                  rendering.laneId ? rendering : { ...rendering, laneId: activeId },
+                ),
+              }))
+            : imported
+          void persist({ terminology: [...(p.terminology ?? []), ...stamped] })
         } catch (err) {
           setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
         }
       }
       reader.readAsText(file)
     },
-    [project, canManage, persist],
+    [project, canManage, persist, activeLane, t],
   )
 
   if (loading) {
@@ -670,7 +739,7 @@ export function GlossaryEditor({
           <Button
             variant="outline"
             disabled={!canManage}
-            onClick={() => downloadBlob(exportConceptsCsv(concepts), "glossary.csv", "text/csv")}
+            onClick={() => downloadBlob(exportConceptsCsv(visibleConcepts), "glossary.csv", "text/csv")}
           >
             <Download data-icon="inline-start" /> {t("terminology.editor.exportCsv")}
           </Button>
@@ -679,7 +748,7 @@ export function GlossaryEditor({
           <Button
             variant="outline"
             disabled={!canManage}
-            onClick={() => downloadBlob(exportConceptsTbx(concepts), "glossary.tbx", "application/xml")}
+            onClick={() => downloadBlob(exportConceptsTbx(visibleConcepts, project?.lanes), "glossary.tbx", "application/xml")}
           >
             <Download data-icon="inline-start" /> {t("terminology.editor.exportTbx")}
           </Button>
@@ -819,7 +888,7 @@ export function GlossaryEditor({
             <p className="py-10 text-center text-sm text-destructive">{violations.error}</p>
           ) : (
             <TerminologyViolationsInbox
-              concepts={concepts}
+              concepts={visibleConcepts}
               rows={violations.rows}
               truncated={violations.truncated || !violations.scanComplete}
               termMatching={project?.termMatching}
@@ -828,10 +897,10 @@ export function GlossaryEditor({
               onJumpToCell={({ cellId, fileId }) => {
                 // `&flash=1` (AQU-1278) because the row named a specific cell
                 // by its ref — a scroll with nothing marking the landed row is
-                // indistinguishable from a link that did nothing. No `lane=`:
-                // this inbox is not lane-scoped, and an emitted lane param
-                // would override whatever lane the editor was last on.
-                navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}&flash=1`)
+                // indistinguishable from a link that did nothing. A named lane
+                // is part of the link so the editor opens on the lane the
+                // violation was found in. `''` is already the default.
+                navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}&flash=1${activeLane ? `&lane=${encodeURIComponent(activeLane)}` : ""}`)
               }}
             />
           )}

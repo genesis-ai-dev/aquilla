@@ -17,6 +17,7 @@ not a micro-spec farm.
 | Projects | Create project, appears on dashboard | `e2e/specs/projects/create.smoke.spec.ts` |
 | Projects | Open / delete / restore from trash | `e2e/specs/projects/project-trash.smoke.spec.ts` |
 | Projects | App shell still routes | `e2e/specs/projects/route-health.smoke.spec.ts` |
+| Projects | Monday organization handoff, project overview shortcuts, project organization scope, recommended setup, and board destinations (AQU-1208; covered in RTL; worker integration covers metadata persistence) | `src/components/ProjectSettings/MondayIntegrationSection.test.tsx`, `src/components/ProjectSettings/MondaySetupWizard.test.tsx`, `src/components/ProjectSettings.subMenuIA.test.tsx`, `src/pages/settings/OrgSettingsMonday.test.tsx`, `src/components/org/ProjectMondayCard.test.tsx`, `src/components/org/ProjectOverview.test.tsx` |
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
@@ -32,6 +33,7 @@ not a micro-spec farm.
 | Importing | Media with companion or embedded MP4/M4A captions preserves reviewed wording, cue boundaries, playable source clips, and byte-exact original media across publication and reload. Attaching captions creates an independent track; counted overwrite preserves other wording and source audio. Pasted and uploaded scripts reuse persisted word timings, preserve paragraph boundaries, save reviewed independent tracks, and retain byte-exact original script downloads (SPA → sync-worker → Postgres + R2). Preview, confidence, boundary correction, and consent changes also have RTL coverage | `e2e/specs/editor/import-media-captions.smoke.spec.ts` |
 | Editor | Adaptive cell pages preserve ordering and show download progress | Covered in worker integration (`cells-read.test.ts`) and RTL (`CellLoadingProgress.test.tsx`, `useActiveCellStore.stale-rejection.test.tsx`) |
 | Editor | Hidden cells are not work — excluded from progress (numerator and denominator, live in both directions), health, automatic drafting and search (AQU-1424) | Covered in worker integration (`sync-worker/src/__tests__/hidden-cells-progress.test.ts` — progress projection, `files` counters, FTS; `auth-worker/src/__tests__/hidden-cells-agent.test.ts` — the shared cell selector behind autopilot and the agent's read/draft, plus agent search) and RTL/unit (`useActiveCellStore.hiddenProgress.test.ts`, `src/lib/completion/draft-targets.test.ts`, `src/lib/health/excluded-cell.test.ts`). No new smoke: the hide/show journey itself is AQU-1422's row, and nothing here can lose data, access or a committed artifact — a regression misreports a number or wastes a credit. |
+| Project management | A project's lane-independent numbers live on its SOURCE lane's progress row, not on the former default target lane's — so the plan board's totals, the files list's counts and the org overview's per-lane denominators are the same whichever target lanes a project has, and a lane with no translations yet still shows the full denominator (AQU-1599) | Covered in worker integration (`sync-worker/src/__tests__/progress-projection.test.ts` — a row per real lane, the source lane's row carrying the denominator and no translations; `lane-validators-progress.test.ts` — the per-lane row sets and the source lane's own; `progress-book-audio.test.ts` — the prune reaches the source lane's rows too; `progress-lane-join.test.ts` — the lane join stays the bare, indexable `target_lang` equality; `plan-read.test.ts` and `files-read.test.ts` — the readers; `auth-worker/src/__tests__/org-portfolio.test.ts` — the org overview's denominator and lane order). No new smoke, on the same reading as the AQU-1424 row above: nothing here can lose data, access or a committed artifact — a regression misreports a number — and the surfaces it shows up on already have smoke journeys. |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
 | Editor | EPUB chapter picker excludes navigation, cover, and notes by default | `e2e/specs/editor/import-epub-picker.smoke.spec.ts` |
 | Editor | Commit survives stale in-flight refetch | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` |
@@ -49,13 +51,13 @@ not a micro-spec farm.
 | Collab | Concurrent cell edit propagates alice → bob after cold import setup on a throttled renderer | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` |
 | Collab | Same-parent commits held behind a request barrier on a throttled (3G-like) network converge, keep both edits in history, stay stable, and the bumped edit is promotable | `e2e/specs/collab/concurrent-edit-throttled.smoke.spec.ts` |
 | Collab | One editor's successive commits chain linearly (same focus session, reload, second tab, three pending corrections on an existing target head, a quick Tab / Shift+Tab re-edit of an empty or translated verse while its first save is still being written to the outbox (AQU-1578), and edits after an unacknowledged human/AI draft including timeout/retry and a correction still only in the editor buffer); corrections and their validation survive navigation and reload | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
-| Collab | Member presence indicators | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
+| Collab | Member presence indicators (one roster row per user however many connections, and a presence entry retired on heartbeat TTL rather than only on a clean socket close — AQU-1791 — are covered in RTL `src/components/PeerPresence.test.tsx` / `src/lib/sync/presence-store.test.ts` and worker unit `sync-worker/src/__tests__/project-do-handlers.test.ts`; no new smoke — a regression miscounts who is online, it loses no data, access or artifact, and a half-open socket is not reproducible from Playwright) | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
 | Collab | BT edit locked for reviewer | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts` |
 | Collab | Cross-user comment | `e2e/specs/collab/cross-user-comment.smoke.spec.ts` |
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Smart journeys (adaptive navigation, independent outcomes)
 
@@ -252,6 +254,19 @@ UI chrome that used to be one smoke file per click is covered under
   as a count of zero, and cancel) in `LinkSourceSection.test.tsx`. No data or artifact
   is at risk before confirming and the step crosses no second service, so per the rules
   above it stays RTL rather than becoming a smoke journey.
+  Which corpus of the upstream a link consumes, and — for the chain case — WHICH of
+  its translations (AQU-1528 / AQU-1605), is RTL plus worker tests, not smoke: the
+  question's states (asked for the chain case only, pre-filled at a single lane,
+  refused with several and no pick, offering exactly the lanes the server returned,
+  and an unreadable lane list said out loud with a retry) are in
+  `ProjectCreateDialog.upstreamLane.test.tsx` and `LinkSourceSection.test.tsx`; which
+  lanes a caller may be offered at all, and the server refusing a lane of another
+  project, an archived lane or one the read wall hides, in auth-worker's
+  `source-linking-lane-choice.test.ts`; and the fold actually reading the named lane
+  (and nothing of the upstream's other lanes) against real Postgres in
+  `sync-worker/src/__tests__/link-sync-lane-choice.test.ts`, whose sibling
+  `link-sync-fold.default-lane-baseline.test.ts` pins that a link naming no lane still
+  reads the former default one.
   The Import dialog's second entry point to the same action (AQU-1527, "From another
   project" on the landing screen) is RTL in `ImportDialog.linkProject.test.tsx`: the tile
   routes to the flow, back links nothing, the shared pre-link preview appears on this
@@ -330,6 +345,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Preferences toggles / theme / app font size (except persist-reload)
 - Account-specific hosted/local Whisper selection, explicit model download consent, and manual/automatic transcription routing (`LocalModelsSection.test.tsx`, `transcription-routing.test.ts`, `auto-transcribe.test.ts`) — covered in RTL/unit tests
 - Local Whisper execution device (AQU-1533): the worker runs on WebGPU only when the browser hands out a GPU adapter, and otherwise loads on WASM without attempting WebGPU first — a WebGPU session that fails cannot be retried on WASM in the same worker (`whisper-worker.device.test.ts`). Unit-level only: a browser check needs a launch without a GPU adapter and model weights from external CDNs, so it is a manual verification, not a smoke.
+- Lane-switcher and TARGET-pill labelling when two lanes read the same (AQU-1784): the suffix rule (code override, else position among the colliding lanes), the pill matching the switcher, Project Settings → Languages saying how a colliding lane is shown, and the inline notice that lets a duplicate name be added anyway — `lane-label-suffix.test.ts`, `lane-options.test.ts`, `lane-language.test.ts`, `lane-create.test.ts`, `EditorTable.laneSwitcher.test.tsx`, `LanguagesSection.test.tsx`. UI-only: switching lanes itself is already exercised by the editor's smoke journeys, and nothing here can lose data, access or a committed artifact — a regression mislabels a lane.
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
 - Comment visibility polish (AQU-1259): the comments page's **Open file** link carries `&comments=1` so arriving in the editor opens that cell's thread instead of only scrolling to the row — the link/reader contract in `project-workspace-lane-deeplink.test.ts`, the page half (unresolved and resolved) in `CommentsPage.test.tsx`. The opt-in **Highlight open comments** editor setting and the leading-edge accent it draws on rows with an unresolved thread are in `ViewSettingsMenu.test.tsx` and `EditorTable.unresolvedCommentHighlight.test.tsx`; AQU-599's always-on badge is unchanged.
@@ -344,6 +360,22 @@ UI chrome that used to be one smoke file per click is covered under
 - Inworld Voice Design starting-point chips (Agent, Narrator, Instructor, Pirate — Companion removed AQU-1378) (`InworldVoiceDesignField.test.tsx`, `inworld-voice-design.test.ts`)
 - AI model consent dialog: Just Whisper starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
 - Org add-member dialog defaults to Contributor and states that org membership below Maintainer does not open projects (`MembersPage.test.tsx`; access-panel copy in `MemberAccessPanel.test.tsx`)
+- Member inspector lane access (AQU-1783): the popover reports a member's LANE GRANTS
+  (`project_member_lane_roles`), not their scopes, because the read wall reads the grants —
+  reading the scopes is what made it print "Unscoped — full access" about a contributor the
+  wall had walled off. The verdict rule is `src/lib/lanes/grant-gap.test.ts` (all granted /
+  gap / deliberate scoping / a grant below Viewer / Maintainer-by-role / wall off); the three
+  rendered states, the "no access" marker and the one-click regrant are in
+  `MemberLaneScopeEditor.test.tsx`; the endpoint payload, the lead-only gate, the regrant
+  granting every target lane (archived included) and a lane created after the regrant still
+  reaching the member (AQU-1781) are in
+  `auth-worker/src/__tests__/member-scopes-lane-grants.test.ts`. No smoke: the gap is a
+  two-table DISAGREEMENT, so a walk only shows it with the read wall on (`LANE_READ_WALL`,
+  unset locally and in e2e) AND grants that have drifted. Since AQU-1781 (a new lane is
+  granted to members who read every lane) and AQU-1782 (direct add writes grants) the app's
+  own flows no longer produce that drift — it lives in data written before them — so a walk
+  has to delete a grant row by hand first. The inspector-shows-the-gap → regrant →
+  contributor-reloads walk is on this issue's QA checklist rather than written blind.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.
@@ -364,6 +396,16 @@ UI chrome that used to be one smoke file per click is covered under
   is an empty state in a single component, nothing is lost if it breaks, and the
   picture-only import journey it follows is already walked by
   `e2e/specs/editor/import-and-edit.smoke.spec.ts` (row 31).
+- AQU-1702 file sidebar cross-group drag: dropping a file on another corpus group
+  moves it there (group marker + slot in the new group, as one call), the group under
+  the pointer shows the ring and the insertion line, and the one drop the sidebar
+  cannot express — a Bible book sent to Ungrouped, which the book-code fallback would
+  pull straight back — says why and writes nothing. "Move to corpus…" is the same
+  move without a drag. Covered in RTL (`ExpandableFileList.reorder.test.tsx`), with
+  the rule in `lib/sidebar/file-regroup.test.ts` and the numbers in
+  `lib/sidebar/file-sort-index.test.ts`. No smoke, same reasoning as AQU-1569: it is
+  sidebar chrome in one component, and the events it writes (`file.corpus.set`,
+  `file.reorder`) are already exercised by the worker projection tests.
 - AQU-1187 sidebar/picker book tree: a file spanning several books shows a collapsible header per book in the expanded sidebar row and files the toolbar chapter picker's options under book headings; per-book and non-scripture files render flat exactly as before — covered in RTL (`sidebar/BookHealthSpine.bookTree.test.tsx`, `ChapterNavigator.bookGroups.test.tsx`, `lib/sidebar/book-sections.test.ts`).
 - Hide cell / Show cell (AQU-1422): the menu entry's role gate (absent below
   Project Lead, including on a DCS-pinned project where a refusal reason exists),

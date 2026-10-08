@@ -762,6 +762,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
         const row = el.closest("label")
         return row !== null && new RegExp(`SOURCE ${el.textContent!.split(" ")[1]}(?!\\d)`).test(row.textContent!)
       }).length
+    const looseFitWarning = translate(CATALOGS.en, "importExport.review.looseFitWarning")
 
     it("applies the shift, ticked, and says how far and how much it helped", async () => {
       renderPanel({ cells: episodeLines })
@@ -770,7 +771,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       const box = screen.getByLabelText(/^Shift timings 2 seconds earlier \(lines up \d+ more\)$/)
       expect(box).toBeChecked()
       expect(onOwnLine()).toBe(30)
-      expect(screen.queryByText(/partly overlap/)).not.toBeInTheDocument()
+      expect(screen.queryByText(looseFitWarning)).not.toBeInTheDocument()
     })
 
     it("unticked, pairs the file as delivered, and ticked again, shifts it back", async () => {
@@ -786,7 +787,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       await waitFor(() => expect(box()).toBeEnabled())
       expect(box()).not.toBeChecked()
       expect(onOwnLine()).toBeLessThan(10)
-      expect(screen.getByText(/partly overlap/)).toBeInTheDocument()
+      expect(screen.getByText(looseFitWarning)).toBeInTheDocument()
       fireEvent.click(box())
       await waitFor(() => expect(box()).toBeEnabled())
       expect(box()).toBeChecked()

@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
 import type {
@@ -10,8 +11,9 @@ import type {
   BuiltinCheckId,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
-import type { LivingMemoryEntry } from "@/lib/parsers/types"
+import type { CellUnit, LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
+import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
 
@@ -238,6 +240,14 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * AQU-1686: one explicit switch per Bible data enrichment
+   * (db/shared/bible-enrichments.ts). A missing id means that enrichment's
+   * default, and `bibleResourcesEnabled` off turns every one of them off.
+   * Maintainer floor, like the rest of the blob. Read server-side through the
+   * `bible_enrichments` generated column (auth-worker/src/lib/aquifer/gate.ts).
+   */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
+  /**
    * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
    * When true, translation generation + predictions inject KB string-search
    * snippets into draft prompts. Agent access to the KB is NOT gated by this.
@@ -282,6 +292,14 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /** AQU-1720: what one imported cell is for docx/txt/md uploads. `paragraph`
+   *  emits one cell per non-empty paragraph with no sentence split and no
+   *  length cap — the unit a dubbing/podcast project generates one voice clip
+   *  for. Absent/`sentence` (the default) keeps the segmenting behaviour that
+   *  suits subtitle and document work. Formats whose cell identity comes from
+   *  the format itself (USFM verses, subtitle cues, key/value resources) are
+   *  unaffected. */
+  importCellUnit?: CellUnit
   /** Typing " or ' in the translation editor produces curly quotes in the
    *  target language's style (src/lib/richtext/smart-quotes.ts). Absent/false
    *  (the default) leaves straight quotes alone. */
@@ -334,6 +352,12 @@ export interface ProjectWideSettings {
    * whole map: writers must send the full merged object.
    */
   fileGenres?: Record<string, string>
+  /**
+   * AQU-1075: which settings this project copies from its upstream, and which
+   * of those the maintainer has detached. Absent on a project that has not
+   * been offered the choice. The server owns `knowledgeDocCopies`.
+   */
+  inheritedFromLink?: InheritedFromLink
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -441,7 +465,16 @@ export interface ProjectSettingsResponse {
 export interface ProjectLaneView {
   id: string
   role: "source" | "target"
-  name: string
+  /**
+   * AQU-1592: the freeform language the user typed, never derived. Null on a
+   * row that predates migration 0152, and absent from a server that predates
+   * it — read it through `laneLanguage` / `laneDisplayName`
+   * (src/lib/lanes/lane-display.ts), which fall back to `name`.
+   */
+  language?: string | null
+  /** Optional display override. Null means "display the language". */
+  name: string | null
+  /** Optional BCP 47 override. Null means "derive from the language on read". */
   langCode: string | null
   legacyTag: string | null
   position: number
@@ -464,16 +497,44 @@ function authHeaders(jwt: string): HeadersInit {
 export type RenameLaneResult =
   | { kind: "ok"; lane: ProjectLaneView }
   | { kind: "duplicate" }
+  /** AQU-1592: the code override is not a well-formed BCP 47 tag. */
+  | { kind: "malformed_code" }
   | { kind: "error"; message: string }
+
+/**
+ * AQU-1592: a 400 from the lane endpoints names which field the server
+ * rejected. Only `malformed_code` gets its own message on the screen; every
+ * other problem stays the generic invalid-name path the UI already had.
+ */
+async function isMalformedCode(res: Response): Promise<boolean> {
+  if (res.status !== 400) return false
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    return body.error === "malformed_code"
+  } catch {
+    return false
+  }
+}
+
+/**
+ * AQU-1592: the identity fields the languages screen may edit. Omit a field to
+ * leave it as it is; `null` on `name` or `code` clears that override.
+ */
+export interface LaneIdentityEdit {
+  name?: string | null
+  language?: string
+  code?: string | null
+}
 
 /** PATCH /api/v2/projects/:id/lanes/:laneId. Language-edit floor. */
 export async function renameProjectLane(
   jwt: string,
   projectId: string,
   laneId: string,
-  name: string,
+  edit: string | LaneIdentityEdit,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<RenameLaneResult> {
+  const patchBody: LaneIdentityEdit = typeof edit === "string" ? { name: edit } : edit
   let res: Response
   try {
     res = await fetch(
@@ -481,13 +542,14 @@ export async function renameProjectLane(
       {
         method: "PATCH",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(patchBody),
       },
     )
   } catch (e) {
     return { kind: "error", message: e instanceof Error ? e.message : String(e) }
   }
   if (res.status === 409) return { kind: "duplicate" }
+  if (await isMalformedCode(res)) return { kind: "malformed_code" }
   if (!res.ok) {
     return { kind: "error", message: `rename failed (${res.status})` }
   }
@@ -498,13 +560,24 @@ export async function renameProjectLane(
 export type CreateLaneResult =
   | { kind: "ok"; lane: ProjectLaneView }
   | { kind: "duplicate" }
+  /** AQU-1592: the code override is not a well-formed BCP 47 tag. */
+  | { kind: "malformed_code" }
   | { kind: "error"; message: string }
 
 /** POST /api/v2/projects/:id/lanes. Language-edit floor. */
 export async function createProjectLane(
   jwt: string,
   projectId: string,
-  input: { name: string; language: string },
+  /** AQU-1784: `allowDuplicateName` accepts a display name that duplicates an
+   *  active lane's — sent by the languages screen, which shows the collision
+   *  inline before the save. Omitted everywhere else, where a duplicate is
+   *  still refused with `{ kind: "duplicate" }`. */
+  input: {
+    name: string
+    language: string
+    code?: string | null
+    allowDuplicateName?: boolean
+  },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CreateLaneResult> {
   let res: Response
@@ -521,6 +594,7 @@ export async function createProjectLane(
     return { kind: "error", message: e instanceof Error ? e.message : String(e) }
   }
   if (res.status === 409) return { kind: "duplicate" }
+  if (await isMalformedCode(res)) return { kind: "malformed_code" }
   if (!res.ok) return { kind: "error", message: `create failed (${res.status})` }
   const body = (await res.json()) as { lane: ProjectLaneView }
   return { kind: "ok", lane: body.lane }
@@ -669,12 +743,20 @@ export async function fetchProjectSettings(
 
 /**
  * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
- * settings blob (no per-key merge) — send a complete blob. Per-key merge is
- * only available via the `useProjectSettings` hook and the Agent API
- * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
- * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
- * `{kind: "forbidden", required, role}`.
+ * settings blob (no per-key merge). The four retired lane keys are omitted
+ * here; the server rejects a body that includes them and keeps the stored
+ * copies. Per-key merge is only available via the `useProjectSettings` hook
+ * and the Agent API PatchSettings command. Caller must include
+ * `ifMatchVersion`; mismatched version returns `{kind: "conflict", latest}`.
+ * Sub-PROJECT_LEAD callers get `{kind: "forbidden", required, role}`.
  */
+/** Drop the retired language keys. The server rejects a body that includes them. */
+function settingsForPatch(settings: ProjectWideSettings): ProjectWideSettings {
+  const next: ProjectWideSettings = { ...settings }
+  for (const key of RETIRED_LANE_SETTINGS_KEYS) delete next[key]
+  return next
+}
+
 export async function patchProjectSettings(
   jwt: string,
   projectId: string,
@@ -689,7 +771,7 @@ export async function patchProjectSettings(
       {
         method: "PATCH",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ settings, ifMatchVersion }),
+        body: JSON.stringify({ settings: settingsForPatch(settings), ifMatchVersion }),
       },
     )
   } catch (e) {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { handleCellsReadRequest, type CellsReadEnv } from "../events/cells-read-route"
+import { handleCellsReadRequest, resetChainCacheForTests, type CellsReadEnv } from "../events/cells-read-route"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { type CellRow } from "./helpers/in-memory-db"
@@ -239,6 +239,44 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     const body = (await res.json()) as { cells: Array<{ value: string }> }
     expect(body.cells.map((c) => c.value).sort()).toEqual(["default-lane", "fr-lane"])
+  })
+
+  it("AQU-1615: present empty lane is the blank bridge, not every target lane", async () => {
+    resetChainCacheForTests()
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "s1", side: "source", anchor_cell_id: null, event_id: "es1", value: "src-1" }),
+        makeCell({
+          cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1-blank", value: "blank-lane",
+          target_lang: "",
+        }),
+        makeCell({
+          cell_id: "t1", side: "target", anchor_cell_id: null, event_id: "et1-sw", value: "sw-lane",
+          target_lang: "sw",
+        }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const read = async (search: string) => {
+      const res = (await handleCellsReadRequest(
+        new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells${search}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db),
+      ))!
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { cells: Array<{ side: string; value: string }> }
+      return body.cells.map((c) => c.value).sort()
+    }
+    try {
+      // Prime the all-lanes cache, then ask for the blank bridge. A shared
+      // cache slot would hand back the sw row.
+      expect(await read("")).toEqual(["blank-lane", "src-1", "sw-lane"])
+      expect(await read("?lane=")).toEqual(["blank-lane", "src-1"])
+      expect(await read("")).toEqual(["blank-lane", "src-1", "sw-lane"])
+    } finally {
+      resetChainCacheForTests()
+    }
   })
 
   it("rejects a lane value longer than 64 characters with 400", async () => {
@@ -878,7 +916,7 @@ describe("project incarnation (AQU-943)", () => {
       .run()
     await db
       .prepare(
-        "INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, anchor_cell_id, event_id, last_editor, last_edit_at, validated, word_count) VALUES (?, ?, ?, 'target', '', ?, NULL, ?, 'alice', 1, 0, 1)",
+        "INSERT INTO cells (project_id, file_id, cell_id, side, value, anchor_cell_id, event_id, last_editor, last_edit_at, validated, word_count) VALUES (?, ?, ?, 'target', ?, NULL, ?, 'alice', 1, 0, 1)",
       )
       .bind("proj-a", "file-x", "c1", opts.value, `ev-${opts.epoch}`)
       .run()
@@ -1326,7 +1364,7 @@ describe("AQU-1160: chain-order cache", () => {
       .run()
     await db
       .prepare(
-        "INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash) VALUES (?, ?, ?, 'target', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 1, NULL)",
+        "INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash) VALUES (?, ?, ?, 'target', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 1, NULL)",
       )
       .bind("proj-a", "file-x", "c0", "v0", "e0", "alice", 1700000000001)
       .run()
@@ -1462,7 +1500,7 @@ it("reads narrow ordering on a cold page and keeps intervening edits visible to 
   let changed = false
   db.prepare = (sql: string) => {
     const statement = prepare(sql)
-    if (!sql.startsWith("SELECT cell_id, side, target_lang, anchor_cell_id, event_id FROM cells")) return statement
+    if (!sql.startsWith("SELECT cells.cell_id, cells.side, cells.lane_id, COALESCE(wl.legacy_tag, '') AS target_lang, cells.anchor_cell_id, cells.event_id FROM cells")) return statement
     const bind = statement.bind.bind(statement)
     statement.bind = (...args: unknown[]) => {
       const bound = bind(...args)
@@ -1487,7 +1525,7 @@ it("reads narrow ordering on a cold page and keeps intervening edits visible to 
   const response = (await handleCellsReadRequest(request("side=target&limit=1"), envWith(db)))!
   const page = await response.json() as { cells: { cellId: string; value: string }[]; maxServerSeq: number }
   expect(orderingRows).toHaveLength(4)
-  expect(Object.keys(orderingRows[0]).sort()).toEqual(["anchor_cell_id", "cell_id", "event_id", "side", "target_lang"])
+  expect(Object.keys(orderingRows[0]).sort()).toEqual(["anchor_cell_id", "cell_id", "event_id", "lane_id", "side", "target_lang"])
   expect(page.cells).toHaveLength(1)
   expect(page.cells[0].value).toBe("edited during read")
   expect(page.maxServerSeq).toBe(1)

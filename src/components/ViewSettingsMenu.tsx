@@ -33,6 +33,10 @@ import {
   useUnresolvedCommentHighlight,
 } from "@/lib/store/unresolved-comment-highlight-pref"
 import {
+  setHealthScoreColorCoding,
+  useHealthScoreColorCoding,
+} from "@/lib/store/health-score-color-coding-pref"
+import {
   setLowMemoryMode,
   useLowMemoryMode,
   type LowMemoryMode,
@@ -138,6 +142,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   // and EditorTable is the only reader, so a prop pair through
   // ProjectWorkspace would be two more parameters carrying no extra meaning.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
+  const healthScoreColorCoding = useHealthScoreColorCoding()
   const lowMemoryMode = useLowMemoryMode()
   const mismatch = useMemo(
     () =>
@@ -352,6 +357,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               checked={highlightUnresolvedComments}
               disabled={!fileOpen}
               onCheckedChange={setUnresolvedCommentHighlight}
+            />
+            <SwitchRow
+              id="view-health-score-color-coding"
+              label={t("editor.view.healthScoreColorCoding")}
+              checked={healthScoreColorCoding}
+              disabled={!fileOpen}
+              onCheckedChange={setHealthScoreColorCoding}
             />
           </FieldGroup>
 

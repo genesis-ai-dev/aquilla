@@ -215,6 +215,50 @@ describe("GlossaryEditor", () => {
     })
   })
 
+  it("exports TBX for the active lane only", async () => {
+    // A person on the French lane must not download the Spanish renderings.
+    // The button passes the lane-filtered list plus the lane rows, so xml:lang
+    // is that lane's language and the lane id note survives.
+    const workspaceProject = {
+      id: "p1",
+      name: "P",
+      lanes: [
+        { id: "lane-empty", role: "target", language: "English", name: null, langCode: null, legacyTag: "", position: 0, archivedAt: null },
+        { id: "lane-fr", role: "target", language: "French", name: null, langCode: null, legacyTag: "fr", position: 1, archivedAt: null },
+        { id: "lane-es", role: "target", language: "Spanish", name: null, langCode: null, legacyTag: "es", position: 2, archivedAt: null },
+      ],
+      terminology: [
+        concept({
+          renderings: [
+            { rendering: "faveur", status: "preferred", laneId: "lane-fr" },
+            { rendering: "gracia", status: "preferred", laneId: "lane-es" },
+          ],
+        }),
+      ],
+    } as unknown as ProjectRecord
+    const blobs: Blob[] = []
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      blobs.push(blob as Blob)
+      return "blob:tbx"
+    })
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    try {
+      renderEditor({ project: workspaceProject, patchSettings, activeLane: "fr" })
+      fireEvent.click(screen.getByRole("button", { name: "Export TBX" }))
+      expect(blobs).toHaveLength(1)
+      const xml = await blobs[0].text()
+      expect(xml).toContain("faveur")
+      expect(xml).not.toContain("gracia")
+      expect(xml).toContain('xml:lang="French"')
+      expect(xml).toContain('<termNote type="aquillaLaneId">lane-fr</termNote>')
+    } finally {
+      createObjectURL.mockRestore()
+      revokeObjectURL.mockRestore()
+      click.mockRestore()
+    }
+  })
+
   it("renders the workspace-owned glossary immediately without a duplicate project resolve", () => {
     mockProjectLoading = true
     const workspaceProject = {

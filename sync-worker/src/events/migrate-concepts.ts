@@ -39,7 +39,7 @@ import { allocateSeqRange } from './event-insert'
 interface BlobConcept {
   id?: string
   sourceTerm?: string
-  renderings?: Array<{ rendering?: string; status?: string }>
+  renderings?: Array<{ rendering?: string; status?: string; laneId?: string }>
   notes?: string
   status?: string
   createdAt?: string
@@ -86,7 +86,9 @@ function normalizeRenderings(raw: BlobConcept['renderings']): Array<{ rendering:
       r?.status === 'preferred' || r?.status === 'admitted' || r?.status === 'forbidden'
         ? r.status
         : 'preferred'
-    return rendering ? [{ rendering, status }] : []
+    if (!rendering) return []
+    const laneId = typeof r?.laneId === 'string' && r.laneId !== '' ? r.laneId : undefined
+    return [{ rendering, status, ...(laneId ? { laneId } : {}) }]
   })
 }
 
@@ -118,18 +120,31 @@ function isMappableConcept(
 const MIGRATION_CHUNK = 200
 
 /**
+ * All that reading the blob needs. Narrower than AquillaDb because autopilot's
+ * context loader in auth-worker reaches this read through a minimal handle.
+ */
+export interface SettingsReadDb {
+  prepare(query: string): {
+    bind(...params: unknown[]): { first<T>(): Promise<T | null> }
+  }
+}
+
+/**
  * Decode a project's LEGACY blob termbase into the read route's wire shape.
  *
  * Read-only. Used by the concepts read route as a fallback while a project is
  * still unmigrated, so nobody ever sees an empty termbase — see the long note
  * at that call site for why a fallback exists at all and why it does not
  * reopen the concurrent-add bug (the blob is never WRITTEN any more).
+ * auth-worker's readProjectConcepts (auth-worker/src/lib/concepts-read.ts)
+ * imports it for the same fallback, so subscribed termbases, autopilot and the
+ * in-app agent's term search see what the editor shows.
  *
  * Shares `loadBlobConcepts` with the migration itself, so what a user sees
  * before migration and what lands after it cannot drift apart.
  */
 export async function readBlobConcepts(
-  db: AquillaDb,
+  db: SettingsReadDb,
   projectId: string,
 ): Promise<Array<{
   conceptId: string
@@ -170,7 +185,7 @@ export async function readBlobConcepts(
  * blob will not parse, or every entry is unusable.
  */
 async function loadBlobConcepts(
-  db: AquillaDb,
+  db: SettingsReadDb,
   projectId: string,
 ): Promise<Array<BlobConcept & { id: string; sourceTerm: string }>> {
   const row = await db

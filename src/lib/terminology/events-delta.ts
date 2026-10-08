@@ -28,7 +28,12 @@ export interface ConceptDeltaInput {
 
 function sameRenderings(a: TermRendering[], b: TermRendering[]): boolean {
   if (a.length !== b.length) return false
-  return a.every((r, i) => r.rendering === b[i].rendering && r.status === b[i].status)
+  return a.every(
+    (r, i) =>
+      r.rendering === b[i].rendering &&
+      r.status === b[i].status &&
+      (r.laneId ?? "") === (b[i].laneId ?? ""),
+  )
 }
 
 /**

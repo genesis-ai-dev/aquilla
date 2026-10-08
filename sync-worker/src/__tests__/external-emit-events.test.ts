@@ -59,12 +59,25 @@ async function memberToken(
   return { token, userId, username: name, credentialId }
 }
 
+const LANE_REQUIRED = new Set(['cell.validate', 'cell.unvalidate', 'cell.backtranslation.set', 'target.cell.repin'])
+
+function withLaneIds(events: unknown[]): unknown[] {
+  return events.map((event) => {
+    if (!event || typeof event !== 'object') return event
+    const row = event as { kind?: string; laneId?: string }
+    if (row.kind && LANE_REQUIRED.has(row.kind) && row.laneId === undefined) {
+      return { ...row, laneId: 'deflane1' }
+    }
+    return event
+  })
+}
+
 async function prepare(env: ReturnType<typeof makeEnv>, token: string, events: unknown[], extra: Record<string, unknown> = {}) {
   const res = (await handleExternalChangesetsRequest(
     new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commands: [{ kind: 'EmitEvents', events }], ...extra }),
+      body: JSON.stringify({ commands: [{ kind: 'EmitEvents', events: withLaneIds(events) }], ...extra }),
     }), env,
   ))!
   return { res, body: (await res.json()) as any }
@@ -124,6 +137,11 @@ beforeEach(async () => {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
 })
 
 describe('EmitEvents — validation + floors', () => {

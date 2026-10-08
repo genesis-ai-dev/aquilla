@@ -26,6 +26,7 @@
 import { removedCellsForFile } from './removed-cells'
 import { hiddenCellsForFile } from './hidden-cells'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
+import { cellMetadataWireSql } from '../../../db/shared/cell-metadata-sql'
 import type { UsfmEdits } from '../lib/usfm-lossless'
 import { readUsfmNotes, reattachUsfmNotes } from '../lib/usfm-notes'
 
@@ -85,14 +86,13 @@ export async function buildUsfmExportPlan(
   //    (project_id, file_id, cell_id) and inherits its addressability.
   const cells = await db
     .prepare(
-      `SELECT s.canonical_ref AS canonical_ref, t.value AS value, s.metadata AS source_metadata
+      `SELECT s.canonical_ref AS canonical_ref, t.value AS value, ${cellMetadataWireSql('s')} AS source_metadata
          FROM cells t
          JOIN cells s
            ON s.project_id = t.project_id
           AND s.file_id    = t.file_id
           AND s.cell_id    = t.cell_id
           AND s.side       = 'source'
-          AND s.target_lang = ''
         WHERE t.project_id = ?
           AND t.file_id    = ?
           AND t.side       = 'target'
@@ -196,7 +196,6 @@ async function resolveAdditions(
         WHERE s.project_id = ?
           AND s.file_id    = ?
           AND s.side       = 'source'
-          AND s.target_lang = ''
           AND s.canonical_ref IS NULL
           AND (s.metadata::jsonb)->'aquillaOrigin'->>'kind' = 'user-insert'`,
     )
@@ -222,7 +221,7 @@ async function resolveAdditions(
       .prepare(
         `SELECT cell_id, anchor_cell_id, canonical_ref
            FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND cell_id IN (${placeholders})`,
       )
       .bind(projectId, fileId, ...frontier)

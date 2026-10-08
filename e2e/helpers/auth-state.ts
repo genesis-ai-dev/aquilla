@@ -57,22 +57,40 @@ export async function writePersistedSession(
 
 /**
  * Windows refuses a replacing rename with EPERM/EACCES while any handle is still
- * open on the destination, which two stacks publishing at once routinely hit.
- * Retrying keeps publication atomic — the rename either replaces the file whole
- * or has not happened — where giving up would lose a session.
+ * open on the destination, which concurrent publishers and readers routinely hit.
+ * A fixed 10ms pause skips the gaps between those reads and the old 50-try cap
+ * gives up in about half a second, which is not long enough while the pre-push
+ * hook is busy. Keep retrying, yielding so the readers can close the file.
+ * The rename either replaces the file whole or has not happened, so a reader
+ * never sees a partial write.
  */
 async function publishAtomically(temporary: string, file: string): Promise<void> {
-  const RETRYABLE = new Set(["EPERM", "EACCES", "EBUSY"])
+  const deadline = Date.now() + 4_000
   for (let attempt = 0; ; attempt += 1) {
     try {
       await fs.rename(temporary, file)
       return
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (attempt >= 50 || code === undefined || !RETRYABLE.has(code)) throw error
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      if (!retryableRename(error) || Date.now() >= deadline) throw error
+      const delay = attempt < 80 ? 0 : Math.min(20, Math.floor((attempt - 80) / 4) + 1)
+      await new Promise((resolve) => {
+        if (delay === 0) setImmediate(resolve)
+        else setTimeout(resolve, delay)
+      })
     }
   }
+}
+
+function retryableRename(error: unknown): boolean {
+  const code = errnoOf(error)
+  if (code === "EPERM" || code === "EACCES" || code === "EBUSY") return true
+  return error instanceof Error && /^(EPERM|EACCES|EBUSY):/.test(error.message)
+}
+
+function errnoOf(error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || !("code" in error)) return undefined
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? code : undefined
 }
 
 export async function readPersistedSession(

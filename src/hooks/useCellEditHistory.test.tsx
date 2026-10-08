@@ -102,6 +102,29 @@ describe("useCellEditHistory (Phase 2b)", () => {
     expect(entry.validated).toBe(false)
   })
 
+  // AQU-1656: once the server acks an AI draft it must still read as AI, and
+  // carry the id of the prompt that produced it — otherwise the drawer can
+  // only show prompts for drafts still sitting in the local outbox.
+  it("keeps an acked AI draft marked as AI and linked to its prompt record", async () => {
+    fetchCellHistoryMock.mockResolvedValueOnce([
+      makeEvent({ id: "e2", serverSeq: 2, payload: { value: "human fix" } }),
+      makeEvent({
+        id: "e1",
+        serverSeq: 1,
+        author: "test-model",
+        payload: { value: "ai draft", ai_suggestion: true, ai_draft: { model: "test-model", interventionId: "iv-1" } },
+      }),
+    ])
+    const { result } = renderHook(() =>
+      useCellEditHistory({ enabled: true, projectId: "proj-a", fileId: "file-abc", cellId: "cell-1", getTokenForFile }),
+    )
+    await waitFor(() => expect(result.current.history).toHaveLength(2))
+    const [draft, fix] = result.current.history
+    expect(draft).toMatchObject({ source: "llm", interventionId: "iv-1" })
+    expect(fix.source).toBe("human")
+    expect(fix.interventionId).toBeUndefined()
+  })
+
   it("flags commits off the current head's parent chain as stale (AQU-1154 bumped branch)", async () => {
     // Exact shape the cell-history route returns after the AQU-1154 A/B
     // scenario: H → A1 (won) / B1 (lost CAS) → B2 (parent B1, lost) → A2

@@ -110,8 +110,9 @@ export const dialog = defineNamespace({
       },
       "dialog.assign.laneLabel": {
         description:
-          "Form label above the target-language lane selector, shown only on " +
-          "projects that have extra translation lanes beyond the default.",
+          "Form label above the target-language lane field on every assign " +
+          "surface. One lane is named in place; several lanes are a menu. " +
+          "Shown even when the project has only its default lane.",
         screenshot: "assign-modal",
       },
       "dialog.assign.defaultLaneFallback": {

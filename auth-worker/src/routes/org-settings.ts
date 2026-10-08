@@ -57,11 +57,11 @@
 // services/org-permissions.ts. Enforced by the terminology-scoped carve-out
 // in routes/project-settings.ts; this route only stores/validates it.
 //
-// AQU-1086: languageEditMinRole (who may change a project's source/target
-// language and its extra target lanes) is the second write-gating role-ladder
-// policy key, on the same OWNER-only write gate. Unlike termbaseEditMinRole
-// its default is MAINTAINER (600) — today's behaviour — so an org opts in by
-// lowering it to PROJECT_LEAD. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
+// AQU-1086 / AQU-984: languageEditMinRole (who may change a project's
+// source/target language and its extra target lanes) is a role-ladder policy
+// key, on the same OWNER-only write gate. Absent, the floor is PROJECT_LEAD.
+// A stored value — including an explicit MAINTAINER — is that org's choice
+// and is kept. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
 // services/org-permissions.ts and the language-scoped carve-out in
 // routes/project-settings.ts; this route only stores/validates it.
 
@@ -403,6 +403,19 @@ orgSettings.on(
           },
           400,
         )
+      }
+    }
+
+    // [Pen test 2026-10-06] Omission is a change too: the blob is replaced
+    // wholesale, so a Maintainer dropping a stored policy key would reset it to
+    // its default. Below owner, carry omitted keys over from the stored value.
+    if (role < EXPORT_FLOOR_WRITE_MIN_ROLE) {
+      existingForPolicyCheck ??= await loadSettings(c.env, orgId)
+      const stored = existingForPolicyCheck.settings as Record<string, unknown>
+      for (const key of Object.keys(PERMISSION_POLICY_KEYS)) {
+        if (body.settings[key] === undefined && stored[key] !== undefined) {
+          body.settings[key] = stored[key]
+        }
       }
     }
 

@@ -371,10 +371,11 @@ UI chrome that used to be one smoke file per click is covered under
   reaching the member (AQU-1781) are in
   `auth-worker/src/__tests__/member-scopes-lane-grants.test.ts`. No smoke: the gap is a
   two-table DISAGREEMENT, so a walk only shows it with the read wall on (`LANE_READ_WALL`,
-  unset locally and in e2e) AND two browser contexts whose grants have been made to drift —
-  the owner adding a lane after the contributor joined. That fixture does not exist, so the
-  owner-adds-a-lane → inspector-shows-the-gap → regrant → contributor-reloads walk is on this
-  issue's QA checklist rather than written blind.
+  unset locally and in e2e) AND grants that have drifted. Since AQU-1781 (a new lane is
+  granted to members who read every lane) and AQU-1782 (direct add writes grants) the app's
+  own flows no longer produce that drift — it lives in data written before them — so a walk
+  has to delete a grant row by hand first. The inspector-shows-the-gap → regrant →
+  contributor-reloads walk is on this issue's QA checklist rather than written blind.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.

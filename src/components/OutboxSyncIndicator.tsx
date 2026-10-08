@@ -4,6 +4,8 @@ import { OutboxInspectorPopover } from "./OutboxInspectorPopover"
 import type { OutboxRecord } from "@/lib/sync/outbox"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useLeaderStalled } from "@/lib/offline/leader-watchdog"
+import { useOfflineQueueCounts } from "@/lib/offline/queue-counts"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
 
 interface OutboxSyncIndicatorProps {
   pendingCount: number
@@ -15,6 +17,8 @@ interface OutboxSyncIndicatorProps {
   /** Reset backoff + force an immediate flush. Wired to the inspector's
    *  "Retry now" button. */
   onRetryNow?: () => void
+  /** Tauri: also counts this project's offline queue (src/lib/offline/queue-counts.ts). */
+  projectId?: string | null
   className?: string
 }
 
@@ -26,6 +30,8 @@ type ChipTone = "idle" | "queued" | "stuck" | "warning" | "notSaving"
  * "is anything stuck?"). Tone shifts as the queue fills up or retries fail.
  * A stalled offline-store leader (Tauri) outranks every outbox state: they all
  * assume local saving works, so none of them may show while it doesn't.
+ * In Tauri, edits on an offline-ready project queue in the offline store
+ * rather than the outbox, so its pending and refused rows count too.
  */
 export function OutboxSyncIndicator({
   pendingCount,
@@ -33,19 +39,24 @@ export function OutboxSyncIndicator({
   failedCount = 0,
   records,
   onRetryNow,
+  projectId,
   className,
 }: OutboxSyncIndicatorProps) {
   const t = useT()
   const leaderStalled = useLeaderStalled()
+  const { store: offlineStore } = useOfflineStore()
+  const offline = useOfflineQueueCounts(offlineStore, projectId)
+  const pending = pendingCount + offline.pending
+  const failed = failedCount + offline.failed
   const stuck = failureStreak >= 3
-  const hasFailed = failedCount > 0
+  const hasFailed = failed > 0
   const tone: ChipTone = leaderStalled
     ? "notSaving"
     : hasFailed
       ? "warning"
       : stuck
         ? "stuck"
-        : pendingCount > 0
+        : pending > 0
           ? "queued"
           : "idle"
 
@@ -53,21 +64,21 @@ export function OutboxSyncIndicator({
     tone === "notSaving"
       ? t("editor.outbox.notSavingLabel")
       : tone === "warning"
-        ? t("nav.outbox.failedCount", { count: failedCount })
+        ? t("nav.outbox.failedCount", { count: failed })
         : tone === "stuck"
           ? t("editor.outbox.backlogLabel")
           : tone === "queued"
-            ? t("editor.outbox.queuedLabel", { count: pendingCount })
+            ? t("editor.outbox.queuedLabel", { count: pending })
             : t("editor.outbox.syncedLabel")
   const title =
     tone === "notSaving"
       ? t("editor.outbox.notSavingTooltip")
       : tone === "warning"
-        ? t("editor.outbox.failedTooltip", { count: failedCount })
+        ? t("editor.outbox.failedTooltip", { count: failed })
         : tone === "stuck"
           ? t("editor.outbox.backlogTooltip")
           : tone === "queued"
-            ? t("editor.outbox.queuedTooltip", { count: pendingCount })
+            ? t("editor.outbox.queuedTooltip", { count: pending })
             : t("editor.outbox.syncedTooltip")
 
   const trigger = <ChipButton label={label} title={title} tone={tone} className={className} />

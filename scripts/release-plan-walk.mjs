@@ -4,11 +4,13 @@
 // slicing logic, and the slicing logic stays testable with no network.
 const REPO = "genesis-ai-dev/aquilla"
 
-// PR-BOT.md's exact heading and verdict line: "## Bot walk — PR <n> @ <sha>"
+// PR-BOT.md's heading and verdict line: "## Bot walk — PR <n> @ <sha>"
 // followed by a line opening "**PASS**", "**FAIL**", "**FLAKY**",
 // "**BLOCKED**", or "**NOT CHECKED**". <sha> is the PR's own head sha, not
-// the dev merge commit.
-const WALK_HEADING = /^## Bot walk — PR (\d+) @ ([0-9a-f]{40})\s*$/m
+// the dev merge commit. The bot writes it full or abbreviated (7+ hex),
+// sometimes in backticks, and a re-walk adds a note in parentheses after it
+// ("@ <sha> (rewalk)"); all of those are the same walk heading.
+const WALK_HEADING = /^## Bot walk — PR #?(\d+) @ `?([0-9a-f]{7,40})`?(?: \([^)\n]*\))?\s*$/m
 const VERDICT_LINE = /^\*\*(PASS|FAIL|FLAKY|BLOCKED|NOT CHECKED)\*\*/
 
 // FLAKY and BLOCKED both mean the bot could not prove the outcome; the
@@ -60,7 +62,8 @@ async function listComments(prNumber, opts) {
 // Resolves one dev-branch merge commit to the walk verdict for the PR it
 // closed. `unknown` covers every case where that isn't possible yet: no
 // associated PR, no matching comment, or a comment whose sha is stale
-// because the walk ran before a later push.
+// because the walk ran before a later push. When several walks name the
+// head sha (a re-walk after a fixture change, say), the newest one wins.
 export async function lookupWalk({ mergeSha, repo = REPO, token, fetchImpl = fetch }) {
   const opts = { repo, token, fetchImpl }
   // The commit subject often carries the PR number too, but not reliably for
@@ -71,11 +74,12 @@ export async function lookupWalk({ mergeSha, repo = REPO, token, fetchImpl = fet
   const pr = candidates.find((candidate) => candidate.merge_commit_sha === mergeSha) ?? candidates[0]
   if (!pr?.number || !pr.head?.sha) return "unknown"
 
+  let latest = null
   for (const comment of await listComments(pr.number, opts)) {
     const parsed = parseWalkComment(comment.body)
-    if (parsed && parsed.prNumber === pr.number && parsed.sha === pr.head.sha) return normalizeVerdict(parsed.verdict)
+    if (parsed && parsed.prNumber === pr.number && pr.head.sha.startsWith(parsed.sha)) latest = parsed
   }
-  return "unknown"
+  return latest ? normalizeVerdict(latest.verdict) : "unknown"
 }
 
 // Fills `walk` for every PR still "unknown" (a docs/test-only PR is already

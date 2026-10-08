@@ -222,6 +222,25 @@ export function virtualClockSeek(sec: number): void {
   notify()
 }
 
+/**
+ * A timeline seek on a file the clock owns (AQU-1118). Every seek moves the
+ * head; only "Play from this cue" (`play`) also starts the clock, so that
+ * button means "play from here" on a film-less file exactly as it does on a
+ * linked video (AQU-1117). A chip click or a table-row click passes no `play`
+ * and stays cue-only.
+ *
+ * Never starts while the recorder is open: the take owns the device, and
+ * nothing auto-resumes once it closes. Already playing, it jumps and keeps
+ * playing, because `virtualClockPlay` is a no-op on a running clock.
+ */
+export function virtualClockSeekFromTimeline(
+  sec: number,
+  opts: { play?: boolean; recorderOpen: boolean },
+): void {
+  virtualClockSeek(Math.max(0, sec))
+  if (opts.play === true && !opts.recorderOpen) virtualClockPlay()
+}
+
 /** Rate re-anchors FIRST, so the seconds already elapsed keep their old rate
  *  rather than being retroactively rescaled. */
 export function setVirtualClockRate(next: number): void {

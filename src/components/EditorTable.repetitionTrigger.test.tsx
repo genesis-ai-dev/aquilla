@@ -188,7 +188,7 @@ describe("EditorTable — AQU-1484 a typed, auto-validated edit reaches onValida
     })
     // The editor's own idle window elapses with focus still in the cell: the
     // text is committed and auto-validated, exactly as before…
-    await waitFor(() => expect(emitTargetCellCommit).toHaveBeenCalledTimes(1), { timeout: 5_000 })
+    await waitFor(() => expect(emitTargetCellCommit).toHaveBeenCalledTimes(1))
     expect(vi.mocked(emitTargetCellCommit).mock.calls[0][0]).toMatchObject({ value: "half-typ" })
     await autoValidateSettled()
     // …but the repetitions are not touched yet.

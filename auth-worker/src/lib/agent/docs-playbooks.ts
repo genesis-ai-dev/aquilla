@@ -35,12 +35,17 @@ and applies before the next step reads the state it produced.
    registered. When a draft or prompt needs a language, read lanes.language
    for that lane — never the lane tag, and never these settings keys.
 
-3. Termbase seed. Same command, key 'terminology':
-   propose_command({commands:[{kind:'PatchSettings', projectId, ifMatchVersion,
-     ops:[{key:'terminology', value:[{id, sourceTerm, …}]}]}]})
-   Gotcha: 'terminology' has its OWN floor — the org's termbaseEditMinRole
-   (default PROJECT_LEAD 500), not 600. Seed from the source text and the
-   person's decisions, never from general knowledge. See docs('terminology').
+3. Termbase seed. Read the concepts table first (docs('terminology')): a
+   second term.create for an existing source term does not merge. Then:
+   propose_command({commands:[{kind:'EmitEvents', events:[{kind:'term.create',
+     payload:{sourceTerm, renderings:[{rendering, status:'preferred'}],
+     status:'active', notes?}}]}]})
+   Gotchas: EmitEvents is sole-command, max 200 events. status 'active' binds
+   and needs the org's termbaseEditMinRole (default PROJECT_LEAD 500);
+   status 'draft' is a suggestion a CONTRIBUTOR (400) may stage. Never seed
+   with a PatchSettings op on 'terminology': that key is retired, and the
+   editor ignores it once the project has any concept. Seed from the source
+   text and the person's decisions, never from general knowledge.
 
 4. Translation brief. Key 'translationBrief' (audience, purpose, register,
    literalness, key-term strategy, constraints), staged the same way at
@@ -59,7 +64,7 @@ and applies before the next step reads the state it produced.
 Done when readiness has no blocking gaps — verify, do not assume:
 - a source file exists with cells: read({fileId}) returns rows
 - targetLanes / sourceLanguage / targetLanguage are set
-- terminology has concepts (or the person explicitly deferred it)
+- the concepts table has live concepts (or the person explicitly deferred it)
 - translationBrief is non-null
 - at least one active assignment covers the work
 Report the gaps you could not close and who has to close them.
@@ -144,8 +149,8 @@ of the first cycle is to make that visible on ONE passage instead of a book.
    as a result.
 
 5. Fill the gaps — each of these is a staged changeset the person applies:
-   - termbase: PatchSettings op on 'terminology' (org termbase floor, default
-     500)
+   - termbase: term.create events in an EmitEvents changeset (status
+     'active' needs the org termbase floor, default 500; docs('terminology'))
    - brief: PatchSettings op on 'translationBrief' (MAINTAINER 600)
    - exemplars: there is no command for these. Ask the person to hand-translate
      and validate 5-10 cells. That is the highest-value thing they can do, and

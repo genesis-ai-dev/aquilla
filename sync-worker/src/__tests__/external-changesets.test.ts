@@ -677,7 +677,7 @@ describe('changesets — commit replay (crash-retry idempotency)', () => {
 //   3. preconditions are lane-scoped — a sibling-lane write never stales a plan
 
 describe('changesets — target-language lanes', () => {
-  const laneRowId: Record<string, string> = { es: 'eslane01', fr: 'frlane01', pt: 'ptlane01' }
+  const laneRowId: Record<string, string> = { es: 'eslane01', fr: 'frlane01', pt: 'ptlane01', Spanish: 'splane01' }
 
   /** `withRows: false` for tests that seed their own lane rows (fixed ids). */
   async function registerLanes(lanes: string[], { withRows = true } = {}): Promise<void> {
@@ -697,6 +697,22 @@ describe('changesets — target-language lanes', () => {
       )
     }
   }
+
+  it('does not retarget a code onto a lane whose name is that language', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['Spanish'])
+
+    const { res, body } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+    ])
+    // AQU-1615: a code is not a lane id, so it names no lane at all, the Spanish
+    // one included.
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(body.error.message).toContain('lane does not exist')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
 
   it('rejects a SetTranslation naming an unregistered lane at prepare', async () => {
     const env = makeEnv(tdb.db)

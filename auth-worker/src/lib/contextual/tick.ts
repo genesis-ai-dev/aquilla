@@ -16,6 +16,7 @@
 // the [[ctx:*]] prompt markers.
 
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { modelLanguageForLane } from "../../../../db/shared/lane-language"
 import {
   getRun,
   failRun,
@@ -53,7 +54,7 @@ import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
 import { triageVerdicts, type TriageCall } from "./triage"
 import { rulesForLane, type LintRule } from "../agent/lint"
-import { loadProjectContext, targetLanguageForTag, type ProjectContext } from "./project-context"
+import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
 import type { PaidCallAdmit } from "../billing/agent-usage"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
@@ -680,7 +681,7 @@ async function loadNeighborBriefs(
   db: AquillaDb,
   projectId: string,
   fileId: string,
-  targetLang: string,
+  laneId: string,
   seed: StoredSpanSeed,
   pairs: CellPair[],
 ): Promise<NeighborBrief[]> {
@@ -688,7 +689,7 @@ async function loadNeighborBriefs(
     const approved = await listSceneBriefs(db, projectId, {
       fileId,
       status: "approved",
-      targetLang,
+      laneId,
     })
     const order = new Map(pairs.map((p, i) => [p.cellId, i]))
     const seedStart = order.get(seed.startCellId) ?? 0
@@ -728,8 +729,9 @@ async function loadParagraphStarts(
   try {
     const { results } = await db
       .prepare(
+        // AQU-1610: a source row is `side = 'source'`, whatever lane it is in.
         `SELECT cell_id FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND metadata ->> 'paragraphStart' = 'true'`,
       )
       .bind(projectId, fileId)
@@ -861,7 +863,7 @@ async function consumeSteering(
         brief &&
         brief.projectId === run.projectId &&
         brief.fileId === run.fileId &&
-        brief.targetLang === run.targetLang
+        brief.laneId === run.laneId
       ) {
         await markStale(db, briefId, "steering-refresh")
         const seed = cursor?.seeds.find(
@@ -992,7 +994,7 @@ async function processSpan(
     db,
     run.projectId,
     run.fileId,
-    run.targetLang,
+    run.laneId,
     storedSeed,
     shared.pairs,
   )
@@ -1002,9 +1004,10 @@ async function processSpan(
   let report: SpanReport | undefined
   let occupiedAtStage = 0
   let phaseActivity = Promise.resolve()
-  const spanTargetLanguage = targetLanguageForTag(
-    run.targetLang,
-    shared.ctx.lanes,
+  const targetLanguage = await modelLanguageForLane(
+    db,
+    run.projectId,
+    { laneId: run.laneId, tag: run.targetLang },
     shared.ctx.targetLanguage,
   )
   try {
@@ -1021,10 +1024,11 @@ async function processSpan(
       // the concepts get scoped to this span's source text inside runSpan.
       briefParameters: shared.ctx.briefParameters,
       ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
+      ...(shared.ctx.termMatching ? { termMatching: shared.ctx.termMatching } : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
-      ...(spanTargetLanguage ? { targetLanguage: spanTargetLanguage } : {}),
+      ...(targetLanguage ? { targetLanguage } : {}),
       // Tag every call this span makes, for cost attribution. A wave runs
       // several spans concurrently, so the span id must ride the request
       // rather than live in shared mutable state.
@@ -1052,7 +1056,7 @@ async function processSpan(
           fileId: run.fileId,
           startCellId: brief.startCellId,
           endCellId: brief.endCellId,
-          targetLang: run.targetLang,
+          laneId: run.laneId,
           construal: brief.l2Construal,
           ambiguityRegister: brief.ambiguityRegister,
           l1Summary: brief.l1Summary,
@@ -1077,7 +1081,8 @@ async function processSpan(
         })
         return proposed.brief.id
       },
-      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts),
+      lint: async (draft) =>
+        lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts, shared.ctx.termMatching),
       stage: async (draft) => {
         // Anti-clobber, checked as late as possible: a human may have typed
         // into one of these cells while the span was running. `pairs` is a
@@ -1088,7 +1093,7 @@ async function processSpan(
           projectId: run.projectId,
           fileId: run.fileId,
           cellIds: draft.cells.map((c) => c.cellId),
-          targetLang: run.targetLang,
+          laneId: run.laneId,
         })
         occupiedAtStage += occupied.size
         const fresh = draft.cells.filter((c) => !occupied.has(c.cellId))
@@ -1309,12 +1314,12 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   // Scope + cursor. Pairs are re-read every wave (cells move under the run);
   // seeds are pinned in the cursor so segmentation never shifts mid-run.
   const [pairs, excludedCellIds] = await Promise.all([
-    selectCellPairs(db, run.projectId, { fileId: run.fileId, targetLang: run.targetLang }),
+    selectCellPairs(db, run.projectId, { fileId: run.fileId, laneId: run.laneId }),
     findProposedCellsFromOtherRuns(db, {
       projectId: run.projectId,
       fileId: run.fileId,
       runId: run.id,
-      targetLang: run.targetLang,
+      laneId: run.laneId,
     }),
   ])
   let cursor = run.spanCursor
@@ -1393,7 +1398,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
 
   // Per-run context is loaded ONCE and shared by every span in the wave
   // (it was re-fetched per span before, which was pure overhead).
-  const ctx = await loadProjectContext(db, run.projectId)
+  const ctx = await loadProjectContext(db, run.projectId, {
+    laneId: run.laneId,
+    targetLang: run.targetLang,
+  })
   const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
     ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
     : []

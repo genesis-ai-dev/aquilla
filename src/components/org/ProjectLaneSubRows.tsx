@@ -25,6 +25,7 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 
 export interface ProjectLaneSubRowsProps {
   projectId: string
+  projectName?: string | null
   lanes: PortfolioLane[]
   defaultLaneLabel: string
   colSpan: number
@@ -43,6 +44,7 @@ function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | n
 
 export function ProjectLaneSubRows({
   projectId,
+  projectName,
   lanes,
   defaultLaneLabel,
   colSpan,
@@ -112,6 +114,7 @@ export function ProjectLaneSubRows({
                     lane={lane.lane}
                     laneId={lane.laneId}
                     laneLabel={label}
+                    projectName={projectName}
                     orgId={orgId}
                     onDone={onStaffed}
                     trigger={

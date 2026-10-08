@@ -64,6 +64,7 @@ import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { LANE_DOES_NOT_EXIST_REASON } from '../../../src/lib/lanes/archived-lane'
+import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 
 /** One source-side row of a file's anchor chain. */
 interface ChainCell {
@@ -139,7 +140,7 @@ async function loadCell(
     .prepare(
       `SELECT ${CHAIN_COLUMNS} FROM cells
         WHERE project_id = ? AND file_id = ? AND cell_id = ?
-          AND side = 'source' AND target_lang = ''`,
+          AND side = 'source'`,
     )
     .bind(projectId, fileId, cellId)
     .first<Parameters<typeof chainCellFromRow>[0]>()
@@ -159,7 +160,7 @@ async function loadSuccessors(
     ? await db
         .prepare(
           `SELECT ${CHAIN_COLUMNS} FROM cells
-            WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+            WHERE project_id = ? AND file_id = ? AND side = 'source'
               AND anchor_cell_id IS NULL`,
         )
         .bind(projectId, fileId)
@@ -167,7 +168,7 @@ async function loadSuccessors(
     : await db
         .prepare(
           `SELECT ${CHAIN_COLUMNS} FROM cells
-            WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+            WHERE project_id = ? AND file_id = ? AND side = 'source'
               AND anchor_cell_id = ?`,
         )
         .bind(projectId, fileId, anchorCellId)
@@ -184,7 +185,7 @@ async function loadTargets(
 ): Promise<TargetRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT target_lang, lane_id, event_id, value, value_html FROM cells
+      `SELECT ${wireLegacyTagSql("cells")} AS target_lang, lane_id, event_id, value, value_html FROM cells
         WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'`,
     )
     .bind(projectId, fileId, cellId)
@@ -229,7 +230,7 @@ async function fileHasPreservedSlots(
   const row = await db
     .prepare(
       `SELECT 1 AS hit FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+        WHERE project_id = ? AND file_id = ? AND side = 'source'
           AND (
             metadata -> 'aquillaImport' -> 'sourceLocator' ->> 'kind' = 'package-block'
             OR jsonb_exists(metadata, 'idml')
@@ -386,7 +387,7 @@ async function prepareInsert(
     const dup = await db
       .prepare(
         `SELECT 1 AS hit FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND canonical_ref = ? LIMIT 1`,
       )
       .bind(projectId, cmd.fileId, cmd.canonicalRef)

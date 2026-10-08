@@ -21,6 +21,7 @@
 // second, divergent one.
 
 import { fetchProject } from "./projects-read"
+import { fetchProjectSettingsResult } from "./project-settings"
 import type { ProjectFileSummary } from "./projects-read-types"
 
 /**
@@ -183,4 +184,53 @@ export async function loadUpstreamFileChoices(
 ): Promise<LinkSourcePreviewFile[]> {
   const upstream = await fetchProject(upstreamProjectId, jwt, apiUrl)
   return buildLinkSourcePreview(upstream, []).files
+}
+
+
+/**
+ * AQU-1605: one of the upstream's lanes, as a choice the link flows can offer.
+ *
+ * `id` is `lanes.id` — what the link request carries and what the mirror resolves
+ * its fold against. It is globally unique (AQU-1606) and survives the lane being
+ * renamed or given another language, which the legacy tag the events use does
+ * not; that translation is the server's job, not the picker's.
+ */
+export interface UpstreamLaneChoice {
+  id: string
+  /** What to show: the lane's name, falling back to its legacy tag. */
+  label: string
+}
+
+/**
+ * The upstream's target lanes THIS caller may see, in lane order.
+ *
+ * Read from `GET /api/v2/projects/:id/settings`, which already applies the lane
+ * read wall to the lane rows it returns (`filterSettingsToVisibleLanes`), so a
+ * member granted one lane of the upstream is offered that one lane and the
+ * picker never has to know the wall exists. Linking requires viewer+ on the
+ * upstream, which is exactly the access this read needs.
+ *
+ * Archived lanes are left out: an archived lane is frozen, so a link to one
+ * could only ever mirror a corpus nobody may still edit, and the server refuses
+ * it. An empty list means the upstream has no target lane the caller may
+ * consume — the caller says so rather than linking to a lane it cannot name.
+ *
+ * Throws on a transport/server failure, like `loadUpstreamFileChoices`: the
+ * caller shows the failure and offers a retry rather than rendering an empty
+ * list, which reads as "no lanes" and is a different situation. A definitive
+ * 403/404 is not a failure — it is an upstream with nothing to offer.
+ */
+export async function loadUpstreamLaneChoices(
+  jwt: string,
+  upstreamProjectId: string,
+  apiUrl?: string,
+): Promise<UpstreamLaneChoice[]> {
+  const out = await fetchProjectSettingsResult(jwt, upstreamProjectId, apiUrl)
+  if (!out.ok) throw new Error(out.message || `lanes read failed (${out.status})`)
+  const lanes = out.value?.lanes ?? []
+  return lanes
+    .filter((lane) => lane.role === "target" && !lane.archivedAt)
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map((lane) => ({ id: lane.id, label: lane.name || lane.legacyTag || "" }))
 }

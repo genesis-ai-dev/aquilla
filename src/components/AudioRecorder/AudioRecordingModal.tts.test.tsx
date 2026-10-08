@@ -435,7 +435,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     // AQU-1216 put the word "Saved" into the auto-advance description, so a
     // /Save/ role query matches that control too.
     fireEvent.click(screen.getByTestId("rec-save"))
-    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"), { timeout: 2000 })
+    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"))
   })
 
   it("turned off, saving stays on the same line for another take", async () => {

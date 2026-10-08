@@ -265,12 +265,9 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
 
     // Dialog closes shortly after the success hint (deferred so the hint is
     // actually perceivable — see AddAsLaneRecommendation's closeTimerRef).
-    await waitFor(
-      () => {
-        expect(screen.queryByText("Create New Project")).toBeNull()
-      },
-      { timeout: 2000 },
-    )
+    await waitFor(() => {
+      expect(screen.queryByText("Create New Project")).toBeNull()
+    })
   })
 
   it("shows a friendly message on a 403 from the upstream lane create", async () => {

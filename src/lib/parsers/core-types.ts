@@ -9,6 +9,20 @@
 
 import type { ImportMilestone, ImportSourceLocator, SourceArtifactFormat } from "../../../shared/import-contract"
 
+/**
+ * What one imported cell is (AQU-1720).
+ *
+ * `sentence` (the default) runs the recursive segment splitter, so a long
+ * paragraph becomes several cells cut at sentence/clause/comma boundaries —
+ * right for subtitle and document work, where a cell is a readable unit.
+ *
+ * `paragraph` makes the cell the paragraph: one non-empty source paragraph
+ * becomes exactly one cell, with no sentence splitting and no length cap. A
+ * dubbing/podcast project generates one voice clip per cell, so a cell cut at
+ * a comma is an unusable clip; the paragraph is the unit the voice is for.
+ */
+export type CellUnit = "sentence" | "paragraph"
+
 export type CellType =
   | "text"
   | "heading"

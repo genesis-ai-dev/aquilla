@@ -92,7 +92,6 @@ export async function buildUsfmExportPlan(
           AND s.file_id    = t.file_id
           AND s.cell_id    = t.cell_id
           AND s.side       = 'source'
-          AND s.target_lang = ''
         WHERE t.project_id = ?
           AND t.file_id    = ?
           AND t.side       = 'target'
@@ -196,7 +195,6 @@ async function resolveAdditions(
         WHERE s.project_id = ?
           AND s.file_id    = ?
           AND s.side       = 'source'
-          AND s.target_lang = ''
           AND s.canonical_ref IS NULL
           AND (s.metadata::jsonb)->'aquillaOrigin'->>'kind' = 'user-insert'`,
     )
@@ -222,7 +220,7 @@ async function resolveAdditions(
       .prepare(
         `SELECT cell_id, anchor_cell_id, canonical_ref
            FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND cell_id IN (${placeholders})`,
       )
       .bind(projectId, fileId, ...frontier)

@@ -24,6 +24,7 @@ import {
   hydrateContextualDrafts,
   resetContextualDraftsStore,
 } from "@/lib/contextual/drafts-store"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 // Capture target-side emits without touching IndexedDB / posthog. Every helper
 // EditorTable imports must be present so the module resolves. `vi.hoisted`
@@ -187,7 +188,7 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     captureCellValidation.mockClear()
     renderTable("fr")
     fireEvent.click(await screen.findByRole("button", { name: /Click to validate/ }))
-    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({
       fileId: "file-1", cellId: "cell-1", targetLang: "fr", surface: "cell",
     }))
@@ -219,7 +220,7 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     ])
     renderTable("fr", [], "")
     fireEvent.click(await screen.findByRole("button", { name: "Use this translation" }))
-    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emitCellValidate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     expect(emitTargetCellCommit).toHaveBeenCalledWith(expect.objectContaining({ targetLang: "fr" }))
     expect(emitCellValidate).toHaveBeenCalledWith(expect.objectContaining({ cellId: "cell-1", targetLang: "fr" }))
     // AQU-1572: the vote an edit casts for itself is still reported, marked
@@ -263,7 +264,7 @@ describe("EditorTable — active lane threads into target-side emits", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
 
-    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled())
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled(), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("Proposal must survive")).toBeInTheDocument()
     expect(screen.getByText("Outbox unavailable")).toBeInTheDocument()
     expect(reviewContextualDraft).not.toHaveBeenCalled()
@@ -279,7 +280,7 @@ describe("EditorTable — active lane threads into target-side emits", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
 
-    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled())
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled(), { timeout: STALL_WATCHDOG_MS })
     expect(screen.getByText("Plain text cannot replace IDML anchors")).toBeInTheDocument()
     expect(emitTargetCellCommit).not.toHaveBeenCalled()
     expect(reviewContextualDraft).not.toHaveBeenCalled()

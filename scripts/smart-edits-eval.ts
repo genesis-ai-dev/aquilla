@@ -91,7 +91,7 @@ async function main(): Promise<void> {
     [projectId],
   )
   const { rows: sources } = await db.query<{ file_id: string; cell_id: string; value: string }>(
-    `SELECT file_id, cell_id, value FROM cells WHERE project_id = $1 AND side = 'source' AND target_lang = ''`,
+    `SELECT file_id, cell_id, value FROM cells WHERE project_id = $1 AND side = 'source'`,
     [projectId],
   )
   await db.end()

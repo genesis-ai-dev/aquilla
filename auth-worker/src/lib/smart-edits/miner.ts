@@ -153,7 +153,7 @@ async function mineCells(
   const { results: sources } = await db
     .prepare(
       `SELECT file_id, cell_id, value FROM cells
-        WHERE project_id = ? AND side = 'source' AND target_lang = ''
+        WHERE project_id = ? AND side = 'source'
           AND (file_id, cell_id) IN (${tuple})`,
     )
     .bind(projectId, ...pairsArgs)

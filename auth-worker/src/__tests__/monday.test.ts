@@ -444,6 +444,8 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
           data: {
             boards: [
               {
+                name: "Authoritative board name",
+                url: "https://real-account.monday.com/boards/board-9",
                 columns: [
                   { id: "numbers_1", title: "Progress", type: "numbers" },
                   { id: "text_ext", title: "External Id", type: "text" },
@@ -474,10 +476,16 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
     })
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      link: { boardId: string; config: { columns: Array<{ columnId: string }> } }
+      link: { boardId: string; boardUrl: string; boardName: string; config: { columns: Array<{ columnId: string }> } }
       warnings: string[]
     }
     expect(body.link.boardId).toBe("board-9")
+    expect(body.link.boardName).toBe("Authoritative board name")
+    expect(body.link.boardUrl).toBe("https://real-account.monday.com/boards/board-9")
+    const reloaded = await request("anna", "GET", "/api/v2/monday/projects/proj-1/link")
+    expect(await reloaded.json()).toMatchObject({ orgId: 1, orgConnected: true, link: {
+      boardUrl: body.link.boardUrl, boardName: body.link.boardName,
+    } })
     expect(body.link.config.columns.map((c) => c.columnId)).toEqual(["numbers_1"])
     expect(body.warnings.some((w) => w.includes("ghost_col"))).toBe(true)
 

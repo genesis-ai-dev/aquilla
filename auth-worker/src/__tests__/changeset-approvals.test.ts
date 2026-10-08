@@ -96,9 +96,7 @@ async function seedCell(args: {
   targetLang?: string
 }): Promise<void> {
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cells
-        (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, target_lang)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT CASE WHEN ? = 'source' THEN aquilla_test_resolve_source_lane(?) ELSE aquilla_test_resolve_target_lane(?, ?) END))`,
   )
     .bind(
       args.projectId,
@@ -109,6 +107,9 @@ async function seedCell(args: {
       args.canonicalRef ?? null,
       crypto.randomUUID(),
       NOW,
+      args.side,
+      args.projectId,
+      args.projectId,
       args.targetLang ?? "",
     )
     .run()

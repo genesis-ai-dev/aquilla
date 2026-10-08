@@ -451,10 +451,7 @@ describe("external quality reads (AQU-1231)", () => {
               ('proj-a', 'file-x', 'dual-fr', 'source', 'the grace french', 'evt-s-dual-fr', 1000, 3)`,
     )
     await testDb.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at, word_count)
-       VALUES ('proj-a', 'file-x', 'dual-id', 'target', 'xx', 'lane-tgt-es', 'merced dual-id', 'evt-t-dual-id', 2000, 2),
-              ('proj-a', 'file-x', 'dual-tag', 'target', 'es', NULL, 'la gracia dual-tag', 'evt-t-dual-tag', 2000, 3),
-              ('proj-a', 'file-x', 'dual-fr', 'target', 'fr', NULL, 'grâce', 'evt-t-dual-fr', 2000, 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at, word_count) VALUES ('proj-a', 'file-x', 'dual-id', 'target', 'lane-tgt-es', 'merced dual-id', 'evt-t-dual-id', 2000, 2), ('proj-a', 'file-x', 'dual-tag', 'target', (SELECT aquilla_test_resolve_target_lane('proj-a', 'es')), 'la gracia dual-tag', 'evt-t-dual-tag', 2000, 3), ('proj-a', 'file-x', 'dual-fr', 'target', (SELECT aquilla_test_resolve_target_lane('proj-a', 'fr')), 'grâce', 'evt-t-dual-fr', 2000, 1)`,
     )
     // Renderings belong to one lane. This scan is the Spanish lane, so the
     // concept's approved renderings have to name it; an unstamped rendering

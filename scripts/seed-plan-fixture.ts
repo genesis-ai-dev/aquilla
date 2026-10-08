@@ -25,6 +25,7 @@
  * the auth module, which is undefined outside Vite. `plan-fixture.test.ts` is
  * where the fixture meets that library and its claimed groups are checked.
  */
+import { createHash } from "node:crypto"
 import { makePostgres, type AquillaDb } from "../db/shim/postgres"
 import { fullProgressRecomputeStmts } from "../sync-worker/src/events/progress-projection"
 import {
@@ -68,8 +69,12 @@ async function insertRows(
   }
 }
 
+function fixtureLaneId(projectId: string, role: "source" | "target", tag: string): string {
+  return createHash("md5").update(`${projectId}|${role}|${tag}`).digest("hex").slice(0, 8)
+}
+
 const CELL_COLUMNS = [
-  "project_id", "file_id", "cell_id", "side", "target_lang", "value", "type",
+  "project_id", "file_id", "cell_id", "side", "lane_id", "value", "type",
   "canonical_ref", "anchor_cell_id", "event_id", "last_editor", "last_edit_at",
   "validated", "endorsement_count", "word_count",
 ]
@@ -87,11 +92,22 @@ async function seed(db: AquillaDb): Promise<void> {
   ]) {
     await db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).bind(PROJECT_ID).run()
   }
+  await db.prepare("DELETE FROM lanes WHERE project_id = ?").bind(PROJECT_ID).run()
   await db.prepare("DELETE FROM projects WHERE id = ?").bind(PROJECT_ID).run()
 
   await db.prepare(
     "INSERT INTO projects (id, name, org_id, created_by, pm_user_id) VALUES (?, ?, ?, ?, ?)",
   ).bind(PROJECT_ID, PROJECT_NAME, ORG, OWNER, OWNER).run()
+
+  const sourceLane = fixtureLaneId(PROJECT_ID, "source", "")
+  const defaultLane = fixtureLaneId(PROJECT_ID, "target", "")
+  const tpiLane = fixtureLaneId(PROJECT_ID, "target", LANE2)
+  await db.prepare(
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+       (?, ?, 'source', 'English', NULL, 0),
+       (?, ?, 'target', 'German', '', 0),
+       (?, ?, 'target', 'Tok Pisin', ?, 1)`,
+  ).bind(sourceLane, PROJECT_ID, defaultLane, PROJECT_ID, tpiLane, PROJECT_ID, LANE2).run()
 
   // NO countStructuralCells key: the project INHERITS the org's, and Dev Org
   // sets it to false. The board is therefore read with headings EXCLUDED, which
@@ -148,12 +164,12 @@ async function seed(db: AquillaDb): Promise<void> {
     for (const b of books) {
       for (const c of cellsFor(b)) {
         sourceRows.push([
-          PROJECT_ID, fileId, c.cellId, "source", "", `Source ${c.cellId}`, c.type, c.ref,
+          PROJECT_ID, fileId, c.cellId, "source", sourceLane, `Source ${c.cellId}`, c.type, c.ref,
           linkTo(`${fileId}|source|`, c.cellId), ev, "dev", NOW - 2 * DAY, 0, 0, 3,
         ])
         if (c.target !== "") {
           targetRows.push([
-            PROJECT_ID, fileId, c.cellId, "target", "", c.target, null, null,
+            PROJECT_ID, fileId, c.cellId, "target", defaultLane, c.target, null, null,
             linkTo(`${fileId}|target|`, c.cellId), ev, "dev", NOW - DAY,
             c.validated ? 1 : 0, c.validated ? VALIDATION_COUNT : 0, 3,
           ])
@@ -183,7 +199,7 @@ async function seed(db: AquillaDb): Promise<void> {
       if (chapter === 0 || chapter > half) continue
       const validated = chapter % 3 !== 0
       targetRows.push([
-        PROJECT_ID, TEXT_FILE, c.cellId, "target", LANE2, `Tok Pisin ${c.cellId}`, null, null,
+        PROJECT_ID, TEXT_FILE, c.cellId, "target", tpiLane, `Tok Pisin ${c.cellId}`, null, null,
         linkTo(`${TEXT_FILE}|target|${LANE2}`, c.cellId), eventOf(TEXT_FILE), "dev", NOW - DAY,
         validated ? 1 : 0, validated ? VALIDATION_COUNT : 0, 3,
       ])
@@ -197,13 +213,13 @@ async function seed(db: AquillaDb): Promise<void> {
   for (let i = 0; i < 40; i += 1) {
     const cellId = `MED-${i}`
     mediaRows.push([
-      PROJECT_ID, MEDIA_FILE, cellId, "source", "", `Line ${i}`, "cue", null,
+      PROJECT_ID, MEDIA_FILE, cellId, "source", sourceLane, `Line ${i}`, "cue", null,
       linkTo(`${MEDIA_FILE}|source|`, cellId), eventOf(MEDIA_FILE), "dev", NOW - 2 * DAY,
       0, 0, 4, i * 30_000, i * 30_000 + 25_000,
     ])
     if (i < 34) {
       targetRows.push([
-        PROJECT_ID, MEDIA_FILE, cellId, "target", "", `Zeile ${i}`, null, null,
+        PROJECT_ID, MEDIA_FILE, cellId, "target", defaultLane, `Zeile ${i}`, null, null,
         linkTo(`${MEDIA_FILE}|target|`, cellId), eventOf(MEDIA_FILE), "dev", NOW - DAY,
         i < 30 ? 1 : 0, i < 30 ? VALIDATION_COUNT : 0, 4,
       ])
@@ -239,13 +255,13 @@ async function seed(db: AquillaDb): Promise<void> {
     for (const c of held) assignmentCells.push([a.id, c.fileId, c.cellId])
     assignmentRows.push([
       a.id, PROJECT_ID, a.user, a.chapters.length > 0 ? "chapters" : "books",
-      a.label, a.lane, held.length,
+      a.label, a.lane === LANE2 ? tpiLane : defaultLane, held.length,
       a.deadlineInDays === null ? null : dateIn(a.deadlineInDays), OWNER, NOW,
     ])
   }
   await insertRows(db, "assignments",
     ["assignment_id", "project_id", "assignee_user_id", "scope_kind", "scope_label",
-     "target_lang", "cells_total", "deadline", "created_by", "created_at"], assignmentRows)
+     "lane_id", "cells_total", "deadline", "created_by", "created_at"], assignmentRows)
   await insertRows(db, "assignment_cells",
     ["assignment_id", "file_id", "cell_id"], assignmentCells)
 

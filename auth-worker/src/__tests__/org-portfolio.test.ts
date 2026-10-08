@@ -131,9 +131,9 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
         ('eslane01', 'pa', 'target', 'es', 'es', 1)`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
-        ('pa','f1','file','', '',   45, 15, ?, 1, 1500),
-        ('pa','f1','file','', 'es', 45, 2,  ?, 1, 2600)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', 'deflane1', 45, 15, ?, 1, 1500),
+        ('pa','f1','file','', 'eslane01', 45, 2,  ?, 1, 2600)`,
     ).bind(JSON.stringify({ "0": 30, "1": 10, "2": 5 }), JSON.stringify({ "0": 43, "3": 2 })).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
@@ -170,12 +170,10 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
         ('swhlane1', 'pa', 'target', 'swh', 'swh', 2)`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
-        ('pa','f1','file','', '', 'srcpa', 45, 0, '{}', 1, 1500)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES ('pa', 'f1', 'file', '', 'srcpa', 45, 0, '{}', 1, 1500)`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
-        ('pa','f1','file','', '', 45, 15, ?, 1, 1500)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, revision, updated_at) VALUES ('pa', 'f1', 'file', '', 45, 15, ?, 1, 1500)`,
     ).bind(JSON.stringify({ "0": 30, "1": 15 })).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
@@ -210,9 +208,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     // Only the former default lane has translations. 'swh' has a lane row but
     // no progress rows, so it borrows the denominator.
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
-        ('pa','f1','file','', '',  'srcpa',   45, 0,  '{}', 1, 1500),
-        ('pa','f1','file','', '',  'deflane', 45, 15, ?,    1, 1500)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES ('pa', 'f1', 'file', '', 'srcpa', 45, 0, '{}', 1, 1500), ('pa', 'f1', 'file', '', 'deflane', 45, 15, ?, 1, 1500)`,
     ).bind(JSON.stringify({ "0": 30, "1": 15 })).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
@@ -247,8 +243,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
         ('swhlane', 'pa', 'target', 'Swahili', 'swh', 2)`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
-        ('pa','f1','file','', '', 'deflane', 45, 15, '{}', 1, 1500)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES ('pa', 'f1', 'file', '', 'deflane', 45, 15, '{}', 1, 1500)`,
     ).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
@@ -272,9 +267,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
         ('deflane', 'pa', 'target', 'Bambara', '', 1)`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
-        ('pa','f1','file','', '', 'srcpa', 10, 0, '{}', 1, 9000),
-        ('pa','f1','file','', '', 'deflane', 10, 1, '{}', 1, 1000)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES ('pa', 'f1', 'file', '', 'srcpa', 10, 0, '{}', 1, 9000), ('pa', 'f1', 'file', '', 'deflane', 10, 1, '{}', 1, 1000)`,
     ).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
@@ -296,8 +289,8 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
       "INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES ('deflane1', 'pa', 'target', 'Default', '')",
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
-        ('pa','f1','file','', '', 10, 4, ?, 1, 1200)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
+        ('pa','f1','file','', 'deflane1', 10, 4, ?, 1, 1200)`,
     ).bind(JSON.stringify({ "0": 6, "1": 4 })).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
@@ -375,8 +368,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
       "INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES ('deflane1', 'pa', 'target', 'Spanish', '')",
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at) VALUES
-        ('pa','f1','file','', '', 10, 4, ?, 1, 1200)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, revision, updated_at) VALUES ('pa', 'f1', 'file', '', 10, 4, ?, 1, 1200)`,
     ).bind(JSON.stringify({ "0": 6, "1": 4 })).run()
 
     const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
@@ -622,11 +614,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     // policy, so one project reported two different denominators at once.
     await seedStructuralOrg(JSON.stringify({ countStructuralCells: false }), null)
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress
-         (project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
-          validator_histogram, structural_count, structural_filled_count,
-          structural_validator_histogram, revision, updated_at)
-       VALUES ('pa','f1','file','', '', 10, 6, ?, 2, 1, ?, 1, 1500)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, structural_count, structural_filled_count, structural_validator_histogram, revision, updated_at) VALUES ('pa', 'f1', 'file', '', 10, 6, ?, 2, 1, ?, 1, 1500)`,
     ).bind(
       JSON.stringify({ "0": 4, "1": 6 }),
       JSON.stringify({ "0": 1, "1": 1 }),
@@ -647,11 +635,7 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
   it("AQU-1083: a lane keeps its numbers when the project counts headings", async () => {
     await seedStructuralOrg("{}", null)
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO file_section_progress
-         (project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
-          validator_histogram, structural_count, structural_filled_count,
-          structural_validator_histogram, revision, updated_at)
-       VALUES ('pa','f1','file','', '', 10, 6, ?, 2, 1, ?, 1, 1500)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, structural_count, structural_filled_count, structural_validator_histogram, revision, updated_at) VALUES ('pa', 'f1', 'file', '', 10, 6, ?, 2, 1, ?, 1, 1500)`,
     ).bind(
       JSON.stringify({ "0": 4, "1": 6 }),
       JSON.stringify({ "0": 1, "1": 1 }),
@@ -991,8 +975,7 @@ describe("plan unit rollup", () => {
   }
 
   const progress = (fileId: string, scope: string, key: string) =>
-    sql(`INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at)
-         VALUES ('pa', '${fileId}', '${scope}', '${key}', '', 10, 0, '{}', 1, 1)`)
+    sql(`INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, revision, updated_at) VALUES ('pa', '${fileId}', '${scope}', '${key}', 10, 0, '{}', 1, 1)`)
 
   async function portfolio(now?: number) {
     const rows = await getOrgPortfolios(env as unknown as Env, [1], { userId: 1, isAdmin: false }, now)
@@ -1210,14 +1193,10 @@ describe("AQU-1421 portfolio lane visibility", () => {
     await sql("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'owner', '{}', 1, 1, 1)")
     await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, ai_drafted_count, last_edit_at) VALUES ('f1', 'pa', 'Episode 1', 'e1', 80, 20, 5, 9000)")
     await sql(
-      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, updated_at)
-       VALUES ('pa', 'f1', 'file', '', '', 70, 20, '{}', 8000),
-              ('pa', 'f1', 'file', '', 'es', 10, 3, '{}', 1000)`,
+      `INSERT INTO file_section_progress (project_id, file_id, scope, section_key, total_count, filled_count, validator_histogram, updated_at, lane_id) VALUES ('pa', 'f1', 'file', '', 70, 20, '{}', 8000, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'file', '', 10, 3, '{}', 1000, (SELECT aquilla_test_resolve_target_lane('pa', 'es')))`,
     )
     await sql(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, ai_drafted) VALUES
-        ('pa', 'f1', 'c-hidden', 'target', '', 'draft', 'e1', 1, 1),
-        ('pa', 'f1', 'c-mine', 'target', 'es', 'draft', 'e1', 1, 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, ai_drafted, lane_id) VALUES ('pa', 'f1', 'c-hidden', 'target', 'draft', 'e1', 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', ''))), ('pa', 'f1', 'c-mine', 'target', 'draft', 'e1', 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', 'es')))`,
     )
     await sql(
       `INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected, deleted, event_id, created_ts)
@@ -1268,8 +1247,7 @@ describe("AQU-1421 portfolio lane visibility", () => {
   describe("machine-drafted cells behind the wall", () => {
     async function drafted(cellId: string, fileId: string, lane = "es") {
       await sql(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, ai_drafted)
-         VALUES ('pa', '${fileId}', '${cellId}', 'target', '${lane}', 'draft', 'e1', 1, 1)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, ai_drafted, lane_id) VALUES ('pa', '${fileId}', '${cellId}', 'target', 'draft', 'e1', 1, 1, (SELECT aquilla_test_resolve_target_lane('pa', '${lane}')))`,
       )
     }
 
@@ -1305,9 +1283,7 @@ describe("AQU-1421 portfolio lane visibility", () => {
     it("drops a drafted heading exactly when the project leaves structural cells out", async () => {
       await seedSplitProject()
       await sql(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, type, event_id, last_edit_at) VALUES
-           ('pa', 'f1', 'c-heading', 'source', '', 'The Birth of Jesus', 'heading', 'e1', 1),
-           ('pa', 'f1', 'c-mine', 'source', '', 'In those days', 'verse', 'e1', 1)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, type, event_id, last_edit_at) VALUES ('pa', 'f1', 'c-heading', 'source', 'The Birth of Jesus', 'heading', 'e1', 1), ('pa', 'f1', 'c-mine', 'source', 'In those days', 'verse', 'e1', 1)`,
       )
       await drafted("c-heading", "f1")
       expect((await walledRow()).aiDraftedCells).toBe(2)

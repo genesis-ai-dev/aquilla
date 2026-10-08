@@ -47,9 +47,10 @@ async function seed(testDb: TestDb): Promise<string> {
             ('proj-blank', 'file-x', 'sw1', 'source', 'world', 'evt-s-sw', 1000, 1)`,
   )
   await testDb.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, word_count, validated)
-     VALUES ('proj-blank', 'file-x', 'blank1', 'target', '', 'blank-line', 'evt-t-blank', 2000, 1, 1),
-            ('proj-blank', 'file-x', 'sw1', 'target', 'sw', 'sw-line', 'evt-t-sw', 2000, 1, 0)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at, word_count, validated)
+     VALUES ('proj-blank', 'file-x', 'blank1', 'target', $1, 'blank-line', 'evt-t-blank', 2000, 1, 1),
+            ('proj-blank', 'file-x', 'sw1', 'target', $2, 'sw-line', 'evt-t-sw', 2000, 1, 0)`,
+    [BLANK, SW],
   )
   const { token, tokenHash, tokenPrefix } = await mintApiToken()
   await testDb.pg.query(

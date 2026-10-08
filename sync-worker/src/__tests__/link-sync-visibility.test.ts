@@ -114,7 +114,7 @@ async function downstreamCell(
 ): Promise<{ value: string; hidden: boolean } | undefined> {
   const r = await t.pg.query<{ value: string; hidden_at: string | null }>(
     `SELECT value, hidden_at FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
     [DOWNSTREAM, DOWNSTREAM_FILE, cellId],
   )
   const row = r.rows[0]
@@ -263,7 +263,7 @@ describe("mirrorSync — upstream hide/show reaches the downstream (AQU-1453)", 
 
       const r = await t.pg.query<{ value: string; tombstoned_at: string | null }>(
         `SELECT value, tombstoned_at FROM cells
-          WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+          WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
         [DOWNSTREAM, DOWNSTREAM_FILE, "cell-2"],
       )
       expect(r.rows[0]?.tombstoned_at).not.toBeNull()
@@ -358,7 +358,7 @@ async function chainedCell(
 ): Promise<{ value: string; hidden: boolean } | undefined> {
   const r = await t.pg.query<{ value: string; hidden_at: string | null }>(
     `SELECT value, hidden_at FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
     [CHAINED, CHAINED_FILE, cellId],
   )
   const row = r.rows[0]

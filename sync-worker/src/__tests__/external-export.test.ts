@@ -133,8 +133,7 @@ async function seedUsfmFile(opts: { format?: string; rawSource?: string | null; 
     lane = '',
   ) =>
     tdb.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, target_lang)
-       VALUES ($1, $2, $3, $4, $5, $6, 'ev-cell', 0, $7)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES ($1, $2, $3, $4, $5, $6, 'ev-cell', 0, (SELECT CASE WHEN $4 = 'source' THEN aquilla_test_resolve_source_lane($1) ELSE aquilla_test_resolve_target_lane($1, $7) END))`,
       [PROJECT, FILE, cellId, side, value, canonicalRef, lane],
     )
   await cell('GEN 1:1', 'source', 'In the beginning God created the heavens and the earth.', 'GEN 1:1')
@@ -451,7 +450,7 @@ describe('export_file (MCP)', () => {
   it('refuses an export larger than the inline limit rather than truncating it', async () => {
     // One verse whose translation alone exceeds the inline ceiling.
     await seedUsfmFile()
-    await tdb.pg.query(`UPDATE cells SET value = $1 WHERE side = 'target' AND target_lang = ''`, [
+    await tdb.pg.query(`UPDATE cells SET value = $1 WHERE side = 'target' AND lane_id = (SELECT id FROM lanes WHERE project_id = cells.project_id AND role = 'target' AND legacy_tag = '')`, [
       'x'.repeat(MCP_EXPORT_MAX_BYTES + 1),
     ])
     const token = await credToken({

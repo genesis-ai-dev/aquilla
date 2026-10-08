@@ -571,14 +571,9 @@ describe("pruning", () => {
     // harness's lane trigger would resolve every copied row's '' tag to the
     // same default target lane — collapsing the source lane's row onto the
     // default lane's and violating the key.
-    await db.prepare(`INSERT INTO file_section_progress
-      (project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
-       validator_histogram, revision, updated_at)
-      SELECT project_id, 'other-file', scope, section_key, target_lang, lane_id, total_count,
-             filled_count, validator_histogram, revision, updated_at
-        FROM file_section_progress WHERE project_id = ? AND file_id = ?`).bind(P, F).run()
+    await db.prepare(`INSERT INTO file_section_progress (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, validator_histogram, revision, updated_at) SELECT project_id, 'other-file', scope, section_key, lane_id, total_count, filled_count, validator_histogram, revision, updated_at FROM file_section_progress WHERE project_id = ? AND file_id = ?`).bind(P, F).run()
     const readOther = async () => (await db.prepare(
-      `SELECT * FROM file_section_progress WHERE file_id = 'other-file' ORDER BY scope, section_key, target_lang`,
+      `SELECT * FROM file_section_progress WHERE file_id = 'other-file' ORDER BY scope, section_key, lane_id`,
     ).all()).results
     const otherBefore = await readOther()
 
@@ -689,8 +684,7 @@ describe("partial recompute", () => {
     // Translate GEN 1:1, then recompute only that cell's neighbourhood.
     await db
       .prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-         VALUES (?, ?, 'g1', 'target', '', 'In the beginning', 'ev-x', ?)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at) VALUES (?, ?, 'g1', 'target', 'In the beginning', 'ev-x', ?)`,
       )
       .bind(P, F, TS)
       .run()

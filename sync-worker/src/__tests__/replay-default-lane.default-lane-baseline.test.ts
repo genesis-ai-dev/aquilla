@@ -100,24 +100,26 @@ describe('replay reintroduces "" for lane-less target commits (§2.5)', () => {
     expect(laneOfEvent(legacyTarget.kind, legacyTarget.payload)).toBe('')
   })
 
-  it('rebuild.ts replay writes target_lang = "" for a lane-less commit', async () => {
+  it('rebuild.ts replay lands a lane-less commit on the default lane', async () => {
     await insertEventRow(t.db, source)
     await insertEventRow(t.db, legacyTarget)
 
     await replayViaRebuild(t)
 
-    const row = await t.pg.query<{ target_lang: string; value: string; event_id: string }>(
-      `SELECT target_lang, value, event_id FROM cells
-       WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'target'`,
+    const row = await t.pg.query<{ legacy_tag: string; value: string; event_id: string }>(
+      `SELECT COALESCE(l.legacy_tag, '') AS legacy_tag, c.value, c.event_id
+         FROM cells c
+         JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+       WHERE c.project_id = $1 AND c.file_id = $2 AND c.cell_id = $3 AND c.side = 'target'`,
       [PROJECT, FILE, CELL],
     )
     expect(row.rows).toHaveLength(1)
-    expect(row.rows[0]?.target_lang).toBe('')
+    expect(row.rows[0]?.legacy_tag).toBe('')
     expect(row.rows[0]?.value).toBe('Bonjour')
     expect(row.rows[0]?.event_id).toBe('tc-legacy')
   })
 
-  it('fold-projection replay also writes target_lang = "" for a lane-less commit', async () => {
+  it('fold-projection does not carry a projection target_lang for a lane-less commit', async () => {
     const events = [source, legacyTarget]
     const foldRows = foldProjection(
       events.map(
@@ -137,21 +139,22 @@ describe('replay reintroduces "" for lane-less target commits (§2.5)', () => {
     )
     const targetRows = foldRows.cells.filter((r) => r.side === 'target')
     expect(targetRows).toHaveLength(1)
-    expect(targetRows[0]?.target_lang).toBe('')
+    expect(targetRows[0]?.target_lang).toBeUndefined()
     expect(targetRows[0]?.value).toBe('Bonjour')
   })
 
-  it('canonical per-event projection also lands on target_lang = ""', async () => {
+  it('canonical per-event projection lands a lane-less commit on the default lane', async () => {
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(t.db, source, stmts, { deferFileCounters: true })
     buildEventProjectionStmts(t.db, legacyTarget, stmts, { deferFileCounters: true })
     for (const s of stmts) await s.run()
 
-    const row = await t.pg.query<{ target_lang: string }>(
-      `SELECT target_lang FROM cells
-       WHERE project_id = $1 AND side = 'target' AND cell_id = $2`,
+    const row = await t.pg.query<{ legacy_tag: string }>(
+      `SELECT COALESCE(l.legacy_tag, '') AS legacy_tag FROM cells c
+         JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+       WHERE c.project_id = $1 AND c.side = 'target' AND c.cell_id = $2`,
       [PROJECT, CELL],
     )
-    expect(row.rows[0]?.target_lang).toBe('')
+    expect(row.rows[0]?.legacy_tag).toBe('')
   })
 })

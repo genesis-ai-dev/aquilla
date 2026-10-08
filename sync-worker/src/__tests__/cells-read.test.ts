@@ -916,7 +916,7 @@ describe("project incarnation (AQU-943)", () => {
       .run()
     await db
       .prepare(
-        "INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, anchor_cell_id, event_id, last_editor, last_edit_at, validated, word_count) VALUES (?, ?, ?, 'target', '', ?, NULL, ?, 'alice', 1, 0, 1)",
+        "INSERT INTO cells (project_id, file_id, cell_id, side, value, anchor_cell_id, event_id, last_editor, last_edit_at, validated, word_count) VALUES (?, ?, ?, 'target', ?, NULL, ?, 'alice', 1, 0, 1)",
       )
       .bind("proj-a", "file-x", "c1", opts.value, `ev-${opts.epoch}`)
       .run()
@@ -1364,7 +1364,7 @@ describe("AQU-1160: chain-order cache", () => {
       .run()
     await db
       .prepare(
-        "INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash) VALUES (?, ?, ?, 'target', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 1, NULL)",
+        "INSERT INTO cells (project_id, file_id, cell_id, side, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash) VALUES (?, ?, ?, 'target', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 1, NULL)",
       )
       .bind("proj-a", "file-x", "c0", "v0", "e0", "alice", 1700000000001)
       .run()

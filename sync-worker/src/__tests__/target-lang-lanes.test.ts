@@ -160,19 +160,22 @@ describe('projection — two lanes on one cell', () => {
       ['fr', 'Bonjour', 'tc-fr'],
       ['swh', 'Habari', 'tc-swh'],
     ])
-    // laneRows() reports the wire tag. The column the writer used to fill is empty.
-    const stored = await t.pg.query<{ target_lang: string; legacy_tag: string }>(
-      `SELECT c.target_lang, l.legacy_tag
+    // laneRows() reports the wire tag. The projection column is gone (0155);
+    // the tag lives on lanes.legacy_tag.
+    const stored = await t.pg.query<{ legacy_tag: string }>(
+      `SELECT l.legacy_tag
          FROM cells c
          JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
         WHERE c.project_id = $1 AND c.side = 'target'
         ORDER BY l.legacy_tag`,
       [PROJECT],
     )
-    expect(stored.rows).toEqual([
-      { target_lang: '', legacy_tag: 'fr' },
-      { target_lang: '', legacy_tag: 'swh' },
-    ])
+    expect(stored.rows).toEqual([{ legacy_tag: 'fr' }, { legacy_tag: 'swh' }])
+    const column = await t.pg.query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'cells' AND column_name = 'target_lang'`,
+    )
+    expect(column.rows).toHaveLength(0)
 
     // A follow-up commit on fr moves ONLY fr's head.
     await applyEvents(t.db, [
@@ -184,16 +187,13 @@ describe('projection — two lanes on one cell', () => {
     expect(after.find((r) => r.target_lang === 'swh')!.event_id).toBe('tc-swh')
   })
 
-  it('a later commit leaves a pre-filled target_lang in place', async () => {
+  it('a later commit updates the lane row and leaves legacy_tag', async () => {
     await t.pg.query(
       `INSERT INTO lanes (id, project_id, role, legacy_tag) VALUES ('lane-fr', $1, 'target', 'fr')`,
       [PROJECT],
     )
     await t.pg.query(
-      `INSERT INTO cells
-         (project_id, file_id, cell_id, side, target_lang, value, event_id,
-          last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
-       VALUES ($1, $2, $3, 'target', 'fr', 'Bonjour', 'tc-old', 'alice', 1, 0, 1, 'h', 'lane-fr')`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, word_count, content_hash, lane_id) VALUES ($1, $2, $3, 'target', 'Bonjour', 'tc-old', 'alice', 1, 0, 1, 'h', 'lane-fr')`,
       [PROJECT, FILE, CELL],
     )
     await applyEvents(t.db, [
@@ -204,11 +204,14 @@ describe('projection — two lanes on one cell', () => {
         payload: { value: 'Salut', targetLang: 'fr' },
       }),
     ])
-    const raw = await t.pg.query<{ target_lang: string; value: string }>(
-      `SELECT target_lang, value FROM cells WHERE project_id = $1 AND side = 'target'`,
+    const raw = await t.pg.query<{ value: string; lane_id: string; legacy_tag: string }>(
+      `SELECT c.value, c.lane_id, l.legacy_tag
+         FROM cells c
+         JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+        WHERE c.project_id = $1 AND c.side = 'target'`,
       [PROJECT],
     )
-    expect(raw.rows).toEqual([{ target_lang: 'fr', value: 'Salut' }])
+    expect(raw.rows).toEqual([{ value: 'Salut', lane_id: 'lane-fr', legacy_tag: 'fr' }])
   })
 
   it('a default-lane commit coexists with named lanes', async () => {

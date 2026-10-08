@@ -135,7 +135,8 @@ describe('AQU-1611 — progress lane joins compare the bare lane_id column', () 
       // Fill the default lane's empty c2 — 'fr' already has it and must not move.
       await t.pg.query(
         `UPDATE cells SET value = 'dos' WHERE project_id = $1 AND file_id = $2
-           AND cell_id = 'c2' AND side = 'target' AND target_lang = ''`,
+           AND cell_id = 'c2' AND side = 'target'
+           AND lane_id = (SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = '')`,
         [PROJECT, FILE],
       )
       await t.db.batch([

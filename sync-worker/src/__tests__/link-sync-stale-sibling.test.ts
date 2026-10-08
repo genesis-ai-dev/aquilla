@@ -105,7 +105,11 @@ async function setUp(consumes: "source" | "target" = "source", gate: "head" | "v
 /** The upstream's projected text for a cell — what its own editor shows. */
 async function upstreamText(t: TestDb, side: "source" | "target", cellId = CELL): Promise<string | null> {
   const r = await t.pg.query<{ value: string }>(
-    `SELECT value FROM cells WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = $4 AND target_lang = ''`,
+    `SELECT value FROM cells WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = $4
+       AND lane_id = (
+         SELECT id FROM lanes WHERE project_id = $1 AND role = $4
+           AND legacy_tag IS NOT DISTINCT FROM CASE WHEN $4 = 'source' THEN NULL ELSE '' END
+       )`,
     [UPSTREAM, LUK, cellId, side],
   )
   return r.rows[0]?.value ?? null

@@ -218,10 +218,9 @@ describe("read filter:'flagged' — rule violations for the QA sweep", () => {
     await seedWorld()
     for (const c of CELLS) {
       await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'target', 'es', ?, ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', ?, ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, 'es')))`,
       )
-        .bind(PROJECT, FILE, cellId(c.id), c.target, c.ref, crypto.randomUUID())
+        .bind(PROJECT, FILE, cellId(c.id), c.target, c.ref, crypto.randomUUID(), PROJECT)
         .run()
     }
     const rules = [
@@ -1087,10 +1086,9 @@ describe("Lane plumbing (AQU-1447)", () => {
     for (const c of CELLS) {
       const id = cellId(c.id)
       await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'target', ?, '', ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', '', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
       )
-        .bind(PROJECT, FILE, id, laneB, c.ref, crypto.randomUUID())
+        .bind(PROJECT, FILE, id, c.ref, crypto.randomUUID(), PROJECT, laneB)
         .run()
     }
 
@@ -1113,10 +1111,9 @@ describe("Lane plumbing (AQU-1447)", () => {
     for (const c of CELLS.slice(0, 2)) {
       const id = cellId(c.id)
       await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'target', ?, '', ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', '', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
       )
-        .bind(PROJECT, FILE, id, laneB, c.ref, crypto.randomUUID())
+        .bind(PROJECT, FILE, id, c.ref, crypto.randomUUID(), PROJECT, laneB)
         .run()
     }
 
@@ -1151,10 +1148,9 @@ describe("Lane plumbing (AQU-1447)", () => {
 
     // A validated lane-B translation of c1 (its source matches "teach")
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, validated, last_edit_at)
-       VALUES (?, ?, ?, 'target', ?, 'Lane B taught', ?, ?, 1, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, validated, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', 'Lane B taught', ?, ?, 1, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
     )
-      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .bind(PROJECT, FILE, cellId("c1"), "MRK 4:1", crypto.randomUUID(), PROJECT, laneB)
       .run()
 
     // Default lane: sees its own validated c1 only
@@ -1174,10 +1170,9 @@ describe("Lane plumbing (AQU-1447)", () => {
     const laneB = crypto.randomUUID()
 
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'target', ?, 'Carril B unico', ?, ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', 'Carril B unico', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
     )
-      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .bind(PROJECT, FILE, cellId("c1"), "MRK 4:1", crypto.randomUUID(), PROJECT, laneB)
       .run()
 
     const hitIds = (out: Awaited<ReturnType<typeof executeSearch>>) => out.data?.hits?.map((h) => h.cellId) ?? []
@@ -1194,10 +1189,9 @@ describe("Lane plumbing (AQU-1447)", () => {
     const laneB = crypto.randomUUID()
 
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'target', ?, 'Carril B unico', ?, ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', 'Carril B unico', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
     )
-      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .bind(PROJECT, FILE, cellId("c1"), "MRK 4:1", crypto.randomUUID(), PROJECT, laneB)
       .run()
 
     const hits = async (q: string) =>

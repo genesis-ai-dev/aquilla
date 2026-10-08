@@ -75,16 +75,15 @@ async function seedTargetCell(
   targetLang = "",
 ): Promise<void> {
   await db.prepare(
-    `INSERT INTO cells
-        (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-     VALUES (?, ?, ?, 'target', ?, ?, ?, 0)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
   ).bind(
     PROJECT,
     FILE,
     cellId,
-    targetLang,
     value,
     `ev-${cellId}-${targetLang || "default"}`,
+    PROJECT,
+    targetLang,
   ).run()
 }
 

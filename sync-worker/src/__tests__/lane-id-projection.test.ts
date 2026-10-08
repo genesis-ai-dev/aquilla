@@ -158,10 +158,7 @@ describe('lane_id resolution — canonical per-event projection', () => {
     await t.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
     await expect(
       t.pg.query(
-        `INSERT INTO cells
-           (project_id, file_id, cell_id, side, target_lang, value, event_id,
-            last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
-         VALUES ($1, $2, 'cell-1', 'target', '', 'Coucou', 'tc-raw', 'alice', 1, 0, 1, 'h', NULL)
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, word_count, content_hash, lane_id) VALUES ($1, $2, 'cell-1', 'target', 'Coucou', 'tc-raw', 'alice', 1, 0, 1, 'h', NULL)
          ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
            value   = excluded.value,
            lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
@@ -243,15 +240,15 @@ describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
       }),
     ])
 
-    const r = await t.pg.query<{ target_lang: string; lane_id: string | null }>(
-      `SELECT target_lang, lane_id FROM cell_validators
+    const r = await t.pg.query<{ lane_id: string | null }>(
+      `SELECT lane_id FROM cell_validators
         WHERE project_id = $1 ORDER BY lane_id`,
       [PROJECT],
     )
-    // The writer leaves the column at its default. The lane id is the identity.
+    // The projection column is gone. The lane id is the identity.
     expect(r.rows).toEqual([
-      { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
-      { target_lang: '', lane_id: ES_LANE },
+      { lane_id: DEFAULT_TARGET_LANE },
+      { lane_id: ES_LANE },
     ])
   })
 
@@ -260,19 +257,18 @@ describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
     await project(t, [SOURCE, LEGACY_TARGET, ES_TARGET])
     for (const s of fullProgressRecomputeStmts(t.db, PROJECT, FILE, 5000)) await s.run()
 
-    const r = await t.pg.query<{ target_lang: string; lane_id: string | null }>(
-      `SELECT DISTINCT target_lang, lane_id FROM file_section_progress
+    const r = await t.pg.query<{ lane_id: string | null }>(
+      `SELECT DISTINCT lane_id FROM file_section_progress
         WHERE project_id = $1 ORDER BY lane_id`,
       [PROJECT],
     )
     // AQU-1599: one row set per row of `lanes`, the SOURCE lane included — it
-    // carries the lane-independent numbers. AQU-1611b: the writer leaves
-    // target_lang at its default on every row, including the named lane.
-    // Ordered by lane_id because the column no longer identifies a row.
+    // carries the lane-independent numbers. Identity is lane_id; the
+    // projection target_lang column was dropped in 0155.
     expect(r.rows).toEqual([
-      { target_lang: '', lane_id: SOURCE_LANE },
-      { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
-      { target_lang: '', lane_id: ES_LANE },
+      { lane_id: SOURCE_LANE },
+      { lane_id: DEFAULT_TARGET_LANE },
+      { lane_id: ES_LANE },
     ])
   })
 })
@@ -304,10 +300,7 @@ describe('lane_id composite FK (slice 8)', () => {
     await seedLanes(t)
     await expect(
       t.pg.query(
-        `INSERT INTO cells
-           (project_id, file_id, cell_id, side, target_lang, value, event_id,
-            last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
-         VALUES ($1, $2, 'ghost', 'target', '', 'x', 'e-ghost', 'alice', 1, 0, 1, 'h', 'no-such-lane')`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, word_count, content_hash, lane_id) VALUES ($1, $2, 'ghost', 'target', 'x', 'e-ghost', 'alice', 1, 0, 1, 'h', 'no-such-lane')`,
         [PROJECT, FILE],
       ),
     ).rejects.toThrow(/foreign key constraint/i)

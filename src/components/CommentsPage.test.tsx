@@ -313,7 +313,7 @@ describe("CommentsPage — jump to a comment", () => {
     expect(screen.queryByRole("button", { name: /Open file/i })).not.toBeInTheDocument()
     const comment = screen.getByRole("button", { name: /unique-search-token/i })
     expect(comment.closest(".rounded-lg")).toHaveClass("bg-card")
-    fireEvent.click(comment)
+    fireEvent.click(screen.getByText("Alice"))
 
     expect(jumpedTo()).toBe(
       "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=c1",
@@ -332,33 +332,17 @@ describe("CommentsPage — jump to a comment", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Show resolved" }))
     fireEvent.click(screen.getByRole("button", { name: /resolved comment from/i }))
 
-    fireEvent.click(screen.getByRole("button", { name: /unique-search-token/i }))
-
     expect(jumpedTo()).toContain("comments=1")
     expect(jumpedTo()).toContain("commentId=c1")
   })
 
-  it("opens edit, resolve, and delete from a right-click on the comment", () => {
+  it("does not offer a comment actions menu or a right-click menu", () => {
     mockComments.mockReturnValue([makeComment()])
     renderWithEditorRoute()
 
+    expect(screen.queryByRole("button", { name: "Comment actions" })).not.toBeInTheDocument()
     fireEvent.contextMenu(screen.getByText("unique-search-token"))
-
-    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeInTheDocument()
-    expect(screen.getByRole("menuitem", { name: "Resolve thread" })).toBeInTheDocument()
-    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeInTheDocument()
-  })
-
-  it("reopens a resolved thread from a right-click on the summary", async () => {
-    mockComments.mockReturnValue([makeComment({ resolved: true })])
-    renderWithEditorRoute()
-    fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
-    fireEvent.click(screen.getByRole("switch", { name: "Show resolved" }))
-
-    fireEvent.contextMenu(screen.getByRole("button", { name: /resolved comment from/i }))
-    await userEvent.setup().click(screen.getByRole("menuitem", { name: "Reopen thread" }))
-
-    expect(mockResolveThread).toHaveBeenCalledWith("c1", false)
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument()
   })
 
   it("scrolls to the reply that was clicked, not the top of the thread", () => {
@@ -374,7 +358,7 @@ describe("CommentsPage — jump to a comment", () => {
     ])
     renderWithEditorRoute()
 
-    fireEvent.click(screen.getByRole("button", { name: /the answer further down/i }))
+    fireEvent.click(screen.getByText("Bob"))
 
     expect(jumpedTo()).toBe(
       "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=reply-9",

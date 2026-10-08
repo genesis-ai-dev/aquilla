@@ -5,12 +5,11 @@
 //
 // AQU-185: filter/sort/show-resolved/navigate/@mention/FTS
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
-  MessageCircle, MessageCircleCheck, ChevronsUpDown, ChevronsDownUp,
-  AlertCircle, Search, Settings2,
-  MoreHorizontal, Pencil, Trash2, RefreshCw, Check, Undo2,
+  MessageCircle, MessageCircleCheck,
+  AlertCircle, Search, Settings2, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -18,25 +17,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
-import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible"
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { createMenuHandle } from "@/components/ui/menu-parts"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import { cn } from "@/lib/utils"
 import { UserChip } from "@/components/UserChip"
 import { useComments } from "@/hooks/useComments"
 import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
@@ -46,17 +31,7 @@ import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderCommentHtml, stripAgentCommentMarker } from "@/lib/comments/comment-helpers"
-import {
-  canMutateComment,
-  commentFloorsFrom,
-  DEFAULT_COMMENT_FLOORS,
-  type CommentFloors,
-} from "@/lib/sync/role-policy"
-import { denialMessage } from "@/lib/permissions/denial"
-import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import DOMPurify from "dompurify"
-import { MentionTextarea } from "@/components/MentionTextarea"
-import type { MentionCandidate } from "@/lib/comments/mention-suggest"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   Popover,
@@ -64,14 +39,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -139,63 +106,6 @@ function safeCommentHtml(text: string): string {
   })
 }
 
-/** Edit, resolve or reopen, and delete. Shared by the ⋯ button and a right-click. */
-function PageCommentActions({
-  showEdit,
-  showDelete,
-  showResolve,
-  resolved,
-  canResolve,
-  resolveDenialReason,
-  onEdit,
-  onToggleResolved,
-  onDelete,
-}: {
-  showEdit: boolean
-  showDelete: boolean
-  showResolve: boolean
-  resolved: boolean
-  canResolve: boolean
-  resolveDenialReason: string | null
-  onEdit: () => void
-  onToggleResolved: () => void
-  onDelete: () => void
-}) {
-  const { t } = useI18n()
-  return (
-    <>
-      {showEdit && (
-        <DropdownMenuItem onClick={onEdit}>
-          <Pencil />
-          {t("common.edit")}
-        </DropdownMenuItem>
-      )}
-      {showResolve && (
-        <AppTooltip content={!canResolve ? (resolveDenialReason ?? "") : ""}>
-          <DropdownMenuItem
-            data-testid="thread-resolve"
-            aria-disabled={!canResolve || undefined}
-            className={cn(!canResolve && "cursor-not-allowed opacity-50")}
-            onClick={() => {
-              if (!canResolve) return
-              onToggleResolved()
-            }}
-          >
-            {resolved ? <Undo2 /> : <Check />}
-            {resolved ? t("comments.thread.reopen") : t("comments.thread.resolve")}
-          </DropdownMenuItem>
-        </AppTooltip>
-      )}
-      {showDelete && (
-        <DropdownMenuItem onClick={onDelete}>
-          <Trash2 />
-          {t("common.delete")}
-        </DropdownMenuItem>
-      )}
-    </>
-  )
-}
-
 function PageCommentRow({
   comment,
   isRoot,
@@ -203,21 +113,6 @@ function PageCommentRow({
   place,
   fileMap,
   root,
-  canMutate,
-  canResolve,
-  resolveDenialReason,
-  resolved,
-  editing,
-  editBody,
-  isSavingEdit,
-  mentionRoster,
-  currentUsername,
-  onStartEdit,
-  onEditBody,
-  onCancelEdit,
-  onSaveEdit,
-  onRequestDelete,
-  onToggleResolved,
   onNavigate,
 }: {
   comment: CommentRecord
@@ -226,43 +121,16 @@ function PageCommentRow({
   place?: string
   fileMap: Map<string, string>
   root: CommentRecord
-  canMutate: boolean
-  canResolve: boolean
-  resolveDenialReason: string | null
-  resolved: boolean
-  editing: boolean
-  editBody: string
-  isSavingEdit: boolean
-  mentionRoster: readonly MentionCandidate[]
-  currentUsername?: string
-  onStartEdit: () => void
-  onEditBody: (value: string) => void
-  onCancelEdit: () => void
-  onSaveEdit: () => void
-  onRequestDelete: () => void
-  onToggleResolved: () => void
   onNavigate?: (comment: CommentRecord) => void
 }) {
   const { t } = useI18n()
-  const actionsMenu = useMemo(() => createMenuHandle(), [])
-  const hasMenu = isRoot || canMutate
-  function actions() {
-    return (
-      <PageCommentActions
-        showEdit={canMutate}
-        showDelete={canMutate}
-        showResolve={isRoot}
-        resolved={resolved}
-        canResolve={canResolve}
-        resolveDenialReason={resolveDenialReason}
-        onEdit={onStartEdit}
-        onToggleResolved={onToggleResolved}
-        onDelete={onRequestDelete}
-      />
-    )
-  }
-  const body = (
-    <>
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate?.(comment)}
+      disabled={!onNavigate}
+      className="block w-full p-2 text-start outline-none hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default"
+    >
       {isRoot && (
         <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
           <CellPlace root={root} place={place} fileMap={fileMap} t={t} />
@@ -289,190 +157,36 @@ function PageCommentRow({
             editedNotice={t("comments.bubble.edited")}
           />
         </span>
-        {hasMenu && (
-          <DropdownMenuTrigger
-            handle={actionsMenu}
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="ms-auto [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/comment:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:aria-expanded:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:data-popup-open:opacity-100"
-                aria-label={t("comments.thread.actionsAria")}
-                onClick={(event) => event.stopPropagation()}
-              />
-            }
-          >
-            <MoreHorizontal />
-          </DropdownMenuTrigger>
-        )}
       </div>
-      {editing ? (
-        <div className="mt-1 ps-7">
-          <MentionTextarea
-            value={editBody}
-            onChange={onEditBody}
-            candidates={mentionRoster}
-            currentUsername={currentUsername}
-            placeholder={t("comments.composer.editPlaceholder")}
-            autoHeight
-            caretAtEnd
-            className="min-h-5 border-0 bg-transparent p-0 text-sm shadow-none rounded-none focus-visible:border-transparent focus-visible:ring-0 data-[empty=true]:before:start-0 data-[empty=true]:before:top-0"
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                onCancelEdit()
-                return
-              }
-              if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || e.nativeEvent.isComposing) return
-              e.preventDefault()
-              onSaveEdit()
-            }}
-          />
-          <div className="mt-1.5 flex justify-end gap-1.5">
-            <Button type="button" size="xs" variant="ghost" onClick={onCancelEdit} disabled={isSavingEdit}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="button" size="xs" onClick={onSaveEdit} disabled={isSavingEdit || !editBody.trim()}>
-              {isSavingEdit ? <Spinner className="size-3" /> : t("common.save")}
-            </Button>
-          </div>
-        </div>
-      ) : comment.deletedAt != null ? (
+      {comment.deletedAt != null ? (
         <p className="mt-1 ps-7 text-sm text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
       ) : (
-        <button
-          type="button"
-          onClick={() => onNavigate?.(comment)}
-          disabled={!onNavigate}
-          className="mt-1 block w-full ps-7 text-start text-sm select-text disabled:cursor-default"
-        >
-          <div data-ph-mask="" dangerouslySetInnerHTML={{ __html: safeCommentHtml(comment.body) }} />
-        </button>
+        <div
+          data-ph-mask=""
+          className="mt-1 ps-7 text-sm select-text"
+          dangerouslySetInnerHTML={{ __html: safeCommentHtml(comment.body) }}
+        />
       )}
-    </>
-  )
-
-  if (!hasMenu) {
-    return <div className="group/comment p-2">{body}</div>
-  }
-
-  return (
-    <>
-      <ContextMenu>
-        <ContextMenuTrigger render={<div className="group/comment p-2" />}>
-          {body}
-        </ContextMenuTrigger>
-        <ContextMenuContent className="min-w-44">{actions()}</ContextMenuContent>
-      </ContextMenu>
-      <DropdownMenu handle={actionsMenu}>
-        <DropdownMenuContent align="end" className="min-w-44">
-          {actions()}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+    </button>
   )
 }
+
 
 // ── Thread (top-level + replies) ─────────────────────────────────────────
 
 interface ThreadProps {
   root: CommentRecord
   replies: CommentRecord[]
-  currentUsername?: string
-  /**
-   * AQU-1000: the reader's project role, or null for a local / git-imported
-   * project with no sync role. Drives the per-thread resolve gate below.
-   */
-  roleLevel?: number | null
-  /**
-   * AQU-1002: the org's configurable comment floors, read off the project
-   * record. Omitted ⇒ the stock defaults, i.e. pre-AQU-1002 behaviour.
-   */
-  floors?: CommentFloors
   fileMap: Map<string, string>
   /** Book, chapter, and verse for this thread's cell, when the read has landed. */
   place?: string
-  onResolve: (commentId: string, resolved: boolean) => void
-  onEdit: (commentId: string, body: string) => Promise<void>
-  onDelete: (commentId: string) => Promise<void>
   onNavigate?: (root: CommentRecord) => void
-  mentionRoster?: readonly MentionCandidate[]
 }
 
 function CommentThreadCard({
-  root, replies, currentUsername, roleLevel = null, floors = DEFAULT_COMMENT_FLOORS,
-  fileMap, place, onResolve, onEdit, onDelete, onNavigate, mentionRoster = [],
+  root, replies, fileMap, place, onNavigate,
 }: ThreadProps) {
   const { t, locale } = useI18n()
-  // AQU-1000: this page offered Resolve / Reopen to every reader, including
-  // roles the server refuses. `useComments.resolveThread` flips `resolved`
-  // optimistically, so the refusal showed up as a thread that closed and then
-  // sprang back open. Decide before offering, and explain a refusal.
-  const isOwnThread = !!currentUsername && root.authorId === currentUsername
-  const canResolve = canMutateComment("comment.resolve", roleLevel, isOwnThread, floors)
-  const resolveDenialReason = canResolve
-    ? null
-    : canMutateComment("comment.resolve", roleLevel, true, floors)
-      // Role clears the self floor but not the foreign one. AQU-1002: name the
-      // org's configured floor, so the sentence matches the real refusal.
-      ? t("comments.resolve.foreignDenied", {
-          minRole: resolveRoleName(t, floors.resolveMinRole, { plural: true }),
-        })
-      : denialMessage(t, ROLE.COMMENTER, roleLevel)
-  const [expanded, setExpanded] = useState(!root.resolved)
-  const wasResolved = useRef(root.resolved)
-  useEffect(() => {
-    const becameResolved = !wasResolved.current && root.resolved
-    wasResolved.current = root.resolved
-    if (becameResolved) setExpanded(false)
-  }, [root.resolved])
-  // Inline edit state
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editBody, setEditBody] = useState("")
-  const [isSavingEdit, setIsSavingEdit] = useState(false)
-
-  // Delete confirm state
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [isDeletingConfirm, setIsDeletingConfirm] = useState(false)
-
-  function startEdit(commentId: string, currentBody: string) {
-    setEditingId(commentId)
-    setEditBody(currentBody)
-  }
-
-  async function saveEdit() {
-    if (!editingId || !editBody.trim()) return
-    setIsSavingEdit(true)
-    try {
-      await onEdit(editingId, editBody.trim())
-    } finally {
-      setIsSavingEdit(false)
-      setEditingId(null)
-      setEditBody("")
-    }
-  }
-
-  function cancelEdit() {
-    setEditingId(null)
-    setEditBody("")
-  }
-
-  function requestDelete(commentId: string) {
-    setDeletingId(commentId)
-    setIsDeletingConfirm(true)
-  }
-
-  async function confirmDelete() {
-    if (!deletingId) return
-    await onDelete(deletingId)
-    setDeletingId(null)
-    setIsDeletingConfirm(false)
-  }
-
-  function cancelDelete() {
-    setDeletingId(null)
-    setIsDeletingConfirm(false)
-  }
 
   const messages = [root, ...replies]
   const authors = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(
@@ -487,11 +201,8 @@ function CommentThreadCard({
   const threadBody = (
     <>
       <ul className="divide-y">
-        {messages.map((comment, index) => {
-          const isOwn = !!currentUsername && comment.authorId === currentUsername
-          const canMutate = isOwn && comment.deletedAt == null
-          return (
-            <li key={comment.commentId}>
+        {messages.map((comment, index) => (
+          <li key={comment.commentId}>
             <PageCommentRow
               comment={comment}
               isRoot={index === 0}
@@ -499,97 +210,29 @@ function CommentThreadCard({
               place={place}
               fileMap={fileMap}
               root={root}
-              canMutate={canMutate}
-              canResolve={canResolve}
-              resolveDenialReason={resolveDenialReason}
-              resolved={root.resolved}
-              editing={editingId === comment.commentId}
-              editBody={editBody}
-              isSavingEdit={isSavingEdit}
-              mentionRoster={mentionRoster}
-              currentUsername={currentUsername}
-              onStartEdit={() => startEdit(comment.commentId, comment.body)}
-              onEditBody={setEditBody}
-              onCancelEdit={cancelEdit}
-              onSaveEdit={() => { void saveEdit() }}
-              onRequestDelete={() => requestDelete(comment.commentId)}
-              onToggleResolved={() => onResolve(root.commentId, !root.resolved)}
               onNavigate={onNavigate}
             />
-            </li>
-          )
-        })}
+          </li>
+        ))}
       </ul>
     </>
   )
 
   const shell = root.resolved ? (
-    <CollapsiblePrimitive.Root
-      data-slot="collapsible"
-      open={expanded}
-      onOpenChange={setExpanded}
-      className="rounded-lg border bg-card text-sm"
+    <button
+      type="button"
+      onClick={() => onNavigate?.(root)}
+      disabled={!onNavigate}
+      className="flex w-full items-center gap-2 rounded-lg border bg-card p-2 text-start text-sm outline-none hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default"
     >
-      {expanded ? (
-        <>
-          <CollapsiblePrimitive.Trigger
-            data-slot="collapsible-trigger"
-            className="flex w-full items-center gap-2 border-b p-2 text-start text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-          >
-            <span className="min-w-0 flex-1">{t("comments.thread.collapse")}</span>
-            <ChevronsDownUp className="size-4 shrink-0" aria-hidden />
-          </CollapsiblePrimitive.Trigger>
-          <CollapsiblePrimitive.Panel data-slot="collapsible-content">{threadBody}</CollapsiblePrimitive.Panel>
-        </>
-      ) : (
-        <ContextMenu>
-          <ContextMenuTrigger render={<div />}>
-            <CollapsiblePrimitive.Trigger
-              data-slot="collapsible-trigger"
-              className="flex w-full items-center gap-2 p-2 text-start outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-            >
-              <MessageCircleCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="min-w-0 flex-1 truncate">{resolvedSummary}</span>
-              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            </CollapsiblePrimitive.Trigger>
-          </ContextMenuTrigger>
-          <ContextMenuContent className="min-w-44">
-            <PageCommentActions
-              showEdit={false}
-              showDelete={!!currentUsername && root.authorId === currentUsername && root.deletedAt == null}
-              showResolve
-              resolved={root.resolved}
-              canResolve={canResolve}
-              resolveDenialReason={resolveDenialReason}
-              onEdit={() => {}}
-              onToggleResolved={() => onResolve(root.commentId, false)}
-              onDelete={() => requestDelete(root.commentId)}
-            />
-          </ContextMenuContent>
-        </ContextMenu>
-      )}
-    </CollapsiblePrimitive.Root>
+      <MessageCircleCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{resolvedSummary}</span>
+    </button>
   ) : (
     <div className="rounded-lg border bg-card text-sm">{threadBody}</div>
   )
 
-  return (
-    <>
-      <Dialog open={isDeletingConfirm} onOpenChange={(v) => { if (!v) cancelDelete() }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("comments.deleteDialog.title")}</DialogTitle>
-            <DialogDescription>{t("comments.deleteDialog.description")}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={cancelDelete}>{t("common.cancel")}</Button>
-            <Button variant="destructive" onClick={() => { void confirmDelete() }}>{t("common.delete")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {shell}
-    </>
-  )
+  return shell
 }
 
 // ── Filter/sort controls ──────────────────────────────────────────────────
@@ -828,11 +471,9 @@ interface CommentsPageProps {
   /** Reuse the workspace's already-resolved project for file labels instead
    * of starting a second project query when this pane opens. */
   project?: ProjectRecord | null
-  /** Project members offered by the @mention picker. Empty until the roster arrives. */
-  mentionRoster?: readonly MentionCandidate[]
 }
 
-export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: CommentsPageProps = {}) {
+export function CommentsPage({ project: workspaceProject }: CommentsPageProps = {}) {
   const t = useT()
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -855,7 +496,7 @@ export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: 
     )
   }, [projectId, session?.jwt])
 
-  const { comments, isLoading, isError, resolveThread, editComment, deleteComment, refresh } = useComments({
+  const { comments, isLoading, isError, refresh } = useComments({
     projectId: projectId ?? null,
     getToken,
     author: session?.username ?? 'unknown',
@@ -1016,20 +657,13 @@ export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: 
               key={root.commentId}
               root={root}
               replies={repliesByParent.get(root.commentId) ?? []}
-              currentUsername={session?.username}
-              roleLevel={project?.syncRole?.level ?? null}
-              floors={commentFloorsFrom(project)}
               fileMap={fileMap}
               place={
                 root.fileId && root.cellId
                   ? places.get(cellPlaceKey(root.fileId, root.cellId))
                   : undefined
               }
-              onResolve={resolveThread}
-              onEdit={editComment}
-              onDelete={deleteComment}
               onNavigate={handleNavigate}
-              mentionRoster={mentionRoster}
             />
           ))}
         </div>

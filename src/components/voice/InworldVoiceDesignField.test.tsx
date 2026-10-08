@@ -571,6 +571,29 @@ describe("InworldVoiceDesignField", () => {
     expect(alert).toHaveClass("select-text")
   })
 
+  it("replaces the bare voice-provider 502 with the next click (AQU-1755)", async () => {
+    vi.mocked(designInworldVoice).mockRejectedValue(
+      new Error("Inworld TTS failed (502): voice provider request failed"),
+    )
+    const user = userEvent.setup()
+    renderField({ prompt: LONG_PROMPT })
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent(/Try again later/)
+    expect(alert).toHaveTextContent(/built-in voice/)
+    expect(alert).not.toHaveTextContent("502")
+  })
+
+  it("replaces a missing sync token with a sign-in step (AQU-1755)", async () => {
+    vi.mocked(designInworldVoice).mockRejectedValue(new Error("designInworldVoice: no sync token"))
+    const user = userEvent.setup()
+    renderField({ prompt: LONG_PROMPT })
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent(/Sign in again, then click Generate previews/)
+    expect(alert).not.toHaveTextContent("no sync token")
+  })
+
   it("switches to Structured with a key: value textarea", async () => {
     const user = userEvent.setup()
     renderField()

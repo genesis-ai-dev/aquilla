@@ -71,20 +71,14 @@ const authorizeSchema = z.object({
 })
 type AuthorizeParams = z.infer<typeof authorizeSchema>
 
-/** Where a client may point the token: an Aquilla MCP endpoint on the same
- *  host as this issuer (RFC 8707). Tokens are not audience-bound — any Agent
- *  API surface accepts them — so this guards against confused clients, not
- *  token replay. */
-export function isAcceptableResource(resource: string, issuer: string): boolean {
-  let url: URL
-  try {
-    url = new URL(resource)
-  } catch {
-    return false
-  }
-  if (url.hash || url.search) return false
-  if (!url.pathname.endsWith(MCP_RESOURCE_SUFFIX)) return false
-  return url.hostname === new URL(issuer).hostname
+/** The existing MCP endpoint is the OAuth audience, not a permission grant. */
+export function oauthResourceFor(env: Pick<Bindings, "SYNC_WORKER_URL">, issuer: string): string {
+  const base = env.SYNC_WORKER_URL ?? issuer.replace(/\/identity$/, "/sync")
+  return `${base.replace(/\/+$/, "")}${MCP_RESOURCE_SUFFIX}`
+}
+
+export function isAcceptableResource(resource: string, issuer: string, expected?: string): boolean {
+  return resource === (expected ?? oauthResourceFor({}, issuer))
 }
 
 /** Eligible organizations, without platform-admin elevation or lazy creation. */
@@ -118,7 +112,7 @@ function clientFetcher(env: Pick<Bindings, "WRANGLER_LOCAL" | "MCP_OAUTH_PINNED_
     : fetch
 }
 
-async function validateAuthorize(params: AuthorizeParams, issuer: string, fetcher: Fetcher): Promise<Validated> {
+async function validateAuthorize(params: AuthorizeParams, issuer: string, resource: string, fetcher: Fetcher): Promise<Validated> {
   const resolved = await resolveClient(params.client_id, fetcher)
   if (!resolved.ok) return { kind: "fatal", error: resolved.error, error_description: resolved.description }
   if (!resolved.client.redirectUris.includes(params.redirect_uri)) {
@@ -132,10 +126,10 @@ async function validateAuthorize(params: AuthorizeParams, issuer: string, fetche
   if (params.code_challenge_method !== "S256" || !params.code_challenge || !PKCE_CHALLENGE.test(params.code_challenge)) {
     return back("invalid_request", "PKCE with code_challenge_method=S256 is required")
   }
-  if (params.resource !== undefined && !isAcceptableResource(params.resource, issuer)) {
+  if (params.resource !== undefined && !isAcceptableResource(params.resource, issuer, resource)) {
     return back("invalid_target", "resource is not an Aquilla MCP endpoint")
   }
-  return { kind: "ok", client: resolved.client, params, mode: "act", resource: params.resource ?? null }
+  return { kind: "ok", client: resolved.client, params, mode: "act", resource: params.resource ?? resource }
 }
 
 async function readBody(req: Request): Promise<unknown> {
@@ -176,6 +170,15 @@ mcpOAuthPublicRoutes.get("/.well-known/oauth-authorization-server/*", (c) => {
   const suffix = c.req.path.slice("/.well-known/oauth-authorization-server".length)
   if (suffix !== new URL(issuer).pathname) return c.json({ error: "not_found" }, 404)
   return c.json(authorizationServerMetadata(issuer), 200, { "Cache-Control": "public, max-age=300" })
+})
+
+// OpenAI's plugin portal proves we own the MCP host by fetching this path and
+// expecting its one-time token as the whole plain-text body. The token comes
+// from the portal at submission time, so it is a secret, not code; unset → 404.
+mcpOAuthPublicRoutes.get("/.well-known/openai-apps-challenge", (c) => {
+  const token = c.env.OPENAI_APPS_CHALLENGE?.trim()
+  if (!token) return c.text("not found", 404)
+  return c.text(token, 200, { "Cache-Control": "no-store" })
 })
 
 // The consent UI lives in the SPA (sign-in, organization selection). Pass the request
@@ -243,7 +246,7 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   if (row.client_id !== input.client_id || row.redirect_uri !== input.redirect_uri) return invalidGrant()
   if ((await pkceS256(input.code_verifier)) !== row.code_challenge) return invalidGrant()
   if (input.resource !== undefined) {
-    const matches = row.resource ? input.resource === row.resource : isAcceptableResource(input.resource, issuer)
+    const matches = input.resource === (row.resource ?? oauthResourceFor(c.env, issuer))
     if (!matches) return c.json({ error: "invalid_target" }, 400)
   }
   // Live role at mint time, not just at consent: it may have been lowered.
@@ -266,12 +269,12 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
     `WITH claimed AS (
        UPDATE mcp_oauth_codes SET status = 'consumed', credential_id = ?
        WHERE code_hash = ? AND status = 'issued' AND expires_at > now()
-       RETURNING user_id, client_name, mode, org_id, project_id, org_ids
+       RETURNING user_id, client_name, mode, org_id, project_id, org_ids, resource
      ) INSERT INTO api_credentials
-       (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at, org_ids)
-       SELECT ?, user_id, client_name, ?, ?, mode, org_id, project_id, NULL, org_ids
+       (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id, expires_at, org_ids, oauth_resource)
+       SELECT ?, user_id, client_name, ?, ?, mode, org_id, project_id, NULL, org_ids, COALESCE(resource, ?)
        FROM claimed RETURNING id`,
-  ).bind(credentialId, codeHash, credentialId, minted.tokenPrefix, minted.tokenHash).first()
+  ).bind(credentialId, codeHash, credentialId, minted.tokenPrefix, minted.tokenHash, oauthResourceFor(c.env, issuer)).first()
   if (!credential) return invalidGrant()
   return c.json({ access_token: minted.token, token_type: "Bearer", scope: row.mode })
 })
@@ -293,7 +296,8 @@ mcpOAuthConsentRoutes.post("/request", async (c) => {
     return c.json({ error: "slow_down" }, 429)
   }
   await recordAuthEvent(c.env.AQUILLA_PG, "mcp_oauth_request", ident, true)
-  const v = await validateAuthorize(parsed.data, issuerFor(c.env, c.req.url), clientFetcher(c.env))
+  const issuer = issuerFor(c.env, c.req.url)
+  const v = await validateAuthorize(parsed.data, issuer, oauthResourceFor(c.env, issuer), clientFetcher(c.env))
   if (v.kind === "fatal") return c.json({ error: v.error, error_description: v.error_description }, 400)
   if (v.kind === "redirect_error") {
     return c.json({ error: v.error, error_description: v.error_description, redirect: v.redirect }, 400)
@@ -326,7 +330,7 @@ mcpOAuthConsentRoutes.post("/decision", async (c) => {
   await recordAuthEvent(c.env.AQUILLA_PG, "mcp_oauth_decision", ident, true)
   const issuer = issuerFor(c.env, c.req.url)
   // Re-validate from scratch: the browser is not trusted to carry a verdict.
-  const v = await validateAuthorize(input, issuer, clientFetcher(c.env))
+  const v = await validateAuthorize(input, issuer, oauthResourceFor(c.env, issuer), clientFetcher(c.env))
   if (v.kind === "fatal") return c.json({ error: v.error, error_description: v.error_description }, 400)
   if (v.kind === "redirect_error") {
     return c.json({ error: v.error, error_description: v.error_description, redirect: v.redirect }, 400)

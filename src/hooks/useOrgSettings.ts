@@ -116,11 +116,11 @@ const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
-// AQU-1086: languageEditMinRole is the second write-gating permission-policy
-// key (who may change a project's source/target language and its extra target
-// lanes). Same OWNER-only write gate; its default is MAINTAINER — today's
-// behaviour — so an org opts IN to project-lead language editing. See
-// DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
+// AQU-1086 / AQU-984: languageEditMinRole is the second write-gating
+// permission-policy key (who may change a project's source/target language
+// and its extra target lanes). Same OWNER-only write gate. Absent, the floor
+// is PROJECT_LEAD; a stored value, including an explicit MAINTAINER, is kept.
+// See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
 // gate) and in auth-worker/src/services/org-permissions.ts (the server
 // default) — all three must agree.
 const LANGUAGE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
@@ -260,6 +260,11 @@ export interface UseOrgSettings {
    * org opts out; a project may still override it in either direction.
    */
   autoPropagateRepetitions: boolean
+  /**
+   * Whether bulk text validation may sign off untouched AI drafts. OFF unless
+   * the org opts in, which keeps the one-at-a-time rule for AI drafts.
+   */
+  allowBulkValidateAiDrafts: boolean
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
@@ -324,6 +329,9 @@ export interface UseOrgSettings {
  * @param projectRoleLevel  Caller's project-resolved role (AD-12 max-wins). Used for canExport.
  *   Falls back to orgRoleLevel when not provided (personal projects / no-org contexts).
  */
+/** How often returning to the tab may re-read org settings (see the effect). */
+const REFETCH_ON_RETURN_MS = 10_000
+
 export function useOrgSettings(
   orgId: number | null | undefined,
   orgRoleLevel: number | null | undefined,
@@ -368,8 +376,10 @@ export function useOrgSettings(
     return next
   }, [])
 
+  const lastFetchAtRef = useRef(0)
   const refresh = useCallback(async (): Promise<OrgSettingsResponse | null> => {
     if (!orgId || !jwt) return null
+    lastFetchAtRef.current = Date.now()
     const got = await fetchOrgSettings(jwt, orgId)
     if (!aliveRef.current) return null
     writeServer(got)
@@ -403,6 +413,27 @@ export function useOrgSettings(
     void refresh().then(() => { if (!alive) return }).catch(() => {})
     return () => { alive = false }
   }, [orgId, refresh, writeServer])
+
+  // Re-read when the tab comes back into view. The sibling sync above only
+  // reaches instances in THIS tab, so a setting changed in another tab — or
+  // by another maintainer — reached an open editor only on reload: turning
+  // bulk validation of AI drafts OFF left an already-open editor still
+  // offering it. At most once per REFETCH_ON_RETURN_MS, so tabbing back and
+  // forth does not hammer the endpoint.
+  useEffect(() => {
+    if (!orgId || typeof document === "undefined") return
+    const onReturn = () => {
+      if (document.visibilityState !== "visible") return
+      if (Date.now() - lastFetchAtRef.current < REFETCH_ON_RETURN_MS) return
+      void refresh().catch(() => {})
+    }
+    document.addEventListener("visibilitychange", onReturn)
+    window.addEventListener("focus", onReturn)
+    return () => {
+      document.removeEventListener("visibilitychange", onReturn)
+      window.removeEventListener("focus", onReturn)
+    }
+  }, [orgId, refresh])
 
   const canEdit =
     orgRoleLevel != null && orgRoleLevel >= ORG_SETTINGS_WRITE_MIN_ROLE
@@ -440,8 +471,8 @@ export function useOrgSettings(
     return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
 
-  // AQU-1086: effective language-edit floor — explicit org setting, or the
-  // MAINTAINER default when unset / out of the role ladder.
+  // AQU-1086 / AQU-984: effective language-edit floor — explicit org setting,
+  // or PROJECT_LEAD when unset / out of the role ladder.
   const languageEditMinRole = resolveLanguageEditFloor(
     typeof server?.settings?.languageEditMinRole === "number"
       ? (server.settings.languageEditMinRole as number)
@@ -479,6 +510,9 @@ export function useOrgSettings(
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
+  // `=== true`, the opposite of the two above: unset is OFF, because AI drafts
+  // have always been reviewed one at a time and an org must opt in.
+  const allowBulkValidateAiDrafts = server?.settings?.allowBulkValidateAiDrafts === true
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -626,6 +660,7 @@ export function useOrgSettings(
     countStructuralCells,
     countStructuralOverrides,
     autoPropagateRepetitions,
+    allowBulkValidateAiDrafts,
     resetCountStructuralOverrides: resetOverrides,
     assignmentMinRole,
     termbaseEditMinRole,

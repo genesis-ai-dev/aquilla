@@ -209,7 +209,7 @@ function PlanStat({ value, label, tone, testId }: {
 export function PlanBoard({
   units, now, projectId, selectedId, onSelect, actions, emptyAction,
   status = "ready", onRetry, orderRef,
-  shortChaptersByUnit, assigneesByUnit, onOpenShortfall, laneLabel, lanes, lane, onLaneChange,
+  shortChaptersByUnit, frontMatterShortUnits, assigneesByUnit, onOpenShortfall, laneLabel, lanes, lane, onLaneChange,
 }: {
   units: PlanUnit[]
   now: number
@@ -248,6 +248,12 @@ export function PlanBoard({
    * hands back a map, so a unit with no entry simply draws no chapter line.
    */
   shortChaptersByUnit?: ReadonlyMap<string, string[]>
+  /**
+   * AQU-1493. The units whose book front matter is short too, keyed by
+   * `planUnitId`, so the row says "front matter and chapters 2 and 3".
+   * Routed like `shortChaptersByUnit`, from the same owner.
+   */
+  frontMatterShortUnits?: ReadonlySet<string>
   /**
    * AQU-1278. Who is working on each unit, keyed by `planUnitId`.
    *
@@ -519,6 +525,7 @@ export function PlanBoard({
         // or assignees arrived, and on a sixty-six row board that is the whole
         // board re-rendering once per background read.
         shortChapters={shortChaptersByUnit?.get(id)}
+        frontMatterShort={frontMatterShortUnits?.has(id) ?? false}
         assignees={assigneesByUnit?.get(id)}
         // The SAME function to every row, never an arrow bound per row: the
         // row is memoized, and a per-row closure would be fresh on every

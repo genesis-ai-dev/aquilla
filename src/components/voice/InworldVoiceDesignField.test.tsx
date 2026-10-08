@@ -38,6 +38,31 @@ vi.mock("@/lib/audio/voice-clone", () => ({
 const session = { jwt: "tok", username: "dev" } as FrontierSession
 const LONG_PROMPT = "A middle-aged male voice with a clear British accent speaking at a steady pace and with a warm, neutral tone."
 
+type StubAudio = {
+  src: string
+  pause: ReturnType<typeof vi.fn>
+  play: ReturnType<typeof vi.fn>
+  removeAttribute: ReturnType<typeof vi.fn>
+  load: ReturnType<typeof vi.fn>
+}
+
+function stubPreviewAudios(): StubAudio[] {
+  const elements: StubAudio[] = []
+  class PreviewAudio {
+    src = ""
+    onended: (() => void) | null = null
+    pause = vi.fn()
+    play = vi.fn().mockResolvedValue(undefined)
+    removeAttribute = vi.fn()
+    load = vi.fn()
+    constructor() {
+      elements.push(this)
+    }
+  }
+  vi.stubGlobal("Audio", PreviewAudio)
+  return elements
+}
+
 function renderField(opts: {
   prompt?: string
   onPromptChange?: (prompt: string) => void
@@ -288,6 +313,139 @@ describe("InworldVoiceDesignField", () => {
     const paused = pause.mock.calls.length
     settlePlay?.()
     await waitFor(() => expect(pause.mock.calls.length).toBeGreaterThan(paused))
+  })
+
+  it("plays a designed preview, toggles it off, and stops the previous element when another starts", async () => {
+    const elements = stubPreviewAudios()
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+      { voiceId: "ws__design-voice-b", previewText: "Hello", previewAudio: "SUQz" },
+    ])
+    const user = userEvent.setup()
+    const { unmount } = renderField({ prompt: LONG_PROMPT })
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    await waitFor(() => {
+      expect(elements[0]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop preview 1" })).toBeTruthy()
+    })
+    expect(elements[0].src).toContain("UklGRQ")
+    expect(elements).toHaveLength(1)
+
+    await user.click(screen.getByRole("button", { name: "Stop preview 1" }))
+    expect(elements[0].pause).toHaveBeenCalledTimes(1)
+    expect(elements[0].removeAttribute).toHaveBeenCalledWith("src")
+    expect(elements[0].load).toHaveBeenCalled()
+    expect(elements[0].src).toBe("")
+    expect(screen.getByRole("button", { name: "Play preview 1" })).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Play preview 2" }))
+    await waitFor(() => {
+      expect(elements[1]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop preview 2" })).toBeTruthy()
+    })
+    expect(elements[1].src).toContain("SUQz")
+    expect(screen.getByRole("button", { name: "Play preview 1" })).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Play preview 1" }))
+    await waitFor(() => {
+      expect(elements[2]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop preview 1" })).toBeTruthy()
+    })
+    const previousPausedAt = elements[1].pause.mock.invocationCallOrder[0]
+    const nextPlayedAt = elements[2].play.mock.invocationCallOrder[0]
+    expect(previousPausedAt).toBeLessThan(nextPlayedAt)
+    expect(elements[1].src).toBe("")
+    expect(screen.getByRole("button", { name: "Play preview 2" })).toBeTruthy()
+
+    unmount()
+    expect(elements[2].pause).toHaveBeenCalled()
+    expect(elements[2].src).toBe("")
+  })
+
+  it("ignores a preview play() that settles after a later preview has replaced it", async () => {
+    const settlers: Array<(() => void) | undefined> = []
+    const elements: Array<{ src: string; pause: ReturnType<typeof vi.fn> }> = []
+    vi.stubGlobal(
+      "Audio",
+      class {
+        src = ""
+        onended: (() => void) | null = null
+        pause = vi.fn()
+        removeAttribute = vi.fn()
+        load = vi.fn()
+        play = vi.fn().mockImplementation(
+          () => new Promise<void>((resolve) => { settlers.push(resolve) }),
+        )
+        constructor() {
+          elements.push(this)
+        }
+      },
+    )
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+      { voiceId: "ws__design-voice-b", previewText: "Hello", previewAudio: "SUQz" },
+    ])
+    const user = userEvent.setup()
+    renderField({ prompt: LONG_PROMPT })
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    await waitFor(() => expect(settlers).toHaveLength(1))
+    expect(screen.getByRole("button", { name: "Play preview 1" })).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Play preview 2" }))
+    await waitFor(() => expect(settlers).toHaveLength(2))
+    expect(elements[0].pause).toHaveBeenCalled()
+    settlers[1]?.()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Stop preview 2" })).toBeTruthy())
+    settlers[0]?.()
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop preview 2" })).toBeTruthy()
+      expect(screen.getByRole("button", { name: "Play preview 1" })).toBeTruthy()
+    })
+  })
+
+  it("halts the element and revokes a saved blob url on unmount", async () => {
+    const elements = stubPreviewAudios()
+    vi.mocked(fetchVoiceReference).mockResolvedValue(new Uint8Array([1, 2, 3]))
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:design-preview")
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const user = userEvent.setup()
+    const { unmount } = renderField({
+      existingVoiceId: "ws__design-voice-saved",
+      existingPreviewAudioId: "design-preview-1.wav",
+    })
+    await user.click(screen.getByRole("button", { name: "Play saved voice" }))
+    await waitFor(() => {
+      expect(elements[0]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop saved voice" })).toBeTruthy()
+    })
+    expect(elements[0].src).toBe("blob:design-preview")
+    unmount()
+    expect(elements[0].pause).toHaveBeenCalled()
+    expect(elements[0].src).toBe("")
+    expect(revoke).toHaveBeenCalledWith("blob:design-preview")
+  })
+
+  it("does not revoke a non-blob saved preview url on unmount", async () => {
+    const elements = stubPreviewAudios()
+    vi.mocked(synthesizeCellTts).mockResolvedValue({
+      audioId: "audio-tts-saved",
+      durationSeconds: 2,
+      objectName: "audio-tts-saved.wav",
+      url: "frontier-audio://audio-tts-saved.wav",
+    })
+    vi.mocked(parseFrontierAudioUrl).mockReturnValue({ audioId: "audio-tts-saved", ext: "wav" })
+    vi.mocked(getCellAudioStreamUrl).mockResolvedValue("https://stream.example/audio-tts-saved.wav")
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const user = userEvent.setup()
+    const { unmount } = renderField({ existingVoiceId: "ws__design-voice-saved" })
+    await user.click(screen.getByRole("button", { name: "Play saved voice" }))
+    await waitFor(() => {
+      expect(elements[0]?.play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop saved voice" })).toBeTruthy()
+    })
+    unmount()
+    expect(elements[0].pause).toHaveBeenCalled()
+    expect(revoke).not.toHaveBeenCalled()
   })
 
   it("explains that an already-published designed voice can be left as-is", () => {

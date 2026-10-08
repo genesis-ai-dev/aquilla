@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState } from "react"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useConcepts } from "@/hooks/useConcepts"
+import { useSubscribedConcepts } from "@/hooks/useSubscribedConcepts"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useProject } from "@/hooks/useProject"
 import { useProjectCells } from "@/hooks/useProjectCells"
@@ -102,22 +103,29 @@ export function RulesSettingsSection({
     getToken,
     tokenReady: !!jwt,
   })
+  // AQU-1721: the editor applies the subscribed termbases too, so the rules
+  // evaluated here include them, and a failed read gets the same notice.
+  const { concepts: subscribedConcepts, error: subscribedConceptsError } = useSubscribedConcepts(projectId)
 
   const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
     project ?? null,
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
     orgRules,
-    undefined,
+    subscribedConcepts,
     undefined,
     localConcepts,
   )
 
-  const { files } = useProjectCells({
+  // The corpus must be read in the lane the page is viewing: an omitted lane
+  // selects the legacy default lane, which is empty for a project translated
+  // into a named lane — "Suggest from edits" then mines nothing.
+  const { files, isLoading: cellsLoading, error: cellsError } = useProjectCells({
     projectId,
     projectFiles,
     getToken,
     enabled: Boolean(jwt) && Boolean(project),
+    lane: activeLane ?? "",
   })
 
   const cells = useMemo(() => files.flatMap((file) => file.cells), [files])
@@ -139,7 +147,7 @@ export function RulesSettingsSection({
 
   return (
     <>
-      {conceptsError && (
+      {(conceptsError || subscribedConceptsError) && (
         <div
           role="alert"
           data-testid="rules-terminology-unavailable"
@@ -160,6 +168,8 @@ export function RulesSettingsSection({
         setBuiltinOverride={setBuiltinOverride}
         infractions={infractions}
         cells={cells}
+        cellsLoading={cellsLoading}
+        cellsError={cellsError}
         completionSettings={project.completionSettings}
         orgRules={orgRules}
         canEditOrgRules={canEditOrgSettings}

@@ -79,6 +79,10 @@ async function seedProjectAndCells(testDb: TestDb) {
      VALUES ('proj-a', 'file-x', 'cell-1', 'source', 'In the beginning', 'evt-1', 1000, 3)`,
   )
   await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+  )
+  await testDb.pg.query(
     `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count)
      VALUES ('proj-a', 'file-x', 'cell-1', 'target', 'Au commencement', 'evt-2', 2000, 2)`,
   )
@@ -299,7 +303,7 @@ describe("external read surface", () => {
     it("scoped member credential reads cells for a file", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files/file-x/cells", token),
+        req("/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1", token),
         env(testDb),
       )
       expect(res!.status).toBe(200)
@@ -328,7 +332,7 @@ describe("external read surface", () => {
       )
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files/file-x/cells", token),
+        req("/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1", token),
         env(testDb),
       )
       expect(res!.status).toBe(200)
@@ -411,7 +415,7 @@ describe("external read surface", () => {
         [`credential:${CRED_1}`],
       )
       const res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files/file-x/cells", token),
+        req("/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1", token),
         env(testDb),
       )
       expect(res!.status).toBe(429)
@@ -437,7 +441,7 @@ describe("external read surface", () => {
         "/api/v1/external/me",
         "/api/v1/external/projects",
         "/api/v1/external/projects/proj-a/files",
-        "/api/v1/external/projects/proj-a/files/file-x/cells",
+        "/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1",
         "/api/v1/external/projects/proj-a/cells/cell-1/history",
       ]) {
         const res = await handleExternalReadRequest(req(path, token), env(testDb))
@@ -547,7 +551,7 @@ describe("external read surface", () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
 
       const page1Res = await handleExternalReadRequest(
-        req("/api/v1/external/projects/proj-a/files/file-x/cells?limit=2", token),
+        req("/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1&limit=2", token),
         env(testDb),
       )
       const page1 = (await page1Res!.json()) as {
@@ -558,7 +562,7 @@ describe("external read surface", () => {
       expect(page1.nextCursor).not.toBeNull()
 
       const page2Res = await handleExternalReadRequest(
-        req(`/api/v1/external/projects/proj-a/files/file-x/cells?limit=2&cursor=${encodeURIComponent(page1.nextCursor as string)}`, token),
+        req(`/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1&limit=2&cursor=${encodeURIComponent(page1.nextCursor as string)}`, token),
         env(testDb),
       )
       const page2 = (await page2Res!.json()) as {
@@ -576,7 +580,7 @@ describe("external read surface", () => {
       while (cursor !== null && guard < 10) {
         guard++
         const res = await handleExternalReadRequest(
-          req(`/api/v1/external/projects/proj-a/files/file-x/cells?limit=2&cursor=${encodeURIComponent(cursor)}`, token),
+          req(`/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1&limit=2&cursor=${encodeURIComponent(cursor)}`, token),
           env(testDb),
         )
         const body = (await res!.json()) as { data: unknown[]; nextCursor: string | null }

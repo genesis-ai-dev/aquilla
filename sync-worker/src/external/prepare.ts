@@ -64,17 +64,12 @@ import { uuidv7 } from './uuid'
 import { stageAndRespond } from './stage'
 import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
-import { canonicalLaneId, settingsTargetLanguage, withCanonicalLaneId } from './canonical-lane'
-import type { ProjectLaneRecord } from '../../../db/shared/lanes'
-import {
-  archivedLaneReason,
-  archivedTagsFromSettings,
-  type ArchiveLaneRow,
-} from '../../../src/lib/lanes/archived-lane'
-import { echoableLaneLabels, visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { laneContextFrom, laneIdRequiredMessage, resolveTargetLaneId } from './external-lane'
+import { languagesEqual } from '../../../src/lib/language-normalize'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
@@ -83,22 +78,6 @@ import { resolveAssignmentAuthority } from '../events/assignment-authority'
 // share them without an import cycle; re-exported here for existing importers
 // (mcp-handlers, changesets-route, tests).
 export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
-
-function archiveRows(lanes: readonly ProjectLaneRecord[]): ArchiveLaneRow[] {
-  return lanes
-    .filter((lane) => lane.role === 'target')
-    .map((lane) => ({
-      id: lane.id,
-      name: lane.name,
-      legacyTag: lane.legacyTag,
-      archivedAt: lane.archivedAt,
-    }))
-}
-
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
-}
 
 // [Pen test] API security & data exposure (2026-08-20): the external Agent
 // API's only throttle was on /search (2026-07-30 pen test) — every mutating
@@ -134,7 +113,7 @@ export async function handlePrepare(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
   const identifier = `credential:${cred.credentialId}`
@@ -188,7 +167,16 @@ export async function prepareChangesetCore(
   // assertCredentialScope (which would 404 the absent project).
   const validated = validateCommands(raw.commands)
   if (!validated.ok) {
-    return errorResponse('validation_failed', 'invalid commands', validated.issues)
+    // A missing lane id has to say where to find one. The generic
+    // "invalid commands" wrapper would hide that.
+    const laneIssue = validated.issues.find((issue) =>
+      issue.message.includes('GET /api/v1/external') || issue.message.includes('are not settings'),
+    )
+    return errorResponse(
+      'validation_failed',
+      laneIssue?.message ?? 'invalid commands',
+      validated.issues,
+    )
   }
 
   // Effective autonomy: the credential is a ceiling; a request may downgrade
@@ -406,7 +394,7 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'DraftCells must be the only command in a changeset')
     }
     try {
-      pending = await expandDraftCells(db, env, cred, projectId, draftCells)
+      pending = await expandDraftCells(db, env, cred, projectId, draftCells, resolvedRole.level)
     } catch (err) {
       return toErrorResponse(err)
     }
@@ -617,24 +605,11 @@ export async function prepareChangesetCore(
     (c): c is SetTranslationCommand => c.kind === 'SetTranslation',
   )
 
-  // AQU-538 lanes: a SetTranslation naming a lane must target a lane the
-  // workspace can select — same rule (and same teaching message) as PlanImport
-  // variants. Settings are only loaded when a lane is actually named, so the
-  // lane-less common case costs no extra query.
-  if (setCommands.some((c) => c.laneId)) {
+  // AQU-1615: laneId is lanes.id. A tag is not a lane, and omitting it is not
+  // the former default lane. A lane the caller cannot see is "lane does not
+  // exist", the same answer as a missing id (AQU-1462).
+  {
     const projectSettings = await loadProjectSettings(db, projectId)
-    // AQU-1532: a lane id naming the primary language is the default lane.
-    // Canonicalize before the registry check, the de-dupe and the
-    // precondition keys, so "bla" in a "bla" project writes the default row.
-    const targetLanguage = settingsTargetLanguage(projectSettings.settings)
-    setCommands = setCommands.map((c) => withCanonicalLaneId(c, targetLanguage))
-    const registeredLanes = new Set(
-      Array.isArray(projectSettings.settings.targetLanes)
-        ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
-        : [],
-    )
-    const archivedRows = archiveRows(projectSettings.lanes ?? [])
-    const archivedTags = archivedTagsFromSettings(projectSettings.settings)
     const { visible: visibleLaneIds } = await visibleTagsForMember(
       db,
       env.LANE_READ_WALL,
@@ -642,36 +617,14 @@ export async function prepareChangesetCore(
       Number(cred.userId),
       resolvedRole.level,
     )
+    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+    const resolved: SetTranslationCommand[] = []
     for (const [index, c] of setCommands.entries()) {
-      if (c.laneId && !registeredLanes.has(c.laneId)) {
-        const echoable = await echoableLaneLabels(
-          db,
-          env.LANE_READ_WALL,
-          projectId,
-          Number(cred.userId),
-          resolvedRole.level,
-        )
-        const listedLanes = echoable === null
-          ? [...registeredLanes]
-          : [...registeredLanes].filter((lane) => echoable.has(lane))
-        return errorResponse(
-          'validation_failed',
-          `commands[${index}] targets unregistered lane "${c.laneId}"; register it in the project's settings.targetLanes with UpdateProjectSettings first`,
-          { registeredLanes: listedLanes },
-        )
-      }
-      if (c.laneId) {
-        const archived = archivedLaneReason({
-          tag: c.laneId,
-          lanes: archivedRows,
-          archivedTags,
-          visibleLaneIds,
-        })
-        if (archived) {
-          return errorResponse('validation_failed', `commands[${index}] ${archived}`)
-        }
-      }
+      const lane = resolveTargetLaneId(c.laneId, `commands[${index}]`, laneCtx)
+      if (!lane.ok) return errorResponse('validation_failed', lane.message)
+      resolved.push({ ...c, laneId: lane.lane.id })
     }
+    setCommands = resolved
   }
 
   // De-dupe commands by target (cell, lane) — the same cell in two lanes is two
@@ -771,11 +724,24 @@ async function expandDraftCells(
   cred: ApiCredentialContext,
   projectId: string,
   cmd: DraftCellsCommand,
+  callerRoleLevel: number,
 ): Promise<Command[]> {
   const projectSettings = await loadProjectSettings(db, projectId)
   assertWithinBatchCap(cmd, completionBatchSizeFromSettings(projectSettings.settings))
-  // AQU-1532: a lane id naming the primary drafts (and later writes) the default lane.
-  const laneId = withCanonicalLaneId(cmd, settingsTargetLanguage(projectSettings.settings)).laneId
+  const { visible: visibleLaneIds } = await visibleTagsForMember(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(cred.userId),
+    callerRoleLevel,
+  )
+  const lane = resolveTargetLaneId(
+    cmd.laneId,
+    'DraftCells.laneId',
+    laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds),
+  )
+  if (!lane.ok) throw new ExternalError('validation_failed', lane.message)
+  const laneId = lane.lane.id
 
   const { drafts } = await requestDrafts(env, {
     projectId,
@@ -783,7 +749,9 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellIds: cmd.cellIds,
     ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
-    ...(laneId !== undefined ? { laneId } : {}),
+    // The draft bridge still speaks the lane's frozen tag. The staged
+    // SetTranslation keeps the id.
+    laneId: lane.lane.legacyTag ?? '',
   })
 
   // Only ever stage cells the caller actually asked for: the plan a human
@@ -805,7 +773,7 @@ async function expandDraftCells(
     fileId: cmd.fileId,
     cellId: d.cellId,
     value: d.value,
-    ...(laneId ? { laneId } : {}),
+    laneId,
     ...(d.aiDraft !== undefined && d.aiDraft !== null ? { aiDraft: d.aiDraft } : {}),
   }))
 }
@@ -898,68 +866,40 @@ async function preparePlanImport(
     }
   }
 
-  // Target lane ids are language tags in the current lane model. Reject an
-  // unregistered lane instead of committing data the workspace cannot select.
+  // AQU-1615: a variant's laneId is lanes.id. The staged plan stores that id.
   const projectSettings = await loadProjectSettings(db, projectId)
-  const registeredLanes = new Set(
-    Array.isArray(projectSettings.settings.targetLanes)
-      ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
-      : [],
+  const { visible: visibleLaneIds } = await visibleTagsForMember(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(cred.userId),
+    callerRoleLevel,
   )
-  const archivedRows = archiveRows(projectSettings.lanes ?? [])
-  const archivedTags = archivedTagsFromSettings(projectSettings.settings)
-  const namesALane = cmd.cells.some((cell) => (cell.variants ?? []).some((variant) => variant.laneId))
-  const visibleLaneIds = namesALane
-    ? (
-        await visibleTagsForMember(
-          db,
-          env.LANE_READ_WALL,
-          projectId,
-          Number(cred.userId),
-          callerRoleLevel,
-        )
-      ).visible
-    : null
-  // AQU-1532: a variant naming the primary language writes the default lane.
-  // Commit applies the same mapping when it stamps targetLang.
-  const targetLanguage = settingsTargetLanguage(projectSettings.settings)
+  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
   for (const [cellIndex, cell] of cmd.cells.entries()) {
     const cellLanes = new Set<string>()
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
-      const lane = canonicalLaneId(variant.laneId, targetLanguage)
-      if (cellLanes.has(lane)) {
+      const where = `PlanImport.cells[${cellIndex}].variants[${variantIndex}].laneId`
+      // PlanImport does not create lanes. '' is the parse placeholder, an
+      // omission, not the blank bridge and not a language match.
+      if (variant.laneId === undefined || variant.laneId === '') {
+        return errorResponse('validation_failed', laneIdRequiredMessage(where))
+      }
+      const resolved = resolveTargetLaneId(variant.laneId, where, laneCtx)
+      if (!resolved.ok) return errorResponse('validation_failed', resolved.message)
+      if (cellLanes.has(resolved.lane.id)) {
         return errorResponse(
           'validation_failed',
-          `PlanImport.cells[${cellIndex}].variants[${variantIndex}] writes the same lane as an earlier variant; the primary language "${targetLanguage ?? ''}" is the default lane`,
+          `PlanImport.cells[${cellIndex}].variants[${variantIndex}] writes the same lane as an earlier variant`,
         )
       }
-      cellLanes.add(lane)
-      if (lane && !registeredLanes.has(lane)) {
-        return errorResponse(
-          'validation_failed',
-          `PlanImport.cells[${cellIndex}].variants[${variantIndex}] targets unregistered lane "${variant.laneId}"; register it with UpdateProjectSettings first`,
-        )
-      }
-      if (lane) {
-        const archived = archivedLaneReason({
-          tag: lane,
-          lanes: archivedRows,
-          archivedTags,
-          visibleLaneIds,
-        })
-        if (archived) {
-          return errorResponse(
-            'validation_failed',
-            `PlanImport.cells[${cellIndex}].variants[${variantIndex}] ${archived}`,
-          )
-        }
-      }
-      const effectiveLanguage = variant.laneId || cmd.targetLanguage || ''
-      if (variant.languageTag && variant.languageTag !== effectiveLanguage) {
+      cellLanes.add(resolved.lane.id)
+      variant.laneId = resolved.lane.id
+      if (variant.languageTag && !languagesEqual(variant.languageTag, resolved.lane.language)) {
         return errorResponse(
           'validation_failed',
           `PlanImport.cells[${cellIndex}].variants[${variantIndex}].languageTag must match its lane language`,
-          { laneId: variant.laneId, expectedLanguageTag: effectiveLanguage },
+          { laneId: resolved.lane.id, expectedLanguageTag: resolved.lane.language },
         )
       }
     }
@@ -1220,12 +1160,9 @@ async function prepareCreateProject(
     projectName: cmd.name,
     newProjectId: definitiveProjectId,
     targetOrg: orgId == null ? 'personal' : String(orgId),
-    // AQU-1223: the seeded language pair is part of what the approver is
-    // authorizing, so it belongs in the effect summary rather than only in the
-    // raw command body.
-    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
+    ...(cmd.lanes !== undefined && cmd.lanes.length > 0
       ? {
-          newProjectLanguages: `${cmd.sourceLanguage || 'none'} → ${cmd.targetLanguage || 'none'}`,
+          newProjectLanguages: cmd.lanes.map((lane) => `${lane.role}:${lane.language}`).join(', '),
         }
       : {}),
     warnings: [],

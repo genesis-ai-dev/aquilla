@@ -18,6 +18,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
+import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
+import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
@@ -34,11 +36,15 @@ import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { ProjectDestinationPicker, type Destination } from "@/components/ProjectDestinationPicker"
 import { ProjectTeamsPicker, teamsRequired } from "@/components/ProjectTeamsPicker"
 import {
+  createProjectLane,
   fetchProjectSettings,
-  patchProjectSettings,
-  PROJECT_SETTINGS_VERSION_INITIAL,
+  renameProjectLane,
 } from "@/lib/sync/project-settings"
+import { laneLanguage } from "@/lib/lanes/lane-display"
+import { isPrimaryRegistryLane } from "@/lib/lanes/registry-lanes"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
+import { InheritedSettingsChoice } from "@/components/ProjectSettings/InheritedSettingsChoice"
 import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 import { summarizeFileSelection } from "@/lib/sync/link-file-selection"
 import {
@@ -200,6 +206,9 @@ const projectSchema = z
     shape: z.enum(["self-contained", "linked-target"]),
     upstreamProjectId: optionalString,
     linkConsumes: z.union([z.enum(["source", "target"]), z.literal("")]),
+    // AQU-1605: which of the upstream's lanes a chain link consumes (`lanes.id`).
+    // Empty for the sibling case, which consumes the upstream's one source lane.
+    upstreamLaneId: optionalString,
   })
   .superRefine((data, ctx) => {
     if (!data.targetLanguage.trim()) {
@@ -226,6 +235,16 @@ const projectSchema = z
         code: z.ZodIssueCode.custom,
         message: "Choose which corpus should become this project's source",
         path: ["linkConsumes"],
+      })
+    }
+    // AQU-1605: the chain case has to name the translation it consumes. Without
+    // it the server falls back to whichever of the upstream's lanes carries the
+    // empty legacy tag, which is an accident of history rather than a choice.
+    if (linking && data.linkConsumes === "target" && !data.upstreamLaneId.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Choose which of the upstream project's translations to use",
+        path: ["upstreamLaneId"],
       })
     }
   })
@@ -294,6 +313,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [filesFailed, setFilesFailed] = useState(false)
   const [filesAttempt, setFilesAttempt] = useState(0)
+  const [inheritReceive, setInheritReceive] = useState({ ...INHERIT_DEFAULTS })
+  const [inheritDetached, setInheritDetached] = useState<Partial<Record<keyof typeof INHERIT_DEFAULTS, boolean>>>({})
+  const inheritReceiveRef = useRef(inheritReceive)
+  inheritReceiveRef.current = inheritReceive
   const fileChoices = useMemo(() => upstreamFiles ?? [], [upstreamFiles])
   const { selectedCount, allSelected, nothingSelected } = useMemo(
     () => summarizeFileSelection(fileChoices, selectedFileIds),
@@ -317,6 +340,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       extraLanguages: [] as string[],
       shape: "self-contained" as ProjectShape,
       upstreamProjectId: "",
+      upstreamLaneId: "",
       linkConsumes: "" as LinkConsumes,
     },
     validators: { onSubmit: projectSchema },
@@ -360,6 +384,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         const willLink = !!upstreamId
         const linkMode: LinkMode = value.shape === "linked-target" ? "live" : "clone"
         const linkConsumes = value.linkConsumes === "target" ? "target" : "source"
+        // AQU-1605: only the chain case carries a lane — the sibling case
+        // consumes the upstream's source lane, which the server records itself.
+        const linkLaneId = linkConsumes === "target" ? value.upstreamLaneId.trim() : ""
         // AQU-1561: guarded as well as disabled — nothing may create a project
         // whose link follows no files, or one whose file list was never read.
         // Nothing has been created at this point, so returning is clean.
@@ -387,24 +414,29 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
             teamIds: destination.orgId != null ? teamIds : undefined,
           })
 
-          // One atomic settings write at version 0. The HTTP PATCH handler
-          // replaces the whole blob (no per-key merge), so languages and lanes
-          // must travel together — a second PATCH with only targetLanes would
-          // silently wipe sourceLanguage/targetLanguage (AQU-1250).
+          // AQU-1594: languages are lane rows, not project-level settings keys.
+          // The create already inserted a source lane. Name it, then add each
+          // requested target lane. The first target's legacy tag is its language.
           try {
-            const result = await patchProjectSettings(
-              jwt,
-              project.id,
-              {
-                sourceLanguage: project.sourceLanguage,
-                targetLanguage: project.targetLanguage,
-                targetLanes: completeTargetLanes(project.targetLanguage, extrasToApply),
-              },
-              PROJECT_SETTINGS_VERSION_INITIAL,
-            )
-            if (result.kind !== "ok") extraLanguagesFailed = true
+            const current = await fetchProjectSettings(jwt, project.id)
+            const sourceLane = current?.lanes?.find((lane) => lane.role === "source")
+            if (!sourceLane) {
+              extraLanguagesFailed = true
+            } else if (project.sourceLanguage) {
+              const renamed = await renameProjectLane(jwt, project.id, sourceLane.id, {
+                language: project.sourceLanguage,
+              })
+              if (renamed.kind !== "ok") extraLanguagesFailed = true
+            }
+            for (const language of completeTargetLanes(project.targetLanguage, extrasToApply)) {
+              const created = await createProjectLane(jwt, project.id, { name: "", language })
+              if (created.kind !== "ok") {
+                extraLanguagesFailed = true
+                break
+              }
+            }
           } catch (err) {
-            console.warn("[project-create] settings write failed (non-fatal):", err)
+            console.warn("[project-create] lane write failed (non-fatal):", err)
             extraLanguagesFailed = true
           }
 
@@ -413,7 +445,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               sourceProjectId: upstreamId,
               mode: linkMode,
               consumes: linkConsumes,
+              ...(linkLaneId ? { laneId: linkLaneId } : {}),
               ...(pickedFileIds ? { fileIds: pickedFileIds } : {}),
+              inherit: inheritReceiveRef.current,
             })
             if (linkResult.seeded === false && linkMode === "live") {
               // AQU-1544: the retry's answer used to be dropped, so a failed
@@ -486,6 +520,35 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const chosenUpstreamId = useStore(form.store, (state) =>
     state.values.upstreamProjectId.trim(),
   )
+
+  // ── AQU-1605: which of the chosen upstream's lanes this link consumes ──
+  //
+  // Read off the form for the same reason the file list is: the corpus answer
+  // moves with the shape, the picker and `form.reset()`, and this must follow it
+  // rather than keep a copy that can disagree. Only the chain case asks — a link
+  // that consumes the upstream's SOURCE has one lane to read.
+  const chosenConsumes = useStore(form.store, (state) => state.values.linkConsumes)
+  const laneChoices = useUpstreamLaneChoices(
+    session?.jwt,
+    chosenUpstreamId,
+    chosenConsumes === "target",
+  )
+  const laneOptions = laneChoices.lanes
+  useEffect(() => {
+    if (!laneOptions) return
+    // One lane is pre-filled, never asked (AQU-1419: no forced chooser at one
+    // lane) — it is still named on screen, so the choice stays visible.
+    if (laneOptions.length === 1) {
+      form.setFieldValue("upstreamLaneId", laneOptions[0]!.id)
+      return
+    }
+    // A pick the list no longer holds (another upstream, or lanes this user's
+    // grants have since narrowed) must not survive into the request.
+    const current = form.getFieldValue("upstreamLaneId")
+    if (current && !laneOptions.some((lane) => lane.id === current)) {
+      form.setFieldValue("upstreamLaneId", "")
+    }
+  }, [laneOptions, form])
 
   useEffect(() => {
     // No upstream, no question to ask — and the stale answer must go with it, so
@@ -848,6 +911,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                     // drops the corpus question; reset its answer
                                     // so a stale pick can't satisfy a later link.
                                     if (!value) form.setFieldValue("linkConsumes", "")
+                                    // AQU-1605: a lane belongs to the upstream it
+                                    // was listed from — changing the upstream
+                                    // retires the answer, cleared or not.
+                                    form.setFieldValue("upstreamLaneId", "")
                                   }}
                                   invalid={invalid}
                                   placeholder={t("projectSettings.create.upstreamProjectPlaceholder")}
@@ -962,9 +1029,12 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                       <RadioGroup
                                         // null = nothing selected (never prefill).
                                         value={field.state.value || null}
-                                        onValueChange={(value) =>
+                                        onValueChange={(value) => {
                                           field.handleChange((value ?? "") as LinkConsumes)
-                                        }
+                                          // AQU-1605: the lane question belongs to
+                                          // the chain case alone.
+                                          form.setFieldValue("upstreamLaneId", "")
+                                        }}
                                         disabled={locked}
                                         className="gap-2"
                                       >
@@ -1005,6 +1075,46 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                   {invalid && <FieldError errors={field.state.meta.errors} />}
                                 </Field>
                               )
+                            }}
+                          />
+                        ) : null}
+
+                        {/* AQU-1605: which of the upstream's translations
+                            becomes this project's source. Chain case only. */}
+                        {showCorpusChoice && chosenConsumes === "target" ? (
+                          <form.Field
+                            name="upstreamLaneId"
+                            children={(field) => {
+                              const invalid = isFieldInvalid(field)
+                              return (
+                                <UpstreamLaneChoiceField
+                                  id="create-upstream-lane"
+                                  lanes={laneOptions}
+                                  failed={laneChoices.failed}
+                                  value={field.state.value}
+                                  onValueChange={(next) => field.handleChange(next)}
+                                  onRetry={laneChoices.retry}
+                                  disabled={locked}
+                                  invalid={invalid}
+                                  error={
+                                    invalid ? <FieldError errors={field.state.meta.errors} /> : null
+                                  }
+                                />
+                              )
+                            }}
+                          />
+                        ) : null}
+
+                        {showCorpusChoice && (chosenConsumes === "source" || chosenConsumes === "target") ? (
+                          <InheritedSettingsChoice
+                            title={t("projectSettings.inherit.linkTitle")}
+                            description={t("projectSettings.inherit.linkDescription")}
+                            receive={inheritReceive}
+                            detached={inheritDetached}
+                            disabled={locked}
+                            onChange={(next) => {
+                              setInheritReceive(next.receive)
+                              setInheritDetached(next.detached)
                             }}
                           />
                         ) : null}
@@ -1212,19 +1322,24 @@ function AddAsLaneRecommendation({
     onBusyChange(true)
     try {
       const current = await fetchProjectSettings(jwt, project.id)
-      const existingLanes = current?.settings.targetLanes ?? []
-      const lower = trimmed.toLowerCase()
-      if (existingLanes.some((l) => l.toLowerCase() === lower)) {
+      const existing = (current?.lanes ?? []).filter((lane) => lane.role === "target")
+      const known = existing
+        .map((lane) =>
+          laneLanguage(lane, {
+            settings: current?.settings,
+            role: "target",
+            legacyTag: lane.legacyTag,
+          }),
+        )
+        .filter((language) => language.length > 0)
+      const registry = known.length > 0 ? known : (current?.settings.targetLanes ?? [])
+      const already = registry.some((language) => isPrimaryRegistryLane(trimmed, language))
+      if (already) {
         fail(`"${trimmed}" is already a lane on ${project.name}.`)
         return
       }
 
-      const result = await patchProjectSettings(
-        jwt,
-        project.id,
-        { targetLanes: [...existingLanes, trimmed] },
-        current?.version ?? 0,
-      )
+      const result = await createProjectLane(jwt, project.id, { name: "", language: trimmed })
       if (result.kind === "ok") {
         setStatus("success")
         setMessage(`Added "${trimmed}" as a lane on ${project.name}. Open that project to start translating.`)
@@ -1238,11 +1353,11 @@ function AddAsLaneRecommendation({
         closeTimerRef.current = setTimeout(onAdded, 900)
         return
       }
-      if (result.kind === "conflict") {
-        fail("Someone else updated that project's settings just now. Try again.")
+      if (result.kind === "duplicate") {
+        fail(`"${trimmed}" is already a lane on ${project.name}.`)
         return
       }
-      if (result.kind === "forbidden") {
+      if (result.kind === "error" && result.message.includes("(403)")) {
         fail(`You need maintainer access on ${project.name} to add a lane there.`)
         return
       }

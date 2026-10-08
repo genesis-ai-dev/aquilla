@@ -8,7 +8,15 @@
 // dependency-free.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
+import type { ExternalLaneSpec } from '../../../db/shared/lanes'
+import {
+  laneIdRequiredMessage,
+  parseLaneSpecs,
+  RETIRED_LANE_SETTINGS_KEYS,
+  RETIRED_LANE_SETTINGS_MESSAGE,
+} from './external-lane'
 import type { AiDraftProvenance } from '../events/types'
+import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import {
   validatePlanImportManifest,
   type PlanImportCell,
@@ -166,11 +174,9 @@ export interface SetTranslationCommand {
   cellId: string
   value: string
   valueHtml?: string
-  /** Target-language lane (AQU-538): a language tag registered in the
-   *  project's settings.targetLanes (e.g. "es", "pt"). Omit for the default
-   *  lane. Prepare rejects an unregistered lane — register it with
-   *  UpdateProjectSettings first. */
-  laneId?: string
+  /** Target lane id (`lanes.id`). Required. A language tag is not accepted.
+   *  Read the ids from GET /api/v1/external/projects/:projectId. */
+  laneId: string
   /** SERVER-MINTED (AQU-1186). Set only by the DraftCells prepare path when it
    *  materializes the copilot's output into SetTranslation commands; it makes
    *  the compiled commit carry `ai_suggestion` + `ai_draft`, so the cell lands
@@ -189,6 +195,13 @@ export interface PlanImportCommand {
   fileType: string
   sourceLanguage?: string
   targetLanguage?: string
+  /** AQU-1471: per-file text direction, stamped onto the created file row. OMIT
+   *  IT unless this one file really runs against the project — absent means the
+   *  project's `sourceTextDirection`/`targetTextDirection` setting decides (and
+   *  below that, the language), so a whole RTL project is one PatchSettings
+   *  rather than one override per import. */
+  sourceTextDirection?: TextDirection
+  targetTextDirection?: TextDirection
   /** Optional uploaded artifact to preserve + link to the created file. */
   artifactId?: string
   /** Optional normalized profile/recipe selected by the unified importer. */
@@ -217,12 +230,10 @@ export interface CreateProjectCommand {
   name: string
   /** Target org id (numeric, or its string form). Omit for a personal project. */
   orgId?: string | number
-  /** Seed `settings.sourceLanguage` at creation — the same key the UI's create
-   *  flow patches immediately after createCloudProject. Omit to leave unset. */
-  sourceLanguage?: string
-  /** Seed `settings.targetLanguage` at creation. Omit (or '') for a
-   *  source-only project, mirroring the UI's source-only shape. */
-  targetLanguage?: string
+  /** Lanes to create with the project. Each is role, language, optional name,
+   *  optional code. They become lane rows; the four project-level language
+   *  keys are not written. Omit for a source lane with no language. */
+  lanes?: ExternalLaneSpec[]
 }
 
 /** The complete accepted key set for a CreateProject command body (AQU-1223).
@@ -234,8 +245,7 @@ export const CREATE_PROJECT_FIELDS: readonly string[] = [
   'projectId',
   'name',
   'orgId',
-  'sourceLanguage',
-  'targetLanguage',
+  'lanes',
 ]
 
 /** Create an organization (AQU-1221, receipt-only like CreateProject). Applies
@@ -428,11 +438,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'SetTranslation.valueHtml must be a string when present' })
         return
       }
-      if (c.laneId !== undefined && (!isNonEmptyString(c.laneId) || c.laneId.length > 64)) {
-        issues.push({
-          index,
-          message: 'SetTranslation.laneId must be a non-empty string (max 64 chars) when present — omit it for the default lane',
-        })
+      if (c.laneId === undefined) {
+        issues.push({ index, message: laneIdRequiredMessage('SetTranslation.laneId') })
+        return
+      }
+      if (!isNonEmptyString(c.laneId) || c.laneId.length > 64) {
+        issues.push({ index, message: 'SetTranslation.laneId lane does not exist' })
         return
       }
       commands.push({
@@ -441,7 +452,7 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         cellId: c.cellId,
         value: c.value,
         ...(c.valueHtml !== undefined ? { valueHtml: c.valueHtml } : {}),
-        ...(c.laneId !== undefined ? { laneId: c.laneId } : {}),
+        laneId: c.laneId,
       })
       return
     }
@@ -466,6 +477,14 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'PlanImport.artifactId must be a non-empty string when present' })
         return
       }
+      let directionInvalid = false
+      for (const key of ['sourceTextDirection', 'targetTextDirection'] as const) {
+        if (c[key] !== undefined && normalizeTextDirection(c[key]) === null) {
+          issues.push({ index, message: `PlanImport.${key} must be "ltr" or "rtl" when present` })
+          directionInvalid = true
+        }
+      }
+      if (directionInvalid) return
       if (!Array.isArray(c.cells)) {
         issues.push({ index, message: 'PlanImport.cells must be an array' })
         return
@@ -579,8 +598,20 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
           }
           variants = []
           for (const [variantIndex, rawVariant] of rc.variants.entries()) {
-            if (!isPlainObject(rawVariant) || typeof rawVariant.laneId !== 'string' || typeof rawVariant.content !== 'string') {
+            if (!isPlainObject(rawVariant) || typeof rawVariant.content !== 'string') {
               issues.push({ index, message: `PlanImport.cells[${cellIndex}].variants[${variantIndex}] has invalid required fields` })
+              cellInvalid = true
+              return
+            }
+            // Omitted and '' are the same omission. A language tag is a string
+            // and falls through; prepare rejects it as a lane that does not exist.
+            if (typeof rawVariant.laneId !== 'string' || rawVariant.laneId === '') {
+              issues.push({
+                index,
+                message: laneIdRequiredMessage(
+                  `PlanImport.cells[${cellIndex}].variants[${variantIndex}].laneId`,
+                ),
+              })
               cellInvalid = true
               return
             }
@@ -634,6 +665,8 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         fileType: c.fileType,
         ...(c.sourceLanguage !== undefined ? { sourceLanguage: c.sourceLanguage as string } : {}),
         ...(c.targetLanguage !== undefined ? { targetLanguage: c.targetLanguage as string } : {}),
+        ...(c.sourceTextDirection !== undefined ? { sourceTextDirection: c.sourceTextDirection as TextDirection } : {}),
+        ...(c.targetTextDirection !== undefined ? { targetTextDirection: c.targetTextDirection as TextDirection } : {}),
         ...(c.artifactId !== undefined ? { artifactId: c.artifactId as string } : {}),
         ...(manifest ? { manifest } : {}),
         cells,
@@ -652,8 +685,8 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
             `CreateProject does not accept ${unknown.map((k) => `\`${k}\``).join(', ')} — ` +
             `accepted fields are ${CREATE_PROJECT_FIELDS.filter((k) => k !== 'kind')
               .map((k) => `\`${k}\``)
-              .join(', ')}. Project settings beyond the language pair are written with ` +
-            `PatchSettings; membership is InviteMember/SetRole.`,
+              .join(', ')}. Languages are lanes, not settings keys. Other project ` +
+            `settings are written with PatchSettings; membership is InviteMember/SetRole.`,
         })
         return
       }
@@ -693,23 +726,21 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'CreateProject.orgId must be a string or number when present' })
         return
       }
-      // '' is meaningful for targetLanguage (the UI's source-only shape writes
-      // exactly that), so these are string-checked, not non-empty-checked.
-      if (c.sourceLanguage !== undefined && typeof c.sourceLanguage !== 'string') {
-        issues.push({ index, message: 'CreateProject.sourceLanguage must be a string when present' })
-        return
-      }
-      if (c.targetLanguage !== undefined && typeof c.targetLanguage !== 'string') {
-        issues.push({ index, message: 'CreateProject.targetLanguage must be a string when present' })
-        return
+      let lanes: ExternalLaneSpec[] | undefined
+      if (c.lanes !== undefined) {
+        const parsed = parseLaneSpecs(c.lanes, 'CreateProject.lanes')
+        if (!parsed.ok) {
+          issues.push({ index, message: parsed.message })
+          return
+        }
+        lanes = parsed.lanes
       }
       commands.push({
         kind: 'CreateProject',
         ...(c.projectId !== undefined ? { projectId: c.projectId as string } : {}),
         name,
         ...(c.orgId !== undefined ? { orgId: c.orgId as string | number } : {}),
-        ...(c.sourceLanguage !== undefined ? { sourceLanguage: c.sourceLanguage } : {}),
-        ...(c.targetLanguage !== undefined ? { targetLanguage: c.targetLanguage } : {}),
+        ...(lanes !== undefined ? { lanes } : {}),
       })
       return
     }
@@ -750,6 +781,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       }
       if (!isPlainObject(c.settings)) {
         issues.push({ index, message: 'UpdateProjectSettings.settings must be a plain object' })
+        return
+      }
+      const settingsBlob = c.settings as Record<string, unknown>
+      const retired = RETIRED_LANE_SETTINGS_KEYS.filter((key) => key in settingsBlob)
+      if (retired.length > 0) {
+        issues.push({ index, message: RETIRED_LANE_SETTINGS_MESSAGE })
         return
       }
       if (

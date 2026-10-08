@@ -74,6 +74,18 @@ describe("full-stack Cloudflare previews", () => {
     expect(JSON.stringify(config)).not.toContain("api.aquilla.app")
   })
 
+  it.each(["auth", "sync"])("runs %s previews behind the lane wall, like the development Worker whose rows they read", (surface) => {
+    // Unset, every member sees every lane and a lane-scoped change cannot be
+    // walked on its preview. Read from wrangler so the two cannot drift apart.
+    const wrangler = readFileSync(join(import.meta.dirname, "..", `${surface}-worker`, "wrangler.toml"), "utf8")
+    const start = wrangler.indexOf("\n[env.development.vars]\n")
+    expect(start).toBeGreaterThan(-1)
+    const end = wrangler.indexOf("\n[", start + 1)
+    const wall = /^LANE_READ_WALL = "(.*)"$/m.exec(wrangler.slice(start, end === -1 ? undefined : end))?.[1]
+    expect(wall).toBe("1")
+    expect(previewConfig(surface, { cwd: "/repo" }).previews.vars?.LANE_READ_WALL).toBe(wall)
+  })
+
   it("preserves the sync Durable Object migration history", () => {
     const config = previewConfig("sync", { cwd: "/repo" })
     expect(config.previews.durable_objects?.bindings).toEqual([{ name: "ProjectSync", class_name: "ProjectSync" }])

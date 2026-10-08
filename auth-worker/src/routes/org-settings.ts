@@ -57,11 +57,11 @@
 // services/org-permissions.ts. Enforced by the terminology-scoped carve-out
 // in routes/project-settings.ts; this route only stores/validates it.
 //
-// AQU-1086: languageEditMinRole (who may change a project's source/target
-// language and its extra target lanes) is the second write-gating role-ladder
-// policy key, on the same OWNER-only write gate. Unlike termbaseEditMinRole
-// its default is MAINTAINER (600) — today's behaviour — so an org opts in by
-// lowering it to PROJECT_LEAD. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
+// AQU-1086 / AQU-984: languageEditMinRole (who may change a project's
+// source/target language and its extra target lanes) is a role-ladder policy
+// key, on the same OWNER-only write gate. Absent, the floor is PROJECT_LEAD.
+// A stored value — including an explicit MAINTAINER — is that org's choice
+// and is kept. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
 // services/org-permissions.ts and the language-scoped carve-out in
 // routes/project-settings.ts; this route only stores/validates it.
 
@@ -143,6 +143,16 @@ const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment", "allowScopedLaneAssi
  * may override it; absent on both means count them.
  */
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+
+/**
+ * Whether bulk text validation may sign off untouched AI drafts. Like
+ * countStructuralCells it is not a permission policy — it widens what one
+ * validate gesture covers, not who may validate — so it rides the general
+ * MAINTAINER gate and needs only validation. Unset means NO. The rule it
+ * relaxes is client-side (the bulk paths' eligibility filter); the external
+ * Agent API keeps its own no-bypass check in sync-worker (AQU-1184).
+ */
+const ALLOW_BULK_AI_DRAFTS_KEY = "allowBulkValidateAiDrafts"
 
 /**
  * AQU-1083: tell each project's realtime room that its effective settings
@@ -396,11 +406,29 @@ orgSettings.on(
       }
     }
 
+    // [Pen test 2026-10-06] Omission is a change too: the blob is replaced
+    // wholesale, so a Maintainer dropping a stored policy key would reset it to
+    // its default. Below owner, carry omitted keys over from the stored value.
+    if (role < EXPORT_FLOOR_WRITE_MIN_ROLE) {
+      existingForPolicyCheck ??= await loadSettings(c.env, orgId)
+      const stored = existingForPolicyCheck.settings as Record<string, unknown>
+      for (const key of Object.keys(PERMISSION_POLICY_KEYS)) {
+        if (body.settings[key] === undefined && stored[key] !== undefined) {
+          body.settings[key] = stored[key]
+        }
+      }
+    }
+
     // Validated but not gated: a mistyped value would read as "unset" and move
     // every percentage in the org with nothing on screen to explain it.
     const rawCountStructural = body.settings[COUNT_STRUCTURAL_KEY]
     if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
       return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)
+    }
+    // Same reason: a string "true" would read as off and nobody would know why.
+    const rawAllowBulkAiDrafts = body.settings[ALLOW_BULK_AI_DRAFTS_KEY]
+    if (rawAllowBulkAiDrafts !== undefined && typeof rawAllowBulkAiDrafts !== "boolean") {
+      return c.json({ error: `${ALLOW_BULK_AI_DRAFTS_KEY} must be a boolean` }, 400)
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

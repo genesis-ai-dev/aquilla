@@ -60,9 +60,11 @@ async function postEvents(db: AquillaDb, events: unknown[]): Promise<EventsRespo
 
 async function targetHeads(t: TestDb): Promise<TargetHead[]> {
   const r = await t.pg.query<TargetHead>(
-    `SELECT target_lang, event_id, value FROM cells
-     WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'target'
-     ORDER BY target_lang`,
+    `SELECT COALESCE(l.legacy_tag, '') AS target_lang, c.event_id, c.value
+       FROM cells c
+       JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1 AND c.file_id = $2 AND c.cell_id = $3 AND c.side = 'target'
+      ORDER BY target_lang`,
     [PROJECT, FILE, CELL],
   )
   return r.rows

@@ -181,7 +181,7 @@ export async function handleMigrateSourceArtifactCopyRequest(
     fidelity: "content-only",
     warningCounts: {},
   }
-  const statements = buildSourceArtifactPersistenceStatements(env.AQUILLA_PG, {
+  const statements = await buildSourceArtifactPersistenceStatements(env.AQUILLA_PG, {
     projectId,
     fileId,
     artifactId: ids.artifactId,

@@ -12,6 +12,9 @@
  * hole — but drift defeats the point, so update both together.
  */
 
+import { laneScopeTags } from "@/lib/lanes/scope-ids"
+import type { LaneIdentity } from "@/lib/lanes/read-wall"
+
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,
@@ -468,11 +471,19 @@ export function scopedLanesFor(
   roleLevel: number | null | undefined,
   scopes: ReadonlyArray<{ kind: string; value: string }> | null | undefined,
   lanes: readonly string[],
+  /**
+   * AQU-1607: the project's lane rows, which turn the lane ids a scope now
+   * holds into the tags `lanes` is written in. Omitted (a caller with no lane
+   * rows loaded yet) compares the stored value to the tag, which is what a
+   * scope meant before lane ids.
+   */
+  laneRows?: readonly LaneIdentity[] | null,
 ): string[] | null {
   if (canSwitchLanes(roleLevel)) return null
   const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane").map((s) => s.value)
   if (laneScopes.length === 0) return null
-  return lanes.filter((lane) => laneScopes.includes(lane))
+  const allowed = laneScopeTags(laneScopes, laneRows ?? [])
+  return lanes.filter((lane) => allowed.has(lane))
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -483,14 +494,13 @@ export function scopedLanesFor(
 // re-resolves the floor on every language write, so this is an affordance
 // value used to disable controls — never authority.
 //
-// The default is MAINTAINER, i.e. the behaviour before this issue: an org opts
-// in to project-lead language editing by lowering `languageEditMinRole` on
-// Org Settings → Security. Deliberately different from the termbase floor
-// (glossary-view.ts), which defaults to PROJECT_LEAD.
+// The default is PROJECT_LEAD when the org has not stored a floor (AQU-984).
+// A stored `languageEditMinRole`, including an explicit MAINTAINER, is kept.
+// Deliberately the same default as the termbase floor (glossary-view.ts).
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Floor for editing a project's languages when the org hasn't configured one. */
-export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /** Clamp an org-configured language floor to the role ladder, else the default. */
 export function resolveLanguageEditFloor(minRole?: number | null): number {

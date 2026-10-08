@@ -1,4 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
+import { spawnSync } from "./lib/spawn-command"
 import { readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -94,4 +95,7 @@ const result = spawnSync(
     env: { ...process.env, E2E_VITE_MODE: runMode.viteMode },
   },
 )
+if (result.error) {
+  console.error(`[e2e-affected] failed to start the browser suite: ${result.error.message}`)
+}
 process.exit(result.status ?? 1)

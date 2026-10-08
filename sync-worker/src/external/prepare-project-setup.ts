@@ -8,6 +8,17 @@
 // the spec's acceptance criterion: an agent that stages a bad plan must be able
 // to fix ONE thing and re-prepare, not bisect a composite command by trial.
 
+import { resolveProjectTextDirection } from '../../../db/shared/text-direction'
+import { askedLanesFromSpecs, listProjectLanes } from '../../../db/shared/lanes'
+import { laneLanguage } from '../../../src/lib/lanes/lane-display'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import {
+  laneContextFrom,
+  laneContextWithPlanned,
+  laneIdRequiredMessage,
+  resolveTargetLaneId,
+  writableTargetLanes,
+} from './external-lane'
 import { errorResponse } from './errors'
 import { stageAndRespond } from './stage'
 import { parseArtifactToCells } from './import-parse-core'
@@ -274,15 +285,39 @@ export async function prepareProjectSetup(
     if (allSatisfied) skipped(index, 'members', 'every named person already holds the proposed role')
   }
 
+  // ── lanes ────────────────────────────────────────────────────────────────
+  if (cmd.lanes && cmd.lanes.length > 0) {
+    const existing = await listProjectLanes(db, urlProjectId)
+    const asked = askedLanesFromSpecs(cmd.lanes, existing)
+    if (!asked.ok) return fieldError('validation_failed', 'lanes', asked.message)
+    cmd.plannedLanes = asked.lanes
+  }
+
   // ── steps: imports ───────────────────────────────────────────────────────
-  const registeredLanes = new Set(
-    Array.isArray(current.settings.targetLanes)
-      ? current.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
-      : [],
+  const { visible: visibleLaneIds } = await visibleTagsForMember(
+    db,
+    env.LANE_READ_WALL,
+    urlProjectId,
+    Number(cred.userId),
+    role.level,
+  )
+  const laneCtx = laneContextWithPlanned(
+    laneContextFrom(current.lanes ?? [], current.settings, visibleLaneIds),
+    cmd.plannedLanes,
   )
   const planNames = new Set<string>()
   let sourceCellsAdded = 0
   let filesCreated = 0
+  // AQU-1471: what direction will the files this plan creates actually render
+  // in? Resolved against the settings the plan LEAVES BEHIND, not the ones it
+  // found — a plan that writes `targetTextDirection: "rtl"` and imports 49
+  // files in the same approval must report "rtl", not the pre-plan answer.
+  const settingsAfterPlan: Record<string, unknown> = { ...current.settings }
+  for (const op of [...ops.plain, ...ops.policy]) {
+    if (op.value === null) delete settingsAfterPlan[op.key]
+    else settingsAfterPlan[op.key] = op.value
+  }
+  const importDirections: string[] = []
 
   for (const [i, spec] of imports.entries()) {
     const index = steps.length
@@ -321,9 +356,11 @@ export async function prepareProjectSetup(
       )
     }
 
+    const callerLaneId = spec.laneId && spec.laneId.length > 0 ? spec.laneId : undefined
     const parsed = await parseArtifactToCells(env, urlProjectId, spec.artifactId, {
       ...(spec.fileType !== undefined ? { fileType: spec.fileType } : {}),
       ...(spec.resultIndex !== undefined ? { resultIndex: spec.resultIndex } : {}),
+      ...(callerLaneId !== undefined ? { laneId: callerLaneId } : { deferMissingLaneId: true }),
       requireSingleResult: true,
     })
     if (!parsed.ok) return parsed.response
@@ -337,14 +374,24 @@ export async function prepareProjectSetup(
         { cells: cells.length, maxCells: PLAN_IMPORT_MAX_CELLS },
       )
     }
-    const unregistered = findUnregisteredLane(cells, registeredLanes)
-    if (unregistered !== null) {
-      return fieldError(
-        'validation_failed',
-        `imports[${i}].artifactId`,
-        `this artifact carries translations in unregistered lane "${unregistered}"; register it in settings.targetLanes first`,
-      )
+    const bound = bindSetupImportLanes(cells, laneCtx, `imports[${i}].laneId`)
+    if (!bound.ok) {
+      return fieldError('validation_failed', `imports[${i}].laneId`, bound.message)
     }
+
+    const resolvedSource = spec.sourceTextDirection
+      ?? resolveProjectTextDirection(
+        settingsAfterPlan,
+        'source',
+        spec.sourceLanguage ?? languageForSetupSide(cmd, current, 'source'),
+      )
+    const resolvedTarget = spec.targetTextDirection
+      ?? resolveProjectTextDirection(
+        settingsAfterPlan,
+        'target',
+        spec.targetLanguage ?? languageForSetupSide(cmd, current, 'target'),
+      )
+    importDirections.push(`${spec.fileName}: source ${resolvedSource}, target ${resolvedTarget}`)
 
     steps.push({
       index,
@@ -356,6 +403,9 @@ export async function prepareProjectSetup(
       ...(spec.resultIndex !== undefined ? { resultIndex: spec.resultIndex } : {}),
       ...(spec.sourceLanguage !== undefined ? { sourceLanguage: spec.sourceLanguage } : {}),
       ...(spec.targetLanguage !== undefined ? { targetLanguage: spec.targetLanguage } : {}),
+      ...(spec.sourceTextDirection !== undefined ? { sourceTextDirection: spec.sourceTextDirection } : {}),
+      ...(spec.targetTextDirection !== undefined ? { targetTextDirection: spec.targetTextDirection } : {}),
+      ...(bound.laneId !== undefined ? { laneId: bound.laneId } : {}),
       cellCount: cells.length,
       // Minted per import (W1-B): a crash-retry re-posts IDENTICAL ids, so the
       // /events idempotency layer dedupes instead of creating a second file.
@@ -393,6 +443,7 @@ export async function prepareProjectSetup(
     ...(membershipChanges.length > 0 ? { membershipChanges } : {}),
     ...(filesCreated > 0 ? { filesCreated } : {}),
     ...(sourceCellsAdded > 0 ? { sourceCellsAdded } : {}),
+    ...(importDirections.length > 0 ? { importTextDirection: summarizeImportDirections(importDirections) } : {}),
     warnings,
   }
 
@@ -412,17 +463,65 @@ export async function prepareProjectSetup(
   })
 }
 
-/** The first variant lane a parse produced that the project cannot select, or
- *  null. Mirrors preparePlanImport's lane rule — committing data the workspace
- *  cannot show is worse than refusing the plan. */
-function findUnregisteredLane(
-  cells: readonly PlanImportCell[],
-  registeredLanes: ReadonlySet<string>,
+/** Language the plan's lanes (or the lanes already on the project) name for one side.
+ *  Direction falls through this when the import does not name its own language.
+ *  The four retired settings keys are not read here except inside laneLanguage's
+ *  migration fallback, which is the only language resolver. */
+function languageForSetupSide(
+  cmd: ProjectSetupCommand,
+  current: Awaited<ReturnType<typeof loadProjectSettings>>,
+  side: 'source' | 'target',
 ): string | null {
+  const planned = cmd.plannedLanes?.find((lane) => lane.role === side)
+  if (planned && planned.language.trim() !== '') return planned.language
+  const existing = (current.lanes ?? []).find((lane) => lane.role === side && !lane.archivedAt)
+  if (!existing) return null
+  const language = laneLanguage(existing, {
+    settings: current.settings,
+    role: side,
+    legacyTag: existing.legacyTag,
+  })
+  return language.trim() === '' ? null : language
+}
+
+/**
+ * Bind each translation to a target lane id.
+ *
+ * Omitted and `''` (the parse placeholder) are an omission. Inside ProjectSetup
+ * that omission uses the one target lane this plan leaves — an existing
+ * visible non-archived target, or a lane in `plannedLanes`. Zero or several
+ * is the required-id 400. A caller-supplied id must be one of those lanes.
+ * A language tag is not an id.
+ */
+function bindSetupImportLanes(
+  cells: readonly PlanImportCell[],
+  ctx: Parameters<typeof resolveTargetLaneId>[2],
+  where: string,
+): { ok: true; laneId?: string } | { ok: false; message: string } {
+  const targets = writableTargetLanes(ctx)
+  const sole = targets.length === 1 ? targets[0] : null
+  let laneId: string | undefined
   for (const cell of cells) {
     for (const variant of cell.variants ?? []) {
-      if (variant.laneId && !registeredLanes.has(variant.laneId)) return variant.laneId
+      if (variant.laneId === undefined || variant.laneId === '') {
+        if (!sole) return { ok: false, message: laneIdRequiredMessage(where) }
+        variant.laneId = sole.id
+        laneId = sole.id
+        continue
+      }
+      const resolved = resolveTargetLaneId(variant.laneId, where, ctx)
+      if (!resolved.ok) return { ok: false, message: resolved.message }
+      variant.laneId = resolved.lane.id
+      laneId = resolved.lane.id
     }
   }
-  return null
+  return { ok: true, ...(laneId !== undefined ? { laneId } : {}) }
+}
+
+/** One receipt line for the plan's resolved import directions: the shared pair
+ *  when every file agrees (the normal case — a project has one language pair),
+ *  else one clause per file so a mixed plan cannot read as uniform. */
+function summarizeImportDirections(lines: readonly string[]): string {
+  const pairs = new Set(lines.map((line) => line.slice(line.indexOf(': ') + 2)))
+  return pairs.size === 1 ? [...pairs][0] : lines.join('; ')
 }

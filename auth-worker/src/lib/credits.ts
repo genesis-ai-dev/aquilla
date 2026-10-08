@@ -192,6 +192,14 @@ export async function recordCredit(
   units: number,
 ): Promise<void> {
   const today = utcDateKey()
+  // `units` is an INTEGER column (requests, or whole audio-seconds). Postgres
+  // rejects a fractional bind (22P02), and the graceful degrade below would then
+  // drop the whole row — hosted transcription lost its llm-rail usage this way
+  // by passing a 2.067 s WAV duration. Normalise here so no caller can repeat
+  // it: a partial unit consumed is a unit billed (ceil, as creditsFor does), and
+  // a non-finite value keeps the cost row with zero units rather than losing
+  // the $-truth.
+  const wholeUnits = Number.isFinite(units) ? Math.ceil(units) : 0
   try {
     await db
       .prepare(
@@ -203,7 +211,7 @@ export async function recordCredit(
            raw_cost_cents = org_credit_usage_daily.raw_cost_cents + EXCLUDED.raw_cost_cents,
            units          = org_credit_usage_daily.units          + EXCLUDED.units`,
       )
-      .bind(orgId, userId, today, rail, rawCostCents, units)
+      .bind(orgId, userId, today, rail, rawCostCents, wholeUnits)
       .run()
   } catch (err) {
     if (isMissingTableError(err)) return // table not yet migrated — silent degrade

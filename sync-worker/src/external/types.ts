@@ -1,5 +1,6 @@
 // Shared types for the changeset engine.
 
+import type { TextDirection } from '../../../db/shared/text-direction'
 import type { EventsRouteEnv } from '../events/route'
 import type { Command } from './commands'
 import type { PatchSettingsOp } from './commands-patch-settings'
@@ -9,6 +10,8 @@ import type { CellPrecondition } from './preconditions'
  *  (the compiled events are routed back through handleEventsWriteRequest). */
 export type ExternalEnv = EventsRouteEnv & {
   /** AQU-730 read wall. Unset locally and in e2e. */
+  /** Request-local trusted MCP delegation factory, never a network header. */
+  mcpRequest?: (input: RequestInfo | URL, init?: RequestInit) => Request
   LANE_READ_WALL?: string
   /** Base URL for the ask-mode approval deep link. */
   BASE_URL?: string
@@ -20,6 +23,13 @@ export type ExternalEnv = EventsRouteEnv & {
    *  internal drafting endpoint with the SYNC_SECRET_KEY shared secret, the
    *  same server-to-server pattern as monday-notify.ts. */
   AUTH_WORKER_URL?: string
+  /** AQU-1572: PostHog project token for the validation and audio events of
+   *  committed changesets (review-telemetry.ts). Blank or unset = no events. */
+  POSTHOG_KEY?: string
+  /** PostHog ingest host. Defaults to EU (posthog-logs.ts, AQU-854). */
+  POSTHOG_HOST?: string
+  /** Deployment profile ("production", "development", "local"), sent as `app_env`. */
+  ENVIRONMENT?: string
 }
 
 /** A skipped / warned item — nothing is ever silently dropped (§3). */
@@ -201,6 +211,14 @@ export interface ChangesetSummary {
   testimony?: TestimonySummaryEntry[]
   /** InsertCell / DeleteCell / SplitCell: the one structural effect line. */
   structure?: StructureSummaryEntry
+  /** ProjectSetup (AQU-1471): the text direction the files this plan creates
+   *  will actually render in, resolved the way the editor resolves it — the
+   *  import's own override, else the project's `sourceTextDirection` /
+   *  `targetTextDirection` (including one this same plan is writing), else the
+   *  language. A string so the approval page's flat number/string filter renders
+   *  it as its own line: an agent setting up a 49-file Arabic project can read
+   *  "rtl" off the receipt instead of opening a file to find out. */
+  importTextDirection?: string
   warnings: ChangesetWarning[]
 }
 
@@ -239,11 +257,12 @@ export interface StructurePlan {
   /** Rows to re-point, each with its pinned head and minted reorder id. */
   reanchor: { cellId: string; parentEventId: string; eventId: string }[]
   /** Target rows to drop (Delete, and Split with `targets: 'blank'`). */
-  targetDeletes?: { lane: string; eventId: string }[]
+  targetDeletes?: { lane: string; laneId?: string; eventId: string }[]
   /** Split with `targets: 'divide'`: per lane, the pinned target head, the two
    *  halves of the translation, and the minted commit ids for each. */
   targetSplits?: {
     lane: string
+    laneId?: string
     parentEventId: string
     headValue: string
     tailValue: string
@@ -377,6 +396,13 @@ export type ProjectSetupStep =
       resultIndex?: number
       sourceLanguage?: string
       targetLanguage?: string
+      /** AQU-1471: the per-file direction override this import carried, if any —
+       *  pinned so commit stamps what the approver read. Absent means the
+       *  project setting (then the language) decides at read time. */
+      sourceTextDirection?: TextDirection
+      targetTextDirection?: TextDirection
+      /** Lane id for translations this artifact already carries. */
+      laneId?: string
       /** Cell count from the prepare-time parse. Commit re-parses the (immutable)
        *  artifact and fails the step if the count moved — the approver approved
        *  a file of this size. */

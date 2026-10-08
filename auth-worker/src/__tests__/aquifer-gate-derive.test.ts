@@ -115,4 +115,137 @@ describe("isBibleResourcesEnabled — AQU-460 derive-on-read matrix", () => {
     await env.AQUILLA_PG.prepare(`UPDATE files SET deleted_at = 1 WHERE id = 'f1'`).run()
     expect(await isBibleResourcesEnabled(env, p)).toBe(false)
   })
+
+  // Moving the read to a generated column (0150) must not change what counts
+  // as an explicit choice: the gate always read the `->>` text, so a stored
+  // string "false" is still an explicit OFF that beats the scripture default.
+  it("a stored string 'false' is still an explicit OFF", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "usfm")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)`,
+    )
+      .bind(p, JSON.stringify({ bibleResourcesEnabled: "false" }))
+      .run()
+    expect(await isBibleResourcesEnabled(env, p)).toBe(false)
+  })
+})
+
+// AQU-1686: the settings blob runs to several MB, and the project_settings
+// schema comment forbids parsing it inline on a read path. The gate runs on
+// every aquifer route and agent run, so it must answer from the generated
+// column (migration 0150) — while keeping the derive-on-read matrix above.
+describe("isBibleResourcesEnabled — reads the generated column", () => {
+  function recordingEnv(): { env: typeof env; statements: string[] } {
+    const statements: string[] = []
+    const db = env.AQUILLA_PG
+    const recording = {
+      ...env,
+      AQUILLA_PG: {
+        prepare: (sql: string) => {
+          statements.push(sql)
+          return db.prepare(sql)
+        },
+      },
+    }
+    return { env: recording as unknown as typeof env, statements }
+  }
+
+  it("selects bible_resources_enabled and never the settings blob", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "usfm")
+    await seedExplicitSetting(p, false)
+    const recorded = recordingEnv()
+
+    expect(await isBibleResourcesEnabled(recorded.env, p)).toBe(false)
+
+    const settingsReads = recorded.statements.filter((sql) => /\bproject_settings\b/.test(sql))
+    expect(settingsReads).toHaveLength(1)
+    expect(settingsReads[0]).toMatch(/\bbible_resources_enabled\b/)
+    // `\bsettings\b` matches the blob column, not `project_settings`.
+    expect(settingsReads[0]).not.toMatch(/\bsettings\b/)
+    // An explicit value answers on its own: no files query.
+    expect(recorded.statements.some((sql) => /\bfiles\b/.test(sql))).toBe(false)
+  })
+
+  it("still derives from scripture files when the column is NULL", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "usfm")
+    // A settings row without the key: the generated column is NULL.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)`,
+    )
+      .bind(p, JSON.stringify({ targetLanguage: "fr" }))
+      .run()
+    const recorded = recordingEnv()
+
+    expect(await isBibleResourcesEnabled(recorded.env, p)).toBe(true)
+    expect(recorded.statements.some((sql) => /\bfiles\b/.test(sql))).toBe(true)
+  })
+})
+
+/** The live database, except that the 0150 columns do not exist: any statement
+ *  that names them fails the way Postgres does (undefined_column, 42703). */
+function envWithout0150(): { env: typeof env; statements: string[] } {
+  const statements: string[] = []
+  const db = env.AQUILLA_PG
+  const missing = Object.assign(new Error('column "bible_resources_enabled" does not exist'), { code: "42703" })
+  const failing = {
+    bind: () => failing,
+    first: async () => { throw missing },
+    all: async () => { throw missing },
+    run: async () => { throw missing },
+  }
+  const without = {
+    ...env,
+    AQUILLA_PG: {
+      prepare: (sql: string) => {
+        statements.push(sql)
+        return /\bbible_resources_enabled\b|\bbible_enrichments\b/.test(sql) ? failing : db.prepare(sql)
+      },
+    },
+  }
+  return { env: without as unknown as typeof env, statements }
+}
+
+// The QA bot's finding on this PR: with 0150 not applied, the column read
+// failed, the gate took that as "no choice", and a scripture project that had
+// switched Bible data OFF was let through. The gate now reads the blob instead.
+describe("isBibleResourcesEnabled — on a database without migration 0150", () => {
+  it("keeps an explicit OFF off on a scripture project", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "usfm")
+    await seedExplicitSetting(p, false)
+    const without = envWithout0150()
+
+    expect(await isBibleResourcesEnabled(without.env, p)).toBe(false)
+    // It fell back to the blob, as the gate read it before AQU-1686.
+    expect(without.statements.some((sql) => /settings::jsonb ->> 'bibleResourcesEnabled'/.test(sql))).toBe(true)
+  })
+
+  it("keeps an explicit ON on, with no scripture files", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "docx")
+    await seedExplicitSetting(p, true)
+    expect(await isBibleResourcesEnabled(envWithout0150().env, p)).toBe(true)
+  })
+
+  it("still derives from scripture files when nothing is set: on with scripture", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "usfm")
+    expect(await isBibleResourcesEnabled(envWithout0150().env, p)).toBe(true)
+  })
+
+  it("still derives from scripture files when nothing is set: off without", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "docx")
+    expect(await isBibleResourcesEnabled(envWithout0150().env, p)).toBe(false)
+  })
 })

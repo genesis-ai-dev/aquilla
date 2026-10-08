@@ -7,6 +7,9 @@
 //       fileName?          — name for the created file (default: artifact name)
 //       stage?             — false/absent = PREVIEW only; true = parse AND stage
 //       sourceLanguage?    — forwarded onto the PlanImport command
+//       sourceTextDirection? / targetTextDirection?
+//                          — per-file "ltr"/"rtl" override (AQU-1471); omit to
+//                            take the project's direction setting / language
 //       targetLanguage?    — forwarded onto the PlanImport command
 //       excludeFrontMatter? — USFM only: drop book-name/title/TOC/intro front
 //                            matter; defaults to the project's
@@ -36,6 +39,7 @@ import { errorResponse } from './errors'
 import { authArtifact } from './artifacts-route'
 import { handlePrepare } from './prepare'
 import { parseArtifactToCells } from './import-parse-core'
+import { normalizeTextDirection, type TextDirection } from '../../../db/shared/text-direction'
 import { PLAN_IMPORT_MAX_CELLS, type PlanImportCommand } from './commands'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
@@ -61,10 +65,16 @@ interface ParseRequestBody {
   stage?: boolean
   sourceLanguage?: string
   targetLanguage?: string
+  /** AQU-1471: forwarded onto the PlanImport command as a per-file override.
+   *  Absent = the project's direction setting, then the language. */
+  sourceTextDirection?: TextDirection
+  targetTextDirection?: TextDirection
   excludeFrontMatter?: boolean
   resultIndex?: number
   changesetId?: string
   autonomyMode?: string
+  /** Lane id for translations the file already carries. */
+  laneId?: string
 }
 
 /** Hand-validate the optional JSON body (no zod — matches commands.ts). */
@@ -72,7 +82,7 @@ function readBody(raw: unknown): { ok: true; body: ParseRequestBody } | { ok: fa
   if (raw === null || raw === undefined) return { ok: true, body: {} }
   if (typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, message: 'body must be a JSON object' }
   const b = raw as Record<string, unknown>
-  for (const k of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'changesetId', 'autonomyMode'] as const) {
+  for (const k of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'changesetId', 'autonomyMode', 'laneId'] as const) {
     if (b[k] !== undefined && typeof b[k] !== 'string') return { ok: false, message: `${k} must be a string when present` }
   }
   for (const k of ['stage', 'excludeFrontMatter'] as const) {
@@ -80,6 +90,11 @@ function readBody(raw: unknown): { ok: true; body: ParseRequestBody } | { ok: fa
   }
   if (b.resultIndex !== undefined && (typeof b.resultIndex !== 'number' || !Number.isInteger(b.resultIndex) || b.resultIndex < 0)) {
     return { ok: false, message: 'resultIndex must be a non-negative integer when present' }
+  }
+  for (const k of ['sourceTextDirection', 'targetTextDirection'] as const) {
+    if (b[k] !== undefined && normalizeTextDirection(b[k]) === null) {
+      return { ok: false, message: `${k} must be "ltr" or "rtl" when present` }
+    }
   }
   return { ok: true, body: b as ParseRequestBody }
 }
@@ -114,6 +129,7 @@ export async function handleParseArtifact(
     ...(body.fileType !== undefined ? { fileType: body.fileType } : {}),
     ...(body.resultIndex !== undefined ? { resultIndex: body.resultIndex } : {}),
     ...(body.excludeFrontMatter !== undefined ? { excludeFrontMatter: body.excludeFrontMatter } : {}),
+    ...(body.laneId !== undefined ? { laneId: body.laneId } : {}),
     // A preview may summarize a multi-book parse; staging must name the book.
     requireSingleResult: body.stage === true,
   })
@@ -148,6 +164,8 @@ export async function handleParseArtifact(
     fileType,
     ...(body.sourceLanguage !== undefined ? { sourceLanguage: body.sourceLanguage } : {}),
     ...(body.targetLanguage !== undefined ? { targetLanguage: body.targetLanguage } : {}),
+    ...(body.sourceTextDirection !== undefined ? { sourceTextDirection: body.sourceTextDirection } : {}),
+    ...(body.targetTextDirection !== undefined ? { targetTextDirection: body.targetTextDirection } : {}),
     artifactId,
     cells,
   }

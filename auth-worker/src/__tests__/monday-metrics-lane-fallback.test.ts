@@ -74,6 +74,28 @@ describe("Monday metrics — pre-backfill file-counter fallback (AQU-1620)", () 
     expect(file.status_auto).toBe("Not started")
   })
 
+  // AQU-1626: a cue sheet or a caption track is machinery the importer made,
+  // not a deliverable — pushing it to Monday put a row on a board for a partner
+  // to chase, and its 500 untranslated cues dragged the project percentage down
+  // with it. Tombstoned files were already excluded; the hidden roles were not.
+  it("pushes neither the hidden companion files nor a tombstoned one", async () => {
+    await seedProject("proj-hidden")
+    await seedFallbackFile("proj-hidden", { cellCount: 10, filledCount: 10, approvedCount: 10 })
+    await seedTargetLanes("proj-hidden", [""])
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, event_id, cell_count, filled_count, approved_count, role, deleted_at)
+       VALUES ('f-cues', ?, 'RUT · audio cues', 'e1', 500, 0, 0, 'audio-cues', NULL),
+              ('f-track', ?, 'RUT · captions', 'e1', 500, 0, 0, 'timeline-content', NULL),
+              ('f-gone', ?, 'RUT draft', 'e1', 500, 0, 0, NULL, 123)`,
+    ).bind("proj-hidden", "proj-hidden", "proj-hidden").run()
+
+    const summary = await computeProjectMetrics(env.AQUILLA_PG, "proj-hidden")
+
+    expect(summary!.files.map((f) => f.fileId)).toEqual(["f1"])
+    expect(summary!.project.total_count).toBe(10)
+    expect(summary!.project.completion_pct).toBe(100)
+  })
+
   it("keeps the file counters on a single-lane project", async () => {
     await seedProject("proj-2")
     await seedFallbackFile("proj-2", { cellCount: 10, filledCount: 6, approvedCount: 4 })
@@ -138,5 +160,32 @@ describe("Monday metrics — pre-backfill file-counter fallback (AQU-1620)", () 
     expect(file.total_count).toBe(20)
     expect(file.filled_count).toBe(5)
     expect(file.completion_pct).toBe(25)
+  })
+
+  it("leaves an archived lane's progress row out of the sum", async () => {
+    await seedProject("proj-6")
+    await seedFallbackFile("proj-6", { cellCount: 10, filledCount: 14, approvedCount: 12 })
+    await seedTargetLanes("proj-6", ["", "French"])
+    await env.AQUILLA_PG.prepare(
+      "UPDATE lanes SET archived_at = now() WHERE project_id = ? AND legacy_tag = 'French'",
+    )
+      .bind("proj-6")
+      .run()
+    for (const [laneId, filled] of [["lane0", 3], ["lane1", 8]] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO file_section_progress
+           (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, updated_at)
+         VALUES (?, 'f1', 'file', '', ?, 10, ?, 0)`,
+      )
+        .bind("proj-6", laneId, filled)
+        .run()
+    }
+
+    const summary = await computeProjectMetrics(env.AQUILLA_PG, "proj-6")
+
+    expect(summary!.files[0].metrics.total_count).toBe(10)
+    expect(summary!.files[0].metrics.filled_count).toBe(3)
+    expect(summary!.project.total_count).toBe(10)
+    expect(summary!.project.filled_count).toBe(3)
   })
 })

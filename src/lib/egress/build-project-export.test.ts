@@ -10,11 +10,13 @@ import type { AudioAssemblyArgs, AudioAssemblyResult } from "@/lib/export/audio-
 import type { FileAudioAttachmentsResponse } from "@/lib/sync/cell-audio-read-types"
 import { SourceExportError } from "@/lib/sync/source-export"
 import {
+  audioListingKey,
   buildProjectExport,
   egressSlug,
   type BuildProjectExportDeps,
 } from "./build-project-export"
 import type { EgressFileRef, EgressOptions, EgressProjectSelection } from "./types"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const cell = (over: Partial<CellData> = {}): CellData => ({
   id: "c1", fileId: "f1", original: "Hello", translated: "Bonjour", context: "", group: "",
@@ -284,7 +286,12 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
     )
   })
 
-  it("uses orchestrator-prefetched audioListings without refetching, once per file across lanes", async () => {
+  // AQU-1591: keyed per (file, LANE), not per file. Audio used to be
+  // lane-independent — `cell_audio` had no lane column — so one listing served
+  // every lane and this test asserted exactly that. A take belongs to one lane
+  // now, so sharing a listing across lanes would write the same dubs into
+  // `audio/fr/` and `audio/de/` whichever language they were recorded in.
+  it("uses orchestrator-prefetched audioListings without refetching, one per (file, lane)", async () => {
     const fetchAudioAttachments = vi.fn<
       NonNullable<BuildProjectExportDeps["fetchAudioAttachments"]>
     >(async () => ({ cells: {} }))
@@ -297,13 +304,35 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
       sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
       opts({ textMode: "none", audioMode: "separate-clips", lanes: ["fr", "de"] }),
       makeDeps({
-        audioListings: new Map([["f1", listingWith("c1", "a1")]]),
+        audioListings: new Map([
+          [audioListingKey("f1", "fr"), listingWith("c1", "a1")],
+          [audioListingKey("f1", "de"), listingWith("c1", "a1")],
+        ]),
         fetchAudioAttachments,
         assembleAudio,
       }),
     )
     expect(fetchAudioAttachments).not.toHaveBeenCalled()
-    expect(assembleAudio).toHaveBeenCalledTimes(2) // one per lane, same listing
+    expect(assembleAudio).toHaveBeenCalledTimes(2) // one per lane, each its own listing
+  })
+
+  // The other half of the same key: a pre-fetch under the OLD per-file key is a
+  // miss, so the builder fetches that lane's own listing rather than silently
+  // exporting another lane's takes.
+  it("fetches per lane when the pre-fetch did not key by lane", async () => {
+    const fetchAudioAttachments = vi.fn<
+      NonNullable<BuildProjectExportDeps["fetchAudioAttachments"]>
+    >(async () => ({ cells: {} }))
+    await buildProjectExport(
+      sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
+      opts({ textMode: "none", audioMode: "separate-clips", lanes: ["fr", "de"] }),
+      makeDeps({
+        audioListings: new Map([["f1", listingWith("c1", "a1")]]),
+        fetchAudioAttachments,
+        assembleAudio: async () => ({ entries: [], skipped: [] }),
+      }),
+    )
+    expect(fetchAudioAttachments.mock.calls.map((c) => c[3])).toEqual(["fr", "de"])
   })
 
   it("a failed attachments-listing fetch is a per-file transient skip, not a project abort", async () => {
@@ -498,7 +527,7 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
 
     let finished = 0
     while (finished < totalUnits) {
-      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4))
+      await vi.waitFor(() => expect(pendingReleases).toHaveLength(4), { timeout: STALL_WATCHDOG_MS })
       await new Promise((r) => setTimeout(r, 0))
       expect(pendingReleases).toHaveLength(4)
       expect(inFlight).toBe(4)
@@ -554,7 +583,7 @@ describe("buildProjectExport — file×lane fetch concurrency", () => {
       makeDeps({ loadCellFiles }),
     )
 
-    await vi.waitFor(() => expect(releases.size).toBe(4))
+    await vi.waitFor(() => expect(releases.size).toBe(4), { timeout: STALL_WATCHDOG_MS })
     for (const key of ["fr:fast", "de:fast", "fr:slow", "de:slow"]) releases.get(key)!()
 
     const { entries, report } = await pending

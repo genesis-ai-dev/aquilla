@@ -55,7 +55,7 @@ export function MemberAccessRow({
         ) : (
           <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
-        <UsernameWithAvatar username={username} size="xs" nameClassName="text-xs" />
+        <UsernameWithAvatar userId={userId} username={username} size="xs" nameClassName="text-xs" />
       </button>
 
       {open && (

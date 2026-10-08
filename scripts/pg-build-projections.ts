@@ -150,9 +150,17 @@ const COUNTER_UPDATE = `UPDATE files SET
 
 // Build one project's projection into Neon: fold → wipe → bulk insert → counters,
 // all inside one transaction so a failure leaves the prior projection intact.
+async function legacyEmptyLaneId(pg: Pool, projectId: string): Promise<string | null> {
+  const found = await pg.query<{ id: string }>(
+    `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = '' LIMIT 1`,
+    [projectId],
+  )
+  return found.rows[0]?.id ?? null
+}
+
 async function buildProject(pg: Pool, projectId: string, counterTs: number): Promise<number> {
   const events = await fetchEvents(pg, projectId)
-  const rows = foldProjection(events)
+  const rows = foldProjection(events, { legacyEmptyLaneId: await legacyEmptyLaneId(pg, projectId) })
   const client = await pg.connect()
   try {
     await client.query("BEGIN")
@@ -254,13 +262,22 @@ function normalize(table: string, rows: Array<Record<string, unknown>>): string 
 
 async function verifyProject(pg: Pool, projectId: string): Promise<boolean> {
   const events = await fetchEvents(pg, projectId)
+  const emptyLaneId = await legacyEmptyLaneId(pg, projectId)
   console.log(`verify ${projectId}: ${events.length} events`)
   const ref = new PGlite()
   const fold = new PGlite()
   await ref.exec(SCHEMA)
   await fold.exec(SCHEMA)
+  // The SQL projector stamps renderings from this row. The fold is pure, so
+  // it receives the same id. Concepts are not part of the bulk INSERT.
+  if (emptyLaneId) {
+    await ref.query(
+      `INSERT INTO lanes (id, project_id, role, legacy_tag, position) VALUES ($1, $2, 'target', '', 0)`,
+      [emptyLaneId, projectId],
+    )
+  }
   await replayCanonicalInto(ref, events)
-  await insertFoldInto(fold, foldProjection(events))
+  await insertFoldInto(fold, foldProjection(events, { legacyEmptyLaneId: emptyLaneId }))
   let ok = true
   for (const table of ["cells", "cell_validators", "files", "comments", "file_section_progress"]) {
     const a = normalize(table, (await ref.query<Record<string, unknown>>(`SELECT * FROM ${table}`)).rows)

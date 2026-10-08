@@ -147,6 +147,19 @@ function adminEmailSet(adminEmails: string | undefined): Set<string> {
 
 const toId = (v: number | string | null): string | null => (v == null ? null : String(v))
 
+function toAccessGrant(r: GrantRow): AccessGrant {
+  return {
+    userId: String(r.user_id),
+    scopeType: r.scope_type,
+    scopeId: r.scope_id,
+    roleLevel: Number(r.role_level),
+    source: r.source,
+    viaTeamId: toId(r.via_team_id),
+    grantedBy: toId(r.granted_by),
+    grantedAt: r.granted_at == null ? null : String(r.granted_at),
+  }
+}
+
 export interface ProjectGrants {
   grants: AccessGrant[]
   attachedTeamIds: string[]
@@ -187,22 +200,111 @@ export async function loadProjectGrants(
     .bind(userId, projectId, orgId ?? "", projectId)
     .all<GrantRow>()
 
-  const grants = (results ?? []).map((r): AccessGrant => ({
-    userId: String(r.user_id),
-    scopeType: r.scope_type,
-    scopeId: r.scope_id,
-    roleLevel: Number(r.role_level),
-    source: r.source,
-    viaTeamId: toId(r.via_team_id),
-    grantedBy: toId(r.granted_by),
-    grantedAt: r.granted_at == null ? null : String(r.granted_at),
-  }))
   return {
-    grants,
+    grants: (results ?? []).map(toAccessGrant),
     attachedTeamIds,
     orgId,
     archivedAt: project.archived_at == null ? null : String(project.archived_at),
   }
+}
+
+/**
+ * Set-based loadProjectGrants: the same three reads, once for a whole page of
+ * projects instead of once per project. Each entry holds exactly the rows the
+ * single-project loader would have returned for that project, so
+ * resolveFromGrants answers the same either way. Missing projects have no
+ * entry.
+ */
+export async function loadProjectGrantsForProjects(
+  db: AquillaDb,
+  userId: string,
+  projectIds: readonly string[],
+): Promise<Map<string, ProjectGrants>> {
+  const byProject = new Map<string, ProjectGrants>()
+  const ids = [...new Set(projectIds)]
+  if (ids.length === 0) return byProject
+  const marks = ids.map(() => "?").join(", ")
+
+  const projects = await db
+    .prepare(`SELECT id, org_id, archived_at FROM projects WHERE id IN (${marks})`)
+    .bind(...ids)
+    .all<{ id: string; org_id: number | string | null; archived_at: string | Date | null }>()
+  const found = projects.results ?? []
+  if (found.length === 0) return byProject
+
+  const orgIds = [...new Set(found.flatMap((p) => (p.org_id == null ? [] : [String(p.org_id)])))]
+  // No org at all would leave `IN ()`, which is a syntax error rather than "no rows".
+  const orgScope =
+    orgIds.length > 0
+      ? `OR (scope_type = 'org' AND scope_id IN (${orgIds.map(() => "?").join(", ")}))`
+      : ""
+  const [attachedRows, grantRows] = await Promise.all([
+    db
+      .prepare(
+        `SELECT DISTINCT project_id, group_id FROM group_project_grants WHERE project_id IN (${marks})`,
+      )
+      .bind(...ids)
+      .all<{ project_id: string; group_id: number | string }>(),
+    db
+      .prepare(
+        `SELECT user_id, scope_type, scope_id, role_level, source,
+                via_team_id, granted_by, granted_at
+           FROM access_grants
+          WHERE user_id = ?
+            AND ((scope_type = 'project' AND scope_id IN (${marks}))
+                 ${orgScope}
+                 OR (scope_type = 'team' AND scope_id IN (
+                       SELECT group_id::TEXT FROM group_project_grants WHERE project_id IN (${marks}))))`,
+      )
+      .bind(userId, ...ids, ...orgIds, ...ids)
+      .all<GrantRow>(),
+  ])
+
+  const attachedByProject = new Map<string, string[]>()
+  for (const row of attachedRows.results ?? []) {
+    const teams = attachedByProject.get(row.project_id) ?? []
+    teams.push(String(row.group_id))
+    attachedByProject.set(row.project_id, teams)
+  }
+  const grants = (grantRows.results ?? []).map(toAccessGrant)
+  for (const project of found) {
+    const orgId = toId(project.org_id)
+    const attachedTeamIds = attachedByProject.get(project.id) ?? []
+    const attached = new Set(attachedTeamIds)
+    byProject.set(project.id, {
+      grants: grants.filter(
+        (g) =>
+          (g.scopeType === "project" && g.scopeId === project.id) ||
+          (g.scopeType === "org" && g.scopeId === orgId) ||
+          (g.scopeType === "team" && attached.has(g.scopeId)),
+      ),
+      attachedTeamIds,
+      orgId,
+      archivedAt: project.archived_at == null ? null : String(project.archived_at),
+    })
+  }
+  return byProject
+}
+
+function isPlatformAdmin(user: { email?: string | null }, adminEmails: string | undefined): boolean {
+  const email = user.email?.trim().toLowerCase()
+  return !!email && adminEmailSet(adminEmails).has(email)
+}
+
+function resolveLoadedGrants(
+  loaded: ProjectGrants,
+  projectId: string,
+  platformAdmin: boolean,
+  includeArchived: boolean,
+): ResolvedRole | null {
+  return resolveFromGrants(loaded.grants, {
+    projectId,
+    orgId: loaded.orgId,
+    archivedAt: loaded.archivedAt,
+    includeArchived,
+    attachedTeamIds: loaded.attachedTeamIds,
+    isPlatformAdmin: platformAdmin,
+  })
 }
 
 /**
@@ -219,13 +321,30 @@ export async function resolveProjectRoleViaGrants(
 ): Promise<ResolvedRole | null> {
   const loaded = await loadProjectGrants(db, user.id, projectId)
   if (!loaded) return null
-  const email = user.email?.trim().toLowerCase()
-  return resolveFromGrants(loaded.grants, {
-    projectId,
-    orgId: loaded.orgId,
-    archivedAt: loaded.archivedAt,
-    includeArchived,
-    attachedTeamIds: loaded.attachedTeamIds,
-    isPlatformAdmin: !!email && adminEmailSet(adminEmails).has(email),
-  })
+  return resolveLoadedGrants(loaded, projectId, isPlatformAdmin(user, adminEmails), includeArchived)
+}
+
+/**
+ * resolveProjectRoleViaGrants for many projects in three statements. Every
+ * requested id gets an entry; null is "missing, archived, or no grant", as it
+ * is for the single-project call.
+ */
+export async function resolveProjectRolesViaGrants(
+  db: AquillaDb,
+  user: { id: string; email?: string | null },
+  projectIds: readonly string[],
+  adminEmails?: string,
+  includeArchived = false,
+): Promise<Map<string, ResolvedRole | null>> {
+  const loaded = await loadProjectGrantsForProjects(db, user.id, projectIds)
+  const platformAdmin = isPlatformAdmin(user, adminEmails)
+  const roles = new Map<string, ResolvedRole | null>()
+  for (const projectId of new Set(projectIds)) {
+    const grants = loaded.get(projectId)
+    roles.set(
+      projectId,
+      grants ? resolveLoadedGrants(grants, projectId, platformAdmin, includeArchived) : null,
+    )
+  }
+  return roles
 }

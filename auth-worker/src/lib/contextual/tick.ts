@@ -16,6 +16,7 @@
 // the [[ctx:*]] prompt markers.
 
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { modelLanguageForLane } from "../../../../db/shared/lane-language"
 import {
   getRun,
   failRun,
@@ -147,6 +148,23 @@ export interface LlmCallUsage {
   tokensPerSecond?: number
 }
 
+/** One model call's full content, for the step inspector's trace view. Fired
+ *  once per call (after retries settle), success or failure. Unlike
+ *  LlmCallUsage this carries the prompt and the reply, so it must only reach
+ *  stores the project already trusts with that text (lib/contextual/traces.ts). */
+export interface LlmCallTrace extends LlmCallUsage {
+  system: string
+  user: string
+  /** The model's reply; null when the call failed. */
+  output: string | null
+  /** Machine error code ("provider_http_error status=429"); null on success.
+   *  Never the provider's error body — see the note in makeLlmCall. */
+  error: string | null
+  /** OpenRouter generation id, for looking the call up on the provider side. */
+  generationId?: string
+  attempts: number
+}
+
 /** Bounded-concurrency gate. `limit <= 0` disables it entirely (no queueing,
  *  no bookkeeping) so the OpenRouter path behaves exactly as before. */
 function makeGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
@@ -179,6 +197,9 @@ export function makeLlmCall(cfg: {
   models: ContextualModels
   signal?: AbortSignal
   onUsage?: (u: LlmCallUsage) => void
+  /** Same contract as onUsage (never throws, fires once per call), but with
+   *  the prompt and reply attached. */
+  onTrace?: (t: LlmCallTrace) => void
   /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
    *  0/undefined = uncapped (the OpenRouter default). */
   maxInFlight?: number
@@ -216,6 +237,29 @@ export function makeLlmCall(cfg: {
       }
     }
     const failed = { promptTokens: 0, completionTokens: 0, costCents: 0, ok: false }
+    let attempts = 0
+    const trace = (
+      u: Omit<LlmCallUsage, "label" | "spanId" | "tier" | "model" | "latencyMs">,
+      result: { output: string | null; error: string | null; generationId?: string },
+    ): void => {
+      if (!cfg.onTrace) return
+      try {
+        cfg.onTrace({
+          ...u,
+          ...result,
+          label: req.label ?? "",
+          spanId: req.spanId ?? "",
+          tier: req.tier as Tier,
+          model,
+          latencyMs: Date.now() - startedAt,
+          system: req.system,
+          user: req.user,
+          attempts,
+        })
+      } catch {
+        /* tracing must never break the run it is recording */
+      }
+    }
 
     // Capacity rejections are NOT model failures. A busy upstream (OpenRouter
     // rate limit, or a self-hosted server whose slots are all occupied) answers
@@ -255,6 +299,7 @@ export function makeLlmCall(cfg: {
     let body!: UpstreamBody
     for (let attempt = 1; ; attempt++) {
       startedAt = Date.now()
+      attempts = attempt
       let outcome: Attempt
       try {
         // The gate holds a slot only for the round-trip, never across the
@@ -288,8 +333,10 @@ export function makeLlmCall(cfg: {
         })
       } catch {
         report(failed)
+        const code = cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error"
+        trace(failed, { output: null, error: code })
         await hold()
-        throw new Error(cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error")
+        throw new Error(code)
       }
       if (outcome.ok) {
         body = outcome.body
@@ -306,6 +353,7 @@ export function makeLlmCall(cfg: {
         const code = outcome.code === "invalid_response"
           ? "provider_invalid_response"
           : "provider_http_error"
+        trace(failed, { output: null, error: `${code} status=${outcome.status}` })
         await hold()
         throw new Error(`${code} status=${outcome.status}`)
       }
@@ -316,14 +364,17 @@ export function makeLlmCall(cfg: {
     }
     if (admission?.ok) await admission.settle({ id: body.id, usage: body.usage })
     const tps = body.timings?.predicted_per_second
-    report({
+    const usage = {
       promptTokens: body.usage?.prompt_tokens ?? 0,
       completionTokens: body.usage?.completion_tokens ?? 0,
       costCents: (body.usage?.cost ?? 0) * 100,
       ok: body.usage !== undefined,
       ...(typeof tps === "number" ? { tokensPerSecond: tps } : {}),
-    })
-    return body.choices?.[0]?.message?.content ?? ""
+    }
+    report(usage)
+    const output = body.choices?.[0]?.message?.content ?? ""
+    trace(usage, { output, error: null, ...(body.id ? { generationId: body.id } : {}) })
+    return output
   }
 }
 
@@ -630,7 +681,7 @@ async function loadNeighborBriefs(
   db: AquillaDb,
   projectId: string,
   fileId: string,
-  targetLang: string,
+  laneId: string,
   seed: StoredSpanSeed,
   pairs: CellPair[],
 ): Promise<NeighborBrief[]> {
@@ -638,7 +689,7 @@ async function loadNeighborBriefs(
     const approved = await listSceneBriefs(db, projectId, {
       fileId,
       status: "approved",
-      targetLang,
+      laneId,
     })
     const order = new Map(pairs.map((p, i) => [p.cellId, i]))
     const seedStart = order.get(seed.startCellId) ?? 0
@@ -678,8 +729,9 @@ async function loadParagraphStarts(
   try {
     const { results } = await db
       .prepare(
+        // AQU-1610: a source row is `side = 'source'`, whatever lane it is in.
         `SELECT cell_id FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND metadata ->> 'paragraphStart' = 'true'`,
       )
       .bind(projectId, fileId)
@@ -811,7 +863,7 @@ async function consumeSteering(
         brief &&
         brief.projectId === run.projectId &&
         brief.fileId === run.fileId &&
-        brief.targetLang === run.targetLang
+        brief.laneId === run.laneId
       ) {
         await markStale(db, briefId, "steering-refresh")
         const seed = cursor?.seeds.find(
@@ -942,7 +994,7 @@ async function processSpan(
     db,
     run.projectId,
     run.fileId,
-    run.targetLang,
+    run.laneId,
     storedSeed,
     shared.pairs,
   )
@@ -952,6 +1004,12 @@ async function processSpan(
   let report: SpanReport | undefined
   let occupiedAtStage = 0
   let phaseActivity = Promise.resolve()
+  const targetLanguage = await modelLanguageForLane(
+    db,
+    run.projectId,
+    { laneId: run.laneId, tag: run.targetLang },
+    shared.ctx.targetLanguage,
+  )
   try {
     report = await runSpan({
       seed,
@@ -966,12 +1024,11 @@ async function processSpan(
       // the concepts get scoped to this span's source text inside runSpan.
       briefParameters: shared.ctx.briefParameters,
       ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
+      ...(shared.ctx.termMatching ? { termMatching: shared.ctx.termMatching } : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
-      ...(run.targetLang || shared.ctx.targetLanguage
-        ? { targetLanguage: run.targetLang || shared.ctx.targetLanguage }
-        : {}),
+      ...(targetLanguage ? { targetLanguage } : {}),
       // Tag every call this span makes, for cost attribution. A wave runs
       // several spans concurrently, so the span id must ride the request
       // rather than live in shared mutable state.
@@ -999,7 +1056,7 @@ async function processSpan(
           fileId: run.fileId,
           startCellId: brief.startCellId,
           endCellId: brief.endCellId,
-          targetLang: run.targetLang,
+          laneId: run.laneId,
           construal: brief.l2Construal,
           ambiguityRegister: brief.ambiguityRegister,
           l1Summary: brief.l1Summary,
@@ -1024,7 +1081,8 @@ async function processSpan(
         })
         return proposed.brief.id
       },
-      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts),
+      lint: async (draft) =>
+        lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts, shared.ctx.termMatching),
       stage: async (draft) => {
         // Anti-clobber, checked as late as possible: a human may have typed
         // into one of these cells while the span was running. `pairs` is a
@@ -1035,7 +1093,7 @@ async function processSpan(
           projectId: run.projectId,
           fileId: run.fileId,
           cellIds: draft.cells.map((c) => c.cellId),
-          targetLang: run.targetLang,
+          laneId: run.laneId,
         })
         occupiedAtStage += occupied.size
         const fresh = draft.cells.filter((c) => !occupied.has(c.cellId))
@@ -1256,12 +1314,12 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   // Scope + cursor. Pairs are re-read every wave (cells move under the run);
   // seeds are pinned in the cursor so segmentation never shifts mid-run.
   const [pairs, excludedCellIds] = await Promise.all([
-    selectCellPairs(db, run.projectId, { fileId: run.fileId, targetLang: run.targetLang }),
+    selectCellPairs(db, run.projectId, { fileId: run.fileId, laneId: run.laneId }),
     findProposedCellsFromOtherRuns(db, {
       projectId: run.projectId,
       fileId: run.fileId,
       runId: run.id,
-      targetLang: run.targetLang,
+      laneId: run.laneId,
     }),
   ])
   let cursor = run.spanCursor
@@ -1340,7 +1398,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
 
   // Per-run context is loaded ONCE and shared by every span in the wave
   // (it was re-fetched per span before, which was pure overhead).
-  const ctx = await loadProjectContext(db, run.projectId)
+  const ctx = await loadProjectContext(db, run.projectId, {
+    laneId: run.laneId,
+    targetLang: run.targetLang,
+  })
   const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
     ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
     : []

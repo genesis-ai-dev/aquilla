@@ -9,7 +9,7 @@
  * affordance reuses the existing CommentsDrawer via onOpenComments.
  */
 
-import { X, AlertTriangle, AlertCircle, BookA, MessageSquare, RefreshCw } from "lucide-react"
+import { X, AlertTriangle, AlertCircle, BookA, CaseSensitive, MessageSquare, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -19,6 +19,7 @@ import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { formatTime, formatCount } from "@/lib/i18n/format"
 import type { CellData } from "@/hooks/useCells"
 import type {
+  CapitalizationFinding,
   CheckRunResult,
   RuleFindingGroup,
   TermConsistencyFinding,
@@ -235,6 +236,55 @@ function TermFindingCard({
   )
 }
 
+/**
+ * AQU-1734: one capitalization finding. A mixed-case card is titled by the
+ * offending word form (raw cell content, never translated); the heading card
+ * carries a localized title because it has no single form to name.
+ */
+function CapitalizationFindingCard({
+  finding,
+  cellMap,
+  onNavigateToCell,
+  onOpenComments,
+}: {
+  finding: CapitalizationFinding
+  cellMap: Map<string, CellData>
+  onNavigateToCell: (cellId: string) => void
+  onOpenComments?: (cellId: string) => void
+}) {
+  const t = useT()
+  return (
+    <div className="min-w-0 rounded-md border p-2">
+      <div className="mb-1 flex min-w-0 items-center gap-1.5">
+        <CaseSensitive className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <span className="min-w-0 truncate text-xs font-semibold">
+          {finding.code === "mixed-case" ? finding.form : t("rules.checkDrawer.headingStartsLowercase")}
+        </span>
+        <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
+          {t("common.cellCount", { count: finding.cells.length })}
+        </span>
+      </div>
+      {finding.code === "mixed-case" && (
+        <p className="mb-1.5 break-words text-xs text-muted-foreground">
+          {t("rules.checkDrawer.mixedCaseHeadline", { count: finding.cells.length })}
+        </p>
+      )}
+      <ul className="min-w-0 space-y-1">
+        {finding.cells.map((fc) => (
+          <CellRefButton
+            key={fc.cellId}
+            cellId={fc.cellId}
+            label={fc.cellLabel ?? findingCellLabel(cellMap.get(fc.cellId), fc.cellId)}
+            cell={cellMap.get(fc.cellId)}
+            onNavigateToCell={onNavigateToCell}
+            onOpenComments={onOpenComments}
+          />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function CheckFindingsDrawer({
   result,
   running,
@@ -252,6 +302,9 @@ export function CheckFindingsDrawer({
   const cleanTermCount = (result?.termFindings.length ?? 0) - flaggedTermFindings.length
   const ruleIssueCount = result?.ruleFindings.reduce((n, g) => n + g.infractions.length, 0) ?? 0
   const termIssueCount = flaggedTermFindings.reduce((n, f) => n + f.flaggedCells.length, 0)
+  const capitalizationFindings = result?.capitalizationFindings ?? []
+  const capitalizationIssueCount = capitalizationFindings.reduce((n, f) => n + f.cells.length, 0)
+  const caseExceptions = result?.caseExceptions ?? []
 
   return (
     <RightSidebarPanel storageKey="check" defaultWidth={320} resizeLabel="Resize file check panel">
@@ -304,8 +357,17 @@ export function CheckFindingsDrawer({
           </div>
 
           {result.totalFindingCount === 0 ? (
-            <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-muted-foreground">
-              {t("rules.checkDrawer.checkedNoIssues", { summary: checkScopeSummary(result, t, locale) })}
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center text-sm text-muted-foreground">
+              <p>{t("rules.checkDrawer.checkedNoIssues", { summary: checkScopeSummary(result, t, locale) })}</p>
+              {/* AQU-1734: a clean result still accounts for what the
+                  capitalization scan excepted — silence is never unexplained. */}
+              {caseExceptions.length > 0 && (
+                <p className="break-words text-[10px]">
+                  {t("rules.checkDrawer.caseExceptionsLearned", {
+                    forms: caseExceptions.map((e) => e.form).join(", "),
+                  })}
+                </p>
+              )}
             </div>
           ) : (
             <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-auto p-3">
@@ -352,6 +414,36 @@ export function CheckFindingsDrawer({
                 {cleanTermCount > 0 && (
                   <p className="mt-1.5 text-[10px] text-muted-foreground">
                     {t("rules.checkDrawer.otherTermsClean", { count: cleanTermCount })}
+                  </p>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <p className="mb-1 text-xs text-muted-foreground">
+                  {t("rules.checkDrawer.capitalization", { count: capitalizationIssueCount })}
+                </p>
+                {capitalizationFindings.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("common.none")}</p>
+                ) : (
+                  <div className="min-w-0 space-y-2">
+                    {capitalizationFindings.map((finding) => (
+                      <CapitalizationFindingCard
+                        key={`${finding.code}:${finding.form}`}
+                        finding={finding}
+                        cellMap={cellMap}
+                        onNavigateToCell={onNavigateToCell}
+                        onOpenComments={onOpenComments}
+                      />
+                    ))}
+                  </div>
+                )}
+                {/* AQU-1734: what the scan learned to allow, so a reviewer can
+                    see the exceptions instead of trusting a silent pass. */}
+                {caseExceptions.length > 0 && (
+                  <p className="mt-1.5 break-words text-[10px] text-muted-foreground">
+                    {t("rules.checkDrawer.caseExceptionsLearned", {
+                      forms: caseExceptions.map((e) => e.form).join(", "),
+                    })}
                   </p>
                 )}
               </div>

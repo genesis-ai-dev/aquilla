@@ -202,6 +202,15 @@ describe("mapFilePairToEvents", () => {
       .toMatchObject({
         idmlMigration: { readiness: "unsupported-legacy-html" },
       })
+    // AQU-1780: the file's diagnostics are counted per cell, never copied.
+    expect(invalidAssessment.diagnostics.length).toBeGreaterThan(0)
+    const invalidSource = invalidEvents.find((event) => event.kind === "source.cell.create")!
+    expect((invalidSource.payload.metadata as { idmlMigration?: unknown }).idmlMigration)
+      .toEqual({
+        version: 2,
+        readiness: "unsupported-legacy-html",
+        diagnosticCount: invalidAssessment.diagnostics.length,
+      })
     expect(invalidEvents.find((event) => event.kind === "target.cell.commit")!.payload.valueHtml)
       .toContain('data-segment-index="9"')
   })

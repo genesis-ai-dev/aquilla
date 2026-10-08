@@ -44,11 +44,13 @@
 // to another project gets `scope_denied` 403.
 
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "../events/lane-id-sql"
+import { applyRenderingLaneScope, renderingLaneScope } from "../events/rendering-lane-scope"
 import { handleHealthRollupRequest } from "../events/health-rollup-route"
 import { handleProgressReadRequest, type FileProgressResponse } from "../events/progress-read-route"
 import { handleConceptsReadRequest, type ConceptRowOut } from "../events/concepts-read-route"
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { externalError } from "./errors"
+import { resolveExternalLaneParam } from "./external-lane"
 import { paginate, parsePageParams } from "./pagination"
 import { mintInternalToken } from "./read-routes"
 import {
@@ -156,8 +158,10 @@ export interface ExternalFileQuality {
   coverage: ExternalFileCoverage
   /** Endorsements a cell needs to count as validated in this project. */
   validationCount: number
-  /** `file-counter-fallback` means the progress projection has no rows for
-   *  this file yet and the `files` counters answered instead. */
+  /** `file-counter-fallback` means this lane has no progress rows yet.
+   *  The total is `files.cell_count`. Filled and validated come from the
+   *  `files` counters when the project has at most one target lane, and are
+   *  0 when it has more, because those counters sum every target lane. */
   coverageSource: FileProgressResponse["source"]
 }
 
@@ -189,7 +193,18 @@ async function handleQuality(
 
   const url = new URL(request.url)
   const fileIdFilter = url.searchParams.get("fileId")
-  const lane = url.searchParams.get("lane") ?? ""
+  const resolvedLane = await resolveExternalLaneParam(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(ctx.credential.userId),
+    ctx.role,
+    url.searchParams.get("lane"),
+    "lane",
+  )
+  if (!resolvedLane.ok) return externalError("validation_failed", resolvedLane.message, 400)
+  const laneId = resolvedLane.lane.id
+  const lane = resolvedLane.lane.legacyTag ?? ""
   const { limit, offset } = parsePageParams(url)
 
   const scope = await resolveScopeFiles(env, ctx, projectId, fileIdFilter)
@@ -197,9 +212,12 @@ async function handleQuality(
 
   // Health: one delegated call covers the whole scope (the rollup route
   // iterates the project's files itself, or one file with ?fileId=).
+  // Always pass the tag, including `''`. A missing health param means every
+  // granted tag when the read wall is on. Progress is the opposite: a missing
+  // param already means the blank bridge, so that query stays omitted below.
   const healthSearch = new URLSearchParams()
   if (fileIdFilter !== null) healthSearch.set("fileId", fileIdFilter)
-  if (lane) healthSearch.set("lane", lane)
+  healthSearch.set("lane", lane)
   const healthRes = await handleHealthRollupRequest(
     await internalRequest(
       env,
@@ -282,7 +300,7 @@ async function handleQuality(
   const page = paginate(perFile, offset, limit)
   return Response.json({
     projectId,
-    lane,
+    laneId,
     /** Same value the project health ring shows: cell-weighted mean over files. */
     projectHealth: health.projectHealth,
     /** Translated cells the health mean was taken over. */
@@ -423,7 +441,18 @@ async function handleTermConsistency(
 
   const url = new URL(request.url)
   const fileIdFilter = url.searchParams.get("fileId")
-  const lane = url.searchParams.get("lane") ?? ""
+  const resolvedLane = await resolveExternalLaneParam(
+    db,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(ctx.credential.userId),
+    ctx.role,
+    url.searchParams.get("lane"),
+    "lane",
+  )
+  if (!resolvedLane.ok) return externalError("validation_failed", resolvedLane.message, 400)
+  const laneId = resolvedLane.lane.id
+  const lane = resolvedLane.lane.legacyTag ?? ""
   const onlyDrift = url.searchParams.get("onlyDrift") === "1"
   const { limit, offset } = parsePageParams(url)
 
@@ -440,7 +469,12 @@ async function handleTermConsistency(
     lane,
   )
 
-  const findings: ExternalTermConsistencyFinding[] = scanTermConsistency(cells, concepts.concepts)
+  const renderingScope = await renderingLaneScope(db, projectId, lane)
+  const laneConcepts = concepts.concepts.map((concept) => ({
+    ...concept,
+    renderings: applyRenderingLaneScope(concept.renderings, renderingScope),
+  }))
+  const findings: ExternalTermConsistencyFinding[] = scanTermConsistency(cells, laneConcepts)
     .map((f) => ({ ...f, consistencyPercent: percent(f.consistentCount, f.totalOccurrences) }))
     .filter((f) => !onlyDrift || f.flaggedCells.length > 0)
 
@@ -449,7 +483,7 @@ async function handleTermConsistency(
   return Response.json({
     projectId,
     fileId: fileIdFilter,
-    lane,
+    laneId,
     /** Source cells the scan ran over (capped — see `truncated`). */
     scannedCells: cells.length,
     truncated: cells.length >= MAX_SCAN_CELLS,

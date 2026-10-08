@@ -23,7 +23,7 @@ interface SimilarRow {
   fileId: string
   sourceValue: string
   targetValue: string
-  targetLang: string
+  laneId: string
   score: number
 }
 
@@ -94,12 +94,15 @@ async function seedProject(testDb: TestDb) {
   await testDb.pg.query(
     `INSERT INTO files (id, project_id, name, event_id) VALUES ('file-x', 'proj-a', 'Genesis', 'evt-file-1')`,
   )
+  await testDb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+  )
   for (const c of CELLS) {
     for (const side of ["source", "target"] as const) {
       const value = side === "source" ? c.source : c.target
       await testDb.pg.query(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, value, target_lang, event_id, last_edit_at, word_count)
-         VALUES ('proj-a', $1, $2, $3, $4, $5, $6, 1000, $7)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count, lane_id) VALUES ('proj-a', $1, $2, $3, $4, $6, 1000, $7, (SELECT CASE WHEN $3 = 'source' THEN aquilla_test_resolve_source_lane('proj-a') ELSE aquilla_test_resolve_target_lane('proj-a', $5) END))`,
         [
           c.fileId ?? "file-x",
           c.cellId,
@@ -166,7 +169,7 @@ describe("external similarity search (AQU-1232)", () => {
     expect(near.fileId).toBe("file-x")
     expect(near.sourceValue).toBe("In the beginning God created the earth")
     expect(near.targetValue).toBe("Au commencement Dieu créa la terre")
-    expect(near.targetLang).toBe("")
+    expect(near.laneId).toBe("deflane1")
     expect(near.score).toBeGreaterThan(0)
     expect(near.score).toBeLessThanOrEqual(1)
   })
@@ -192,9 +195,9 @@ describe("external similarity search (AQU-1232)", () => {
       expect(Object.keys(row).sort()).toEqual([
         "cellId",
         "fileId",
+        "laneId",
         "score",
         "sourceValue",
-        "targetLang",
         "targetValue",
       ])
     }

@@ -23,10 +23,17 @@ import { StaffLanePopover } from "./StaffLanePopover"
 
 // The popover links out to the project's invite page (AQU-607), so every
 // render needs a Router in context.
-function renderPopover(orgId: number | null = 1) {
+function renderPopover(orgId: number | null = 1, laneId?: string) {
   return render(
     <MemoryRouter>
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={orgId} />
+      <StaffLanePopover
+        projectId="proj-1"
+        lane="es"
+        laneId={laneId}
+        laneLabel="Spanish"
+        projectName="Mark"
+        orgId={orgId}
+      />
     </MemoryRouter>,
   )
 }
@@ -180,7 +187,7 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
     expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300)
@@ -191,7 +198,9 @@ describe("StaffLanePopover", () => {
     ])
 
     await waitFor(() =>
-      expect(screen.getByText(/maria is now reviewer on spanish/i)).toBeInTheDocument(),
+      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
+        /maria will join as a reviewer on mark, spanish lane only/i,
+      ),
     )
   })
 
@@ -204,7 +213,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
@@ -216,6 +225,28 @@ describe("StaffLanePopover", () => {
       ]),
     )
     expect(scopes).toHaveLength(3)
+  })
+
+  // AQU-1607: a lane scope is a lane id, so staffing a lane whose id the row
+  // knows writes that id — the lane's language cannot say which of two
+  // same-language lanes was staffed.
+  it("writes the lane's id when the caller passes one, replacing a tag row for it", async () => {
+    mockFetchMemberScopes.mockResolvedValue([
+      { kind: "lane", value: "es" },
+      { kind: "lane", value: "fr" },
+    ])
+
+    renderPopover(1, "ln-es")
+    openPopover()
+    pickMaria()
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+
+    await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+    const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
+    expect(scopes).toEqual([
+      { kind: "lane", value: "fr" },
+      { kind: "lane", value: "ln-es" },
+    ])
   })
 
   it("skips the membership POST when the person already holds >= the picked role", async () => {
@@ -231,7 +262,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     expect(mockAddProjectMember).not.toHaveBeenCalled()
@@ -242,13 +273,17 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    fireEvent.click(screen.getByRole("button", { name: /add as lead \(unscoped\)/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add as lead — every lane/i }))
 
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
     expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 500)
     expect(mockPutMemberScopes).not.toHaveBeenCalled()
 
-    await waitFor(() => expect(screen.getByText(/maria is now a lead/i)).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
+        /maria will join as a project lead on mark — every lane/i,
+      ),
+    )
   })
 
   it("handles the server's 'leads unscopable' 400 gracefully as a success outcome", async () => {
@@ -257,7 +292,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/already leads this project/i)).toBeInTheDocument(),
@@ -389,9 +424,9 @@ describe("StaffLanePopover", () => {
       // Picking a name advances to the role step instead of navigating away.
       pickMaria()
       expect(onRowClick).not.toHaveBeenCalled()
-      expect(screen.getByRole("button", { name: /add to spanish/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /spanish lane only/i })).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+      fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
       await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
       expect(onRowClick).not.toHaveBeenCalled()
     })

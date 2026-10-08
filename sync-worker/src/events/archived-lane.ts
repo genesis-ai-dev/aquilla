@@ -8,6 +8,7 @@ import {
   archivedTagsFromSettings,
   type ArchiveLaneRow,
 } from '../../../src/lib/lanes/archived-lane'
+import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import type { RequestCache } from './request-cache'
 
 const rowsByCache = new WeakMap<RequestCache, Map<string, Promise<ArchiveLaneRow[]>>>()
@@ -18,7 +19,9 @@ async function loadRows(db: AquillaDb, projectId: string): Promise<ArchiveLaneRo
     .filter((lane) => lane.role === 'target')
     .map((lane) => ({
       id: lane.id,
-      name: lane.name,
+      // AQU-1592: the refusal message names the lane the way the screen does —
+      // the name when one was set, else the language.
+      name: laneDisplayName(lane),
       legacyTag: lane.legacyTag,
       archivedAt: lane.archivedAt,
     }))
@@ -39,10 +42,28 @@ function rowsFor(db: AquillaDb, projectId: string, cache: RequestCache): Promise
 }
 
 /**
+ * AQU-1612: the project's target lane rows, memoized per request. The lane
+ * resolver needs them to turn an event's `laneId` into the lane's frozen tag;
+ * sharing the archived-lane list means an id-bearing batch pays for the lane
+ * list once, not once per event.
+ */
+export function targetLaneRowsFor(
+  db: AquillaDb,
+  projectId: string,
+  cache: RequestCache,
+): Promise<ArchiveLaneRow[]> {
+  return rowsFor(db, projectId, cache)
+}
+
+/**
  * AQU-1532: true when the project has a target lane row whose legacy tag is
- * exactly `tag` — the same match the projection's lane_id lookup uses. The
- * default lane (`''`) always counts as present. Shares the per-request lane
- * list with the archived-lane check.
+ * exactly `tag` — the same match the projection's lane_id lookup uses.
+ * `''` is not refused as missing. A bare project has no target lane yet, and
+ * the cell-write batch creates that bridge before resolving lane_id
+ * (AQU-1594). A project that already has a target lane does not: the write
+ * reaches the cells insert and fails there (AQU-1615), rather than as a 422.
+ * A named tag still has to exist or the write is a 422.
+ * Shares the per-request lane list with the archived-lane check.
  */
 export async function targetLaneRowExists(
   db: AquillaDb,

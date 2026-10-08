@@ -98,22 +98,23 @@ beforeEach(async () => {
 })
 
 describe('PatchSettings — per-key floors', () => {
-  it('a non-terminology key requires MAINTAINER (600): project_lead denied, maintainer allowed', async () => {
+  it('a non-language key requires MAINTAINER (600): project_lead denied, maintainer allowed', async () => {
     const env = makeEnv(tdb.db)
     const lead = await memberToken(tdb, 500)
     const { res: deniedRes, body: denied } = await prepare(env, lead.token, patchCmd([
-      { key: 'targetLanes', value: ['es', 'pt'] },
+      { key: 'translationBrief', value: { l1Summary: 'x' } },
     ]))
     expect(deniedRes.status).toBe(403)
     expect(denied.error.code).toBe('permission_denied')
+    expect(denied.error.message).toMatch(/maintainer/)
 
     const maintainer = await memberToken(tdb, 600)
     const { res, body } = await prepare(env, maintainer.token, patchCmd([
-      { key: 'targetLanes', value: ['es', 'pt'] },
+      { key: 'translationBrief', value: { l1Summary: 'x' } },
     ]))
     expect(res.status).toBe(200)
     expect(body.summary.command).toBe('PatchSettings')
-    expect(body.summary.settingsChanges.targetLanes).toContain('es')
+    expect(body.summary.settingsChanges.translationBrief).toContain('l1Summary')
 
     const { res: commitRes, body: committed } = await commit(env, maintainer.token, body.changeset.id)
     expect(commitRes.status).toBe(200)
@@ -123,7 +124,7 @@ describe('PatchSettings — per-key floors', () => {
     // Merge semantics: patched key replaced, untouched keys survive.
     const rows = await tdb.rows<{ settings: string; version: number }>('project_settings')
     const stored = JSON.parse(rows[0].settings)
-    expect(stored.targetLanes).toEqual(['es', 'pt'])
+    expect(stored.translationBrief).toEqual({ l1Summary: 'x' })
     expect(stored.targetLanguage).toBe('fr')
     expect(stored.validationCount).toBe(3)
     expect(rows[0].version).toBe(2)
@@ -161,33 +162,33 @@ describe('PatchSettings — per-key floors', () => {
     expect(commitRes.status).toBe(200)
   })
 
-  it('language keys default to MAINTAINER (600), and an org languageEditMinRole override lowers them (AQU-1086)', async () => {
+  it('rejects the retired language keys before any lane row is created, even when the org would have lowered the floor (AQU-1615)', async () => {
     const env = makeEnv(tdb.db)
-    // Default: no org setting → a project lead is denied, same as any other key.
-    const leadBefore = await memberToken(tdb, 500)
-    const { res: deniedRes, body: denied } = await prepare(env, leadBefore.token, patchCmd([
-      { key: 'targetLanguage', value: 'de' },
-    ]))
-    expect(deniedRes.status).toBe(403)
-    expect(denied.error.code).toBe('permission_denied')
-
-    // Org opts in → the same lead-scoped PAT can patch a language key, at
-    // prepare AND at commit.
     await tdb.pg.query(
       `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
       [ORG_ID, JSON.stringify({ languageEditMinRole: 500 })],
     )
-    const lead = await memberToken(tdb, 500)
-    const { res, body } = await prepare(env, lead.token, patchCmd([
+    const maintainer = await memberToken(tdb, 600)
+    const before = await tdb.pg.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM lanes WHERE project_id = $1`,
+      [PROJECT],
+    )
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
       { key: 'targetLanguage', value: 'de' },
       { key: 'targetLanes', value: ['es'] },
     ]))
-    expect(res.status).toBe(200)
-    const { res: commitRes } = await commit(env, lead.token, body.changeset.id)
-    expect(commitRes.status).toBe(200)
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(body.error.message).toContain('are not settings')
+    expect(body.error.message).toContain('lanes')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+    const after = await tdb.pg.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM lanes WHERE project_id = $1`,
+      [PROJECT],
+    )
+    expect(after.rows[0].n).toBe(before.rows[0].n)
     const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
-    expect(stored.targetLanguage).toBe('de')
-    expect(stored.targetLanes).toEqual(['es'])
+    expect(stored.targetLanguage).toBe('fr')
   })
 
   it('a lowered languageEditMinRole does not widen any other key (AQU-1086)', async () => {
@@ -199,7 +200,7 @@ describe('PatchSettings — per-key floors', () => {
     const lead = await memberToken(tdb, 500)
     // Mixed batch takes the max floor — the non-language key still needs 600.
     const { res: mixedRes } = await prepare(env, lead.token, patchCmd([
-      { key: 'targetLanguage', value: 'de' },
+      { key: 'systemPrompt', value: 'x' },
       { key: 'translationBrief', value: { l1Summary: 'x' } },
     ]))
     expect(mixedRes.status).toBe(403)
@@ -246,10 +247,10 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
   it('a wrong value type for a valid key is rejected, naming the expected type', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)
-    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'targetLanes', value: 'es' }]))
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'validationCount', value: 'es' }]))
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
-    expect(JSON.stringify(body.error.details)).toContain('string[]')
+    expect(JSON.stringify(body.error.details)).toContain('number')
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
@@ -275,6 +276,38 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(JSON.parse(rows[0].settings).systemPrompt).toBeNull()
   })
 
+  // AQU-1471: the key an RTL project needs. It used to be `unknown settings key`,
+  // which left a 49-file Arabic project with no answer but 49 manual clicks.
+  it('accepts targetTextDirection: "rtl" and stores it', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
+      { key: 'targetTextDirection', value: 'rtl' },
+      { key: 'sourceTextDirection', value: 'auto' },
+    ]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.targetTextDirection).toBe('rtl')
+    expect(stored.sourceTextDirection).toBe('auto')
+  })
+
+  it('rejects a direction value outside "ltr" | "rtl" | "auto", naming the key', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
+      { key: 'targetTextDirection', value: 'right-to-left' },
+    ]))
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    // Caught at shape validation from the key registry, so the offender is
+    // named in the per-command issue list rather than details.field.
+    expect(JSON.stringify(body.error.details)).toContain('targetTextDirection')
+    expect(JSON.stringify(body.error.details)).toContain('rtl')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('negative control: a valid single-key patch still stages, commits, and leaves other keys alone', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)
@@ -289,6 +322,39 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(stored.systemPrompt).toBe('translate plainly')
     expect(stored.targetLanguage).toBe('fr')
     expect(stored.validationCount).toBe(3)
+  })
+
+  // AQU-1686: agents switch Bible data enrichments through this path. A
+  // misspelled enrichment id stored here would be ignored by every reader,
+  // so the agent would believe it had turned something off when it had not.
+  it('bibleEnrichments rejects an unknown enrichment id or a non-boolean value at prepare', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    for (const value of [{ voice: false }, { voices: 'off' }]) {
+      const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'bibleEnrichments', value }]))
+      expect(res.status).toBe(400)
+      expect(body.error.code).toBe('validation_failed')
+      expect(JSON.stringify(body.error.details)).toContain('bibleEnrichments')
+    }
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('bibleEnrichments stores a valid map at the maintainer floor and refuses a project lead', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const value = { places: false, autopilot: true }
+    const { res: deniedRes, body: denied } = await prepare(env, lead.token, patchCmd([{ key: 'bibleEnrichments', value }]))
+    expect(deniedRes.status).toBe(403)
+    expect(denied.error.code).toBe('permission_denied')
+
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'bibleEnrichments', value }]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.bibleEnrichments).toEqual(value)
+    expect(stored.targetLanguage).toBe('fr')
   })
 })
 
@@ -318,6 +384,11 @@ const POLICY_DIRECTION_CASES: {
   { key: 'harmonize_min_role', tighten: { from: 'project_lead', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'project_lead' } },
   { key: 'cellEditingFloor', tighten: { from: 'contributor', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'contributor' } },
   { key: 'validationNamedUsers', tighten: { from: ['a', 'b'], to: ['a'] }, loosen: { from: ['a'], to: ['a', 'b'] } },
+  // AQU-1571: the audio twins, which an agent could loosen until they joined
+  // POLICY_SETTINGS_KEYS.
+  { key: 'allowSelfValidationAudio', tighten: { from: undefined, to: false }, loosen: { from: false, to: true } },
+  { key: 'validationRoleFloorAudio', tighten: { from: 'reviewer', to: 'project_lead' }, loosen: { from: 'maintainer', to: null } },
+  { key: 'validationNamedUsersAudio', tighten: { from: undefined, to: ['a'] }, loosen: { from: ['a'], to: [] } },
 ]
 
 describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §1)', () => {
@@ -434,7 +505,7 @@ describe('UpdateProjectSettings — policy guard re-check at commit (AQU-926)', 
       commands: [{
         kind: 'UpdateProjectSettings',
         projectId: PROJECT,
-        settings: { targetLanguage: 'de', terminology: { concepts: [] }, validationCount: 3 },
+        settings: { terminology: { concepts: [] }, validationCount: 3 },
         ifMatchVersion: 1,
       }],
     }), env))!
@@ -557,7 +628,7 @@ describe('PatchSettings — version guard', () => {
     const maintainer = await memberToken(tdb, 600)
     const { res, body } = await prepare(env, maintainer.token, [
       ...patchCmd([{ key: 'systemPrompt', value: 'b' }]),
-      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
+      { kind: 'SetTranslation', fileId: 'f', cellId: 'c', laneId: 'deflane1', value: 'v' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

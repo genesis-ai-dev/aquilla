@@ -57,8 +57,14 @@ interface Props {
   timelineDurationSec?: number
   /** The line the virtual playhead is on. Null on every other arrangement. */
   virtualSoundingCellId?: string | null
+  /** AQU-1704: the file is in Free timing, so the queue plays it (see `virtualOwnsFile`). */
+  freeTiming?: boolean
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
+  /** AQU-1591: the active target-language lane. The bar plays this lane's takes
+   *  (plus the shared programme audio), so a line voiced only in another
+   *  language reads as unvoiced here, which is what it is. */
+  lane?: string
 }
 
 function fmtTime(s: number): string {
@@ -70,7 +76,8 @@ function fmtTime(s: number): string {
 
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
-  videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, below,
+  videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, freeTiming = false, below,
+  lane,
 }: Props) {
   const t = useT()
 
@@ -80,7 +87,7 @@ export function VoicePlaybackBar({
   // bus, so generating/recording a take flips "No voiced lines yet" at once
   // instead of staying stale until reload.
   const fileId = rawCells[0]?.fileId ?? null
-  const { byCellId: audioByCellId } = useFileAudioAttachments(projectId, fileId)
+  const { byCellId: audioByCellId, hasLoaded: audioLoaded } = useFileAudioAttachments(projectId, fileId, lane)
   const cells = useMemo(
     () => mergeCellsWithAudio(rawCells, audioByCellId),
     [rawCells, audioByCellId],
@@ -99,6 +106,7 @@ export function VoicePlaybackBar({
     paneOnScreen: videoPaneOnScreen,
     timelineDurationSec,
     virtualSoundingCellId,
+    freeTiming,
   })
   const videoController = useVideoController()
   // AQU-646 stage 3h: "not the queue", rather than "the video".
@@ -112,8 +120,15 @@ export function VoicePlaybackBar({
   const sourceAudible = useQueueAudibility().source
   const { currentTime, duration, rate, volume } = transport.progress
 
-  // A picture is always playable; the queue needs a clip to play.
-  const canPlay = useMemo(() => drivesVideo || hasAnyPlayableAudio(cells), [drivesVideo, cells])
+  // A picture is always playable; the queue needs a clip to play. Neither is
+  // knowable before the file's attachments are read: a source clip arriving
+  // makes the cells file-timed, which hands the file from the picture or the
+  // virtual clock to the queue. A press in that window went to the engine that
+  // was about to lose the file, so nothing sounded (AQU-1643).
+  const canPlay = useMemo(
+    () => audioLoaded && (drivesVideo || hasAnyPlayableAudio(cells)),
+    [audioLoaded, drivesVideo, cells],
+  )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined
   const activeVoice = activeCell ? resolveCastVoice(settings, activeCell.id) : undefined
@@ -125,7 +140,7 @@ export function VoicePlaybackBar({
   }, [cells, transport.source, transport.kind])
 
   const isPlaying = transport.playing
-  const isLoading = transport.kind === "loading"
+  const isLoading = transport.kind === "loading" || !audioLoaded
 
   const startAt = useCallback((from: number, explicit = false) => {
     if (!session?.jwt) return
@@ -238,7 +253,7 @@ export function VoicePlaybackBar({
           duration, and `activeIndex < 0` used to make the scrubber dead there. */}
       <BarScrubber
         fraction={progressFraction}
-        disabled={!transport.active || duration <= 0}
+        disabled={!audioLoaded || !transport.active || duration <= 0}
         onSeek={(f) => (drivesVideo ? videoController?.seek(f * duration) : seekQueueToTime(f * duration))}
       />
 
@@ -258,7 +273,9 @@ export function VoicePlaybackBar({
                   ? transport.errorMessage
                   : activeVoice
                     ? activeVoice.name
-                    : canPlay ? t("audio.playbackBar.pressPlayToListen") : t("audio.playbackBar.noVoicedLines")}
+                    : !audioLoaded
+                      ? null
+                      : canPlay ? t("audio.playbackBar.pressPlayToListen") : t("audio.playbackBar.noVoicedLines")}
               </div>
             </div>
           </div>

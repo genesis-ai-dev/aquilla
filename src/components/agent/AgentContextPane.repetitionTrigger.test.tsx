@@ -130,6 +130,26 @@ describe("AgentContextPane — AQU-1497 the workbench's validation control fills
   })
 })
 
+// AQU-1571: the workspace greys a vote the project's text rules refuse and
+// says why; the pane must carry that reason through to the control.
+describe("AgentContextPane — AQU-1571 a refused vote is blocked with its reason", () => {
+  it("shows the own-change reason and sends nothing on a click", async () => {
+    const h = handlers()
+    renderPane(h, { ...REPEATED, canValidate: false, validationBlock: "self" })
+
+    const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
+    expect(button).toHaveAttribute("aria-disabled", "true")
+    fireEvent.mouseEnter(button)
+    fireEvent.pointerEnter(button)
+    fireEvent.focus(button)
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "You made the latest change to this text, so someone else must validate it",
+    )
+    fireEvent.click(button)
+    expect(h.onValidationChange).not.toHaveBeenCalled()
+  })
+})
+
 describe("AgentContextPane — AQU-1497 a typed, auto-validated workbench edit fills repetitions", () => {
   it("fires once the translator types and leaves the cell", async () => {
     const h = handlers()
@@ -154,7 +174,7 @@ describe("AgentContextPane — AQU-1497 a typed, auto-validated workbench edit f
     act(() => { pm.editor!.commands.setContent("half-typ") })
     // The editor's own idle window elapses with focus still in the cell: the
     // text is committed and auto-validated, exactly as before…
-    await waitFor(() => expect(h.onCommitTarget).toHaveBeenCalledTimes(1), { timeout: 5_000 })
+    await waitFor(() => expect(h.onCommitTarget).toHaveBeenCalledTimes(1))
     expect(vi.mocked(h.onCommitTarget).mock.calls[0][1]).toMatchObject({ value: "half-typ" })
     await act(async () => { await vi.mocked(h.onCommitTarget).mock.results[0].value })
     // …but the repetitions are not touched yet.

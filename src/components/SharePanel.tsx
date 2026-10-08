@@ -22,8 +22,10 @@ import {
   revokeProjectInvite,
   type ActiveProjectInvite,
 } from "@/lib/sync/invites"
-import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { laneLanguageForTag, laneRowLabel } from "@/lib/lanes/lane-language"
+import { resolveLaneScopeValue } from "@/lib/lanes/scope-ids"
 import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
 import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
 import posthog from "@/lib/posthog"
@@ -36,6 +38,9 @@ import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers } from "@/lib/frontier/members"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { toUserFacingError } from "@/lib/errors/user-error"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
+import { toast } from "@/components/ui/toast"
+import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
 import {
   MembersPanel,
   type MembersPanelMember,
@@ -56,6 +61,8 @@ interface SharePanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
+  /** Display name for the grant sentence. Falls back to "this project" while loading. */
+  projectName?: string | null
   /** Fires after a server invite is successfully minted so the parent can
    * refresh any "you have outstanding shares" UI (onboarding checklist). */
   onSharesChanged?: () => void
@@ -69,7 +76,7 @@ const DEFAULT_INVITE_ROLE = ROLE.CONTRIBUTOR
 
 type Tab = "members" | "link"
 
-export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: SharePanelProps) {
+export function SharePanel({ open, onOpenChange, projectId, projectName, onSharesChanged }: SharePanelProps) {
   const t = useT()
   const [tab, setTab] = useState<Tab>("members")
 
@@ -107,10 +114,11 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
 
         <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1.5 pb-1.5">
           {tab === "members" ? (
-            <MembersTab projectId={projectId} />
+            <MembersTab projectId={projectId} projectName={projectName} />
           ) : (
             <InviteLinkTab
               projectId={projectId}
+              projectName={projectName}
               onSharesChanged={onSharesChanged}
             />
           )}
@@ -120,7 +128,7 @@ export function SharePanel({ open, onOpenChange, projectId, onSharesChanged }: S
   )
 }
 
-function MembersTab({ projectId }: { projectId: string }) {
+function MembersTab({ projectId, projectName }: { projectId: string; projectName?: string | null }) {
   const t = useT()
   // FrontierSession has no userId — server enforces self-grant rejection so we
   // pass null and skip the local self-block.
@@ -221,6 +229,9 @@ function MembersTab({ projectId }: { projectId: string }) {
   const [scopeLanes, setScopeLanes] = useState<Array<{ value: string; label: string }>>([
     { value: "", label: "Default" },
   ])
+  // AQU-1607: the project's lane rows behind those options — they turn a
+  // scope still holding a legacy tag into the lane id the checkbox uses.
+  const [scopeLaneRows, setScopeLaneRows] = useState<ProjectLaneView[]>([])
   const [scopeFiles, setScopeFiles] = useState<Array<{ id: string; name: string }>>([])
   const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScopeValue[]>>({})
   const [scopeOptionsError, setScopeOptionsError] = useState<string | null>(null)
@@ -240,6 +251,7 @@ function MembersTab({ projectId }: { projectId: string }) {
     setLoadedScopeOptionsKey(null)
     setScopeOptionsError(null)
     setScopeLanes([{ value: "", label: "Default" }])
+    setScopeLaneRows([])
     setScopeFiles([])
     if (!canManageScopes || !jwt) return
     let alive = true
@@ -250,11 +262,28 @@ function MembersTab({ projectId }: { projectId: string }) {
           resolveCloudProjectResult(projectId, jwt),
         ])
         if (!alive) return
-        const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
-        setScopeLanes([
-          { value: "", label: defaultLabel },
-          ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLabel).map((t) => ({ value: t, label: t })),
-        ])
+        const defaultLanguage = laneLanguageForTag("", settingsRes?.lanes, settingsRes?.settings) ?? ""
+        const defaultLabel = defaultLanguage || "Default"
+        // AQU-1607: one option per lane ROW, valued by lane id, so scoping
+        // someone to one of two lanes sharing a language picks that lane.
+        // A server predating lane rows keeps the old tag-derived list.
+        const laneRows = (settingsRes?.lanes ?? []).filter(
+          (lane) => lane.role === "target" && !lane.archivedAt,
+        )
+        setScopeLaneRows(laneRows)
+        setScopeLanes(
+          laneRows.length > 0
+            ? laneRows.map((lane) => ({
+                value: lane.id,
+                // AQU-1586: the row's name or language before its tag — a
+                // tag can be the opaque lane id.
+                label: laneRowLabel(lane) ?? ((lane.legacyTag ?? "").trim() || defaultLabel),
+              }))
+            : [
+                { value: "", label: defaultLabel },
+                ...extraRegistryLanes(settingsRes?.settings.targetLanes, defaultLanguage).map((t) => ({ value: t, label: t })),
+              ],
+        )
         if (!projectRes.ok) {
           if (projectRes.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
           throw new Error("Could not load project scope details.")
@@ -267,6 +296,7 @@ function MembersTab({ projectId }: { projectId: string }) {
       } catch (caught) {
         if (alive) {
           setScopeLanes([{ value: "", label: "Default" }])
+          setScopeLaneRows([])
           setScopeFiles([])
           setScopeOptionsReady(false)
           setLoadedScopeOptionsKey(null)
@@ -321,13 +351,29 @@ function MembersTab({ projectId }: { projectId: string }) {
   const handleSaveScopes = useCallback(async (userId: number, scopes: MemberScopeValue[]) => {
     if (!jwt) throw new Error("Sign in to manage scopes.")
     const saved = await putMemberScopes(jwt, projectId, userId, scopes)
-    setScopesByUser((prev) => ({ ...prev, [userId]: saved }))
+    setScopesByUser((prev) => ({ ...prev, [userId]: saved.scopes }))
   }, [jwt, projectId])
+
+  // AQU-1607: lane scopes are lane ids. A row written before the backfill
+  // still holds a legacy tag, so resolve it to its lane id for display —
+  // otherwise its checkbox reads as unticked and saving would drop it.
+  const normalizedScopesByUser = useMemo(() => {
+    if (scopeLaneRows.length === 0) return scopesByUser
+    const out: Record<number, MemberScopeValue[]> = {}
+    for (const [userId, scopes] of Object.entries(scopesByUser)) {
+      out[Number(userId)] = scopes.map((scope) => {
+        if (scope.kind !== "lane") return scope
+        const resolved = resolveLaneScopeValue(scope.value, scopeLaneRows)
+        return resolved.ok ? { kind: "lane" as const, value: resolved.laneId } : scope
+      })
+    }
+    return out
+  }, [scopesByUser, scopeLaneRows])
 
   const scopeConfig: MembersPanelScopeConfig | undefined = canManageScopes &&
     scopeOptionsReady && memberScopesReady &&
     loadedScopeOptionsKey === currentScopeKey && loadedMemberScopesKey === currentScopeKey
-    ? { lanes: scopeLanes, files: scopeFiles, scopesByUser, onSave: handleSaveScopes }
+    ? { lanes: scopeLanes, files: scopeFiles, scopesByUser: normalizedScopesByUser, onSave: handleSaveScopes }
     : undefined
   const scopeError = scopeOptionsError ?? memberScopesError
   const supplementalErrors = Array.from(
@@ -366,6 +412,11 @@ function MembersTab({ projectId }: { projectId: string }) {
           scopeConfig={scopeConfig}
           suggestions={suggestions}
           emptySuggestionsHint={t("projectSettings.share.emptySuggestionsHint")}
+          grantScope={{
+            kind: "project",
+            projectName: grantProjectName(t, projectName),
+            lanes: "all",
+          }}
         />
       )}
     </div>
@@ -374,6 +425,7 @@ function MembersTab({ projectId }: { projectId: string }) {
 
 interface InviteLinkTabProps {
   projectId: string
+  projectName?: string | null
   onSharesChanged?: () => void
 }
 
@@ -390,8 +442,8 @@ const EXPIRY_OPTIONS: { labelKey: MessageKey; value: number | null }[] = [
 ]
 const DEFAULT_EXPIRY_DAYS = 30
 
-function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
-  const t = useT()
+function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTabProps) {
+  const { t, locale } = useI18n()
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
@@ -403,6 +455,17 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
   const [serverError, setServerError] = useState<string | null>(null)
   // Bump this to trigger the active-invites list to re-fetch after a new invite is created.
   const [inviteListVersion, setInviteListVersion] = useState(0)
+  const inviteCopy = describeGrant(t, {
+    link: inviteEmail.trim().length === 0,
+    names: inviteEmail.trim() ? [inviteEmail.trim()] : [],
+    roleLevel: inviteRole,
+    scope: {
+      kind: "project",
+      projectName: grantProjectName(t, projectName),
+      lanes: "all",
+    },
+    locale,
+  })
 
   async function handleCreate() {
     setEmailError(null)
@@ -441,6 +504,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
       }
       const url = `${window.location.origin}/join/${serverInvite.token}`
       setIssuedUrl(url)
+      toast.add({ type: "success", title: inviteCopy.sentence })
       posthog.capture(INVITE_SENT, {
         project_id: projectId,
         role: inviteRole,
@@ -582,12 +646,15 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
               <span>{serverError}</span>
             </p>
           )}
+          <GrantScopeNotice sentence={inviteCopy.sentence} />
           <Button
             onClick={handleCreate}
             disabled={busy || !session?.jwt}
             className="w-full"
           >
-            {busy ? t("common.creating") : t("projectSettings.share.createInviteLinkButton")}
+            {busy
+              ? t("common.creating")
+              : grantButtonLabel(t, t("projectSettings.share.createInviteLinkButton"), inviteCopy.scopeEcho)}
           </Button>
         </div>
       )}

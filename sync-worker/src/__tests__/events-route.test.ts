@@ -1327,6 +1327,42 @@ describe('POST /events — event.applied carries serverSeq + the cell\'s project
     expect(JSON.stringify(bySideLane(rows))).toBe(JSON.stringify(bySideLane(viaRead)))
   })
 
+  it('AQU-1780: frame rows leave out idmlMigration.diagnostics, byte-identical to the by-ids read', async () => {
+    const token = await makeToken({ role: 500, username: 'alice' })
+    const { db } = await makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+      ],
+    })
+    const kept = {
+      legacyCodex: { idmlStructure: { storyId: 'u1' } },
+      idmlMigration: { version: 2, readiness: 'unsupported-legacy-html' },
+    }
+    const diagnostics = [{ code: 'UNSUPPORTED_CONSTRUCT', message: 'Paragraph contains only protected IDML tokens' }]
+    await handleEventsWriteRequest(
+      await makeRequest([
+        sourceCreate({
+          payload: {
+            cellId: 'cell-1',
+            value: 'source text',
+            metadata: { ...kept, idmlMigration: { ...kept.idmlMigration, diagnostics } },
+          },
+        }),
+        targetCreate(),
+      ], token),
+      makeEnv(db),
+    )
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(await makeRequest([targetCommit()], token), env)
+    expect(res?.status).toBe(200)
+
+    const rows = applied()[0].rows as Array<{ side: string; metadata: unknown }>
+    expect(rows.find((r) => r.side === 'source')!.metadata).toEqual(kept)
+    const viaRead = await readCellByIds(db, 'cell-1')
+    expect(JSON.stringify(bySideLane(rows))).toBe(JSON.stringify(bySideLane(viaRead)))
+  })
+
   it('the POST response `applied[]` carries the same frame (serverSeq + rows) as the DO broadcast', async () => {
     // The WHY: the author's own client used to follow its outbox flush with a
     // GET …/cells?cellIds= + GET /cells/audit-stats to confirm the head. The

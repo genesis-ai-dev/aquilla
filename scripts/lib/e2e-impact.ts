@@ -26,6 +26,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/agent/agent-connection.smoke.spec.ts"],
   },
   {
+    // Aquilla Tools (prototype): sandboxed tool host, bridge, store, provenance.
+    source: /^(?:src\/(?:lib|components|pages)\/[Tt]ools\/|shared\/tools\/|auth-worker\/src\/(?:routes\/tools|lib\/tools\/)|sync-worker\/src\/events\/tool-provenance|db\/postgres\/migrations\/.*project_tools)/,
+    sentinels: ["e2e/specs/tools/tools-heatmap.spec.ts"],
+  },
+  {
     source: /^(?:auth-worker\/|src\/(?:pages|components|lib|hooks|context)\/.*(?:auth|account|login|signup|password|session|credential|outbox))/i,
     sentinels: [
       "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",

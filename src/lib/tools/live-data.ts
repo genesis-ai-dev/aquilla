@@ -11,6 +11,7 @@
 import { fetchAllFileCells, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { fetchConcepts } from "@/lib/sync/concepts-read"
+import { fetchProjectSettings } from "@/lib/sync/project-settings"
 import { emitCellValidate, emitTargetCellCommits, type CellCommitInput } from "@/lib/sync/events-emit"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import type { ToolOrigin, ToolScope } from "../../../shared/tools/manifest"
@@ -36,6 +37,8 @@ interface CachedCell {
 
 export interface LiveToolDataOptions {
   projectId: string
+  /** Session JWT (auth-worker) — used to resolve the project's lanes. */
+  sessionJwt: string
   author: string
   toolOrigin: ToolOrigin
   tokenFor: SyncTokenFor
@@ -57,7 +60,7 @@ export function chapterOf(ref: string | null): string | null {
 }
 
 /** Pair source/target rows (one lane) into the tool's cell view. Exported for tests. */
-export function pairRows(rows: CellRow[], lane: string): Map<string, CachedCell> {
+export function pairRows(rows: CellRow[], lane: string, laneId: string | null = null): Map<string, CachedCell> {
   const order: string[] = []
   const source = new Map<string, CellRow>()
   const target = new Map<string, CellRow>()
@@ -86,7 +89,7 @@ export function pairRows(rows: CellRow[], lane: string): Map<string, CachedCell>
       },
       targetEventId: t?.eventId || null,
       sourceEventId: s.eventId || null,
-      laneId: t?.laneId ?? null,
+      laneId: t?.laneId ?? laneId,
       targetLang: lane,
     })
   }
@@ -98,6 +101,7 @@ export class LiveToolData implements ToolHostData {
   private readonly cache = new Map<string, Map<string, CachedCell>>()
   /** Files this tool has listed — the scope of its cells.changed pushes. */
   readonly watchedFiles = new Set<string>()
+  private defaultLane: Promise<{ tag: string; id: string | null }> | null = null
 
   constructor(opts: LiveToolDataOptions) {
     this.opts = opts
@@ -107,6 +111,22 @@ export class LiveToolData implements ToolHostData {
     const t = await this.opts.tokenFor(this.opts.projectId, fileId)
     if (!t) throw new Error("no sync token for this project")
     return t
+  }
+
+  /** The project's first live target lane — what a tool's "" lane means. */
+  private resolveLane(lane: string): Promise<{ tag: string; id: string | null }> {
+    if (lane) return Promise.resolve({ tag: lane, id: null })
+    if (!this.defaultLane) {
+      this.defaultLane = fetchProjectSettings(this.opts.sessionJwt, this.opts.projectId)
+        .then((settings) => {
+          const target = (settings?.lanes ?? [])
+            .filter((l) => l.role === "target" && !l.archivedAt)
+            .sort((a, b) => a.position - b.position)[0]
+          return { tag: target?.legacyTag ?? "", id: target?.id ?? null }
+        })
+        .catch(() => ({ tag: "", id: null }))
+    }
+    return this.defaultLane
   }
 
   invalidate(fileId: string): void {
@@ -121,8 +141,9 @@ export class LiveToolData implements ToolHostData {
   }
 
   private async loadFile(fileId: string, lane: string): Promise<Map<string, CachedCell>> {
-    const rows = await fetchAllFileCells(this.opts.projectId, fileId, await this.token(fileId), undefined, lane || undefined)
-    const paired = pairRows(rows, lane)
+    const resolved = await this.resolveLane(lane)
+    const rows = await fetchAllFileCells(this.opts.projectId, fileId, await this.token(fileId), undefined, resolved.tag || undefined)
+    const paired = pairRows(rows, resolved.tag, resolved.id)
     this.cache.set(fileId, paired)
     this.watchedFiles.add(fileId)
     return paired

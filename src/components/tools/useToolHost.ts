@@ -105,6 +105,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   useEffect(() => {
     const data = new LiveToolData({
       projectId,
+      sessionJwt: session.jwt,
       author: session.username,
       toolOrigin: { origin: "tool", toolId, version: toolVersion, codeHash },
       tokenFor: makeAudioSyncTokenFetcher(() => session),

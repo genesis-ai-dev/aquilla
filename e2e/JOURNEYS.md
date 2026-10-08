@@ -164,6 +164,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Account switch cross-tab | `e2e/specs/orgs/account-switch-cross-tab.spec.ts` |
 | Six simultaneous editors (write + live-update latency under whole-BSB helloao import) | `e2e/specs/collab/six-editor-concurrency.spec.ts` |
 | Session-expired banner | `e2e/specs/auth/session-expired-banner.smoke.spec.ts` |
+| Aquilla Tools (prototype): install the vetted Key-Term Heat Map starter, its first write pauses on the host permission prompt ("Always allow" extends the standing grant), a bulk harmonize lands through the outbox with server-verified tool provenance, and "revert everything since then" restores every cell except one a person edited afterwards (full-suite, not smoke: prototype surface behind a nav entry. Bridge trust checks, embedJson, permission decisions and the build gates are in `src/lib/tools/__tests__/`; the revert skip rules in `shared/tools/revert.test.ts`; the store/grant/activity routes in auth-worker's `tools-routes.test.ts`; the provenance stamp in sync-worker's `tool-provenance.test.ts`) | `e2e/specs/tools/tools-heatmap.spec.ts` |
 
 ## Covered in RTL
 

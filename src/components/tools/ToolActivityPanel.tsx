@@ -123,7 +123,7 @@ export function ToolActivityPanel({
                 </span>
                 {e.value !== null && <span className="min-w-0 flex-1 truncate text-muted-foreground">{e.value}</span>}
                 <span className="text-xs text-muted-foreground">{e.author}</span>
-                <span className="text-xs text-muted-foreground">{fmtShortCalendarDate(e.serverTs)}</span>
+                <span className="text-xs text-muted-foreground">{fmtShortCalendarDate(e.serverTs)} {new Date(e.serverTs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                 {e.verified ? (
                   <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
                     <BadgeCheck className="size-3.5" aria-hidden />

@@ -1,5 +1,5 @@
 /**
- * Mounts one tool in a sandboxed iframe: `sandbox="allow-scripts"` (no
+ * Mounts one tool in a sandboxed iframe: `sandbox="allow-scripts allow-forms"` (no
  * allow-same-origin → opaque origin), srcdoc carrying a no-network CSP, the
  * bridge runtime and the app theme. See src/lib/tools/srcdoc.ts for the
  * production hosting plan (dedicated tools origin).
@@ -10,7 +10,7 @@ import { AlertTriangle, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc"
+import { TOOL_SANDBOX, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc"
 import type { ToolDetail } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { PermissionPrompt } from "./PermissionPrompt"
@@ -60,7 +60,7 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", o
       <iframe
         ref={frameRef}
         title={t("tools.frame.title", { name: tool.name })}
-        sandbox="allow-scripts"
+        sandbox={TOOL_SANDBOX}
         referrerPolicy="no-referrer"
         srcDoc={srcdoc}
         className="min-h-0 w-full flex-1 border-0 bg-background"

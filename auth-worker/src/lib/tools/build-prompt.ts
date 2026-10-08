@@ -17,6 +17,7 @@ through the global \`aquilla\` object the host injects before your code runs.
 - No external <script src>, <link href>, @import, <iframe>, <base>, <meta http-equiv>.
 - Never touch window.parent / window.top — only the aquilla API.
 - Plain modern JavaScript (ES2020) in a classic <script>; no modules, no JSX, no build step.
+- Forms are fine, but every submit handler must call event.preventDefault() (navigation is blocked).
 - Keep it under ${Math.floor(MAX_TOOL_SOURCE_BYTES / 1024)} KB. No external fonts or images.
 - The tool MUST render something sensible in EVERY state: no files, a file with no cells,
   cells with empty translations, no terms. It must never throw on empty data.

@@ -11,7 +11,7 @@ import type { Context } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
-import { MAX_REPAIR_ATTEMPTS, runBuild } from "../lib/tools/builder"
+import { MAX_REPAIR_ATTEMPTS, builderUpstream, runBuild } from "../lib/tools/builder"
 
 const MAX_REQUEST_CHARS = 4000
 
@@ -22,8 +22,8 @@ export async function buildToolRoute(c: Context<AuthHonoEnv>) {
   if (role.level < ROLE.CONTRIBUTOR) {
     return c.json({ error: { code: "permission_denied", message: "building a tool requires contributor access" } }, 403)
   }
-  if (!c.env.OPENROUTER_API_KEY) {
-    return c.json({ error: { code: "unavailable", message: "the tool builder is not configured (OPENROUTER_API_KEY)" } }, 503)
+  if (!builderUpstream(c.env).apiKey) {
+    return c.json({ error: { code: "unavailable", message: "the tool builder is not configured (TOOLS_BUILDER_API_KEY / OPENROUTER_API_KEY)" } }, 503)
   }
 
   const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null

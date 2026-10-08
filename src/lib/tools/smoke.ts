@@ -12,7 +12,7 @@
 
 import { createBridgeHost, type ToolErrorReport } from "./host-bridge"
 import { createToolHandlers, type ToolCellView, type ToolHostData } from "./host-handlers"
-import { buildToolSrcdoc } from "./srcdoc"
+import { TOOL_SANDBOX, buildToolSrcdoc } from "./srcdoc"
 import type { ToolManifest } from "../../../shared/tools/manifest"
 
 export const SMOKE_LOAD_TIMEOUT_MS = 8000
@@ -39,7 +39,7 @@ export interface SmokeFrame {
 
 export function createIframeSmokeFrame(label: string): SmokeFrame {
   const iframe = document.createElement("iframe")
-  iframe.setAttribute("sandbox", "allow-scripts")
+  iframe.setAttribute("sandbox", TOOL_SANDBOX)
   iframe.setAttribute("aria-hidden", "true")
   iframe.title = `smoke-${label}`
   Object.assign(iframe.style, { position: "fixed", left: "-10000px", top: "0", width: "1024px", height: "768px", border: "0" })

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { ROLE } from "@/lib/sync/role-policy"
-import { TOOL_CSP, buildToolSrcdoc, embedJson } from "../srcdoc"
+import { TOOL_CSP, TOOL_SANDBOX, buildToolSrcdoc, embedJson } from "../srcdoc"
 import { applyPromptAnswer, decideScope, grantableAtInstall, revokeScope } from "../permissions"
 import type { ToolScope } from "../../../../shared/tools/manifest"
 
@@ -34,6 +34,8 @@ describe("buildToolSrcdoc", () => {
     expect(runtime).toBeLessThan(tool)
     expect(TOOL_CSP).toContain("connect-src 'none'")
     expect(TOOL_CSP).toContain("default-src 'none'")
+    expect(TOOL_CSP).toContain("form-action 'none'")
+    expect(TOOL_SANDBOX.split(" ")).not.toContain("allow-same-origin")
   })
 
   it("wraps a bare fragment in a full document", () => {

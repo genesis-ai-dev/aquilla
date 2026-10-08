@@ -23,7 +23,20 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 export interface BuildEnv {
   OPENROUTER_API_KEY?: string
   OPENROUTER_BASE_URL?: string
+  TOOLS_BUILDER_API_KEY?: string
+  TOOLS_BUILDER_BASE_URL?: string
   TOOLS_BUILDER_MODEL?: string
+}
+
+/** The key + endpoint the builder uses: a dedicated TOOLS_BUILDER_* pair when
+ *  configured, otherwise the shared chat/agent OpenRouter settings. */
+export function builderUpstream(env: BuildEnv): { apiKey: string | null; url: string } {
+  const dedicated = env.TOOLS_BUILDER_API_KEY?.trim()
+  if (dedicated) {
+    const base = env.TOOLS_BUILDER_BASE_URL?.trim()
+    return { apiKey: dedicated, url: base ? `${base.replace(/\/$/, "")}/chat/completions` : OPENROUTER_URL }
+  }
+  return { apiKey: env.OPENROUTER_API_KEY?.trim() || null, url: completionsUrl(env) }
 }
 
 export interface BuildRequest {
@@ -71,11 +84,12 @@ function completionsUrl(env: BuildEnv): string {
 
 export async function runBuild(env: BuildEnv, req: BuildRequest, fetchImpl: typeof fetch = fetch): Promise<BuildResult> {
   const model = env.TOOLS_BUILDER_MODEL?.trim() || TOOLS_BUILDER_MODEL
-  const res = await fetchImpl(completionsUrl(env), {
+  const upstream = builderUpstream(env)
+  const res = await fetchImpl(upstream.url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${env.OPENROUTER_API_KEY ?? ""}`,
+      Authorization: `Bearer ${upstream.apiKey ?? ""}`,
       "X-Title": "Aquilla Tools builder",
     },
     body: JSON.stringify({

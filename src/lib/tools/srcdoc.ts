@@ -1,6 +1,11 @@
 /**
  * Builds the srcdoc a tool runs in.
  *
+ * The frame's sandbox is TOOL_SANDBOX: scripts and forms, nothing else. Forms
+ * are allowed only so a tool's `submit` handlers fire (Chrome drops the event
+ * entirely in a sandbox without allow-forms); the CSP's `form-action 'none'`
+ * still forbids any actual submission/navigation.
+ *
  * Prototype hosting: `<iframe sandbox="allow-scripts" srcdoc=…>` — no
  * allow-same-origin, so the frame has an OPAQUE origin (no cookies, no storage,
  * no access to the app's DOM or IndexedDB) — plus a meta CSP that forbids
@@ -11,6 +16,10 @@
  */
 
 import { TOOL_RUNTIME_SOURCE } from "./runtime-source"
+
+/** The iframe sandbox for every tool frame (and the smoke frame). Never add
+ *  allow-same-origin: it would give the tool the app's origin. */
+export const TOOL_SANDBOX = "allow-scripts allow-forms"
 
 /** The CSP every tool document carries. `connect-src 'none'` and the absent
  *  `allow-same-origin` are what make "no network, no app storage" true;

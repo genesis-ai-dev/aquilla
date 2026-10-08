@@ -554,7 +554,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }, [session?.jwt, id, refreshSharedSettings])
 
   const createLane = useCallback(async (
-    input: { name: string; language: string; code?: string | null },
+    input: {
+      name: string
+      language: string
+      code?: string | null
+      /** AQU-1784: the section already warned about the duplicate inline. */
+      allowDuplicateName?: boolean
+    },
   ) => {
     const jwt = session?.jwt
     if (!jwt || !id) return "invalid" as const

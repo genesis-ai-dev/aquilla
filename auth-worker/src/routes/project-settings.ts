@@ -76,6 +76,7 @@ import {
 } from "../../../src/lib/lanes/read-wall"
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
 import { loadTargetLaneIdentities, visibleTagsForMember } from "../../../db/shared/lane-visibility"
+import { grantNewLane } from "../../../db/shared/lane-grants"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
@@ -519,6 +520,14 @@ const createLaneSchema = z.object({
   name: z.string(),
   language: z.string(),
   code: z.string().nullable().optional(),
+  /**
+   * AQU-1784: the languages screen warns inline when the new lane's display
+   * name duplicates an active lane's and then sends this, so the save goes
+   * through instead of coming back 409. Absent means the old refusal, which
+   * is what every other create path (project creation, the org's add-language
+   * popover, the sibling merge) still gets.
+   */
+  allowDuplicateName: z.boolean().optional(),
 })
 
 const archiveLaneSchema = z.object({
@@ -619,6 +628,7 @@ projectSettings.post(
         name: body.name,
         language: body.language,
         code: body.code,
+        allowDuplicateName: body.allowDuplicateName === true,
         targetLanguage,
         existing: (current.lanes ?? []).map((lane) => ({
           id: lane.id,
@@ -635,6 +645,16 @@ projectSettings.post(
       const status = created.problem === "duplicate" ? 409 : 400
       const error = created.problem === "duplicate" ? "duplicate_name" : created.problem
       return c.json({ error }, status)
+    }
+    // AQU-1781: under the read wall a member below Maintainer sees only the
+    // lanes they hold a grant for, so a lane nobody is granted is invisible to
+    // every unscoped contributor while the inspector still calls them
+    // "Unscoped — full access". Grant it in the same request that creates it.
+    try {
+      await grantNewLane(c.env.AQUILLA_PG, projectId, { laneId: created.laneId }, user.id)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return c.json({ error: `write failed: ${message}` }, 500)
     }
     // AQU-1594: the lane row is the registry. Do not mirror the tag into
     // settings.targetLanes.

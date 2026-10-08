@@ -16,6 +16,7 @@
 // from an explicit user action and need to show the error.
 
 import { AUTH_API_URL } from "./sync-token"
+import type { CurrentTargetLane, MemberLaneGrant } from "@/lib/lanes/grant-gap"
 
 /** A single lane/file write-restriction row on a project member. */
 export interface MemberScope {
@@ -135,9 +136,43 @@ export async function fetchMemberScopes(
  * `laneNames` covers only the lanes the scopes name, and an older server
  * simply omits it — fall back to the raw value.
  */
+/**
+ * AQU-1783: the member's actual lane GRANTS, plus the project's current target
+ * lanes, as auth-worker reports them. The read wall reads grants, not scopes,
+ * so this is what the inspector must show — feed it to `memberLaneAccess` for
+ * the verdict.
+ *
+ * Absent whenever the caller is not a project lead (a member below that must
+ * not learn the project's whole lane set — AQU-1421), the project has no
+ * target lane rows, or the server predates this field. Absent means "say
+ * nothing about grants", never "no access".
+ */
+export interface MemberLaneAccessPayload {
+  memberRoleLevel: number
+  readWallEnabled: boolean
+  grants: MemberLaneGrant[]
+  targetLanes: CurrentTargetLane[]
+}
+
 export interface MemberScopeView {
   scopes: MemberScope[]
   laneNames: Record<string, string>
+  laneAccess?: MemberLaneAccessPayload
+}
+
+/** Parse the optional `laneAccess` block defensively — an older server omits
+ *  it, and a malformed one must read as absent rather than as "no lanes". */
+function parseLaneAccess(raw: unknown): MemberLaneAccessPayload | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const value = raw as Partial<MemberLaneAccessPayload>
+  if (typeof value.memberRoleLevel !== "number") return undefined
+  if (!Array.isArray(value.grants) || !Array.isArray(value.targetLanes)) return undefined
+  return {
+    memberRoleLevel: value.memberRoleLevel,
+    readWallEnabled: value.readWallEnabled === true,
+    grants: value.grants,
+    targetLanes: value.targetLanes,
+  }
 }
 
 /** Label for one lane scope: its lane's name when known, else the raw value. */
@@ -160,8 +195,17 @@ export async function fetchMemberScopeView(
       console.warn(`[member-scopes] fetchMemberScopeView ${projectId}/${userId} → HTTP ${res.status}`)
       return null
     }
-    const body = (await res.json()) as { scopes?: MemberScope[]; laneNames?: Record<string, string> }
-    return { scopes: body.scopes ?? [], laneNames: body.laneNames ?? {} }
+    const body = (await res.json()) as {
+      scopes?: MemberScope[]
+      laneNames?: Record<string, string>
+      laneAccess?: unknown
+    }
+    const laneAccess = parseLaneAccess(body.laneAccess)
+    return {
+      scopes: body.scopes ?? [],
+      laneNames: body.laneNames ?? {},
+      ...(laneAccess ? { laneAccess } : {}),
+    }
   } catch (err) {
     console.warn("[member-scopes] fetchMemberScopeView failed:", err)
     return null
@@ -203,6 +247,15 @@ export async function putMemberScopes(
     const message = detail.error ?? `HTTP ${res.status}`
     throw new Error(offenders.length > 0 ? `${message}: ${offenders.join(", ")}` : message)
   }
-  const body = (await res.json()) as { scopes?: MemberScope[]; laneNames?: Record<string, string> }
-  return { scopes: body.scopes ?? [], laneNames: body.laneNames ?? {} }
+  const body = (await res.json()) as {
+    scopes?: MemberScope[]
+    laneNames?: Record<string, string>
+    laneAccess?: unknown
+  }
+  const laneAccess = parseLaneAccess(body.laneAccess)
+  return {
+    scopes: body.scopes ?? [],
+    laneNames: body.laneNames ?? {},
+    ...(laneAccess ? { laneAccess } : {}),
+  }
 }

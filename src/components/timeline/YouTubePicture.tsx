@@ -37,8 +37,17 @@ type Props = VideoHTMLAttributes<HTMLVideoElement> & { ref: RefObject<HTMLVideoE
  *  embed whose request carries no Referer (player error 153, "Video player
  *  configuration error"), and in Safari the pane's picture showed "This video
  *  could not be loaded" on every try. Naming the policy on the iframe sends
- *  the page's origin however the page or browser default is set. */
-const PLAYER_CONFIG = { cc_load_policy: 0, referrerpolicy: "strict-origin-when-cross-origin" }
+ *  the page's origin however the page or browser default is set.
+ *
+ *  `origin` is required once enablejsapi is on. Without it the iframe player
+ *  answers error 150 ("embedding not allowed") and the pane shows "This video
+ *  could not be loaded" for a video that plays fine. The library leaves origin
+ *  commented out; the page has to supply its own. */
+function playerConfig(): Record<string, string | number> {
+  const base = { cc_load_policy: 0, referrerpolicy: "strict-origin-when-cross-origin" }
+  const origin = typeof window !== "undefined" ? window.location.origin : ""
+  return origin ? { ...base, origin } : base
+}
 
 type Handler = (e: SyntheticEvent<HTMLVideoElement>) => void
 
@@ -98,7 +107,7 @@ export function YouTubePicture({ ref, src, style, ...rest }: Props) {
       {...(attrs as VideoHTMLAttributes<HTMLVideoElement>)}
       ref={ref}
       style={style ? { ...FIT_PANE, ...style } : FIT_PANE}
-      config={PLAYER_CONFIG}
+      config={playerConfig()}
       // Canonical form: the element's own matcher misses some share-link shapes.
       src={id ? `https://www.youtube.com/watch?v=${id}` : src}
     />

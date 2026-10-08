@@ -1,9 +1,14 @@
 import { useMemo, type ReactNode } from "react"
-import { buildDisplayChunks, rangeSpanClass, type DisplayChunk, type RangeHighlight } from "@/lib/richtext/rule-ranges"
+import { HEALTH_SPAN_CLASS } from "@/lib/completion/draft-health-spans"
+import {
+  buildDisplayChunks, rangeSpanClass,
+  type DisplayChunk, type HealthDisplaySpan, type RangeHighlight,
+} from "@/lib/richtext/rule-ranges"
 
 // AQU-1757: the range model and its underline classes live in
 // lib/richtext/rule-ranges so the rich-text source path draws identically.
-export type { RangeHighlight }
+// The #946 health wash rides the same chunking, so its type lives there too.
+export type { HealthDisplaySpan, RangeHighlight }
 
 export const EXAMPLE_COLORS = [
   "#3b82f6", "#f97316", "#22c55e", "#a855f7",
@@ -22,6 +27,8 @@ interface HighlightedTextProps {
   highlights?: TokenHighlight[]
   /** Byte-range violation highlights. Always rendered. */
   ranges?: RangeHighlight[]
+  /** Display-only AI-draft provenance wash (#946). Layers under violations. */
+  healthSpans?: HealthDisplaySpan[]
   showEvidence?: boolean
   /** Called with the rule id and the span element itself, so callers can
    *  anchor popovers to the violation glyph. Matches `TranslatedEditor.onRuleClick`. */
@@ -30,6 +37,7 @@ interface HighlightedTextProps {
 
 export function HighlightedText({
   text, highlights = [], ranges = [],
+  healthSpans = [],
   showEvidence = false, onRangeClick,
 }: HighlightedTextProps) {
   const highlightMap = useMemo(() => {
@@ -38,20 +46,39 @@ export function HighlightedText({
     return map
   }, [highlights])
 
-  const chunks = useMemo(() => buildDisplayChunks(text, ranges), [ranges, text])
+  const chunks = useMemo(
+    () => buildDisplayChunks(text, ranges, healthSpans),
+    [healthSpans, ranges, text],
+  )
   const hasRanges = chunks.some((chunk) => chunk.ranges.length > 0)
+  const hasHealth = chunks.some((chunk) => chunk.health)
 
-  if (highlights.length === 0 && !hasRanges) return <span>{text}</span>
+  if (highlights.length === 0 && !hasRanges && !hasHealth) return <span>{text}</span>
+
+  // A health wash is one element even where violation boundaries split the
+  // text inside it, so the wash stays continuous under the stacked underlines.
+  const groups: Array<{ health?: HealthDisplaySpan; chunks: DisplayChunk[] }> = []
+  for (const chunk of chunks) {
+    const prev = groups[groups.length - 1]
+    if (prev && prev.health === chunk.health) prev.chunks.push(chunk)
+    else groups.push({ health: chunk.health, chunks: [chunk] })
+  }
 
   return (
     <span>
-      {chunks.map((chunk, i) => {
-        if (chunk.ranges.length > 0) {
-          return <RangeStack key={i} chunk={chunk} onRangeClick={onRangeClick} />
-        }
-        if (!showEvidence || highlights.length === 0) return <span key={i}>{chunk.text}</span>
-        return <EvidenceTokens key={i} text={chunk.text} highlightMap={highlightMap} />
-      })}
+      {groups.map((group, i) => (
+        <HealthSpanWrap key={i} span={group.health}>
+          {group.chunks.map((chunk) => {
+            if (chunk.ranges.length > 0) {
+              return <RangeStack key={chunk.start} chunk={chunk} onRangeClick={onRangeClick} />
+            }
+            if (showEvidence && highlights.length > 0) {
+              return <EvidenceTokens key={chunk.start} text={chunk.text} highlightMap={highlightMap} />
+            }
+            return <span key={chunk.start}>{chunk.text}</span>
+          })}
+        </HealthSpanWrap>
+      ))}
     </span>
   )
 }
@@ -86,6 +113,25 @@ function RangeStack({
     )
   }
   return <>{node}</>
+}
+
+function HealthSpanWrap({
+  span,
+  children,
+}: {
+  span?: HealthDisplaySpan
+  children: ReactNode
+}) {
+  if (!span) return <>{children}</>
+  return (
+    <span
+      data-health-span={span.kind}
+      title={span.title}
+      className={HEALTH_SPAN_CLASS[span.kind]}
+    >
+      {children}
+    </span>
+  )
 }
 
 function EvidenceTokens({ text, highlightMap }: { text: string; highlightMap: Map<string, number> }) {

@@ -1042,6 +1042,10 @@ describe("a YouTube link", () => {
     expect(media.tagName.toLowerCase()).toBe("youtube-video")
     expect(media.getAttribute("src")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
     expect(container.querySelector("video")).toBeNull()
+    // Error 150 if the iframe API is asked to play without the page origin.
+    const config = (media as HTMLElement & { config?: { origin?: string; cc_load_policy?: number } }).config
+    expect(config?.cc_load_policy).toBe(0)
+    expect(config?.origin).toBe(window.location.origin)
   })
 
   // Walk r2 (2026-10-05): the element's shadow :host carries min-width 300px,

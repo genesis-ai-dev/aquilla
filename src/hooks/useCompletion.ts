@@ -353,8 +353,7 @@ export function useCompletion(
 
   const draftProvenance = useCallback((
     mode: AiDraftProvenance["mode"],
-    exampleIds: string[],
-    approvedExampleCount: number,
+    approvedExamples: readonly ValidatedPair[],
     evidence?: TranslationEvidenceSnapshot,
     interventionId?: string,
   ): AiDraftProvenance => ({
@@ -362,13 +361,18 @@ export function useCompletion(
     model: modelName,
     provider,
     promptVersion: `${PROMPT_VERSION}:${promptFingerprint(effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}`,
-    exampleIds,
+    exampleIds: uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
+    exampleTexts: approvedExamples.map((example, index) => ({
+      cellId: example.cellId ?? `example-${index}`,
+      source: example.source,
+      target: example.target,
+    })),
     generatedAt: Date.now(),
     mode,
     projectState: {
       sourceLanguage,
       targetLanguage,
-      approvedExampleCount,
+      approvedExampleCount: approvedExamples.length,
       ...(evidence ? {
         evidenceCoverage: evidence.coverage,
         evidenceWeight: evidence.weight,
@@ -542,7 +546,7 @@ export function useCompletion(
         cell,
         committedText,
         llmAuthor,
-        draftProvenance(mode, exampleIds, approvedExamples.length, evidence.snapshot, interventionId),
+        draftProvenance(mode, approvedExamples, evidence.snapshot, interventionId),
       )
       recordModelCall?.({
         callId: interventionId,
@@ -895,8 +899,7 @@ export function useCompletion(
                 author: llmAuthor,
                 provenance: draftProvenance(
                   "batch",
-                  uniqueExampleIds(batchApprovedExamples.map((example) => example.cellId)),
-                  batchApprovedExamples.length,
+                  batchApprovedExamples,
                   undefined,
                   crypto.randomUUID(),
                 ),
@@ -1256,7 +1259,7 @@ export function useCompletion(
           cell,
           committedText,
           llmAuthor,
-          draftProvenance("paragraph", paragraphExampleIds, approvedExamples.length, undefined, interventionId),
+          draftProvenance("paragraph", approvedExamples, undefined, interventionId),
         )
         committedIds.add(cellId)
         recordedCells.push({

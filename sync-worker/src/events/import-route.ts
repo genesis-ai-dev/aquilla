@@ -37,7 +37,7 @@ import {
   laneOfEvent,
   type PersistedEvent,
 } from './event-projection'
-import { ensureBlankTargetBridgeStmt } from '../../../db/shared/lanes'
+import { dataTargetTagsFromEvents, ensureBlankTargetBridgeStmt, ensureProjectLanes } from '../../../db/shared/lanes'
 import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
@@ -785,6 +785,38 @@ export async function handleBulkImportRequest(
       clientTs,
       serverTs: serverTs++,
     })
+  }
+
+  // AQU-1240: projection resolves cells.lane_id from `lanes`. Projects created
+  // by /__dev__/seed (and any path that skipped createProjectShared) have no
+  // rows there, so the subquery is NULL and the NOT NULL column 500s the
+  // whole chunk as "DB batch failed". Codex ingest already calls this;
+  // /import did not. Only a project with no lane rows at all: one that has
+  // lanes keeps them, because asking again from the file's languages would
+  // add a tagged lane beside a '' bridge, or a '' lane beside a tagged one
+  // (AQU-1594). The default-target bridge below covers projects that have lanes.
+  try {
+    const anyLane = await db
+      .prepare(`SELECT 1 AS present FROM lanes WHERE project_id = ? LIMIT 1`)
+      .bind(body.projectId)
+      .first<{ present: number }>()
+    if (!anyLane) {
+      await ensureProjectLanes(db, body.projectId, {
+        settings: body.file
+          ? {
+              sourceLanguage: body.file.sourceLanguage,
+              targetLanguage: body.file.targetLanguage,
+            }
+          : undefined,
+        dataTargetTags: dataTargetTagsFromEvents(targetEvents),
+      })
+    }
+  } catch (err) {
+    console.error('[import] ensure lanes failed:', err)
+    return withCors(
+      Response.json({ error: 'DB batch failed' }, { status: 500 }),
+      request,
+    )
   }
 
   try {

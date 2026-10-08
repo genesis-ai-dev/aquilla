@@ -13,6 +13,7 @@ let storeLoading: boolean
 let online: boolean | null
 let storeId = 0
 let outbox = { count: 0, failed: 0 }
+let outboxUnreadable = false
 const outboxListeners = new Set<() => void>()
 
 function setOutbox(next: { count: number; failed: number }) {
@@ -27,8 +28,10 @@ vi.mock("@/context/OfflineStoreContext", () => ({
   OfflineStoreProvider: ({ children }: { children: ReactNode }) => children,
 }))
 vi.mock("@/lib/sync/outbox", () => ({
-  outboxPendingCount: async () => outbox.count,
-  outboxFailedCount: async () => outbox.failed,
+  readOutboxCounts: async () => {
+    if (outboxUnreadable) throw new Error("IndexedDB unavailable")
+    return outbox
+  },
   subscribeToOutbox: (listener: () => void) => {
     outboxListeners.add(listener)
     return () => outboxListeners.delete(listener)
@@ -55,6 +58,7 @@ beforeEach(async () => {
   online = true
   storeLoading = false
   outbox = { count: 0, failed: 0 }
+  outboxUnreadable = false
   outboxListeners.clear()
   store = await createStorePromise({
     schema,
@@ -197,6 +201,28 @@ describe("DesktopUpdatePrompt", () => {
     outbox = { count: 2, failed: 1 }
     renderPrompt(fakeCommands())
     expect(await screen.findByText(/3 changes haven't reached the server yet/)).toBeInTheDocument()
+  })
+
+  it("warns instead of claiming all is sent when the outbox can't be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    outboxUnreadable = true
+    renderPrompt(fakeCommands())
+
+    expect(await screen.findByText(/couldn't check whether all your changes have reached the server/)).toBeInTheDocument()
+    expect(screen.queryByText("Aquilla 1.2.0 is ready to install.")).toBeNull()
+  })
+
+  it("ignores a second click after the install has started the shutdown", async () => {
+    const user = userEvent.setup()
+    const commands = fakeCommands()
+    renderPrompt(commands)
+
+    const button = await screen.findByRole("button", { name: "Restart to update" })
+    await user.click(button)
+    await settle()
+    await user.click(button)
+    expect(commands.install).toHaveBeenCalledTimes(1)
+    expect(commands.download).toHaveBeenCalledTimes(1)
   })
 
   it("ignores a second click while an install is already running", async () => {

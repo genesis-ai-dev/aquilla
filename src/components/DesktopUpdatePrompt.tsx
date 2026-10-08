@@ -55,8 +55,8 @@ type Props = {
  * (src/lib/offline/update-gate.ts for why). If the queue isn't draining it
  * offers "Update anyway" instead — the rows stay in the local store. Both
  * queues count: the offline store's and the IndexedDB outbox. Nothing is
- * offered while the offline store is still booting; if it failed to boot its
- * queue is unreadable, so the prompt warns rather than claim all is sent.
+ * offered while the offline store is still booting; if it failed to boot, or
+ * the outbox can't be read, the prompt warns rather than claim all is sent.
  * Installing runs the same save handshake as a quit
  * (src-tauri/src/app_update.rs).
  *
@@ -72,8 +72,8 @@ export function DesktopUpdatePrompt({
   const { store, loading: storeLoading } = useOfflineStore()
   const [update, setUpdate] = useState<DownloadedUpdate | null>(null)
   const [queue, setQueue] = useState<OfflineQueueSnapshot>(EMPTY_QUEUE)
-  // Null until the first read lands.
-  const [outbox, setOutbox] = useState<OfflineQueueSnapshot | null>(null)
+  // Undefined until the first read lands; null if IndexedDB couldn't be read.
+  const [outbox, setOutbox] = useState<OfflineQueueSnapshot | null | undefined>(undefined)
   const installing = useRef(false)
   const [graceOver, setGraceOver] = useState(false)
 
@@ -120,7 +120,7 @@ export function DesktopUpdatePrompt({
     }
   }, [])
 
-  const total = store ? addQueues(queue, outbox ?? EMPTY_QUEUE) : null
+  const total = store && outbox ? addQueues(queue, outbox) : null
   const pending = (total?.count ?? 0) > 0
   useEffect(() => {
     if (!update || !pending) return
@@ -133,7 +133,7 @@ export function DesktopUpdatePrompt({
   }, [update, pending, graceMs])
 
   // Hold until both queues have been read once.
-  const gate = storeLoading || !outbox ? null : evaluateUpdateGate(total, graceOver)
+  const gate = storeLoading || outbox === undefined ? null : evaluateUpdateGate(total, graceOver)
   const gateKind = gate?.kind ?? "sending"
   const count = gate?.kind === "sending" || gate?.kind === "stuck" ? gate.count : 0
 
@@ -143,19 +143,18 @@ export function DesktopUpdatePrompt({
       return
     }
     const install = () => {
-      // A second click would find the update already taken and fail.
+      // A second click would find the shutdown already claimed and fail.
+      // `install` resolves once the save handshake starts, not when the app
+      // exits, so the flag stays set on success — the app is on its way out.
       if (installing.current) return
       installing.current = true
-      commands
-        .install()
-        .catch((error: unknown) => {
-          console.warn("[update] install failed", error)
-          // Most likely the downloaded update is gone; fetch it again.
-          setUpdate(null)
-        })
-        .finally(() => {
-          installing.current = false
-        })
+      commands.install().catch((error: unknown) => {
+        installing.current = false
+        console.warn("[update] install failed", error)
+        // The update is still downloaded unless it went missing; re-checking
+        // returns it again either way.
+        setUpdate(null)
+      })
     }
     toast.add({
       id: UPDATE_TOAST_ID,

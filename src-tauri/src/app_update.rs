@@ -12,7 +12,7 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::shutdown_guard::{self, ShutdownGuardState};
@@ -21,6 +21,10 @@ use crate::shutdown_guard::{self, ShutdownGuardState};
 pub struct AppUpdateState {
     /// A checked and fully downloaded update, waiting for `install_app_update`.
     ready: Mutex<Option<(Update, Vec<u8>)>>,
+    /// Held for a whole check + download, so a call that overlaps one already
+    /// running (the webview re-checks on every reconnect) waits for it and
+    /// returns its result instead of fetching the installer a second time.
+    downloading: tokio::sync::Mutex<()>,
 }
 
 #[derive(Serialize)]
@@ -41,12 +45,14 @@ impl From<&Update> for DownloadedUpdate {
 
 /// Checks for an update and downloads it without installing. `None` when the
 /// app is up to date. Repeat calls after a successful download return the
-/// same update without fetching it again.
+/// same update without fetching it again, including calls that overlap an
+/// in-flight download.
 #[tauri::command]
 pub async fn download_app_update(
     app: AppHandle,
     state: State<'_, AppUpdateState>,
 ) -> Result<Option<DownloadedUpdate>, String> {
+    let _downloading = state.downloading.lock().await;
     if let Some((update, _)) = state.ready.lock().map_err(|e| e.to_string())?.as_ref() {
         return Ok(Some(update.into()));
     }
@@ -67,20 +73,40 @@ pub async fn download_app_update(
 /// handshake as a quit. The webview must only call this once its offline
 /// queue is empty. If the install itself fails the app still relaunches (on
 /// the old version) — the store has already been shut down by then.
+///
+/// Errs without starting anything when there's no downloaded update, or when
+/// a quit/restart/install already claimed the shutdown — the update stays
+/// downloaded, so it isn't lost to a shutdown that won't install it.
 #[tauri::command]
 pub fn install_app_update(
     app: AppHandle,
     update_state: State<'_, AppUpdateState>,
     guard_state: State<'_, ShutdownGuardState>,
 ) -> Result<(), String> {
-    let Some((update, bytes)) = update_state.ready.lock().map_err(|e| e.to_string())?.take() else {
+    if update_state.ready.lock().map_err(|e| e.to_string())?.is_none() {
         return Err("no downloaded update to install".into());
-    };
-    shutdown_guard::exit_after_handshake(&app, &guard_state, move |app| {
-        if let Err(err) = update.install(&bytes) {
-            log::error!("[app_update] install of {} failed: {err}", update.version);
+    }
+    // Only taken once the handshake has run, i.e. once this install owns the
+    // shutdown.
+    let started = shutdown_guard::exit_after_handshake(&app, &guard_state, |app| {
+        let ready = app
+            .state::<AppUpdateState>()
+            .ready
+            .lock()
+            .ok()
+            .and_then(|mut ready| ready.take());
+        match ready {
+            Some((update, bytes)) => {
+                if let Err(err) = update.install(&bytes) {
+                    log::error!("[app_update] install of {} failed: {err}", update.version);
+                }
+            }
+            None => log::error!("[app_update] downloaded update vanished before install"),
         }
         app.restart();
     });
+    if !started {
+        return Err("the app is already shutting down".into());
+    }
     Ok(())
 }

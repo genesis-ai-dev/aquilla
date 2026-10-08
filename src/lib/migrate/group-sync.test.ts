@@ -27,7 +27,16 @@ function harness() {
     }
     if (u.endsWith("/migrate/groups") && init?.method === "POST") {
       posts.push(String(init.body))
-      return new Response(JSON.stringify({ orgIdByUuid: { x: 1 }, teamIdByUuid: {} }))
+      // AQU-1800: a dryRun post is read-only and answers with the row count an
+      // apply would add; an apply answers with the count it wrote.
+      const dryRun = JSON.parse(String(init.body)).dryRun === true
+      return new Response(
+        JSON.stringify(
+          dryRun
+            ? { dryRun: true, orgIdByUuid: {}, teamIdByUuid: {}, would: { laneGrants: 4 } }
+            : { orgIdByUuid: { x: 1 }, teamIdByUuid: {}, created: { laneGrants: 7 } },
+        ),
+      )
     }
     throw new Error(`unexpected ${u}`)
   }) as unknown as typeof fetch
@@ -35,12 +44,31 @@ function harness() {
 }
 
 describe("syncGroupsToNeon plan hash", () => {
-  it("dry-run reports the hash without posting", async () => {
+  it("dry-run reports the hash and the lane grants an apply would add, writing nothing", async () => {
     const h = harness()
     const r = await syncGroupsToNeon(creds, h.http, { apply: false })
     expect(r.planHash).toMatch(/^[0-9a-f]{64}$/)
     expect(r.skipped).toBe(false)
-    expect(h.posts).toHaveLength(0)
+    // AQU-1800: the dry run does post, but only as the read-only `dryRun`
+    // query behind "lane-access rows an apply would add". The no-op member
+    // upserts this file exists to prevent still ride on apply alone.
+    expect(h.posts).toHaveLength(1)
+    expect(JSON.parse(h.posts[0]).dryRun).toBe(true)
+    expect(r.laneGrants).toBe(4)
+  })
+
+  it("apply reports the lane-access rows the endpoint wrote", async () => {
+    const h = harness()
+    const r = await syncGroupsToNeon(creds, h.http, { apply: true })
+    expect(r.laneGrants).toBe(7)
+  })
+
+  it("a skipped apply reports no lane-grant count rather than zero", async () => {
+    const h = harness()
+    const first = await syncGroupsToNeon(creds, h.http, { apply: true })
+    const skipped = await syncGroupsToNeon(creds, h.http, { apply: true, lastPlanHash: first.planHash })
+    expect(skipped.skipped).toBe(true)
+    expect(skipped.laneGrants).toBeNull()
   })
 
   it("apply posts on first run, skips when the hash is unchanged, posts again when members change", async () => {

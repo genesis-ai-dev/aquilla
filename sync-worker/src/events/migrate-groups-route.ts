@@ -11,6 +11,7 @@
 // can place projects without a second round-trip.
 
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { countTeamLaneAccessStmt, grantTeamLaneAccessStmt } from '../../../db/shared/lane-grants'
 
 const PATH = '/migrate/groups'
 
@@ -47,7 +48,7 @@ interface Plan {
   teamMembers: TeamMemberRow[]
 }
 
-function isPlan(x: unknown): x is { plan: Plan } {
+function isPlan(x: unknown): x is { plan: Plan; dryRun?: boolean } {
   if (typeof x !== 'object' || x === null) return false
   const p = (x as { plan?: unknown }).plan as Plan | undefined
   return (
@@ -57,6 +58,19 @@ function isPlan(x: unknown): x is { plan: Plan } {
     Array.isArray(p.teams) &&
     Array.isArray(p.teamMembers)
   )
+}
+
+/** teamUuid -> the DISTINCT user ids the plan puts on that team. Distinct
+ *  because the dry-run count counts the pending ids it is handed, and the same
+ *  person listed twice would overstate what the apply would write. */
+function membersByTeam(plan: Plan): Map<string, Set<number>> {
+  const byTeam = new Map<string, Set<number>>()
+  for (const m of plan.teamMembers) {
+    const set = byTeam.get(m.teamUuid) ?? new Set<number>()
+    set.add(m.userId)
+    byTeam.set(m.teamUuid, set)
+  }
+  return byTeam
 }
 
 async function runBatch(db: AquillaDb, stmts: AquillaStatement[]): Promise<number> {
@@ -97,6 +111,27 @@ export async function handleMigrateGroupsRequest(
   if (!isPlan(body)) return new Response('body must be { plan: { orgs, orgMembers, teams, teamMembers } }', { status: 400 })
   const plan = body.plan
   const db = env.AQUILLA_PG
+
+  // AQU-1800: the sync's dry run reports how many lane-access rows the apply
+  // would add. Read-only — it writes nothing, not even the orgs and teams,
+  // which is why a team the plan has yet to create contributes nothing: it has
+  // no project attached, so there is no lane to grant.
+  if (body.dryRun === true) {
+    const teamIds = await idMap(db, 'groups')
+    let laneGrants = 0
+    for (const [teamUuid, pending] of membersByTeam(plan)) {
+      const teamId = teamIds.get(teamUuid)
+      if (teamId === undefined) continue
+      const row = await countTeamLaneAccessStmt(db, teamId, [...pending]).first<{ n: number }>()
+      laneGrants += Number(row?.n ?? 0)
+    }
+    return Response.json({
+      dryRun: true,
+      orgIdByUuid: Object.fromEntries(await idMap(db, 'organizations')),
+      teamIdByUuid: Object.fromEntries(teamIds),
+      would: { laneGrants },
+    })
+  }
 
   // 1) Orgs (new legacy_uuids only; conflicts skipped).
   const createdOrgs = await runBatch(
@@ -152,9 +187,30 @@ export async function handleMigrateGroupsRequest(
       ),
   )
 
+  // 5) AQU-1800: lane access for the team members just written. Membership is
+  //    what gives them the team's projects, and under the lane read wall a
+  //    member below Maintainer with no grant row opens those projects to source
+  //    text only. Runs for every team in the plan, not only the teams that
+  //    gained a member: the statement selects nothing for a member who already
+  //    holds grants there, so it is both idempotent and a repair for anyone the
+  //    one-off AQU-730 backfill missed.
+  const createdLaneGrants = await runBatch(
+    db,
+    [...membersByTeam(plan).keys()]
+      .map((teamUuid) => teamIdByUuid.get(teamUuid))
+      .filter((teamId): teamId is number => teamId !== undefined)
+      .map((teamId) => grantTeamLaneAccessStmt(db, teamId, null)),
+  )
+
   return Response.json({
     orgIdByUuid: Object.fromEntries(orgIdByUuid),
     teamIdByUuid: Object.fromEntries(teamIdByUuid),
-    created: { orgs: createdOrgs, orgMembers: createdOrgMembers, teams: createdTeams, teamMembers: createdTeamMembers },
+    created: {
+      orgs: createdOrgs,
+      orgMembers: createdOrgMembers,
+      teams: createdTeams,
+      teamMembers: createdTeamMembers,
+      laneGrants: createdLaneGrants,
+    },
   })
 }

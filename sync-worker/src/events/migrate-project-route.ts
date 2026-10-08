@@ -11,6 +11,7 @@
 // deterministic id and (group_id, project_id).
 
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { grantTeamLaneAccessStmt } from '../../../db/shared/lane-grants'
 import { ensureProjectLaneStmts, retryingLaneIdCollision } from '../../../db/shared/lanes'
 import { projectIdFor } from '../../../src/lib/migrate/ids'
 
@@ -131,6 +132,14 @@ export async function handleMigrateProjectRequest(
         )
       }
       stmts.push(...ensureProjectLaneStmts(db, body.projectId))
+      // AQU-1800: attaching the project to its team is what gives the team's
+      // members access to it, and under the lane read wall access without a
+      // lane grant shows them source text only. Last in the batch, so it sees
+      // the grant row and the lanes the statements above just wrote. Lanes the
+      // content sweep creates later are covered by grantNewLaneStmt.
+      if (typeof body.teamId === 'number') {
+        stmts.push(grantTeamLaneAccessStmt(db, body.teamId, body.ownerUserId))
+      }
       await db.batch(stmts)
     })
   } catch (err) {

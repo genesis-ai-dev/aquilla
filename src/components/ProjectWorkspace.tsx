@@ -33,7 +33,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 // AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
 // link and the first-position fallback that replaces the old `''` one.
@@ -2231,6 +2231,10 @@ export function ProjectWorkspace() {
   // tag can be. Shared with the completion target below so the editor labels
   // a lane with the same language it asks the model to translate into.
   const laneLabels = useMemo(() => laneLabelsByTag(laneRows), [laneRows])
+  // AQU-1784: a lane's code override, the suffix that tells two lanes showing
+  // the same label apart in the switcher, the TARGET pill and the import
+  // destination picker.
+  const laneCodes = useMemo(() => laneCodesByTag(laneRows), [laneRows])
   // AQU-602: the target language of the ACTIVE lane, so switching lanes
   // switches what the editor reads/writes/translates into (source stays
   // shared). The completion path was already lane-aware; this routes the
@@ -2329,10 +2333,11 @@ export function ProjectWorkspace() {
     return laneComboboxOptions({
       lanes: switchable,
       laneLabels,
+      laneCodes,
       defaultLaneLabel: laneLabels[""] || activeTargetLanguage || "Target",
       archivedLanes: archivedLaneTags,
     })
-  }, [project?.syncRole?.level, availableLanes, scopedLanes, laneLabels, activeTargetLanguage, archivedLaneTags])
+  }, [project?.syncRole?.level, availableLanes, scopedLanes, laneLabels, laneCodes, activeTargetLanguage, archivedLaneTags])
   // AQU-538 deep link: `/project/:id/editor?lane=<lane>` — PM surfaces link into
   // the editor at the lane they were viewing. Read the param ONCE per project
   // (after the lane registry loads so an unknown lane can be told apart from a
@@ -13912,6 +13917,7 @@ export function ProjectWorkspace() {
             onLaneChange={setActiveLane}
             defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
             laneLabels={laneLabels}
+            laneCodes={laneCodes}
             // AQU-583: the TARGET tag is the discoverable entry point to change
             // the target language — deep-link to settings filtered to the
             // Project Info + Languages sections (both carry the "target language"

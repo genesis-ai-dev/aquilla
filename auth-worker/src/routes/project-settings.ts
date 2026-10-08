@@ -520,6 +520,14 @@ const createLaneSchema = z.object({
   name: z.string(),
   language: z.string(),
   code: z.string().nullable().optional(),
+  /**
+   * AQU-1784: the languages screen warns inline when the new lane's display
+   * name duplicates an active lane's and then sends this, so the save goes
+   * through instead of coming back 409. Absent means the old refusal, which
+   * is what every other create path (project creation, the org's add-language
+   * popover, the sibling merge) still gets.
+   */
+  allowDuplicateName: z.boolean().optional(),
 })
 
 const archiveLaneSchema = z.object({
@@ -620,6 +628,7 @@ projectSettings.post(
         name: body.name,
         language: body.language,
         code: body.code,
+        allowDuplicateName: body.allowDuplicateName === true,
         targetLanguage,
         existing: (current.lanes ?? []).map((lane) => ({
           id: lane.id,

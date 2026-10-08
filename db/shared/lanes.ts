@@ -736,6 +736,9 @@ export async function createTargetLane(
     code?: string | null
     targetLanguage: string | null
     existing: readonly ExistingLaneIdentity[]
+    /** AQU-1784: let a display name that duplicates an existing lane's
+     *  through — the caller has already shown the maintainer the collision. */
+    allowDuplicateName?: boolean
   },
 ): Promise<
   | { ok: true; laneId: string; language: string; name: string | null; legacyTag: string; langCode: string | null }
@@ -750,6 +753,7 @@ export async function createTargetLane(
       code: input.code,
       targetLanguage: input.targetLanguage,
       existing: input.existing,
+      allowDuplicateName: input.allowDuplicateName,
     })
     if (!plan.ok) return { inserted: false as const, problem: plan.problem }
     await insertTargetLane(db, projectId, {

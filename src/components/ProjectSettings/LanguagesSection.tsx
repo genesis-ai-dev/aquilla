@@ -38,6 +38,8 @@ import {
   laneLanguage,
   laneLanguageCode,
 } from "@/lib/lanes/lane-display"
+import { laneLabelSuffixesById } from "@/lib/lanes/lane-language"
+import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 
@@ -79,6 +81,11 @@ export interface LanguagesSectionProps {
     name: string
     language: string
     code?: string | null
+    /** AQU-1784: accept a display name that duplicates an ACTIVE lane's. Sent
+     *  once this section has shown the collision inline, so the maintainer has
+     *  already seen it. A name duplicating an ARCHIVED lane is still refused —
+     *  restoring that lane is what they want. */
+    allowDuplicateName?: boolean
   }) => Promise<"ok" | "duplicate" | "invalid" | "malformed_code">
   onSetLaneArchived?: (laneId: string, archived: boolean) => Promise<boolean>
   /** AQU-1464: reads the lane's newest target edit for the archive confirmation.
@@ -178,6 +185,39 @@ export function LanguagesSection({
   // control is disabled here rather than offering a click that cannot work.
   const activeTargetCount = targetRows.filter((lane) => !lane.archivedAt).length
   const canArchiveAnyLane = activeTargetCount > 1
+  // AQU-1784: two lanes can resolve to the same display string — the same
+  // language with no name override on either, or the same name typed twice.
+  // They are told apart by a suffix, numbered in REGISTRY order so this screen
+  // and the editor's lane switcher name a collision identically.
+  const laneSuffixes = laneLabelSuffixesById(
+    targetRows.slice().sort((a, b) => a.position - b.position || a.id.localeCompare(b.id)),
+  )
+  const laneLabel = (lane: ProjectLaneView) =>
+    withLaneLabelSuffix(laneDisplayName(lane), laneSuffixes[lane.id] ?? null)
+  /**
+   * The ACTIVE lane a new one would read the same as, or undefined. Two lanes
+   * of one language is a legitimate shape (two teams, one language), so this
+   * drives a notice rather than a refusal — and the same answer tells
+   * `handleAdd` to send `allowDuplicateName`.
+   */
+  function duplicateActiveLane(language: string, name: string): ProjectLaneView | undefined {
+    // A blank candidate has no display name of its own — the placeholder
+    // `laneDisplayName` would hand back must not collide with anything.
+    if (!language && !name) return undefined
+    const folded = laneDisplayName({ role: "target", language, name: name || null })
+      .trim()
+      .toLocaleLowerCase()
+    return targetRows.find(
+      (lane) =>
+        !lane.archivedAt && laneDisplayName(lane).trim().toLocaleLowerCase() === folded,
+    )
+  }
+  const pendingDuplicate = rowMode
+    ? duplicateActiveLane(
+        normalizeLane(newLane),
+        nameEdited ? normalizeLane(laneName) : "",
+      )
+    : undefined
   const archiveBlockedTooltip = t("projectSettings.languages.lastActiveLaneTooltip")
 
   // The primary is shown in the default-language field above. Listing it again
@@ -216,6 +256,9 @@ export function LanguagesSection({
           name,
           language,
           code: normalizeLane(laneCode) || null,
+          // The collision has been on screen as a notice while they typed, so
+          // the save goes through rather than coming back refused.
+          allowDuplicateName: !!duplicateActiveLane(language, name),
         })
         if (result === "duplicate") {
           setAddError(t("projectSettings.languages.duplicateNameError"))
@@ -350,7 +393,7 @@ export function LanguagesSection({
                 <>
                   <div className="flex min-w-0 flex-col gap-0.5">
                     <span className="text-xs text-muted-foreground">
-                      {t("projectSettings.languages.archiveConfirm", { lane: laneDisplayName(defaultRow) })}
+                      {t("projectSettings.languages.archiveConfirm", { lane: laneLabel(defaultRow) })}
                     </span>
                     {onLoadLaneLastChange && (
                       <LaneLastChangeNote laneId={defaultRow.id} load={onLoadLaneLastChange} />
@@ -385,7 +428,7 @@ export function LanguagesSection({
                     disabled={!canEdit || !canArchiveAnyLane}
                     data-testid={`archive-lane-${defaultRow.id}`}
                     aria-label={t("projectSettings.languages.archiveLaneAriaLabel", {
-                      lane: laneDisplayName(defaultRow),
+                      lane: laneLabel(defaultRow),
                     })}
                     onClick={() => {
                       setLaneActionError(null)
@@ -430,11 +473,22 @@ export function LanguagesSection({
                         {laneLanguageCode(lane)}
                       </span>
                     )}
+                    {/* AQU-1784: only a lane that shares its label with another
+                        says how it is told apart — a project whose lane names
+                        are already unique renders exactly as it did. */}
+                    {laneSuffixes[lane.id] && (
+                      <span
+                        className="shrink-0 text-xs text-muted-foreground"
+                        data-testid={`lane-shown-as-${lane.id}`}
+                      >
+                        {t("projectSettings.languages.laneShownAs", { label: laneLabel(lane) })}
+                      </span>
+                    )}
                     {pendingArchive === lane.id ? (
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="flex min-w-0 flex-col gap-0.5">
                           <span className="text-xs text-muted-foreground">
-                            {t("projectSettings.languages.archiveConfirm", { lane: laneDisplayName(lane) })}
+                            {t("projectSettings.languages.archiveConfirm", { lane: laneLabel(lane) })}
                           </span>
                           {/* AQU-1464: whether the lane is dormant or someone is
                               working in it right now — archiving locks them out. */}
@@ -464,7 +518,7 @@ export function LanguagesSection({
                           className="h-7 w-7 shrink-0"
                           disabled={!canEdit || !canArchiveAnyLane}
                           data-testid={`archive-lane-${lane.id}`}
-                          aria-label={t("projectSettings.languages.archiveLaneAriaLabel", { lane: laneDisplayName(lane) })}
+                          aria-label={t("projectSettings.languages.archiveLaneAriaLabel", { lane: laneLabel(lane) })}
                           onClick={() => {
                             setLaneActionError(null)
                             setPendingArchive(lane.id)
@@ -544,7 +598,7 @@ export function LanguagesSection({
               {t("projectSettings.languages.archivedLanesDescription")}
             </p>
             <ul data-testid="archived-lanes-list" className="flex flex-col gap-1">
-              {(rowMode ? archivedRows.map((lane) => laneDisplayName(lane)) : archived).map((lane, index) => {
+              {(rowMode ? archivedRows.map((lane) => laneLabel(lane)) : archived).map((lane, index) => {
                 const key = rowMode ? archivedRows[index].id : lane
                 return (
                 <li
@@ -682,6 +736,15 @@ export function LanguagesSection({
               </div>
             )}
           </div>
+        )}
+        {/* AQU-1784: the collision is named BEFORE the save, and the save is
+            still allowed — the switcher numbers the pair once both exist. */}
+        {pendingDuplicate && !addError && (
+          <p className="text-xs text-muted-foreground" data-testid="add-lane-duplicate-notice">
+            {t("projectSettings.languages.duplicateNameNotice", {
+              lane: laneLabel(pendingDuplicate),
+            })}
+          </p>
         )}
         {addError && <p className="text-xs text-destructive">{addError}</p>}
       </CardContent>

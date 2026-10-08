@@ -44,16 +44,14 @@ export const workspace = defineNamespace({
     // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
-    // Tauri desktop: a downloaded app update, held until the offline queue has
-    // reached the server (src/components/DesktopUpdatePrompt.tsx).
+    // Desktop update prompt (DesktopUpdatePrompt.tsx).
     "workspace.update.readyToast": "Aquilla {version} is ready to install.",
     "workspace.update.restartToUpdate": "Restart to update",
     "workspace.update.stuckToast": plural({
       one: "Aquilla {version} is ready, but {count} change hasn't reached the server yet. If you update now, it stays saved on this device and sends after the restart.",
       other: "Aquilla {version} is ready, but {count} changes haven't reached the server yet. If you update now, they stay saved on this device and send after the restart.",
     }),
-    // Some of the unsent changes were refused by the server; those don't send
-    // on their own, after a restart or otherwise.
+    // Refused rows never resend, so don't promise they will.
     "workspace.update.refusedToast": plural({
       one: "Aquilla {version} is ready, but {count} change hasn't reached the server — it was refused, so it won't send on its own. If you update now, it stays saved on this device.",
       other: "Aquilla {version} is ready, but {count} changes haven't reached the server, and some were refused and won't send on their own. If you update now, they all stay saved on this device.",
@@ -612,6 +610,19 @@ export const workspace = defineNamespace({
           "new app version is downloaded but some changes made on this device " +
           "still haven't been sent to the server. Reassures that updating keeps " +
           "them. Paired with an 'Update anyway' action " +
+          "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
+          "'sync' jargon.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+          count: "How many changes haven't been sent yet.",
+        },
+      },
+      "workspace.update.refusedToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when a " +
+          "new app version is downloaded but some unsent changes were refused " +
+          "by the server and won't send on their own. Must not promise they'll " +
+          "send after the update. Paired with an 'Update anyway' action " +
           "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
           "'sync' jargon.",
         placeholders: {

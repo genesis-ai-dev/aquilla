@@ -1,8 +1,4 @@
-// The session recorded into each generation's eventlog fixture
-// (eventlog-compat.test.ts): a download, some edits queued offline, some sent
-// and some stuck, using every event the schema declares. Only read when a new
-// generation's fixture is written — the frozen fixtures are what later builds
-// are tested against, so edit this freely for the next generation.
+// Source for the next generation's fixture only — edit freely; frozen fixtures are what's tested.
 import { events } from "../schema"
 
 const at = new Date("2026-10-05T12:00:00Z")
@@ -63,8 +59,7 @@ export function buildSampleSession() {
     events.syncCursorSet({ projectId: "proj1", fileId: "file2", serverSeq: 17, projectEpoch: 1 }),
     events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: at, queueDepth: 0 }),
 
-    // Offline editing: q1 reached the server, q2 is mid-flush, q3 was refused
-    // (403), q4 is still waiting. q2–q4 must survive every later build.
+    // q1 sent, q2 mid-flush, q3 refused (403), q4 waiting; q2–q4 must survive every later build.
     queued("q1", "GEN 1:1", "En el principio creó Dios"),
     queued("q2", "GEN 1:2", "Y la tierra estaba desordenada"),
     queued("q3", "EXO 1:1", "Estos son los nombres"),
@@ -74,7 +69,6 @@ export function buildSampleSession() {
     events.eventQueueStatusSet({ id: "q2", status: "flushing" }),
     events.eventQueueStatusSet({ id: "q3", status: "failed" }),
 
-    // A second project downloaded and then removed again.
     events.offlineProjectStatusSet({ projectId: "proj2", status: "ready", syncedAt: at, queueDepth: 0 }),
     events.projectSynced({ id: "proj2", name: "Mark", orgId: "org1", settings: null, syncedAt: at }),
     events.fileSynced({ id: "file3", projectId: "proj2", name: "MRK", type: "usfm", sequenceIndex: 0 }),

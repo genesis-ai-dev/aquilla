@@ -1,14 +1,4 @@
-// Desktop auto-update, split into download and install so the webview can
-// hold the install until the offline store's queue has drained to the server
-// (src/components/DesktopUpdatePrompt.tsx).
-//
-// Why: a user who edited offline only gets an update once they're back
-// online, and the update relaunches straight into the new build. Anything
-// still queued then has to survive a newer offline schema reading it. Sending
-// it first makes the upgrade lose nothing but re-downloadable cache.
-//
-// Tauri v2 has no built-in update dialog (`plugins.updater.dialog` is a v1
-// key), so nothing checked for updates before this module.
+// Download and install are split so the install can wait for the offline queue to drain.
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,22 +8,16 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::shutdown_guard::{self, ShutdownGuardState};
 
-/// Bounds on a check and a download. Without them a connection that stalls
-/// (sleep, a captive portal) never resolves, and since the call holds
-/// `downloading`, every later check would queue behind it until a restart.
+/// Unbounded, a stalled fetch holds `downloading` and blocks every later check.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
-/// A download is only abandoned when no bytes arrive for this long, so a slow
-/// but moving connection still finishes.
+/// Measured since the last chunk, so slow-but-moving downloads still finish.
 const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(120);
 const DOWNLOAD_STALL_POLL: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub struct AppUpdateState {
-    /// A checked and fully downloaded update, waiting for `install_app_update`.
     ready: Mutex<Option<(Update, Vec<u8>)>>,
-    /// Held for a whole check + download, so a call that overlaps one already
-    /// running (the webview re-checks on every reconnect) waits for it and
-    /// returns its result instead of fetching the installer a second time.
+    /// Overlapping calls (one per reconnect) wait and reuse the result instead of re-downloading.
     downloading: tokio::sync::Mutex<()>,
 }
 
@@ -53,10 +37,7 @@ impl From<&Update> for DownloadedUpdate {
     }
 }
 
-/// Checks for an update and downloads it without installing. `None` when the
-/// app is up to date. Repeat calls after a successful download return the
-/// same update without fetching it again, including calls that overlap an
-/// in-flight download.
+/// `None` when up to date; repeat calls return the already-downloaded update.
 #[tauri::command]
 pub async fn download_app_update(
     app: AppHandle,
@@ -80,8 +61,7 @@ pub async fn download_app_update(
     Ok(Some(info))
 }
 
-/// Downloads `update`, giving up once no bytes have arrived for
-/// `DOWNLOAD_STALL_TIMEOUT`. Dropping the download future cancels the request.
+/// Returning early drops `download`, which cancels the request.
 async fn download_unless_stalled(update: &Update) -> Result<Vec<u8>, String> {
     let last_progress = Arc::new(Mutex::new(Instant::now()));
     let on_chunk = {
@@ -107,14 +87,7 @@ async fn download_unless_stalled(update: &Update) -> Result<Vec<u8>, String> {
     }
 }
 
-/// Installs the downloaded update and relaunches into it, after the same save
-/// handshake as a quit. The webview must only call this once its offline
-/// queue is empty. If the install itself fails the app still relaunches (on
-/// the old version) — the store has already been shut down by then.
-///
-/// Errs without starting anything when there's no downloaded update, or when
-/// a quit/restart/install already claimed the shutdown — the update stays
-/// downloaded, so it isn't lost to a shutdown that won't install it.
+/// Call only with an empty offline queue. Relaunches (on the old version) even if install fails.
 #[tauri::command]
 pub fn install_app_update(
     app: AppHandle,
@@ -124,8 +97,7 @@ pub fn install_app_update(
     if update_state.ready.lock().map_err(|e| e.to_string())?.is_none() {
         return Err("no downloaded update to install".into());
     }
-    // Only taken once the handshake has run, i.e. once this install owns the
-    // shutdown.
+    // Taken inside the closure so a refused shutdown leaves the update downloaded.
     let started = shutdown_guard::exit_after_handshake(&app, &guard_state, |app| {
         let ready = app
             .state::<AppUpdateState>()

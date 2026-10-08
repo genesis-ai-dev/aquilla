@@ -10,8 +10,7 @@ import { isTauriRuntime } from "./is-tauri"
 import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
 import { checkClientSessionHead } from "./head-check"
 
-// Names the OPFS directory the store lives in — changing it strands every
-// device's existing data (incl. unsent edits). eventlog-compat.test.ts pins it.
+// Names the OPFS dir; changing it strands every device's data (pinned by eventlog-compat.test.ts).
 export const STORE_ID = "aquilla-offline"
 
 // Re-exported for backward compatibility — existing importers (e.g.

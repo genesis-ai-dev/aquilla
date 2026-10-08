@@ -19,7 +19,7 @@ import {
 const UPDATE_TOAST_ID = "desktop-update"
 const RECHECK_MS = 6 * 60 * 60_000
 
-/** src-tauri/src/app_update.rs `DownloadedUpdate`. */
+/** Mirrors app_update.rs `DownloadedUpdate`. */
 export interface DownloadedUpdate {
   version: string
   notes: string | null
@@ -30,8 +30,7 @@ export interface DesktopUpdateCommands {
   install: () => Promise<void>
 }
 
-// Dynamically imported so the browser SPA never pulls @tauri-apps/api into
-// its bundle — same convention as OfflineShutdownGuard.tsx.
+// Dynamic import keeps @tauri-apps/api out of the browser bundle.
 const tauriCommands: DesktopUpdateCommands = {
   download: async () => {
     const { invoke } = await import("@tauri-apps/api/core")
@@ -49,19 +48,7 @@ type Props = {
   graceMs?: number
 }
 
-/**
- * Invisible mount: checks for a desktop update while online, downloads it,
- * and offers to install only once the offline queue has reached the server
- * (src/lib/offline/update-gate.ts for why). If the queue isn't draining it
- * offers "Update anyway" instead — the rows stay in the local store. Both
- * queues count: the offline store's and the IndexedDB outbox. Nothing is
- * offered while the offline store is still booting; if it failed to boot, or
- * the outbox can't be read, the prompt warns rather than claim all is sent.
- * Installing runs the same save handshake as a quit
- * (src-tauri/src/app_update.rs).
- *
- * Rendered alongside the other invisible offline mounts in App.tsx.
- */
+/** Offers a downloaded desktop update once both offline queues have drained (see update-gate.ts). */
 export function DesktopUpdatePrompt({
   commands = tauriCommands,
   recheckMs = RECHECK_MS,
@@ -72,7 +59,7 @@ export function DesktopUpdatePrompt({
   const { store, loading: storeLoading } = useOfflineStore()
   const [update, setUpdate] = useState<DownloadedUpdate | null>(null)
   const [queue, setQueue] = useState<OfflineQueueSnapshot>(EMPTY_QUEUE)
-  // Undefined until the first read lands; null if IndexedDB couldn't be read.
+  // undefined = not read yet; null = unreadable.
   const [outbox, setOutbox] = useState<OfflineQueueSnapshot | null | undefined>(undefined)
   const installing = useRef(false)
   const [graceOver, setGraceOver] = useState(false)
@@ -132,7 +119,6 @@ export function DesktopUpdatePrompt({
     }
   }, [update, pending, graceMs])
 
-  // Hold until both queues have been read once.
   const gate = storeLoading || outbox === undefined ? null : evaluateUpdateGate(total, graceOver)
   const gateKind = gate?.kind ?? "sending"
   const count = gate?.kind === "sending" || gate?.kind === "stuck" ? gate.count : 0
@@ -144,16 +130,13 @@ export function DesktopUpdatePrompt({
       return
     }
     const install = () => {
-      // A second click would find the shutdown already claimed and fail.
-      // `install` resolves once the save handshake starts, not when the app
-      // exits, so the flag stays set on success — the app is on its way out.
+      // Blocks double-clicks; stays set on success since the app is already exiting.
       if (installing.current) return
       installing.current = true
       commands.install().catch((error: unknown) => {
         installing.current = false
         console.warn("[update] install failed", error)
-        // The update is still downloaded unless it went missing; re-checking
-        // returns it again either way.
+        // Re-checking re-offers the update (re-downloading it if it went missing).
         setUpdate(null)
       })
     }

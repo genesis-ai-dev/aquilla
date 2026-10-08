@@ -898,11 +898,7 @@ export async function removeOutboxEvents(
   notifyOutboxChanged()
 }
 
-/**
- * Total and failed record counts in one pass. Unlike `outboxPendingCount` /
- * `outboxFailedCount` this throws when IndexedDB can't be read, for callers
- * that must not mistake an unreadable outbox for an empty one.
- */
+/** Throws when IndexedDB is unreadable (unlike `outboxPendingCount`), so unreadable ≠ empty. */
 export async function readOutboxCounts(scope?: OutboxOwnerScope): Promise<{ count: number; failed: number }> {
   const ownerKey = ownerForScope(scope)
   const db = await openDb()

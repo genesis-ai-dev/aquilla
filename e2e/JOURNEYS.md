@@ -359,6 +359,20 @@ UI chrome that used to be one smoke file per click is covered under
 - Inworld Voice Design starting-point chips (Agent, Narrator, Instructor, Pirate — Companion removed AQU-1378) (`InworldVoiceDesignField.test.tsx`, `inworld-voice-design.test.ts`)
 - AI model consent dialog: Just Whisper starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
 - Org add-member dialog defaults to Contributor and states that org membership below Maintainer does not open projects (`MembersPage.test.tsx`; access-panel copy in `MemberAccessPanel.test.tsx`)
+- Member inspector lane access (AQU-1783): the popover reports a member's LANE GRANTS
+  (`project_member_lane_roles`), not their scopes, because the read wall reads the grants —
+  reading the scopes is what made it print "Unscoped — full access" about a contributor the
+  wall had walled off. The verdict rule is `src/lib/lanes/grant-gap.test.ts` (all granted /
+  gap / deliberate scoping / a grant below Viewer / Maintainer-by-role / wall off); the three
+  rendered states, the "no access" marker and the one-click regrant are in
+  `MemberLaneScopeEditor.test.tsx`; the endpoint payload, the lead-only gate and the regrant
+  equalling the current non-archived lane set are in
+  `auth-worker/src/__tests__/member-scopes-lane-grants.test.ts`. No smoke: the gap is a
+  two-table DISAGREEMENT, so a walk only shows it with the read wall on (`LANE_READ_WALL`,
+  unset locally and in e2e) AND two browser contexts whose grants have been made to drift —
+  the owner adding a lane after the contributor joined. That fixture does not exist, so the
+  owner-adds-a-lane → inspector-shows-the-gap → regrant → contributor-reloads walk is on this
+  issue's QA checklist rather than written blind.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.

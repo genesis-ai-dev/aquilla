@@ -27,9 +27,15 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
-import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import {
+  loadCurrentTargetLanes,
+  loadLaneGrants,
+  loadTargetLaneIdentities,
+} from "../../../db/shared/lane-visibility"
 import { laneScopeIdsForStorage, type LaneScopeConversion } from "../../../src/lib/lanes/scope-ids"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
+import { laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
+import type { MemberLaneGrant } from "../../../src/lib/lanes/grant-gap"
 
 const memberScopes = new Hono<AuthHonoEnv>()
 
@@ -131,6 +137,73 @@ async function laneNamesForScopes(
 }
 
 /**
+ * AQU-1783: what the member inspector needs to tell the truth about a
+ * member's lane access.
+ *
+ * The inspector used to read the scopes above and print "Unscoped — full
+ * access" when they were empty. The read wall reads `project_member_lane_roles`
+ * instead, and the two drift apart whenever grants were never written or lag
+ * behind the lane set. So the inspector gets the GRANTS, plus the project's
+ * current target lanes, and computes the gap with `memberLaneAccess` — the
+ * wall's own rule, client-side (`src/lib/lanes/grant-gap.ts`).
+ *
+ * Only a project lead (500+) gets this block, matching the rule that already
+ * governs reading someone else's scopes. A member below that reading their own
+ * scopes must NOT learn the project's whole lane set: that is the sibling-lane
+ * leak AQU-1421 closes.
+ *
+ * `undefined` when the project has no target lane rows at all — there is then
+ * no lane set to diagnose against, and an older client simply sees the plain
+ * `{ scopes }` shape it always saw.
+ */
+interface MemberLaneAccessPayload {
+  /** The target member's EFFECTIVE project role — the one the wall resolves. */
+  memberRoleLevel: number
+  /** Whether THIS environment enforces the wall; local and e2e do not. */
+  readWallEnabled: boolean
+  grants: MemberLaneGrant[]
+  targetLanes: Array<{ id: string; name: string }>
+}
+
+async function loadLaneAccess(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  targetUserId: number,
+): Promise<MemberLaneAccessPayload | undefined> {
+  const targetLanes = await loadCurrentTargetLanes(env.AQUILLA_PG, projectId)
+  if (targetLanes.length === 0) return undefined
+  const projectRow = await env.AQUILLA_PG.prepare(
+    "SELECT created_by, org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ created_by: number; org_id: number | null }>()
+  if (!projectRow) return undefined
+  const effectiveMembers = await listEffectiveProjectMembers(
+    env,
+    projectId,
+    projectRow.org_id,
+    projectRow.created_by,
+  )
+  const member = effectiveMembers.find((m) => m.userId === targetUserId)
+  if (!member) return undefined
+  // A grant may still name an archived lane, so names come from the full lane
+  // list — a grant is reported with the name it has, never with its id.
+  const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  const nameById = new Map(identities.map((lane) => [lane.id, lane.name] as const))
+  const grants = await loadLaneGrants(env.AQUILLA_PG, projectId, targetUserId)
+  return {
+    memberRoleLevel: member.roleLevel,
+    readWallEnabled: laneReadWallEnabled(env.LANE_READ_WALL),
+    grants: grants.map((grant): MemberLaneGrant => ({
+      laneId: grant.lane,
+      name: nameById.get(grant.lane) ?? "",
+      level: grant.level,
+    })),
+    targetLanes,
+  }
+}
+
+/**
  * GET /api/v2/projects/:projectId/members/:userId/scopes
  *
  * Own scopes: viewer (100+). Others' scopes: project_lead (500+).
@@ -158,16 +231,22 @@ memberScopes.get(
 
     const scopes = await loadScopes(c.env, projectId, targetUserId)
     const laneNames = await laneNamesForScopes(c.env, projectId, scopes)
+    // AQU-1783: the inspector's grant list. Lead-only — see loadLaneAccess.
+    const laneAccess =
+      callerRole.level >= ROLE.PROJECT_LEAD
+        ? await loadLaneAccess(c.env, projectId, targetUserId)
+        : undefined
     // A member asking about THEMSELVES also learns whether the org lets
     // lane-limited members assign work — see loadLaneAssignmentAllowed.
     if (rawUserId === "me") {
       return c.json({
         scopes,
         ...(laneNames ? { laneNames } : {}),
+        ...(laneAccess ? { laneAccess } : {}),
         allowScopedLaneAssignment: await loadLaneAssignmentAllowed(c.env, projectId),
       })
     }
-    return c.json({ scopes, ...(laneNames ? { laneNames } : {}) })
+    return c.json({ scopes, ...(laneNames ? { laneNames } : {}), ...(laneAccess ? { laneAccess } : {}) })
   },
 )
 
@@ -302,7 +381,14 @@ memberScopes.put(
 
     const saved = await loadScopes(c.env, projectId, targetUserId)
     const savedLaneNames = await laneNamesForScopes(c.env, projectId, saved)
-    return c.json({ scopes: saved, ...(savedLaneNames ? { laneNames: savedLaneNames } : {}) })
+    // AQU-1783: the grants this save just rewrote, so the inspector's "lanes
+    // they can read" list refreshes from the server without a page reload.
+    const savedLaneAccess = await loadLaneAccess(c.env, projectId, targetUserId)
+    return c.json({
+      scopes: saved,
+      ...(savedLaneNames ? { laneNames: savedLaneNames } : {}),
+      ...(savedLaneAccess ? { laneAccess: savedLaneAccess } : {}),
+    })
   },
 )
 
@@ -320,10 +406,14 @@ async function syncMemberLaneGrants(
   if (!membership) return
   const lanes = await loadTargetLaneIdentities(db, projectId)
   if (lanes.length === 0) return
+  // AQU-1783: an unscoped member is granted the project's CURRENT lanes. A
+  // scope still resolves against every lane, archived included, so a member
+  // deliberately scoped to a since-archived lane keeps that grant.
   const plan = planLaneGrants({
     roleLevel: membership.role_level,
     laneScopes: laneIds,
     lanes,
+    fanOutLanes: await loadCurrentTargetLanes(db, projectId),
   })
   await db
     .prepare("DELETE FROM project_member_lane_roles WHERE project_id = ? AND user_id = ?")

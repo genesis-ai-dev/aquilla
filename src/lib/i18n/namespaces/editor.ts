@@ -1137,6 +1137,7 @@ export const editor = defineNamespace({
     "editor.row.addLineBelow": "Add a line below",
     "editor.row.draftSearching": "{cellRef}: Looking up similar examples…",
     "editor.row.draftGenerating": "{cellRef}: Generating translation…",
+    "editor.row.aligningStyles": "{cellRef}: Aligning styles…",
     "editor.row.draftPreviewReady": "{cellRef}: Translation preview available",
     "editor.assurance.validatedWithInfractions":
       "Validation is authoritative, but automatic checks still found an issue.",
@@ -1471,6 +1472,16 @@ export const editor = defineNamespace({
       "This edit would change the protected IDML document structure.",
     "editor.idml.editWouldChangeFormattingError":
       "This edit would change protected IDML formatting.",
+    "editor.idml.alignStylesChangedWording":
+      "Align styles would have changed the wording, so nothing was saved.",
+    "editor.idml.alignStylesUnchanged":
+      "Align styles did not move any text. Nothing was changed.",
+    "editor.idml.alignStylesEmpty":
+      "Align styles returned no placement. Nothing was saved.",
+    "editor.idml.alignStylesFailed":
+      "Align styles could not place this cell. Nothing was saved.",
+    "editor.idml.alignStylesUnavailable":
+      "This cell has no style runs to align.",
 
     // — Text-to-speech status badge on a row ————————————————————————
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
@@ -1664,6 +1675,9 @@ export const editor = defineNamespace({
     "editor.ai.translateWithAi": "Translate with AI",
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
+    "editor.ai.alignStyles": "Align styles",
+    "editor.ai.aligningStyles": "Aligning styles…",
+    "editor.ai.alignStylesNeedsText": "Translate this cell before aligning styles",
 
     // — Remaining action-rail tooltips ————————————————————————————
     "editor.audio.play": "Play audio",
@@ -1947,6 +1961,16 @@ export const editor = defineNamespace({
           "Screen-reader-only live-region announcement while an AI draft is " +
           "being written for one row. Never visible. Leads with the row's " +
           "reference so a listener knows which line is speaking.",
+        placeholders: {
+          cellRef: "The row's reference, e.g. a verse or cue id.",
+        },
+      },
+      "editor.row.aligningStyles": {
+        description:
+          "Screen-reader-only live-region announcement while Align styles is " +
+          "moving this row's existing translation into the source's bold and " +
+          "italic runs. Never visible. It is not a new translation. Leads with " +
+          "the row's reference so a listener knows which line is speaking.",
         placeholders: {
           cellRef: "The row's reference, e.g. a verse or cue id.",
         },
@@ -5491,6 +5515,34 @@ export const editor = defineNamespace({
           "reports a structural break already detected on commit. 'IDML' is the " +
           "file-format name and stays as-is.",
       },
+      "editor.idml.alignStylesChangedWording": {
+        description:
+          "Inline error after Align styles. The model tried to rephrase the " +
+          "translation instead of only moving words between style runs, so the " +
+          "app refused to save. The 'nothing was saved' half must survive.",
+      },
+      "editor.idml.alignStylesUnchanged": {
+        description:
+          "Inline notice after Align styles when the model left every word in " +
+          "the run it was already in. Nothing was written. Not a failure of the " +
+          "translation itself.",
+      },
+      "editor.idml.alignStylesEmpty": {
+        description:
+          "Inline error when Align styles comes back without a placement for " +
+          "the runs. The 'nothing was saved' half must survive.",
+      },
+      "editor.idml.alignStylesFailed": {
+        description:
+          "Inline error when Align styles cannot rebuild the cell's protected " +
+          "structure. The 'nothing was saved' half must survive. 'Align styles' " +
+          "is the name of the action.",
+      },
+      "editor.idml.alignStylesUnavailable": {
+        description:
+          "Inline error when Align styles is asked of a cell that has no " +
+          "separate style runs to move words between. One sentence.",
+      },
       "editor.idml.editWouldChangeFormattingError": {
         description:
           "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
@@ -6410,6 +6462,27 @@ export const editor = defineNamespace({
           "Tooltip on the refresh button that asks the model for a different draft " +
           "of a cell that already has one. The clause after the dash is the point: " +
           "it produces an alternative, not a correction.",
+      },
+      "editor.ai.alignStyles": {
+        description:
+          "Hover tooltip on the last icon in a cell's three-dot menu, on files whose " +
+          "layout must round-trip (Adobe InDesign). The button itself shows only an " +
+          "icon. It asks the model to move the existing translation into the " +
+          "source's bold, italic, and plain runs. It does not write a new " +
+          "translation. Also the button's accessible name when the action can run. " +
+          "Imperative, two words.",
+        maxLength: 16,
+      },
+      "editor.ai.aligningStyles": {
+        description:
+          "Tooltip and status while Align styles is in flight. Present participle, " +
+          "trailing ellipsis glyph. Not a translation draft.",
+        maxLength: 22,
+      },
+      "editor.ai.alignStylesNeedsText": {
+        description:
+          "Tooltip on Align styles when the cell has no translation yet, so there " +
+          "are no words to move into style runs. Imperative — translate first.",
       },
       "editor.audio.play": {
         description:

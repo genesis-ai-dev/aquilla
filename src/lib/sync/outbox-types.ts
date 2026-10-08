@@ -143,7 +143,7 @@ export interface AiDraftProvenance {
   /** Source/target of examples placed in the prompt (#946 reload). */
   exampleTexts?: Array<{ cellId: string; source: string; target: string }>
   generatedAt: number
-  mode: "single" | "batch" | "paragraph" | "agent" | "read"
+  mode: "single" | "batch" | "paragraph" | "agent" | "read" | "align-styles"
   /** AQU-1656: the ai_interventions row holding this draft's prompt and raw
    *  output. A row is current while the cell's draft still carries its id. */
   interventionId?: string

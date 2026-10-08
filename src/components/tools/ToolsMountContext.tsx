@@ -18,6 +18,49 @@ export interface ToolsMountValue {
   refresh: () => void
   /** Cached tool detail (source) fetch. */
   loadTool: (toolId: string) => Promise<ToolDetail>
+  /** Extensions pinned to the editor bar (per user + project). */
+  pinned: string[]
+  togglePin: (toolId: string) => void
+  /** The extension open in the side panel (per user + project). */
+  dockSelection: string | null
+  setDockSelection: (toolId: string | null) => void
+  /** Bumps whenever something asks for the side panel to open. */
+  panelRequestSeq: number
+  openInPanel: (toolId: string) => void
+  paletteOpen: boolean
+  setPaletteOpen: (open: boolean) => void
+}
+
+interface ExtensionPrefs {
+  pinned: string[]
+  dock: string | null
+}
+
+function prefsKey(username: string, projectId: string): string {
+  return `aquilla.extensions.prefs.v1:${username}:${projectId}`
+}
+
+function readPrefs(username: string, projectId: string): ExtensionPrefs {
+  try {
+    const raw = window.localStorage.getItem(prefsKey(username, projectId))
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    if (!parsed || typeof parsed !== "object") return { pinned: [], dock: null }
+    const o = parsed as Record<string, unknown>
+    return {
+      pinned: Array.isArray(o.pinned) ? o.pinned.filter((x): x is string => typeof x === "string") : [],
+      dock: typeof o.dock === "string" ? o.dock : null,
+    }
+  } catch {
+    return { pinned: [], dock: null }
+  }
+}
+
+function writePrefs(username: string, projectId: string, prefs: ExtensionPrefs): void {
+  try {
+    window.localStorage.setItem(prefsKey(username, projectId), JSON.stringify(prefs))
+  } catch {
+    // private mode / quota — prefs still apply for this session
+  }
 }
 
 const ToolsMountContext = createContext<ToolsMountValue | null>(null)
@@ -29,6 +72,39 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
   const [version, setVersion] = useState(0)
   const [details] = useState(() => new Map<string, Promise<ToolDetail>>())
   const jwt = session?.jwt ?? null
+  const username = session?.username ?? ""
+  const prefsId = `${username}:${projectId}`
+  const [prefs, setPrefs] = useState<ExtensionPrefs>(() => readPrefs(username, projectId))
+  const [prefsFor, setPrefsFor] = useState(prefsId)
+  if (prefsFor !== prefsId) {
+    setPrefsFor(prefsId)
+    setPrefs(readPrefs(username, projectId))
+  }
+  const [panelRequestSeq, setPanelRequestSeq] = useState(0)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const updatePrefs = useCallback(
+    (fn: (p: ExtensionPrefs) => ExtensionPrefs) => {
+      setPrefs((prev) => {
+        const next = fn(prev)
+        writePrefs(username, projectId, next)
+        return next
+      })
+    },
+    [username, projectId],
+  )
+  const togglePin = useCallback(
+    (toolId: string) =>
+      updatePrefs((p) => ({ ...p, pinned: p.pinned.includes(toolId) ? p.pinned.filter((x) => x !== toolId) : [...p.pinned, toolId] })),
+    [updatePrefs],
+  )
+  const setDockSelection = useCallback((toolId: string | null) => updatePrefs((p) => ({ ...p, dock: toolId })), [updatePrefs])
+  const openInPanel = useCallback(
+    (toolId: string) => {
+      setDockSelection(toolId)
+      setPanelRequestSeq((n) => n + 1)
+    },
+    [setDockSelection],
+  )
 
   useEffect(() => {
     if (!jwt || !projectId) return
@@ -67,8 +143,22 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo(
-    () => ({ projectId, session: session ?? null, tools, refresh, loadTool }),
-    [projectId, session, tools, refresh, loadTool],
+    () => ({
+      projectId,
+      session: session ?? null,
+      tools,
+      refresh,
+      loadTool,
+      pinned: prefs.pinned,
+      togglePin,
+      dockSelection: prefs.dock,
+      setDockSelection,
+      panelRequestSeq,
+      openInPanel,
+      paletteOpen,
+      setPaletteOpen,
+    }),
+    [projectId, session, tools, refresh, loadTool, prefs, togglePin, setDockSelection, panelRequestSeq, openInPanel, paletteOpen],
   )
   return <ToolsMountContext.Provider value={value}>{children}</ToolsMountContext.Provider>
 }

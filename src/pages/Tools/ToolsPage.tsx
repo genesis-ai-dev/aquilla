@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Blocks, History, Play, Trash2, X } from "lucide-react"
+import { ArrowLeft, Blocks, History, Pin, PinOff, Play, Trash2, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -15,6 +15,7 @@ import { BuildToolCard, type BuiltTool } from "@/components/tools/BuildToolCard"
 import { InstallToolDialog } from "@/components/tools/InstallToolDialog"
 import { ToolActivityPanel } from "@/components/tools/ToolActivityPanel"
 import { useScopeLabel } from "@/components/tools/scope-label"
+import { useToolsMount } from "@/components/tools/ToolsMountContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProject } from "@/hooks/useProject"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -50,12 +51,14 @@ export function ToolsPage() {
   const [installing, setInstalling] = useState(false)
   const [activityFor, setActivityFor] = useState<string | null>(null)
   const jwt = session?.jwt ?? null
+  const mounts = useToolsMount()
 
   const refresh = useCallback(async () => {
     if (!jwt || !projectId) return
     try {
       setTools(await listTools(jwt, projectId))
       setError(null)
+      mounts?.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -178,12 +181,29 @@ export function ToolsPage() {
                       <History className="size-3.5" aria-hidden />
                       {t("extensions.activity.heading")}
                     </Button>
+                    {tool.manifest.mounts.includes("panel") && mounts && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        aria-pressed={mounts.pinned.includes(tool.id)}
+                        aria-label={`${mounts.pinned.includes(tool.id) ? t("extensions.unpin") : t("extensions.pin")}: ${tool.name}`}
+                        onClick={() => mounts.togglePin(tool.id)}
+                      >
+                        {mounts.pinned.includes(tool.id) ? <PinOff className="size-3.5" aria-hidden /> : <Pin className="size-3.5" aria-hidden />}
+                      </Button>
+                    )}
                     <Button size="sm" variant="ghost" aria-label={`${t("extensions.remove")}: ${tool.name}`} onClick={() => void remove(tool)}>
                       <Trash2 className="size-3.5" aria-hidden />
                     </Button>
                   </div>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{tool.description}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("extensions.mounts.label")}:{" "}
+                  {tool.manifest.mounts
+                    .map((m) => (m === "page" ? t("extensions.mounts.page") : m === "panel" ? t("extensions.mounts.panel") : m === "inline" ? t("extensions.mounts.inline") : t("extensions.mounts.editor")))
+                    .join(" · ")}
+                </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                   <span className="text-muted-foreground">{t("extensions.grants.label")}:</span>
                   {tool.grantedScopes.length === 0 && <span className="text-muted-foreground">{t("extensions.grants.none")}</span>}

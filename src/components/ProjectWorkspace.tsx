@@ -176,7 +176,9 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { ToolsDockPanel } from "./tools/ToolMounts"
-import { ExtensionEditorSurface, ExtensionEditorSwitcher, useExtensionEditorChoice } from "./tools/ExtensionEditor"
+import { ExtensionEditorSurface, useExtensionEditorChoice } from "./tools/ExtensionEditor"
+import { ExtensionsBar } from "./tools/ExtensionsBar"
+import { useToolsMount } from "./tools/ToolsMountContext"
 import { STANDARD_EDITOR } from "@/lib/tools/editor-choice"
 import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
@@ -1379,6 +1381,11 @@ export function ProjectWorkspace() {
   // Smart Extensions: an installed `editor` extension may replace the
   // standard editor for this file (choice remembered per user/project/file).
   const extensionEditorChoice = useExtensionEditorChoice(currentUsername, projectId ?? "", activeFileId ?? null)
+  const extensionPanelRequestSeq = useToolsMount()?.panelRequestSeq ?? 0
+  // A pinned extension or palette entry asked for the side panel: show it.
+  useEffect(() => {
+    if (extensionPanelRequestSeq > 0) selectDockTab("tools")
+  }, [extensionPanelRequestSeq, selectDockTab])
   // Keep the ref in sync so effects declared earlier in the component can
   // access the resolved username without a hoisting issue.
   currentUsernameRef.current = currentUsername
@@ -13468,11 +13475,12 @@ export function ProjectWorkspace() {
           <ExtensionEditorSurface
             choice={extensionEditorChoice}
             file={{ fileId: activeFileId, name: activeFile.name }}
+            bar={<ExtensionsBar choice={extensionEditorChoice} />}
           />
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
           <div className="relative flex h-full w-full flex-col">
-            <ExtensionEditorSwitcher choice={extensionEditorChoice} />
+            <ExtensionsBar choice={extensionEditorChoice} />
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">

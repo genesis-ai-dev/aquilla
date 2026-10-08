@@ -78,7 +78,8 @@ export function ToolsDockPanel() {
   const t = useT()
   const ctx = useToolsMount()
   const panelTools = toolsFor(ctx?.tools ?? [], "panel")
-  const [picked, setPicked] = useState<string | null>(null)
+  const picked = ctx?.dockSelection ?? null
+  const setPicked = (id: string) => ctx?.setDockSelection(id)
   const selected = panelTools.find((tool) => tool.id === picked)?.id ?? panelTools[0]?.id ?? null
   if (!ctx) return null
   return (

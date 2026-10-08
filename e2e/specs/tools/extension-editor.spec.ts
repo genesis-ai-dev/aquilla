@@ -54,7 +54,10 @@ test("a custom editor extension replaces the editor, writes with attribution, an
   await tools.installStarter(EDITOR, { landsIn: "editor" })
 
   await openSeededProject(alice, seeded)
-  await tools.switchEditor(EDITOR)
+  // No trip to the management page: the extensions palette (Ctrl+Shift+E)
+  // offers the installed editor for this file.
+  await alice.keyboard.press("Control+Shift+E")
+  await alice.getByRole("option", { name: `${EDITOR}: use as editor for this file` }).click()
   const frame = tools.toolFrame(EDITOR)
   const box = frame.getByLabel("Translation")
   // The file opens on its heading cells; jump to the first verse.

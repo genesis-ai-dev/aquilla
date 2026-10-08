@@ -7,7 +7,7 @@
  * (or project-wide), see src/lib/tools/editor-choice.ts.
  */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   STANDARD_EDITOR,
@@ -57,7 +57,7 @@ export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorCho
   const [wholeProject, setWholeProject] = useState(false)
   if (choice.editors.length === 0) return null
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-1.5 text-xs" data-testid="extension-editor-switcher">
+    <div className="flex flex-wrap items-center gap-2" data-testid="extension-editor-switcher">
       <label className="flex items-center gap-2">
         <span className="text-muted-foreground">{t("extensions.editor.label")}</span>
         <select
@@ -85,13 +85,16 @@ export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorCho
 export function ExtensionEditorSurface({
   choice,
   file,
+  bar,
 }: {
   choice: ExtensionEditorChoice
   file: { fileId: string; name: string }
+  /** The extensions bar (switcher, pins, palette) shown above the editor. */
+  bar: ReactNode
 }) {
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="extension-editor-surface">
-      <ExtensionEditorSwitcher choice={choice} />
+      {bar}
       <MountedTool
         key={`${choice.selected}:${file.fileId}`}
         toolId={choice.selected}

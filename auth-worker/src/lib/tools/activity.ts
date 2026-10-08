@@ -151,9 +151,13 @@ export async function readToolActivity(
   if (cellIds.length > 0) {
     const { results } = await db
       .prepare(
-        `SELECT file_id, cell_id, target_lang, lane_id, event_id, value, last_editor, source_event_id
-           FROM cells
-          WHERE project_id = ? AND side = 'target' AND cell_id IN (${placeholders(cellIds.length)})`,
+        // cells.target_lang was dropped (AQU-1611); a lane's legacy_tag is the
+        // tag events carry as targetLang ('' for the default lane).
+        `SELECT c.file_id, c.cell_id, COALESCE(l.legacy_tag, '') AS target_lang, c.lane_id,
+                c.event_id, c.value, c.last_editor, c.source_event_id
+           FROM cells c
+           LEFT JOIN lanes l ON l.id = c.lane_id
+          WHERE c.project_id = ? AND c.side = 'target' AND c.cell_id IN (${placeholders(cellIds.length)})`,
       )
       .bind(projectId, ...cellIds)
       .all<{

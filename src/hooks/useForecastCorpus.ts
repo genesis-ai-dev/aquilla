@@ -11,7 +11,7 @@
  *      glosser reads, which the store revalidates on every own commit and
  *      remote `event.applied`. Each change is diffed and only changed cells
  *      are re-sent, so an edit costs O(that cell).
- *   2. Every other file's target rows, read once through `fetchAllFileCells`
+ *   2. Every other file's rows (source and target), read once through `fetchAllFileCells`
  *      the first time the editor actually asks for a suggestion (so opening a
  *      project never pays for it), with bounded concurrency.
  * Validated cells weigh 1, other non-empty target cells FALLBACK_WEIGHT.
@@ -30,7 +30,8 @@ const LOAD_CONCURRENCY = 2
 /** Cell order = file position × this + cell index (thesaurus locality bound). */
 const FILE_ORDER_STRIDE = 1_000_000
 
-type ActiveCell = Pick<CellSummary, "id" | "fileId" | "index" | "translated" | "validated" | "status">
+type ActiveCell = Pick<CellSummary, "id" | "fileId" | "index" | "translated" | "validated" | "status"> &
+  Partial<Pick<CellSummary, "original">>
 
 export interface UseForecastCorpusOpts {
   enabled: boolean
@@ -102,11 +103,12 @@ export function useForecastCorpus({
       if (cell.fileId !== activeFileId) continue
       present.add(cell.id)
       const text = cell.translated.trim()
+      const source = cell.original?.trim() ?? ""
       const validated = isValidated(cell)
-      const signature = `${validated ? 1 : 0}:${text}`
+      const signature = `${validated ? 1 : 0}:${text}\u0000${source}`
       if (sent.get(cell.id)?.signature === signature) continue
       sent.set(cell.id, { signature, fileId: activeFileId })
-      upserts.push({ id: cell.id, text, validated, order: fileOrder * FILE_ORDER_STRIDE + cell.index })
+      upserts.push({ id: cell.id, text, source, validated, order: fileOrder * FILE_ORDER_STRIDE + cell.index })
     }
     const removed: string[] = []
     for (const [id, entry] of sent) {
@@ -138,18 +140,23 @@ async function loadOtherFiles(
       try {
         const token = await current.getToken(next.id)
         if (!token || isDisposed()) continue
-        const rows = await fetchAllFileCells(projectId, next.id, token, "target", lane)
+        // Both sides: the source verse feeds the translation lexicon.
+        const rows = await fetchAllFileCells(projectId, next.id, token, undefined, lane)
         if (isDisposed()) return
         const sent = sentByClient.get(client)
-        const cells: ForecastCell[] = []
+        const byCell = new Map<string, ForecastCell>()
         rows.forEach((row, i) => {
-          if (row.side !== "target" || (row.targetLang ?? "") !== lane) return
           // The active-file feed is fresher for any cell it already sent.
           if (sent?.has(row.cellId)) return
-          const text = row.value.trim()
-          if (text) cells.push({ id: row.cellId, text, validated: row.validated, order: next.order * FILE_ORDER_STRIDE + i })
+          const cell = byCell.get(row.cellId) ?? { id: row.cellId, text: "", validated: false, order: next.order * FILE_ORDER_STRIDE + i }
+          if (row.side === "source") cell.source = row.value.trim()
+          else if ((row.targetLang ?? "") === lane) {
+            cell.text = row.value.trim()
+            cell.validated = row.validated
+          } else return
+          byCell.set(row.cellId, cell)
         })
-        client.upsert(cells)
+        client.upsert(Array.from(byCell.values()).filter((cell) => cell.text || cell.source))
       } catch {
         // Best effort: a file that fails to load just isn't in the corpus.
       }

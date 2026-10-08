@@ -27,6 +27,8 @@
  * Pure, synchronous, no DOM — runs in a Web Worker or a test.
  */
 
+import { SourceLexicon } from "./source-lexicon"
+
 /** Same token class as `completion/tokenize.ts`, without lower-casing. */
 const TOKEN_RE = /[\p{L}\p{N}\p{M}]+/gu
 
@@ -47,6 +49,12 @@ export interface ForecastCell {
    * insertion order.
    */
   order?: number
+  /**
+   * Plain SOURCE text of the same cell. Feeds the translation lexicon (paired
+   * cells) and, for a cell with no target yet, is what a suggestion for that
+   * cell aligns against.
+   */
+  source?: string
 }
 
 interface IndexedCell {
@@ -89,33 +97,45 @@ export class BiaIndex {
   /** next → (prev → weight): the Python `MarkovChain.reverse_mapping`. */
   private readonly backward: WeightTable = new Map()
   private nextOrder = 0
+  /** Source-side lexicon over the same cells (see source-lexicon.ts). */
+  readonly lexicon: SourceLexicon = new SourceLexicon({
+    target: (id) => this.cells.get(id),
+    targetDf: (word) => this.postings.get(word)?.size ?? 0,
+  })
 
   /** Number of indexed cells (the IDF `n`). */
   get size(): number {
     return this.cells.size
   }
 
-  /** Add or replace cells. Empty text removes the cell. */
+  /** Add or replace cells. Empty text removes the cell's target (its source stays). */
   upsert(cells: readonly ForecastCell[]): void {
     for (const cell of cells) {
+      this.lexicon.remove(cell.id)
       this.removeOne(cell.id)
       const surface = Array.from(cell.text.matchAll(TOKEN_RE), (m) => m[0])
       const tokens = surface.map((t) => t.toLowerCase())
-      if (tokens.length === 0) continue
-      const order = cell.order ?? this.nextOrder
-      this.nextOrder = Math.max(this.nextOrder, order + 1)
-      const weight = cell.validated ? 1 : FALLBACK_WEIGHT
-      this.cells.set(cell.id, { tokens, surface, weight, order })
-      this.apply(cell.id, tokens, surface, weight, 1)
+      if (tokens.length > 0) {
+        const order = cell.order ?? this.nextOrder
+        this.nextOrder = Math.max(this.nextOrder, order + 1)
+        const weight = cell.validated ? 1 : FALLBACK_WEIGHT
+        this.cells.set(cell.id, { tokens, surface, weight, order })
+        this.apply(cell.id, tokens, surface, weight, 1)
+      }
+      this.lexicon.set(cell.id, cell.source)
     }
   }
 
   remove(ids: readonly string[]): void {
-    for (const id of ids) this.removeOne(id)
+    for (const id of ids) {
+      this.lexicon.remove(id)
+      this.removeOne(id)
+    }
   }
 
   clear(): void {
     this.cells.clear()
+    this.lexicon.clear()
     this.postings.clear()
     this.freq.clear()
     this.surfaces.clear()

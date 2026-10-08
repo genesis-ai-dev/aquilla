@@ -93,7 +93,32 @@ export interface SuggestOptions extends Pick<PredictOptions, "neighbors" | "deca
   extend?: boolean
   /** Offer Markov/frequency fallbacks when BIA has nothing (default true). */
   fallback?: boolean
+  /**
+   * The verse's SOURCE text (or tokens). When given, target words the
+   * project's lexicon aligns to it are mixed into the BIA scores.
+   */
+  source?: string | readonly string[]
+  /** Mixing weight alpha of the source score against BIA (0 = source off). */
+  sourceWeight?: number
+  /** Relative-position falloff lambda for source alignment. */
+  sourceLambda?: number
+  /**
+   * "add": bia + alpha*src (source can introduce new words at full weight);
+   * "boost": bia * (1 + alpha*src) + BOOST_FLOOR*alpha*src (source re-ranks
+   * BIA's candidates and only weakly introduces its own).
+   */
+  sourceMix?: SourceMix
+  /** Exponent on Dice (sharper = trusts only strong pairs). */
+  sourcePower?: number
+  /**
+   * Exponent on the TARGET word's IDF applied to its source score: > 0 lets
+   * the source speak mostly for content words and leaves function words to
+   * the left context, where BIA + Markov already predict them well.
+   */
+  sourceTargetIdf?: number
 }
+
+export type SourceMix = "add" | "boost"
 
 /**
  * The Python's behaviour, for evals and comparisons: hard Markov filter, one
@@ -109,6 +134,19 @@ export const FAITHFUL_OPTIONS: SuggestOptions = { markov: "filter", neighbors: f
  * fallback keeps coverage at 100%.
  */
 export const SHIPPED_DECAY = 1
+
+/**
+ * Source mixing, tuned on a dev split carved from the TRAINING verses (never
+ * the held-out test verses) by scripts/bia-source-tune.ts:
+ *   score(t) = bia(t)/max(bia) + alpha * src(t)/max(src), then the Markov weight.
+ */
+export const SOURCE_WEIGHT = 2
+export const SOURCE_LAMBDA = 8
+export const SOURCE_MIX: SourceMix = "add"
+export const SOURCE_POWER = 2
+export const SOURCE_TARGET_IDF = 3
+/** In "boost" mixing, how much a source-only word scores relative to α·src. */
+export const BOOST_FLOOR = 0.25
 
 export const DEFAULT_ANCHORS = 15
 export const THESAURUS_ANCHORS = 7
@@ -230,6 +268,20 @@ export class BiaEngine {
       neighbors: opts.neighbors,
       decay: opts.decay ?? SHIPPED_DECAY,
     })
+    const source = this.sourceTokens(opts.source)
+    const alpha = opts.sourceWeight ?? SOURCE_WEIGHT
+    if (source.length > 0 && alpha > 0) {
+      const aligned = this.index.lexicon.scoreTargets(source, {
+        left: leftTokens,
+        right: rightTokens,
+        excludeCellId: opts.excludeCellId,
+        lambda: opts.sourceLambda ?? SOURCE_LAMBDA,
+        power: opts.sourcePower ?? SOURCE_POWER,
+      })
+      const q = opts.sourceTargetIdf ?? SOURCE_TARGET_IDF
+      if (q !== 0) for (const [t, v] of aligned) aligned.set(t, v * this.index.idf(t) ** q)
+      ranked = this.rank(mixScores(ranked, aligned, alpha, opts.sourceMix ?? SOURCE_MIX))
+    }
     if (prefix) ranked = ranked.filter(([w]) => fits(w))
     ranked = this.markov(ranked, prev, next, mode, limit)
     const out = ranked.slice(0, limit).map(([word, score]) => ({ word, score, source: "bia" as const }))
@@ -247,6 +299,11 @@ export class BiaEngine {
       .filter(([w]) => fits(w))
       .slice(0, limit)
       .map(([word, score]) => ({ word, score, source: "frequency" as const }))
+  }
+
+  private sourceTokens(source: SuggestOptions["source"]): readonly string[] {
+    if (source === undefined) return []
+    return typeof source === "string" ? tokenize(source) : source
   }
 
   /** Next word(s) after `left` (Python `get_possible_next` + 2-word extension). */
@@ -294,6 +351,9 @@ export class BiaEngine {
       excludeCellId?: string
       /** "idf2" = the Python `combine_votes`; "votes" (default) = vote share. */
       weighting?: "idf2" | "votes"
+      /** The verse's source: words translating the same source word rank up. */
+      source?: string | readonly string[]
+      sourceWeight?: number
     } = {},
   ): Array<{ word: string; score: number }> {
     const target = tokenize(word)[0]
@@ -357,9 +417,54 @@ export class BiaEngine {
       }
     }
     combined.delete(target)
-    const total = Array.from(combined.values()).reduce((a, b) => a + b, 0)
-    return this.rank(combined)
+    const source = this.sourceTokens(opts.source)
+    const alpha = opts.sourceWeight ?? SOURCE_WEIGHT
+    const scored = source.length > 0 && alpha > 0
+      ? mixScores(this.rank(combined), this.sourceAlternatives(target, source, opts.excludeCellId), alpha)
+      : combined
+    scored.delete(target)
+    const total = Array.from(scored.values()).reduce((a, b) => a + b, 0)
+    return this.rank(scored)
       .slice(0, opts.limit ?? 10)
       .map(([w, s]) => ({ word: index.display(w), score: total > 0 ? s / total : 0 }))
   }
+
+  /**
+   * Other target words for the source word(s) `target` translates here:
+   * sum over the verse's source words s of idf(s) * dice(s, target) * dice(s, t).
+   */
+  private sourceAlternatives(target: string, source: readonly string[], excludeCellId?: string): Map<string, number> {
+    const { lexicon } = this.index
+    const pairs = lexicon.pairCount
+    const out = new Map<string, number>()
+    for (const s of new Set(source)) {
+      const assoc = lexicon.associations(s, excludeCellId)
+      const anchor = assoc.find(([t]) => t === target)?.[1] ?? 0
+      if (anchor === 0) continue
+      const weight = lexicon.idf(s, pairs) * anchor
+      for (const [t, d] of assoc) out.set(t, (out.get(t) ?? 0) + weight * d)
+    }
+    return out
+  }
+}
+
+/** Max-normalise both score sets and add alpha x the second to the first. */
+export function mixScores(
+  primary: Ranked,
+  secondary: ReadonlyMap<string, number>,
+  alpha: number,
+  mode: SourceMix = "add",
+): Map<string, number> {
+  const topPrimary = primary[0]?.[1] ?? 0
+  let topSecondary = 0
+  for (const v of secondary.values()) if (v > topSecondary) topSecondary = v
+  const out = new Map<string, number>()
+  for (const [w, v] of primary) out.set(w, topPrimary > 0 ? v / topPrimary : 0)
+  if (topSecondary === 0) return out
+  for (const [w, v] of secondary) {
+    const s = (alpha * v) / topSecondary
+    const b = out.get(w) ?? 0
+    out.set(w, mode === "boost" ? b * (1 + s) + BOOST_FLOOR * s : b + s)
+  }
+  return out
 }

@@ -29,12 +29,26 @@ export interface EvalReport {
 export interface EvalOptions {
   /** Cap on scored positions per task (deterministic stride sampling). */
   maxPositions?: number
+  /**
+   * "baseline" (default): the BIA ablations against unigram/bigram.
+   * "source": no-source vs with-source on the same positions (test items
+   * must carry their source verse), plus a source-only ablation.
+   * "variants": only the given SuggestOptions variants (tuning).
+   */
+  methods?: "baseline" | "source" | "variants"
+  variants?: Record<string, SuggestOptions>
 }
+
+/** A held-out verse: its target text, and its source when evaluating alignment. */
+export type EvalItem = string | { text: string; source?: string }
 
 export const FAITHFUL = "bia faithful (python: markov filter)"
 export const SHIPPED = "bia shipped (decay + markov weight + fallback)"
+export const NO_SOURCE = "bia shipped, no source"
+export const WITH_SOURCE = "bia shipped + source"
+export const SOURCE_ONLY = "source lexicon only"
 
-type Predictor =(left: string[], right: string[]) => string[]
+type Predictor = (left: string[], right: string[], source: string | undefined) => string[]
 
 class Tally {
   private hits1 = 0
@@ -64,38 +78,56 @@ function positions(tests: readonly string[][], minIndex: number, trailing: numbe
   return Array.from({ length: max }, (_, k) => all[Math.floor(k * stride)])
 }
 
-export function runForecastEval(train: readonly ForecastCell[], testTexts: readonly string[], opts: EvalOptions = {}): EvalReport {
+export function runForecastEval(train: readonly ForecastCell[], testItems: readonly EvalItem[], opts: EvalOptions = {}): EvalReport {
   const index = new BiaIndex()
   index.upsert(train)
   const engine = new BiaEngine(index)
   const unigram = index.vocabularyByFrequency().slice(0, 3).map(([w]) => w)
-  const tests = testTexts.map((t) => tokenize(t)).filter((t) => t.length > 1)
+  const items = testItems
+    .map((item) => (typeof item === "string" ? { text: item } : item))
+    .map((item) => ({ tokens: tokenize(item.text), source: item.source }))
+    .filter((item) => item.tokens.length > 1)
+  const tests = items.map((item) => item.tokens)
   const max = opts.maxPositions ?? 2000
 
   const bigramNext = (prev: string | undefined): string[] => {
     const followers = prev === undefined ? [] : index.followers(prev).slice(0, 3).map(([w]) => w)
     return followers.length > 0 ? followers : unigram
   }
-  const bia = (o: SuggestOptions): Predictor => (left, right) =>
-    (right.length === 0
-      ? engine.suggestNext(`${left.join(" ")} `, { ...o, extend: false, limit: 3 })
-      : engine.suggestInfill(`${left.join(" ")} `, ` ${right.join(" ")}`, { ...o, limit: 3 })
+  const bia = (o: SuggestOptions): Predictor => (left, right, source) => {
+    const withSource = o.sourceWeight !== 0 && source ? { ...o, source } : o
+    return (right.length === 0
+      ? engine.suggestNext(`${left.join(" ")} `, { ...withSource, extend: false, limit: 3 })
+      : engine.suggestInfill(`${left.join(" ")} `, ` ${right.join(" ")}`, { ...withSource, limit: 3 })
     ).map((s) => s.word.toLowerCase())
-  const biaMethods: Record<string, Predictor> = {
-    [FAITHFUL]: bia(FAITHFUL_OPTIONS),
-    "bia votes only (no markov)": bia({ ...FAITHFUL_OPTIONS, markov: "off" }),
-    "bia + markov weight": bia({ ...FAITHFUL_OPTIONS, markov: "weight" }),
-    [SHIPPED]: bia({}),
   }
+  const biaMethods: Record<string, Predictor> =
+    opts.methods === "variants"
+      ? Object.fromEntries(Object.entries(opts.variants ?? {}).map(([name, o]) => [`bia ${name}`, bia(o)]))
+      : opts.methods === "source"
+        ? {
+            [NO_SOURCE]: bia({ sourceWeight: 0 }),
+            [WITH_SOURCE]: bia({}),
+            ["bia " + SOURCE_ONLY]: bia({ sourceWeight: 1000 }),
+          }
+        : {
+            [FAITHFUL]: bia(FAITHFUL_OPTIONS),
+            "bia votes only (no markov)": bia({ ...FAITHFUL_OPTIONS, markov: "off" }),
+            "bia + markov weight": bia({ ...FAITHFUL_OPTIONS, markov: "weight" }),
+            [SHIPPED]: bia({ sourceWeight: 0 }),
+          }
+  const baselines = opts.methods !== "variants"
 
   const nextMethods: Record<string, Predictor> = {
-    "unigram": () => unigram,
-    "bigram-markov": (left) => bigramNext(left.at(-1)),
+    ...(baselines ? { "unigram": () => unigram, "bigram-markov": (left: string[]) => bigramNext(left.at(-1)) } : {}),
     ...biaMethods,
   }
   const infillMethods: Record<string, Predictor> = {
-    "unigram": () => unigram,
-    "bigram-markov": (left, right) => {
+    ...(baselines ? { "unigram": (): string[] => unigram, "bigram-markov": bigramInfill } : {}),
+    ...biaMethods,
+  }
+
+  function bigramInfill(left: string[], right: string[]): string[] {
       const prev = left.at(-1)
       const next = right[0]
       if (prev === undefined) return unigram
@@ -106,8 +138,6 @@ export function runForecastEval(train: readonly ForecastCell[], testTexts: reado
         .slice(0, 3)
         .map(([w]) => w)
       return ranked.length > 0 ? ranked : unigram
-    },
-    ...biaMethods,
   }
 
   let queries = 0
@@ -118,7 +148,7 @@ export function runForecastEval(train: readonly ForecastCell[], testTexts: reado
       const tally = new Tally()
       for (const [c, i] of pts) {
         const tokens = tests[c]
-        const predicted = predict(tokens.slice(0, i), infill ? tokens.slice(i + 1) : [])
+        const predicted = predict(tokens.slice(0, i), infill ? tokens.slice(i + 1) : [], items[c].source)
         if (name.startsWith("bia")) queries++
         tally.add(predicted, tokens[i])
       }
@@ -151,4 +181,41 @@ export function splitHeldOut(lines: readonly string[], k = 10, trainLimit?: numb
     }
   })
   return { train, test }
+}
+
+/**
+ * Split two vref-aligned files (source, target) into paired train cells and
+ * held-out items, keeping only verses present in both. Every `k`th pair is
+ * held out; `trainLimit` keeps the first N training pairs (early project).
+ */
+export function splitParallel(
+  sourceLines: readonly string[],
+  targetLines: readonly string[],
+  k = 10,
+  trainLimit?: number,
+): { train: ForecastCell[]; test: Array<{ text: string; source: string }> } {
+  const train: ForecastCell[] = []
+  const test: Array<{ text: string; source: string }> = []
+  let kept = 0
+  targetLines.forEach((line, i) => {
+    const text = line.trim()
+    const source = (sourceLines[i] ?? "").trim()
+    if (!text || !source) return
+    if (kept++ % k === k - 1) test.push({ text, source })
+    else if (trainLimit === undefined || train.length < trainLimit) {
+      train.push({ id: `v${i}`, text, source, validated: true, order: i })
+    }
+  })
+  return { train, test }
+}
+
+/** Carve a tuning split out of TRAINING cells: every `k`th becomes a dev item. */
+export function devSplit(train: readonly ForecastCell[], k = 10): { train: ForecastCell[]; dev: Array<{ text: string; source?: string }> } {
+  const kept: ForecastCell[] = []
+  const dev: Array<{ text: string; source?: string }> = []
+  train.forEach((cell, i) => {
+    if (i % k === k - 1) dev.push({ text: cell.text, source: cell.source })
+    else kept.push(cell)
+  })
+  return { train: kept, dev }
 }

@@ -145,7 +145,9 @@ export function createGhostTextExtension(options: GhostTextOptions) {
           timer = null
           const asked = view.state
           const context = caretContext(asked)
-          if (!context || !context.left.trim()) return
+          // An empty cell is asked too: with a source verse the worker can
+          // offer the first word; without one it answers nothing.
+          if (!context) return
           const continuing = acceptedAt.get(view) === context.pos && !/\s$/u.test(context.left)
           const lead = continuing ? " " : ""
           void client

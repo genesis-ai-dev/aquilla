@@ -44,28 +44,26 @@ test("BIA · ghost-text suggestions and words that fit here", async ({ page }) =
   let verified = false
   try {
     await show.chapter("Ghost text", "Genesis 1:25 is the one verse left to translate.")
-    const editor = await assist.openNextUnfinished(cellId)
-    await assist.type("E hizo Dios animales ", 70)
+    await assist.openNextUnfinished(cellId)
+    await assist.type("E hizo Dios animales de ", 70)
     await expect(async () => {
       await page.keyboard.press("Backspace")
       await page.keyboard.type(" ")
-      await expect(assist.ghost(cellId)).toHaveText("de la", { timeout: 1_000 })
+      await expect(assist.ghost(cellId)).toHaveText("la tierra", { timeout: 1_000 })
     }).toPass({ timeout: 15_000 })
     await show.caption("A faint suggestion, learned from the other 30 validated verses.")
     await show.beat(1400)
 
     await show.caption("Tab accepts it…")
     await assist.acceptSuggestion()
-    await expect(assist.ghost(cellId)).toHaveText(/^ tierra/)
     await show.beat(900)
-    await show.caption("…→ takes just the next word.")
-    await assist.acceptNextWord()
-    await show.beat(700)
 
     await assist.type(" según ", 70)
     await expect(assist.ghost(cellId)).toHaveText("su género")
+    await show.caption("…→ takes just the next word.")
     await show.beat(600)
-    await assist.acceptSuggestion()
+    await assist.acceptNextWord()
+    await assist.type(" género", 70)
     await assist.type(", y ganado según ", 60)
     await expect(assist.ghost(cellId)).toHaveText("su género")
     await show.beat(600)
@@ -80,7 +78,7 @@ test("BIA · ghost-text suggestions and words that fit here", async ({ page }) =
     await show.beat(1600)
     await show.click('[data-testid="words-that-fit-panel"] button[aria-label="Replace with especie"]')
     const expected = "E hizo Dios animales de la tierra según su especie, y ganado según su género"
-    await expect(editor).toHaveText(expected)
+    await expect.poll(() => assist.documentText(cellId)).toBe(expected)
     await show.beat(1200)
 
     await ws.blurEditor()

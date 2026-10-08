@@ -26,6 +26,15 @@ export class TypingAssist {
     return this.target(cellId).locator('.ProseMirror[contenteditable="true"]').first()
   }
 
+  /**
+   * The editor's DOCUMENT text. Not the DOM's text: the ghost suggestion is a
+   * widget inside the contenteditable, so `toHaveText` on the editor would
+   * read it too — which is exactly what must never reach the document.
+   */
+  async documentText(cellId: string): Promise<string> {
+    return this.editor(cellId).evaluate((el) => (el as HTMLElement & { editor: { getText: () => string } }).editor.getText())
+  }
+
   /** The faint suggestion shown after the caret. */
   ghost(cellId: string): Locator {
     return this.editor(cellId).getByTestId("ghost-text")

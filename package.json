@@ -37,6 +37,8 @@
     "audit:deps:report": "node scripts/audit-deps.mjs --report",
     "ai-sections:eval": "tsx scripts/ai-sections-eval.ts",
     "bia:eval": "tsx scripts/bia-eval.ts",
+    "bia:eval-source": "tsx scripts/bia-source-eval.ts",
+    "bia:tune-source": "tsx scripts/bia-source-tune.ts",
     "ai-sections:build-data": "tsx scripts/build-section-boundaries.ts",
     "parity:score": "tsx parity/instruments/parity-score.ts",
     "roundtrip:score": "tsx parity/instruments/roundtrip-score.ts",

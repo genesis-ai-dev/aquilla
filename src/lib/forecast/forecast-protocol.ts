@@ -17,9 +17,14 @@ export type ForecastCommand =
   | { type: "remove"; ids: string[] }
   | { type: "clear" }
 
+/**
+ * `excludeCellId` is the cell being edited: its stale committed text is left
+ * out of the corpus, and its SOURCE verse (fed with the cells) is what the
+ * suggestion aligns against. `source` overrides that lookup.
+ */
 export type ForecastQuery =
-  | { kind: "suggest"; left: string; right: string; excludeCellId?: string; limit?: number }
-  | { kind: "fit"; word: string; left: string; right: string; excludeCellId?: string; limit?: number }
+  | { kind: "suggest"; left: string; right: string; excludeCellId?: string; source?: string; limit?: number }
+  | { kind: "fit"; word: string; left: string; right: string; excludeCellId?: string; source?: string; limit?: number }
 
 export type ForecastRequest = ForecastCommand | { type: "query"; id: number; query: ForecastQuery }
 
@@ -42,13 +47,20 @@ export function applyForecastCommand(engine: BiaEngine, command: ForecastCommand
  * a single infill word between words, nothing in the middle of a word.
  * `insert` is adjusted so accepting it leaves single spaces on both sides.
  */
-export function suggestAtCaret(engine: BiaEngine, left: string, right = "", opts: { excludeCellId?: string; limit?: number } = {}): Suggestion[] {
+export function suggestAtCaret(
+  engine: BiaEngine,
+  left: string,
+  right = "",
+  opts: { excludeCellId?: string; source?: string; limit?: number } = {},
+): Suggestion[] {
   const inside = endsInsideWord(left)
   if (inside && startsInsideWord(right)) return []
   const atEnd = right.trim().length === 0
-  const results = atEnd
-    ? engine.suggestNext(left, { excludeCellId: opts.excludeCellId, limit: opts.limit })
-    : engine.suggestInfill(left, right, { excludeCellId: opts.excludeCellId, limit: opts.limit })
+  const source = sourceFor(engine, opts)
+  // An empty cell gets a first word only when its source verse can say what it is.
+  if (!left.trim() && !right.trim() && (source === undefined || source.length === 0)) return []
+  const suggest = { excludeCellId: opts.excludeCellId, limit: opts.limit, source }
+  const results = atEnd ? engine.suggestNext(left, suggest) : engine.suggestInfill(left, right, suggest)
   const needsLeadingSpace = !inside && left.length > 0 && !/\s$/u.test(left)
   const needsTrailingSpace = !atEnd && !/^\s/u.test(right)
   return results
@@ -59,6 +71,12 @@ export function suggestAtCaret(engine: BiaEngine, left: string, right = "", opts
     }))
 }
 
+/** The query's source verse: explicit text, else the edited cell's stored source. */
+function sourceFor(engine: BiaEngine, opts: { excludeCellId?: string; source?: string }): string | readonly string[] | undefined {
+  if (opts.source !== undefined) return opts.source
+  return opts.excludeCellId === undefined ? undefined : engine.index.lexicon.sourceOf(opts.excludeCellId)
+}
+
 export function answerForecastQuery(engine: BiaEngine, query: ForecastQuery): Omit<ForecastResponse, "id"> {
   if (query.kind === "suggest") {
     return { suggestions: suggestAtCaret(engine, query.left, query.right, query) }
@@ -67,6 +85,7 @@ export function answerForecastQuery(engine: BiaEngine, query: ForecastQuery): Om
     fits: engine.wordsThatFit(query.word, {
       context: { left: query.left, right: query.right },
       excludeCellId: query.excludeCellId,
+      source: sourceFor(engine, query),
       limit: query.limit ?? 12,
     }),
   }

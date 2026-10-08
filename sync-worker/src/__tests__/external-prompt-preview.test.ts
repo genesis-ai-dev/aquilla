@@ -454,6 +454,61 @@ describe("external prompt preview", () => {
       expect(body.parts.rules).toBe("")
     })
 
+    // AQU-1777: a termbase's renderings carry ITS lane ids. The preview maps
+    // them onto this project's lanes by language before its lane filter, as
+    // route #8 does for the editor, so a lane's preview injects exactly what
+    // that lane's editor compiles.
+    it("maps a subscribed termbase's lane-stamped renderings onto this project's lanes (AQU-1777)", async () => {
+      await testDb.pg.query(`UPDATE projects SET org_published_termbase = TRUE WHERE id = 'proj-b'`)
+      await subscribe("proj-b", 0)
+      // This project: the `''` lane is French; a Spanish lane tagged with its own id.
+      await testDb.pg.query(
+        `UPDATE lanes SET language = 'French' WHERE project_id = 'proj-a' AND id = 'deflane1'`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('c0ffee01', 'proj-a', 'target', 'Spanish', NULL, 'es', 'c0ffee01', 2)`,
+      )
+      // The termbase: a French `''` lane and a Spanish lane, spelled as a code.
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES
+           ('tb000f7a', 'proj-b', 'target', 'French', NULL, 'fr', '', 1),
+           ('tb000e5a', 'proj-b', 'target', 'es', NULL, 'es', 'es', 2)`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ('up-cov', 'proj-b', 'covenant', $1, 'active', 0, 1, 1)`,
+        [
+          JSON.stringify([
+            { rendering: "alliance", status: "preferred", laneId: "tb000f7a" },
+            { rendering: "pacto", status: "preferred", laneId: "tb000e5a" },
+            // Stamped with a lane the termbase no longer has: applies nowhere.
+            { rendering: "patto", status: "admitted", laneId: "tb000111" },
+          ]),
+        ],
+      )
+      await insertConcept("own", "proj-a", "active", "testament")
+
+      const french = await preview(testDb, token)
+      expect(french.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
+        ["up-cov", ["alliance"]],
+        ["own", ["testament"]],
+      ])
+      expect(french.body.parts.rules).toContain("alliance")
+      expect(french.body.parts.rules).not.toContain("pacto")
+      expect(french.body.parts.rules).not.toContain("patto")
+
+      const spanish = await preview(testDb, token, "cell-live", "?targetLang=c0ffee01")
+      // The project's own unstamped rendering belongs to its `''` lane, so the
+      // Spanish lane lists the concept with nothing to enforce (AQU-1508).
+      expect(spanish.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
+        ["up-cov", ["pacto"]],
+        ["own", []],
+      ])
+      expect(spanish.body.parts.rules).toContain("pacto")
+      expect(spanish.body.parts.rules).not.toContain("alliance")
+    })
+
     it("injects project rules from settings", async () => {
       await putSettings(testDb, "proj-a", {
         sourceLanguage: "English",

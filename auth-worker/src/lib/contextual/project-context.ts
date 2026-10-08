@@ -36,7 +36,7 @@ import {
 import { conceptToRegexSource } from "../../../../src/lib/terminology/match"
 import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
 import type { TermMatchOptions, TermMatchingSettings } from "../../../../src/lib/terminology/model"
-import { conceptsForLane } from "../../../../src/lib/terminology/rendering-lane"
+import { conceptsForLane, mapSubscribedConceptLanes } from "../../../../src/lib/terminology/rendering-lane"
 import { readProjectConcepts } from "../concepts-read"
 import type { LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
 import { languagesForLanes, loadLaneRows } from "../read-lane-language"
@@ -405,17 +405,12 @@ export async function loadProjectContext(
       ? (brief as Record<string, unknown>)
       : {}
 
+  const lanes: LaneLanguageRow[] = await loadLaneRows(db, projectId).catch(() => [])
   const loaded = [
     ...(await loadLocalConcepts(db, projectId)),
-    ...(await loadSubscribedConcepts(db, projectId)),
+    ...(await loadSubscribedConcepts(db, projectId, lanes)),
   ]
   const concepts = lane ? await conceptsForRequestedLane(db, projectId, loaded, lane) : loaded
-  let lanes: LaneLanguageRow[] = []
-  try {
-    lanes = await loadLaneRows(db, projectId)
-  } catch {
-    lanes = []
-  }
   const resolved = languagesForLanes(lanes, settings, "")
   const sourceLanguage = resolved.sourceLanguage ?? ""
   const targetLanguage = resolved.targetLanguage ?? ""
@@ -563,8 +558,17 @@ async function loadLocalConcepts(db: SettingsDb, projectId: string): Promise<Con
  *  the editor's read (route #8), so the editor and autopilot apply the same
  *  termbases (AQU-1721). Deleting a project cascades to none of the
  *  subscription, settings or concept rows, so the join on `projects` is what
- *  drops a deleted termbase. */
-async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promise<Concept[]> {
+ *  drops a deleted termbase.
+ *
+ *  Each termbase's renderings carry ITS lane ids. They are mapped onto this
+ *  project's lanes by language (mapSubscribedConceptLanes, AQU-1777) before
+ *  `conceptsForRequestedLane` runs, as route #8 maps them for the editor, so a
+ *  lane's run and that lane's editor see the same subscribed renderings. */
+async function loadSubscribedConcepts(
+  db: SettingsDb,
+  projectId: string,
+  subscriberLanes: readonly LaneLanguageRow[],
+): Promise<Concept[]> {
   try {
     // The order the subscriptions list shows: priority, then age.
     const { results } = await db
@@ -587,9 +591,15 @@ async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promis
     // settings blob only while it has none. Reading only the blob gave
     // subscribers nothing once the termbase was migrated.
     const termbases = await Promise.all(
-      results.map((r) => readProjectConcepts(db, r.termbase_project_id)),
+      results.map(async (r) => {
+        const [concepts, termbaseLanes] = await Promise.all([
+          readProjectConcepts(db, r.termbase_project_id),
+          loadLaneRows(db, r.termbase_project_id),
+        ])
+        return mapSubscribedConceptLanes(parseConcepts(concepts), termbaseLanes, subscriberLanes)
+      }),
     )
-    return termbases.flatMap((concepts) => parseConcepts(concepts))
+    return termbases.flat()
   } catch (err) {
     // Draft without them rather than fail the run, but say so: a silently
     // empty termbase is the failure this read exists to end.

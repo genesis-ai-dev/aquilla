@@ -55,7 +55,8 @@ import {
 } from "../lib/branching-search/settings"
 import { resolveLane } from "../../../db/shared/lane-ref"
 import { loadProjectSettings } from "../../../db/shared/projects"
-import { conceptsForLane } from "../../../src/lib/terminology/rendering-lane"
+import { listProjectLanes } from "../../../db/shared/lanes"
+import { conceptsForLane, mapSubscribedConceptLanes } from "../../../src/lib/terminology/rendering-lane"
 import {
   buildBriefBlock,
   buildPrompt,
@@ -341,6 +342,11 @@ export async function buildPromptPreview(
   // live concepts, oldest first. A subscription counts only while its termbase
   // is published, not archived, and in this project's org. That is the gate
   // canReadTermbase puts on route #8, and autopilot applies it too.
+  //
+  // AQU-1777: a termbase's renderings carry ITS lane ids. Each termbase's
+  // concepts are mapped onto this project's lanes by language
+  // (mapSubscribedConceptLanes), as route #8 and autopilot map them, before
+  // the lane filter below, so the preview injects what the editor compiles.
   type ConceptRow = {
     concept_id: string
     source_term: string
@@ -350,7 +356,7 @@ export async function buildPromptPreview(
   }
   const subscribedRows = await db
     .prepare(
-      "SELECT c.concept_id, c.source_term, c.renderings, c.status, c.case_sensitive " +
+      "SELECT s.termbase_project_id, c.concept_id, c.source_term, c.renderings, c.status, c.case_sensitive " +
         "FROM project_termbase_subscriptions s " +
         "JOIN projects sub ON sub.id = s.project_id " +
         "JOIN projects tb ON tb.id = s.termbase_project_id " +
@@ -361,7 +367,7 @@ export async function buildPromptPreview(
         "ORDER BY s.priority ASC, s.created_at ASC, s.termbase_project_id, c.created_at ASC, c.concept_id",
     )
     .bind(projectId)
-    .all<ConceptRow>()
+    .all<ConceptRow & { termbase_project_id: string }>()
   const conceptRows = await db
     .prepare(
       "SELECT concept_id, source_term, renderings, status, case_sensitive " +
@@ -370,7 +376,7 @@ export async function buildPromptPreview(
     .bind(projectId)
     .all<ConceptRow>()
 
-  const concepts: CompiledConcept[] = [...subscribedRows.results, ...conceptRows.results].map((row) => {
+  const toConcept = (row: ConceptRow): CompiledConcept => {
     const parsed: unknown =
       typeof row.renderings === "string" ? safeJson(row.renderings) : row.renderings
     const renderings = Array.isArray(parsed)
@@ -389,7 +395,23 @@ export async function buildPromptPreview(
       status: row.status,
       ...(row.case_sensitive ? { caseSensitive: true } : {}),
     }
-  })
+  }
+  // Rows arrive grouped by termbase in subscription order (the ORDER BY), and
+  // a Map keeps that order, so the mapped list stays subscribed-first.
+  const rowsByTermbase = new Map<string, ConceptRow[]>()
+  for (const row of subscribedRows.results) {
+    const rows = rowsByTermbase.get(row.termbase_project_id) ?? []
+    rows.push(row)
+    rowsByTermbase.set(row.termbase_project_id, rows)
+  }
+  const subscribedConcepts: CompiledConcept[] = []
+  for (const [termbaseProjectId, rows] of rowsByTermbase) {
+    const termbaseLanes = await listProjectLanes(db, termbaseProjectId)
+    subscribedConcepts.push(
+      ...mapSubscribedConceptLanes(rows.map(toConcept), termbaseLanes, lanes ?? []),
+    )
+  }
+  const concepts: CompiledConcept[] = [...subscribedConcepts, ...conceptRows.results.map(toConcept)]
 
   const emptyLane = await resolveLane(db, projectId, { targetLang: "" })
   const activeLane = emptyLane.laneId

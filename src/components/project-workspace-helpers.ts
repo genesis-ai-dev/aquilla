@@ -9,6 +9,8 @@ import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
+import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 
 /**
@@ -407,6 +409,26 @@ export function workspaceTerminology(
     editor: subscribed.length === 0 ? local : [...subscribed, ...local],
     glossary: local,
   }
+}
+
+/**
+ * The active lane's slice of the editor's concept list, for Check file and
+ * the term-lookup popover (AQU-1721, AQU-1508).
+ *
+ * One rule serves both lists: a subscribed rendering arrives from route #8
+ * already stamped with THIS project's lane id (mapped from its termbase lane
+ * by language, AQU-1777), so `conceptsForLaneTag` over this project's lane
+ * rows reads it exactly like a local one. With no subscriptions the editor
+ * list IS `local`, so the local slice is reused and keeps its identity.
+ */
+export function editorConceptsForLane(
+  editor: Concept[],
+  local: Concept[],
+  laneLocal: Concept[],
+  activeLane: string,
+  laneRows: readonly LaneLanguageRow[],
+): Concept[] {
+  return editor === local ? laneLocal : conceptsForLaneTag(editor, activeLane, laneRows)
 }
 
 /**

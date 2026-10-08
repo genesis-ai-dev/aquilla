@@ -51,7 +51,7 @@ async function seedConcept(
   row: {
     id: string
     sourceTerm: string
-    renderings: { rendering: string; status: string }[]
+    renderings: { rendering: string; status: string; laneId?: string }[]
     status?: string
     notes?: string
     caseSensitive?: boolean
@@ -263,5 +263,112 @@ describe("subscribed termbase concepts (AQU-1715)", () => {
     } finally {
       warn.mockRestore()
     }
+  })
+})
+
+// AQU-1777: a termbase is a project with its own lanes, so its renderings
+// carry ITS lane ids (AQU-1508), which never equal the subscriber's. Both
+// readers must map them onto the subscriber's lanes by language, or a stamped
+// subscribed rendering is absent from every lane of the subscriber.
+async function seedLane(
+  projectId: string,
+  lane: { id: string; legacyTag: string | null; language: string | null; role?: "source" | "target" },
+) {
+  await db
+    .prepare(
+      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, ?, ?, NULL, NULL, ?, 1)`,
+    )
+    .bind(lane.id, projectId, lane.role ?? "target", lane.language, lane.legacyTag)
+    .run()
+}
+
+type ReadRendering = { rendering: string; laneId?: string }
+/** `[rendering, laneId]` pairs of one concept as route #8 returned it. */
+const renderingsOf = (concepts: Array<Record<string, unknown>>, id: string) =>
+  (concepts.find((c) => c.id === id)?.renderings as ReadRendering[] | undefined)?.map((r) => [
+    r.rendering,
+    r.laneId ?? null,
+  ]) ?? null
+
+const autopilotRenderings = async (lane: { laneId?: string; targetLang?: string }, id = "grace") =>
+  (await loadProjectContext(db, "consumer", lane)).concepts.find((c) => c.id === id)?.renderings.map((r) => r.rendering) ?? null
+
+describe("subscribed renderings follow the subscriber's lanes (AQU-1777)", () => {
+  it("stamps each rendering with the subscriber lane of the same language, on both paths", async () => {
+    await seedSubscription()
+    // The termbase: a Spanish `''` lane and a French lane.
+    await seedLane("tb", { id: "tb00055c", legacyTag: null, language: "English", role: "source" })
+    await seedLane("tb", { id: "tb000e5a", legacyTag: "", language: "Spanish" })
+    await seedLane("tb", { id: "tb000f7a", legacyTag: "fr", language: "French" })
+    // The subscriber: a Spanish `''` lane (lower-case) and a Canadian-French
+    // lane tagged with its own id, as planNewTargetLane tags a second lane.
+    await seedLane("consumer", { id: "c000055c", legacyTag: null, language: "English", role: "source" })
+    await seedLane("consumer", { id: "c0000e5a", legacyTag: "", language: "spanish" })
+    await seedLane("consumer", { id: "c0ffee01", legacyTag: "c0ffee01", language: "fr-CA" })
+    await seedConcept("tb", {
+      id: "grace",
+      sourceTerm: "grace",
+      renderings: [
+        { rendering: "gracia", status: "preferred", laneId: "tb000e5a" },
+        { rendering: "grâce", status: "preferred", laneId: "tb000f7a" },
+        // Unstamped: the termbase's `''` lane, so Spanish.
+        { rendering: "favor", status: "admitted" },
+        // Stamped with a lane the termbase no longer has: applies nowhere.
+        { rendering: "grazia", status: "admitted", laneId: "tb000111" },
+      ],
+    })
+
+    expect(renderingsOf(await readViaRoute(), "grace")).toEqual([
+      ["gracia", "c0000e5a"],
+      ["grâce", "c0ffee01"],
+      ["favor", "c0000e5a"],
+    ])
+    expect(await autopilotRenderings({ targetLang: "" })).toEqual(["gracia", "favor"])
+    expect(await autopilotRenderings({ laneId: "c0ffee01" })).toEqual(["grâce"])
+    // What the mapping is for: the French lane's run is held to the French rendering.
+    const french = await loadProjectContext(db, "consumer", { laneId: "c0ffee01" })
+    expect(lintTerminology(french.concepts, "by grace alone", "par la faveur").map((h) => h.ruleId)).toEqual([
+      "term:grace:approved",
+    ])
+    expect(lintTerminology(french.concepts, "by grace alone", "par la grâce")).toEqual([])
+  })
+
+  it("reads an unstamped rendering as the termbase's '' lane, never the subscriber's", async () => {
+    await seedSubscription()
+    await seedLane("tb", { id: "tb000e5a", legacyTag: "", language: "Spanish" })
+    // The subscriber's `''` lane is English; its Spanish lane is tagged "es".
+    await seedLane("consumer", { id: "c0000e00", legacyTag: "", language: "English" })
+    await seedLane("consumer", { id: "c0000e5a", legacyTag: "es", language: "Spanish" })
+    await seedConcept("tb", { id: "grace", sourceTerm: "grace", renderings: [{ rendering: "gracia", status: "preferred" }] })
+
+    expect(renderingsOf(await readViaRoute(), "grace")).toEqual([["gracia", "c0000e5a"]])
+    expect(await autopilotRenderings({ targetLang: "" })).toEqual([])
+    expect(await autopilotRenderings({ targetLang: "es" })).toEqual(["gracia"])
+  })
+
+  it("leaves out a rendering whose termbase lane no subscriber lane matches", async () => {
+    await seedSubscription()
+    await seedLane("tb", { id: "tb000f7a", legacyTag: "", language: "French" })
+    await seedLane("consumer", { id: "c0000e5a", legacyTag: "", language: "Spanish" })
+    await seedConcept("tb", { id: "grace", sourceTerm: "grace", renderings: [{ rendering: "grâce", status: "preferred" }] })
+
+    expect(renderingsOf(await readViaRoute(), "grace")).toEqual([])
+    const ctx = await loadProjectContext(db, "consumer", { targetLang: "" })
+    expect(ctx.concepts.find((c) => c.id === "grace")?.renderings).toEqual([])
+    expect(lintTerminology(ctx.concepts, "by grace alone", "sólo por favor")).toEqual([])
+  })
+
+  it("matches by legacy_tag when a lane has no language yet", async () => {
+    await seedSubscription()
+    // An un-backfilled termbase `''` lane records no language.
+    await seedLane("tb", { id: "tb000e5a", legacyTag: "", language: null })
+    await seedLane("consumer", { id: "c0000e5a", legacyTag: "", language: "Spanish" })
+    await seedLane("consumer", { id: "c0000f7a", legacyTag: "fr", language: "French" })
+    await seedConcept("tb", { id: "grace", sourceTerm: "grace", renderings: [{ rendering: "gracia", status: "preferred" }] })
+
+    expect(renderingsOf(await readViaRoute(), "grace")).toEqual([["gracia", "c0000e5a"]])
+    expect(await autopilotRenderings({ targetLang: "" })).toEqual(["gracia"])
+    expect(await autopilotRenderings({ targetLang: "fr" })).toEqual([])
   })
 })

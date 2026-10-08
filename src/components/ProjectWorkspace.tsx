@@ -158,6 +158,7 @@ import {
   nextPaintGate,
   runReconnectResync,
   runAfterPushedLinkSync,
+  editorConceptsForLane,
   workspaceTerminology,
   timelinePlayReady,
 } from "./project-workspace-helpers"
@@ -2217,12 +2218,10 @@ export function ProjectWorkspace() {
     [localConcepts, activeLane, laneRows],
   )
   // AQU-1721: Check file also reads the subscribed termbases; their renderings
-  // follow the lane by the same rule (useRules applies it to both lists).
+  // follow the lane by the same rule (useRules applies it to both lists), and
+  // arrive already mapped onto this project's lanes (AQU-1777).
   const laneEditorConcepts = useMemo(
-    () =>
-      surfaceConcepts.editor === localConcepts
-        ? laneLocalConcepts
-        : conceptsForLaneTag(surfaceConcepts.editor, activeLane, laneRows),
+    () => editorConceptsForLane(surfaceConcepts.editor, localConcepts, laneLocalConcepts, activeLane, laneRows),
     [surfaceConcepts.editor, localConcepts, laneLocalConcepts, activeLane, laneRows],
   )
   // The DEFAULT (`''`) lane's language, for labels that always name that lane.

@@ -240,7 +240,10 @@ describe("CommentThread — resolve controls reflect real authority (AQU-1000)",
     })
     const onEdit = vi.fn()
     renderThread({ thread, canEdit: true, onEdit, projectId: "proj-1", fileId: "file-1", cellId: "cell-1" })
-    expect(screen.getAllByRole("button", { name: "Comment actions" })).toHaveLength(2)
+    const actions = screen.getAllByRole("button", { name: "Comment actions" })
+    expect(actions).toHaveLength(2)
+    expect(actions[0].className).toContain("group-hover/comment:opacity-100")
+    expect(actions[0].closest(".group\\/comment")).toBeTruthy()
 
     fireEvent.contextMenu(screen.getByText("please look"))
     const user = userEvent.setup()

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url"
 import { test, expect } from "../../helpers/multi-user"
 import { ToolsPage } from "../../helpers/page-objects/ToolsPage"
 import { jwtFor, mintSyncToken, openSeededProject, readCellHistory, seedProjectWithFile, type SeededProject } from "../../helpers/seed-project"
+import { readProjectLanes } from "../../helpers/frontier-api"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE = path.join(__dirname, "../../fixtures/tools/key-terms.usfm")
@@ -42,6 +43,12 @@ async function target(jwt: string, seeded: SeededProject, ref: string): Promise<
   const rows = await readRows(jwt, seeded)
   const src = rows.find((r) => r.side === "source" && r.canonicalRef === ref)
   return rows.find((r) => r.side === "target" && r.cellId === src?.cellId)
+}
+
+/** The seeded project's target lane tag (its legacy_tag, e.g. "Swahili"). */
+async function targetLaneTag(jwt: string, projectId: string): Promise<string> {
+  const lane = (await readProjectLanes(jwt, projectId)).find((l) => l.role === "target")
+  return lane?.legacyTag ?? ""
 }
 
 test("a custom editor extension replaces the editor, writes with attribution, and updates live", async ({ alice }) => {
@@ -90,7 +97,7 @@ test("a custom editor extension replaces the editor, writes with attribution, an
       events: [{
         id: randomUUID(), schemaVersion: 1, projectId: seeded.projectId, fileId: seeded.fileId, cellId: t12!.cellId,
         parentId: t12!.eventId, kind: "target.cell.commit", author: "alice",
-        payload: { value: "Abraham fue padre de Isaac.", targetLang: "sw" }, clientTs: Date.now(),
+        payload: { value: "Abraham fue padre de Isaac.", targetLang: await targetLaneTag(jwt, seeded.projectId) }, clientTs: Date.now(),
       }],
     }),
   })

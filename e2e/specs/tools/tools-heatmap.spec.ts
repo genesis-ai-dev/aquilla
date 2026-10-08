@@ -12,6 +12,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test, expect } from "../../helpers/multi-user"
 import { ToolsPage } from "../../helpers/page-objects/ToolsPage"
+import { readProjectLanes } from "../../helpers/frontier-api"
 import { jwtFor, mintSyncToken, readCellHistory, seedProjectWithFile, type SeededProject } from "../../helpers/seed-project"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -36,8 +37,15 @@ async function readRows(jwt: string, seeded: SeededProject): Promise<Row[]> {
   return ((await r.json()) as { cells: Row[] }).cells
 }
 
+/** The seeded project's target lane tag (its legacy_tag, e.g. "Swahili"). */
+async function targetLaneTag(jwt: string, projectId: string): Promise<string> {
+  const lane = (await readProjectLanes(jwt, projectId)).find((l) => l.role === "target")
+  return lane?.legacyTag ?? ""
+}
+
 async function commitTargets(jwt: string, seeded: SeededProject, edits: { cellId: string; parentId: string; value: string }[]) {
   const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const targetLang = await targetLaneTag(jwt, seeded.projectId)
   const res = await fetch(`${SYNC_BASE}/events`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -51,8 +59,7 @@ async function commitTargets(jwt: string, seeded: SeededProject, edits: { cellId
         parentId: e.parentId,
         kind: "target.cell.commit",
         author: "alice",
-        // The seeded project's only target lane is tagged "sw".
-        payload: { value: e.value, targetLang: "sw" },
+        payload: { value: e.value, targetLang },
         clientTs: Date.now(),
       })),
     }),

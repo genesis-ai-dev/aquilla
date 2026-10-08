@@ -8,6 +8,8 @@
 //   PUT    /:projectId/tools/:toolId/grant         { scopes } — the caller's standing grant
 //   DELETE /:projectId/tools/:toolId               archive
 //   GET    /:projectId/tools/:toolId/activity?since=<ms>   attributed writes + revert inputs
+//   POST   /:projectId/tools/:toolId/copy      share as an OWNED copy into { targetProjectId }
+//   GET    /:projectId/tools/:toolId/source?version=N   one version's source (code review)
 //   POST   /:projectId/tools/build                 one builder attempt (routes/tools-build.ts)
 //
 // Authorization: any member can list/run tools (a tool can do nothing its
@@ -171,6 +173,56 @@ tools.get("/:projectId/tools/:toolId/activity", authMiddleware, async (c) => {
   if (!Number.isFinite(since) || since < 0) return err(c, 400, "validation_failed", "since must be epoch ms")
   const activity = await readToolActivity(c.env.AQUILLA_PG, pid(c), tid(c), since)
   return c.json(activity)
+})
+
+// Sharing = an owned copy, never a live link: the target project gets its own
+// tool (origin 'copy', upstream_tool_id -> the original) with the exact code
+// and hash, and NO grants — its members review the code and approve scopes
+// themselves. Later upstream versions are not pulled automatically.
+tools.post("/:projectId/tools/:toolId/copy", authMiddleware, async (c) => {
+  if ((await roleFor(c)) == null) return err(c, 404, "not_found", "project not found")
+  const user = c.get("user")
+  const tool = await getTool(c.env.AQUILLA_PG, pid(c), tid(c), user.id)
+  if (!tool) return err(c, 404, "not_found", "extension not found")
+  const body = (await c.req.json().catch(() => null)) as { targetProjectId?: unknown } | null
+  const targetProjectId = typeof body?.targetProjectId === "string" ? body.targetProjectId : ""
+  if (!targetProjectId || targetProjectId === pid(c)) return err(c, 400, "validation_failed", "targetProjectId must be another project")
+  const targetRole = await resolveProjectRole(c.env, user, targetProjectId)
+  if (!targetRole || targetRole.level < ROLE.CONTRIBUTOR) {
+    return err(c, 403, "permission_denied", "copying an extension needs contributor access on the target project")
+  }
+  const input: SaveVersionInput = {
+    source: tool.source,
+    manifest: tool.manifest,
+    origin: "copy",
+    upstreamToolId: tool.id,
+    buildMeta: { copiedFrom: { projectId: pid(c), toolId: tool.id, version: tool.currentVersion, codeHash: tool.codeHash } },
+  }
+  const checked = await checkVersion(input)
+  if (!checked.ok) return c.json({ error: { code: "validation_failed", message: "extension failed the save gates", errors: checked.errors, lint: checked.lint } }, 400)
+  const newId = await createTool(c.env.AQUILLA_PG, targetProjectId, user.id, input, checked)
+  return c.json({ tool: await getTool(c.env.AQUILLA_PG, targetProjectId, newId, user.id) }, 201)
+})
+
+tools.get("/:projectId/tools/:toolId/source", authMiddleware, async (c) => {
+  if ((await roleFor(c)) == null) return err(c, 404, "not_found", "project not found")
+  const version = Number(c.req.query("version") ?? "0")
+  const row = await c.env.AQUILLA_PG.prepare(
+    `SELECT v.version, v.source, v.code_hash, v.build_meta, t.upstream_tool_id
+       FROM project_tool_versions v JOIN project_tools t ON t.id = v.tool_id
+      WHERE v.tool_id = ? AND v.project_id = ? AND (? = 0 OR v.version = ?)
+      ORDER BY v.version DESC LIMIT 1`,
+  )
+    .bind(tid(c), pid(c), version, version)
+    .first<{ version: number; source: string; code_hash: string; build_meta: unknown; upstream_tool_id: string | null }>()
+  if (!row) return err(c, 404, "not_found", "extension not found")
+  return c.json({
+    version: Number(row.version),
+    source: row.source,
+    codeHash: row.code_hash,
+    upstreamToolId: row.upstream_tool_id,
+    buildMeta: typeof row.build_meta === "string" ? JSON.parse(row.build_meta) : row.build_meta,
+  })
 })
 
 export default tools

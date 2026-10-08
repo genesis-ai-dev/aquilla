@@ -100,6 +100,15 @@ export const extensions = defineNamespace({
     "extensions.stale.rebuild": "Rebuild it",
     "extensions.change.placeholder": "Describe a change to this extension…",
     "extensions.change.submit": "Change it",
+    "extensions.copy.button": "Copy",
+    "extensions.copy.pick": "Copy to another project…",
+    "extensions.copy.done": "Copied to {project}.",
+    "extensions.review.badge": "Copied — review its code",
+    "extensions.review.button": "Review code",
+    "extensions.review.title": "Code of {name}",
+    "extensions.review.hash": "Code hash {hash}",
+    "extensions.review.note":
+      "This is an owned copy: it does not change when the original does, and it starts with no permissions. Read what it does before allowing it to write.",
   },
   context: {
     _context: {
@@ -134,6 +143,9 @@ export const extensions = defineNamespace({
       "extensions.revert.skippedRow": { description: "One skipped cell.", placeholders: { cell: "Cell reference.", by: "Username now holding the cell." } },
       "extensions.palette.openPanel": { description: "Command palette entry.", placeholders: { name: "Extension name." } },
       "extensions.tell.label": { description: "Heading of a message an extension left for the user.", placeholders: { name: "Extension name." } },
+      "extensions.copy.done": { description: "Result after copying an extension.", placeholders: { project: "Target project name." } },
+      "extensions.review.title": { description: "Code review dialog title.", placeholders: { name: "Extension name." } },
+      "extensions.review.hash": { description: "Shows the full code fingerprint.", placeholders: { hash: "Hex sha256." } },
       "extensions.heal.failed": { description: "Error after an automatic fix failed.", placeholders: { message: "Builder error." } },
       "extensions.heal.done": { description: "Result after an extension was changed or healed.", placeholders: { version: "New version number." } },
       "extensions.palette.useAsEditor": { description: "Command palette entry.", placeholders: { name: "Extension name." } },

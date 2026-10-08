@@ -121,6 +121,30 @@ describe("tools API", () => {
     expect(await ok.json()).toEqual({ scopes: ["read:cells"] })
   })
 
+  it("shares as an owned copy with upstream link, same hash and no grants", async () => {
+    await seedProject()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('proj-other', 'Other', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-other', 1, ?, 1)",
+    ).bind(ROLE.OWNER).run()
+    const jwt = await jwtFor("owner")
+    const { tool } = (await (await call("/tools", jwt, {
+      method: "POST",
+      body: { source: GOOD_SOURCE, manifest: MANIFEST, origin: "starter", grant: ["read:cells"] },
+    })).json()) as ToolBody
+    const res = await call(`/tools/${tool.id}/copy`, jwt, { method: "POST", body: { targetProjectId: "proj-other" } })
+    expect(res.status).toBe(201)
+    const copy = (await res.json()) as { tool: ToolBody["tool"] & { upstreamToolId: string; origin: string; projectId: string } }
+    expect(copy.tool.projectId).toBe("proj-other")
+    expect(copy.tool.upstreamToolId).toBe(tool.id)
+    expect(copy.tool.origin).toBe("copy")
+    expect(copy.tool.codeHash).toBe(tool.codeHash)
+    expect(copy.tool.grantedScopes).toEqual([])
+    // A viewer elsewhere cannot copy into a project they cannot write.
+    const viewerJwt = await jwtFor("viewer")
+    expect((await call(`/tools/${tool.id}/copy`, viewerJwt, { method: "POST", body: { targetProjectId: "proj-other" } })).status).toBe(403)
+  })
+
   it("activity returns tool-stamped writes and the pre-window value", async () => {
     await seedProject()
     const jwt = await jwtFor("owner")

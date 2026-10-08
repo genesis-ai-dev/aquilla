@@ -160,6 +160,24 @@ export async function removeTool(jwt: string, projectId: string, toolId: string)
   await request<{ ok: true }>(jwt, `${p(projectId)}/${encodeURIComponent(toolId)}`, { method: "DELETE" })
 }
 
+export async function copyTool(jwt: string, projectId: string, toolId: string, targetProjectId: string): Promise<ToolDetail> {
+  return (
+    await request<{ tool: ToolDetail }>(jwt, `${p(projectId)}/${encodeURIComponent(toolId)}/copy`, {
+      method: "POST",
+      body: { targetProjectId },
+    })
+  ).tool
+}
+
+export async function fetchToolSource(
+  jwt: string,
+  projectId: string,
+  toolId: string,
+  version = 0,
+): Promise<{ version: number; source: string; codeHash: string; upstreamToolId: string | null }> {
+  return request(jwt, `${p(projectId)}/${encodeURIComponent(toolId)}/source?version=${version}`)
+}
+
 export async function fetchToolActivity(jwt: string, projectId: string, toolId: string, sinceMs: number): Promise<ToolActivity> {
   return request<ToolActivity>(jwt, `${p(projectId)}/${encodeURIComponent(toolId)}/activity?since=${Math.max(0, Math.floor(sinceMs))}`)
 }

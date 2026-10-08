@@ -16,6 +16,7 @@ import { InstallToolDialog } from "@/components/tools/InstallToolDialog"
 import { ToolActivityPanel } from "@/components/tools/ToolActivityPanel"
 import { useScopeLabel } from "@/components/tools/scope-label"
 import { useToolsMount } from "@/components/tools/ToolsMountContext"
+import { CopyExtension, ReviewCopiedExtension } from "@/components/tools/ShareExtension"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProject } from "@/hooks/useProject"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -172,6 +173,7 @@ export function ToolsPage() {
                   <span className="font-medium">{tool.name}</span>
                   <Badge variant="outline">{t("extensions.version", { version: tool.currentVersion })}</Badge>
                   <Badge variant="outline" className="font-mono">{t("extensions.codeHash", { hash: tool.codeHash.slice(0, 8) })}</Badge>
+                  {jwt && <ReviewCopiedExtension projectId={projectId} tool={tool} jwt={jwt} />}
                   <div className="ml-auto flex gap-2">
                     <Button size="sm" render={<Link to={`/project/${projectId}/extensions/${tool.id}`} />}>
                       <Play className="size-3.5" aria-hidden />
@@ -204,6 +206,11 @@ export function ToolsPage() {
                     .map((m) => (m === "page" ? t("extensions.mounts.page") : m === "panel" ? t("extensions.mounts.panel") : m === "inline" ? t("extensions.mounts.inline") : t("extensions.mounts.editor")))
                     .join(" · ")}
                 </p>
+                {jwt && (
+                  <div className="mt-1">
+                    <CopyExtension projectId={projectId} tool={tool} jwt={jwt} />
+                  </div>
+                )}
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                   <span className="text-muted-foreground">{t("extensions.grants.label")}:</span>
                   {tool.grantedScopes.length === 0 && <span className="text-muted-foreground">{t("extensions.grants.none")}</span>}

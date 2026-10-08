@@ -412,7 +412,7 @@ projects.post(
       const leadsEveryTeam = teamRoles.size > 0 &&
         [...teamRoles.values()].every((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
       const genuinelyAllowed = (orgRole != null && orgRole >= ROLE.MAINTAINER) || leadsEveryTeam
-      if (!genuinelyAllowed && isPlatformAdminEmail(c.env, user.email)) {
+      if (!genuinelyAllowed && await isPlatformAdminEmail(c.env, user.email)) {
         if (!(await hasActiveElevation(c))) {
           return c.json(
             { error: "elevation required to create a project in an org with platform-admin access" },
@@ -548,7 +548,7 @@ projects.get("/", authMiddleware, async (c) => {
 
   // Platform operators see every project in an org-scoped list, or one page
   // of the tenancy in picker mode. Unparameterized boot never bypasses.
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const isAdmin = await isPlatformAdminEmail(c.env, user.email)
   const adminBypass = isAdmin && (orgFilter !== null || pickerMode)
   const minRoleBind = minRole !== null && !adminBypass ? minRole : null
 
@@ -2307,7 +2307,7 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
   const unelevated = await projectElevationDenial(c, callerRole)
   if (unelevated) return unelevated
 
-  const invite = isAdminActor(c.env, user)
+  const invite = await isAdminActor(c.env, user)
     ? await c.env.AQUILLA_PG.prepare(
         "SELECT role_level, email FROM project_invites WHERE token = ? AND project_id = ? AND used_by IS NULL",
       )

@@ -8,7 +8,7 @@
 //
 // Routes (mounted at /api/v2/admin):
 //   GET /me                    — { isPlatformAdmin: true } (only reachable past the gate)
-//   GET /admins                — the ADMIN_EMAILS allowlist joined to user accounts
+//   GET /admins                — the platform_admins rows (plus any ADMIN_EMAILS bootstrap) joined to user accounts
 //   GET /overview              — top-line counts (orgs, users, projects, active-7d)
 //   GET /orgs                  — every org + owner + member/project counts
 //   GET /users                 — every user
@@ -23,7 +23,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { parseAdminEmails, requirePlatformAdmin, requireAdminElevation, adminElevationRequired } from "../middleware/platform-admin"
+import { loadPlatformAdminEmails, requirePlatformAdmin, requireAdminElevation, adminElevationRequired } from "../middleware/platform-admin"
 import { resolveCreditConfig, readSpend } from "../lib/credits"
 import { countTargetLanesByOrg } from "../lib/billing/words"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
@@ -294,13 +294,14 @@ admin.get("/migration-status", async (c) => {
 })
 
 /**
- * GET /api/v2/admin/admins — the ADMIN_EMAILS allowlist, joined to user
- * accounts by email. Allowlist entries without a matching users row are still
- * returned (hasAccount: false) so a typo'd or not-yet-registered email in
- * wrangler.toml is visible from the dashboard instead of silently inert.
+ * GET /api/v2/admin/admins — the platform admins (`platform_admins` rows, plus
+ * any `ADMIN_EMAILS` bootstrap), joined to user accounts by email. Entries
+ * without a matching users row are still returned (hasAccount: false) so a
+ * typo'd or not-yet-registered email in the table is visible from the
+ * dashboard instead of silently inert.
  */
 admin.get("/admins", async (c) => {
-  const allowlist = Array.from(parseAdminEmails(c.env)).sort((a, b) =>
+  const allowlist = Array.from(await loadPlatformAdminEmails(c.env)).sort((a, b) =>
     a.localeCompare(b),
   )
   if (allowlist.length === 0) return c.json({ admins: [] })

@@ -29,7 +29,7 @@
 
 import type { Env } from "../types"
 import type { AuthUser, RoleResolution } from "../types"
-import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { isPlatformAdminEmail, loadPlatformAdminEmails, platformAdminEmailsParam } from "../middleware/platform-admin"
 import { memoize } from "../lib/request-memo"
 import {
   orgPathContribution,
@@ -205,12 +205,12 @@ async function resolveProjectRoleInternal(
       parseAccessGrantsMode(env.ACCESS_GRANTS_RESOLVER),
       { userId: String(user.id), projectId },
       () => resolveGrantPaths(env, user, projectId, project),
-      () =>
+      async () =>
         resolveProjectRoleViaGrants(
           env.AQUILLA_PG,
           { id: String(user.id), email: user.email },
           projectId,
-          env.ADMIN_EMAILS,
+          await platformAdminEmailsParam(env),
           true,
         ),
       (g) => {
@@ -261,7 +261,12 @@ async function resolveGrantPaths(
         )
       : Promise.resolve<PathResult<{ role_level: number }>>({ row: null, failed: false }),
   ])
-  return roleFromGrantPaths(env, user, project, { override, group, org })
+  return roleFromGrantPaths(
+    await isPlatformAdminEmail(env, user.email),
+    user,
+    project,
+    { override, group, org },
+  )
 }
 
 /** What each grant-path query answered for one project. */
@@ -272,12 +277,12 @@ interface GrantPaths {
 }
 
 /**
- * The rules, with no I/O: max-wins over whatever the path queries returned.
+ * The rules, with no I/O (the platform-admin lookup is done by the caller): max-wins over whatever the path queries returned.
  * resolveProjectRole and resolveProjectRoles both end here, so asking about
  * one project or a page of them cannot give different answers.
  */
 function roleFromGrantPaths(
-  env: Env,
+  isPlatformAdmin: boolean,
   user: AuthUser,
   project: ProjectRow,
   { override, group, org }: GrantPaths,
@@ -303,7 +308,7 @@ function roleFromGrantPaths(
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every
   // project — the cross-tenant support/oversight path. Lowest tie priority so
   // a genuine grant keeps attribution when the admin is also a real member.
-  if (isPlatformAdminEmail(env, user.email))
+  if (isPlatformAdmin)
     contributions.push({ source: "platform", level: 700 })
 
   if (contributions.length === 0) {
@@ -472,6 +477,8 @@ export async function resolveProjectRoles(
 
   let legacyPaths: Promise<Map<string, GrantPaths>> | undefined
   let viewRoles: ReturnType<typeof resolveProjectRolesViaGrants> | undefined
+  // One platform_admins read for the whole page, shared by both resolver paths.
+  let admins: Promise<Set<string>> | undefined
   const mode = parseAccessGrantsMode(env.ACCESS_GRANTS_RESOLVER)
   await Promise.all(
     ids.map(async (projectId) => {
@@ -486,15 +493,26 @@ export async function resolveProjectRoles(
         async () => {
           legacyPaths ??= loadGrantPathsForProjects(env, user, live)
           const paths = (await legacyPaths).get(projectId)
-          return paths ? roleFromGrantPaths(env, user, project, paths) : null
+          return paths
+            ? roleFromGrantPaths(
+                (await (admins ??= loadPlatformAdminEmails(env))).has(user.email.trim().toLowerCase()),
+                user,
+                project,
+                paths,
+              )
+            : null
         },
         async () => {
-          viewRoles ??= resolveProjectRolesViaGrants(
-            env.AQUILLA_PG,
-            { id: String(user.id), email: user.email },
-            live.map((p) => p.id),
-            env.ADMIN_EMAILS,
-            true,
+          // Assigned synchronously (before any await) so concurrent projects
+          // on the page share one view read.
+          viewRoles ??= (admins ??= loadPlatformAdminEmails(env)).then((set) =>
+            resolveProjectRolesViaGrants(
+              env.AQUILLA_PG,
+              { id: String(user.id), email: user.email },
+              live.map((p) => p.id),
+              Array.from(set).join(","),
+              true,
+            ),
           )
           return (await viewRoles).get(projectId) ?? null
         },

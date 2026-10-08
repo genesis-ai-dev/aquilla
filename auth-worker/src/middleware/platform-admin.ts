@@ -6,18 +6,30 @@
 // Platform admin is the cross-tenant primitive — it lets a named operator
 // read every org/user/project for support and oversight.
 //
-// Identity is by EMAIL: `ADMIN_EMAILS` (a comma-separated allowlist) lists the
-// exact account emails that are site admins. Usernames do not matter. Membership
-// lives in deploy config rather than a DB column, so god-mode can't be conferred
-// by a stray SQL write and is auditable in the worker config. Mount this AFTER
-// authMiddleware so `c.get("user")` is hydrated.
+// Identity is by EMAIL: a platform admin is an account whose email is a row in
+// the `platform_admins` table, or is listed in the optional `ADMIN_EMAILS`
+// env var (comma-separated). Usernames do not matter.
+//
+// The table is the source of truth for deployed environments (AQU-1239). The
+// repo is public, and the list used to sit in wrangler.toml, so every admin's
+// real address was published with it. Deployed dev/prod no longer set
+// `ADMIN_EMAILS`. It remains only as a bootstrap for local dev, e2e, tests and
+// self-hosters, who can start with an admin before any row exists. Rows are
+// written by hand with SQL (see docs/DEPLOYMENT-ENVIRONMENTS.md), never by an
+// API route, so a stray request cannot confer god-mode.
+//
+// Every check reads the table; nothing is cached across requests, so a deleted
+// row loses access on the next request. If the read fails (for example the
+// table does not exist yet), the table contributes nobody: fail closed, never
+// open. Mount this AFTER authMiddleware so `c.get("user")` is hydrated.
 
 import type { Context, Next } from "hono"
 import type { Env } from "../types"
 import type { AuthHonoEnv } from "./auth"
+import { memoize } from "../lib/request-memo"
 
-/** Parse `ADMIN_EMAILS` into a set of trimmed, lowercased emails. */
-export const parseAdminEmails = (env: Env): Set<string> => {
+/** Parse the optional `ADMIN_EMAILS` bootstrap var into trimmed, lowercased emails. */
+const parseAdminEmails = (env: Env): Set<string> => {
   const raw = env.ADMIN_EMAILS ?? ""
   return new Set(
     raw
@@ -28,19 +40,65 @@ export const parseAdminEmails = (env: Env): Set<string> => {
 }
 
 /**
+ * Every platform admin email: `platform_admins` rows plus the `ADMIN_EMAILS`
+ * bootstrap, lowercased. A failed table read logs and contributes nobody, so a
+ * missing table (migration not yet applied) demotes table admins to non-admin
+ * instead of 500ing every request. Memoised for the life of one request only.
+ */
+export const loadPlatformAdminEmails = (env: Env): Promise<Set<string>> =>
+  memoize(env.requestMemo, "platform-admin:all", async () => {
+    const all = new Set<string>()
+    try {
+      const { results } = await env.AQUILLA_PG.prepare(
+        "SELECT email FROM platform_admins",
+      ).all<{ email: string }>()
+      for (const r of results) all.add(r.email.trim().toLowerCase())
+    } catch (err) {
+      console.error("[platform-admin] platform_admins read failed; failing closed:", err)
+    }
+    for (const e of parseAdminEmails(env)) all.add(e)
+    return all
+  })
+
+/**
  * Context-free identity check, usable from services (no hono Context).
  * The permission resolvers call this to grant platform operators owner-level
  * access on every org/project — see resolveProjectRole / getEffectiveOrgRole.
+ * One primary-key lookup, plus the env bootstrap.
  */
-export const isPlatformAdminEmail = (env: Env, email: string): boolean =>
-  parseAdminEmails(env).has(email.trim().toLowerCase())
+export const isPlatformAdminEmail = async (env: Env, email: string): Promise<boolean> => {
+  const normalized = email.trim().toLowerCase()
+  if (!normalized) return false
+  if (parseAdminEmails(env).has(normalized)) return true
+  return memoize(env.requestMemo, `platform-admin:${normalized}`, async () => {
+    try {
+      const row = await env.AQUILLA_PG.prepare(
+        "SELECT 1 AS ok FROM platform_admins WHERE email = ?",
+      )
+        .bind(normalized)
+        .first<{ ok: number }>()
+      return row != null
+    } catch (err) {
+      console.error("[platform-admin] platform_admins lookup failed; failing closed:", err)
+      return false
+    }
+  })
+}
 
 /** True when the hydrated request user is a platform operator (by email). */
-export const isPlatformAdmin = (c: Context<AuthHonoEnv>): boolean => {
+export const isPlatformAdmin = async (c: Context<AuthHonoEnv>): Promise<boolean> => {
   const user = c.get("user")
   if (!user) return false
   return isPlatformAdminEmail(c.env, user.email)
 }
+
+/**
+ * The platform admin set as the comma-separated string the shared resolvers in
+ * db/shared take (they cannot import this module). Callers resolve it here
+ * first, then pass it in place of `env.ADMIN_EMAILS`.
+ */
+export const platformAdminEmailsParam = async (env: Env): Promise<string> =>
+  Array.from(await loadPlatformAdminEmails(env)).join(",")
 
 /**
  * Whether the admin console requires step-up elevation (the emailed 6-digit
@@ -48,14 +106,14 @@ export const isPlatformAdmin = (c: Context<AuthHonoEnv>): boolean => {
  * `WRANGLER_LOCAL=1` (the local dev-stack / e2e signal, which also relaxes other
  * security for seeding) — so local dev and e2e keep the open console even though
  * the prod-shaped top-level [vars] turn elevation on. Separate from WHO is an
- * admin (`ADMIN_EMAILS`): identity is always enforced; this only governs the
+ * admin (`platform_admins`): identity is always enforced; this only governs the
  * extra step-up.
  */
 export const adminElevationRequired = (env: Env): boolean =>
   env.ADMIN_REQUIRE_ELEVATION === "true" && env.WRANGLER_LOCAL !== "1"
 
 /**
- * Reject any caller whose account email is not in the `ADMIN_EMAILS` allowlist.
+ * Reject any caller whose account email is not a platform admin (see header).
  * Returns the same 403 shape as the org-role guards so the client handles it
  * uniformly. Every `/api/v2/admin/*` route mounts behind this — a single choke
  * point so there is no "forgot the check" path into cross-tenant data.
@@ -64,7 +122,7 @@ export const requirePlatformAdmin = async (
   c: Context<AuthHonoEnv>,
   next: Next,
 ): Promise<Response | void> => {
-  if (!isPlatformAdmin(c)) {
+  if (!(await isPlatformAdmin(c))) {
     return c.json({ error: "platform admin required" }, 403)
   }
   await next()

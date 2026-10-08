@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { parseRuleSuggestions, suggestRulesFromPairs } from "./rule-suggester"
+import { candidateWindow, parseRuleSuggestions, suggestRulesFromCandidates, suggestRulesFromPairs } from "./rule-suggester"
+import type { EditCandidate } from "./edit-miner"
 
 vi.mock("@/lib/completion/completion-service", () => ({ complete: vi.fn() }))
 import { complete } from "@/lib/completion/completion-service"
@@ -74,5 +75,52 @@ describe("suggestRulesFromPairs usage callback", () => {
     )
     expect(onLlmCall).toHaveBeenCalledTimes(1)
     expect(onLlmCall.mock.calls[0][0]).toMatchObject({ kind: "rule-suggestion", provider: "custom", model: "m" })
+  })
+})
+
+// "Suggest more" in the rules list asks the LLM again and again. Each batch
+// must look at different edits and must not re-propose rules already in the
+// list, or the button just hands back the same handful forever.
+describe("suggestRulesFromCandidates batching", () => {
+  beforeEach(() => vi.mocked(complete).mockReset())
+
+  const settings = { endpoint: "", model: "m", maxTokens: 512, temperature: 0.2, systemPrompt: "", llmHealthPenalty: 0.1, provider: "custom" as const }
+  const candidates: EditCandidate[] = Array.from({ length: 50 }, (_, i) => ({
+    kind: "human-authored",
+    evidence: `edit ${i}`,
+    score: 50 - i,
+    sourceSample: `source-${i}`,
+    targetSample: `target-${i}`,
+    key: `k${i}`,
+  }))
+  const promptOf = () => vi.mocked(complete).mock.calls[0][0].messages[1].content
+
+  it("a later batch shows the model different edits than the first", async () => {
+    vi.mocked(complete).mockResolvedValue("[]")
+    await suggestRulesFromCandidates(candidates, settings, null, undefined, { offset: 20 })
+    expect(promptOf()).toContain('"source-20"')
+    expect(promptOf()).not.toContain('"source-0"')
+  })
+
+  it("tells the model which rules already exist so it proposes new ones", async () => {
+    vi.mocked(complete).mockResolvedValue("[]")
+    await suggestRulesFromCandidates(candidates, settings, null, undefined, { exclude: ["Preserve verse numbers"] })
+    expect(promptOf()).toMatch(/Do not propose them again[\s\S]*Preserve verse numbers/)
+  })
+
+  it("a focused ask names the focus and widens the window", async () => {
+    vi.mocked(complete).mockResolvedValue("[]")
+    await suggestRulesFromCandidates(candidates, settings, null, undefined, { focus: "punctuation" })
+    expect(promptOf()).toContain('rules about: "punctuation"')
+    expect(promptOf()).toContain('"source-39"')
+  })
+})
+
+describe("candidateWindow", () => {
+  it("wraps past the end so a late batch on a small corpus is never empty", () => {
+    expect(candidateWindow([1, 2, 3, 4, 5], 4, 3)).toEqual([5, 1, 2])
+  })
+  it("returns everything when the corpus fits in one window", () => {
+    expect(candidateWindow([1, 2], 7, 20)).toEqual([1, 2])
   })
 })

@@ -46,15 +46,42 @@ export const workspace = defineNamespace({
     "workspace.offline.leaderStalledRestart": "Restart app",
     // Tauri: a newer build owns the offline data (src/lib/offline/generation-guard.ts).
     "workspace.offline.newerDataToast": "Your offline projects were saved by a newer version of Aquilla. Update the app to use them — until then, changes save only while you're online.",
-    // Tauri desktop: a downloaded app update, held until the offline queue has
-    // reached the server (src/components/DesktopUpdatePrompt.tsx).
+    // Desktop update prompt (DesktopUpdatePrompt.tsx).
     "workspace.update.readyToast": "Aquilla {version} is ready to install.",
     "workspace.update.restartToUpdate": "Restart to update",
     "workspace.update.stuckToast": plural({
       one: "Aquilla {version} is ready, but {count} change hasn't reached the server yet. If you update now, it stays saved on this device and sends after the restart.",
       other: "Aquilla {version} is ready, but {count} changes haven't reached the server yet. If you update now, they stay saved on this device and send after the restart.",
     }),
+    // Refused rows never resend, so don't promise they will.
+    "workspace.update.refusedToast": plural({
+      one: "Aquilla {version} is ready, but {count} change hasn't reached the server — it was refused, so it won't send on its own. If you update now, it stays saved on this device.",
+      other: "Aquilla {version} is ready, but {count} changes haven't reached the server, and some were refused and won't send on their own. If you update now, they all stay saved on this device.",
+    }),
+    "workspace.update.unknownToast": "Aquilla {version} is ready, but this device couldn't check whether all your changes have reached the server. If you update now, anything unsent stays saved on this device.",
     "workspace.update.updateAnyway": "Update anyway",
+    // Tauri offline mode: the server refuses to sync a downloaded project —
+    // deleted, access removed, archived or frozen (src/lib/offline/project-access.ts).
+    "workspace.offline.projectUnavailableToast": "“{name}” is no longer available to you on the server, so this device has stopped syncing it.",
+    "workspace.offline.projectUnavailableHint": "It may have been deleted or archived, or your access was removed. You can still read the copy on this device.",
+    "workspace.offline.projectUnavailableQueued": plural({
+      one: "{count} change on this device hasn't been sent and can't be until your access is restored. Ask a project lead before removing the offline copy.",
+      other: "{count} changes on this device haven't been sent and can't be until your access is restored. Ask a project lead before removing the offline copy.",
+    }),
+    "workspace.offline.projectUnavailableRemove": "Remove offline copy",
+    // Tauri offline mode: queued edits the server refused for good
+    // (src/lib/offline/refused-writes.ts).
+    "workspace.offline.refusedToast": plural({
+      one: "{count} change you made offline couldn't be saved — the server refused it.",
+      other: "{count} changes you made offline couldn't be saved — the server refused them.",
+    }),
+    "workspace.offline.refusedRetry": "Retry",
+    "workspace.offline.refusedDiscard": "Discard",
+    "workspace.offline.refusedDiscardConfirm": plural({
+      one: "Discard {count} change? It can't be recovered.",
+      other: "Discard {count} changes? They can't be recovered.",
+    }),
+    "workspace.offline.refusedKeep": "Keep",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -397,6 +424,8 @@ export const workspace = defineNamespace({
 
     // -- chat/ChatMarkdown --
     "workspace.chatMarkdown.copyCode": "Copy code",
+    "workspace.chatMarkdown.image": "[image]",
+    "workspace.chatMarkdown.imageAlt": "[image: {alt}]",
 
     // -- onboarding/steps/OrgStep --
     "workspace.orgStep.emailsPlaceholder": "alex@example.com, sam@example.com",
@@ -598,10 +627,93 @@ export const workspace = defineNamespace({
           count: "How many changes haven't been sent yet.",
         },
       },
+      "workspace.update.refusedToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when a " +
+          "new app version is downloaded but some unsent changes were refused " +
+          "by the server and won't send on their own. Must not promise they'll " +
+          "send after the update. Paired with an 'Update anyway' action " +
+          "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
+          "'sync' jargon.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+          count: "How many changes haven't been sent yet.",
+        },
+      },
+      "workspace.update.unknownToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when a " +
+          "new app version is downloaded but the app couldn't open its local " +
+          "storage to check for unsent changes. Paired with an 'Update anyway' " +
+          "action (workspace.update.updateAnyway). Plain language — no 'queue', " +
+          "'store' or 'sync' jargon.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+        },
+      },
       "workspace.update.updateAnyway": {
         description:
           "Action button on the 'changes not sent yet' update toast; installs " +
           "the update and relaunches without waiting. Short imperative.",
+      },
+      "workspace.offline.projectUnavailableToast": {
+        description:
+          "Title of a persistent toast in the Tauri desktop app when the server " +
+          "stops letting this device sync a project it downloaded for offline " +
+          "use. Full sentence with a period. Plain language — no 'token' or " +
+          "'403' jargon.",
+        placeholders: {
+          name: "The project's name, shown in quotation marks.",
+        },
+      },
+      "workspace.offline.projectUnavailableHint": {
+        description:
+          "Body of the 'no longer available' toast when nothing is waiting to be " +
+          "sent. Lists the likely causes without blame and reassures that the " +
+          "local copy is still readable. Two full sentences with periods.",
+      },
+      "workspace.offline.projectUnavailableQueued": {
+        description:
+          "Body of the 'no longer available' toast when edits made on this " +
+          "device are still waiting to be sent. Warns they can't be delivered and " +
+          "that removing the offline copy would lose them. Two full sentences.",
+        placeholders: {
+          count: "How many unsent changes are on this device.",
+        },
+      },
+      "workspace.offline.projectUnavailableRemove": {
+        description:
+          "Action button on the 'no longer available' toast; deletes this " +
+          "project's copy from the device. Short imperative.",
+      },
+      "workspace.offline.refusedToast": {
+        description:
+          "Title of a persistent error toast in the Tauri desktop app when edits " +
+          "made offline were refused by the server (e.g. the user's role or the " +
+          "language lane changed meanwhile). Paired with 'Retry' and 'Discard' " +
+          "buttons. One full sentence with a period. Plain language.",
+        placeholders: {
+          count: "How many refused changes are on this device.",
+        },
+      },
+      "workspace.offline.refusedRetry": {
+        description: "Button on the refused-changes toast; tries sending the changes again. Short imperative.",
+      },
+      "workspace.offline.refusedDiscard": {
+        description:
+          "Button on the refused-changes toast that deletes the changes from the " +
+          "device (asks to confirm first), and the confirm button itself. Short imperative.",
+      },
+      "workspace.offline.refusedDiscardConfirm": {
+        description:
+          "Toast title asking the user to confirm deleting refused offline changes. " +
+          "A question, then a short warning sentence.",
+        placeholders: {
+          count: "How many changes would be deleted.",
+        },
+      },
+      "workspace.offline.refusedKeep": {
+        description: "Button that cancels discarding refused changes and keeps them. Short imperative.",
       },
       "workspace.projectCard.deletedBy": {
         description:
@@ -1748,6 +1860,23 @@ export const workspace = defineNamespace({
         description:
           "Tooltip and accessible name for the small copy button that " +
           "appears on hover over a fenced code block in an assistant chat message.",
+      },
+
+      "workspace.chatMarkdown.image": {
+        description:
+          "Muted stand-in text shown where an assistant chat message contains an image " +
+          "without a description. Remote images are never loaded, so this replaces the " +
+          "picture. Keep the square brackets.",
+      },
+
+      "workspace.chatMarkdown.imageAlt": {
+        description:
+          "Muted stand-in text shown where an assistant chat message contains an image, " +
+          "followed by the image's description. Remote images are never loaded, so this " +
+          "replaces the picture. Keep the square brackets.",
+        placeholders: {
+          alt: "The image's description (alt text) written by the AI assistant, in whatever language it used. Not translated.",
+        },
       },
 
       "workspace.orgStep.emailsPlaceholder": {

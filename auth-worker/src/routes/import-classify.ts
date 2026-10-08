@@ -251,7 +251,7 @@ imports.post(
       console.error("Import classification failed:", error)
       return c.json({
         error: "import_classifier_unavailable",
-        message: error instanceof Error ? error.message : String(error),
+        message: "Import classification is temporarily unavailable",
       }, 502)
     }
   },

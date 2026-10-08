@@ -69,12 +69,7 @@ pub fn restart_app(app: AppHandle, state: State<'_, ShutdownGuardState>) {
     exit_after_handshake(&app, &state, |app| app.restart());
 }
 
-/// Runs the save handshake, then `after` (which may relaunch or never return),
-/// then exits. False — and `after` is dropped unrun — when a shutdown is
-/// already under way, so a second quit/restart/update request is a no-op.
-/// Used by `app_update.rs` to install an update only once the offline store
-/// has been flushed and shut down: on Windows the updater's `install()` exits
-/// the process itself, so the handshake can't wait until after it.
+/// False if a shutdown is already under way. `after` may never return (Windows `install()` exits).
 pub fn exit_after_handshake<F>(app: &AppHandle, state: &ShutdownGuardState, after: F) -> bool
 where
     F: FnOnce(&AppHandle) + Send + 'static,

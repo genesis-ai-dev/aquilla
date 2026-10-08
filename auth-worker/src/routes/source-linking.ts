@@ -31,6 +31,10 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
+import {
+  clearInheritedSettings,
+  seedInheritedSettings,
+} from "../../../db/shared/inherited-settings"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRoleIncludingArchived } from "../services/project-permissions"
@@ -41,6 +45,7 @@ import {
   emitLinkSourceEvent,
   listDownstreamProjects,
   loadLinkAdoption,
+  loadLinkAdoptionRaw,
   loadLinkBackfillRaw,
   loadProjectWithSource,
   loadLinkFileIds,
@@ -49,6 +54,8 @@ import {
   loadUpstreamFileIds,
   matchFilesForReplace,
   parseLinkFileIds,
+  liveLinkKeepsLane,
+  resolveUpstreamLinkLane,
   snapshotSourceCells,
   triggerLinkSeedSync,
 } from "../services/source-linking"
@@ -57,7 +64,10 @@ import {
   parseSourceLinkBackfill,
   serializeSourceLinkBackfill,
 } from "../../../db/shared/source-link-backfill"
-import { serializeSourceLinkAdoption } from "../../../db/shared/source-link-adopt"
+import {
+  parseSourceLinkAdoption,
+  serializeSourceLinkAdoption,
+} from "../../../db/shared/source-link-adopt"
 
 const sourceLinking = new Hono<AuthHonoEnv>()
 
@@ -94,6 +104,19 @@ const replaceFilePairSchema = z.object({
 })
 
 /** Why a set of replace pairs cannot be honoured as given, or null. */
+/** Postgres `undefined_column` (42703), including when a transaction wrapper
+ *  puts the code on `cause`. */
+function isPgUndefinedColumn(error: unknown): boolean {
+  const candidates: unknown[] = [error]
+  if (error && typeof error === "object" && "cause" in error) {
+    candidates.push((error as { cause?: unknown }).cause)
+  }
+  return candidates.some((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false
+    return (candidate as { code?: unknown }).code === "42703"
+  })
+}
+
 function replacePairsProblem(
   pairs: ReadonlyArray<{ upstreamFileId: string; fileId: string }>,
 ): string | null {
@@ -116,6 +139,23 @@ const linkSourceSchema = z.object({
   // got past that is a 400 rather than a link that can never sync. The cap is a
   // whole Bible and then some; files.id is a UUID, hence 256.
   fileIds: z.array(z.string().min(1).max(256)).min(1).max(5000).optional(),
+  // AQU-1605: WHICH of the upstream's lanes this link consumes, by `lanes.id`.
+  // Omitted: the server picks when the choice is unambiguous (the upstream
+  // source lane, or the one non-archived target lane this caller can see) and
+  // 400s otherwise. A new link always stores a concrete id. Existing rows may
+  // still be null until AQU-1616's backfill; that null means the '' lane.
+  laneId: z.string().min(1).max(256).optional(),
+  // AQU-1075: which settings this downstream copies. Omitted fields use the
+  // defaults (brief, knowledge documents, and workflow policy on; living
+  // memory, smart quotes, and AI instructions off).
+  inherit: z.object({
+    translationBrief: z.boolean().optional(),
+    knowledgeDocs: z.boolean().optional(),
+    workflowPolicy: z.boolean().optional(),
+    livingMemory: z.boolean().optional(),
+    smartQuotes: z.boolean().optional(),
+    systemPrompt: z.boolean().optional(),
+  }).optional(),
   // Each pair costs a read of both files' source lines before the link is
   // saved, so the cap is a Bible's worth of books rather than the selection's.
   replaceFiles: z.array(replaceFilePairSchema).min(1).max(200).optional(),
@@ -138,7 +178,9 @@ sourceLinking.post(
       consumes = "source",
       gate = "validated",
       fileIds,
+      laneId,
       replaceFiles,
+      inherit,
     } = c.req.valid("json")
 
     // AQU-1559: deduped so the stored list is the set it is read as, and
@@ -196,6 +238,42 @@ sourceLinking.post(
     const sourceRole = await resolveProjectRoleIncludingArchived(c.env, user, sourceProjectId)
     if (!sourceRole) {
       return c.json({ error: "not found or no access to source project" }, 403)
+    }
+
+    // AQU-1605: the chosen upstream lane, checked against this caller's access
+    // to the upstream — see resolveUpstreamLinkLane. Done after the source-role
+    // check above so an outsider learns nothing about the upstream's lanes.
+    const lane = await resolveUpstreamLinkLane(c.env, {
+      upstreamProjectId: sourceProjectId,
+      consumes,
+      laneId,
+      userId: user.id,
+      upstreamRole: sourceRole.level,
+    })
+    if (!lane.ok) return c.json({ error: lane.error }, lane.status)
+
+    // Re-pointing a live link at a different lane leaves the downstream source
+    // as a mix of the old lane's text and the new one's. The stored cells are
+    // not rewritten here. Detach first (that snapshots and clears the lane),
+    // or send the lane the link already follows.
+    if (project.source_project_id && project.source_link_mode === "live") {
+      const stored = await c.env.AQUILLA_PG.prepare(
+        `SELECT source_link_lane_id FROM projects WHERE id = ?`,
+      )
+        .bind(projectId)
+        .first<{ source_link_lane_id: string | null }>()
+      const keeps = await liveLinkKeepsLane(c.env, {
+        upstreamProjectId: sourceProjectId,
+        consumes,
+        storedLaneId: stored?.source_link_lane_id ?? null,
+        requestedLaneId: lane.laneId,
+      })
+      if (!keeps) {
+        return c.json(
+          { error: "detach the link before changing which upstream lane it follows" },
+          409,
+        )
+      }
     }
 
     // Cycle check: starting at the prospective source, walk its source
@@ -257,6 +335,7 @@ sourceLinking.post(
                 source_link_consumes = ?,
                 source_link_gate     = ?,
                 source_link_file_ids = ?,
+                source_link_lane_id  = ?,
                 ${adoptionJson !== null ? "source_link_adopt    = ?," : ""}
                 source_link_cursor   = 0,
                 updated_at           = CURRENT_TIMESTAMP
@@ -271,20 +350,27 @@ sourceLinking.post(
           consumes,
           gate,
           followedFileIdsJson,
+          lane.laneId,
           ...(adoptionJson !== null ? [adoptionJson] : []),
           projectId,
         )
         .run()
     } catch (err) {
       // AQU-1559: `source_link_file_ids` arrives with migration 0127, and this
-      // worker can be deployed before it is applied (a per-PR preview runs new
-      // code against the shared development database). A whole-project link does
-      // not need the column at all, so it falls back to the pre-slice statement
-      // rather than failing a link that worked before this slice. A link that
-      // asked to follow a subset genuinely cannot be honoured there, and saying
-      // so is better than silently saving a whole-project link instead.
-      // AQU-1679: the same goes for a link that asked to replace a file.
-      if (followedFileIdsJson !== null || adoptionJson !== null) {
+      // worker can be deployed before it is applied. A whole-project link does
+      // not need that column, so an undefined-column (42703) retries without
+      // it. The lane is still written — dropping it would save a default-lane
+      // link (AQU-1605). A subset link cannot be honoured without the column,
+      // and a missing lane column cannot either; both fail closed.
+      // AQU-1679: `source_link_adopt` is named only when a replace was asked
+      // for, so a database that predates it still saves a link that replaces
+      // nothing. A replace that cannot be recorded fails closed — dropping the
+      // column would mirror those files in as copies. The retry below drops
+      // only `source_link_file_ids`, never the lane or the adoption.
+      const cause = err && typeof err === "object" ? (err as { cause?: { code?: unknown } }).cause : undefined
+      const missingColumn =
+        (err as { code?: unknown } | null)?.code === "42703" || cause?.code === "42703"
+      if (followedFileIdsJson !== null || adoptionJson !== null || !missingColumn) {
         console.error("link-source UPDATE failed:", err)
         return c.json({ error: "link failed" }, 500)
       }
@@ -295,11 +381,12 @@ sourceLinking.post(
                   source_link_mode     = ?,
                   source_link_consumes = ?,
                   source_link_gate     = ?,
+                  source_link_lane_id  = ?,
                   source_link_cursor   = 0,
                   updated_at           = CURRENT_TIMESTAMP
             WHERE id = ?`,
         )
-          .bind(sourceProjectId, mode, consumes, gate, projectId)
+          .bind(sourceProjectId, mode, consumes, gate, lane.laneId, projectId)
           .run()
       } catch (retryErr) {
         console.error("link-source UPDATE failed:", retryErr)
@@ -334,6 +421,23 @@ sourceLinking.post(
     //   clone semantics (§2: "snapshot at birth"), not a side effect of
     //   detach. There is no later resync for clones, so this is the only
     //   chance to seed.
+    // AQU-1075: the choice is stored and the current values are copied now,
+    // under the link, after the row names its upstream. A later upstream save
+    // keeps a live link current. A failure here does not undo the link — the
+    // text mirror is the thing the caller is waiting on.
+    try {
+      await seedInheritedSettings(c.env.AQUILLA_PG, {
+        downstreamProjectId: projectId,
+        upstreamProjectId: sourceProjectId,
+        choice: inherit,
+        updatedBy: user.id,
+        blobs: c.env.SNAPSHOTS ?? null,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("inherited settings seed failed:", err)
+    }
+
     let seeded = false
     if (mode === "live") {
       seeded = await triggerLinkSeedSync(c.env, projectId)
@@ -357,6 +461,8 @@ sourceLinking.post(
       gate,
       // AQU-1559: the stored selection, echoed back. null = the whole project.
       fileIds: followedFileIds,
+      // AQU-1605: the stored lane. Always a concrete upstream lane id.
+      laneId: lane.laneId,
       // AQU-1679: the pairs recorded, echoed back. null = nothing replaced.
       replaceFiles: replaceFiles ?? null,
       previousSourceProjectId: project.source_project_id,
@@ -439,14 +545,23 @@ sourceLinking.post(
 //
 // `complete: false` means the addition is recorded but the files have not all
 // arrived yet (the sync failed, or ran out of rounds). Nothing is half-added in
-// the meantime: the files are not part of the link and not in the file list
-// until they are complete. Calling again with the same files resumes the
+// the meantime: the files are not part of the link and not in the link's file
+// list until they are complete. Calling again with the same files resumes the
 // replay where it stopped, and so does any later sync of the link.
+//
+// AQU-1679: `replaceFiles` names files this project ALREADY has that an added
+// upstream file should follow into, instead of arriving as a second copy —
+// the link request's option, available here too. Same shape and checks as
+// there; every pair's upstream file must be among the files being added. The
+// pairs are recorded on `projects.source_link_adopt` before the addition, so
+// the mirror sync joins the file to its upstream before it replays the file's
+// history (sync-worker events/link-adopt.ts runs first).
 // ──────────────────────────────────────────────────────────────────────────
 
 const addLinkFilesSchema = z.object({
   // Same bounds as the link request's own `fileIds`.
   fileIds: z.array(z.string().min(1).max(256)).min(1).max(5000),
+  replaceFiles: z.array(replaceFilePairSchema).min(1).max(200).optional(),
 })
 
 sourceLinking.post(
@@ -456,7 +571,16 @@ sourceLinking.post(
   async (c) => {
     const user = c.get("user")
     const projectId = c.req.param("projectId") as string
-    const { fileIds } = c.req.valid("json")
+    const { fileIds, replaceFiles } = c.req.valid("json")
+
+    // AQU-1679: refused on shape alone, before any lookup.
+    if (replaceFiles) {
+      const problem = replacePairsProblem(replaceFiles)
+      if (problem) return c.json({ error: problem }, 400)
+      if (replaceFiles.some((p) => !fileIds.includes(p.upstreamFileId))) {
+        return c.json({ error: "a replaced file must be one of the files being added" }, 400)
+      }
+    }
 
     const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
     if (!role) return c.json({ error: "not found or no access" }, 403)
@@ -472,6 +596,14 @@ sourceLinking.post(
     // with — and a legacy link with no recorded mode is not mirrored either.
     if (project.source_link_mode !== "live") {
       return c.json({ error: "only a live link can have files added" }, 409)
+    }
+    // AQU-1679: a chain link's source is the upstream's translations, which a
+    // file imported on its own cannot line up with — same rule as the link.
+    if (replaceFiles && project.source_link_consumes === "target") {
+      return c.json(
+        { error: "only a link to the upstream's source can replace a file's source" },
+        400,
+      )
     }
 
     // The same check the link itself makes ([Pen test] AQU authz review):
@@ -497,6 +629,63 @@ sourceLinking.post(
     const added = [...new Set(fileIds)].filter((id) => upstreamFileIds.has(id) && !followedSet.has(id))
     if (added.length === 0) {
       return c.json({ projectId, added: [], fileIds: followed, complete: true })
+    }
+
+    // AQU-1679: a pair for a file that is not actually being added — already
+    // followed, or gone upstream — is refused rather than dropped: the lead
+    // asked for one file, and silence here would quietly leave them with two.
+    if (replaceFiles && replaceFiles.some((p) => !added.includes(p.upstreamFileId))) {
+      return c.json({ error: "a replaced file must be one of the files being added" }, 400)
+    }
+    // The pairs are checked against the two projects' actual lines before
+    // anything is recorded — the same pairing the mirror then performs.
+    if (replaceFiles) {
+      const matches = await matchFilesForReplace(c.env, {
+        projectId,
+        sourceProjectId: upstreamId,
+        pairs: replaceFiles,
+      })
+      if (matches.some((m) => !m.canReplace)) {
+        return c.json(
+          {
+            error: "some files do not match the upstream files they were to follow",
+            replaceFiles: matches,
+          },
+          422,
+        )
+      }
+      // Recorded BEFORE the addition, folded into whatever is already adopted
+      // (a compare-and-set, as below): the sync that the addition triggers
+      // must find the pairs, or it would replay the file in as a copy.
+      let adopted = false
+      for (let attempt = 0; attempt < 3 && !adopted; attempt++) {
+        const current = await loadLinkAdoptionRaw(c.env, projectId)
+        if (!current.ok) {
+          // A database that predates migration 0140 cannot hold the pairs, and
+          // adding the file as a copy is not what was asked.
+          console.error(`link-source/files: source_link_adopt unreadable for ${projectId}`)
+          return c.json({ error: "replacing a file's source is not available yet" }, 503)
+        }
+        const existing = parseSourceLinkAdoption(current.raw)
+        const files = { ...(existing?.files ?? {}) }
+        for (const pair of replaceFiles) files[pair.upstreamFileId] = pair.fileId
+        const pending = [
+          ...new Set([...(existing?.pending ?? []), ...replaceFiles.map((p) => p.upstreamFileId)]),
+        ]
+        try {
+          const res = await c.env.AQUILLA_PG.prepare(
+            `UPDATE projects SET source_link_adopt = ?
+              WHERE id = ? AND source_link_adopt IS NOT DISTINCT FROM ?`,
+          )
+            .bind(serializeSourceLinkAdoption({ files, pending }), projectId, current.raw)
+            .run()
+          adopted = Number(res.meta?.changes ?? 0) > 0
+        } catch (err) {
+          console.error("link-source/files adopt UPDATE failed:", err)
+          return c.json({ error: "could not add files" }, 500)
+        }
+      }
+      if (!adopted) return c.json({ error: "the link changed while adding files; try again" }, 409)
     }
 
     // Record the addition, folded into anything already pending. A
@@ -538,12 +727,18 @@ sourceLinking.post(
     const after = await loadLinkFileIds(c.env, projectId)
     const pending = await loadLinkBackfillRaw(c.env, projectId)
     const stillPending = pending.ok ? parseSourceLinkBackfill(pending.raw) : null
+    // AQU-1679: a file whose join has not run is not complete either — until it
+    // has, the file is not yet the project's own file following the link.
+    const stillJoining = replaceFiles ? (await loadLinkAdoption(c.env, projectId))?.pending ?? [] : []
     const afterSet = after ? new Set(after) : null
     const complete =
       !stillPending?.fileIds.some((id) => added.includes(id)) &&
+      !stillJoining.some((id) => added.includes(id)) &&
       added.every((id) => afterSet === null || afterSet.has(id))
 
-    return c.json({ projectId, added, fileIds: after, complete })
+    // AQU-1679: echoed only when pairs were sent — an add that replaces nothing
+    // answers exactly what it did before this slice.
+    return c.json({ projectId, added, fileIds: after, ...(replaceFiles ? { replaceFiles } : {}), complete })
   },
 )
 
@@ -752,44 +947,65 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   // write a followed-into file's source onto that file, not into a new copy.
   const adoption = await loadLinkAdoption(c.env, projectId)
 
-  try {
-    // AQU-476: clear link metadata too — detach makes the project fully
-    // self-contained (mode/consumes/gate no longer apply; cursor resets so
-    // a future re-link starts clean).
-    await c.env.AQUILLA_PG.prepare(
-      `UPDATE projects
-          SET source_project_id    = NULL,
-              source_link_mode     = NULL,
-              source_link_consumes = NULL,
-              source_link_gate     = NULL,
-              source_link_file_ids = NULL,
-              source_link_cursor   = 0,
-              updated_at           = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-    )
-      .bind(projectId)
-      .run()
-  } catch (err) {
-    // AQU-1559: a database that predates migration 0127 has nothing to clear in
-    // that one column, and detach is not the operation to break over it — it
-    // worked before this slice. Retry without it.
+  // AQU-476: clear link metadata too — detach makes the project fully
+  // self-contained (mode/consumes/gate no longer apply; cursor resets so
+  // a future re-link starts clean).
+  //
+  // The three columns that arrived after the original link metadata
+  // (`source_link_file_ids`, `source_link_lane_id`, `source_link_adopt`) are
+  // cleared in the same statement when they exist. A database missing one of
+  // them retries without only that column: dropping the lane because the file
+  // list or the adoption column is absent would leave a detached project still
+  // naming a lane. Tried fewest-omissions first, and every attempt that still
+  // names the lane before any that drops it.
+  const detachColumns = ["source_link_file_ids", "source_link_lane_id", "source_link_adopt"]
+  const detachOmissions: ReadonlyArray<ReadonlyArray<string>> = [
+    [],
+    ["source_link_file_ids"],
+    ["source_link_adopt"],
+    ["source_link_file_ids", "source_link_adopt"],
+    ["source_link_lane_id"],
+    ["source_link_file_ids", "source_link_lane_id"],
+    ["source_link_adopt", "source_link_lane_id"],
+    ["source_link_file_ids", "source_link_lane_id", "source_link_adopt"],
+  ]
+  let detached = false
+  let detachErr: unknown
+  for (const omit of detachOmissions) {
+    const dropped = new Set(omit)
+    const assignments = [
+      "source_project_id = NULL",
+      "source_link_mode = NULL",
+      "source_link_consumes = NULL",
+      "source_link_gate = NULL",
+      ...detachColumns.filter((col) => !dropped.has(col)).map((col) => `${col} = NULL`),
+      "source_link_cursor = 0",
+      "updated_at = CURRENT_TIMESTAMP",
+    ]
     try {
       await c.env.AQUILLA_PG.prepare(
-        `UPDATE projects
-            SET source_project_id    = NULL,
-                source_link_mode     = NULL,
-                source_link_consumes = NULL,
-                source_link_gate     = NULL,
-                source_link_cursor   = 0,
-                updated_at           = CURRENT_TIMESTAMP
-          WHERE id = ?`,
+        `UPDATE projects SET ${assignments.join(", ")} WHERE id = ?`,
       )
         .bind(projectId)
         .run()
-    } catch (retryErr) {
-      console.error("detach-source UPDATE failed:", err, retryErr)
-      return c.json({ error: "detach failed" }, 500)
+      detached = true
+      break
+    } catch (err) {
+      detachErr = err
+      if (!isPgUndefinedColumn(err)) break
     }
+  }
+  if (!detached) {
+    console.error("detach-source UPDATE failed:", detachErr)
+    return c.json({ error: "detach failed" }, 500)
+  }
+
+  // AQU-1075: the copied values stay; the choice does not, so a later re-link
+  // starts from the defaults instead of a detach left over from this one.
+  try {
+    await clearInheritedSettings(c.env.AQUILLA_PG, projectId, user.id)
+  } catch (err) {
+    console.error("inherited settings clear failed:", err)
   }
 
   // AQU-1560: a pending addition was for the link that just ended.

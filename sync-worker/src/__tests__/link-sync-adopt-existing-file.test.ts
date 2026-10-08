@@ -21,6 +21,9 @@
 //   5. A new link's first sync replays the upstream's whole history, in
 //      windows, without re-mirroring the joined lines.
 //   6. A file that no longer matches is linked as a separate copy instead.
+//   7. The same join works for a file ADDED to an existing link later
+//      ("Choose files", AQU-1560): the join runs before the file's history is
+//      replayed, so the replay lands on the project's own cells.
 
 import { describe, it, expect } from "vitest"
 import { mirrorSync, deterministicDownstreamFileId } from "../events/link-sync"
@@ -191,7 +194,7 @@ async function ownSource(
 
 async function targetSide(t: TestDb): Promise<{ cells: unknown[]; validators: unknown[] }> {
   const cells = await t.pg.query(
-    `SELECT * FROM cells WHERE project_id = $1 AND file_id = $2 AND side = 'target' ORDER BY cell_id, target_lang`,
+    `SELECT * FROM cells WHERE project_id = $1 AND file_id = $2 AND side = 'target' ORDER BY cell_id, lane_id`,
     [ESTABLISHED, OWN_MRK],
   )
   const validators = await t.pg.query(
@@ -386,6 +389,61 @@ describe("mirrorSync — replacing the source of a file the project already has 
         [ESTABLISHED, deterministicDownstreamFileId(ESTABLISHED, UP_MRK)],
       )
       expect(copy.rows.map((r) => r.cell_id)).toEqual(["up-1", "up-2", "up-3"])
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("joins a file added to an existing link before replaying its history", async () => {
+    const t = await makeTestDb()
+    try {
+      seq = 0
+      await seedProjects(t)
+      await seedEstablished(t)
+      await seedUpstream(t)
+      // An established link that follows only Genesis, fully synced.
+      await t.pg.query(
+        `UPDATE projects
+            SET source_project_id = $2, source_link_mode = 'live', source_link_consumes = 'source',
+                source_link_gate = 'validated', source_link_cursor = 0, source_link_file_ids = $3
+          WHERE id = $1`,
+        [ESTABLISHED, UPSTREAM, JSON.stringify([UP_GEN])],
+      )
+      await mirrorSync(t.db, ESTABLISHED)
+      expect(await fileNames(t)).toEqual(["Genesis.usfm", "Mark.usfm"])
+      const before = await targetSide(t)
+
+      // What POST /link-source/files writes when the lead adds Mark and asks for
+      // it to replace the source of the project's own Mark.
+      await t.pg.query(
+        `UPDATE projects SET source_link_backfill = $2, source_link_adopt = $3 WHERE id = $1`,
+        [
+          ESTABLISHED,
+          JSON.stringify({ fileIds: [UP_MRK], doneSeq: 0 }),
+          JSON.stringify({ files: { [UP_MRK]: OWN_MRK }, pending: [UP_MRK] }),
+        ],
+      )
+      const result = await mirrorSync(t.db, ESTABLISHED, { windowEvents: 2 })
+      expect(result.more).toBe(false)
+
+      // Still one Mark — the project's own, now joined — and the replay of its
+      // history wrote nothing beyond the join itself.
+      expect(await fileNames(t)).toEqual(["Genesis.usfm", "Mark.usfm"])
+      expect((await ownSource(t)).map((r) => [r.cell_id, r.upstream_cell_id, r.value])).toEqual([
+        ["own-1", "up-1", MARK[0]],
+        ["own-2", "up-2", MARK[1]],
+        ["own-3", "up-3", MARK[2]],
+      ])
+      expect(await mirrorEventCount(t, OWN_MRK)).toBe(3)
+      expect(await targetSide(t)).toEqual(before)
+      // The add finished: every upstream file is followed, so the link is a
+      // whole-project one again (AQU-1559's rule), nothing is pending.
+      const link = await t.pg.query<{ source_link_file_ids: string | null; source_link_backfill: string | null }>(
+        `SELECT source_link_file_ids, source_link_backfill FROM projects WHERE id = $1`,
+        [ESTABLISHED],
+      )
+      expect(link.rows[0]).toEqual({ source_link_file_ids: null, source_link_backfill: null })
+      expect(await adoptRecord(t)).toEqual({ files: { [UP_MRK]: OWN_MRK }, pending: [] })
     } finally {
       await t.close()
     }

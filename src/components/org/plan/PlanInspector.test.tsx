@@ -3,6 +3,8 @@ import type { ReactNode } from "react"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { PlanInspector } from "./PlanInspector"
 import type { PlanOpenKind, PlanUnit } from "@/lib/plan/plan-status"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectTooltip } from "@/test-utils/tooltip"
 
 // Every test below used to pass getToken={null}, which short-circuits
 // usePlanUnitSections before it fetches — so the whole AQU-1098 breakdown (the
@@ -71,10 +73,13 @@ function renderInspector(
   const onPatch = vi.fn().mockResolvedValue(true)
   const onClose = vi.fn()
   const onStep = vi.fn()
+  // The provider App.tsx mounts, with no delay, so the Mark done tooltip opens.
   render(
-    <PlanInspector unit={u} now={NOW} canPlan={canPlan} showAudio={showAudio}
-      projectId="p1" getToken={getToken} lane="" languageLabel="Tok Pisin"
-      onPatch={onPatch} onClose={onClose} onStep={onStep} {...extras} />,
+    <TooltipProvider delay={0}>
+      <PlanInspector unit={u} now={NOW} canPlan={canPlan} showAudio={showAudio}
+        projectId="p1" getToken={getToken} lane="" languageLabel="Tok Pisin"
+        onPatch={onPatch} onClose={onClose} onStep={onStep} {...extras} />
+    </TooltipProvider>,
   )
   return { onPatch, onClose, onStep }
 }
@@ -147,6 +152,14 @@ describe("marking done", () => {
     )
   })
 
+  it("pauses on a big book a few cells short, where rounding once read 100%", () => {
+    // AQU-1493: 1,194 of 1,200 validated rounded to 100 and skipped the nudge.
+    const { onPatch } = renderInspector(unit({ totalCount: 1200, filledCount: 1200, validatedCount: 1194 }))
+    fireEvent.click(screen.getByTestId("plan-mark-done"))
+    expect(screen.getByTestId("plan-done-nudge")).toHaveTextContent("99%")
+    expect(onPatch).not.toHaveBeenCalled()
+  })
+
   it("marks a fully validated unit done without a detour", async () => {
     const { onPatch } = renderInspector(unit({ validatedCount: 100 }))
     fireEvent.click(screen.getByTestId("plan-mark-done"))
@@ -164,8 +177,30 @@ describe("marking done", () => {
 
   it("reverses a mark", async () => {
     const { onPatch } = renderInspector(unit({ doneAt: NOW, doneBy: "randall" }))
+    expect(screen.getByTestId("plan-unmark-done")).toHaveTextContent("Unmark")
     fireEvent.click(screen.getByTestId("plan-unmark-done"))
     await waitFor(() => expect(onPatch).toHaveBeenCalledWith({ fileId: "f1", sectionKey: "", done: false }))
+  })
+
+  it("says the mark can be reversed in a tooltip, never as a word beside the button", async () => {
+    // AQU-1494: "Undoable." printed beside Mark done read as "cannot be
+    // undone" (Joel, 2026-09-29).
+    renderInspector(unit())
+    expect(screen.queryByText(/undoable/i)).toBeNull()
+    await expectTooltip(screen.getByTestId("plan-mark-done"), "You can unmark this later.")
+  })
+
+  it("says beside Unmark what a unit marked done has to do again (AQU-1494)", () => {
+    // The mark stands; the work that came back since is said where the button
+    // that would take the mark away is, in the board row's own words.
+    renderInspector(unit({ filledCount: 94, validatedCount: 94, doneAt: NOW, doneBy: "randall" }))
+    expect(screen.getByTestId("plan-done-with-work")).toHaveTextContent(/^Marked done \u00b7 6 cells to translate$/)
+    expect(screen.getByTestId("plan-unmark-done")).toBeInTheDocument()
+  })
+
+  it("says nothing more beside Unmark when a unit marked done is finished (AQU-1494)", () => {
+    renderInspector(unit({ filledCount: 100, validatedCount: 100, doneAt: NOW, doneBy: "randall" }))
+    expect(screen.queryByTestId("plan-done-with-work")).toBeNull()
   })
 
   it("shows a Done unit's bars beside the mark, mismatch and all", () => {
@@ -331,7 +366,7 @@ describe("the chapter grid (AQU-1278)", () => {
     renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
     await waitFor(() => expect(screen.getByTestId("plan-chapter-extras")).toBeInTheDocument())
     expect(within(screen.getByTestId("plan-chapter-extras")).getByTestId("plan-tile-GEN"))
-      .toHaveTextContent("front matter")
+      .toHaveTextContent("Front matter")
     const grid = screen.getByTestId("plan-chapter-grid")
     expect([...grid.children].map((c) => c.getAttribute("data-testid"))).toEqual(["plan-tile-GEN 1"])
   })
@@ -411,6 +446,52 @@ describe("the chapter grid (AQU-1278)", () => {
     renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
     await waitFor(() =>
       expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("3 chapters"))
+  })
+
+  it("does not count a book's front matter as a chapter (AQU-1493)", async () => {
+    // Ruth has four chapters. A line added above its first verse puts a short
+    // front-matter section beside them, and the panel used to read "5
+    // chapters" and "3 chapters short" while the board row said "front matter
+    // and chapters 1 and 2".
+    const getToken = withSections([
+      section("RUT", { totalCount: 1, filledCount: 0, validatedCount: 0 }),
+      section("RUT 1"), section("RUT 2"), doneSection("RUT 3"), doneSection("RUT 4"),
+    ])
+    renderInspector(unit({ sectionKey: "RUT", fileName: "Ruth" }), true, false, getToken)
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("4 chapters"))
+    expect(screen.getByTestId("plan-inspector-meta")).not.toHaveTextContent("5 chapters")
+    expect(screen.getByTestId("plan-grid-summary")).toHaveTextContent("Front matter and 2 chapters short")
+  })
+
+  it("names short front matter alone rather than calling it a chapter (AQU-1493)", async () => {
+    // Only the line above the first verse is open: no chapter is short.
+    const getToken = withSections([
+      section("RUT", { totalCount: 1, filledCount: 0, validatedCount: 0 }),
+      doneSection("RUT 1"), doneSection("RUT 2"),
+    ])
+    renderInspector(unit({ sectionKey: "RUT", fileName: "Ruth" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-grid-summary")).toBeInTheDocument())
+    const summary = screen.getByTestId("plan-grid-summary")
+    expect(summary).toHaveTextContent(/^Front matter short$/)
+    expect(summary).not.toHaveTextContent("chapter")
+    expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("2 chapters")
+  })
+
+  it("counts only the chapters once front matter is finished too (AQU-1493)", async () => {
+    const getToken = withSections([doneSection("RUT"), doneSection("RUT 1"), doneSection("RUT 2")])
+    renderInspector(unit({ sectionKey: "RUT", fileName: "Ruth" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-grid-summary")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-grid-summary")).toHaveTextContent("2 of 2 complete")
+  })
+
+  it("still counts a one-chapter book's bare code as its chapter (AQU-1493)", async () => {
+    // TIT alone is chapter 1, not front matter, so it stays in the count.
+    const getToken = withSections([section("TIT")])
+    renderInspector(unit({ sectionKey: "TIT", fileName: "Titus" }), true, false, getToken)
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("1 chapter"))
+    expect(screen.getByTestId("plan-grid-summary")).toHaveTextContent("1 chapter short")
   })
 
   it("opens one chapter's own bars when its tile is chosen", async () => {
@@ -582,7 +663,10 @@ describe("the chapter card", () => {
   const verse = (
     cellId: string,
     ref: string,
-    over: Partial<{ filled: boolean; validated: boolean; recorded: boolean; audioValidated: boolean }> = {},
+    over: Partial<{
+      filled: boolean; validated: boolean; recorded: boolean; audioValidated: boolean; unnumbered: boolean
+      structural: boolean
+    }> = {},
   ) => ({ cellId, ref, filled: true, validated: true, ...over })
 
   const openChapter = async (
@@ -656,6 +740,163 @@ describe("the chapter card", () => {
 
     fireEvent.click(screen.getByTestId("plan-verse-chip-c4"))
     expect(onOpenCell).toHaveBeenCalledWith("c4")
+  })
+
+  it("lists a line with no verse reference where it sits, as an unnumbered line (AQU-1493)", async () => {
+    // A line added by hand below 12:4 counts with chapter 12; the worker lists
+    // it right after 12:4. It has no number for its chip to print.
+    const onOpenCell = vi.fn()
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 21, filledCount: 20, validatedCount: 18 })],
+      [
+        verse("c4", "GEN 12:4", { validated: false }),
+        verse("x1", "", { filled: false, validated: false, unnumbered: true }),
+        verse("c5", "GEN 12:5", { filled: false, validated: false }),
+      ],
+      { onOpenCell },
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect([...row.children].map((c) => c.textContent)).toEqual(["Unnumbered line", "12:5"])
+    fireEvent.click(screen.getByTestId("plan-verse-chip-x1"))
+    expect(onOpenCell).toHaveBeenCalledWith("x1")
+  })
+
+  it("says so on the chapter that holds such lines, and only there (AQU-1493)", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 21, filledCount: 21, validatedCount: 18 })],
+      [verse("c4", "GEN 12:4"), verse("x1", "", { unnumbered: true })],
+    )
+    expect(screen.getByTestId("plan-chapter-unnumbered")).toHaveTextContent(
+      "1 unnumbered line here has no verse reference; it\u2019s counted with this chapter.",
+    )
+    // Inside the selected chapter's card — not under the grid, where it used
+    // to sit whether or not anyone had asked.
+    expect(screen.getByTestId("plan-chapter-detail")).toContainElement(screen.getByTestId("plan-chapter-unnumbered"))
+    expect(screen.getAllByTestId("plan-chapter-unnumbered")).toHaveLength(1)
+  })
+
+  it("labels a heading as a heading where it sits, and opens it (AQU-1493)", async () => {
+    // "The Seventh Day" counts with 2:1 below it and the worker lists it first.
+    // A USFM heading's own ref ("GEN 2:s1:1") is jargon, so it reads "Heading"
+    // as well; neither is one of the chapter's unnumbered lines.
+    const onOpenCell = vi.fn()
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 2", { totalCount: 4, filledCount: 1, validatedCount: 1 })],
+      [
+        verse("h2", "", { filled: false, validated: false, structural: true }),
+        verse("s1", "GEN 2:s1:1", { filled: false, validated: false, structural: true }),
+        verse("g21", "GEN 2:1"),
+        verse("g22", "GEN 2:2", { filled: false, validated: false }),
+      ],
+      { onOpenCell },
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    // AQU-1493 (Sam, 2026-10-03): a heading's chip names the verse it
+    // introduces, "Heading · 2:1", the separator the board joins fragments with.
+    expect([...row.children].map((c) => c.textContent)).toEqual(["Heading \u00b7 2:1", "Heading \u00b7 2:1", "2:2"])
+    // A word chip grows to fit its word; a verse chip keeps its fixed width.
+    expect(screen.getByTestId("plan-verse-chip-h2").className).toContain("px-2")
+    expect(screen.getByTestId("plan-verse-chip-h2").className).not.toContain("w-[46px]")
+    expect(screen.getByTestId("plan-verse-chip-g22").className).toContain("w-[46px]")
+    fireEvent.click(screen.getByTestId("plan-verse-chip-h2"))
+    expect(onOpenCell).toHaveBeenCalledWith("h2")
+    expect(screen.queryByTestId("plan-chapter-unnumbered")).toBeNull()
+  })
+
+  it("names each word chip by where its line sits, so two of them can be told apart (AQU-1493)", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 2", { totalCount: 6, filledCount: 1, validatedCount: 1 })],
+      [
+        verse("h2", "", { filled: false, validated: false, structural: true }),
+        verse("s1", "GEN 2:s1:1", { filled: false, validated: false, structural: true }),
+        verse("g21", "GEN 2:1"),
+        verse("x1", "", { filled: false, validated: false, unnumbered: true }),
+        verse("g22", "GEN 2:2", { filled: false, validated: false }),
+        verse("hEnd", "", { filled: false, validated: false, structural: true }),
+      ],
+    )
+    const name = (id: string) => screen.getByTestId(`plan-verse-chip-${id}`).getAttribute("aria-label")
+    // Stacked headings before the same verse: the place, then which of them.
+    expect(name("h2")).toBe("Heading before 2:1 (1 of 2)")
+    expect(name("s1")).toBe("Heading before 2:1 (2 of 2)")
+    // An added line is placed by the line above it; a heading with no verse
+    // below it, by the verse above.
+    expect(name("x1")).toBe("Unnumbered line after 2:1")
+    expect(name("hEnd")).toBe("Heading after 2:2")
+    // A numbered chip already names itself.
+    expect(name("g22")).toBeNull()
+    // The chip itself still prints the short word.
+    expect(screen.getByTestId("plan-verse-chip-x1")).toHaveTextContent(/^Unnumbered line$/)
+    // A heading prints the verse it introduces beside the word, and keeps the
+    // full sentence for its tooltip; one with no verse below it introduces
+    // nothing and keeps the bare word.
+    expect(screen.getByTestId("plan-verse-chip-h2")).toHaveTextContent(/^Heading \u00b7 2:1$/)
+    expect(screen.getByTestId("plan-verse-chip-hEnd")).toHaveTextContent(/^Heading$/)
+  })
+
+  it("says a line added above a book's first verse counts with its front matter, not 'this chapter' (AQU-1493)", async () => {
+    // Front matter is not a chapter. A line added at the very top of a file
+    // counts there, beside the book's title.
+    await openChapter(
+      nearlyDone({ sectionKey: "JON" }),
+      [section("JON", { totalCount: 2, filledCount: 0, validatedCount: 0 }), section("JON 1")],
+      [
+        verse("x0", "", { filled: false, validated: false, unnumbered: true }),
+        verse("fmt", "JON:mt1:1", { filled: false, validated: false, structural: true }),
+      ],
+    )
+    expect(screen.getByTestId("plan-chapter-unnumbered")).toHaveTextContent(
+      "1 unnumbered line here has no verse reference; it\u2019s counted with the book\u2019s front matter.",
+    )
+    expect(screen.getByTestId("plan-chapter-unnumbered")).not.toHaveTextContent("this chapter")
+  })
+
+  it("calls a front-matter card's structural lines titles or intros, numbered among themselves (AQU-1493)", async () => {
+    // JON:h:1, JON:mt1:1 and JON:ip:1: the book's running header, title and
+    // introduction, all on the front matter before chapter 1. None is a heading.
+    await openChapter(
+      nearlyDone({ sectionKey: "JON" }),
+      [section("JON", { totalCount: 3, filledCount: 0, validatedCount: 0 }), section("JON 1")],
+      [
+        verse("fh", "JON:h:1", { filled: false, validated: false, structural: true }),
+        verse("fmt", "JON:mt1:1", { filled: false, validated: false, structural: true }),
+        verse("fip", "JON:ip:1", { filled: false, validated: false, structural: true }),
+      ],
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect([...row.children].map((c) => c.textContent)).toEqual(["Title or intro", "Title or intro", "Title or intro"])
+    expect(screen.getByTestId("plan-verse-chip-fmt").getAttribute("aria-label")).toBe("Title or intro (2 of 3)")
+  })
+
+  it("counts only added lines in the unnumbered note, never a heading (AQU-1493)", async () => {
+    // A mixed-version deploy could still flag a heading `unnumbered`; the
+    // `structural` flag wins.
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 2", { totalCount: 4, filledCount: 4, validatedCount: 2 })],
+      [
+        verse("h2", "", { structural: true }),
+        verse("hx", "", { structural: true, unnumbered: true }),
+        verse("x2", "", { unnumbered: true }),
+        verse("g21", "GEN 2:1"),
+      ],
+    )
+    expect(screen.getByTestId("plan-chapter-unnumbered")).toHaveTextContent(
+      "1 unnumbered line here has no verse reference; it’s counted with this chapter.",
+    )
+  })
+
+  it("says nothing about unnumbered lines on a chapter without them", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
+      [verse("c4", "GEN 12:4", { validated: false })],
+    )
+    expect(screen.queryByTestId("plan-chapter-unnumbered")).toBeNull()
   })
 
   it("opens the chapter's FIRST cell from its title, short or not", async () => {
@@ -775,6 +1016,42 @@ describe("the chapter card", () => {
     )
     expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent("Chapter 1")
   })
+
+  it("reads its tiles and the open card again when the page bumps dataVersion (AQU-1493)", async () => {
+    // The panel stays mounted under the settings modal. Leaving headings out
+    // must empty the open card's 'Heading' chips and the tile's corner number
+    // without the reader clicking another row first.
+    const u = nearlyDone({ sectionKey: "JON" })
+    const getToken = withSections([section("JON 1", { totalCount: 21, filledCount: 17, validatedCount: 17 })])
+    vi.mocked(getFileSectionProgress).mockResolvedValue({
+      verses: [
+        verse("h1", "", { filled: false, validated: false, structural: true }),
+        verse("v5", "JON 1:5", { filled: false, validated: false }),
+      ],
+    } as never)
+    const props = {
+      unit: u, now: NOW, canPlan: true, showAudio: false, projectId: "p1", getToken, lane: "",
+      languageLabel: "German", onPatch: vi.fn(), onClose: vi.fn(), onStep: vi.fn(),
+    }
+    const { rerender } = render(<TooltipProvider delay={0}><PlanInspector {...props} dataVersion={0} /></TooltipProvider>)
+    await waitFor(() => expect(screen.getByTestId("plan-tile-JON 1")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("plan-tile-JON 1"))
+    await waitFor(() => expect(screen.getByTestId("plan-verse-chip-h1")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-chapter-detail-left")).toHaveTextContent("4 cells not yet translated")
+
+    withSections([section("JON 1", { totalCount: 17, filledCount: 16, validatedCount: 16 })])
+    vi.mocked(getFileSectionProgress).mockResolvedValue({
+      verses: [verse("v5", "JON 1:5", { filled: false, validated: false })],
+    } as never)
+    rerender(<TooltipProvider delay={0}><PlanInspector {...props} dataVersion={1} /></TooltipProvider>)
+
+    await waitFor(() => expect(screen.queryByTestId("plan-verse-chip-h1")).toBeNull())
+    expect(screen.getByTestId("plan-verse-chip-v5")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-chapter-detail-left")).toHaveTextContent("1 cell not yet translated"))
+    expect(getFileProgress).toHaveBeenCalledTimes(2)
+    expect(getFileSectionProgress).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe("the inspector's percentages say what they stand for (round 7)", () => {
@@ -845,7 +1122,7 @@ describe("the chapter's verses belong to the language on screen", () => {
 })
 
 describe("the chapter card names front matter in words", () => {
-  it("titles a book's front matter 'front matter', not its bare book code", async () => {
+  it("titles a book's front matter 'Front matter', not its bare book code", async () => {
     // The tile already uses the word; the card's title kept the raw key, so a
     // reader opening the tile saw "GEN" as a title with no reason to know it
     // meant the bit before chapter 1.
@@ -862,7 +1139,12 @@ describe("the chapter card names front matter in words", () => {
     await waitFor(() => expect(screen.getByTestId("plan-tile-GEN")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("plan-tile-GEN"))
     await waitFor(() => expect(screen.getByTestId("plan-chapter-detail")).toBeInTheDocument())
-    expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent(/^front matter$/)
+    // AQU-1493: the tile's own words, starting with a capital as a heading
+    // does ("Chapter 3"). The tile is a label standing alone too, so it reads
+    // the same (Sam, 2026-10-03); it used to be lower case.
+    expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent(/^Front matter$/)
+    expect(screen.getByTestId("plan-tile-GEN")).toHaveTextContent(/^Front matter/)
+    expect(screen.getByTestId("plan-tile-GEN")).not.toHaveTextContent("front matter")
   })
 })
 

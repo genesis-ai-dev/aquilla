@@ -1,13 +1,6 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
-/**
- * Bumped whenever the offline events change — a new event, or a new shape for
- * an existing one. Each generation's eventlog is frozen as a fixture
- * (src/lib/offline/__fixtures__/eventlog-gen<N>.json) that every later build
- * must still replay with its queued edits intact: a device can carry unsent
- * edits across an app update. eventlog-compat.test.ts fails until a schema
- * change comes with a bump and a new fixture (`pnpm offline:fixture`).
- */
+/** Bump on any offline event change, then run `pnpm offline:fixture` (enforced by eventlog-compat.test.ts). */
 export const OFFLINE_DATA_GENERATION = 1
 
 /**

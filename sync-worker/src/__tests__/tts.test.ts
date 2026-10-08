@@ -13,7 +13,7 @@ import { describe, it, expect, afterEach } from "vitest"
 import { sign } from "hono/jwt"
 import { audioObjectKey } from "../audio"
 import { handleTtsRequest } from "../tts"
-import { bytesToBase64, INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT } from "../inworld-tts"
+import { __setInworldBackoffSleepForTests, bytesToBase64, INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT } from "../inworld-tts"
 import type { SyncTokenClaims } from "../auth"
 
 const SECRET = "tts-tests-secret"
@@ -509,11 +509,17 @@ describe("POST /api/v1/voice/tts", () => {
 
   it("does NOT record any seconds on an Inworld failure (502)", async () => {
     const { db, usageRows } = makeStubDb()
-    stubInworld({ wav: makeWav(1), status: 500 })
-    const token = await makeToken()
-    const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "fail" }, token)))!
-    expect(res.status).toBe(502)
-    expect(usageRows).toHaveLength(0)
+    const calls = stubInworld({ wav: makeWav(1), status: 500 })
+    __setInworldBackoffSleepForTests(async () => {})
+    try {
+      const token = await makeToken()
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "fail" }, token)))!
+      expect(res.status).toBe(502)
+      expect(usageRows).toHaveLength(0)
+      expect(calls).toHaveLength(4)
+    } finally {
+      __setInworldBackoffSleepForTests(null)
+    }
   })
 
   it("attributes recorded seconds to the project's org_id", async () => {
@@ -778,6 +784,27 @@ describe("POST /api/v1/voice/tts/design", () => {
       }),
     ))!
     expect(res.status).toBe(401)
+  })
+
+  it("collapses an Inworld design failure to a bare 502 after backoff (AQU-1755)", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({ wav: makeWav(1), designStatus: 500 })
+    __setInworldBackoffSleepForTests(async () => {})
+    try {
+      const token = await makeToken()
+      const res = (await call(
+        makeEnv(db),
+        jsonPost("/api/v1/voice/tts/design", {
+          projectId: "p1",
+          designPrompt: "A warm middle-aged male narrator with a steady pace and a clear tone.",
+        }, token),
+      ))!
+      expect(res.status).toBe(502)
+      expect(await res.text()).toBe("voice provider request failed")
+      expect(calls).toHaveLength(4)
+    } finally {
+      __setInworldBackoffSleepForTests(null)
+    }
   })
 
   it("400 when the design prompt is too short", async () => {

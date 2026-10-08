@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   INWORLD_TTS_REQUEST_TIMEOUT_MS,
+  __setInworldBackoffSleepForTests,
+  fetchInworld,
+  inworldBackoffDelayMs,
   isAbortTimeout,
   synthesizeInworldSpeech,
   inworldAuthHeader,
@@ -182,6 +185,7 @@ describe("synthesizeInworldSpeech — request deadline", () => {
   }
 
   afterEach(() => {
+    __setInworldBackoffSleepForTests(null)
     vi.unstubAllGlobals()
   })
 
@@ -199,19 +203,24 @@ describe("synthesizeInworldSpeech — request deadline", () => {
   })
 
   it("reports a blown deadline distinctly from an unreachable host", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw timeoutRejection() }))
+    const fetchMock = vi.fn(async () => { throw timeoutRejection() })
+    vi.stubGlobal("fetch", fetchMock)
 
     await expect(synthesizeInworldSpeech(config, { text: "hi" })).rejects.toThrow(
       `Inworld TTS did not respond within ${INWORLD_TTS_REQUEST_TIMEOUT_MS / 1000}s`,
     )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it("still reports a non-timeout transport failure as unreachable", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("connection reset") }))
+    __setInworldBackoffSleepForTests(async () => {})
+    const fetchMock = vi.fn(async () => { throw new TypeError("connection reset") })
+    vi.stubGlobal("fetch", fetchMock)
 
     await expect(synthesizeInworldSpeech(config, { text: "hi" })).rejects.toThrow(
       /Inworld TTS unreachable/,
     )
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
   it("keeps the deadline below the client's own bound so its 502 wins the race", () => {
@@ -219,6 +228,45 @@ describe("synthesizeInworldSpeech — request deadline", () => {
     // src/lib/audio/tts-engine-error.ts — the server must fail first so the
     // user reads *why*, not a generic client timeout.
     expect(INWORLD_TTS_REQUEST_TIMEOUT_MS).toBeLessThan(90_000)
+  })
+})
+
+describe("Inworld exponential backoff", () => {
+  afterEach(() => {
+    __setInworldBackoffSleepForTests(null)
+    vi.unstubAllGlobals()
+  })
+
+  it("waits 1–2s, then 4s, then 8s", () => {
+    expect(inworldBackoffDelayMs(0, () => 0)).toBe(1000)
+    expect(inworldBackoffDelayMs(0, () => 0.999)).toBe(1999)
+    expect(inworldBackoffDelayMs(1)).toBe(4000)
+    expect(inworldBackoffDelayMs(2)).toBe(8000)
+    expect(inworldBackoffDelayMs(3)).toBeNull()
+  })
+
+  it("retries a 502 and returns the later success", async () => {
+    const waits: number[] = []
+    __setInworldBackoffSleepForTests(async (ms) => { waits.push(ms) })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("down", { status: 502 }))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const res = await fetchInworld("https://api.inworld.ai/voices/v1/voices:design", { method: "POST" })
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(waits).toHaveLength(1)
+    expect(waits[0]).toBeGreaterThanOrEqual(1000)
+    expect(waits[0]).toBeLessThanOrEqual(2000)
+  })
+
+  it("does not retry a 400", async () => {
+    const fetchMock = vi.fn(async () => new Response("bad prompt", { status: 400 }))
+    vi.stubGlobal("fetch", fetchMock)
+    const res = await fetchInworld("https://api.inworld.ai/voices/v1/voices:design", { method: "POST" })
+    expect(res.status).toBe(400)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 

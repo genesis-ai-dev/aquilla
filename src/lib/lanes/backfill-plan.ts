@@ -20,7 +20,8 @@
  *     else null (honest for freeform labels like "Grade 7 English" or BLANK).
  */
 
-import { LANGUAGES } from '../languages/catalog'
+import { LANGUAGES, NAMED_VARIETY_LANGUAGES } from '../languages/catalog'
+import { isLaneId } from './lane-id'
 import { isPrimaryRegistryLane } from './registry-lanes'
 
 /** Placeholder name for a default lane on a BLANK project (no targetLanguage). */
@@ -33,7 +34,21 @@ export type LaneRolePlan = {
   role: 'source' | 'target'
   /** '' for the default target lane; the tag for other target lanes; null for source. */
   legacyTag: string | null
+  /**
+   * AQU-1592: the language label this lane is for, exactly as the project
+   * settings carry it ('' when unset). This is the ONLY identity field the live
+   * writers store (`ensureProjectLaneStmts`); a display name and a language
+   * code are derived on read by src/lib/lanes/lane-display.ts.
+   */
+  language: string
+  /**
+   * LEGACY, backfill-only: the pre-AQU-1592 derived display name, including the
+   * placeholders. Read by the one-off daemon (scripts/neon-backfill-lanes.ts)
+   * which still writes the old columns; the live writers ignore it, because a
+   * name derived at write time is exactly the drift AQU-1585 is about.
+   */
   name: string
+  /** LEGACY, backfill-only: the pre-AQU-1592 write-time-derived code. */
   langCode: string | null
 }
 
@@ -48,14 +63,25 @@ export type ProjectLaneInputs = {
   dataTargetTags: string[]
 }
 
-/** ISO 639-1 code for a stored language label (English name or code), else null. */
+/**
+ * Code for a stored language label, else null.
+ *
+ * A catalog name ("Spanish") or a named variety ("Traditional Han") derives
+ * its tag. A label that is already a known code ("zh-Hant") derives that
+ * same tag, so an old code typed into the name field still has a code. A
+ * freeform description ("Grade 7 English") derives nothing.
+ */
 export function codeForLanguageLabel(label: string | null | undefined): string | null {
   const s = (label ?? '').trim()
   if (!s) return null
   const lc = s.toLowerCase()
-  const byName = LANGUAGES.find((e) => e.name.toLowerCase() === lc)
+  const byName =
+    NAMED_VARIETY_LANGUAGES.find((e) => e.name.toLowerCase() === lc) ??
+    LANGUAGES.find((e) => e.name.toLowerCase() === lc)
   if (byName) return byName.code
-  const byCode = LANGUAGES.find((e) => e.code.toLowerCase() === lc)
+  const byCode =
+    NAMED_VARIETY_LANGUAGES.find((e) => e.code.toLowerCase() === lc) ??
+    LANGUAGES.find((e) => e.code.toLowerCase() === lc)
   if (byCode) return byCode.code
   return null
 }
@@ -73,6 +99,7 @@ export function planLanesForProject(input: ProjectLaneInputs): LaneRolePlan[] {
   plans.push({
     role: 'source',
     legacyTag: null,
+    language: srcLabel,
     name: srcLabel || SOURCE_LANE_PLACEHOLDER,
     langCode: codeForLanguageLabel(srcLabel),
   })
@@ -101,15 +128,21 @@ export function planLanesForProject(input: ProjectLaneInputs): LaneRolePlan[] {
       plans.push({
         role: 'target',
         legacyTag: '',
+        language: primaryLabel,
         name: primaryLabel || BLANK_LANE_PLACEHOLDER,
         langCode: codeForLanguageLabel(primaryLabel),
       })
     } else {
+      // A tag that is an opaque lane id (dev writes those into settings.targetLanes)
+      // is an event key, not a language. Storing it would tell the model to
+      // translate into "a3f09c1e".
+      const language = isLaneId(tag) ? '' : tag
       plans.push({
         role: 'target',
         legacyTag: tag,
-        name: tag, // tags are usually already display names
-        langCode: codeForLanguageLabel(tag),
+        language,
+        name: language ? tag : BLANK_LANE_PLACEHOLDER,
+        langCode: codeForLanguageLabel(language),
       })
     }
   }

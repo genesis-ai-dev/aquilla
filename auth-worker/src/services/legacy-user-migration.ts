@@ -23,6 +23,7 @@ import {
   parseWerkzeugScryptHash,
   verifyPassword,
 } from "../utils/password"
+import { applyMigratedMemberLaneGrants } from "./lane-grants"
 import type { AquillaDb } from "../../../db/shim/postgres"
 
 export type LegacyMigrationFailure =
@@ -219,6 +220,7 @@ type MigrationApplyStage =
   | "org-memberships"
   | "team-memberships"
   | "project-memberships"
+  | "lane-access"
   | "activity-log"
 
 function logSanitizedApplyFailure(
@@ -340,11 +342,13 @@ export async function applyLegacyUserMigration(
       }
 
       stage = "team-memberships"
+      const joinedTeamIds: number[] = []
       for (const teamUuid of access.teamUuids) {
         const team = await tx.prepare(
           "SELECT id FROM groups WHERE legacy_uuid = ?",
         ).bind(teamUuid).first<{ id: number }>()
         if (!team) throw new Error("planned group disappeared")
+        joinedTeamIds.push(Number(team.id))
         await tx.prepare(
           `INSERT INTO group_members (group_id, user_id, added_by)
            VALUES (?, ?, NULL)
@@ -353,11 +357,13 @@ export async function applyLegacyUserMigration(
       }
 
       stage = "project-memberships"
+      const openedProjectIds = new Set<string>()
       for (const membership of access.projectMemberships) {
         const project = await tx.prepare(
           "SELECT id FROM projects WHERE id = ?",
         ).bind(membership.projectId).first<{ id: string }>()
         if (!project) throw new Error("planned project disappeared")
+        openedProjectIds.add(project.id)
         await tx.prepare(
           `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
            VALUES (?, ?, ?, NULL)
@@ -365,6 +371,23 @@ export async function applyLegacyUserMigration(
            DO UPDATE SET role_level = excluded.role_level`,
         ).bind(project.id, userId, membership.roleLevel).run()
       }
+
+      // AQU-1799: the membership rows above are only half of a person's
+      // access. Under the lane read/write wall a member below Maintainer reads
+      // and writes a target lane only through a project_member_lane_roles row,
+      // so without this stage every account migrated after the AQU-730
+      // backfill — at sign-in or by the nightly import — opened its projects
+      // with no target lane in the switcher and nothing to edit. Grants are
+      // written inside this transaction, so a failure here leaves no
+      // half-migrated account for the retry to trip over.
+      stage = "lane-access"
+      for (const teamId of joinedTeamIds) {
+        const attached = await tx.prepare(
+          "SELECT project_id FROM group_project_grants WHERE group_id = ?",
+        ).bind(teamId).all<{ project_id: string }>()
+        for (const row of attached.results ?? []) openedProjectIds.add(row.project_id)
+      }
+      await applyMigratedMemberLaneGrants(tx, userId, [...openedProjectIds])
 
       stage = "activity-log"
       await tx.prepare(

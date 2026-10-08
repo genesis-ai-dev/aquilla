@@ -10,7 +10,8 @@
 // global within a DB); isolation comes from giving every shard its own backend,
 // not from parallelizing inside one. Output is line-prefixed [sN] per shard.
 
-import { spawn, type ChildProcess } from "node:child_process"
+import type { ChildProcess } from "node:child_process"
+import { spawn } from "./lib/spawn-command"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { killChildTree } from "./lib/spawn-worker"

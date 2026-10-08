@@ -11,8 +11,7 @@ import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
 import { checkClientSessionHead } from "./head-check"
 import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
 
-// Names the OPFS directory the store lives in — changing it strands every
-// device's existing data (incl. unsent edits). eventlog-compat.test.ts pins it.
+// Names the OPFS dir; changing it strands every device's data (pinned by eventlog-compat.test.ts).
 export const STORE_ID = "aquilla-offline"
 
 // Re-exported for backward compatibility — existing importers (e.g.

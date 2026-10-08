@@ -21,6 +21,8 @@
 // `source.cell.commit` events to keep projections aligned.
 
 import { sign } from "hono/jwt"
+import { ensureProjectLanes } from "../../../db/shared/lanes"
+import { visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { Env } from "../types"
 import {
   loadFileSourceLines,
@@ -232,6 +234,8 @@ export interface SourceLinkProject {
   source_project_id: string | null
   /** AQU-1560: 'live' | 'clone', or null for a legacy link (see SourceLinkMode). */
   source_link_mode: string | null
+  /** AQU-1679: 'source' | 'target', or null (= source, the server's default). */
+  source_link_consumes: string | null
   archived_at: string | null
 }
 
@@ -470,6 +474,30 @@ export async function loadLinkAdoption(
   }
 }
 
+/**
+ * AQU-1679: the adopted-files column exactly as stored, for a compare-and-set
+ * write — the mirror sync writes it too (a joined file leaves `pending`) and may
+ * be running right now. `{ ok: false }` is a database that predates migration
+ * 0140, where a replace cannot be recorded; the add route has to refuse rather
+ * than add the file as a copy the lead did not ask for.
+ */
+export async function loadLinkAdoptionRaw(
+  env: Env,
+  projectId: string,
+): Promise<{ ok: true; raw: string | null } | { ok: false }> {
+  if (!env.AQUILLA_PG) return { ok: false }
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT source_link_adopt FROM projects WHERE id = ?",
+    )
+      .bind(projectId)
+      .first<{ source_link_adopt: string | null }>()
+    return { ok: true, raw: row?.source_link_adopt ?? null }
+  } catch {
+    return { ok: false }
+  }
+}
+
 /** AQU-1679: forget the adopted files — the link they belonged to has ended or
  *  been replaced. Best-effort for the same reason as `clearLinkBackfill`. */
 export async function clearLinkAdoption(env: Env, projectId: string): Promise<void> {
@@ -580,7 +608,7 @@ export async function loadProjectWithSource(
   projectId: string,
 ): Promise<SourceLinkProject | null> {
   return env.AQUILLA_PG.prepare(
-    `SELECT id, name, source_project_id, source_link_mode, archived_at
+    `SELECT id, name, source_project_id, source_link_mode, source_link_consumes, archived_at
        FROM projects WHERE id = ?`,
   )
     .bind(projectId)
@@ -1311,4 +1339,170 @@ export async function snapshotSourceCells(
   }
 
   return emitted
+}
+
+/**
+ * AQU-1605: resolve the UPSTREAM lane a link is being pointed at.
+ *
+ * The caller chooses the lane, so the server has to be the one that says the
+ * choice is legitimate — the picker it came from lists only what the user may
+ * see, and a request that did not come from that picker must not be able to
+ * reach further. Three things are checked, in the order that makes the error
+ * useful:
+ *
+ *  1. The lane belongs to THIS upstream project, in the role the link's
+ *     `consumes` implies — a `'target'` link consumes one of the upstream's
+ *     translations, a `'source'` link its source lane. Lane ids are globally
+ *     unique (AQU-1606), so a lane id from another project resolves to a real
+ *     row and would otherwise be stored as a lane this upstream has never had.
+ *  2. The lane is not archived. An archived lane is frozen (AQU-1462), so a
+ *     link to one can only ever mirror a corpus nobody may still edit; the
+ *     pickers do not offer one, and accepting it here would create a link that
+ *     looks live and never moves.
+ *  3. The caller may SEE the lane. Linking already requires viewer+ on the
+ *     upstream, but the lane read wall can narrow that to a subset of its
+ *     lanes — and a link is a read: it copies the lane's text into a project the
+ *     caller controls. Without this check, a member granted one lane of an
+ *     upstream could mirror any other lane's translations out of it.
+ *
+ * Omitting the lane does not mean "the former default lane". A new link always
+ * stores a concrete id: a source link stores the upstream source lane, and a
+ * target link stores the one non-archived target lane the caller can see.
+ * Several (or none) is a 400 — storing null would make the fold consume the
+ * `legacy_tag = ''` lane, including for a member who was never granted it.
+ * Existing rows may still be null until AQU-1616's backfill; that is a read
+ * concern, not a shape this writer produces.
+ */
+export type UpstreamLaneChoice =
+  | { ok: true; laneId: string }
+  | { ok: false; error: string; status: 400 | 403 }
+
+export async function resolveUpstreamLinkLane(
+  env: Env,
+  args: {
+    upstreamProjectId: string
+    consumes: "source" | "target"
+    laneId: string | null | undefined
+    userId: number
+    upstreamRole: number
+  },
+): Promise<UpstreamLaneChoice> {
+  const { upstreamProjectId, consumes, userId, upstreamRole } = args
+  let laneId = args.laneId ?? null
+  const role = consumes === "target" ? "target" : "source"
+  if (!laneId) {
+    // Fixtures and any project the lane backfill has not reached have no
+    // `lanes` rows. A new link still has to store an id, so mint the standard
+    // source lane and '' target lane first. A project that already has lanes
+    // is left alone — `ensureProjectLanes` would also insert the '' target
+    // lane, which is a different choice than the ones already there.
+    const anyLane = await env.AQUILLA_PG.prepare(
+      `SELECT 1 AS present FROM lanes WHERE project_id = ? LIMIT 1`,
+    )
+      .bind(upstreamProjectId)
+      .first<{ present: number }>()
+    if (!anyLane) await ensureProjectLanes(env.AQUILLA_PG, upstreamProjectId)
+    if (role === "source") {
+      const source = await env.AQUILLA_PG.prepare(
+        `SELECT id FROM lanes WHERE project_id = ? AND role = 'source'`,
+      )
+        .bind(upstreamProjectId)
+        .first<{ id: string }>()
+      if (!source) {
+        return { ok: false, status: 400, error: "source project has no source lane" }
+      }
+      laneId = source.id
+    } else {
+      const { results } = await env.AQUILLA_PG.prepare(
+        `SELECT id FROM lanes
+          WHERE project_id = ? AND role = 'target' AND archived_at IS NULL
+          ORDER BY position, id`,
+      )
+        .bind(upstreamProjectId)
+        .all<{ id: string }>()
+      let ids = (results ?? []).map((row) => row.id)
+      const { visible } = await visibleTagsForMember(
+        env.AQUILLA_PG,
+        env.LANE_READ_WALL,
+        upstreamProjectId,
+        userId,
+        upstreamRole,
+      )
+      if (visible !== null) ids = ids.filter((id) => visible.has(id))
+      if (ids.length !== 1) {
+        return {
+          ok: false,
+          status: 400,
+          error:
+            ids.length === 0
+              ? "no target lane of the source project is available to link"
+              : "choose which target lane of the source project this link follows",
+        }
+      }
+      laneId = ids[0]
+    }
+  }
+  const lane = await env.AQUILLA_PG.prepare(
+    `SELECT id, role, archived_at FROM lanes WHERE id = ? AND project_id = ?`,
+  )
+    .bind(laneId, upstreamProjectId)
+    .first<{ id: string; role: string; archived_at: string | null }>()
+  if (!lane || lane.role !== role) {
+    return {
+      ok: false,
+      status: 400,
+      error: `lane not found on the source project (expected one of its ${role} lanes)`,
+    }
+  }
+  if (lane.archived_at) {
+    return { ok: false, status: 400, error: "that lane is archived" }
+  }
+  // The read wall only ever restricts TARGET lanes, and only below Maintainer;
+  // `visible === null` is an unrestricted caller.
+  if (role === "target") {
+    const { visible } = await visibleTagsForMember(
+      env.AQUILLA_PG,
+      env.LANE_READ_WALL,
+      upstreamProjectId,
+      userId,
+      upstreamRole,
+    )
+    if (visible !== null && !visible.has(laneId)) {
+      return { ok: false, status: 403, error: "no access to that lane of the source project" }
+    }
+  }
+  return { ok: true, laneId }
+}
+
+/** A live re-link that keeps following the same upstream lane.
+ *
+ *  Equal ids are the same lane. NULL is the pre-AQU-1616 shape: a source link
+ *  already follows the upstream source lane, and a target link the `''` lane.
+ *  Naming that lane is not a change. Any other id is.
+ */
+export async function liveLinkKeepsLane(
+  env: Env,
+  args: {
+    upstreamProjectId: string
+    consumes: "source" | "target"
+    storedLaneId: string | null
+    requestedLaneId: string
+  },
+): Promise<boolean> {
+  if (args.storedLaneId === args.requestedLaneId) return true
+  if (args.storedLaneId !== null) return false
+  const row =
+    args.consumes === "source"
+      ? await env.AQUILLA_PG.prepare(
+          `SELECT id FROM lanes WHERE project_id = ? AND role = 'source'`,
+        )
+          .bind(args.upstreamProjectId)
+          .first<{ id: string }>()
+      : await env.AQUILLA_PG.prepare(
+          `SELECT id FROM lanes
+            WHERE project_id = ? AND role = 'target' AND legacy_tag = ''`,
+        )
+          .bind(args.upstreamProjectId)
+          .first<{ id: string }>()
+  return row?.id === args.requestedLaneId
 }

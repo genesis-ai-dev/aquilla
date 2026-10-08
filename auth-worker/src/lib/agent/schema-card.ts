@@ -127,8 +127,10 @@ All tables carry project_id; ALWAYS filter with :project.
 - cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected 0/1, deleted 0/1).
 - cell_word_morph (project_id, file_id, cell_id, word_seq, surface, lemma, morph_code, strongs_h, strongs_g) — per-word morphology for original-language files.
 - comments (PK (project_id, comment_id) — comment_id is unique per project only; scope_kind 'cell'|'file'|'project', file_id, cell_id, parent_comment_id, body, resolved 0/1, author_id, created_at ms, deleted_at). Always filter by project_id.
-- assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id). cells_total is stamped once at creation and goes stale when a cell is removed — count assignment_cells joined to live source cells for a true total.
-- project_settings (project_id, settings TEXT json) — settings::jsonb ->> 'sourceLanguage' / ->> 'targetLanguage' = the project's language pair; -> 'terminology' the termbase concepts; -> 'validationCountThreshold' the N-of-M bar.
+- assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id). cells_total is stamped once at creation and goes stale when a cell is removed. assignment_cells is likewise the snapshot the scope resolved to at creation: for a book or chapter assignment it misses lines added to the file since, so joining it to live source cells gives a floor, not the true extent — say so if you report it.
+- lanes (project_id, id, role 'source'|'target', language, name, lang_code, legacy_tag, position) — language is what you translate from (role source) or into (role target). legacy_tag is the event key, never a language; an 8-hex legacy_tag is the lane id. The former default lane is legacy_tag ''.
+- project_settings (project_id, settings TEXT json, validation_count TEXT, validation_count_audio TEXT) — validation_count / validation_count_audio = the 'validationCount' / 'validationCountAudio' settings, the N-of-M bar for text / recorded takes (unset = 1, cap 15; docs('validation') has the clamped read). Do not read sourceLanguage or targetLanguage out of settings to decide what language a draft is in; that answer is the lane row.
+- concepts (concept_id, project_id, source_term, renderings jsonb [{rendering, status 'preferred'|'admitted'|'forbidden', laneId?}], notes, status 'active'|'draft'|'deprecated', case_sensitive 0/1, match_options jsonb, created_at ms, deleted_at) — the termbase, one row per concept; deleted_at IS NULL = live; only 'active' concepts bind. laneId is lanes.id; a rendering without it belongs to the target lane whose legacy_tag is ''. Written only by term.* events.
 - users (id, username, display_name, email), project_members (project_id, user_id, role_level).
 - information_schema is queryable WITHOUT :project — your escape hatch when a column/table is not documented here.`
 
@@ -211,8 +213,9 @@ export interface AgentPromptContext {
    *  "the next three", "segment 8" without the model having to guess. */
   fileName?: string
   fileKind?: string
-  /** Project language pair from project_settings (route looks them up) —
-   *  without it the model asks the user "what language?" mid-run. */
+  /** Languages of the source lane and the focused target lane. The route
+   *  resolves them through laneLanguage. Without them the model asks the user
+   *  "what language?" mid-run. */
   sourceLanguage?: string
   targetLanguage?: string
   /** project_settings.bibleResourcesEnabled — when on, the execute.aquifer

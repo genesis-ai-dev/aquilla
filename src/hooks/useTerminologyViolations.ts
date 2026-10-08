@@ -9,6 +9,8 @@ export interface UseTerminologyViolationsOpts {
   projectId: string | null
   getToken?: (fileId: string) => Promise<string | null>
   enabled?: boolean
+  /** Legacy tag of the lane to scan. `''` is the former default lane. */
+  lane?: string
 }
 
 export interface UseTerminologyViolations {
@@ -22,7 +24,7 @@ export interface UseTerminologyViolations {
 const EMPTY: TerminologyViolationRow[] = []
 
 export function useTerminologyViolations(opts: UseTerminologyViolationsOpts): UseTerminologyViolations {
-  const { projectId, getToken, enabled = true } = opts
+  const { projectId, getToken, enabled = true, lane } = opts
   const [rows, setRows] = useState<TerminologyViolationRow[]>(EMPTY)
   const [isLoading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -58,7 +60,10 @@ export function useTerminologyViolations(opts: UseTerminologyViolationsOpts): Us
           setLoading(false)
           return
         }
-        const page = await fetchTerminologyViolations(projectId, token, controller.signal)
+        const page = await fetchTerminologyViolations(projectId, token, {
+          signal: controller.signal,
+          lane,
+        })
         if (!current()) return
         setRows(page.violations)
         setScanComplete(page.scanComplete)
@@ -74,7 +79,7 @@ export function useTerminologyViolations(opts: UseTerminologyViolationsOpts): Us
     return () => {
       controller.abort()
     }
-  }, [projectId, enabled])
+  }, [projectId, enabled, lane])
 
   return { rows, isLoading, error, scanComplete, truncated }
 }

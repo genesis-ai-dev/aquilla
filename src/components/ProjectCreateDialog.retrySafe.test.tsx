@@ -45,7 +45,24 @@ vi.mock("@/lib/sync/project-settings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/project-settings")>()
   return {
     ...actual,
-    fetchProjectSettings: vi.fn(),
+    fetchProjectSettings: vi.fn().mockResolvedValue({
+      version: 0,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: null,
+      settings: {},
+      lanes: [
+        {
+          id: "source-lane",
+          role: "source",
+          language: "",
+          name: null,
+          langCode: null,
+          legacyTag: "",
+          position: 0,
+          archivedAt: null,
+        },
+      ],
+    }),
     patchProjectSettings: vi.fn().mockResolvedValue({
       kind: "ok",
       value: {
@@ -55,6 +72,8 @@ vi.mock("@/lib/sync/project-settings", async (importOriginal) => {
         settings: {},
       },
     }),
+    createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "lane" } }),
+    renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
   }
 })
 

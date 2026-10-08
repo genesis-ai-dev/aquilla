@@ -410,6 +410,8 @@ export const editor = defineNamespace({
     "editor.view.showTranslationNotes": "Show translation notes",
     "editor.view.showHealthIndicators": "Show health indicators",
     "editor.view.highlightUnresolvedComments": "Highlight open comments",
+    "editor.view.healthScoreColorCoding": "Health Score Color Coding",
+    "editor.health.citedExample": "{source} → {target}",
     "editor.view.lowMemory": "Low-memory mode",
     "editor.view.lowMemoryAuto": "Auto",
     "editor.view.lowMemoryOn": "On",
@@ -452,7 +454,7 @@ export const editor = defineNamespace({
     "editor.bibles.removeVersion": "Remove {version}",
     "editor.bibles.scrollToVerse": "Scroll to a verse to see its text.",
     "editor.bibles.noTextForRef": "No text for {ref} in this version.",
-    "editor.bibles.searchPlaceholder": "Search versions (e.g. 'eng', 'BSB')",
+    "editor.bibles.searchPlaceholder": "Search versions (e.g. 'English', 'BSB')",
     "editor.bibles.searchLabel": "Search Bible versions",
     "editor.bibles.failedToLoad": "Failed to load: {error}",
     "editor.bibles.retryVersion": "Retry {version}",
@@ -559,6 +561,13 @@ export const editor = defineNamespace({
     "editor.history.draftKeptTooltip":
       "How much of the AI draft above survived this revision, measured character " +
       "by character. 100% means the draft was approved unchanged.",
+    "editor.history.aiTrace.show": "Show prompt",
+    "editor.history.aiTrace.hide": "Hide prompt",
+    "editor.history.aiTrace.output": "Model output",
+    "editor.history.aiTrace.olderVersion":
+      "This draft was made on an older version of the cell. The prompt below explains that version, not the current text.",
+    "editor.history.aiTrace.missing": "The prompt for this draft was not stored.",
+    "editor.history.aiTrace.loadFailed": "Couldn't load the prompt. Open it again to retry.",
     "editor.history.staleBadge": "stale branch",
     "editor.history.staleTooltip":
       "This edit lost the first-child-of-parent race for its slot. It was logged " +
@@ -643,10 +652,6 @@ export const editor = defineNamespace({
       "You made the latest change to these cells, so someone else must validate them",
     "editor.selection.validateOwnEditsSome":
       "Some selected cells have your latest change, so someone else must validate them",
-    "editor.selection.validateAiDrafts":
-      "Nothing eligible — untouched AI drafts require individual review",
-    "editor.selection.validateAiDraftsOrgHint":
-      "An organization maintainer can allow this under Settings → Project defaults.",
     "editor.selection.validateNeedTranslation": "Selected cells need a translation first",
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my text validations",
@@ -719,10 +724,6 @@ export const editor = defineNamespace({
     "editor.batchValidate.skip.ownEdit": plural({
       one: "{count} has your latest change, so someone else must validate it",
       other: "{count} have your latest change, so someone else must validate them",
-    }),
-    "editor.batchValidate.skip.aiDraft": plural({
-      one: "{count} is an untouched AI draft, reviewed one at a time",
-      other: "{count} are untouched AI drafts, reviewed one at a time",
     }),
     "editor.batchValidate.skip.outOfScope": plural({
       one: "{count} is outside your assigned files or lanes",
@@ -1136,6 +1137,7 @@ export const editor = defineNamespace({
     "editor.row.addLineBelow": "Add a line below",
     "editor.row.draftSearching": "{cellRef}: Looking up similar examples…",
     "editor.row.draftGenerating": "{cellRef}: Generating translation…",
+    "editor.row.aligningStyles": "{cellRef}: Aligning styles…",
     "editor.row.draftPreviewReady": "{cellRef}: Translation preview available",
     "editor.assurance.validatedWithInfractions":
       "Validation is authoritative, but automatic checks still found an issue.",
@@ -1470,6 +1472,16 @@ export const editor = defineNamespace({
       "This edit would change the protected IDML document structure.",
     "editor.idml.editWouldChangeFormattingError":
       "This edit would change protected IDML formatting.",
+    "editor.idml.alignStylesChangedWording":
+      "Align styles would have changed the wording, so nothing was saved.",
+    "editor.idml.alignStylesUnchanged":
+      "Align styles did not move any text. Nothing was changed.",
+    "editor.idml.alignStylesEmpty":
+      "Align styles returned no placement. Nothing was saved.",
+    "editor.idml.alignStylesFailed":
+      "Align styles could not place this cell. Nothing was saved.",
+    "editor.idml.alignStylesUnavailable":
+      "This cell has no style runs to align.",
 
     // — Text-to-speech status badge on a row ————————————————————————
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
@@ -1593,6 +1605,7 @@ export const editor = defineNamespace({
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.addLaneItem": "Add lane…",
     "editor.lane.searchPlaceholder": "Search lanes…",
     "editor.lane.searchAriaLabel": "Search lanes",
     "editor.lane.searchEmpty": "No lanes found.",
@@ -1652,7 +1665,7 @@ export const editor = defineNamespace({
 
     // — AI drafting on the target side ————————————————————————————
     "editor.ai.draftBadge": "AI draft · review required",
-    "editor.ai.draftBadgeAria": "AI draft — individual human review required",
+    "editor.ai.draftBadgeAria": "AI draft — human review required",
     "editor.ai.lookingUpExamples": "Looking up similar examples…",
     "editor.ai.generatingTranslation": "Generating translation…",
     "editor.ai.signInForTranslations": "Sign in for AI translations",
@@ -1662,10 +1675,15 @@ export const editor = defineNamespace({
     "editor.ai.translateWithAi": "Translate with AI",
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
+    "editor.ai.alignStyles": "Align styles",
+    "editor.ai.aligningStyles": "Aligning styles…",
+    "editor.ai.alignStylesNeedsText": "Translate this cell before aligning styles",
 
     // — Remaining action-rail tooltips ————————————————————————————
     "editor.audio.play": "Play audio",
     "editor.cue.playFrom": "Play from this cue",
+    // AQU-1118: the same button while this row's line is the one playing.
+    "editor.cue.pause": "Pause",
 
     // — Expansion tab: health ————————————————————————————————————
     "editor.expansion.retrievalSupport": "Health",
@@ -1943,6 +1961,16 @@ export const editor = defineNamespace({
           "Screen-reader-only live-region announcement while an AI draft is " +
           "being written for one row. Never visible. Leads with the row's " +
           "reference so a listener knows which line is speaking.",
+        placeholders: {
+          cellRef: "The row's reference, e.g. a verse or cue id.",
+        },
+      },
+      "editor.row.aligningStyles": {
+        description:
+          "Screen-reader-only live-region announcement while Align styles is " +
+          "moving this row's existing translation into the source's bold and " +
+          "italic runs. Never visible. It is not a new translation. Leads with " +
+          "the row's reference so a listener knows which line is speaking.",
         placeholders: {
           cellRef: "The row's reference, e.g. a verse or cue id.",
         },
@@ -3514,6 +3542,23 @@ export const editor = defineNamespace({
           "this browser only.",
         maxLength: 32,
       },
+      "editor.view.healthScoreColorCoding": {
+        description:
+          "Label of the switch that colours words in an AI draft: green when the " +
+          "word also appears in a cited example translation, orange when the model " +
+          "produced it without that support. Turns the health percentage into " +
+          "something a consultant can inspect. Applies to this browser only.",
+        maxLength: 32,
+      },
+      "editor.health.citedExample": {
+        description:
+          "Tooltip on a green (supported) span in an AI draft. Names the cited " +
+          "example the span was found in, as source text then target text.",
+        placeholders: {
+          source: "The example's source-language text, already truncated.",
+          target: "The example's target-language text, already truncated.",
+        },
+      },
       "editor.view.lowMemory": {
         description:
           "Section heading for the setting that strips the editor back on a " +
@@ -3759,7 +3804,7 @@ export const editor = defineNamespace({
       "editor.bibles.searchPlaceholder": {
         description:
           "Placeholder in the search field of the add-translation picker. The two " +
-          "quoted items are examples of what to type — a language code and a " +
+          "quoted items are examples of what to type — a language name and a " +
           "translation abbreviation; keep them as-is and translate only the framing " +
           "words.",
       },
@@ -4222,6 +4267,18 @@ export const editor = defineNamespace({
           "(the AI draft against this revision) and that the unit is characters, so " +
           "a reader does not mistake it for a quality score.",
       },
+      "editor.history.aiTrace.show": {
+        description:
+          "Toggle under an AI-drafted version in the cell history. Opens the exact " +
+          "instructions and examples sent to the AI model for that draft.",
+        maxLength: 24,
+      },
+      "editor.history.aiTrace.output": {
+        description:
+          "Heading above the AI model's raw reply, shown after the prompt messages. " +
+          "May differ from the saved text when the reply was cleaned up before saving.",
+        maxLength: 24,
+      },
       "editor.history.staleBadge": {
         description:
           "Amber badge on a history entry that was recorded but never became the " +
@@ -4506,7 +4563,7 @@ export const editor = defineNamespace({
           "nothing has happened yet.",
         placeholders: {
           count: "Cells the click will leave alone; selects the plural form.",
-          reasons: "A list of reason clauses such as \"7 are untouched AI drafts, reviewed one at a time\".",
+          reasons: "A list of reason clauses such as \"7 are outside your assigned files or lanes\".",
         },
       },
       "editor.selection.validateOutOfScope": {
@@ -4533,20 +4590,6 @@ export const editor = defineNamespace({
           "selected cells were last changed by this user on a project that does " +
           "not let people validate their own work. The rest are blocked for " +
           "another reason (already validated, or no translation yet).",
-      },
-      "editor.selection.validateAiDrafts": {
-        description:
-          "Tooltip when bulk-validate is disabled because the selected cells are " +
-          "untouched AI drafts. Policy: a human must open each AI draft " +
-          "individually, so they cannot be approved in bulk. The reason after the " +
-          "dash is the important half.",
-      },
-      "editor.selection.validateAiDraftsOrgHint": {
-        description:
-          "Second sentence of that same tooltip: an organization can switch the " +
-          "rule off. 'Settings → Project defaults' names the organization " +
-          "settings page where the switch lives — use this catalog's wording for " +
-          "both names, keeping the arrow.",
       },
       "editor.selection.validateNeedTranslation": {
         description:
@@ -4720,7 +4763,7 @@ export const editor = defineNamespace({
           count:
             "How many cells were skipped in total. Selects the plural form. Always the sum of the clauses in {reasons}.",
           reasons:
-            "The already-joined list of reasons, e.g. \"3 still need a translation, 2 are untouched AI drafts…\". Do not translate its contents here; translate the skip.* keys.",
+            "The already-joined list of reasons, e.g. \"3 still need a translation, 2 you had already validated…\". Do not translate its contents here; translate the skip.* keys.",
         },
       },
       "editor.batchValidate.skip.needsTranslation": {
@@ -4747,16 +4790,6 @@ export const editor = defineNamespace({
           + "work, so someone else has to. A fragment, not a sentence.",
         placeholders: {
           count: "How many cells carried this reader's own latest change. Selects the plural form.",
-        },
-      },
-      "editor.batchValidate.skip.aiDraft": {
-        description:
-          "One clause inside {reasons}: untouched AI drafts. Bulk validation "
-          + "deliberately excludes them — an unread machine draft must be "
-          + "approved individually — so this clause explains a RULE, not a "
-          + "failure. A fragment, not a sentence.",
-        placeholders: {
-          count: "How many cells were untouched AI drafts. Selects the plural form.",
         },
       },
       "editor.batchValidate.skip.outOfScope": {
@@ -4790,7 +4823,7 @@ export const editor = defineNamespace({
         description:
           "Toast title when a bulk validation ran and signed off no cells at "
           + "all. Neutral, not an error: the usual cause is that every "
-          + "candidate was an AI draft or already validated. The reasons "
+          + "candidate was already validated by this reader. The reasons "
           + "follow on the next line.",
       },
       "editor.batchValidate.nothingEligibleNoReason": {
@@ -5482,6 +5515,34 @@ export const editor = defineNamespace({
           "reports a structural break already detected on commit. 'IDML' is the " +
           "file-format name and stays as-is.",
       },
+      "editor.idml.alignStylesChangedWording": {
+        description:
+          "Inline error after Align styles. The model tried to rephrase the " +
+          "translation instead of only moving words between style runs, so the " +
+          "app refused to save. The 'nothing was saved' half must survive.",
+      },
+      "editor.idml.alignStylesUnchanged": {
+        description:
+          "Inline notice after Align styles when the model left every word in " +
+          "the run it was already in. Nothing was written. Not a failure of the " +
+          "translation itself.",
+      },
+      "editor.idml.alignStylesEmpty": {
+        description:
+          "Inline error when Align styles comes back without a placement for " +
+          "the runs. The 'nothing was saved' half must survive.",
+      },
+      "editor.idml.alignStylesFailed": {
+        description:
+          "Inline error when Align styles cannot rebuild the cell's protected " +
+          "structure. The 'nothing was saved' half must survive. 'Align styles' " +
+          "is the name of the action.",
+      },
+      "editor.idml.alignStylesUnavailable": {
+        description:
+          "Inline error when Align styles is asked of a cell that has no " +
+          "separate style runs to move words between. One sentence.",
+      },
       "editor.idml.editWouldChangeFormattingError": {
         description:
           "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
@@ -6087,6 +6148,15 @@ export const editor = defineNamespace({
           "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
         maxLength: 28,
       },
+      "editor.lane.addLaneItem": {
+        description:
+          "Menu item inside the lane switcher, for a maintainer, that opens " +
+          "Languages settings to add another target-language lane. Shown even " +
+          "when the project has only one lane. Trailing ellipsis means it opens " +
+          "a further screen — keep it. Not shown to a member who can only see " +
+          "some lanes.",
+        maxLength: 16,
+      },
       "editor.lane.searchAriaLabel": {
         description:
           "Accessible label for the search field inside every lane-picker combobox (editor lane switcher, rule scope picker, rules lane filter). Filters the lane list as the user types.",
@@ -6337,8 +6407,8 @@ export const editor = defineNamespace({
       },
       "editor.ai.draftBadgeAria": {
         description:
-          "Screen-reader name of that badge, spelling out the policy: each AI draft " +
-          "must be reviewed one at a time and cannot be approved in bulk.",
+          "Screen-reader name of that badge, spelling out what it marks: text a " +
+          "model drafted, which a person still has to review and sign off.",
       },
       "editor.ai.lookingUpExamples": {
         description:
@@ -6393,6 +6463,27 @@ export const editor = defineNamespace({
           "of a cell that already has one. The clause after the dash is the point: " +
           "it produces an alternative, not a correction.",
       },
+      "editor.ai.alignStyles": {
+        description:
+          "Hover tooltip on the last icon in a cell's three-dot menu, on files whose " +
+          "layout must round-trip (Adobe InDesign). The button itself shows only an " +
+          "icon. It asks the model to move the existing translation into the " +
+          "source's bold, italic, and plain runs. It does not write a new " +
+          "translation. Also the button's accessible name when the action can run. " +
+          "Imperative, two words.",
+        maxLength: 16,
+      },
+      "editor.ai.aligningStyles": {
+        description:
+          "Tooltip and status while Align styles is in flight. Present participle, " +
+          "trailing ellipsis glyph. Not a translation draft.",
+        maxLength: 22,
+      },
+      "editor.ai.alignStylesNeedsText": {
+        description:
+          "Tooltip on Align styles when the cell has no translation yet, so there " +
+          "are no words to move into style runs. Imperative — translate first.",
+      },
       "editor.audio.play": {
         description:
           "Tooltip on the action-rail play button for a cell's recording. Swaps " +
@@ -6404,6 +6495,13 @@ export const editor = defineNamespace({
           "Tooltip on the action-rail button that starts the file's master " +
           "audio/video from this cell's timecode, rather than playing the cell's own " +
           "recording. 'Cue' is the timed entry.",
+        maxLength: 24,
+      },
+      "editor.cue.pause": {
+        description:
+          "Tooltip on that same action-rail button while this row's line is the one " +
+          "playing: it shows a pause icon, and pressing it stops playback. A verb, " +
+          "short like 'Play'.",
         maxLength: 24,
       },
       "editor.expansion.retrievalSupport": {

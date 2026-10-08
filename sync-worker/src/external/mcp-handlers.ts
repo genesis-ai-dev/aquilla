@@ -350,16 +350,15 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
     },
     multiLanguage: {
       note:
-        'A project can hold MULTIPLE target languages at once via target-language lanes. A ' +
-        'lane is a language tag (e.g. "es", "pt") registered in the project\'s ' +
-        'settings.targetLanes array; every cell keeps one shared source plus one independent ' +
-        'target per lane. Omitting the lane everywhere uses the default lane (the project\'s ' +
-        'single targetLanguage) — existing single-language callers need no changes.',
+        'A project holds a source lane and any number of target lanes. Each lane has an id, ' +
+        'a name, a language, and a role. get_project returns the lanes you may use. Writes ' +
+        'and reads that mean a target lane take that id. A language tag is not a lane id ' +
+        'and is not aliased. Omitting the id is validation_failed and names GET /api/v1/external.',
       workflow: [
-        '1. Register the lanes once: get_project_settings for the live version, then patch_settings { ops: [{ key: "targetLanes", value: ["es", "pt"] }], ifMatchVersion } — a field-scoped write, so the rest of the settings blob is untouched.',
-        '2. Write per lane: each SetTranslation entry takes an optional laneId ("es" or "pt"). An unregistered laneId is rejected at prepare with validation_failed. The project\'s primary targetLanguage IS the default lane: omitting laneId and passing the primary (any spelling) both write the default row. A regional lane beside the primary (fr-CA in a French project) is its own lane and must be registered.',
-        '3. Read per lane: read_content takes an optional lane argument — target cells are filtered to that lane (source cells are always included). Omit it to get every lane (each target row carries its targetLang).',
-        '4. Importing a file can seed several lanes at once: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
+        '1. Read lanes from get_project (lanes: [{ id, name, language, role }]). Create them with CreateProject or ProjectSetup (lanes: [{ role, language, name?, code? }]). Do not write sourceLanguage, targetLanguage, targetLanes, or archivedLanes.',
+        '2. Write per lane: laneId on SetTranslation is that id and is required. An unknown id, a tag, or a lane you cannot see is validation_failed with "lane does not exist".',
+        '3. Read per lane: read_content takes a required lane argument — the lane id. Target cells are filtered to that lane.',
+        '4. Importing a file names the lane by id: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
       ],
       preconditionScope:
         'Preconditions and drift (plan_stale) are lane-scoped: concurrent edits to the SAME ' +

@@ -1,13 +1,4 @@
-// A device can carry unsent offline edits across an app update: the user edits
-// offline, comes back online, the update installs and relaunches straight into
-// the new build, which rebuilds its local state by replaying the eventlog the
-// old build wrote. DesktopUpdatePrompt holds the install until the queue has
-// drained, but a stuck queue ("Update anyway") or a manual install skips that.
-//
-// So every generation's eventlog is frozen here, and every later build must
-// replay it with the queue intact. To change the offline events: bump
-// OFFLINE_DATA_GENERATION in schema.ts, update __fixtures__/eventlog-sample.ts,
-// and run `pnpm offline:fixture`. Never edit or delete an existing fixture.
+// Unsent edits can cross an app update, so every build must replay each frozen fixture. Never edit one.
 import { readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs"
 import { createRequire } from "node:module"
 import path from "node:path"
@@ -74,7 +65,7 @@ function snapshot(store: Store<typeof schema>): LocalSnapshot {
   return { queue, counts }
 }
 
-/** What LiveStore does on a state rebuild: decode each stored event with the current schema, then materialize it. */
+/** Mimics LiveStore's state rebuild. */
 async function replay(encoded: EncodedEvent[]): Promise<Store<typeof schema>> {
   const store = await makeStore()
   for (const { name, args } of encoded) {
@@ -87,7 +78,7 @@ async function replay(encoded: EncodedEvent[]): Promise<Store<typeof schema>> {
 }
 
 async function liveStoreStorageFormatVersion(): Promise<number> {
-  // @livestore/common isn't a direct dependency; resolve it the way @livestore/livestore does.
+  // Not a direct dependency; resolve it via @livestore/livestore.
   const fromLivestore = createRequire(createRequire(import.meta.url).resolve("@livestore/livestore"))
   const common = (await import(fromLivestore.resolve("@livestore/common"))) as { liveStoreStorageFormatVersion: number }
   return common.liveStoreStorageFormatVersion
@@ -152,10 +143,7 @@ describe("offline data compatibility tripwires", () => {
   })
 
   it("keeps the store's OPFS location", async () => {
-    // Either value names the directory every device's store lives in
-    // (`livestore-<storeId>@<format>`); changing one silently strands all
-    // existing data, unsent edits included. A LiveStore upgrade that bumps the
-    // format needs a migration that reads the old directory first.
+    // Both name the OPFS dir (`livestore-<storeId>@<format>`); changing either strands all data.
     expect(STORE_ID).toBe(newest?.storeId)
     expect(await liveStoreStorageFormatVersion()).toBe(newest?.storageFormatVersion)
   })

@@ -210,7 +210,12 @@ components:
         cellId: { type: string }
         value: { type: string }
         valueHtml: { type: string }
-      required: [kind, fileId, cellId, value]
+        laneId:
+          type: string
+          description: >
+            Required lanes.id of the target lane. A language tag is not accepted.
+            GET /api/v1/external/projects/{projectId} returns the lanes the caller may use.
+      required: [kind, fileId, cellId, value, laneId]
 
     PlanImportCell:
       type: object
@@ -220,6 +225,17 @@ components:
         canonicalRef: { type: string }
         section: { type: string }
         type: { type: string }
+        variants:
+          type: array
+          description: Target-lane translations for this source cell. laneId is lanes.id.
+          items:
+            type: object
+            properties:
+              laneId: { type: string, description: Required lanes.id. A language tag is not accepted. }
+              languageTag: { type: string }
+              content: { type: string }
+              contentHtml: { type: string }
+            required: [laneId, content]
       required: [content]
 
     PlanImportCommand:
@@ -259,6 +275,20 @@ components:
         orgId:
           type: [string, integer]
           description: Target org id. Omit for a personal (org-less) project.
+        lanes:
+          type: array
+          description: >
+            Lanes to create with the project. Each item is role, language, optional name,
+            optional code. They become lane rows. sourceLanguage, targetLanguage, targetLanes,
+            and archivedLanes are not accepted. Omit for a source lane with no language.
+          items:
+            type: object
+            properties:
+              role: { type: string, enum: [source, target] }
+              language: { type: string }
+              name: { type: string }
+              code: { type: string }
+            required: [role, language]
       required: [kind, name]
 
     UpdateProjectSettingsCommand:
@@ -270,7 +300,12 @@ components:
       properties:
         kind: { type: string, enum: [UpdateProjectSettings] }
         projectId: { type: string, description: Must equal the changeset's URL project id. }
-        settings: { type: object, description: Settings blob to write (replaces the stored blob). }
+        settings:
+          type: object
+          description: >
+            Settings blob to write (replaces the stored blob). sourceLanguage, targetLanguage,
+            targetLanes, and archivedLanes are rejected; create lanes with CreateProject or
+            ProjectSetup and address a lane by its id.
         ifMatchVersion:
           type: integer
           description: Must equal the live settings version at both prepare and commit, else plan_stale.
@@ -731,7 +766,7 @@ paths:
                         fileId: { type: string }
                         sourceValue: { type: string }
                         targetValue: { type: string }
-                        targetLang: { type: string }
+                        laneId: { type: string, description: lanes.id of the target lane. Rows on a lane the caller cannot see are omitted. }
                         score: { type: number, minimum: 0, maximum: 1 }
                   nextCursor: { type: [string, "null"] }
         "400":
@@ -794,9 +829,16 @@ paths:
         - name: cursor
           in: query
           schema: { type: string }
+        - name: lane
+          in: query
+          required: true
+          description: >
+            Required lanes.id of the target lane. A language tag is not accepted.
+            Omitting it is validation_failed and names GET /api/v1/external.
+          schema: { type: string }
       responses:
         "200":
-          description: OK
+          description: OK. Cell rows include laneId.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PaginatedResponse" }

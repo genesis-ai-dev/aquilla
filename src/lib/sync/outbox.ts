@@ -907,6 +907,29 @@ export async function removeOutboxEvents(
   notifyOutboxChanged()
 }
 
+/** Throws when IndexedDB is unreadable (unlike `outboxPendingCount`), so unreadable ≠ empty. */
+export async function readOutboxCounts(scope?: OutboxOwnerScope): Promise<{ count: number; failed: number }> {
+  const ownerKey = ownerForScope(scope)
+  const db = await openDb()
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readonly")
+    tx.onerror = () => reject(tx.error ?? new Error("count tx failed"))
+    let count = 0
+    let failed = 0
+    const req = tx.objectStore(STORE).openCursor()
+    req.onsuccess = () => {
+      const cursor = req.result
+      if (!cursor) { resolve({ count, failed }); return }
+      const record = cursor.value as OutboxRecord
+      if (belongsToOwner(record, ownerKey)) {
+        count++
+        if (record.status === "failed") failed++
+      }
+      cursor.continue()
+    }
+  })
+}
+
 export async function outboxPendingCount(scope?: OutboxOwnerScope): Promise<number> {
   const ownerKey = ownerForScope(scope)
   try {

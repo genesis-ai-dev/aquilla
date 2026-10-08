@@ -133,8 +133,7 @@ async function seedUsfmFile(opts: { format?: string; rawSource?: string | null; 
     lane = '',
   ) =>
     tdb.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, target_lang)
-       VALUES ($1, $2, $3, $4, $5, $6, 'ev-cell', 0, $7)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES ($1, $2, $3, $4, $5, $6, 'ev-cell', 0, (SELECT CASE WHEN $4 = 'source' THEN aquilla_test_resolve_source_lane($1) ELSE aquilla_test_resolve_target_lane($1, $7) END))`,
       [PROJECT, FILE, cellId, side, value, canonicalRef, lane],
     )
   await cell('GEN 1:1', 'source', 'In the beginning God created the heavens and the earth.', 'GEN 1:1')
@@ -156,10 +155,16 @@ beforeEach(async () => {
     ],
   })
   bucket = makeStubBucket()
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1), ('eslane01', $1, 'target', 'es', 2)`,
+    [PROJECT],
+  )
 })
 
 function exportReq(token: string, opts: { lane?: string; fileId?: string; method?: string } = {}): Request {
-  const query = opts.lane === undefined ? '' : `?lane=${encodeURIComponent(opts.lane)}`
+  const lane = opts.lane === undefined ? 'deflane1' : opts.lane
+  const query = `?lane=${encodeURIComponent(lane)}`
   return new Request(
     `https://w/api/v1/external/projects/${PROJECT}/files/${opts.fileId ?? FILE}/export${query}`,
     { method: opts.method ?? 'GET', headers: { Authorization: `Bearer ${token}` } },
@@ -211,7 +216,7 @@ describe('GET .../files/:fileId/export (REST)', () => {
       projectId: PROJECT,
     })
 
-    const es = (await handleExternalExportRequest(exportReq(token, { lane: 'es' }), makeEnv()))!
+    const es = (await handleExternalExportRequest(exportReq(token, { lane: 'eslane01' }), makeEnv()))!
     const text = await es.text()
     expect(text).toContain('En el principio creó Dios los cielos y la tierra.')
     expect(text).not.toContain('Au commencement')
@@ -382,6 +387,7 @@ describe('export_file (MCP)', () => {
     const { payload, isError } = await callMcpTool(token, 'export_file', {
       projectId: PROJECT,
       fileId: FILE,
+      lane: 'deflane1',
     })
     expect(isError).toBe(false)
     expect(payload.fileName).toBe('GEN.SFM')
@@ -405,6 +411,7 @@ describe('export_file (MCP)', () => {
     const { payload, isError } = await callMcpTool(token, 'export_file', {
       projectId: PROJECT,
       fileId: FILE,
+      lane: 'deflane1',
     })
     expect(isError).toBe(true)
     expect((payload.error as { code: string }).code).toBe('permission_denied')
@@ -431,6 +438,7 @@ describe('export_file (MCP)', () => {
     const { payload, isError } = await callMcpTool(token, 'export_file', {
       projectId: PROJECT,
       fileId: FILE,
+      lane: 'deflane1',
     })
     expect(isError).toBe(true)
     const err = payload.error as { code: string; message: string; restPath: string }
@@ -442,7 +450,7 @@ describe('export_file (MCP)', () => {
   it('refuses an export larger than the inline limit rather than truncating it', async () => {
     // One verse whose translation alone exceeds the inline ceiling.
     await seedUsfmFile()
-    await tdb.pg.query(`UPDATE cells SET value = $1 WHERE side = 'target' AND target_lang = ''`, [
+    await tdb.pg.query(`UPDATE cells SET value = $1 WHERE side = 'target' AND lane_id = (SELECT id FROM lanes WHERE project_id = cells.project_id AND role = 'target' AND legacy_tag = '')`, [
       'x'.repeat(MCP_EXPORT_MAX_BYTES + 1),
     ])
     const token = await credToken({
@@ -455,6 +463,7 @@ describe('export_file (MCP)', () => {
     const { payload, isError } = await callMcpTool(token, 'export_file', {
       projectId: PROJECT,
       fileId: FILE,
+      lane: 'deflane1',
     })
     expect(isError).toBe(true)
     const err = payload.error as { code: string; maxBytes: number; restPath: string }
@@ -482,7 +491,7 @@ describe('export is discoverable (the cold-start contract)', () => {
   it('publishes export_file in the MCP tool catalog', async () => {
     const tool = MCP_TOOLS.find((t) => t.name === 'export_file')
     expect(tool).toBeDefined()
-    expect(tool?.inputSchema.required).toEqual(['projectId', 'fileId'])
+    expect(tool?.inputSchema.required).toEqual(['projectId', 'fileId', 'lane'])
 
     const token = await credToken({
       credentialId: CRED_MAINTAINER,

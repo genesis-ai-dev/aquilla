@@ -11,6 +11,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, vi, afterEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { laneDisplayName, laneLanguageCode } from "../../../src/lib/lanes/lane-display"
 
 async function seedProject(projectId: string, name: string, createdBy: number): Promise<void> {
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES (?, ?, ?)")
@@ -83,6 +84,24 @@ describe("POST /:projectId/merge-sibling — role floors", () => {
 })
 
 describe("POST /:projectId/merge-sibling — validation", () => {
+  it("accepts a lane of a language the host already has under another tag", async () => {
+    await seedUser(31, "u31")
+    await seedProject("host-lang", "Host", 31)
+    await seedProject("donor-lang", "Donor", 31)
+    await grant("host-lang", 31, 500)
+    await grant("donor-lang", 31, 500)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, ?)",
+    )
+      .bind("host-lang", JSON.stringify({ targetLanes: ["Spanish"] }), 31)
+      .run()
+
+    const fetchSpy = mockFold({ merged: 0, skipped: [], lane: "es" })
+    const res = await post("host-lang", await jwtFor("u31"), { donorProjectId: "donor-lang", lane: "es" })
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
   it("400 when the lane already exists on the host", async () => {
     await seedUser(3, "u3")
     await seedProject("host-c", "Host", 3)
@@ -254,7 +273,10 @@ describe("POST /:projectId/merge-sibling — success path", () => {
 // write, which keeps the two in step, and refuses a name the host already shows.
 describe("POST /:projectId/merge-sibling — the lane is a real lane (AQU-1550)", () => {
   interface LaneRow {
-    name: string
+    /** AQU-1592: the stored freeform language. */
+    language: string | null
+    /** AQU-1592: null when the lane carries only a language. */
+    name: string | null
     role: string
     legacy_tag: string | null
     lang_code: string | null
@@ -262,7 +284,7 @@ describe("POST /:projectId/merge-sibling — the lane is a real lane (AQU-1550)"
 
   async function lanesOf(projectId: string): Promise<LaneRow[]> {
     const { results } = await env.AQUILLA_PG.prepare(
-      "SELECT name, role, legacy_tag, lang_code FROM lanes WHERE project_id = ? ORDER BY position, id",
+      "SELECT language, name, role, legacy_tag, lang_code FROM lanes WHERE project_id = ? ORDER BY position, id",
     )
       .bind(projectId)
       .all<LaneRow>()
@@ -271,12 +293,20 @@ describe("POST /:projectId/merge-sibling — the lane is a real lane (AQU-1550)"
 
   async function seedLane(
     projectId: string,
-    lane: { id: string; name: string; legacyTag: string; position: number },
+    lane: {
+      id: string
+      /** AQU-1592: the freeform language. Defaults to '' when the test only cares about the name. */
+      language?: string
+      /** Null when the lane carries only a language. */
+      name: string | null
+      legacyTag: string
+      position: number
+    },
   ): Promise<void> {
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position) VALUES (?, ?, 'target', ?, NULL, ?, ?)",
+      "INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES (?, ?, 'target', ?, ?, NULL, ?, ?)",
     )
-      .bind(lane.id, projectId, lane.name, lane.legacyTag, lane.position)
+      .bind(lane.id, projectId, lane.language ?? "", lane.name, lane.legacyTag, lane.position)
       .run()
   }
 
@@ -294,7 +324,20 @@ describe("POST /:projectId/merge-sibling — the lane is a real lane (AQU-1550)"
 
     expect(readLanes((await settingsOf("host-j"))?.settings)).toEqual(["fr"])
     const lane = (await lanesOf("host-j")).find((row) => row.legacy_tag === "fr")
-    expect(lane).toEqual({ name: "fr", role: "target", legacy_tag: "fr", lang_code: "fr" })
+    // AQU-1592: the tag IS the lane's language — tags are language labels. No
+    // derived name and no derived code are stored; laneDisplayName shows "fr"
+    // and laneLanguageCode derives "fr" from it at read time.
+    expect(lane).toEqual({
+      language: "fr",
+      name: null,
+      role: "target",
+      legacy_tag: "fr",
+      lang_code: null,
+    })
+    expect(laneDisplayName({ role: "target", language: lane!.language, name: lane!.name })).toBe("fr")
+    expect(
+      laneLanguageCode({ language: lane!.language, name: lane!.name, langCode: lane!.lang_code }),
+    ).toBe("fr")
   })
 
   it("400 and no fold when another of the host's lanes already shows that name", async () => {

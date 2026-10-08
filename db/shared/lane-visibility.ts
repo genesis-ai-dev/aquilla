@@ -9,21 +9,45 @@ import {
   filterSettingsToVisibleLanes,
   labelsForGrantedLanes,
   laneReadWallEnabled,
+  lanesForRequestedTag,
   visibleLaneTags,
   type LaneGrant,
   type LaneIdentity,
   type VisibleLaneTags,
 } from "../../src/lib/lanes/read-wall"
+import { laneDisplayNameSql } from "./lanes"
 
 export async function loadTargetLaneIdentities(db: AquillaDb, projectId: string): Promise<LaneIdentity[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, name, legacy_tag FROM lanes
+      `SELECT id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE project_id = ? AND role = 'target'`,
     )
     .bind(projectId)
     .all<{ id: string; name: string; legacy_tag: string | null }>()
   return (results ?? []).map((row) => ({ id: row.id, name: row.name, legacyTag: row.legacy_tag }))
+}
+
+/**
+ * AQU-1783: the project's CURRENT target lanes — non-archived, in display
+ * order. `loadTargetLaneIdentities` deliberately returns archived rows too,
+ * because the wall still has to decide about a lane a stored grant names. The
+ * member inspector asks a different question ("which lanes should this person
+ * be able to read today?"), and an archived lane is not one of them.
+ */
+export async function loadCurrentTargetLanes(
+  db: AquillaDb,
+  projectId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, ${laneDisplayNameSql("lanes")} AS name FROM lanes
+        WHERE project_id = ? AND role = 'target' AND archived_at IS NULL
+        ORDER BY position, id`,
+    )
+    .bind(projectId)
+    .all<{ id: string; name: string }>()
+  return (results ?? []).map((row) => ({ id: row.id, name: row.name }))
 }
 
 export async function loadTargetLaneIdentitiesForProjects(
@@ -35,7 +59,7 @@ export async function loadTargetLaneIdentitiesForProjects(
   const placeholders = projectIds.map(() => "?").join(", ")
   const { results } = await db
     .prepare(
-      `SELECT project_id, id, name, legacy_tag FROM lanes
+      `SELECT project_id, id, ${laneDisplayNameSql("lanes")} AS name, legacy_tag FROM lanes
         WHERE role = 'target' AND project_id IN (${placeholders})`,
     )
     .bind(...projectIds)
@@ -130,4 +154,29 @@ export async function echoableLaneLabels(
   const { visible, lanes } = await visibleTagsForMember(db, flag, projectId, userId, role)
   if (visible === null) return null
   return labelsForGrantedLanes(lanes, visible)
+}
+
+/**
+ * Whether this caller may see the lane a request named.
+ *
+ * Same rule as sync-worker's `canReadRequestedLane`: the wall flag off, or a
+ * Maintainer, sees every lane. Below that, a lane id must be one of the
+ * granted ids. A legacy tag must name exactly one target lane, and that
+ * lane's id must be granted — a tag that matches two lanes matches neither.
+ */
+export async function callerMayReadLane(
+  db: AquillaDb,
+  flag: string | undefined,
+  projectId: string,
+  userId: number,
+  role: number,
+  ref: { laneId?: string | null; targetLang?: string | null },
+): Promise<boolean> {
+  const { visible, lanes } = await visibleTagsForMember(db, flag, projectId, userId, role)
+  if (visible === null) return true
+  const laneId = (ref.laneId ?? "").trim()
+  if (laneId) return visible.has(laneId)
+  const matches = lanesForRequestedTag(lanes, ref.targetLang ?? "")
+  if (matches.length !== 1) return false
+  return visible.has(matches[0]!.id)
 }

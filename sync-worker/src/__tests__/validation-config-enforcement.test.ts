@@ -358,7 +358,8 @@ async function targetRow(db: AquillaDb, lane = '') {
   return db
     .prepare(
       `SELECT event_id, last_editor, validated FROM cells
-        WHERE project_id = 'proj-v' AND cell_id = 'cell-v1' AND side = 'target' AND target_lang = ?`,
+        WHERE project_id = 'proj-v' AND cell_id = 'cell-v1' AND side = 'target'
+          AND lane_id = (SELECT id FROM lanes WHERE project_id = 'proj-v' AND role = 'target' AND legacy_tag = ?)`,
     )
     .bind(lane)
     .first<{ event_id: string; last_editor: string; validated: number }>()

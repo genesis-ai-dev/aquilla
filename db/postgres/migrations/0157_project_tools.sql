@@ -1,9 +1,9 @@
--- Migration 0153: Aquilla Tools prototype tables.
+-- Migration 0157: Aquilla Tools prototype tables.
 --
 -- Apply by hand (same convention as prior migrations here — NOT applied
 -- automatically). PROTOTYPE: not yet applied to any shared environment.
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0153_project_tools.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0157_project_tools.sql
 -- Verify: `\d project_tools`, `\d project_tool_versions`, `\d project_tool_grants`.
 
 -- Aquilla Tools (prototype): agent-built, sandboxed mini-apps per project.

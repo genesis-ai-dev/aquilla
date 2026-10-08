@@ -1,7 +1,7 @@
 # Smart Extensions (prototype)
 
 Status: **prototype**, branch `dadukhankevin/aquilla-tools-prototype`. Not deployed; migration
-`0153_project_tools.sql` has not been applied to any shared database.
+`0157_project_tools.sql` has not been applied to any shared database.
 
 Smart Extensions are small, sandboxed apps that run inside a project: built from a prompt by
 the builder model (Claude Opus 5.5 via OpenRouter), or installed from reviewed starters. An

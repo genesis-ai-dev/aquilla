@@ -1671,6 +1671,73 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
   })
 
+  // AQU-1779: the badge shows the higher of the progress and roster floors
+  // but writes only the progress floor. A value below the roster floor used
+  // to save, snap straight back, and loosen per-member progress org-wide.
+  async function openTeamPicker(settings: Record<string, unknown>) {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), ...settings, patch })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
+    renderOverview()
+    const card = await screen.findByTestId("overview-team-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+    return patch
+  }
+
+  function choose(option: HTMLElement) {
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+  }
+
+  it("disables Team floors below the member-list floor and says why", async () => {
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
+
+    for (const name of [/everyone with access/i, /contributors and up/i, /project leads and up/i]) {
+      expect(await screen.findByRole("option", { name })).toHaveAttribute("aria-disabled", "true")
+    }
+    expect(screen.getByRole("option", { name: /maintainers and owners/i })).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("option", { name: /owners only/i })).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent(
+      "This card lists members, and the member list is set to “Maintainers and owners”. To go lower, lower it on the Members card or in Settings → Security first.",
+    )
+
+    choose(screen.getByRole("option", { name: /everyone with access/i }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(patch).not.toHaveBeenCalled()
+  })
+
+  it("names an owner-only member list in the hint and leaves only Owners only open", async () => {
+    await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.OWNER })
+
+    expect(await screen.findByRole("option", { name: /maintainers and owners/i })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("option", { name: /owners only/i })).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent("“Owners only”")
+  })
+
+  it("offers every Team floor once the member list is open to everyone, and writes only the progress floor", async () => {
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.VIEWER })
+
+    const everyone = await screen.findByRole("option", { name: /everyone with access/i })
+    expect(everyone).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.queryByTestId("section-visibility-min-hint")).not.toBeInTheDocument()
+
+    choose(everyone)
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.VIEWER }))
+    expect(patch).toHaveBeenCalledTimes(1)
+  })
+
+  it("raises the Team floor to Owners only without touching the member-list floor", async () => {
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
+
+    choose(await screen.findByRole("option", { name: /owners only/i }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
+    expect(patch).toHaveBeenCalledTimes(1)
+    expect(patch).not.toHaveBeenCalledWith(expect.objectContaining({ rosterViewMinRole: expect.anything() }))
+  })
+
   it("starts expanded again after a fresh mount, with no saved collapsed state", async () => {
     await withWorkload()
     useProject.mockReturnValue({

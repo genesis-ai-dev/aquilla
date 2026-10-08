@@ -102,6 +102,7 @@ import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
   sectionTintClass,
+  visibilityRolePickerLabelKey,
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
 import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
@@ -2447,6 +2448,15 @@ export function ProjectOverview() {
                       canEdit={canEditVisibility}
                       onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
                       description={t("org.projectOverview.teamVisibilityDescription")}
+                      // AQU-1779: the badge shows the higher of the two floors
+                      // but writes only the progress floor, so a value below
+                      // the roster floor would save, snap back, and loosen
+                      // per-member progress org-wide unseen. Offer only what
+                      // can show; the roster is lowered on the Members card.
+                      minSelectableRole={orgSettings.rosterViewMinRole}
+                      belowMinSelectableHint={t("org.projectOverview.teamVisibilityRosterFloorHint", {
+                        floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
+                      })}
                     />
                   </div>
                   {teamOpen && (

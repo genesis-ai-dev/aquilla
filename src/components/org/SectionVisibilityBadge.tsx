@@ -67,6 +67,17 @@ export function visibilityFloorLabelKey(minRole: number): MessageKey {
   return "org.sectionVisibilityBadge.floorOwner"
 }
 
+/** Catalog key for a floor's picker label ("Maintainers and owners"), for
+ *  copy that names a floor mid-sentence. Same thresholds as
+ *  visibilityFloorLabelKey. */
+export function visibilityRolePickerLabelKey(minRole: number): MessageKey {
+  if (minRole <= ROLE.VIEWER) return "org.sectionVisibilityBadge.rolePickerEveryone"
+  if (minRole <= ROLE.CONTRIBUTOR) return "org.sectionVisibilityBadge.rolePickerContributor"
+  if (minRole <= ROLE.PROJECT_LEAD) return "org.sectionVisibilityBadge.rolePickerProjectLead"
+  if (minRole <= ROLE.MAINTAINER) return "org.sectionVisibilityBadge.rolePickerMaintainer"
+  return "org.sectionVisibilityBadge.rolePickerOwner"
+}
+
 /** True when a floor restricts the section beyond "everyone with access". */
 export function isRestrictedFloor(minRole: number): boolean {
   return minRole > ROLE.VIEWER
@@ -96,6 +107,15 @@ export interface SectionVisibilityBadgeProps {
   onChangeMinRole?: (nextMinRole: number) => void | Promise<void>
   /** One-line description shown above the picker in the advanced popover. */
   description?: string
+  /**
+   * Lowest floor this control can actually apply (AQU-1779). Options below it
+   * are disabled and never written: a section whose shown floor is the higher
+   * of two settings must not offer a value that saves but cannot show.
+   */
+  minSelectableRole?: number
+  /** Why the options below `minSelectableRole` are off; shown in the popover
+   *  whenever any option is disabled. */
+  belowMinSelectableHint?: string
   className?: string
 }
 
@@ -110,6 +130,8 @@ export function SectionVisibilityBadge({
   canEdit = false,
   onChangeMinRole,
   description,
+  minSelectableRole,
+  belowMinSelectableHint,
   className,
 }: SectionVisibilityBadgeProps) {
   const t = useT()
@@ -118,6 +140,8 @@ export function SectionVisibilityBadge({
   const label = t(visibilityFloorLabelKey(minRole))
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
+  const isSelectable = (level: number) => minSelectableRole == null || level >= minSelectableRole
+  const someDisabled = VISIBILITY_ROLE_OPTIONS.some((opt) => !isSelectable(opt.level))
 
   const badgeContent = (
     <Badge
@@ -141,7 +165,7 @@ export function SectionVisibilityBadge({
   async function handleChange(value: string | null) {
     if (!value || !onChangeMinRole) return
     const next = Number(value)
-    if (!Number.isFinite(next) || next === minRole) return
+    if (!Number.isFinite(next) || next === minRole || !isSelectable(next)) return
     setBusy(true)
     try {
       await onChangeMinRole(next)
@@ -179,7 +203,7 @@ export function SectionVisibilityBadge({
             <SelectContent>
               <SelectGroup>
                 {VISIBILITY_ROLE_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.level} value={String(opt.level)}>
+                  <SelectItem key={opt.level} value={String(opt.level)} disabled={!isSelectable(opt.level)}>
                     {t(opt.labelKey)}
                   </SelectItem>
                 ))}
@@ -187,6 +211,11 @@ export function SectionVisibilityBadge({
             </SelectContent>
           </Select>
           {description && <FieldDescription className="text-xs">{description}</FieldDescription>}
+          {someDisabled && belowMinSelectableHint && (
+            <FieldDescription className="text-xs" data-testid="section-visibility-min-hint">
+              {belowMinSelectableHint}
+            </FieldDescription>
+          )}
         </Field>
       </PopoverContent>
     </Popover>

@@ -603,6 +603,11 @@ export const org = defineNamespace({
       "Who can see each teammate's assignment progress on this project.",
     "org.projectOverview.membersVisibilityDescription":
       "Who can see the member roster on this project.",
+    // AQU-1779: under the Team card's "Who can see this section" picker when
+    // the lower options are disabled. The Team card lists people, so it can
+    // never be more open than the member list.
+    "org.projectOverview.teamVisibilityRosterFloorHint":
+      "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -2647,6 +2652,13 @@ export const org = defineNamespace({
           done: "Whole-number count of cells completed in this assignment.",
           total: "Whole-number count of cells total in this assignment's scope.",
           pct: "Whole-number completion percentage, e.g. 40.",
+        },
+      },
+      "org.projectOverview.teamVisibilityRosterFloorHint": {
+        description:
+          "One-line note in the project overview's Team card visibility popover, shown when the options below the member-list setting are greyed out. Explains why (the card shows people, so it can't be more open than the member list) and where to lower the member list first. 'Members card' is the card of that name on the same page; 'Settings → Security' is the org settings page — use the localized names of both.",
+        placeholders: {
+          floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
         },
       },
       "org.sectionVisibilityBadge.changeVisibilityAriaLabel": {

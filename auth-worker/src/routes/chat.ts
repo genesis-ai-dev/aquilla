@@ -375,10 +375,8 @@ chat.post(
       }
       return c.json(data)
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error)
       console.error("Error in chat completion:", error)
-      return c.json({ error: "internal_error", message }, 500)
+      return c.json({ error: "internal_error", message: "Chat completion failed" }, 500)
     }
   },
 )

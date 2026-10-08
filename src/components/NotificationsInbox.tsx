@@ -418,7 +418,8 @@ function NotificationList({
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     if (notices.length === 0) return
-    const page = Math.max(1, virtualizer.range.endIndex - virtualizer.range.startIndex)
+    const range = virtualizer.range
+    const page = Math.max(1, range ? range.endIndex - range.startIndex : 1)
     let next: number | null = null
     if (event.key === "ArrowDown") next = activeIndex + 1
     else if (event.key === "ArrowUp") next = activeIndex - 1

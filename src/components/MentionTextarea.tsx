@@ -203,7 +203,8 @@ export function MentionTextarea({
         contentEditable
         suppressContentEditableWarning
         data-empty={value.length === 0 ? "true" : "false"}
-        {...({ placeholder } as React.HTMLAttributes<HTMLDivElement>)}
+        // The empty hint is a real placeholder attribute. Div typings omit it.
+        {...{ placeholder } as React.HTMLAttributes<HTMLDivElement>}
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledBy}
         aria-expanded={open}

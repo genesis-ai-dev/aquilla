@@ -67,6 +67,7 @@ describe("DateTooltip", () => {
     const trigger = screen.getByText(/\(edited\)/).closest("[data-slot=tooltip-trigger]")
     expect(trigger).toHaveTextContent("21h ago")
     expect(trigger).toHaveTextContent("(edited)")
+    if (!trigger) throw new Error("edited time is not inside a tooltip trigger")
 
     fireEvent.pointerEnter(trigger, { pointerType: "mouse" })
     fireEvent.mouseEnter(trigger)

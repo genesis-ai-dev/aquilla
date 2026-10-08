@@ -282,7 +282,7 @@ import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
-import { useFocusLock } from "@/hooks/useFocusLock"
+import { lockHolderForCell, useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
   createProjectPresenceStore,
@@ -7801,8 +7801,10 @@ export function ProjectWorkspace() {
   // enforcement. Reads cellLockHoldersRef (updated synchronously on every
   // WS frame) so a debounce-queued commit can't slip through a stale render.
   // Returns the holder label, or null when the cell is free.
+  const activeLaneForLockRef = useRef(activeLane)
+  activeLaneForLockRef.current = activeLane
   const checkLockHolder = useCallback((cellId: string) =>
-    cellLockHoldersRef.current.get(cellId) ?? null, [])
+    lockHolderForCell(cellLockHoldersRef.current, cellId, activeLaneForLockRef.current), [])
 
   // Stable identities for the EditorTable callback props below — EditorTable
   // rows are React.memo'd, so a new function identity here would fail the
@@ -13453,6 +13455,7 @@ export function ProjectWorkspace() {
               onValidationChange: handleAgentValidationChange,
               onCellValidated: handleCellValidated,
               cellLockHolders,
+              lane: activeLane,
               onClaimCell: handleClaimCell,
               onReleaseCell: handleReleaseCell,
               onViewCell: handleViewCell,

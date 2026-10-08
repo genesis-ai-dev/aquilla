@@ -33,6 +33,7 @@ import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-optio
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
+import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
   type CellFootnoteDetails,
   type CellStore,
@@ -2660,7 +2661,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getPendingTargetEventId={getPendingTargetEventId}
           reservePendingTargetCommit={reservePendingTargetCommit}
           onOptimisticEdit={onOptimisticEdit}
-          lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          lockHolderLabel={lockHolderForCell(cellLockHolders, cell.id, activeLane)}
           presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
           onClaimCell={onClaimCell}

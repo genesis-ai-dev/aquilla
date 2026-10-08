@@ -9,6 +9,14 @@
 //   - staffing / scopes    → routes/member-scopes.ts   (the scopes just stored)
 //   - direct add / role    → routes/projects.ts        (nothing — the bug)
 //
+// AQU-1799 added a fourth: the Codex/GitLab account migration
+// (services/legacy-user-migration.ts) writes org, team and project
+// memberships in one transaction and wrote no grants either, so every account
+// migrated after the AQU-730 backfill — at first sign-in or by the nightly
+// import — was walled off from every target lane of every project it was just
+// given. It now calls applyMigratedMemberLaneGrants below, inside that same
+// transaction.
+//
 // A directly-added contributor therefore held zero grants: no target lane in
 // the switcher, no target cells, 0% progress, while the project lead saw
 // everything. Both writers now live here so the three paths cannot drift
@@ -23,6 +31,7 @@
 // later.
 
 import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
+import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
 
 /**
@@ -91,7 +100,10 @@ export async function applyDirectAddLaneGrants(
   projectId: string,
   targetUserId: number,
   roleLevel: number,
-  grantedBy: number,
+  // Null for a writer with no human actor behind it: the Codex/GitLab
+  // migration (AQU-1799) writes every other membership row with
+  // `granted_by NULL` for the same reason, and the column is nullable.
+  grantedBy: number | null,
 ): Promise<void> {
   const lanes = await loadTargetLaneIdentities(db, projectId)
   if (lanes.length === 0) return
@@ -125,6 +137,41 @@ export async function applyDirectAddLaneGrants(
       )
       .bind(projectId, targetUserId, grant.laneId, grant.level, grantedBy)
       .run()
+  }
+}
+
+/**
+ * AQU-1799 — grants for every project a freshly written membership set opens.
+ *
+ * The Codex/GitLab migration copies a person's whole access in one atomic
+ * step: org memberships, team memberships and direct project memberships. Each
+ * of those can open a project, and under the read wall a below-Maintainer
+ * member reads a target lane only through a grant row — so the migration has
+ * to write grants for the projects it just opened or the person signs in to a
+ * project with no editable lane.
+ *
+ * `projectIds` is the set of projects the caller's membership writes reach
+ * (direct memberships, plus the projects attached to the teams it joined).
+ * The role is re-resolved per project rather than taken from the plan, because
+ * the effective role is max-wins across the direct, team and org paths
+ * (AD-12): a Developer on the project who is also a Maintainer on its org
+ * resolves to Maintainer and must get no rows at all. Projects the person
+ * cannot actually reach (archived, or no surviving path) are skipped.
+ *
+ * Per project the work is `applyDirectAddLaneGrants`, so a migrated account and
+ * an account added by hand land in exactly the same place — including the
+ * "rows already exist → rewrite the level only" rule, which leaves a
+ * pre-seeded lane-scoped account reading exactly the lanes it was scoped to.
+ */
+export async function applyMigratedMemberLaneGrants(
+  db: AquillaDb,
+  userId: number,
+  projectIds: readonly string[],
+): Promise<void> {
+  for (const projectId of new Set(projectIds)) {
+    const role = await resolveProjectRoleShared(db, { id: String(userId) }, projectId)
+    if (!role) continue
+    await applyDirectAddLaneGrants(db, projectId, userId, role.level, null)
   }
 }
 

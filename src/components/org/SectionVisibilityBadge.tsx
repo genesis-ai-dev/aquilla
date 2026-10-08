@@ -16,7 +16,7 @@
 // role-level number out. Callers own the actual permission source (org
 // settings patch, or a static floor) and the hide/show decision.
 
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Lock, Eye, ChevronDown, Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -113,6 +113,13 @@ export interface SectionVisibilityBadgeProps {
    * of two settings must not offer a value that saves but cannot show.
    */
   minSelectableRole?: number
+  /**
+   * The floor `onChangeMinRole` actually writes, when it differs from the
+   * shown `minRole` (AQU-1779: the Team card shows the higher of two floors
+   * but writes one). Picking the shown value then still writes when the
+   * stored one sits below it, which repairs a floor the old bug loosened.
+   */
+  storedMinRole?: number
   /** Why the options below `minSelectableRole` are off. Whenever any option
    *  is disabled, a circled-i beside the picker's label expands it in place. */
   belowMinSelectableHint?: string
@@ -131,6 +138,7 @@ export function SectionVisibilityBadge({
   onChangeMinRole,
   description,
   minSelectableRole,
+  storedMinRole,
   belowMinSelectableHint,
   className,
 }: SectionVisibilityBadgeProps) {
@@ -138,6 +146,7 @@ export function SectionVisibilityBadge({
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [hintOpen, setHintOpen] = useState(false)
+  const hintId = useId()
   const label = t(visibilityFloorLabelKey(minRole))
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
@@ -166,7 +175,7 @@ export function SectionVisibilityBadge({
   async function handleChange(value: string | null) {
     if (!value || !onChangeMinRole) return
     const next = Number(value)
-    if (!Number.isFinite(next) || next === minRole || !isSelectable(next)) return
+    if (!Number.isFinite(next) || next === (storedMinRole ?? minRole) || !isSelectable(next)) return
     setBusy(true)
     try {
       await onChangeMinRole(next)
@@ -176,7 +185,14 @@ export function SectionVisibilityBadge({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        // Each opening starts with the why tucked away again.
+        if (!next) setHintOpen(false)
+      }}
+    >
       <PopoverTrigger
         render={(
           <button
@@ -204,7 +220,7 @@ export function SectionVisibilityBadge({
                 aria-label={t("org.sectionVisibilityBadge.whyOptionsOffAriaLabel")}
                 aria-expanded={hintOpen}
                 data-state={hintOpen ? "open" : "closed"}
-                aria-controls="section-visibility-min-hint"
+                aria-controls={hintId}
                 onClick={() => setHintOpen((v) => !v)}
               >
                 <Info className="size-3.5" aria-hidden />
@@ -230,7 +246,9 @@ export function SectionVisibilityBadge({
               </SelectGroup>
             </SelectContent>
           </Select>
-          {description && <FieldDescription className="text-xs">{description}</FieldDescription>}
+          {/* nth-last-2:mt-0: with the hint after it, Field's own rule would
+              pull this up against the picker. */}
+          {description && <FieldDescription className="text-xs nth-last-2:mt-0">{description}</FieldDescription>}
           {/* Stays mounted so it can animate both ways: the 0fr→1fr grid row
               grows to the text's own height without measuring it, and the
               negative margin cancels the Field's gap while it is shut. */}
@@ -245,7 +263,7 @@ export function SectionVisibilityBadge({
               aria-hidden={!hintOpen}
               inert={!hintOpen}
             >
-              <FieldDescription id="section-visibility-min-hint" className="min-h-0 overflow-hidden text-xs">
+              <FieldDescription id={hintId} className="min-h-0 overflow-hidden text-xs">
                 {belowMinSelectableHint}
               </FieldDescription>
             </div>

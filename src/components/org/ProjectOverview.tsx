@@ -2454,6 +2454,9 @@ export function ProjectOverview() {
                       // per-member progress org-wide unseen. Offer only what
                       // can show; the roster is lowered on the Members card.
                       minSelectableRole={orgSettings.rosterViewMinRole}
+                      // Re-picking the shown floor still writes when progress
+                      // sits below it, so an owner can undo the old loosening.
+                      storedMinRole={orgSettings.memberProgressViewMinRole}
                       belowMinSelectableHint={t("org.projectOverview.teamVisibilityRosterFloorHint", {
                         floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
                       })}

@@ -1714,6 +1714,25 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     )
   })
 
+  it("repairs a progress floor the old bug left below the member list when the shown value is picked again", async () => {
+    // What production holds after the bug: progress loosened to Everyone
+    // while the member list stayed at Maintainers, so the badge shows
+    // Maintainers and the loosening is invisible here.
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.VIEWER, rosterViewMinRole: ROLE.MAINTAINER })
+
+    choose(await screen.findByRole("option", { name: /maintainers and owners/i }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.MAINTAINER }))
+    expect(patch).toHaveBeenCalledTimes(1)
+  })
+
+  it("writes nothing when the shown value is picked again and progress already matches it", async () => {
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
+
+    choose(await screen.findByRole("option", { name: /maintainers and owners/i }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(patch).not.toHaveBeenCalled()
+  })
+
   it("names an owner-only member list in the hint and leaves only Owners only open", async () => {
     await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.OWNER })
 

@@ -203,7 +203,7 @@ export function MentionTextarea({
         contentEditable
         suppressContentEditableWarning
         data-empty={value.length === 0 ? "true" : "false"}
-        placeholder={placeholder}
+        {...({ placeholder } as React.HTMLAttributes<HTMLDivElement>)}
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledBy}
         aria-expanded={open}

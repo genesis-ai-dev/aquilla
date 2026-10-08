@@ -92,7 +92,7 @@ function readDraft(storageKey: string): string {
 
 export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, resolveDenialReason, onReply, onResolve, onReopen, onEdit, onDelete, canEdit = false, canDelete = false, canEditMessage, canDeleteMessage, projectId, fileId, cellId, mentionRoster = [], currentUsername, highlightCommentId }: CommentThreadProps) {
   const { t, locale } = useI18n()
-  const highlightRef = useRef<HTMLLIElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
   const [, setOwnerRevision] = useState(0)
   useEffect(() => subscribeClientLocalStorageOwner(() => {
     setOwnerRevision((revision) => revision + 1)
@@ -444,7 +444,7 @@ function CommentMessageRow({
   message: CommentMessage
   stale: boolean
   lit: boolean
-  highlightRef?: Ref<HTMLLIElement>
+  highlightRef?: Ref<HTMLDivElement>
   editing: boolean
   editText: string
   onEditText: (text: string) => void

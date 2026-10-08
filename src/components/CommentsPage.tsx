@@ -89,6 +89,7 @@ import {
   headerBadgeCount,
   resolveFileName,
 } from "./comments-page-filters"
+import { cellPlaceKey, formatScriptureRef, useCommentCellPlaces } from "./comments-cell-preview"
 
 function sortItems(t: TFunction): { value: SortOrder; label: string }[] {
   return [
@@ -99,21 +100,30 @@ function sortItems(t: TFunction): { value: SortOrder; label: string }[] {
 }
 
 function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>, t: TFunction): string {
-  if (comment.scopeKind === "cell") {
-    const { name } = resolveFileName(comment.fileId, fileMap, t)
-    // AQU-599: prefer the human-readable cell reference (e.g. "GEN 1:1") the
-    // server resolves from the source cell, so the panel shows the cell number
-    // instead of the opaque cellId. Fall back to the raw id only when no
-    // canonical ref is available (non-scripture / deleted cell / older worker).
-    const cellLabel =
-      comment.cellRef?.trim() || t("common.cellLabel", { id: comment.cellId ?? "?" })
-    return t("comments.scope.cell", { cell: cellLabel, file: name })
-  }
   if (comment.scopeKind === "file") {
     const { name } = resolveFileName(comment.fileId, fileMap, t)
     return t("comments.scope.file", { file: name })
   }
   return t("common.project")
+}
+
+function CellPlace({
+  root,
+  place,
+  fileMap,
+  t,
+}: {
+  root: CommentRecord
+  place?: string
+  fileMap: Map<string, string>
+  t: TFunction
+}) {
+  if (root.scopeKind === "cell") {
+    const label = place || formatScriptureRef(root.cellRef)
+    if (label) return <span className="min-w-0 flex-1 truncate">{label}</span>
+    return <span className="min-w-0 flex-1 truncate">{resolveFileName(root.fileId, fileMap, t).name}</span>
+  }
+  return <span className="min-w-0 flex-1 truncate">{scopeLabel(root, fileMap, t)}</span>
 }
 
 function safeCommentHtml(text: string): string {
@@ -140,6 +150,8 @@ interface ThreadProps {
    */
   floors?: CommentFloors
   fileMap: Map<string, string>
+  /** Book, chapter, and verse for this thread's cell, when the read has landed. */
+  place?: string
   onResolve: (commentId: string, resolved: boolean) => void
   onEdit: (commentId: string, body: string) => Promise<void>
   onDelete: (commentId: string) => Promise<void>
@@ -149,7 +161,7 @@ interface ThreadProps {
 
 function CommentThreadCard({
   root, replies, currentUsername, roleLevel = null, floors = DEFAULT_COMMENT_FLOORS,
-  fileMap, onResolve, onEdit, onDelete, onNavigate, mentionRoster = [],
+  fileMap, place, onResolve, onEdit, onDelete, onNavigate, mentionRoster = [],
 }: ThreadProps) {
   const { t, locale } = useI18n()
   // AQU-1000: this page offered Resolve / Reopen to every reader, including
@@ -266,7 +278,7 @@ function CommentThreadCard({
             <li key={comment.commentId} className="p-2">
               {index === 0 && (
                 <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <span className="min-w-0 flex-1 truncate">{scopeLabel(root, fileMap, t)}</span>
+                  <CellPlace root={root} place={place} fileMap={fileMap} t={t} />
                   {fileMissing && (
                     <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
                       {t("comments.file.deletedBadge")}
@@ -743,6 +755,8 @@ export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: 
     return map
   }, [project?.files])
 
+  const places = useCommentCellPlaces(projectId, getToken, comments)
+
   // Derive unique file/author options for filter controls
   const { fileOptions, authorOptions } = useMemo(() => {
     const fileIds = new Set<string>()
@@ -869,6 +883,11 @@ export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: 
               roleLevel={project?.syncRole?.level ?? null}
               floors={commentFloorsFrom(project)}
               fileMap={fileMap}
+              place={
+                root.fileId && root.cellId
+                  ? places.get(cellPlaceKey(root.fileId, root.cellId))
+                  : undefined
+              }
               onResolve={resolveThread}
               onEdit={editComment}
               onDelete={deleteComment}

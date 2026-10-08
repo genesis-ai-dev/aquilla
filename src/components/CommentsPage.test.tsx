@@ -54,6 +54,14 @@ vi.mock("@/lib/sync/cqrs-bridge", () => ({
   buildFileScopedTokenFetcher: () => async () => "file-tok",
 }))
 
+const { fetchCellsByIds } = vi.hoisted(() => ({
+  fetchCellsByIds: vi.fn(async () => [] as Array<Record<string, unknown>>),
+}))
+
+vi.mock("@/lib/sync/cells-read", () => ({
+  fetchCellsByIds,
+}))
+
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
   return {
     commentId: "c1",
@@ -224,6 +232,37 @@ describe("CommentsPage chrome", () => {
     expect(search).toHaveValue("")
     expect(screen.getByText("unique-search-token")).toBeInTheDocument()
     expect(screen.getByTestId("comments-count-badge")).toHaveTextContent("1")
+  })
+
+  it("labels a thread with the book, chapter, and verse", async () => {
+    fetchCellsByIds.mockResolvedValueOnce([
+      {
+        cellId: "cell-heading",
+        side: "source",
+        canonicalRef: null,
+        value: "The Creation",
+        valueHtml: null,
+        metadata: { aquillaImport: { milestone: { label: "Genesis 1" } } },
+      },
+      {
+        cellId: "cell-verse",
+        side: "source",
+        canonicalRef: "GEN 1:2",
+        value: "Now the earth was formless",
+        valueHtml: null,
+      },
+    ])
+    mockComments.mockReturnValue([
+      makeComment({ commentId: "heading", cellId: "cell-heading", cellRef: null, body: "on the heading" }),
+      makeComment({ commentId: "verse", cellId: "cell-verse", cellRef: null, body: "on the verse" }),
+    ])
+    renderPage()
+
+    expect(await screen.findByText("Genesis 1")).toBeInTheDocument()
+    expect(screen.getByText("Genesis 1:2")).toBeInTheDocument()
+    expect(screen.queryByText("The Creation")).not.toBeInTheDocument()
+    expect(screen.queryByText("Now the earth was formless")).not.toBeInTheDocument()
+    expect(screen.queryByText(/cell-heading/)).not.toBeInTheDocument()
   })
 
   it("shows No comments without Clear filters when only resolved threads exist", () => {

@@ -56,6 +56,10 @@ vi.mock("@/lib/sync/cqrs-bridge", () => ({
   buildFileScopedTokenFetcher: () => async () => "file-tok",
 }))
 
+vi.mock("@/lib/sync/cells-read", () => ({
+  fetchCellsByIds: vi.fn(async () => []),
+}))
+
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
   return {
     commentId: "c1",

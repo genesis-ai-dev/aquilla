@@ -1081,6 +1081,8 @@ export interface CellHistoryEntry {
 export interface CommentMessage {
   id: string
   author: string
+  /** Username when the record has one. Edit and delete use it, not the label. */
+  authorId?: string
   authorType: "user" | "anonymous"
   text: string
   timestamp: string

@@ -82,6 +82,7 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
       messages: [root, ...replies].map((r) => ({
         id: r.commentId,
         author: r.authorLabel ?? r.authorId,
+        authorId: r.authorId,
         authorType: "user" as const,
         text: r.deletedAt ? "[deleted]" : r.body,
         timestamp: new Date(r.createdAt).toISOString(),
@@ -160,9 +161,14 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
     }
   }
 
-  function canMutateThread(kind: "comment.edit" | "comment.delete", thread: CommentThreadType): boolean {
+  function canMutateMessage(
+    kind: "comment.edit" | "comment.delete",
+    thread: CommentThreadType,
+    message: { id: string; authorId?: string },
+  ): boolean {
     if (roleLevel === null) return permissions.canEditComments
-    const isOwn = currentUsername != null && thread.authorId === currentUsername
+    const authorId = message.authorId ?? (message.id === thread.id ? thread.authorId : undefined)
+    const isOwn = currentUsername != null && authorId != null && authorId === currentUsername
     return canMutateComment(kind, roleLevel, isOwn, floors)
   }
 
@@ -247,10 +253,10 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
                 onReply={(text) => onReply(thread.id, text)}
                 onResolve={(msg) => onResolve(thread.id, msg)}
                 onReopen={() => onReopen(thread.id)}
-                onEdit={(text) => onEdit?.(thread.id, text)}
-                onDelete={() => onDelete?.(thread.id)}
-                canEdit={canMutateThread("comment.edit", thread)}
-                canDelete={canMutateThread("comment.delete", thread)}
+                onEdit={(messageId, text) => onEdit?.(messageId, text)}
+                onDelete={(messageId) => onDelete?.(messageId)}
+                canEditMessage={(message) => canMutateMessage("comment.edit", thread, message)}
+                canDeleteMessage={(message) => canMutateMessage("comment.delete", thread, message)}
                 projectId={project.id}
                 fileId={cell.fileId}
                 cellId={cell.id}

@@ -190,7 +190,9 @@ describe("StaffLanePopover", () => {
     fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
-    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300)
+    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
+      scopeLanes: ["es"],
+    })
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [

@@ -175,6 +175,28 @@ export async function applyMigratedMemberLaneGrants(
   }
 }
 
+/** Lane scopes named on a new membership. Existing rows are left in place. */
+export async function insertMemberLaneScopes(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+  laneIds: readonly string[],
+  createdBy: number,
+): Promise<void> {
+  const now = Date.now()
+  for (const laneId of laneIds) {
+    await db
+      .prepare(
+        `INSERT INTO project_member_scopes
+           (project_id, user_id, kind, value, created_by, created_at)
+         VALUES (?, ?, 'lane', ?, ?, ?)
+         ON CONFLICT (project_id, user_id, kind, value) DO NOTHING`,
+      )
+      .bind(projectId, userId, laneId, String(createdBy), now)
+      .run()
+  }
+}
+
 /** The member's stored kind='lane' scopes. Empty = unscoped = every lane. */
 async function loadMemberLaneScopes(
   db: AquillaDb,

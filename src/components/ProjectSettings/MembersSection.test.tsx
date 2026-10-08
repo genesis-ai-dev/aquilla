@@ -4,6 +4,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { MembersSection } from "./MembersSection"
+
+vi.mock("@/hooks/useCurrentTargetLanes", () => ({
+  useCurrentTargetLanes: () => ({ lanes: [], ready: true }),
+}))
 import type { ProjectMember } from "@/lib/frontier/members"
 
 const DEFAULT_MEMBERS: ProjectMember[] = [

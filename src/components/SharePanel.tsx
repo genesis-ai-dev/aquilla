@@ -17,11 +17,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  createServerInvite,
   listProjectInvites,
   revokeProjectInvite,
   type ActiveProjectInvite,
+  type ServerInviteCreated,
 } from "@/lib/sync/invites"
+import { createServerInviteWithChoice } from "@/lib/sync/invite-with-choice"
 import { fetchProjectSettings, type ProjectLaneView } from "@/lib/sync/project-settings"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { laneLanguageForTag, laneRowLabel } from "@/lib/lanes/lane-language"
@@ -33,6 +34,15 @@ import { isElevationRequiredError } from "@/lib/frontier/elevation"
 import { INVITE_SENT } from "@/lib/event-names"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
+import { LaneAccessFields } from "@/components/LaneAccessFields"
+import {
+  chosenLaneLabels,
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+} from "@/lib/lanes/lane-access-choice"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers } from "@/lib/frontier/members"
@@ -399,8 +409,14 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
           newMemberDefaultRole={ROLE.CONTRIBUTOR}
           callerUserId={callerUserId}
           callerMaxRole={callerMaxRole}
-          onAdd={async (usernames, role) => {
-            const results = await addMany(usernames.map((username) => ({ username, role })))
+          onAdd={async (usernames, role, laneAccess) => {
+            const results = await addMany(
+              usernames.map((username) => ({
+                username,
+                role,
+                ...(laneAccess ? { laneAccess } : {}),
+              })),
+            )
             return results.map((r) => ({
               username: r.username,
               ok: r.ok,
@@ -417,6 +433,13 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
             projectName: grantProjectName(t, projectName),
             lanes: "all",
           }}
+          targetLanes={
+            scopeLaneRows.length > 0
+              ? scopeLanes
+                  .filter((lane) => lane.value !== "")
+                  .map((lane) => ({ id: lane.value, label: lane.label }))
+              : undefined
+          }
         />
       )}
     </div>
@@ -455,6 +478,9 @@ function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTa
   const [serverError, setServerError] = useState<string | null>(null)
   // Bump this to trigger the active-invites list to re-fetch after a new invite is created.
   const [inviteListVersion, setInviteListVersion] = useState(0)
+  const { lanes: targetLanes } = useCurrentTargetLanes(projectId)
+  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null)
+  const choiceReady = laneChoiceReady(laneChoice, inviteRole, targetLanes.length)
   const inviteCopy = describeGrant(t, {
     link: inviteEmail.trim().length === 0,
     names: inviteEmail.trim() ? [inviteEmail.trim()] : [],
@@ -462,7 +488,7 @@ function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTa
     scope: {
       kind: "project",
       projectName: grantProjectName(t, projectName),
-      lanes: "all",
+      lanes: chosenLaneLabels(targetLanes, inviteRole, laneChoice),
     },
     locale,
   })
@@ -480,17 +506,24 @@ function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTa
       setServerError(t("projectSettings.share.signInToInvite"))
       return
     }
+    if (!choiceReady) {
+      setServerError(t("projectSettings.share.laneChoiceRequired"))
+      return
+    }
+    const laneAccess = needsLaneChoice(inviteRole, targetLanes.length) && laneChoice
+      ? toMemberLaneAccess(laneChoice)
+      : undefined
     setBusy(true)
     try {
-      let serverInvite: Awaited<ReturnType<typeof createServerInvite>>
+      let serverInvite: ServerInviteCreated | null
       try {
-        serverInvite = await createServerInvite(
+        serverInvite = await createServerInviteWithChoice(
           session.jwt,
           projectId,
           inviteRole,
-          undefined,
           trimmedEmail || undefined,
-          expiresInDays
+          expiresInDays,
+          laneAccess,
         )
       } catch (err) {
         // AQU-1541: the step-up dialog is already open; say why, not "no permission".
@@ -529,6 +562,7 @@ function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTa
     setInviteEmail("")
     setInviteRole(DEFAULT_INVITE_ROLE)
     setExpiresInDays(DEFAULT_EXPIRY_DAYS)
+    setLaneChoice(null)
   }
 
   return (
@@ -646,10 +680,18 @@ function InviteLinkTab({ projectId, projectName, onSharesChanged }: InviteLinkTa
               <span>{serverError}</span>
             </p>
           )}
+          {needsLaneChoice(inviteRole, targetLanes.length) && (
+            <LaneAccessFields
+              lanes={targetLanes}
+              value={laneChoice}
+              onChange={setLaneChoice}
+              disabled={!session?.jwt || busy}
+            />
+          )}
           <GrantScopeNotice sentence={inviteCopy.sentence} />
           <Button
             onClick={handleCreate}
-            disabled={busy || !session?.jwt}
+            disabled={busy || !session?.jwt || !choiceReady}
             className="w-full"
           >
             {busy

@@ -152,7 +152,8 @@ describe("SharePanel — member scopes wiring", () => {
 
     const config = lastMembersPanelProps!.scopeConfig!
     expect(config.lanes).toEqual([
-      { value: "", label: "fr" },
+      // No lane row: '' is the former default lane, not settings.targetLanguage.
+      { value: "", label: "Default" },
       { value: "es", label: "es" },
       { value: "de", label: "de" },
     ])

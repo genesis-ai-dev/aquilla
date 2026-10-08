@@ -101,6 +101,8 @@ export interface CreateMultiProjectInviteRequest {
   roleLevel?: number
   expiresAt?: string
   scopeLanes?: string[]
+  /** AQU-1808: explicit every-current-lane choice. The admin form has no per-lane picker. */
+  allCurrentLanes?: boolean
 }
 
 export interface CreateMultiProjectInviteResponse {

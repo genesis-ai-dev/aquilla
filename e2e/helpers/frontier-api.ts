@@ -417,19 +417,31 @@ export async function createOrgInvite(
   return (await r.json()) as { token: string }
 }
 
-/** POST /api/v2/projects/:projectId/members — add a user to a project. */
+/**
+ * POST /api/v2/projects/:projectId/members — add a user to a project.
+ *
+ * Below project lead, the product no longer treats a missing lane list as
+ * every lane. Specs that seed a collaborator are making that every-lane
+ * choice on purpose, unless they pass specific lanes.
+ */
 export async function addProjectMember(
   jwt: string,
   projectId: string,
   username: string,
   role: number = ROLE.CONTRIBUTOR,
+  laneAccess?: { scopeLanes: string[] },
 ): Promise<void> {
+  const body: Record<string, unknown> = { username, role }
+  if (role < ROLE.PROJECT_LEAD) {
+    if (laneAccess?.scopeLanes) body.scopeLanes = laneAccess.scopeLanes
+    else body.allCurrentLanes = true
+  }
   const r = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     {
       method: "POST",
       headers: authHeaders(jwt),
-      body: JSON.stringify({ username, role }),
+      body: JSON.stringify(body),
     },
   )
   if (!r.ok) throw new Error(`addProjectMember failed: HTTP ${r.status} — ${await r.text()}`)

@@ -34,13 +34,17 @@ async function seedOrg(opts: { lanes?: boolean } = {}) {
   }
 }
 
-async function addMember(role: number, username = "bob") {
+async function addMember(
+  role: number,
+  username = "bob",
+  lanes: { allCurrentLanes: true } | { scopeLanes: string[] } | null = { allCurrentLanes: true },
+) {
   return app.request(
     "/api/v2/projects/p1/members",
     {
       method: "POST",
       headers: authHeader(await jwtFor("alice")),
-      body: JSON.stringify({ username, role }),
+      body: JSON.stringify(lanes ? { username, role, ...lanes } : { username, role }),
     },
     env,
   )
@@ -57,7 +61,15 @@ async function grantsFor(userId: number): Promise<Array<{ lane: string; level: n
 }
 
 describe("POST /api/v2/projects/:id/members — lane grants (AQU-1782)", () => {
-  it("grants every current target lane to a directly added contributor", async () => {
+  it("refuses a new contributor when the lanes were not chosen", async () => {
+    await seedOrg()
+    const res = await addMember(300, "bob", null)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("target lanes") })
+    expect(await grantsFor(2)).toEqual([])
+  })
+
+  it("grants every current target lane when that choice is explicit", async () => {
     await seedOrg()
     const res = await addMember(300)
     expect(res.status).toBe(200)
@@ -67,25 +79,26 @@ describe("POST /api/v2/projects/:id/members — lane grants (AQU-1782)", () => {
     ])
   })
 
-  it("grants only the scoped lane when the member already has a lane scope", async () => {
+  it("grants only the lanes named on the add", async () => {
     await seedOrg()
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_by, created_at)
-       VALUES ('p1', 2, 'lane', 'lane0002', '1', 0)`,
-    ).run()
-    expect((await addMember(300)).status).toBe(200)
+    expect((await addMember(300, "bob", { scopeLanes: ["lane0002"] })).status).toBe(200)
     expect(await grantsFor(2)).toEqual([{ lane: "lane0002", level: 300 }])
+    const scopes = await env.AQUILLA_PG.prepare(
+      `SELECT value FROM project_member_scopes
+        WHERE project_id = 'p1' AND user_id = 2 AND kind = 'lane'`,
+    ).all<{ value: string }>()
+    expect((scopes.results ?? []).map((row) => row.value)).toEqual(["lane0002"])
   })
 
   it("writes no grant rows for a Maintainer — their role already clears the wall", async () => {
     await seedOrg()
-    expect((await addMember(600)).status).toBe(200)
+    expect((await addMember(600, "bob", undefined)).status).toBe(200)
     expect(await grantsFor(2)).toEqual([])
   })
 
   it("adds the member without error and without grants on a project that has no lanes yet", async () => {
     await seedOrg({ lanes: false })
-    expect((await addMember(300)).status).toBe(200)
+    expect((await addMember(300, "bob", undefined)).status).toBe(200)
     const row = await env.AQUILLA_PG.prepare(
       "SELECT role_level FROM project_members WHERE project_id = 'p1' AND user_id = 2",
     ).first<{ role_level: number }>()
@@ -132,8 +145,8 @@ describe("POST /api/v2/projects/:id/members — lane grants (AQU-1782)", () => {
         headers: authHeader(await jwtFor("alice")),
         body: JSON.stringify({
           members: [
-            { username: "bob", role: 300 },
-            { username: "carol", role: 400 },
+            { username: "bob", role: 300, allCurrentLanes: true },
+            { username: "carol", role: 400, allCurrentLanes: true },
           ],
         }),
       },

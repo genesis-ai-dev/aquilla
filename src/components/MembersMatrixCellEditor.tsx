@@ -1,4 +1,14 @@
 import { useState, type ReactNode } from "react"
+import { LaneAccessFields } from "@/components/LaneAccessFields"
+import { useCurrentTargetLanes, type TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
+import {
+  chosenLaneLabels,
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+  type MemberLaneAccess,
+} from "@/lib/lanes/lane-access-choice"
 import { Trash2, GitMerge } from "lucide-react"
 import type { SecondarySrc } from "@/lib/frontier/members"
 import { Button } from "@/components/ui/button"
@@ -130,24 +140,30 @@ export function MembersMatrixCellEditor({
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<Status>("idle")
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const { lanes: targetLanes } = useCurrentTargetLanes(!cell && open ? projectId : null)
 
   const source = cell?.role.source
   const isImmutable =
     source === "creator" || source === "group" || source === "org"
   const canEdit = !isImmutable && Boolean(session?.jwt)
 
-  async function applyRole(level: RoleLevel) {
+  async function applyRole(level: RoleLevel, laneAccess?: MemberLaneAccess) {
     if (!session?.jwt) return
     setStatus("submitting")
     setErrorMsg(null)
     try {
-      await addProjectMember(session.jwt, projectId, username, level)
+      if (laneAccess) {
+        await addProjectMember(session.jwt, projectId, username, level, laneAccess)
+      } else {
+        await addProjectMember(session.jwt, projectId, username, level)
+      }
+      const scope = grantScopeWithChoice(grantScope, targetLanes, level, laneAccess, false)
       toast.add({
         type: "success",
         title: describeGrant(t, {
           names: [username],
           roleLevel: level,
-          scope: grantScope,
+          scope,
           locale,
         }).sentence,
       })
@@ -193,7 +209,7 @@ export function MembersMatrixCellEditor({
           >
             <span aria-hidden>—</span>
           </PopoverTrigger>
-          <PopoverContent className="w-56 p-2" side="bottom">
+          <PopoverContent className={targetLanes.length > 0 ? "w-72 p-2" : "w-56 p-2"} side="bottom">
             <RolePickerBody
               title={t("workspace.typeahead.addUser", { username })}
               username={username}
@@ -202,6 +218,7 @@ export function MembersMatrixCellEditor({
               onPick={applyRole}
               status={status}
               errorMsg={errorMsg}
+              targetLanes={targetLanes}
             />
           </PopoverContent>
         </Popover>
@@ -312,27 +329,46 @@ function RolePickerBody({
   onPick,
   status,
   errorMsg,
+  targetLanes,
 }: {
   title: string
   username: string
   grantScope: GrantScope
   currentLevel: number | null
-  onPick: (level: RoleLevel) => void | Promise<void>
+  onPick: (level: RoleLevel, laneAccess?: MemberLaneAccess) => void | Promise<void>
   status: Status
   errorMsg: string | null
+  /** Set only when this picker is adding a new member. A role change omits it. */
+  targetLanes?: readonly TargetLaneOption[]
 }) {
   const { t, locale } = useI18n()
-  // The role buttons are the submit. The sentence tracks the role under the
-  // pointer (or the current role, until then) so it stays live without a
-  // second confirmation step.
+  // The role buttons are the submit, except a new member below project lead
+  // on a project that has lanes: that pick waits for an explicit lane choice.
   const [preview, setPreview] = useState<number | null>(null)
-  const shown = preview ?? currentLevel ?? PROJECT_ROLE_OPTIONS[0].level
+  const [pendingLevel, setPendingLevel] = useState<RoleLevel | null>(null)
+  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null)
+  const shown = preview ?? pendingLevel ?? currentLevel ?? PROJECT_ROLE_OPTIONS[0].level
+  const lanes = targetLanes ?? []
+  const confirming = pendingLevel !== null && needsLaneChoice(pendingLevel, lanes.length)
   const copy = describeGrant(t, {
     names: [username],
     roleLevel: shown,
-    scope: grantScope,
+    scope: grantScopeWithChoice(
+      grantScope,
+      lanes,
+      shown,
+      pendingLevel === shown && laneChoice ? toMemberLaneAccess(laneChoice) : undefined,
+      Boolean(targetLanes),
+    ),
     locale,
   })
+  function handlePick(level: RoleLevel) {
+    if (targetLanes && needsLaneChoice(level, targetLanes.length)) {
+      setPendingLevel(level)
+      return
+    }
+    void onPick(level)
+  }
   return (
     <div className="space-y-1.5">
       <div className="px-1 pb-1 text-xs font-medium border-b">{title}</div>
@@ -344,7 +380,7 @@ function RolePickerBody({
             <button
               key={opt.level}
               type="button"
-              onClick={() => onPick(opt.level)}
+              onClick={() => handlePick(opt.level)}
               onMouseEnter={() => setPreview(opt.level)}
               onFocus={() => setPreview(opt.level)}
               disabled={status === "submitting" || isCurrent}
@@ -368,6 +404,29 @@ function RolePickerBody({
           )
         })}
       </div>
+      {confirming && pendingLevel !== null && (
+        <div className="space-y-1.5 px-1 pt-1">
+          <LaneAccessFields
+            name={`matrix-lane-${username}`}
+            lanes={lanes}
+            value={laneChoice}
+            onChange={setLaneChoice}
+            disabled={status === "submitting"}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="w-full"
+            disabled={!laneChoiceReady(laneChoice, pendingLevel, lanes.length) || status === "submitting"}
+            onClick={() => {
+              if (!laneChoice) return
+              void onPick(pendingLevel, toMemberLaneAccess(laneChoice))
+            }}
+          >
+            {t("common.add")}
+          </Button>
+        </div>
+      )}
       {status === "submitting" && (
         <div className="flex items-center gap-1 px-1 pt-1 text-[10px] text-muted-foreground">
           <Spinner className="size-3" />
@@ -522,4 +581,25 @@ function ImmutableBody({
       )}
     </div>
   )
+}
+
+function grantScopeWithChoice(
+  scope: GrantScope,
+  lanes: readonly TargetLaneOption[],
+  role: number,
+  laneAccess: MemberLaneAccess | undefined,
+  unchosen: boolean,
+): GrantScope {
+  if (scope.kind !== "project" || !needsLaneChoice(role, lanes.length)) return scope
+  if (!laneAccess) return unchosen ? { ...scope, lanes: "unknown" } : scope
+  return {
+    ...scope,
+    lanes: chosenLaneLabels(
+      lanes,
+      role,
+      "allCurrentLanes" in laneAccess
+        ? { kind: "all" }
+        : { kind: "lanes", laneIds: laneAccess.scopeLanes },
+    ),
+  }
 }

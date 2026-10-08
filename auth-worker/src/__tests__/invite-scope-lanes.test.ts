@@ -253,3 +253,96 @@ describe("AQU-528 multi-project language-scoped invite", () => {
     expect(await laneScopesFor("pa", 2)).toEqual([])
   })
 })
+
+describe("AQU-1808: an invite names its lanes when the project has some", () => {
+  async function seedLane(projectId: string, id: string, name: string) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES (?, ?, 'target', ?, NULL, 0)`,
+    )
+      .bind(id, projectId, name)
+      .run()
+  }
+
+  async function grantsFor(projectId: string, userId: number): Promise<string[]> {
+    const { results } = await env.AQUILLA_PG.prepare(
+      `SELECT lane FROM project_member_lane_roles WHERE project_id = ? AND user_id = ? ORDER BY lane`,
+    )
+      .bind(projectId, userId)
+      .all<{ lane: string }>()
+    return (results ?? []).map((row) => row.lane)
+  }
+
+  it("refuses a contributor invite that does not choose lanes", async () => {
+    await seedUser(1, "alice")
+    await seedProject("p1", 1)
+    await seedLane("p1", "lane-es", "Spanish")
+    const res = await app.request(
+      "/api/v2/projects/p1/invites",
+      { method: "POST", headers: authHeader(await jwtFor("alice")), body: JSON.stringify({ role: 400 }) },
+      env,
+    )
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ code: "lane_choice_required" })
+  })
+
+  it("an explicit every-lane invite stores no scopes and grants each current lane", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await seedProject("p1", 1)
+    await seedLane("p1", "lane-es", "Spanish")
+    await seedLane("p1", "lane-fr", "French")
+    const created = await app.request(
+      "/api/v2/projects/p1/invites",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ role: 400, allCurrentLanes: true }),
+      },
+      env,
+    )
+    expect(created.status).toBe(200)
+    const { token, scopeLanes } = (await created.json()) as { token: string; scopeLanes?: string[] }
+    expect(scopeLanes).toBeUndefined()
+    const stored = await env.AQUILLA_PG.prepare(
+      "SELECT scope_lanes FROM project_invites WHERE token = ?",
+    )
+      .bind(token)
+      .first<{ scope_lanes: string | null }>()
+    expect(stored?.scope_lanes).toBeNull()
+
+    const accepted = await app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor("bob")), body: JSON.stringify({ token }) },
+      env,
+    )
+    expect(accepted.status).toBe(200)
+    expect(await laneScopesFor("p1", 2)).toEqual([])
+    expect(await grantsFor("p1", 2)).toEqual(["lane-es", "lane-fr"])
+  })
+
+  it("a named lane invite grants only that lane", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await seedProject("p1", 1)
+    await seedLane("p1", "lane-es", "Spanish")
+    await seedLane("p1", "lane-fr", "French")
+    const created = await app.request(
+      "/api/v2/projects/p1/invites",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ role: 400, scopeLanes: ["lane-es"] }),
+      },
+      env,
+    )
+    expect(created.status).toBe(200)
+    const { token } = (await created.json()) as { token: string }
+    await app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor("bob")), body: JSON.stringify({ token }) },
+      env,
+    )
+    expect(await laneScopesFor("p1", 2)).toEqual(["lane-es"])
+    expect(await grantsFor("p1", 2)).toEqual(["lane-es"])
+  })
+})

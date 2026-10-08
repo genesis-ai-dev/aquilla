@@ -230,6 +230,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.signInToInvite": "Sign in to create an invite link.",
     "projectSettings.share.createInviteFailed":
       "Couldn't create invite. You may not have permission, or the server is unreachable.",
+    "projectSettings.share.laneChoiceLegend": "Target lanes",
+    "projectSettings.share.laneChoiceAll": "Every current target lane",
+    "projectSettings.share.laneChoiceSome": "Only selected lanes",
+    "projectSettings.share.laneChoiceRequired": "Choose the lanes before adding this person.",
+    "projectSettings.share.laneChoiceLeadNote": "A project lead sees every target lane.",
+    "projectSettings.share.laneChoiceAdminHint":
+      "To limit someone to some lanes, use that project's share panel.",
     "projectSettings.share.inviteLinkReady": "Invite link ready. Send it to the recipient.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
     "projectSettings.share.copied": "Copied!",

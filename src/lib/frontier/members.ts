@@ -4,6 +4,7 @@ import { throwIfElevationRequired } from "./elevation";
 import { ROLE } from "@/lib/frontier/roles";
 import { createRequestCoalescer } from "@/lib/request-coalescer";
 import type { ScopePath } from "@/lib/access/types";
+import type { MemberLaneAccess } from "@/lib/lanes/lane-access-choice";
 
 export interface LookedUpUser {
   id: number;
@@ -234,14 +235,15 @@ export async function addProjectMember(
   jwt: string,
   projectId: string,
   username: string,
-  role: number
+  role: number,
+  laneAccess?: MemberLaneAccess,
 ): Promise<ProjectMember> {
   const res = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     {
       method: "POST",
       headers: authHeaders(jwt),
-      body: JSON.stringify({ username, role }),
+      body: JSON.stringify({ username, role, ...laneAccess }),
     }
   );
   await throwIfElevationRequired(res, "project")
@@ -275,14 +277,20 @@ export interface MemberGrantResult {
 export async function addProjectMembers(
   jwt: string,
   projectId: string,
-  members: Array<{ username: string; role: number }>
+  members: Array<{
+    username: string
+    role: number
+    laneAccess?: MemberLaneAccess
+  }>
 ): Promise<MemberGrantResult[]> {
   const res = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
     {
       method: "POST",
       headers: authHeaders(jwt),
-      body: JSON.stringify({ members }),
+      body: JSON.stringify({
+        members: members.map(({ username, role, laneAccess }) => ({ username, role, ...laneAccess })),
+      }),
     }
   );
   await throwIfElevationRequired(res, "project")

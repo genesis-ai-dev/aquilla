@@ -25,6 +25,8 @@ export interface ToolActivityEvent {
   version: number | null
   verified: boolean
   value: string | null
+  /** The cell's canonical reference (e.g. "MAT 1:1"), when it has one. */
+  ref: string | null
 }
 
 export interface ToolActivity {
@@ -103,6 +105,7 @@ export async function readToolActivity(
       version: typeof prov.version === "number" ? prov.version : null,
       verified: prov.verified === true,
       value: str(payload.value),
+      ref: null,
     })
     if (!r.file_id || !r.cell_id) continue
     writes.push({
@@ -181,6 +184,18 @@ export async function readToolActivity(
         priorValueHtml: prior?.valueHtml ?? null,
       })
     }
+  }
+
+  if (cellIds.length > 0) {
+    const { results } = await db
+      .prepare(
+        `SELECT cell_id, canonical_ref FROM cells
+          WHERE project_id = ? AND side = 'source' AND canonical_ref IS NOT NULL AND cell_id IN (${placeholders(cellIds.length)})`,
+      )
+      .bind(projectId, ...cellIds)
+      .all<{ cell_id: string; canonical_ref: string }>()
+    const refs = new Map(results.map((r) => [r.cell_id, r.canonical_ref]))
+    for (const a of activity) a.ref = a.cellId ? (refs.get(a.cellId) ?? null) : null
   }
 
   return { events: activity, writes, cells, truncated }

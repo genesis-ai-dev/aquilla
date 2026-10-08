@@ -158,6 +158,12 @@ const ApproveChangeset = lazy(() =>
 const ProjectApprovals = lazy(() =>
   import("@/pages/ProjectApprovals/ProjectApprovals").then((m) => ({ default: m.ProjectApprovals })),
 )
+const ToolsPage = lazy(() =>
+  import("@/pages/Tools/ToolsPage").then((m) => ({ default: m.ToolsPage })),
+)
+const ToolRunPage = lazy(() =>
+  import("@/pages/Tools/ToolRunPage").then((m) => ({ default: m.ToolRunPage })),
+)
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
 
@@ -448,6 +454,8 @@ function AppRoutes() {
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
         <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
+        <Route path="/project/:id/tools" element={<LazyRoute><ToolsPage /></LazyRoute>} />
+        <Route path="/project/:id/tools/:toolId" element={<LazyRoute><ToolRunPage /></LazyRoute>} />
         <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/voice" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />

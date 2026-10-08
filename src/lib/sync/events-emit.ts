@@ -261,6 +261,10 @@ export interface CellCommitInput {
    * undo commits carry no such tag).
    */
   propagatedFromCellId?: string
+  /** Aquilla Tools: the tool that made this write (provenance, see outbox-types). */
+  toolOrigin?: OutboxPayloadFor<"target.cell.commit">["tool_origin"]
+  /** Aquilla Tools: this commit compensates a tool's write ("revert since T"). */
+  revertOfTool?: OutboxPayloadFor<"target.cell.commit">["revert_of_tool"]
 }
 
 function noteTargetCellCommit(input: CellCommitInput): void {
@@ -309,6 +313,8 @@ function targetCellCommitEventInput(
       ...(input.propagatedFromCellId !== undefined
         ? { propagated_from_cell_id: input.propagatedFromCellId }
         : {}),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
+      ...(input.revertOfTool ? { revert_of_tool: input.revertOfTool } : {}),
     },
     clientTs: input.clientTs,
   }
@@ -379,6 +385,8 @@ export interface CellValidateInput {
   surface?: TelemetrySurface
   author: string
   clientTs?: number
+  /** Aquilla Tools: the tool that made this validation (provenance). */
+  toolOrigin?: OutboxPayloadFor<"cell.validate">["tool_origin"]
 }
 
 /**
@@ -409,6 +417,7 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
       editEventId: input.editEventId,
       // AQU-538: '' (default lane) is omitted from the wire.
       ...targetLaneFields(input),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
     clientTs: input.clientTs,
   })

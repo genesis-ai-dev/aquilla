@@ -274,6 +274,14 @@ export interface OutboxEventPayloads {
      * this to trigger the AD-14 endorsement-revocation cascade and the
      * harmonize-affected-validation comment thread. Only set by emitCellHarmonize.
      */
+    /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string }
+    /** Aquilla Tools: set on the compensating events "revert since T" emits. */
+    revert_of_tool?: { toolId: string; sinceMs: number }
     harmonize_origin?: {
       /** Stable id of the built-in check or custom rule that drove the sweep. */
       rule_or_check_id: string
@@ -300,6 +308,12 @@ export interface OutboxEventPayloads {
   "cell.validate": {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
+    /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string }
     /**
      * AQU-538: lane of the target row being validated. Omitted on the wire for
      * the default lane (`''`). Validation is projected per lane so a cell can

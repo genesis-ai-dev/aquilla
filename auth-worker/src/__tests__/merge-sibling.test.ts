@@ -84,6 +84,24 @@ describe("POST /:projectId/merge-sibling — role floors", () => {
 })
 
 describe("POST /:projectId/merge-sibling — validation", () => {
+  it("accepts a lane of a language the host already has under another tag", async () => {
+    await seedUser(31, "u31")
+    await seedProject("host-lang", "Host", 31)
+    await seedProject("donor-lang", "Donor", 31)
+    await grant("host-lang", 31, 500)
+    await grant("donor-lang", 31, 500)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, ?)",
+    )
+      .bind("host-lang", JSON.stringify({ targetLanes: ["Spanish"] }), 31)
+      .run()
+
+    const fetchSpy = mockFold({ merged: 0, skipped: [], lane: "es" })
+    const res = await post("host-lang", await jwtFor("u31"), { donorProjectId: "donor-lang", lane: "es" })
+    expect(res.status).toBe(200)
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
   it("400 when the lane already exists on the host", async () => {
     await seedUser(3, "u3")
     await seedProject("host-c", "Host", 3)

@@ -1,19 +1,17 @@
-// AQU-1086: the language-scoped carve-out in the project-settings write
-// route. Below the maintainer settings floor a write whose only *changed* keys
-// are language keys (`sourceLanguage`, `targetLanguage`, `targetLanes`,
-// `archivedLanes`) is allowed — but only when the project's org has lowered
-// `languageEditMinRole` far enough.
+// AQU-1595: the four project-language keys (`sourceLanguage`, `targetLanguage`,
+// `targetLanes`, `archivedLanes`) are lane rows, not settings. The settings
+// write route refuses a body that includes any of them, whoever the caller is,
+// and a body that omits them keeps the stored copies (history is not
+// rewritten). The AQU-1086 language-only carve-out therefore never fires: a
+// lead's language edit goes through the lane routes, which carry the org's
+// `languageEditMinRole` floor. Absence of that key is Project lead (AQU-984);
+// a stored floor, including an explicit Maintainer (600), is kept.
 //
-// Mirrors project-settings-termbase-scope.test.ts and guards the same two
-// failure modes, in order of severity:
-//   1. Lowering the language floor silently widening write access to the rest
-//      of project settings (AI config, validation thresholds, health).
-//   2. The carve-out never firing in practice, because the client patch is a
-//      whole-object read-modify-write and every write echoes back every key —
-//      so the gate must key off the DIFF, not off key presence.
-//
-// The default floor is MAINTAINER (600): with no org setting, everything here
-// behaves exactly as it did before this issue.
+// Guards, in order of severity:
+//   1. A language key can never ride a settings write past the maintainer
+//      floor, bundled with other keys or alone.
+//   2. The language floor must not widen write access to the rest of project
+//      settings (AI config, validation thresholds, health).
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
@@ -52,6 +50,11 @@ async function seed(orgSettings = "{}", projectSettings = '{"sourceLanguage":"en
   )
     .bind(projectSettings)
     .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+      ('ln-src', 'p1', 'source', 'English', NULL, 0),
+      ('ln-main', 'p1', 'target', 'French', '', 1)`,
+  ).run()
 }
 
 async function patchProjectSettings(
@@ -68,6 +71,25 @@ async function patchProjectSettings(
     },
     env,
   )
+}
+
+async function patchLane(username: string, body: Record<string, unknown>): Promise<Response> {
+  return app.request(
+    "/api/v2/projects/p1/lanes/ln-main",
+    {
+      method: "PATCH",
+      headers: authHeader(await jwtFor(username)),
+      body: JSON.stringify(body),
+    },
+    env,
+  )
+}
+
+async function storedLaneLanguage(): Promise<string | null> {
+  const row = await env.AQUILLA_PG.prepare(
+    "SELECT language FROM lanes WHERE id = 'ln-main'",
+  ).first<{ language: string | null }>()
+  return row?.language ?? null
 }
 
 async function storedSettings(): Promise<Record<string, unknown>> {
@@ -124,5 +146,66 @@ describe("project-settings language keys (AQU-1595)", () => {
     expect(res.status).toBe(403)
     expect((await storedSettings()).systemPrompt).toBe("keep me")
     expect((await storedSettings()).sourceLanguage).toBe("en")
+  })
+})
+
+// The floor the settings carve-out used to apply now guards the lane routes
+// (`denyLanguageWrite`). The claims are AQU-1086's and AQU-984's, unchanged.
+describe("lane writes carry the language-edit floor (AQU-1086 / AQU-984)", () => {
+  it("lets a project lead change a lane's language when the org floor is 500", async () => {
+    await seed('{"languageEditMinRole":500}')
+    const res = await patchLane("dan", { language: "German" })
+    expect(res.status).toBe(200)
+    expect(await storedLaneLanguage()).toBe("German")
+  })
+
+  it("lets a project lead change a lane's language when the org has not set a floor (AQU-984)", async () => {
+    await seed() // key absent — never set, so the default is project lead
+    const res = await patchLane("dan", { language: "German" })
+    expect(res.status).toBe(200)
+    expect(await storedLaneLanguage()).toBe("German")
+  })
+
+  it("403s a project lead when the org explicitly stored maintainer, and names that role", async () => {
+    await seed('{"languageEditMinRole":600}')
+    const res = await patchLane("dan", { language: "German" })
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as {
+      error: string
+      code: string
+      required: { roleLevel: number }
+    }
+    expect(body.code).toBe("role_required")
+    expect(body.required.roleLevel).toBe(600)
+    expect(body.error).toMatch(/maintainer/i)
+    expect(await storedLaneLanguage()).toBe("French")
+  })
+
+  it("403s a contributor (400) either way — the floor only reaches project lead", async () => {
+    await seed('{"languageEditMinRole":500}')
+    const lowered = await patchLane("carla", { language: "German" })
+    expect(lowered.status).toBe(403)
+
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_settings SET settings = '{}' WHERE org_id = 1",
+    ).run()
+    const defaulted = await patchLane("carla", { language: "German" })
+    expect(defaulted.status).toBe(403)
+    const body = (await defaulted.json()) as {
+      error: string
+      code: string
+      required: { roleLevel: number }
+    }
+    expect(body.code).toBe("role_required")
+    expect(body.required.roleLevel).toBe(500)
+    expect(body.error).toMatch(/project lead/i)
+    expect(await storedLaneLanguage()).toBe("French")
+  })
+
+  it("leaves the maintainer path untouched", async () => {
+    await seed('{"languageEditMinRole":600}')
+    const res = await patchLane("bob", { language: "German" })
+    expect(res.status).toBe(200)
+    expect(await storedLaneLanguage()).toBe("German")
   })
 })

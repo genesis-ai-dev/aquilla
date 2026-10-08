@@ -12,7 +12,8 @@ export const fileDetails = defineNamespace({
     "fileDetails.orderingTimeline": "Timeline (timecodes)",
     "fileDetails.orderingSequence": "Sequence",
     "fileDetails.languages": "Languages",
-    "fileDetails.sourceLanguage": "Source language",
+    "fileDetails.sourceLanguage": "Declared source language",
+    "fileDetails.targetLanguage": "Declared target language",
     "fileDetails.imported": "Imported",
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
@@ -94,10 +95,21 @@ export const fileDetails = defineNamespace({
       },
       "fileDetails.sourceLanguage": {
         description:
-          "Metadata row label for the language of the file's source content. The value " +
-          "is a language name or code. This row does not show a target language because " +
-          "targets belong to lanes and the file's import-time target stamp may be stale.",
-        maxLength: 24,
+          "Metadata row label for the source language this file DECLARED at import — " +
+          "what the file says about itself, which may disagree with the language of the " +
+          "lane its rows are in. The value is a language name or code. Translate " +
+          "'declared' as 'stated' / 'as claimed by the file', not as a setting the user " +
+          "chose. Shown next to the declared target language (AQU-1596).",
+        maxLength: 32,
+      },
+      "fileDetails.targetLanguage": {
+        description:
+          "Metadata row label for the target language this file DECLARED at import — " +
+          "what the file says about itself, which may disagree with the lane its rows " +
+          "are in. The value is a language name or code. Translate 'declared' as " +
+          "'stated' / 'as claimed by the file'. It is import information, not the " +
+          "lane's language (AQU-1596).",
+        maxLength: 32,
       },
       "fileDetails.imported": {
         description:

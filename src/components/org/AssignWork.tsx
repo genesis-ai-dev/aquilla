@@ -2,6 +2,12 @@ import { useState, useEffect, useMemo } from "react"
 import { fetchProjectRoster, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
+import {
+  buildLaneItems,
+  initialAssignmentLane,
+  laneIdForTag,
+  laneTagForAssignment,
+} from "@/lib/sync/assignment-lane"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -70,10 +76,20 @@ export interface AssignWorkProps {
   /** Called after a successful assign so the parent can refresh rollups. */
   onAssigned?: () => void
   /**
-   * Target-language lane for the assignment. '' = the project's default lane
-   * (omitted on the wire, same contract as AssignModal).
+   * Lane tag the manager arrived from. `null` or omitted is the All tab:
+   * several lanes pre-fill nothing. `''` is the default lane. One lane names
+   * itself either way.
    */
-  targetLang?: string
+  arrivedLane?: string | null
+  /** Tags the field offers. `''` is the default lane. Omitted → that lane only. */
+  laneTags?: readonly string[]
+  laneLabels?: Readonly<Record<string, string>>
+  defaultLaneLabel?: string
+  /**
+   * Target lane rows. The chosen row's id is what `assignment.create` sends.
+   * Absent before the lane rows exist; the tag still goes out.
+   */
+  laneRows?: readonly { id: string; legacyTag: string | null }[]
 }
 
 const DEFAULT_ROLE_LEVEL = 500
@@ -89,7 +105,11 @@ export function AssignWork({
   assignmentMinRole = DEFAULT_ASSIGNMENT_MIN_ROLE,
   callerUserId = null,
   onAssigned,
-  targetLang = "",
+  arrivedLane = null,
+  laneTags,
+  laneLabels,
+  defaultLaneLabel,
+  laneRows,
 }: AssignWorkProps) {
   const t = useT()
   const isSelfAssignMode = roleLevel < assignmentMinRole
@@ -104,6 +124,28 @@ export function AssignWork({
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const laneItems = useMemo(
+    () =>
+      buildLaneItems({
+        targetLanes: laneTags,
+        laneLabels,
+        defaultLaneLabel,
+        defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
+      }),
+    [laneTags, laneLabels, defaultLaneLabel, t],
+  )
+  // undefined = the arrival rule; a string or null is the manager's own pick.
+  // Reset when the panel opens or the lane they arrived from changes, so a
+  // previous choice doesn't survive into the All tab.
+  const arrivalKey = `${open ? "open" : "closed"}:${arrivedLane ?? "all"}:${laneItems.map((item) => item.value).join("\0")}`
+  const [lanePick, setLanePick] = useState<{ key: string; value: string | null } | null>(null)
+  if (lanePick?.key !== arrivalKey) {
+    setLanePick({ key: arrivalKey, value: initialAssignmentLane(laneItems, arrivedLane) })
+  }
+  const selectedLane = lanePick?.key === arrivalKey ? lanePick.value : initialAssignmentLane(laneItems, arrivedLane)
+  function chooseLane(value: string | null) {
+    setLanePick({ key: arrivalKey, value })
+  }
   // AQU-1308: why the roster is empty, when it is empty for a reason.
   const [rosterError, setRosterError] = useState<"hidden" | "load-failed" | null>(null)
 
@@ -220,6 +262,15 @@ export function AssignWork({
       setError(t("dialog.assign.error.selfOnly"))
       return
     }
+    // One lane names itself. Several lanes pre-fill only from the tab the
+    // manager arrived from; the All tab pre-fills nothing and cannot submit.
+    const chosenLane = laneItems.length === 1 ? laneItems[0]!.value : selectedLane
+    if (!chosenLane) {
+      setError(t("org.assignWork.chooseLane"))
+      return
+    }
+    const targetLang = laneTagForAssignment(chosenLane)
+    const laneId = laneIdForTag(targetLang, laneRows)
     // AQU-678: label the assignment with the spelled-out canonical book name.
     const fileName = sortedFiles.find((f) => f.id === fileId)?.label ?? "file"
     // AQU-677: zero checked chapters = whole book (unchanged single-book path);
@@ -243,7 +294,8 @@ export function AssignWork({
         scope,
         scopeKind,
         scopeLabel,
-        targetLang: targetLang || undefined,
+        ...(targetLang ? { targetLang } : {}),
+        ...(laneId ? { laneId } : {}),
         deadline: deadline || null,
       })
       setSelectedChapters([])
@@ -268,6 +320,40 @@ export function AssignWork({
   return (
     <div role="group" aria-label={t("dialog.assign.title")} className="mt-3 w-full rounded-md border p-3">
       <FieldGroup className="gap-4">
+        <Field>
+          <FieldLabel htmlFor={laneItems.length > 1 ? "assign-work-lane" : undefined}>
+            {t("dialog.assign.laneLabel")}
+          </FieldLabel>
+          {laneItems.length === 1 ? (
+            <p data-testid="assign-work-lane-fixed" className="text-sm">
+              {laneItems[0]!.label}
+            </p>
+          ) : (
+            <Select
+              items={[
+                { value: "", label: t("org.assignWork.chooseLane") },
+                ...laneItems,
+              ]}
+              value={selectedLane ?? ""}
+              onValueChange={(v) => chooseLane(v ? v : null)}
+              disabled={busy}
+            >
+              <SelectTrigger id="assign-work-lane" data-testid="assign-work-lane">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">{t("org.assignWork.chooseLane")}</SelectItem>
+                  {laneItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="assign-work-assignee">{t("org.assignWork.assigneeLabel")}</FieldLabel>
@@ -298,6 +384,7 @@ export function AssignWork({
                       .map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>
                           <UsernameWithAvatar
+                            userId={m.userId}
                             username={m.username}
                             label={t("dialog.assign.assigneeSelfSuffix", { username: m.username })}
                             size="xs"
@@ -312,6 +399,7 @@ export function AssignWork({
                       {eligibleMembers.map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>
                           <UsernameWithAvatar
+                            userId={m.userId}
                             username={m.username}
                             size="xs"
                             menuSafe

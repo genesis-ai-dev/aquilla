@@ -24,6 +24,7 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import { pg, env } from "./helpers/pg-test-env"
 import { PostgresDb, type PgExecutor } from "../../../db/shim/postgres"
+import { rewriteTestLaneResolve } from "../../../db/shared/test-lane-fill"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
@@ -384,6 +385,7 @@ function makeShim(): PostgresDb {
   // Re-use the same pgliteExecutor pattern from pg-test-env.ts.
   const pgliteExec: PgExecutor = {
     async run(sql: string, params: unknown[]) {
+      sql = rewriteTestLaneResolve(sql)
       const r = await pg.query<Record<string, unknown>>(sql, params as unknown[])
       return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
     },
@@ -391,6 +393,7 @@ function makeShim(): PostgresDb {
       pg.transaction((tx) =>
         fn({
           async run(sql: string, params: unknown[]) {
+            sql = rewriteTestLaneResolve(sql)
             const r = await (tx as unknown as { query: typeof pg.query }).query<Record<string, unknown>>(sql, params as unknown[])
             return { rows: r.rows, rowCount: (r as { affectedRows?: number }).affectedRows ?? r.rows.length }
           },

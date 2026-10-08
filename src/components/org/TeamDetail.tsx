@@ -445,7 +445,7 @@ export function TeamDetail() {
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.name")} />,
         meta: { className: "min-w-0" },
         cell: ({ row }) => (
-          <UsernameWithAvatar username={row.original.username} size="xs" nameClassName="font-normal" />
+          <UsernameWithAvatar userId={row.original.userId} username={row.original.username} size="xs" nameClassName="font-normal" />
         ),
       },
       {

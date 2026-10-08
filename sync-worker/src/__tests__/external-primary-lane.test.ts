@@ -204,7 +204,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(r.commit?.body.receipt.appliedCount).toBe(1)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: 'bla', value: 'primary text', legacy_tag: 'bla' }),
+      expect.objectContaining({ target_lang: '', value: 'primary text', legacy_tag: 'bla' }),
     ])
   })
 
@@ -251,7 +251,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const r = await setTranslation(fileId, cellId, 'hola', laneId('es'))
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: 'es', value: 'hola', legacy_tag: 'es' }),
+      expect.objectContaining({ target_lang: '', value: 'hola', legacy_tag: 'es' }),
     ])
   })
 
@@ -266,7 +266,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const r = await setTranslation(fileId, cellId, 'icitte', laneId('fr-CA'))
     expect(r.commit?.status, JSON.stringify(r.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: 'fr-CA', value: 'icitte', legacy_tag: 'fr-CA' }),
+      expect.objectContaining({ target_lang: '', value: 'icitte', legacy_tag: 'fr-CA' }),
     ])
   })
 
@@ -317,7 +317,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const written = await setTranslation(fileId, cellId, 'via id', laneId('bla'))
     expect(written.commit?.status, JSON.stringify(written.commit?.body)).toBe(200)
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: 'bla', value: 'via id', legacy_tag: 'bla' }),
+      expect.objectContaining({ target_lang: '', value: 'via id', legacy_tag: 'bla' }),
     ])
   })
 })
@@ -329,8 +329,8 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
       { laneId: 'es', content: 'variante' },
     ])
     expect(await targetRows()).toEqual([
-      expect.objectContaining({ target_lang: 'bla', value: 'primary variant', legacy_tag: 'bla' }),
-      expect.objectContaining({ target_lang: 'es', value: 'variante', legacy_tag: 'es' }),
+      expect.objectContaining({ target_lang: '', value: 'primary variant', legacy_tag: 'bla' }),
+      expect.objectContaining({ target_lang: '', value: 'variante', legacy_tag: 'es' }),
     ])
   })
 
@@ -349,6 +349,6 @@ describe('AQU-1532 — PlanImport variants and EmitEvents naming the primary (la
         WHERE v.project_id = $1 AND v.cell_id = $2`,
       [PROJECT, cellId],
     )
-    expect(validators.rows).toEqual([{ target_lang: 'bla', legacy_tag: 'bla' }])
+    expect(validators.rows).toEqual([{ target_lang: '', legacy_tag: 'bla' }])
   })
 })

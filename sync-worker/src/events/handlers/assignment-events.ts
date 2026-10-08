@@ -83,8 +83,8 @@ export function handleAssignmentEvent(
         .prepare(
           `INSERT INTO assignments (
             assignment_id, project_id, assignee_user_id, scope_kind, scope_label,
-            target_lang, lane_id, cells_total, deadline, note, created_by, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ${laneIdResolveSql('target')}, 0, ?, ?, ?, ?)
+            lane_id, cells_total, deadline, note, created_by, created_at
+          ) VALUES (?, ?, ?, ?, ?, ${laneIdResolveSql('target')}, 0, ?, ?, ?, ?)
           ON CONFLICT DO NOTHING`,
         )
         .bind(
@@ -93,8 +93,8 @@ export function handleAssignmentEvent(
           p.assigneeUserId,
           p.scopeKind,
           p.scopeLabel,
-          // AQU-538 (§3.5): '' is the default lane (absent/omitted on the wire).
-          p.targetLang ?? '',
+          // The event still names the lane by tag. lane_id is resolved from it.
+          // assignments.target_lang is left at its default.
           ...laneIdResolveBinds('target', event.projectId, p.targetLang ?? ''),
           p.deadline ?? null,
           p.note ?? null,
@@ -245,13 +245,12 @@ export function handleAssignmentEvent(
       stmts.push(
         db
           .prepare(
-            `UPDATE assignments SET assignee_user_id = ?, target_lang = ?,
+            `UPDATE assignments SET assignee_user_id = ?,
                     lane_id = ${laneIdResolveSql('target')}
              WHERE assignment_id = ? AND project_id = ?`,
           )
           .bind(
             p.assigneeUserId,
-            p.targetLang,
             ...laneIdResolveBinds('target', event.projectId, p.targetLang),
             p.assignmentId,
             event.projectId,

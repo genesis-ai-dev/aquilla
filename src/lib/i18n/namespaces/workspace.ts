@@ -53,6 +53,19 @@ export const workspace = defineNamespace({
       other: "{count} changes on this device haven't been sent and can't be until your access is restored. Ask a project lead before removing the offline copy.",
     }),
     "workspace.offline.projectUnavailableRemove": "Remove offline copy",
+    // Tauri offline mode: queued edits the server refused for good
+    // (src/lib/offline/refused-writes.ts).
+    "workspace.offline.refusedToast": plural({
+      one: "{count} change you made offline couldn't be saved — the server refused it.",
+      other: "{count} changes you made offline couldn't be saved — the server refused them.",
+    }),
+    "workspace.offline.refusedRetry": "Retry",
+    "workspace.offline.refusedDiscard": "Discard",
+    "workspace.offline.refusedDiscardConfirm": plural({
+      one: "Discard {count} change? It can't be recovered.",
+      other: "Discard {count} changes? They can't be recovered.",
+    }),
+    "workspace.offline.refusedKeep": "Keep",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -395,6 +408,8 @@ export const workspace = defineNamespace({
 
     // -- chat/ChatMarkdown --
     "workspace.chatMarkdown.copyCode": "Copy code",
+    "workspace.chatMarkdown.image": "[image]",
+    "workspace.chatMarkdown.imageAlt": "[image: {alt}]",
 
     // -- onboarding/steps/OrgStep --
     "workspace.orgStep.emailsPlaceholder": "alex@example.com, sam@example.com",
@@ -589,6 +604,35 @@ export const workspace = defineNamespace({
         description:
           "Action button on the 'no longer available' toast; deletes this " +
           "project's copy from the device. Short imperative.",
+      },
+      "workspace.offline.refusedToast": {
+        description:
+          "Title of a persistent error toast in the Tauri desktop app when edits " +
+          "made offline were refused by the server (e.g. the user's role or the " +
+          "language lane changed meanwhile). Paired with 'Retry' and 'Discard' " +
+          "buttons. One full sentence with a period. Plain language.",
+        placeholders: {
+          count: "How many refused changes are on this device.",
+        },
+      },
+      "workspace.offline.refusedRetry": {
+        description: "Button on the refused-changes toast; tries sending the changes again. Short imperative.",
+      },
+      "workspace.offline.refusedDiscard": {
+        description:
+          "Button on the refused-changes toast that deletes the changes from the " +
+          "device (asks to confirm first), and the confirm button itself. Short imperative.",
+      },
+      "workspace.offline.refusedDiscardConfirm": {
+        description:
+          "Toast title asking the user to confirm deleting refused offline changes. " +
+          "A question, then a short warning sentence.",
+        placeholders: {
+          count: "How many changes would be deleted.",
+        },
+      },
+      "workspace.offline.refusedKeep": {
+        description: "Button that cancels discarding refused changes and keeps them. Short imperative.",
       },
       "workspace.projectCard.deletedBy": {
         description:
@@ -1735,6 +1779,23 @@ export const workspace = defineNamespace({
         description:
           "Tooltip and accessible name for the small copy button that " +
           "appears on hover over a fenced code block in an assistant chat message.",
+      },
+
+      "workspace.chatMarkdown.image": {
+        description:
+          "Muted stand-in text shown where an assistant chat message contains an image " +
+          "without a description. Remote images are never loaded, so this replaces the " +
+          "picture. Keep the square brackets.",
+      },
+
+      "workspace.chatMarkdown.imageAlt": {
+        description:
+          "Muted stand-in text shown where an assistant chat message contains an image, " +
+          "followed by the image's description. Remote images are never loaded, so this " +
+          "replaces the picture. Keep the square brackets.",
+        placeholders: {
+          alt: "The image's description (alt text) written by the AI assistant, in whatever language it used. Not translated.",
+        },
       },
 
       "workspace.orgStep.emailsPlaceholder": {

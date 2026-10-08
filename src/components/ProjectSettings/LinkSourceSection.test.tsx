@@ -29,7 +29,11 @@ import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { UserError } from "@/lib/errors/user-error"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { isLinkSeedFailed, resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
+import { pickSelectOption } from "@/test-utils/select"
+import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
 import { LinkSourceSection } from "./LinkSourceSection"
+
+const inherit = { ...INHERIT_DEFAULTS }
 
 const linkProjectSource = vi.fn()
 const triggerLinkSync = vi.fn()
@@ -43,10 +47,24 @@ vi.mock("@/lib/sync/archive", () => ({
 // stay about the step's behaviour — the clash arithmetic itself is pinned in
 // `src/lib/sync/link-source-preview.test.ts`.
 const loadLinkSourcePreview = vi.fn()
+// AQU-1605: the chain case now also asks WHICH of the upstream's translations
+// becomes this project's source. Mocked at the loader, like the preview above:
+// which lanes a caller may see is the server's answer (the read wall), pinned in
+// auth-worker's source-linking-lane-choice.test.ts. One lane by default, because
+// a single lane is pre-filled — so every case that predates this slice reads
+// exactly as it did, with the lane simply carried on the request.
+const loadUpstreamLaneChoices = vi.fn()
 
 vi.mock("@/lib/sync/link-source-preview", () => ({
   loadLinkSourcePreview: (...args: unknown[]) => loadLinkSourcePreview(...args),
+  loadUpstreamLaneChoices: (...args: unknown[]) => loadUpstreamLaneChoices(...args),
 }))
+
+const ONE_LANE = [{ id: "lane-upstream-default", label: "French" }]
+const TWO_LANES = [
+  { id: "lane-quebec", label: "Quebec French" },
+  { id: "lane-france", label: "France French" },
+]
 
 // AQU-1679: the server's comparison of one of this project's files with the
 // upstream file it could follow. Mocked at the fetch so these tests stay about
@@ -141,6 +159,11 @@ async function pick(
   await user.click(screen.getByRole("combobox", { name: "Source project" }))
   await user.click(await screen.findByRole("option", { name }))
   await user.click(corpusRadio(corpus))
+  // AQU-1605: the chain case waits for the lane list — pre-filled at one lane,
+  // which is what the default mock returns.
+  if (corpus === "target") {
+    await screen.findByRole("combobox", { name: "Which of its translations?" })
+  }
   // AQU-1526: the pick alone links nothing — it opens the confirm step.
   await user.click(reviewButton())
   await waitFor(() => expect(screen.queryByRole("button", { name: "Review what will be added" })).toBeNull())
@@ -152,6 +175,8 @@ beforeEach(() => {
   resetLinkSeedStatusForTests()
   loadLinkSourcePreview.mockReset()
   loadLinkSourcePreview.mockResolvedValue(previewOf("English Source", UPSTREAM_FILES))
+  loadUpstreamLaneChoices.mockReset()
+  loadUpstreamLaneChoices.mockResolvedValue(ONE_LANE)
   fetchLinkFileMatches.mockReset()
   navigationError = null
   navigationProjects = [
@@ -189,6 +214,7 @@ describe("LinkSourceSection", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
     // The server seeded inside the same call, so no client self-heal needed.
     expect(triggerLinkSync).not.toHaveBeenCalled()
@@ -453,7 +479,10 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
     expect(reviewButton().hasAttribute("disabled")).toBe(true)
 
     await user.click(corpusRadio("target"))
-    expect(reviewButton().hasAttribute("disabled")).toBe(false)
+    // AQU-1605: the chain case has a second question. With one lane it is
+    // pre-filled, so the step opens as soon as the list lands.
+    await screen.findByRole("combobox", { name: "Which of its translations?" })
+    await waitFor(() => expect(reviewButton().hasAttribute("disabled")).toBe(false))
     expect(linkProjectSource).not.toHaveBeenCalled()
   })
 
@@ -490,6 +519,10 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "target",
+      // AQU-1605: the upstream lane the chain link consumes — pre-filled here,
+      // since this upstream has one translation the caller may see.
+      laneId: "lane-upstream-default",
+      inherit,
     })
   })
 
@@ -523,6 +556,7 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
         sourceProjectId: "proj-upstream",
         mode: "live",
         consumes: "source",
+        inherit,
       }),
     )
   })
@@ -553,6 +587,104 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
     expect(corpusRadio("source").getAttribute("aria-checked")).toBe("false")
     expect(corpusRadio("target").getAttribute("aria-checked")).toBe("false")
     expect(reviewButton().hasAttribute("disabled")).toBe(true)
+  })
+})
+
+// AQU-1605 — WHICH of the upstream's translations the chain case consumes.
+//
+// Why these tests exist: "One of its Targets" used to send no lane, and the
+// server read whichever of the upstream's lanes carried the empty legacy tag. An
+// upstream translating into several languages could only be chained from on one
+// of them, by accident of history. The flow now asks — and only about lanes this
+// caller may see, which is the server's answer, not the picker's.
+describe("LinkSourceSection — which upstream translation (AQU-1605)", () => {
+  it("asks only for the chain case", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(corpusRadio("source"))
+
+    expect(screen.queryByText("Which of its translations?")).toBeNull()
+    expect(loadUpstreamLaneChoices).not.toHaveBeenCalled()
+  })
+
+  it("will not go forward until one of several lanes is chosen, and sends it", async () => {
+    const user = userEvent.setup()
+    loadUpstreamLaneChoices.mockResolvedValue(TWO_LANES)
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "target",
+      gate: "validated",
+      laneId: "lane-france",
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(corpusRadio("target"))
+
+    await screen.findByRole("combobox", { name: "Which of its translations?" })
+    expect(reviewButton().hasAttribute("disabled")).toBe(true)
+
+    await pickSelectOption("Which of its translations?", "France French")
+    await waitFor(() => expect(reviewButton().hasAttribute("disabled")).toBe(false))
+
+    await user.click(reviewButton())
+    // The picker is off screen by now, so the confirm step names the lane
+    // itself — otherwise it reads identically for every lane of the upstream.
+    expect(await screen.findByText("translation: France French")).toBeTruthy()
+
+    await user.click(linkButton())
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "target",
+      laneId: "lane-france",
+      inherit,
+    })
+  })
+
+  it("offers exactly the lanes the server returned", async () => {
+    // A read-walled member gets back the one lane they are granted, of an
+    // upstream that has several. The flow must not add a default lane to that.
+    const user = userEvent.setup()
+    loadUpstreamLaneChoices.mockResolvedValue([{ id: "lane-granted", label: "Quebec French" }])
+    renderSection(700)
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(corpusRadio("target"))
+
+    const select = await screen.findByRole("combobox", { name: "Which of its translations?" })
+    await user.click(select)
+    const options = await screen.findAllByRole("option")
+    expect(options.map((o) => o.textContent)).toEqual(["Quebec French"])
+  })
+
+  it("says so, with a retry, when the lane list cannot be read", async () => {
+    const user = userEvent.setup()
+    loadUpstreamLaneChoices.mockRejectedValueOnce(new Error("boom"))
+    renderSection(700)
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(corpusRadio("target"))
+
+    expect(await screen.findByText("Couldn't load this project's translations.")).toBeTruthy()
+    expect(reviewButton().hasAttribute("disabled")).toBe(true)
+
+    loadUpstreamLaneChoices.mockResolvedValue(ONE_LANE)
+    await user.click(tryAgainButton())
+    expect(
+      await screen.findByRole("combobox", { name: "Which of its translations?" }),
+    ).toBeTruthy()
   })
 })
 
@@ -787,6 +919,7 @@ describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
       mode: "live",
       consumes: "source",
       fileIds: ["up-MAT", "up-MRK"],
+      inherit,
     })
   })
 
@@ -816,6 +949,7 @@ describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
   })
 
@@ -850,6 +984,7 @@ describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
   })
 
@@ -950,6 +1085,7 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
     expect(fetchLinkFileMatches).not.toHaveBeenCalled()
   })
@@ -993,6 +1129,7 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       mode: "live",
       consumes: "source",
       replaceFiles: [{ upstreamFileId: "up-MRK", fileId: "own-mrk" }],
+      inherit,
     })
   })
 
@@ -1067,6 +1204,7 @@ describe("LinkSourceSection — replacing the source of a file already here (AQU
       mode: "live",
       consumes: "source",
       fileIds: ["up-MAT", "up-LUK"],
+      inherit,
     })
   })
 

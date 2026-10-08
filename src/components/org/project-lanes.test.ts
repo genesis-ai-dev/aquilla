@@ -27,44 +27,43 @@ function baseProject(overrides: Partial<PortfolioProject> = {}): PortfolioProjec
 describe("resolveDefaultLaneLabel (AQU-606)", () => {
   it("labels a migrated project's default lane with the project-level target language", () => {
     // The exact regression: the lanes migration leaves the project's target on
-    // project settings and its files with no per-file hint, so hint-only
-    // resolution rendered the generic "Default" placeholder instead of "French".
+    // project settings, so a resolver that did not read it rendered the generic
+    // "Default" placeholder instead of "French".
     const p = baseProject({ targetLanguage: "French" })
-    expect(resolveDefaultLaneLabel(p, undefined)).toBe("French")
-    expect(laneChipLabel("", resolveDefaultLaneLabel(p, undefined))).toBe("French")
+    expect(resolveDefaultLaneLabel(p)).toBe("French")
+    expect(laneChipLabel("", resolveDefaultLaneLabel(p))).toBe("French")
   })
 
-  it("prefers the project-level target language over a stale per-file hint", () => {
-    const p = baseProject({ targetLanguage: "French" })
-    expect(resolveDefaultLaneLabel(p, "Spanish")).toBe("French")
-  })
-
-  it("falls back to the per-file hint when the project has no target set", () => {
+  // AQU-1596 regression guard: the per-file hint is gone. A file only ever
+  // *declared* a language, which can disagree with its lane, so a project with
+  // no target of its own shows the neutral placeholder rather than borrowing a
+  // language off a file.
+  it("ignores a file's declared language — it is never a lane's language", () => {
     const p = baseProject({ targetLanguage: null })
-    expect(resolveDefaultLaneLabel(p, "Spanish")).toBe("Spanish")
+    expect(resolveDefaultLaneLabel(p)).toBe("")
+    expect(laneChipLabel("", resolveDefaultLaneLabel(p), "No target set")).toBe("No target set")
   })
 
   it("returns '' when neither source is set, so the chip shows the placeholder", () => {
     const p = baseProject()
-    expect(resolveDefaultLaneLabel(p, undefined)).toBe("")
-    expect(laneChipLabel("", resolveDefaultLaneLabel(p, undefined), "No target set")).toBe(
+    expect(resolveDefaultLaneLabel(p)).toBe("")
+    expect(laneChipLabel("", resolveDefaultLaneLabel(p), "No target set")).toBe(
       "No target set",
     )
   })
 
-  it("treats whitespace-only values as unset on both sources", () => {
-    expect(resolveDefaultLaneLabel(baseProject({ targetLanguage: "   " }), "  ")).toBe("")
-    expect(resolveDefaultLaneLabel(baseProject({ targetLanguage: "  " }), " Spanish ")).toBe("Spanish")
+  it("treats a whitespace-only target language as unset", () => {
+    expect(resolveDefaultLaneLabel(baseProject({ targetLanguage: "   " }))).toBe("")
   })
 
   it("never relabels a named lane", () => {
     const p = baseProject({ targetLanguage: "French" })
-    expect(laneChipLabel("es", resolveDefaultLaneLabel(p, undefined))).toBe("es")
+    expect(laneChipLabel("es", resolveDefaultLaneLabel(p))).toBe("es")
   })
 
   it("prefers the lane row's name over the tag", () => {
     const p = baseProject({ targetLanguage: "French" })
-    expect(laneChipLabel("es", resolveDefaultLaneLabel(p, undefined), "Default", "Yoruba Team")).toBe(
+    expect(laneChipLabel("es", resolveDefaultLaneLabel(p), "Default", "Yoruba Team")).toBe(
       "Yoruba Team",
     )
   })
@@ -97,6 +96,18 @@ describe("withOptimisticLane (AQU-605)", () => {
       validatedCells: 0,
       lastEditAt: null,
     })
+  })
+
+  it("appends a second lane of a language the row already shows", () => {
+    // The rows are the list (AQU-1595): displayLanes no longer invents a ''
+    // lane beside server rows, so the default lane is a row here like the rest.
+    const p = baseProject({
+      lanes: [
+        { lane: "", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: null },
+        { lane: "Spanish", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: null },
+      ],
+    })
+    expect(displayLanes(withOptimisticLane(p, "es")).map((l) => l.lane)).toEqual(["", "Spanish", "es"])
   })
 
   it("is a no-op for a case-insensitive duplicate", () => {

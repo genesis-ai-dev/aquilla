@@ -327,7 +327,7 @@ describe("SharePanel — invite create needs the admin code", () => {
     )
     renderPanel()
     fireEvent.click(screen.getByRole("button", { name: "Invite link" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Create invite link" }))
+    fireEvent.click(await screen.findByRole("button", { name: /create invite link/i }))
 
     expect(await screen.findByText("Verify with your admin code, then try again.")).toBeInTheDocument()
     expect(screen.queryByText(/couldn't create invite/i)).not.toBeInTheDocument()

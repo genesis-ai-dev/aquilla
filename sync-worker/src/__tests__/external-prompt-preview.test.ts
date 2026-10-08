@@ -401,6 +401,114 @@ describe("external prompt preview", () => {
       expect(body.parts.rules).toBe("")
     })
 
+    // AQU-1721: the editor compiles subscribed termbases ahead of the project's
+    // own concepts (useRules), so a preview without them would not match the
+    // real call. These run the same gate the editor's read (route #8) and
+    // autopilot apply.
+    async function insertConcept(id: string, projectId: string, status: string, rendering: string, createdAt = 1) {
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ($1, $2, 'covenant', $3, $4, 0, $5, $5)`,
+        [id, projectId, JSON.stringify([{ rendering, status: "preferred" }]), status, createdAt],
+      )
+    }
+    async function subscribe(termbaseProjectId: string, priority: number) {
+      await testDb.pg.query(
+        `INSERT INTO project_termbase_subscriptions (project_id, termbase_project_id, priority) VALUES ('proj-a', $1, $2)`,
+        [termbaseProjectId, priority],
+      )
+    }
+
+    it("compiles a subscribed termbase's active concepts ahead of the project's own (AQU-1721)", async () => {
+      await testDb.pg.query(`UPDATE projects SET org_published_termbase = TRUE WHERE id = 'proj-b'`)
+      await subscribe("proj-b", 0)
+      await insertConcept("up-later", "proj-b", "active", "pacte", 2)
+      await insertConcept("up-first", "proj-b", "active", "accord", 1)
+      await insertConcept("up-draft", "proj-b", "draft", "contrat")
+      await insertConcept("own", "proj-a", "active", "alliance")
+
+      const { body } = await preview(testDb, token)
+      // Subscribed first, each termbase oldest first; a draft compiles to nothing.
+      expect(body.parts.injectedTerms.map((t) => t.conceptId)).toEqual(["up-first", "up-later", "own"])
+      expect(body.parts.rules).toContain("accord")
+      expect(body.parts.rules).toContain("alliance")
+      expect(body.parts.rules).not.toContain("contrat")
+    })
+
+    it("leaves out an unpublished, trashed, deleted or other-org termbase (AQU-1721)", async () => {
+      await testDb.pg.query(`INSERT INTO organizations (id, name, owner_user_id) VALUES (20, 'Org B', 1)`)
+      await testDb.pg.query(
+        `INSERT INTO projects (id, name, org_id, created_by, org_published_termbase, archived_at) VALUES
+          ('tb-trashed', 'Trashed', 10, 1, TRUE, now()),
+          ('tb-other-org', 'Other org', 20, 1, TRUE, NULL)`,
+      )
+      // proj-b exists in the same org but is not published. tb-deleted has no
+      // project row: deleting a project cascades to none of these rows.
+      for (const [i, tb] of ["proj-b", "tb-trashed", "tb-other-org", "tb-deleted"].entries()) {
+        await subscribe(tb, i)
+        await insertConcept(`c-${tb}`, tb, "active", `r-${tb}`)
+      }
+
+      const { body } = await preview(testDb, token)
+      expect(body.parts.injectedTerms).toEqual([])
+      expect(body.parts.rules).toBe("")
+    })
+
+    // AQU-1777: a termbase's renderings carry ITS lane ids. The preview maps
+    // them onto this project's lanes by language before its lane filter, as
+    // route #8 does for the editor, so a lane's preview injects exactly what
+    // that lane's editor compiles.
+    it("maps a subscribed termbase's lane-stamped renderings onto this project's lanes (AQU-1777)", async () => {
+      await testDb.pg.query(`UPDATE projects SET org_published_termbase = TRUE WHERE id = 'proj-b'`)
+      await subscribe("proj-b", 0)
+      // This project: the `''` lane is French; a Spanish lane tagged with its own id.
+      await testDb.pg.query(
+        `UPDATE lanes SET language = 'French' WHERE project_id = 'proj-a' AND id = 'deflane1'`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+         VALUES ('c0ffee01', 'proj-a', 'target', 'Spanish', NULL, 'es', 'c0ffee01', 2)`,
+      )
+      // The termbase: a French `''` lane and a Spanish lane, spelled as a code.
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position) VALUES
+           ('tb000f7a', 'proj-b', 'target', 'French', NULL, 'fr', '', 1),
+           ('tb000e5a', 'proj-b', 'target', 'es', NULL, 'es', 'es', 2)`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ('up-cov', 'proj-b', 'covenant', $1, 'active', 0, 1, 1)`,
+        [
+          JSON.stringify([
+            { rendering: "alliance", status: "preferred", laneId: "tb000f7a" },
+            { rendering: "pacto", status: "preferred", laneId: "tb000e5a" },
+            // Stamped with a lane the termbase no longer has: applies nowhere.
+            { rendering: "patto", status: "admitted", laneId: "tb000111" },
+          ]),
+        ],
+      )
+      await insertConcept("own", "proj-a", "active", "testament")
+
+      const french = await preview(testDb, token)
+      expect(french.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
+        ["up-cov", ["alliance"]],
+        ["own", ["testament"]],
+      ])
+      expect(french.body.parts.rules).toContain("alliance")
+      expect(french.body.parts.rules).not.toContain("pacto")
+      expect(french.body.parts.rules).not.toContain("patto")
+
+      const spanish = await preview(testDb, token, "cell-live", "?targetLang=c0ffee01")
+      // The project's own unstamped rendering belongs to its `''` lane, so the
+      // Spanish lane lists the concept with nothing to enforce (AQU-1508).
+      expect(spanish.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
+        ["up-cov", ["pacto"]],
+        ["own", []],
+      ])
+      expect(spanish.body.parts.rules).toContain("pacto")
+      expect(spanish.body.parts.rules).not.toContain("alliance")
+    })
+
     it("injects project rules from settings", async () => {
       await putSettings(testDb, "proj-a", {
         sourceLanguage: "English",

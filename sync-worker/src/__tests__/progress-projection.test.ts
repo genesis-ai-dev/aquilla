@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeTestDb } from './helpers/pg-test-db'
+import { progressRowsForLane } from './helpers/progress-rows'
 import { makeTestToken } from './helpers/auth'
 import {
   fileProgressRecomputeStmt,
@@ -59,23 +60,39 @@ async function fixture() {
 
 describe('file_section_progress projection', () => {
   it('stores one file row and one compact histogram per canonical section', async () => {
-    const { db, rows } = await fixture()
+    const { db, pg, rows } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
 
-    const projected = await rows<{
+    interface Row {
       scope: string
       section_key: string
       total_count: number
       filled_count: number
       validator_histogram: Record<string, number>
       revision: number
-    }>('file_section_progress')
-    // file + GEN 1 + GEN 2 + the AQU-1093 book row for GEN.
+    }
+    // AQU-1599: four keys (file + GEN 1 + GEN 2 + the AQU-1093 book row for
+    // GEN) on each of the project's two lanes.
+    expect(await rows('file_section_progress')).toHaveLength(8)
+    const projected = await progressRowsForLane<Row>(pg, PROJECT, 'target')
     expect(projected).toHaveLength(4)
     expect(projected.find((row) => row.scope === 'file')).toMatchObject({
       total_count: 3,
       filled_count: 2,
       revision: 7,
+    })
+    // AQU-1599: the source lane's row carries the lane-independent denominator
+    // — the numbers readers used to take from the manufactured '' row — and no
+    // lane's translations, so archiving a target lane cannot take them away.
+    const sourceRows = await progressRowsForLane<Row>(pg, PROJECT, 'source')
+    expect(sourceRows.find((row) => row.scope === 'file')).toMatchObject({
+      total_count: 3,
+      filled_count: 0,
+      revision: 7,
+    })
+    expect(sourceRows.find((row) => row.scope === 'book')).toMatchObject({
+      section_key: 'GEN',
+      total_count: 3,
     })
     // The book row sums its chapters: GEN 1 (2 cells) + GEN 2 (1).
     expect(projected.find((row) => row.scope === 'book')).toMatchObject({
@@ -91,7 +108,7 @@ describe('file_section_progress projection', () => {
   })
 
   it('recomputes only a touched target section plus the file rollup', async () => {
-    const { db, pg, rows } = await fixture()
+    const { db, pg } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     await pg.query(
       `UPDATE cells SET value = 'dos', endorsement_count = 2
@@ -102,7 +119,7 @@ describe('file_section_progress projection', () => {
       fileProgressRecomputeStmt(db, PROJECT, FILE, 101),
       sectionsProgressRecomputeStmt(db, PROJECT, FILE, 101, ['c2']),
     ])
-    const projected = await rows<{ scope: string; section_key: string; filled_count: number }>('file_section_progress')
+    const projected = await progressRowsForLane<{ scope: string; section_key: string; filled_count: number }>(pg, PROJECT, 'target')
     expect(projected.find((row) => row.scope === 'file')?.filled_count).toBe(3)
     expect(projected.find((row) => row.section_key === 'GEN 1')?.filled_count).toBe(2)
     expect(projected.find((row) => row.section_key === 'GEN 2')?.filled_count).toBe(1)
@@ -111,7 +128,7 @@ describe('file_section_progress projection', () => {
   it('full rebuild removes section rows that no longer exist', async () => {
     const { db, pg, rows } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
-    expect(await rows('file_section_progress')).toHaveLength(4)
+    expect(await rows('file_section_progress')).toHaveLength(8)
 
     // c3 loses its reference. It sits below c2 in the file — the anchor the
     // editor orders by — so since AQU-1493 it counts in c2's chapter.
@@ -123,9 +140,13 @@ describe('file_section_progress projection', () => {
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 101))
 
     // GEN 2 goes; the GEN book row survives because GEN 1 still has verses.
+    // Three surviving keys, on both lanes (AQU-1599). c3 lost its own
+    // reference and now counts in GEN 1 (AQU-1493), so that chapter is 3.
     const projected = await rows<{ scope: string; section_key: string; total_count: number }>('file_section_progress')
-    expect(projected).toHaveLength(3)
-    expect(projected.find((row) => row.section_key === 'GEN 1')?.total_count).toBe(3)
+    expect(projected).toHaveLength(6)
+    const gen1 = projected.filter((row) => row.section_key === 'GEN 1')
+    expect(gen1).toHaveLength(2)
+    expect(gen1.every((row) => row.total_count === 3)).toBe(true)
     expect(projected.some((row) => row.section_key === 'GEN 2')).toBe(false)
     expect(projected.some((row) => row.scope === 'file')).toBe(true)
     expect(projected.some((row) => row.scope === 'book' && row.section_key === 'GEN')).toBe(true)
@@ -466,12 +487,12 @@ async function mediaFixture() {
 
 describe('file_section_progress time buckets (AQU-805)', () => {
   it('groups media source cells into 5-minute time sections', async () => {
-    const { db, rows } = await mediaFixture()
+    const { db, pg } = await mediaFixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, MEDIA_FILE, 100))
 
-    const projected = await rows<{ scope: string; section_key: string; total_count: number; filled_count: number }>(
-      'file_section_progress',
-    )
+    const projected = await progressRowsForLane<{
+      scope: string; section_key: string; total_count: number; filled_count: number
+    }>(pg, PROJECT, 'target')
     const sections = projected.filter((row) => row.scope === 'section')
     // Buckets: 0ms (m1,m2), 600000ms (m3), 1200000ms (m4).
     expect(sections.map((row) => row.section_key).sort()).toEqual([
@@ -487,7 +508,7 @@ describe('file_section_progress time buckets (AQU-805)', () => {
   })
 
   it('recomputes only the touched time section plus the file rollup', async () => {
-    const { db, pg, rows } = await mediaFixture()
+    const { db, pg } = await mediaFixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, MEDIA_FILE, 100))
     await pg.query(
       `UPDATE cells SET value = 'cuatro' WHERE project_id = $1 AND file_id = $2 AND cell_id = 'm4' AND side = 'target'`,
@@ -497,7 +518,7 @@ describe('file_section_progress time buckets (AQU-805)', () => {
       fileProgressRecomputeStmt(db, PROJECT, MEDIA_FILE, 101),
       sectionsProgressRecomputeStmt(db, PROJECT, MEDIA_FILE, 101, ['m4']),
     ])
-    const projected = await rows<{ scope: string; section_key: string; filled_count: number }>('file_section_progress')
+    const projected = await progressRowsForLane<{ scope: string; section_key: string; filled_count: number }>(pg, PROJECT, 'target')
     expect(projected.find((row) => row.section_key === 't:000001200000')?.filled_count).toBe(1)
     expect(projected.find((row) => row.scope === 'file')?.filled_count).toBe(3)
   })
@@ -568,14 +589,18 @@ describe('structural aggregates (AQU-1083)', () => {
     })
   }
 
+  // AQU-1599: the source lane's row also carries target_lang ''. These
+  // numbers (fills, histograms, takes) belong to the lane people translate
+  // in; the source row's fills and takes are 0 on purpose.
   const read = async (db: AquillaDb, scope: string) =>
     db.prepare(
-      `SELECT total_count, filled_count, validator_histogram,
-              structural_count, structural_filled_count, structural_validator_histogram,
-              audio_count, audio_validated_count,
-              structural_audio_count, structural_audio_validated_count
-         FROM file_section_progress
-        WHERE project_id = ? AND file_id = ? AND scope = ? AND target_lang = ''`,
+      `SELECT p.total_count, p.filled_count, p.validator_histogram,
+              p.structural_count, p.structural_filled_count, p.structural_validator_histogram,
+              p.audio_count, p.audio_validated_count,
+              p.structural_audio_count, p.structural_audio_validated_count
+         FROM file_section_progress p
+         JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id AND l.role = 'target'
+        WHERE p.project_id = ? AND p.file_id = ? AND p.scope = ?`,
     ).bind(P, F, scope).first<Record<string, unknown>>()
 
   // The predicate that EXCLUDES structural cells on read is the negation of the
@@ -653,10 +678,11 @@ describe('structural aggregates (AQU-1083)', () => {
     await sectionsProgressRecomputeStmt(db, P, F, 10).run()
     const scoped = async (scope: string, key: string) =>
       db.prepare(
-        `SELECT audio_count, audio_validated_count,
-                structural_audio_count, structural_audio_validated_count
-           FROM file_section_progress
-          WHERE project_id = ? AND scope = ? AND section_key = ? AND target_lang = ''`,
+        `SELECT p.audio_count, p.audio_validated_count,
+                p.structural_audio_count, p.structural_audio_validated_count
+           FROM file_section_progress p
+           JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id AND l.role = 'target'
+          WHERE p.project_id = ? AND p.scope = ? AND p.section_key = ?`,
       ).bind(P, scope, key).first<Record<string, unknown>>()
     // The book branch is a POSITIONAL UNION arm with no column aliases, so it
     // is the one that silently shifts if the new columns land anywhere but the
@@ -673,9 +699,10 @@ describe('structural aggregates (AQU-1083)', () => {
     const { db } = await fixture()
     await sectionsProgressRecomputeStmt(db, P, F, 10).run()
     const row = await db.prepare(
-      `SELECT structural_count, structural_filled_count, structural_validator_histogram
-         FROM file_section_progress
-        WHERE project_id = ? AND scope = 'section' AND section_key = 'GEN 1'`,
+      `SELECT p.structural_count, p.structural_filled_count, p.structural_validator_histogram
+         FROM file_section_progress p
+         JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id AND l.role = 'target'
+        WHERE p.project_id = ? AND p.scope = 'section' AND p.section_key = 'GEN 1'`,
     ).bind(P).first<Record<string, unknown>>()
     // Heading refs split to the same chapter prefix as verses, so they land in
     // GEN 1's bucket — which is exactly why the chapter never read 100%.
@@ -1124,7 +1151,7 @@ describe('file progress follows the lanes that exist (AQU-1594)', () => {
       `SELECT scope, target_lang, lane_id, total_count, filled_count
          FROM file_section_progress
         WHERE project_id = $1 AND scope = 'file'
-        ORDER BY target_lang`,
+        ORDER BY target_lang, lane_id`,
       [P],
     )
   }
@@ -1134,8 +1161,12 @@ describe('file progress follows the lanes that exist (AQU-1594)', () => {
       { id: 'srcsw001', project_id: P, role: 'source', legacy_tag: null },
       { id: 'tgtsw001', project_id: P, role: 'target', language: 'sw', legacy_tag: 'sw' },
     ])
+    // One row per lane that exists: the source lane's own row (AQU-1599) and
+    // the sw lane's, keyed by lane_id. No blank-tag target lane is made up.
+    // The writer leaves target_lang at its default on every row (AQU-1611b).
     expect(rows).toEqual([
-      { scope: 'file', target_lang: 'sw', lane_id: 'tgtsw001', total_count: 1, filled_count: 0 },
+      { scope: 'file', target_lang: '', lane_id: 'srcsw001', total_count: 1, filled_count: 0 },
+      { scope: 'file', target_lang: '', lane_id: 'tgtsw001', total_count: 1, filled_count: 0 },
     ])
   })
 
@@ -1145,6 +1176,7 @@ describe('file progress follows the lanes that exist (AQU-1594)', () => {
       { id: 'tgtblank', project_id: P, role: 'target', language: 'sw', legacy_tag: '' },
     ])
     expect(rows).toEqual([
+      { scope: 'file', target_lang: '', lane_id: 'srcblank', total_count: 1, filled_count: 0 },
       { scope: 'file', target_lang: '', lane_id: 'tgtblank', total_count: 1, filled_count: 0 },
     ])
   })

@@ -1,5 +1,5 @@
 ---
-description: Drive a Linear issue through the prototype debug→staging→QA lifecycle
+description: Drive a Linear issue through the debug → PR to dev → release lifecycle
 argument-hint: [AQU-### | next | debug "desc" | improve "desc"] [--deploy] [--no-verify]
 ---
 
@@ -20,17 +20,23 @@ Arguments: $ARGUMENTS
   everything V1 ships without. `list_projects` for the live set.
 - Area: every issue carries exactly one label from the team's `Area` label group
   (`list_issue_labels` for the live list).
-- Status pipeline (see AGENTS.md → "Issue workflow"):
-  `Triage → Backlog → Todo → Dispatched → Fixed → Dev Verification Needed → Ready for QA → Deployed/Done`
+- Status pipeline (release-branch flow — see `e2e/journeys/QA-BOT-REGIMEN.md` and
+  `docs/DEPLOYMENT-ENVIRONMENTS.md` → "Cutting a release"):
+  `Triage → Backlog → Todo → Dispatched → Fixed → Ready for QA → Awaiting Deployment → Deployed/Done`
+  - `Fixed` = fix committed on the ticket branch and verified locally.
+  - `Ready for QA` = PR open against **`dev`** with a bot walk **PASS** at its head sha.
+  - `Awaiting Deployment` = PR merged into `dev`; it rides the next `release/YYYY/MM/DD[-NN]` cut.
+  - `Deployed` = the commit is in a production calver tag (`YYYY.MM.DD.NN`). Set by whoever
+    deploys the release (or after `/issue-audit` flags it). `main` is retired — never target it.
   - **`Triage`** (id `086173c5-e3e4-4f37-93d5-ae2f069ab6a6`) is the **human / HITL queue** — it sits
     outside the normal flow. `/issue next` never pulls from it. If you're working a specific `AQU-###`
     that's still in `Triage`, it isn't agent-ready: surface that and stop, unless the user is explicitly
     telling you to take it on.
-  - `Ready for QA` is the **dev→QA hand-off**; **QA owns the merge to `main`** and sets
-    `Deployed`/`Done`. Don't set those yourself unless you're doing the QA merge.
-  - **Every commit must carry its `AQU-###`** so QA can scan a PR-to-main and see which
-    tickets it covers. The `prepare-commit-msg` hook auto-injects it from a `…/aqu-###-…`
-    branch. Prototyping may merge straight to `main` with `--no-verify` — the ref is still required.
+  - Production deploys are always a person (Kieran or Matthew) from a release branch. Never
+    set `Deployed`/`Done` yourself unless `git tag --contains <sha>` shows a calver tag.
+  - **Every commit must carry its `AQU-###`** so the release plan and `/issue-audit` can map
+    commits on a release branch back to tickets. The `prepare-commit-msg` hook auto-injects it
+    from a `…/aqu-###-…` branch.
 - **Spec repo (source of truth):** `~/frontierrnd/aquilla-specs`
   - Features: `04-features/<feature>.md` (carry a `revisions:` frontmatter log)
   - User stories: `05-user-stories/<story>.md` (have `Acceptance criteria` + `Error / edge cases`)
@@ -75,8 +81,9 @@ Parse `$ARGUMENTS`:
   - **Unattended run** (scheduled routine, swarm agent, or any session where no human typed
     this command): leave it in `Triage` and stop — a human promotes it via `/triage`. Never
     self-promote an issue you created.
-- **`--deploy`** → after marking `Fixed`, deploy for dev validation and advance to
-  `Dev Verification Needed` (see Step 3). Without it, stop at `Fixed` and tell the user.
+- **`--deploy`** → after marking `Fixed`, push, open the PR to `dev`, and drive it through
+  `Ready for QA` → merge → `Awaiting Deployment` (Steps 3–4). Without it, stop at `Fixed`
+  and tell the user.
 - **`--no-verify`** → skip the dev-stack verification gate (only if the user insists).
 
 Announce which issue + current status you're acting on before doing anything.
@@ -86,7 +93,7 @@ Announce which issue + current status you're acting on before doing anything.
 If the issue is in `Backlog` or `Todo`:
 - **Isolate first (one ticket = one worktree).** If the current working tree is dirty or
   you're on another ticket's branch, do NOT start here — create a worktree off live
-  `origin/main` on this issue's suggested branch (`get_issue` → `gitBranchName`) and work
+  `origin/dev` (`pnpm worktree:new`) on this issue's suggested branch (`get_issue` → `gitBranchName`) and work
   there. Never pile this ticket onto another ticket's branch/working copy (see AGENTS.md →
   "One ticket = one branch = one worktree").
 - **Keep the existing assignee** — whoever held the issue in `Todo` keeps it through
@@ -108,8 +115,8 @@ If the issue is in `Backlog` or `Todo`:
    screenshot. For multi-user/permission issues, use the e2e harness.
 3. If the change touches a journey in `e2e/JOURNEYS.md`, extend/add the spec and run
    `npm run test:e2e:smoke`.
-4. Commit referencing the issue — **`AQU-###` MUST be in the message** so QA can map the
-   commit to a ticket at PR-to-main time. Branch with the suggested name from `get_issue`
+4. Commit referencing the issue — **`AQU-###` MUST be in the message** so the commit maps to
+   its ticket on the PR and on the release branch. Branch with the suggested name from `get_issue`
    (`gitBranchName`) and the `prepare-commit-msg` hook injects the ref automatically; on a
    non-`aqu-` branch, add it by hand (the hook will warn).
 5. Move the issue to **`Fixed`** and post a Linear comment summarizing the fix +
@@ -144,35 +151,30 @@ the behavior should actually be, which may differ from your Step 1 hunch.
 Do not advance past `Fixed` until the spec decision is made and recorded.
 
 If `--deploy` was NOT passed, **stop here** and report: "AQU-### is Fixed (verified
-locally), spec reconciled, not yet on staging. Re-run with `--deploy` to push and advance."
+locally), spec reconciled, no PR yet. Re-run with `--deploy` to open the PR and advance."
 
-## Step 3 — Deploy for dev validation (→ Dev Verification Needed)  [only with `--deploy`]
+## Step 3 — Open the PR to `dev` (→ Ready for QA)  [only with `--deploy`]
 
-Staging lives at **`https://dev.aquilla.app`** (API at `https://api.dev.aquilla.app`),
-backed by the Neon `staging` branch via Hyperdrive. It does **not** have the dev auth
-bypass — sign in with a real staging account.
+1. Push the ticket branch and open a PR with **base `dev`** (never `main` — it is retired).
+   Structure the title/body per `.github/pull_request_template.md`.
+2. Wait for the PR bot walk (`e2e/journeys/PR-BOT.md`). When it is **PASS** at the PR's
+   current head sha, move the issue to **`Ready for QA`** and comment the PR URL + walk result.
+   A FLAKY/BLOCKED walk is a checker bug, not QA work — fix the journey's outcome check
+   (see QA-BOT-REGIMEN.md §1); a push after the walk makes the evidence stale.
 
-1. Deploy from repo root:
-   - Everything: `pnpm run deploy:aquilla:staging`
-   - Or piecemeal: `deploy:aquilla:staging:spa` / `:sync` / `:auth` (zone-perm token needed,
-     same as prod — CI's token can't sync routes).
-   - If the staging Hyperdrive id is still `REPLACE_WITH_STAGING_HYPERDRIVE_ID` in the
-     worker `wrangler.toml`s, staging isn't provisioned yet — stop, leave the issue at
-     `Fixed`, and point at **AQU-146** (one-time provisioning) instead of guessing.
-2. Move the issue to **`Dev Verification Needed`** (deployed to the dev branch, awaiting
-   dev-team validation).
-3. Comment the dev URL (`https://dev.aquilla.app`) + what to validate.
+## Step 4 — Merge into `dev` (→ Awaiting Deployment)
 
-## Step 4 — Promote to staging for QA (→ Ready for QA)
+Per QA-BOT-REGIMEN.md §1, you may merge your own PR into `dev` when, at the current head sha:
+the walk is PASS, the review agent has no proven unresolved finding, and required checks are green.
 
-When the fix is validated by the dev team and the functionality is on **staging**:
-- Move the issue to **`Ready for QA`** — the dev→QA hand-off.
-- Comment what was validated and what's on staging for QA to test against.
+- Merge, then move the issue to **`Awaiting Deployment`** and comment the merge sha.
+- Optional: a person can `pnpm run deploy:aquilla:dev` from a clean `dev` checkout to put it
+  on `https://dev.aquilla.app`. Live deploys are never automatic — don't run it unasked.
 
-**Stop at `Ready for QA`.** **QA owns the merge to `main`** and sets `Deployed`/`Done` as
-part of that merge — they test against the staging tickets and scan each PR-to-main for the
-`AQU-###` refs its commits carry. Don't set `Deployed`/`Done` yourself unless you're doing
-the QA merge.
+**Stop at `Awaiting Deployment`.** The deploy bot cuts `release/YYYY/MM/DD[-NN]` from `dev`
+(`node scripts/release-plan.mjs`), a person deploys it, and `scripts/tag-release.sh` tags it
+`YYYY.MM.DD.NN`. The issue becomes `Deployed` once its commit is in that tag. Hotfixes are
+cherry-picked onto the deployed release branch — see `docs/DEPLOYMENT-ENVIRONMENTS.md`.
 
 ## Step 5 — Report
 

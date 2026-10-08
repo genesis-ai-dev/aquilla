@@ -13,6 +13,7 @@ import {
   type AudioValidationTake,
 } from "./AudioValidationControl"
 import { lineState, takeState } from "./audio-validation-state"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const take = (over: Partial<AudioValidationTake> & { audioId: string }): AudioValidationTake => ({
   label: null,
@@ -338,10 +339,10 @@ describe("the validator list", () => {
         />
       </I18nProvider>,
     )
-    await vi.waitFor(() => expect(screen.queryByText("Audio validated by")).toBeNull())
+    await vi.waitFor(() => expect(screen.queryByText("Audio validated by")).toBeNull(), { timeout: STALL_WATCHDOG_MS })
     await userEvent.unhover(button()!)
     await userEvent.hover(button()!)
-    expect(await screen.findByText("Audio validated by", {}, { timeout: 2000 })).toBeInTheDocument()
+    expect(await screen.findByText("Audio validated by")).toBeInTheDocument()
     expect(screen.getByText("bo")).toBeInTheDocument()
   })
 
@@ -582,7 +583,7 @@ describe("AudioValidationControl — a part of the line not yet recorded", () =>
     const user = userEvent.setup()
     draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"], label: "“Bring back some bread,”" }), missing])
     await user.hover(button()!)
-    const list = await screen.findByText("“and some milk too.”", {}, { timeout: 2000 })
+    const list = await screen.findByText("“and some milk too.”")
     expect(within(list.closest("li")!).getByTestId("audio-validation-unrecorded")).toHaveTextContent("Not recorded yet")
   })
 })

@@ -56,10 +56,10 @@ const make = (n: number, over: Partial<BatchValidateCandidate> = {}) =>
 const eligibleCells = (n: number) => make(n)
 /** No target text at all: the footer counts them, the run cannot. */
 const untranslatedCells = (n: number) => make(n, { translated: "", targetEventId: null })
-/** Untouched AI drafts — individually reviewed on purpose (AQU-983). */
-const aiDraftCells = (n: number) => make(n, { aiDrafted: true })
 /** Already carrying my validation, so a second vote would be a wasted request. */
 const alreadyMineCells = (n: number) => make(n, { activeValidators: [ME] })
+/** Translated but never committed: the footer counts them, the run cannot. */
+const uncommittedCells = (n: number) => make(n, { targetEventId: null })
 
 function summarizeOptions(over: Partial<Parameters<typeof summarizeBatchValidate>[1]> = {}) {
   return { username: ME, myScopes: [], activeLane: "fr", ...over }
@@ -319,18 +319,17 @@ describe("completionBatchSizeFor", () => {
 // ── AQU-1507: the confirmation promises what the RUN will do ────────────────
 //
 // The body used to be built from file progress (`total - validated`), which
-// counts untranslated cells, untouched AI drafts, cells this reader had already
-// signed off and cells outside their assignment — none of which the run
-// touches. On the reported file that read "83 cells are currently unvalidated"
+// counts untranslated cells, cells this reader had already signed off and cells
+// outside their assignment — none of which the run touches. On the reported file that read "83 cells are currently unvalidated"
 // and then validated zero. These tests pin the count to the very summary the
 // run consumes, so the two cannot drift apart again.
 describe("batch-validate confirmation body", () => {
   it("promises only the cells the run will validate, and names the rest", () => {
-    // The reported file: 4 untouched AI drafts and 79 untranslated cells, of
-    // which none is eligible.
+    // The reported file: 4 cells already signed off by this reader and 79
+    // untranslated cells, of which none is eligible.
     const desc = batchValidateDescription([
       ...untranslatedCells(79),
-      ...aiDraftCells(4),
+      ...alreadyMineCells(4),
     ])
     // 83 is still a true number about this file — it is what the run will NOT
     // touch. What must be gone is 83 offered as the thing about to happen.
@@ -339,14 +338,14 @@ describe("batch-validate confirmation body", () => {
     expect(desc).toContain("Nothing in this file can be batch-validated right now.")
     expect(desc).toContain("Skipped 83 cells")
     expect(desc).toContain("79 still need a translation")
-    expect(desc).toContain("4 are untouched AI drafts")
+    expect(desc).toContain("4 you had already validated")
   })
 
   it("counts a mixed file the way the run does, and accounts for every cell", () => {
     const candidates = [
       ...eligibleCells(6),
       ...untranslatedCells(3),
-      ...aiDraftCells(2),
+      ...uncommittedCells(2),
       ...alreadyMineCells(1),
     ]
     const summary = summarizeBatchValidate(candidates, summarizeOptions({}))
@@ -358,7 +357,7 @@ describe("batch-validate confirmation body", () => {
     expect(desc).toContain("validates 6 eligible cells")
     expect(desc).toContain("Skipped 6 cells")
     expect(desc).toContain("3 still need a translation")
-    expect(desc).toContain("2 are untouched AI drafts")
+    expect(desc).toContain("2 have no saved translation yet")
     expect(desc).toContain("1 you had already validated")
   })
 
@@ -368,11 +367,11 @@ describe("batch-validate confirmation body", () => {
   it("follows the shared eligibility predicate rather than a count of its own", () => {
     const cells = eligibleCells(4)
     expect(batchValidateDescription(cells)).toContain("validates 4 eligible cells")
-    const withDraft: BatchValidateCandidate[] = [
+    const withIneligible: BatchValidateCandidate[] = [
       ...cells.slice(0, 3),
-      { ...cells[3], aiDrafted: true },
+      { ...cells[3], targetEventId: null },
     ]
-    expect(batchValidateDescription(withDraft)).toContain("validates 3 eligible cells")
+    expect(batchValidateDescription(withIneligible)).toContain("validates 3 eligible cells")
   })
 
   it("says there is nothing to look at on an empty file, without promising success", () => {
@@ -401,7 +400,7 @@ describe("batch-validate can be confirmed only when the run will validate someth
 
   it("allows a run with eligible cells, including a partial one", () => {
     expect(canConfirm(eligibleCells(2))).toBe(true)
-    expect(canConfirm([...eligibleCells(1), ...aiDraftCells(2)])).toBe(true)
+    expect(canConfirm([...eligibleCells(1), ...alreadyMineCells(2)])).toBe(true)
   })
 
   it("blocks every outcome that validates nothing", () => {
@@ -409,7 +408,7 @@ describe("batch-validate can be confirmed only when the run will validate someth
     expect(canConfirm(eligibleCells(3), { canValidate: false })).toBe(false)
     expect(canConfirm(eligibleCells(3), { hasTarget: false })).toBe(false)
     expect(canConfirm([])).toBe(false)
-    expect(canConfirm([...untranslatedCells(2), ...aiDraftCells(1)])).toBe(false)
+    expect(canConfirm([...untranslatedCells(2), ...alreadyMineCells(1)])).toBe(false)
   })
 
   it("blocks when no file is open or the summary cannot be computed", () => {

@@ -26,6 +26,8 @@ export type TermRenderingStatusPayload = 'preferred' | 'admitted' | 'forbidden'
 export interface TermRenderingPayload {
   rendering: string
   status: TermRenderingStatusPayload
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 /** Mirrors `Concept['status']` in src/lib/terminology/types.ts. */
@@ -1047,6 +1049,9 @@ export interface EventPayloads {
       /** The upstream event's server_seq — the monotonic apply-guard key. */
       seq: number
       side: 'source' | 'target'
+      /** Upstream lane the text was copied from (`lanes.id`). Provenance only:
+       *  the downstream row is that project's own source lane. */
+      laneId?: string
       contentHash: string
     }
   }

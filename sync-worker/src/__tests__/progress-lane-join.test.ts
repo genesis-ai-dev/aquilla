@@ -1,10 +1,8 @@
-// AQU-1261: the progress recomputes must join lanes on the BARE `target_lang`
-// column.
+// AQU-1611: the progress recomputes join lanes on the BARE `lane_id` column.
 //
-// `cells.target_lang` is `TEXT NOT NULL DEFAULT ''` (migration 0057) and is the
-// fourth column of `idx_cells_file_scan(project_id, file_id, side, target_lang,
-// cell_id)`. `COALESCE(t.target_lang, '') = lanes.lane` therefore changes no
-// result — the column cannot be NULL — but it makes the predicate
+// `idx_cells_file_scan` is `(project_id, file_id, side, lane_id, cell_id)`
+// (migration 0154). `t.lane_id = lanes.lane_id` is an indexable equality on
+// that column. Wrapping the join key in COALESCE makes the predicate
 // non-indexable, so the planner stops at the `(project_id, file_id, side)`
 // prefix and pairs `lanes × source cells` against every target row in the file
 // before filtering. On a 10k-cell file that rejected ~4M candidate pairs per
@@ -13,9 +11,13 @@
 // Two guards, because each catches what the other cannot:
 //   1. the SQL shape — a COALESCE cannot come back on the join key;
 //   2. the RESULTS — the default lane ('') and named lanes still project
-//      exactly what they did with the wrapped comparison.
+//      exactly what they did when the join was the bare tag column.
+//
+// The source lane's `lane_id` matches no target cell, which is what
+// `join_tag` being NULL used to do. The audio join stays on `join_tag`.
 import { describe, expect, it } from 'vitest'
 import { makeTestDb } from './helpers/pg-test-db'
+import { progressRowsForLane } from './helpers/progress-rows'
 import {
   fileProgressRecomputeStmt,
   fullProgressRecomputeStmts,
@@ -66,13 +68,14 @@ interface ProgressRow {
   filled_count: number
 }
 
+/** Target-lane rows only — the source lane's carries no lane's filled count. */
 const byLane = (rows: ProgressRow[], scope: string, key: string) =>
   rows
     .filter((r) => r.scope === scope && r.section_key === key)
     .sort((a, b) => a.target_lang.localeCompare(b.target_lang))
     .map((r) => [r.target_lang, r.total_count, r.filled_count])
 
-describe('AQU-1261 — progress lane joins compare the bare target_lang column', () => {
+describe('AQU-1611 — progress lane joins compare the bare lane_id column', () => {
   it('never wraps the join key in COALESCE, in the file, partial or full recompute', async () => {
     const t = await makeTestDb()
     try {
@@ -84,11 +87,12 @@ describe('AQU-1261 — progress lane joins compare the bare target_lang column',
       ].map(sqlOf)
 
       // The two progress recomputes that carry the lane join must spell it bare.
-      const withLaneJoin = statements.filter((sql) => sql.includes('lanes.lane'))
+      const withLaneJoin = statements.filter((sql) => sql.includes('lanes.join_tag'))
       expect(withLaneJoin.length).toBeGreaterThanOrEqual(3)
       for (const sql of withLaneJoin) {
-        expect(sql).toContain('t.target_lang = lanes.lane')
-        expect(sql).not.toContain('COALESCE(t.target_lang')
+        expect(sql).toContain('t.lane_id = lanes.lane_id')
+        expect(sql).not.toContain('COALESCE(t.lane_id')
+        expect(sql).not.toContain('t.target_lang = lanes.join_tag')
       }
     } finally {
       await t.close()
@@ -99,7 +103,7 @@ describe('AQU-1261 — progress lane joins compare the bare target_lang column',
     const t = await fixture()
     try {
       await t.db.batch(fullProgressRecomputeStmts(t.db, PROJECT, FILE, 100))
-      const rows = await t.rows<ProgressRow>('file_section_progress')
+      const rows = await progressRowsForLane<ProgressRow>(t.pg, PROJECT, 'target')
 
       // The denominator is lane-independent (3 source cells); each lane counts
       // only its OWN filled targets. '' has uno + tres; 'fr' has un + deux.
@@ -139,7 +143,7 @@ describe('AQU-1261 — progress lane joins compare the bare target_lang column',
         sectionsProgressRecomputeStmt(t.db, PROJECT, FILE, 101, ['c2']),
       ])
 
-      const rows = await t.rows<ProgressRow>('file_section_progress')
+      const rows = await progressRowsForLane<ProgressRow>(t.pg, PROJECT, 'target')
       expect(byLane(rows, 'file', '')).toEqual([
         ['', 3, 3],
         ['fr', 3, 2],

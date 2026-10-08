@@ -98,22 +98,23 @@ beforeEach(async () => {
 })
 
 describe('PatchSettings — per-key floors', () => {
-  it('a non-terminology key requires MAINTAINER (600): project_lead denied, maintainer allowed', async () => {
+  it('a non-language key requires MAINTAINER (600): project_lead denied, maintainer allowed', async () => {
     const env = makeEnv(tdb.db)
     const lead = await memberToken(tdb, 500)
     const { res: deniedRes, body: denied } = await prepare(env, lead.token, patchCmd([
-      { key: 'systemPrompt', value: 'Be plain.' },
+      { key: 'translationBrief', value: { l1Summary: 'x' } },
     ]))
     expect(deniedRes.status).toBe(403)
     expect(denied.error.code).toBe('permission_denied')
+    expect(denied.error.message).toMatch(/maintainer/)
 
     const maintainer = await memberToken(tdb, 600)
     const { res, body } = await prepare(env, maintainer.token, patchCmd([
-      { key: 'systemPrompt', value: 'Be plain.' },
+      { key: 'translationBrief', value: { l1Summary: 'x' } },
     ]))
     expect(res.status).toBe(200)
     expect(body.summary.command).toBe('PatchSettings')
-    expect(body.summary.settingsChanges.systemPrompt).toContain('Be plain.')
+    expect(body.summary.settingsChanges.translationBrief).toContain('l1Summary')
 
     const { res: commitRes, body: committed } = await commit(env, maintainer.token, body.changeset.id)
     expect(commitRes.status).toBe(200)
@@ -123,7 +124,7 @@ describe('PatchSettings — per-key floors', () => {
     // Merge semantics: patched key replaced, untouched keys survive.
     const rows = await tdb.rows<{ settings: string; version: number }>('project_settings')
     const stored = JSON.parse(rows[0].settings)
-    expect(stored.systemPrompt).toBe('Be plain.')
+    expect(stored.translationBrief).toEqual({ l1Summary: 'x' })
     expect(stored.targetLanguage).toBe('fr')
     expect(stored.validationCount).toBe(3)
     expect(rows[0].version).toBe(2)
@@ -321,6 +322,39 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(stored.systemPrompt).toBe('translate plainly')
     expect(stored.targetLanguage).toBe('fr')
     expect(stored.validationCount).toBe(3)
+  })
+
+  // AQU-1686: agents switch Bible data enrichments through this path. A
+  // misspelled enrichment id stored here would be ignored by every reader,
+  // so the agent would believe it had turned something off when it had not.
+  it('bibleEnrichments rejects an unknown enrichment id or a non-boolean value at prepare', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    for (const value of [{ voice: false }, { voices: 'off' }]) {
+      const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'bibleEnrichments', value }]))
+      expect(res.status).toBe(400)
+      expect(body.error.code).toBe('validation_failed')
+      expect(JSON.stringify(body.error.details)).toContain('bibleEnrichments')
+    }
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('bibleEnrichments stores a valid map at the maintainer floor and refuses a project lead', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const value = { places: false, autopilot: true }
+    const { res: deniedRes, body: denied } = await prepare(env, lead.token, patchCmd([{ key: 'bibleEnrichments', value }]))
+    expect(deniedRes.status).toBe(403)
+    expect(denied.error.code).toBe('permission_denied')
+
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'bibleEnrichments', value }]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.bibleEnrichments).toEqual(value)
+    expect(stored.targetLanguage).toBe('fr')
   })
 })
 

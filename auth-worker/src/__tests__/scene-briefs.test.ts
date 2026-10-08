@@ -177,8 +177,8 @@ describe("scene-brief run evidence", () => {
     let adapterProvenance: unknown
     const executor: PgExecutor = {
       async run(_sql, params) {
-        adapterRegister = params[7]
-        adapterProvenance = params[11]
+        adapterRegister = params[6]
+        adapterProvenance = params[10]
         return {
           rows: [{
             id: params[0],
@@ -186,18 +186,19 @@ describe("scene-brief run evidence", () => {
             file_id: params[2],
             start_cell_id: params[3],
             end_cell_id: params[4],
-            target_lang: params[5],
-            construal: params[6],
-            ambiguity_register: params[7],
-            l1_summary: params[8],
-            l1_generated_at: params[9],
-            l1_model_id: params[10],
+            target_lang: "",
+            lane_id: params[12],
+            construal: params[5],
+            ambiguity_register: params[6],
+            l1_summary: params[7],
+            l1_generated_at: params[8],
+            l1_model_id: params[9],
             status: "proposed",
             human_edited: false,
             stale_since: null,
             stale_reason: null,
-            provenance: params[11],
-            created_by: params[12],
+            provenance: params[10],
+            created_by: params[11],
             reviewed_by: null,
             version: 1,
             created_at: "2026-08-11T00:00:00.000Z",

@@ -11,7 +11,6 @@ export interface ImportDirectionInput {
   activeTag?: string
   sourceLanguage?: string
   targetLanguage?: string
-  inferred?: { sourceLanguage?: string; targetLanguage?: string } | null
 }
 
 export interface ImportDirection {
@@ -75,21 +74,15 @@ function filled(...values: Array<string | null | undefined>): string {
  * A project that already has a source-lane language and a distinct
  * target-lane language does not. Lane rows decide that. The editor's active
  * tag is often `""`, and resolving only that tag reports no target when the
- * real target lane is tagged `fr`. Inferred languages and the dialog's
- * language props fill a side the lanes have not named.
+ * real target lane is tagged `fr`. The dialog's language props fill a side
+ * the lanes have not named. A file's declared languages never do (AQU-1596):
+ * a declaration can disagree with the lane, so it may only pre-fill the
+ * direction panel as a suggestion.
  */
 export function resolveImportDirection(input: ImportDirectionInput): ImportDirection {
   const lanes = input.lanes ?? []
-  const source = filled(
-    sourceLanguageFromLanes(lanes),
-    input.inferred?.sourceLanguage,
-    input.sourceLanguage,
-  )
-  const target = filled(
-    targetLanguageFromLanes(lanes, input.activeTag ?? ""),
-    input.inferred?.targetLanguage,
-    input.targetLanguage,
-  )
+  const source = filled(sourceLanguageFromLanes(lanes), input.sourceLanguage)
+  const target = filled(targetLanguageFromLanes(lanes, input.activeTag ?? ""), input.targetLanguage)
   const bothEmpty = source === "" && target === ""
   const needsDirection =
     bothEmpty ||

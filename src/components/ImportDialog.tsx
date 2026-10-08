@@ -69,7 +69,7 @@ import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
 import { formatBytesProgress } from "@/lib/format-bytes"
-import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { CellUnit, FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { filterEpubStrings } from "@/lib/parsers/epub"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
@@ -337,6 +337,13 @@ interface ImportDialogProps {
    */
   excludeFrontMatter?: boolean
   /**
+   * AQU-1720: per-project import cell unit. `paragraph` makes one non-empty
+   * paragraph one cell for docx/txt/md uploads (no sentence split, no length
+   * cap) — the unit a dubbing project generates one voice clip for. Wired from
+   * the project's `importCellUnit` setting; absent/`sentence` segments as before.
+   */
+  cellUnit?: CellUnit
+  /**
    * AQU-1527: the "From another project" source — link this established project
    * to another project's source (AQU-1525's action) from the place people
    * actually go to bring material in, instead of only from Project Settings →
@@ -390,6 +397,7 @@ export function ImportDialog({
   existingFiles,
   patchDcsCursor,
   excludeFrontMatter,
+  cellUnit,
   linkSource,
   sourceDisabledReason = null,
   translation,
@@ -613,13 +621,21 @@ export function ImportDialog({
       // Lane rows name the direction. The active tag is often `""`, which does
       // not match a target lane tagged `fr`, so the language props can both be
       // empty while the project already has a source and a target.
+      //
+      // AQU-1596: the direction decision reads the *lane's* languages. A file's
+      // declared languages are import information and can disagree with the
+      // lane — letting a declaration stand in for the lane's language here is
+      // what let a Spanish-declaring file answer the direction question for a
+      // French lane. The declaration is still used, but only to pre-fill the
+      // panel below as a suggestion.
       const direction = resolveImportDirection({
         lanes,
         activeTag: targetLang ?? "",
         sourceLanguage,
         targetLanguage,
-        inferred: inferredLanguages,
       })
+      const declaredSource = (inferredLanguages?.sourceLanguage ?? "").trim()
+      const declaredTarget = (inferredLanguages?.targetLanguage ?? "").trim()
 
       // Respect the persisted per-project skip choice so we don't re-prompt on
       // every import once the user has deliberately deferred direction setup.
@@ -627,8 +643,18 @@ export function ImportDialog({
 
       if (direction.needsDirection && !skipped) {
         setPendingImport({ refs, inferredLanguages })
-        setDirectionSource(direction.source)
-        setDirectionTarget(languagesEqual(direction.source, direction.target) ? "" : direction.target)
+        // The declared values are the suggestion: they pre-fill the inputs
+        // wherever the lane has nothing usable to show, and the user's answer is
+        // what actually gets saved (AQU-1596 — suggest or warn, never silently
+        // adopt). "Usable" excludes a target equal to the source, which is the
+        // broken state the panel exists to repair — there the declaration is
+        // the most useful thing we can offer.
+        const suggestedSource = direction.source || declaredSource
+        const laneTargetUsable =
+          direction.target !== "" && !languagesEqual(direction.source, direction.target)
+        const suggestedTarget = laneTargetUsable ? direction.target : declaredTarget
+        setDirectionSource(suggestedSource)
+        setDirectionTarget(languagesEqual(suggestedSource, suggestedTarget) ? "" : suggestedTarget)
         setScreen("direction")
         return
       }
@@ -657,7 +683,6 @@ export function ImportDialog({
       activeTag: targetLang ?? "",
       sourceLanguage,
       targetLanguage,
-      inferred: pendingImport.inferredLanguages,
     })
     if (!direction.needsDirection) {
       if (directionAutoFinished.current === pendingImport) return
@@ -704,7 +729,12 @@ export function ImportDialog({
     try {
       const mergedLanguages = {
         ...(captured.inferredLanguages ?? {}),
-        sourceLanguage: directionSource.trim() || captured.inferredLanguages?.sourceLanguage,
+        // AQU-1596: the confirmed value is exactly what stands in the field.
+        // The source used to fall back to the file's declaration when the user
+        // cleared it, which turned a declaration the user had just deleted into
+        // the lane's language. Cleared now means "leave the lane alone", which
+        // is what the target side already did.
+        sourceLanguage: directionSource.trim() || undefined,
         targetLanguage: directionTarget.trim() || undefined,
         // BLOCKER 1: mark as explicit so handleImported in ProjectWorkspace
         // REPLACES current values instead of only filling empty slots.
@@ -1226,6 +1256,7 @@ export function ImportDialog({
             onCommitError={setPreviewCommitError}
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
+            cellUnit={cellUnit}
             onTranslationCheck={translationCheckFor("upload")}
           />
         )}
@@ -1268,6 +1299,7 @@ export function ImportDialog({
             onCommitError={setPreviewCommitError}
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
+            cellUnit={cellUnit}
             onTranslationCheck={translationCheckFor("gdrive")}
           />
         )}
@@ -1956,6 +1988,9 @@ interface UploadPanelProps {
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
    *  the Paratext preview). */
   excludeFrontMatter?: boolean
+  /** AQU-1720: per-project import cell unit, forwarded into prepareImportFile
+   *  so a dubbing project's paragraphs arrive as whole cells. */
+  cellUnit?: CellUnit
   /** AQU-823: "gdrive" swaps the dropzone for the Google Drive picker while
    *  reusing this panel's preview/collision/commit machinery unchanged. */
   variant?: "upload" | "gdrive"
@@ -2066,7 +2101,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, variant = "upload", onTranslationCheck }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck }: UploadPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -2201,6 +2236,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 setPhase(idmlParsePhase(file.name, progress))
               },
               excludeFrontMatter,
+              cellUnit,
             })
             preparedByFile.set(file, prepared)
           }

@@ -23,7 +23,7 @@
 // see trimWindowForCell), so spacing the original out could never have been a
 // data edit in the first place.
 
-import { activeTargetForCell, sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { resolveTargetAudio, sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 
@@ -111,7 +111,7 @@ export function buildProgramme(cells: readonly CellData[]): Programme {
     // would have to skip it, which is exactly what this design avoids.
     const sourceLenSec = sourceWindow ? nominalLenSec : 0
 
-    const target = activeTargetForCell(cell)
+    const target = resolveTargetAudio(cell)
     const att = target ? cell.attachments?.[target.audioId] : undefined
     const effMs = effectiveAttachmentDurationMs(att)
     // A dub whose length genuinely isn't known borrows the section's, which is

@@ -82,6 +82,47 @@ describe("AQU-730 read wall", () => {
     expect(byCodeBody.cells.map((c) => c.value).sort()).toEqual(["source-text"])
   })
 
+  it("wall off: a lane scope keeps matching its own lane's new rows, which carry no target_lang (AQU-1039 × AQU-1611b)", async () => {
+    // Rows as the projection writers leave them after AQU-1611b: lane_id is
+    // the identity and target_lang is the column default on every row. The
+    // scope clause's tag match must resolve through lane_id, or a scope on
+    // the ''-tagged lane would match every lane and a scope on "es" none.
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: ES, project_id: PROJECT, role: "target", name: "Spanish", lang_code: "es", legacy_tag: "es" },
+        { id: FR, project_id: PROJECT, role: "target", name: "French", lang_code: "fr", legacy_tag: "fr" },
+        { id: DEFAULT, project_id: PROJECT, role: "target", name: "Spanish", lang_code: "es", legacy_tag: "" },
+      ],
+      cells: [
+        { project_id: PROJECT, file_id: FILE, cell_id: "s1", side: "source", event_id: "e-s", value: "source-text", target_lang: "" },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t1", side: "target", event_id: "e-es", value: "hola", target_lang: "", lane_id: ES },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t1", side: "target", event_id: "e-fr", value: "bonjour", target_lang: "", lane_id: FR },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t1", side: "target", event_id: "e-def", value: "default-hola", target_lang: "", lane_id: DEFAULT },
+      ],
+    })
+    const read = async (scope: string) => {
+      const token = await makeTestToken(SECRET, {
+        projectId: PROJECT,
+        fileId: FILE,
+        role: 400,
+        scopes: [{ kind: "lane", value: scope }],
+      })
+      const res = (await handleCellsReadRequest(
+        new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db, false),
+      ))!
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { cells: Array<{ value: string }> }
+      return body.cells.map((c) => c.value).sort()
+    }
+    expect(await read(DEFAULT)).toEqual(["default-hola", "source-text"])
+    expect(await read(ES)).toEqual(["hola", "source-text"])
+    // A stored scope that is still the legacy tag resolves to the same lane.
+    expect(await read("fr")).toEqual(["bonjour", "source-text"])
+  })
+
   it("does not return another lane's progress to a contributor without that grant", async () => {
     const { db } = await makeTestDb({
       files: [{ id: FILE, project_id: PROJECT, name: "Genesis", event_id: "file-event" }],

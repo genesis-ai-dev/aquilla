@@ -25,10 +25,12 @@ describe("project-lane-archive", () => {
       expect(isLaneArchived("fr-BE", ["", "fr-CA"])).toBe(false)
     })
 
-    it("matches archived tags case-insensitively", () => {
+    it("matches archived tags case-insensitively, not by language", () => {
       expect(isLaneArchived("fr-CA", ["fr-ca"])).toBe(true)
       expect(isLaneArchived("FR-CA", ["fr-CA"])).toBe(true)
       expect(isLaneArchived("fr-BE", ["fr-CA"])).toBe(false)
+      expect(isLaneArchived("es", ["Spanish"])).toBe(false)
+      expect(isLaneArchived("spanish", ["Spanish"])).toBe(true)
     })
   })
 

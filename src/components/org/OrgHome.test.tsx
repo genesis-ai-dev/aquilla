@@ -367,7 +367,6 @@ describe("ProjectTable", () => {
           showOrg
           // AQU-606: this map is only the per-file *hint*; the project's own
           // targetLanguage ("French") takes precedence for the '' lane chip.
-          defaultLaneLabelByProjectId={new Map([[project.id, "conversational Spanish"]])}
         />
       </MemoryRouter>,
     )

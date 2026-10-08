@@ -7,6 +7,7 @@
 // every run; now it is one tool call and always the same, correct retrieval.
 
 import { AliasMap } from "../compress"
+import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
 import { clip } from "./read"
 import type { ExamplePair, ToolOutcome } from "./types"
 
@@ -18,7 +19,9 @@ export interface ExamplesArgs {
 
 export interface ExamplesContext {
   projectId: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
 }
@@ -83,7 +86,9 @@ export async function executeExamples(
 
   // Only validated pairs are trusted. With no usable query, fall back to the
   // most recently touched validated pairs. Filter by lane to ensure examples
-  // come from the active translation lane only.
+  // come from the active translation lane only — by `lane_id` (AQU-1610), so
+  // a second lane of the same language cannot be shown the first's examples.
+  const { laneId } = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
   const { results } = tsquery
     ? await db
         .prepare(
@@ -91,13 +96,13 @@ export async function executeExamples(
            FROM cells t
            JOIN cells s ON s.project_id = t.project_id AND s.file_id = t.file_id
                        AND s.cell_id = t.cell_id AND s.side = 'source'
-           WHERE t.project_id = ? AND t.side = 'target' AND t.target_lang = ? AND t.value <> ''
+           WHERE t.project_id = ? AND t.side = 'target' AND t.lane_id = ? AND t.value <> ''
              AND t.validated = 1
              AND s.value_tsv @@ to_tsquery('simple', ?)
            ORDER BY ts_rank(s.value_tsv, to_tsquery('simple', ?)) DESC
            LIMIT ?`,
         )
-        .bind(ctx.projectId, ctx.lane, tsquery, tsquery, n)
+        .bind(ctx.projectId, laneId, tsquery, tsquery, n)
         .all<PairHit>()
     : await db
         .prepare(
@@ -105,11 +110,11 @@ export async function executeExamples(
            FROM cells t
            JOIN cells s ON s.project_id = t.project_id AND s.file_id = t.file_id
                        AND s.cell_id = t.cell_id AND s.side = 'source'
-           WHERE t.project_id = ? AND t.side = 'target' AND t.target_lang = ? AND t.value <> '' AND t.validated = 1
+           WHERE t.project_id = ? AND t.side = 'target' AND t.lane_id = ? AND t.value <> '' AND t.validated = 1
            ORDER BY t.last_edit_at DESC
            LIMIT ?`,
         )
-        .bind(ctx.projectId, ctx.lane, n)
+        .bind(ctx.projectId, laneId, n)
         .all<PairHit>()
 
   if (results.length === 0) {

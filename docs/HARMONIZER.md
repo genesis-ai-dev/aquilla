@@ -58,8 +58,14 @@ Status: **built** = in a PR; otherwise ordered by value ÷ cost.
    turn's speaker is recoverable. This is reference at turn boundaries (item 4).
 
 ### Participant reference (tracking who is on stage)
-4. **Under-specification at a subject switch.** *Built*: `textual.reference`,
-   AQU-1658. Jev answers three questions: did the source subject switch? Would
+4. **Under-specification at a subject switch.** *Built, not registered*:
+   `textual.reference`, AQU-1658. **It failed the eval.** Jev's "would a
+   reader identify the subject" answer averaged 0.83 on original verses and
+   0.72 after the name became "he", and never went below 0.5. Every cut-off
+   either stays silent or flags about 0.6 clean boundaries per passage.
+   Redesign: ask a `choice` over the passage's named participants ("who would
+   a reader take the subject to be?") and compare it in code with the
+   source's answer, instead of asking Jev to judge clarity. Jev answers three questions: did the source subject switch? Would
    a reader of the target identify the right participant? Which word refers to
    the subject? It flags the word when the subject switched and a reader would
    misidentify it.
@@ -134,6 +140,24 @@ Status: **built** = in a PR; otherwise ordered by value ÷ cost.
 - **Realization profiles.** Several checks (5, 6, 8, 9, 11) need a learned
   per-project profile. Compute it once per project from validated cells,
   cache it, and pass it to `plan` instead of having each check relearn it.
+- **Eval results** (`pnpm harmonizer:eval`, BSB + Macula, MAT–ACT, 40 cases
+  per check, typesafe/jev-1.13, 2026-10-05). Shipping thresholds are in
+  bold.
+
+  | Check | Recall | False alarms per clean passage |
+  |---|---|---|
+  | sentence: run-on | **88%** (0.6) | 0.03 |
+  | quotation close (broken spans only) | **38%** (0.6) | 0.07 |
+  | sentence: broken-off | **18%** (0.6) | 0.00 |
+  | reference (unregistered) | 28% | about 0.55 from this check alone |
+
+  The first run scored far lower, for two reasons:
+  - Unfair perturbations: a speech that opened before the window, or a
+    "fragment" that was really a complete sentence.
+  - Two rules the data contradicted: asking about quotations still open at
+    the window edge (most clean-text alarms), and a 0.7 source gate that
+    rejected real fragments.
+
 - **Eval harness.** Take validated passages, perturb them (drop a closing
   quote, replace a name with "he" after a switch, swap a connective), and
   measure how many the check recovers and how many it flags falsely. Run it

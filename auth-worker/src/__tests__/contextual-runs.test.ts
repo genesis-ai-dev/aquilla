@@ -44,6 +44,8 @@ import {
 const db = env.AQUILLA_PG
 const PROJECT = "proj-ctx"
 const FILE = "file-mrk"
+/** The lane id the fake adapter below hands back for the default lane. */
+const LANE_DEFAULT = "lane-def"
 
 const seed = (n: number) => ({
   id: `${FILE}#s${n}`,
@@ -293,17 +295,25 @@ describe("durable sanitized activity", () => {
     let draftId = ""
     const executor: PgExecutor = {
       async run(sql, params) {
+        // AQU-1610: the store resolves the lane ref to a lane id before it
+        // writes, and asks which column the live-row indexes are keyed on, so
+        // the adapter has to answer both lookups too.
+        if (sql.includes("FROM lanes")) return { rows: [{ id: LANE_DEFAULT }], rowCount: 1 }
+        if (sql.includes("FROM pg_indexes")) {
+          return { rows: [{ indexdef: "… (project_id, file_id, cell_id, lane_id) …" }], rowCount: 1 }
+        }
         if (sql.includes("SELECT id FROM contextual_runs")) return { rows: [], rowCount: 0 }
         if (sql.includes("FROM contextual_runs WHERE id")) {
           return { rows: runRow ? [runRow] : [], rowCount: runRow ? 1 : 0 }
         }
         if (sql.includes("INSERT INTO contextual_runs")) {
-          roleParam = params[5]
+          roleParam = params[4]
           runRow = {
-            id: params[0], project_id: params[1], file_id: params[2], target_lang: params[3],
-            status: "running", initiated_by: params[4], role_snapshot: params[5], span_cursor: null,
+            id: params[0], project_id: params[1], file_id: params[2], target_lang: "",
+            status: "running", initiated_by: params[3], role_snapshot: params[4], span_cursor: null,
             done_spans: 0, total_spans: 0, failed_spans: 0, units_spent: 0, calls_spent: 0,
-            last_error: null, steering_cursor: null, anchor_cell_id: params[6], scope_group: params[7],
+            lane_id: params[8],
+            last_error: null, steering_cursor: null, anchor_cell_id: params[5], scope_group: params[6],
             created_at: "2026-08-11T00:00:00.000Z", updated_at: "2026-08-11T00:00:00.000Z",
           }
           return { rows: [runRow], rowCount: 1 }
@@ -316,8 +326,8 @@ describe("durable sanitized activity", () => {
         if (sql.includes("UPDATE contextual_drafts")) return { rows: [], rowCount: 0 }
         if (sql.includes("INSERT INTO contextual_drafts")) {
           draftId = String(params[0])
-          verdictParam = params[8]
-          provenanceParam = params[9]
+          verdictParam = params[7]
+          provenanceParam = params[8]
           return { rows: [], rowCount: 1 }
         }
         if (sql.includes("SELECT id, run_id") && sql.includes("FROM contextual_drafts")) {
@@ -325,7 +335,7 @@ describe("durable sanitized activity", () => {
             rows: [{
               id: draftId, run_id: (runRow as Record<string, unknown>).id,
               project_id: PROJECT, file_id: FILE, cell_id: "c-json",
-              target_lang: "", scene_brief_id: null,
+              target_lang: "", lane_id: LANE_DEFAULT, scene_brief_id: null,
               text: "structured", verdicts: verdictParam, provenance: provenanceParam,
               status: "proposed", created_at: "2026-08-11T00:00:00.000Z",
               reviewed_at: null, reviewed_by: null,

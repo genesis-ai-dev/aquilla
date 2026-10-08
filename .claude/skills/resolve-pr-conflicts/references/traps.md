@@ -107,8 +107,9 @@ the push usually means exactly that migration is pending - say so in the report.
 - The hook sizes the run from `remote tip..local tip`. To see what the branch alone would
   select (informational, not a substitute for the gate):
   `pnpm exec tsx scripts/e2e-affected.ts --base origin/<base> < /dev/null`.
-- The pre-commit warning that the branch "already has commits for OTHER tickets" is noise on any
-  branch cut from `dev`; it compares against `main`. It never blocks.
+- The pre-commit warning that the branch "already has commits for OTHER tickets" compares against
+  the nearer of `origin/dev` and `origin/main`, so a listed ticket really is on this branch and not
+  yet on `dev`. It never blocks.
 
 ## Shell traps on this machine
 

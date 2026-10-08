@@ -1,6 +1,7 @@
 // POST /api/v2/projects/:projectId/tools/build — one builder attempt.
 //
-// Body: { request: string, repair?: { previousSource, previousManifest, failure }, attempt?: number }
+// Body: { request: string, repair?: { previousSource, previousManifest, failure }, attempt?: number,
+//         base?: { source, manifest } }   — base present = edit_tool (change an existing tool)
 // → 200 { ok:true, source, manifest, model, usage } | { ok:false, failure, source, manifestJson, lint, model, usage }
 //
 // Synchronous for the prototype (the SPA shows a progress card while it
@@ -50,7 +51,18 @@ export async function buildToolRoute(c: Context<AuthHonoEnv>) {
   }
 
   try {
-    const result = await runBuild(c.env, { request, ...(repair ? { repair } : {}) })
+    const b = body?.base
+    let base: { source: string; manifest: string } | undefined
+    if (b && typeof b === "object" && !Array.isArray(b)) {
+      const bb = b as Record<string, unknown>
+      if (typeof bb.source === "string") {
+        base = {
+          source: bb.source.slice(0, 250_000),
+          manifest: typeof bb.manifest === "string" ? bb.manifest.slice(0, 5000) : JSON.stringify(bb.manifest ?? {}).slice(0, 5000),
+        }
+      }
+    }
+    const result = await runBuild(c.env, { request, ...(repair ? { repair } : {}), ...(base ? { base } : {}) })
     console.log(
       `[tools/build] project=${projectId} attempt=${attempt} ok=${result.ok} model=${result.model} ` +
         `in=${result.usage.promptTokens} out=${result.usage.completionTokens} cost=$${result.usage.cost.toFixed(4)}`,

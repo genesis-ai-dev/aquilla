@@ -90,6 +90,14 @@ export const extensions = defineNamespace({
     "extensions.palette.openPage": "{name}: open full page",
     "extensions.palette.manage": "Manage Smart Extensions",
     "extensions.palette.button": "Smart Extensions (⌘⇧E)",
+    "extensions.heal.button": "Heal it",
+    "extensions.heal.running": "Healing…",
+    "extensions.heal.failed": "Could not heal it: {message}",
+    "extensions.heal.done": "Updated to v{version}.",
+    "extensions.stale.message": "This extension was built for an older version of the extension API.",
+    "extensions.stale.rebuild": "Rebuild it",
+    "extensions.change.placeholder": "Describe a change to this extension…",
+    "extensions.change.submit": "Change it",
   },
   context: {
     _context: {
@@ -123,6 +131,8 @@ export const extensions = defineNamespace({
       "extensions.revert.skippedHeading": { description: "Heading over cells revert left alone.", placeholders: { count: "Number of cells." } },
       "extensions.revert.skippedRow": { description: "One skipped cell.", placeholders: { cell: "Cell reference.", by: "Username now holding the cell." } },
       "extensions.palette.openPanel": { description: "Command palette entry.", placeholders: { name: "Extension name." } },
+      "extensions.heal.failed": { description: "Error after an automatic fix failed.", placeholders: { message: "Builder error." } },
+      "extensions.heal.done": { description: "Result after an extension was changed or healed.", placeholders: { version: "New version number." } },
       "extensions.palette.useAsEditor": { description: "Command palette entry.", placeholders: { name: "Extension name." } },
       "extensions.palette.openPage": { description: "Command palette entry.", placeholders: { name: "Extension name." } },
       "extensions.palette.button": { description: "Tooltip/label of the header button that opens the extensions palette; keep the shortcut.", maxLength: 40 },

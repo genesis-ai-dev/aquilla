@@ -13,6 +13,8 @@
  *   origin cannot be named; the reply carries only what that tool asked for.
  */
 
+import { removedApi } from "../../../shared/tools/api-rev"
+
 export class BridgeError extends Error {
   code: string
   constructor(code: string, message: string) {
@@ -36,6 +38,8 @@ export interface BridgeHostOptions {
   authorize: (method: string) => Promise<void>
   onReady?: () => void
   onToolError?: (err: ToolErrorReport) => void
+  /** A tool called a removed bridge API (see shared/tools/api-rev.ts). */
+  onApiRemoved?: (method: string, message: string) => void
   /** Called for every completed call (for activity/debug surfaces). */
   onCall?: (method: string, ok: boolean) => void
   /** Origins accepted from the frame. Default: the opaque origin "null". */
@@ -94,6 +98,16 @@ export function createBridgeHost(opts: BridgeHostOptions): BridgeHost {
     const handler = Object.prototype.hasOwnProperty.call(opts.handlers, call.method)
       ? opts.handlers[call.method]
       : undefined
+    const removed = handler ? null : removedApi(call.method)
+    if (removed) {
+      // Removed-API marker: fail loudly with the replacement, and let the host
+      // offer "this extension is old → rebuild".
+      const message = `aquilla.${call.method} was removed in apiRev ${removed.removedIn}; use ${removed.replacement}`
+      reply(call.requestId, { ok: false, code: "api_removed", message })
+      opts.onApiRemoved?.(call.method, message)
+      opts.onCall?.(call.method, false)
+      return
+    }
     if (!handler) {
       reply(call.requestId, { ok: false, code: "unknown_method", message: `aquilla.${call.method} does not exist` })
       opts.onCall?.(call.method, false)

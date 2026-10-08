@@ -33,6 +33,8 @@ export interface ToolHostState {
   prompt: PendingPrompt | null
   errors: ToolErrorReport[]
   clearErrors: () => void
+  /** Set when the tool called a removed bridge API. */
+  removedApi: string | null
   ready: boolean
 }
 
@@ -41,6 +43,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   const [prompt, setPrompt] = useState<PendingPrompt | null>(null)
   const [errors, setErrors] = useState<ToolErrorReport[]>([])
   const [ready, setReady] = useState(false)
+  const [removedApi, setRemovedApi] = useState<string | null>(null)
 
   const standingRef = useRef<Set<ToolScope>>(new Set(tool.grantedScopes))
   const deniedRef = useRef<Set<ToolScope>>(new Set())
@@ -129,6 +132,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
         if (!(await ask(scope))) throw new BridgeError("permission_denied", `${scope} was not allowed`)
       },
       onReady: () => setReady(true),
+      onApiRemoved: (_method, message) => setRemovedApi(message),
       onToolError: (err) => setErrors((prev) => [...prev.slice(-4), err]),
     })
     hostRef.current = host
@@ -178,5 +182,5 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     return () => observer.disconnect()
   }, [])
 
-  return { prompt, errors, clearErrors: () => setErrors([]), ready }
+  return { prompt, errors, clearErrors: () => setErrors([]), ready, removedApi }
 }

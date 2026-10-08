@@ -18,6 +18,7 @@ import type { ToolSummary } from "@/lib/tools/tools-api"
 import type { ToolMount } from "../../../shared/tools/manifest"
 import { ToolFrame } from "./ToolFrame"
 import { useMountedTool, useToolsMount } from "./ToolsMountContext"
+import { useEditTool } from "./useEditTool"
 
 function toolsFor(tools: ToolSummary[], mount: ToolMount): ToolSummary[] {
   return tools.filter((t) => t.manifest.mounts.includes(mount))
@@ -39,6 +40,7 @@ export function MountedTool({
   const ctx = useToolsMount()
   const { project, roleLevel } = useProject(ctx?.projectId ?? "")
   const { tool, error } = useMountedTool(toolId)
+  const edit = useEditTool(ctx?.projectId ?? "", ctx?.session?.jwt ?? null)
   if (error) return <p role="alert" className="p-2 text-xs text-destructive">{error}</p>
   if (!ctx?.session || !tool || !project) return <Spinner className="m-3" />
   return (
@@ -51,6 +53,12 @@ export function MountedTool({
       {...(cell ? { cell } : {})}
       {...(file ? { file } : {})}
       onGrantChange={() => ctx.refresh()}
+      onHeal={(request) => {
+        void edit.run(tool, request).then((next) => {
+          if (next) ctx.refresh()
+        })
+      }}
+      healing={edit.busy}
       className={className}
     />
   )

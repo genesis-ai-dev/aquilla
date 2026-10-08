@@ -167,7 +167,13 @@ export async function fetchToolActivity(jwt: string, projectId: string, toolId: 
 export async function buildToolAttempt(
   jwt: string,
   projectId: string,
-  body: { request: string; attempt: number; repair?: { previousSource: string; previousManifest: string; failure: string } },
+  body: {
+    request: string
+    attempt: number
+    repair?: { previousSource: string; previousManifest: string; failure: string }
+    /** edit_tool: the version being changed. */
+    base?: { source: string; manifest: string }
+  },
 ): Promise<BuildAttempt> {
   return request<BuildAttempt>(jwt, `${p(projectId)}/build`, { method: "POST", body })
 }

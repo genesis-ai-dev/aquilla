@@ -27,7 +27,11 @@ through the global \`aquilla\` object the host injects before your code runs.
   Their values are complete CSS colors (e.g. "oklch(0.98 0 0)"): use them as var(--primary), never wrap them in hsl().
 
 ## The aquilla API (apiRev ${TOOLS_API_REV}) — every call returns a Promise
-- aquilla.context → { tool:{id,name,version}, project:{id,name}, user:{username,roleLevel}, mount:"page"|"panel" }
+- aquilla.context → { tool:{id,name,version}, project:{id,name}, user:{username,roleLevel},
+    mount:"page"|"panel"|"inline"|"editor", cell:{fileId,cellId}|null (inline), file:{fileId,name}|null (editor) }
+  Mounts (manifest "mounts"): page = its own page; panel = the editor's side panel (narrow, ~300px);
+  inline = under one cell (aquilla.context.cell); editor = REPLACES the standard editor for a file
+  (aquilla.context.file) — a full editing surface: list that file's cells, write targets, validate.
 - aquilla.files.list() → [{ fileId, name, cellCount }]                      scope read:cells
 - aquilla.cells.list(fileId, { lane? }) → [{                                scope read:cells
     cellId, ref /* e.g. "MAT 1:1" or null */, source /* plain text */, target /* plain text */,
@@ -37,7 +41,7 @@ through the global \`aquilla\` object the host injects before your code runs.
     Writes translations as the current user (scope write:target). value is plain text.
     Batch many edits into ONE call. The host chains each edit on the cell's live head.
 - aquilla.cells.validate([{ fileId, cellId }]) → { validated:[cellId], failed:[...] }   scope write:validation
-- aquilla.storage.get(key) / .set(key, jsonValue) / .remove(key) — small per-tool, per-user storage.
+- aquilla.storage.get(key) / aquilla.storage.set(key, jsonValue) / aquilla.storage.remove(key) — small per-tool, per-user storage.
 - aquilla.permissions.request(scope) → boolean; aquilla.permissions.list() → [scope].
     Calls needing an ungranted scope pause on a user prompt automatically; a denied call
     rejects with an Error whose .code is "permission_denied". Handle that gracefully.
@@ -51,7 +55,7 @@ Start your script with: \`(async () => { … })()\` and render a loading state f
 
 ## Output format — exactly two fenced blocks, nothing else
 \`\`\`json
-{ "name": "…", "description": "one sentence", "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page"] }
+{ "name": "…", "description": "one sentence", "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit] }
 \`\`\`
 \`\`\`html
 <!doctype html>
@@ -59,13 +63,27 @@ Start your script with: \`(async () => { … })()\` and render a loading state f
 \`\`\`
 `
 
+export interface EditBase {
+  source: string
+  manifest: string
+}
+
 export function buildUserMessage(
   request: string,
   repair?: { previousSource: string; previousManifest: string; failure: string },
+  base?: EditBase,
 ): string {
-  if (!repair) return `Build this tool:\n\n${request}`
+  const ask = base
+    ? [
+        `Change this existing tool (edit_tool). Keep everything that works; return the COMPLETE updated tool.`,
+        `Requested change:\n\n${request}`,
+        `Current manifest:\n\`\`\`json\n${base.manifest}\n\`\`\``,
+        `Current source:\n\`\`\`html\n${base.source}\n\`\`\``,
+      ].join("\n\n")
+    : `Build this tool:\n\n${request}`
+  if (!repair) return ask
   return [
-    `You were asked to build this tool:\n\n${request}`,
+    base ? ask : `You were asked to build this tool:\n\n${request}`,
     `Your previous attempt failed the build gates:\n\n${repair.failure}`,
     `Previous manifest:\n\`\`\`json\n${repair.previousManifest}\n\`\`\``,
     `Previous source:\n\`\`\`html\n${repair.previousSource}\n\`\`\``,

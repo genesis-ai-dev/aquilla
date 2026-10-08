@@ -42,6 +42,8 @@ export function builderUpstream(env: BuildEnv): { apiKey: string | null; url: st
 export interface BuildRequest {
   request: string
   repair?: { previousSource: string; previousManifest: string; failure: string }
+  /** edit_tool: the version being changed. Absent = build_tool (new tool). */
+  base?: { source: string; manifest: string }
 }
 
 export interface BuildUsage {
@@ -99,7 +101,7 @@ export async function runBuild(env: BuildEnv, req: BuildRequest, fetchImpl: type
       usage: { include: true },
       messages: [
         { role: "system", content: TOOLS_BUILDER_SYSTEM_PROMPT },
-        { role: "user", content: buildUserMessage(req.request, req.repair) },
+        { role: "user", content: buildUserMessage(req.request, req.repair, req.base) },
       ],
     }),
   })

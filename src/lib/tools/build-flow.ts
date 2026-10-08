@@ -25,6 +25,7 @@ export interface BuildFlowDeps {
     request: string
     attempt: number
     repair?: { previousSource: string; previousManifest: string; failure: string }
+    base?: { source: string; manifest: string }
   }) => Promise<BuildAttempt>
   smoke: (source: string, manifest: ToolManifest) => Promise<SmokeResult>
   onPhase?: (phase: BuildPhase) => void
@@ -41,7 +42,13 @@ export interface BuildFlowResult {
   failures: string[]
 }
 
-export async function runBuildFlow(request: string, deps: BuildFlowDeps): Promise<BuildFlowResult> {
+/** `base` turns a build (build_tool) into a change to an existing tool (edit_tool / Heal it). */
+export async function runBuildFlow(
+  request: string,
+  deps: BuildFlowDeps,
+  base?: { source: string; manifest: ToolManifest },
+): Promise<BuildFlowResult> {
+  const baseBody = base ? { base: { source: base.source, manifest: JSON.stringify(base.manifest, null, 2) } } : {}
   let repair: { previousSource: string; previousManifest: string; failure: string } | undefined
   const failures: string[] = []
   let cost = 0
@@ -49,7 +56,7 @@ export async function runBuildFlow(request: string, deps: BuildFlowDeps): Promis
 
   for (let attempt = 0; attempt <= MAX_REPAIRS; attempt++) {
     deps.onPhase?.(repair ? { kind: "repairing", attempt, failure: repair.failure } : { kind: "generating", attempt })
-    const out = await deps.attempt({ request, attempt, ...(repair ? { repair } : {}) })
+    const out = await deps.attempt({ request, attempt, ...(repair ? { repair } : {}), ...baseBody })
     cost += out.usage.cost
     model = out.model
 

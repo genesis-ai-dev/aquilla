@@ -112,6 +112,8 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       list: function (fileId, opts) { return call("cells.list", { fileId: fileId, lane: opts && opts.lane ? opts.lane : "" }); },
       commit: function (edits) { return call("cells.commit", { edits: edits }); },
       validate: function (items) { return call("cells.validate", { items: items }); },
+      // Removed-API marker (apiRev 1): the host answers with api_removed.
+      save: function (edit) { return call("cells.save", edit === undefined ? null : edit); },
     },
     terms: {
       list: function () { return call("terms.list"); },

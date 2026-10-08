@@ -1372,11 +1372,12 @@ describe("AQU-1421 portfolio lane visibility", () => {
     expect(translator.lanes.find((lane) => lane.lane === "")?.name).toBe("Spanish")
   })
 
-  // The wall asks one question per project: is this caller a Maintainer on it,
-  // by any grant path? That is resolveProjectRole's question, and the page now
-  // gets it answered for every project at once, so each path is walked here
-  // through the dashboard itself.
-  it("lifts the wall for a Maintainer role on the project whichever path grants it, and for nothing lower", async () => {
+  // The wall asks one question per project: is this caller a project lead on
+  // it, by any grant path? That is resolveProjectRole's question, and the page
+  // now gets it answered for every project at once, so each path is walked
+  // here through the dashboard itself. AQU-1795 lowered the floor from
+  // Maintainer (600) to project lead (500).
+  it("lifts the wall for a project lead on the project whichever path grants it, and for nothing lower", async () => {
     await seedSplitProject()
     env.LANE_READ_WALL = "1"
     try {
@@ -1398,6 +1399,11 @@ describe("AQU-1421 portfolio lane visibility", () => {
 
       // And a direct Maintainer row does it with the team back at Contributor.
       await sql("UPDATE group_project_grants SET role_level = 400 WHERE group_id = 1 AND project_id = 'pa'")
+      expect(await lanes()).toEqual(["es"])
+      // AQU-1795: a project lead sees every lane. A contributor still does not.
+      await sql("UPDATE project_members SET role_level = 500 WHERE project_id = 'pa' AND user_id = 2")
+      expect(await lanes()).toEqual(["", "es"])
+      await sql("UPDATE project_members SET role_level = 400 WHERE project_id = 'pa' AND user_id = 2")
       expect(await lanes()).toEqual(["es"])
       await sql("UPDATE project_members SET role_level = 600 WHERE project_id = 'pa' AND user_id = 2")
       expect(await lanes()).toEqual(["", "es"])

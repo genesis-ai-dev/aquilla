@@ -31,9 +31,10 @@ beforeEach(() => {
 })
 
 describe("LanguagesSection", () => {
-  it("renders the default target language read-only", () => {
+  it("lists the project's target language with the other target lanes", () => {
     renderSection({ defaultTargetLanguage: "French" })
-    expect(screen.getByText("French")).toBeTruthy()
+    expect(screen.getByTestId("target-lanes-list").textContent).toContain("French")
+    expect(screen.queryByText("Default target language")).toBeNull()
   })
 
   it("renders the existing lanes list", () => {
@@ -43,10 +44,10 @@ describe("LanguagesSection", () => {
     expect(list.textContent).toContain("fr-BE")
   })
 
-  it("shows an empty state when there are no extra lanes", () => {
-    renderSection({ targetLanes: [] })
+  it("shows an empty state when there are no target lanes", () => {
+    renderSection({ defaultTargetLanguage: "", targetLanes: [] })
     expect(screen.queryByTestId("target-lanes-list")).toBeNull()
-    expect(screen.getByText(/no additional lanes yet/i)).toBeTruthy()
+    expect(screen.getByText(/no target lanes yet/i)).toBeTruthy()
   })
 
   it("rejects an empty lane", async () => {
@@ -443,6 +444,12 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
       { ...LANGUAGE_ONLY, language: "Spanish", legacyTag: "Spanish" },
     ])
     expect(screen.getByText("es")).toBeTruthy()
+  })
+
+  it("suggests language names when changing a lane's language", () => {
+    renderIdentity()
+    const field = screen.getByTestId("lane-language-lane-yo")
+    expect(field.getAttribute("role")).toBe("combobox")
   })
 
   it("submits a language edit as a language, not a rename", async () => {

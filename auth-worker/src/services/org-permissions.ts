@@ -1912,8 +1912,9 @@ async function aiDraftedByLane(
 /**
  * Per-project text the caller may see. Null when the wall is off, the caller
  * is a platform admin, or every project on the page is already unrestricted
- * (org Maintainer+, creator, or a resolved role at Maintainer+). A missing map
- * entry means that project stays on the SQL totals.
+ * (org role at project lead or above, creator, or a resolved project role at
+ * project lead or above — AQU-1795). A missing map entry means that project
+ * stays on the SQL totals.
  */
 async function visiblePortfolioText(
   env: Env,

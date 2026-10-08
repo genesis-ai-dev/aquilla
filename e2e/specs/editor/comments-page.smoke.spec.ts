@@ -56,7 +56,7 @@ test("comments page empty state, filters, search, and resolved surface session",
     const composer = drawer.getByRole("textbox", { name: "New thread" })
     await expect(composer).toBeVisible()
     await composer.fill(uniqueText)
-    await drawer.locator('button[type="submit"], button:has-text("Post")').first().click()
+    await drawer.getByRole("button", { name: "Post" }).click()
     await expect(drawer.getByText(uniqueText)).toBeVisible({ timeout: 10_000 })
 
     await alice.goto(`/project/${projectId}/comments`)

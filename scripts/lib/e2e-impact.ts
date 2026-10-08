@@ -145,7 +145,9 @@ function tokensFor(file: string): string[] {
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((token) => token.length >= 5 && !["component", "dialog", "section", "index", "route", "button"].includes(token))
+    // "popover" is chrome, like "dialog". Matching it sent the member-presence
+    // spec out for every language-popover edit.
+    .filter((token) => token.length >= 5 && !["component", "dialog", "section", "index", "route", "button", "popover"].includes(token))
 }
 
 function closestSpecs(file: string, smokeSpecs: string[]): string[] {

@@ -109,6 +109,7 @@ import contextualDecisionsRoutes from "./routes/contextual-decisions"
 import teamRoutes from "./routes/team"
 import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import toolsRoutes from "./routes/tools"
 import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import knowledgeInternalRoutes from "./routes/knowledge-internal"
@@ -335,6 +336,8 @@ app.route("/api/v2/projects", teamHandoffRoutes)
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Aquilla Tools (prototype): sandboxed, agent-built mini-apps (routes/tools.ts).
+app.route("/api/v2/projects", toolsRoutes)
 // Team chat history — the caller's own past agent conversations, listed and
 // reopened (AQU-1653, routes/agent-sessions.ts). Sibling router, same base;
 // read-only, and scoped to (project, user) so it never surfaces another

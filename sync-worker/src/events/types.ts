@@ -388,6 +388,14 @@ export interface EventPayloads {
      * uses this field to enforce harmonize_min_role and to trigger the AD-14
      * endorsement-revocation cascade. Only set by the harmonize sweep path.
      */
+    /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
+    /** Aquilla Tools: set on the compensating events "revert since T" emits. */
+    revert_of_tool?: { toolId: string; sinceMs: number }
     harmonize_origin?: {
       /** Stable id of the built-in check or custom rule that drove the sweep. */
       rule_or_check_id: string
@@ -415,6 +423,12 @@ export interface EventPayloads {
   'cell.validate': {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
+    /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
     /**
      * AQU-538: target-language lane of the validated commit. Absent/'' =
      * default lane — same convention as target.cell.commit. A user's standing

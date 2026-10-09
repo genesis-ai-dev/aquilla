@@ -20,6 +20,11 @@ import { getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload
 import { sanitizeSourceDisplayHtml } from "@/lib/richtext/editor-content"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import type { ToolOrigin, ToolScope } from "../../../shared/tools/manifest"
+import type { ToolEditorServices } from "./editor-services"
+import { LiveEditorData } from "./live-data-editor"
+import { uiStrings, type UiStrings } from "./ui-strings"
+import type { ToolSettingsSection, ToolTypingParams } from "./host-handlers-editor"
+import type { ToolLens } from "../../../shared/tools/editor-api"
 import type {
   HostKey,
   ToolAudioEntry,
@@ -51,6 +56,8 @@ export interface ToolHostServices {
   openComments?: (cellId: string) => void
   /** The file this mount is bound to (claims/comments outside it are refused). */
   fileId?: string
+  /** apiRev 3: the workspace's editor pipeline for `fileId` (editor mounts). */
+  editor?: ToolEditorServices
 }
 
 export type SyncTokenFor = (projectId: string, fileId: string) => Promise<string | null>
@@ -83,6 +90,8 @@ export interface LiveToolDataOptions {
   services?: () => ToolHostServices
   /** apiRev 2: replay an allowlisted host shortcut (host-keys.ts). */
   hostKey?: (key: HostKey) => boolean
+  /** apiRev 3: the user's UI locale (for ui.strings). */
+  locale?: () => string
 }
 
 const CHAPTER_RE = /^(.+?)\s+(\d+)[:.]/
@@ -143,8 +152,16 @@ export class LiveToolData implements ToolHostData {
   readonly watchedFiles = new Set<string>()
   private defaultLane: Promise<{ tag: string; id: string | null }> | null = null
 
+  /** apiRev 3: editor parity surfaces over the workspace's services. */
+  readonly editor: LiveEditorData
+
   constructor(opts: LiveToolDataOptions) {
     this.opts = opts
+    this.editor = new LiveEditorData({
+      services: () => this.services().editor,
+      boundFile: () => this.services().fileId,
+      origin: opts.toolOrigin,
+    })
   }
 
   /** Start the lane lookup and the file's sync token while the frame boots,
@@ -223,6 +240,8 @@ export class LiveToolData implements ToolHostData {
 
   /** apiRev 2: one server page (complete source/target groups per cell). */
   async pageCells(fileId: string, lane: string, cursor: string | null, limit: number): Promise<ToolCellPage> {
+    // Editor mounts read the workspace's own store: one read of the file.
+    if (!lane && this.editor.for(fileId)) return this.editor.page(fileId, cursor, limit)
     const resolved = await this.resolveLane(lane)
     const page = await fetchFileCells(
       this.opts.projectId,
@@ -247,6 +266,7 @@ export class LiveToolData implements ToolHostData {
   /** apiRev 2: re-read specific cells (after cells.changed) instead of the file. */
   async getCells(fileId: string, cellIds: string[], lane: string): Promise<ToolCellView[]> {
     if (cellIds.length === 0) return []
+    if (!lane && this.editor.for(fileId)) return this.editor.get(fileId, cellIds)
     const resolved = await this.resolveLane(lane)
     const rows = await fetchCellsByIds(this.opts.projectId, fileId, cellIds, await this.token(fileId), resolved.tag || undefined)
     const paired = pairRows(rows, resolved.tag, resolved.id)
@@ -258,6 +278,7 @@ export class LiveToolData implements ToolHostData {
   }
 
   async listCells(fileId: string, lane: string): Promise<ToolCellView[]> {
+    if (!lane && this.editor.for(fileId)) return this.editor.all(fileId)
     const paired = await this.loadFile(fileId, lane)
     return [...paired.values()].map((c) => c.view)
   }
@@ -283,6 +304,9 @@ export class LiveToolData implements ToolHostData {
   }
 
   async commit(edits: ToolEdit[]): Promise<ToolWriteResult> {
+    if (edits.length > 0 && edits.every((e) => this.editor.for(e.fileId))) {
+      return this.editor.commit(edits, sanitizeSourceDisplayHtml)
+    }
     const failed: ToolWriteResult["failed"] = []
     const committed: string[] = []
     const inputs: CellCommitInput[] = []
@@ -335,6 +359,7 @@ export class LiveToolData implements ToolHostData {
   }
 
   async validate(items: { fileId: string; cellId: string }[]): Promise<ToolValidateResult> {
+    if (items.length > 0 && items.every((i) => this.editor.for(i.fileId))) return this.editor.setValidation(items, true)
     const validated: string[] = []
     const failed: ToolValidateResult["failed"] = []
     for (const item of items) {
@@ -362,6 +387,7 @@ export class LiveToolData implements ToolHostData {
   }
 
   async unvalidate(items: { fileId: string; cellId: string }[]): Promise<ToolValidateResult> {
+    if (items.length > 0 && items.every((i) => this.editor.for(i.fileId))) return this.editor.setValidation(items, false)
     const validated: string[] = []
     const failed: ToolValidateResult["failed"] = []
     for (const item of items) {
@@ -499,9 +525,42 @@ export class LiveToolData implements ToolHostData {
     return true
   }
 
+  async uiStrings(keys: string[]): Promise<UiStrings> {
+    return uiStrings(this.opts.locale?.() ?? "en", keys)
+  }
+
   async hostKey(key: HostKey): Promise<boolean> {
     return this.opts.hostKey?.(key) ?? false
   }
+
+  // ── apiRev 3: editor parity (live-data-editor.ts) ────────────────────────
+  editorConfig = (fileId: string) => this.editor.editorConfig(fileId)
+  setLane = (fileId: string, tag: string) => this.editor.setLane(fileId, tag)
+  setLens = (lens: ToolLens) => this.editor.setLens(lens)
+  openSettings = (section: ToolSettingsSection) => this.editor.openSettings(section)
+  sections = (fileId: string) => this.editor.sections(fileId)
+  signals = (fileId: string) => this.editor.signals(fileId)
+  pericopes = (fileId: string) => this.editor.pericopes(fileId)
+  settle = (fileId: string, cellId: string) => this.editor.settle(fileId, cellId)
+  termMatches = (fileId: string, cellIds: string[]) => this.editor.termMatches(fileId, cellIds)
+  openTerm = (conceptId: string) => this.editor.openTerm(conceptId)
+  draft = (fileId: string, cellIds: string[], opts: { regenerate: boolean }) => this.editor.draft(fileId, cellIds, opts)
+  draftParagraph = (fileId: string, cellId: string) => this.editor.draftParagraph(fileId, cellId)
+  listBacktranslations = (fileId: string) => this.editor.listBacktranslations(fileId)
+  runBacktranslation = (fileId: string, cellId: string) => this.editor.runBacktranslation(fileId, cellId)
+  saveBacktranslation = (fileId: string, cellId: string, text: string) => this.editor.saveBacktranslation(fileId, cellId, text)
+  openHistory = (fileId: string, cellId: string) => this.editor.openHistory(fileId, cellId)
+  openAttachments = (fileId: string, cellId: string) => this.editor.openAttachments(fileId, cellId)
+  openRule = (fileId: string, cellId: string, ruleId: string) => this.editor.openRule(fileId, cellId, ruleId)
+  listPeers = (fileId: string) => this.editor.listPeers(fileId)
+  typing = (fileId: string, cellId: string, selection: ToolTypingParams | null) => this.editor.typing(fileId, cellId, selection)
+  viewing = (fileId: string, cellId: string | null) => this.editor.viewing(fileId, cellId)
+  recordAudio = (fileId: string, cellId: string) => this.editor.recordAudio(fileId, cellId)
+  generateAudio = (fileId: string, cellId: string) => this.editor.generateAudio(fileId, cellId)
+  setSelection = (fileId: string, cellIds: string[]) => this.editor.setSelection(fileId, cellIds)
+  suggest = (fileId: string, cellId: string, prefix: string) => this.editor.suggest(fileId, cellId, prefix)
+  suggestionFeedback = (fileId: string, cellId: string, suggestionId: string, accepted: boolean) =>
+    this.editor.suggestionFeedback(fileId, cellId, suggestionId, accepted)
 
   private readStore(): Record<string, unknown> {
     try {

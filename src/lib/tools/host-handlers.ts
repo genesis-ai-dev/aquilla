@@ -7,6 +7,9 @@
 
 import { BridgeError, type BridgeHandler } from "./host-bridge"
 import { isToolScope, type ToolScope } from "../../../shared/tools/manifest"
+import type { ToolCellViewRev3 } from "../../../shared/tools/editor-api"
+import { createEditorHandlers, type ToolEditorHostData } from "./host-handlers-editor"
+import { MAX_UI_STRING_KEYS, type UiStrings } from "./ui-strings"
 
 export interface ToolFileView {
   fileId: string
@@ -14,7 +17,7 @@ export interface ToolFileView {
   cellCount: number
 }
 
-export interface ToolCellView {
+export interface ToolCellView extends ToolCellViewRev3 {
   cellId: string
   ref: string | null
   source: string
@@ -75,7 +78,7 @@ export interface ToolValidateResult {
   failed: { cellId: string; reason: string }[]
 }
 
-export interface ToolHostData {
+export interface ToolHostData extends ToolEditorHostData {
   listFiles: () => Promise<ToolFileView[]>
   listCells: (fileId: string, lane: string) => Promise<ToolCellView[]>
   listTerms: () => Promise<ToolTermView[]>
@@ -109,6 +112,8 @@ export interface ToolHostData {
   stopAudio: () => Promise<boolean>
   /** A host shortcut pressed inside the frame (allowlisted by the host). */
   hostKey: (key: HostKey) => Promise<boolean>
+  /** apiRev 3: the app's UI strings in the user's language (ui-strings.ts). */
+  uiStrings: (keys: string[]) => Promise<UiStrings>
 }
 
 export interface HostKey {
@@ -190,6 +195,7 @@ export function parseHostKey(params: unknown): HostKey {
 
 export function createToolHandlers(data: ToolHostData): Record<string, BridgeHandler> {
   return {
+    ...createEditorHandlers(data),
     "files.list": async () => data.listFiles(),
     "cells.list": async (params) => {
       if (!isRecord(params)) bad("params must be an object")
@@ -271,6 +277,11 @@ export function createToolHandlers(data: ToolHostData): Record<string, BridgeHan
     },
     "audio.stop": async () => data.stopAudio(),
     "ui.hostKey": async (params) => data.hostKey(parseHostKey(params)),
+    "ui.strings": async (params) => {
+      if (!isRecord(params) || !Array.isArray(params.keys)) bad("keys must be an array")
+      if (params.keys.length > MAX_UI_STRING_KEYS) bad(`at most ${MAX_UI_STRING_KEYS} keys per call`)
+      return data.uiStrings(params.keys.map((k, i) => str(k, `keys[${i}]`)))
+    },
     "ui.notify": async (params) => {
       if (!isRecord(params) || typeof params.message !== "string") bad("message must be a string")
       data.notify(params.message.slice(0, 300))

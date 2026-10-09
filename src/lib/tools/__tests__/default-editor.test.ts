@@ -33,8 +33,8 @@ function mount(data: ToolHostData) {
     }),
   )
   const q = (sel: string) => pair.doc.querySelector(sel) as HTMLElement | null
-  const row = (cellId: string) => q(`.row[data-cell-id="${cellId}"]`)
-  const tgt = (cellId: string) => row(cellId)?.querySelector(".tgt") as HTMLElement
+  const row = (cellId: string) => q(`.cell[data-cell-id="${cellId}"]`)
+  const tgt = (cellId: string) => row(cellId)?.querySelector("[data-target-read-view]") as HTMLElement
   return { pair, host, stop, q, row, tgt }
 }
 
@@ -60,40 +60,59 @@ describe("first-party default editor", () => {
     expect(await firstPartyToolId("p2", "default-editor")).not.toBe(a)
   })
 
-  it("renders source and target (rich text) with comment, audio and presence badges", async () => {
+  it("renders the built-in's row anatomy: rich text, key terms, issues, signals, comments, audio, locks, peers and chapters", async () => {
     const { row, tgt, q, stop } = mount(populated())
     await vi.waitFor(() => expect(row("c4")).not.toBeNull())
-    expect(row("c1")?.querySelector(".ref")?.textContent).toBe("MAT 1:1")
     expect(tgt("c1").innerHTML).toContain("<b>genealogía</b>")
-    expect(row("c4")?.classList.contains("heading")).toBe(true)
+    expect(row("c1")?.querySelector("[data-editor-cell-surface=source]")?.textContent).toContain("The book of the genealogy")
+    // Key term from terms.matches, issue blot + stale badge + repetition from cells.signals.
+    await vi.waitFor(() => expect(row("c1")?.querySelector(".term[data-concept-id='t1']")?.textContent).toBe("Jesus"))
+    await vi.waitFor(() => expect(row("c2")?.querySelector("[data-testid=stale-source-indicator]")).not.toBeNull())
+    expect(row("c2")?.querySelector(".blot.minor[data-rule-id='r1']")).not.toBeNull()
+    expect(row("c1")?.querySelector("[data-testid=source-repetition-count]")).not.toBeNull()
+    // AI drafting in progress on the empty c3: streaming preview overlay.
+    expect(row("c3")?.querySelector(".ai-overlay")?.textContent).toContain("Jesús nació")
     await vi.waitFor(() => expect(row("c2")?.querySelector("[data-comments='1']")).not.toBeNull())
-    await vi.waitFor(() => expect(row("c1")?.querySelector("[aria-label='Play audio for MAT 1:1']")).not.toBeNull())
-    await vi.waitFor(() => expect(row("c3")?.querySelector("[data-lock='someone']")).not.toBeNull())
-    expect(tgt("c3").getAttribute("contenteditable")).toBe("false")
-    expect(q("#progress")?.textContent).toContain("validated")
+    await vi.waitFor(() => expect(tgt("c3").getAttribute("data-target-locked-by")).toBe("someone"))
+    expect(tgt("c3").getAttribute("aria-readonly")).toBe("true")
+    await vi.waitFor(() => expect(row("c3")?.querySelector("[data-cell-presence]")).not.toBeNull())
+    await vi.waitFor(() => expect(q("#nav-slot nav")?.textContent).toContain("Matthew 1"))
+    expect(q("[data-testid=lane-switcher]")?.textContent).toContain("Español")
+    expect(q("#nav-slot")?.textContent).toContain("Suggested passages")
     stop()
   })
 
-  it("commits on blur (plain + html) and toggles validation", async () => {
+  it("edits like TranslatedEditor: activates on click, commits plain + html on blur, validates and removes its validation", async () => {
     const data = populated()
     const commit = vi.spyOn(data, "commit")
     const validate = vi.spyOn(data, "validate")
     const unvalidate = vi.spyOn(data, "unvalidate")
-    const { row, tgt, stop } = mount(data)
-    await vi.waitFor(() => expect(row("c3")).not.toBeNull())
-    const box = tgt("c3")
-    box.innerHTML = "Jesús nació en <i>Belén</i>"
+    const settle = vi.spyOn(data, "settle")
+    const { row, tgt, pair, stop } = mount(data)
+    await vi.waitFor(() => expect(row("c2")).not.toBeNull())
+    const box = tgt("c2")
+    box.click()
+    await vi.waitFor(() => expect(box.getAttribute("contenteditable")).toBe("true"))
+    box.innerHTML = "Abraham <i>engendró</i> a Isaac"
     box.dispatchEvent(new Event("input"))
-    box.dispatchEvent(new Event("blur"))
+    box.blur()
     await vi.waitFor(() => expect(commit).toHaveBeenCalled())
-    expect(commit.mock.calls[0][0]).toEqual([{ fileId: "f1", cellId: "c3", value: "Jesús nació en Belén", html: "<p>Jesús nació en <i>Belén</i></p>" }])
-    const val = row("c3")!.querySelector(".val") as HTMLButtonElement
-    await vi.waitFor(() => expect(val.disabled).toBe(false))
-    val.click()
-    await vi.waitFor(() => expect(validate).toHaveBeenCalledWith([{ fileId: "f1", cellId: "c3" }]))
-    await vi.waitFor(() => expect(val.getAttribute("aria-pressed")).toBe("true"))
-    val.click()
-    await vi.waitFor(() => expect(unvalidate).toHaveBeenCalledWith([{ fileId: "f1", cellId: "c3" }]))
+    expect(commit.mock.calls[0][0]).toEqual([{ fileId: "f1", cellId: "c2", value: "Abraham engendró a Isaac", html: "<p>Abraham <i>engendró</i> a Isaac</p>" }])
+    await vi.waitFor(() => expect(settle).toHaveBeenCalledWith("f1", "c2"))
+    const val = () => row("c2")!.querySelector("[data-testid=validation-gutter] button") as HTMLButtonElement
+    await vi.waitFor(() => expect(val().getAttribute("aria-pressed")).toBe("false"))
+    val().click()
+    await vi.waitFor(() => expect(validate).toHaveBeenCalledWith([{ fileId: "f1", cellId: "c2" }]))
+    await vi.waitFor(() => expect(val().getAttribute("aria-pressed")).toBe("true"))
+    // Like the built-in: a second click opens the validators list, whose trash removes yours.
+    val().click()
+    const remove = await vi.waitFor(() => {
+      const b = pair.doc.querySelector("[aria-label='Remove your validation']") as HTMLButtonElement | null
+      expect(b).not.toBeNull()
+      return b!
+    })
+    remove.click()
+    await vi.waitFor(() => expect(unvalidate).toHaveBeenCalledWith([{ fileId: "f1", cellId: "c2" }]))
     stop()
   })
 
@@ -107,12 +126,14 @@ describe("first-party default editor", () => {
     await vi.waitFor(() => expect(tgt("c2").textContent).toBe("Abraham fue padre de Isaac"))
     expect(getCells).toHaveBeenCalledWith("f1", ["c2"], "")
 
-    // Unsaved typing in c1: a remote change offers "Use theirs" instead.
+    // Unsaved typing in c1: the remote change offers "Discard and reload" instead.
+    tgt("c1").click()
+    await vi.waitFor(() => expect(tgt("c1").getAttribute("contenteditable")).toBe("true"))
     tgt("c1").textContent = "mi borrador"
     tgt("c1").dispatchEvent(new Event("input"))
     getCells.mockResolvedValueOnce([{ cellId: "c1", ref: "MAT 1:1", source: "x", target: "versión remota", validated: false, chapter: "MAT 1" }])
     host.push({ type: "cells.changed", fileId: "f1", cellIds: ["c1"] })
-    await vi.waitFor(() => expect(row("c1")?.querySelector(".remote")).not.toBeNull())
+    await vi.waitFor(() => expect(row("c1")?.querySelector(".remote-bar")).not.toBeNull())
     expect(tgt("c1").textContent).toBe("mi borrador")
     stop()
   })
@@ -121,12 +142,43 @@ describe("first-party default editor", () => {
     const { row, tgt, host, stop } = mount(populated())
     await vi.waitFor(() => expect(row("c2")).not.toBeNull())
     host.push({ type: "presence.changed", fileId: "f1", holders: { c2: { username: "bob" } } })
-    await vi.waitFor(() => expect(tgt("c2").getAttribute("contenteditable")).toBe("false"))
+    await vi.waitFor(() => expect(tgt("c2").getAttribute("aria-readonly")).toBe("true"))
     expect(row("c2")?.textContent).toContain("bob is editing")
     host.push({ type: "presence.changed", fileId: "f1", holders: {} })
-    await vi.waitFor(() => expect(tgt("c2").getAttribute("contenteditable")).toBe("true"))
-    host.push({ type: "editor.reveal", fileId: "f1", cellId: "c3" })
-    await vi.waitFor(() => expect(row("c3")?.classList.contains("flash")).toBe(true))
+    await vi.waitFor(() => expect(tgt("c2").getAttribute("aria-readonly")).toBe("false"))
+    host.push({ type: "editor.reveal", fileId: "f1", cellId: "c1" })
+    await vi.waitFor(() => expect(row("c1")?.querySelector(".row")?.classList.contains("flash")).toBe(true))
+    stop()
+  })
+
+  it("drafts with the host's AI (confirming before replacing text), selects for the host's bulk bar, and adds a footnote", async () => {
+    const data = populated()
+    const draft = vi.spyOn(data, "draft")
+    const setSelection = vi.spyOn(data, "setSelection")
+    const commit = vi.spyOn(data, "commit")
+    const { row, pair, stop } = mount(data)
+    await vi.waitFor(() => expect(row("c2")).not.toBeNull())
+    ;(row("c2")!.querySelector("[aria-label='Translate with AI']") as HTMLButtonElement).click()
+    const replace = await vi.waitFor(() => {
+      const b = [...pair.doc.querySelectorAll(".dialog button")].find((x) => x.textContent === "Replace") as HTMLButtonElement | undefined
+      expect(b).toBeDefined()
+      return b!
+    })
+    replace.click()
+    await vi.waitFor(() => expect(draft).toHaveBeenCalledWith("f1", ["c2"], { regenerate: false }))
+
+    const sel = row("c1")!.querySelector("[role=checkbox]") as HTMLElement
+    sel.dispatchEvent(new MouseEvent("pointerdown", { button: 0, bubbles: true }))
+    pair.doc.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }))
+    await vi.waitFor(() => expect(setSelection).toHaveBeenCalledWith("f1", ["c1"]))
+
+    ;(row("c2")!.querySelector("[data-slot=cell-action-rail-overflow]") as HTMLButtonElement).click()
+    ;(pair.doc.querySelector(".overflow [aria-label='Add footnote']") as HTMLButtonElement).click()
+    const ta = pair.doc.querySelector(".dialog textarea") as HTMLTextAreaElement
+    ta.value = "Hebreo: engendró"
+    ;([...pair.doc.querySelectorAll(".dialog button")].find((x) => x.textContent === "Add footnote") as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(commit).toHaveBeenCalled())
+    expect(commit.mock.calls.at(-1)![0][0].value).toMatch(/\\f \+ \\fr 1:2 \\ft Hebreo: engendró\\f\*$/)
     stop()
   })
 })

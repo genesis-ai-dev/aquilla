@@ -20,6 +20,10 @@ export function useScopeLabel(): (scope: ToolScope) => string {
           return t("extensions.scope.aiGenerate")
         case "read:comments":
           return t("extensions.scope.readComments")
+        case "ai:draft":
+          return t("extensions.scope.aiDraft")
+        case "write:audio":
+          return t("extensions.scope.writeAudio")
       }
     },
     [t],

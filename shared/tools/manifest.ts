@@ -13,8 +13,12 @@
  *  above TOOLS_MIN_API_REV (api-rev.ts), and are flagged "rebuild" below it.
  *  Rev 2 (additive only): the surfaces the first-party default editor needs —
  *  rich text, paged/targeted reads, unvalidate, presence, comments, audio and
- *  host shortcuts. See API_REV_ADDITIONS in api-rev.ts. */
-export const TOOLS_API_REV = 2
+ *  host shortcuts. Rev 3 (additive only): what full editor parity needs —
+ *  the host's editor config, chapter sections, per-cell signals, AI drafting,
+ *  back-translation, key terms, live presence drafts, suggestions, host
+ *  panels (history, attachments, rules, recorder) and the bulk selection.
+ *  See API_REV_ADDITIONS in api-rev.ts. */
+export const TOOLS_API_REV = 3
 
 /** Every scope a manifest may declare. Reads of project metadata (name, the
  *  current user, theme) need no scope. */
@@ -25,6 +29,8 @@ export const TOOL_SCOPES = [
   "write:validation",
   "ai:generate",
   "read:comments",
+  "ai:draft",
+  "write:audio",
 ] as const
 
 export type ToolScope = (typeof TOOL_SCOPES)[number]
@@ -36,6 +42,8 @@ export const TOOL_SCOPE_LABELS: Record<ToolScope, string> = {
   "write:validation": "mark cells validated",
   "ai:generate": "use AI on your behalf",
   "read:comments": "see comment counts and open comment threads",
+  "ai:draft": "draft and back-translate with Aquilla's AI (uses your project's AI credits)",
+  "write:audio": "record and generate audio for cells",
 }
 
 export function isToolScope(value: unknown): value is ToolScope {

@@ -76,6 +76,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       }
     } else if (msg.type === "event" && msg.event && typeof msg.event.type === "string") {
       if (msg.event.type === "theme" && msg.event.vars) applyTheme(msg.event.vars);
+      if (msg.event.type === "fonts") applyFonts(msg.event.fonts);
       emit(msg.event);
     }
   });
@@ -92,11 +93,37 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     Object.keys(vars).forEach(function (k) {
       if (/^--[a-z0-9-]+$/i.test(k)) root.style.setProperty(k, String(vars[k]));
     });
+    // apiRev 3: the app's light/dark scheme as a class, like the app's own.
+    if (vars["--aq-color-scheme"]) {
+      var dark = vars["--aq-color-scheme"] === "dark";
+      root.classList.toggle("dark", dark);
+      root.style.colorScheme = dark ? "dark" : "light";
+    }
+    // apiRev 3: the app's breakpoints, from the APP's viewport width.
+    var vw = parseFloat(vars["--aq-viewport-width"]);
+    if (vw > 0) {
+      root.classList.toggle("vp-sm", vw >= 640);
+      root.classList.toggle("vp-md", vw >= 768);
+      root.classList.toggle("vp-lg", vw >= 1024);
+      root.classList.toggle("vp-xl", vw >= 1280);
+    }
+  }
+  // apiRev 3: the app font arrives as bytes (no URL can load under the CSP).
+  function applyFonts(fonts) {
+    if (!Array.isArray(fonts) || typeof FontFace === "undefined" || !document.fonts) return;
+    fonts.forEach(function (f) {
+      try {
+        if (!f || typeof f.family !== "string" || !(f.data instanceof ArrayBuffer)) return;
+        var face = new FontFace(f.family, f.data, f.descriptors || {});
+        document.fonts.add(face);
+        face.load().catch(function () {});
+      } catch (err) { /* a font is a nicety, never an error */ }
+    });
   }
   if (boot.theme) applyTheme(boot.theme);
 
   var aquilla = {
-    apiRev: 2,
+    apiRev: 3,
     context: Object.freeze({
       tool: boot.tool || null,
       project: boot.project || null,
@@ -118,16 +145,56 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       commit: function (edits) { return call("cells.commit", { edits: edits }); },
       validate: function (items) { return call("cells.validate", { items: items }); },
       unvalidate: function (items) { return call("cells.unvalidate", { items: items }); },
+      // apiRev 3: chapter/section paging, host-computed per-cell signals, and
+      // "the user left this cell" (pays owed repetition propagation).
+      sections: function (fileId) { return call("cells.sections", { fileId: fileId }); },
+      signals: function (fileId) { return call("cells.signals", { fileId: fileId }); },
+      pericopes: function (fileId) { return call("cells.pericopes", { fileId: fileId }); },
+      settle: function (fileId, cellId) { return call("cells.settle", { fileId: fileId, cellId: cellId }); },
       // Removed-API marker (apiRev 1): the host answers with api_removed.
       save: function (edit) { return call("cells.save", edit === undefined ? null : edit); },
     },
     terms: {
       list: function () { return call("terms.list"); },
+      matches: function (fileId, cellIds) { return call("terms.matches", { fileId: fileId, cellIds: cellIds }); },
+      open: function (conceptId) { return call("terms.open", { conceptId: conceptId }); },
+    },
+    // apiRev 3: the host editor's configuration and workspace controls.
+    editor: {
+      config: function (fileId) { return call("editor.config", { fileId: fileId }); },
+      setLane: function (fileId, lane) { return call("editor.setLane", { fileId: fileId, lane: String(lane || "") }); },
+      setLens: function (lens) { return call("editor.setLens", { lens: lens }); },
+      openSettings: function (section) { return call("editor.openSettings", { section: section }); },
+    },
+    backtranslation: {
+      list: function (fileId) { return call("backtranslation.list", { fileId: fileId }); },
+      run: function (fileId, cellId) { return call("backtranslation.run", { fileId: fileId, cellId: cellId }); },
+      save: function (fileId, cellId, text) { return call("backtranslation.save", { fileId: fileId, cellId: cellId, text: String(text) }); },
+    },
+    history: {
+      open: function (fileId, cellId) { return call("history.open", { fileId: fileId, cellId: cellId }); },
+    },
+    attachments: {
+      open: function (fileId, cellId) { return call("attachments.open", { fileId: fileId, cellId: cellId }); },
+    },
+    rules: {
+      open: function (fileId, cellId, ruleId) { return call("rules.open", { fileId: fileId, cellId: cellId, ruleId: ruleId }); },
+    },
+    selection: {
+      set: function (fileId, cellIds) { return call("selection.set", { fileId: fileId, cellIds: cellIds }); },
+    },
+    suggestions: {
+      get: function (fileId, cellId, prefix) { return call("suggestions.get", { fileId: fileId, cellId: cellId, prefix: String(prefix || "") }); },
+      feedback: function (fileId, cellId, suggestionId, accepted) { return call("suggestions.feedback", { fileId: fileId, cellId: cellId, suggestionId: suggestionId, accepted: !!accepted }); },
     },
     presence: {
       list: function (fileId) { return call("presence.list", { fileId: fileId }); },
       claim: function (fileId, cellId) { return call("presence.claim", { fileId: fileId, cellId: cellId }); },
       release: function (fileId, cellId) { return call("presence.release", { fileId: fileId, cellId: cellId }); },
+      // apiRev 3: collaborators (colour, live draft), your own live draft, where you are.
+      peers: function (fileId) { return call("presence.peers", { fileId: fileId }); },
+      typing: function (fileId, cellId, selection) { return call("presence.typing", { fileId: fileId, cellId: cellId, selection: selection || null }); },
+      view: function (fileId, cellId) { return call("presence.view", { fileId: fileId, cellId: cellId || null }); },
     },
     comments: {
       counts: function (fileId) { return call("comments.counts", { fileId: fileId }); },
@@ -137,6 +204,9 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       list: function (fileId) { return call("audio.list", { fileId: fileId }); },
       play: function (fileId, cellId) { return call("audio.play", { fileId: fileId, cellId: cellId }); },
       stop: function () { return call("audio.stop"); },
+      // apiRev 3: the HOST records (it owns the microphone) and synthesizes.
+      record: function (fileId, cellId) { return call("audio.record", { fileId: fileId, cellId: cellId }); },
+      generate: function (fileId, cellId) { return call("audio.generate", { fileId: fileId, cellId: cellId }); },
     },
     storage: {
       get: function (key) { return call("storage.get", { key: key }); },
@@ -149,6 +219,8 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     },
     ui: {
       notify: function (message) { return call("ui.notify", { message: String(message) }); },
+      // apiRev 3: the app's UI strings in the user's language.
+      strings: function (keys) { return call("ui.strings", { keys: keys }); },
       hostKey: function (k) {
         return call("ui.hostKey", { key: String(k && k.key || ""), mod: !!(k && k.mod), shift: !!(k && k.shift), alt: !!(k && k.alt) });
       },
@@ -157,6 +229,9 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       generate: function (prompt, opts) {
         return call("ai.generate", { prompt: String(prompt), system: opts && opts.system ? String(opts.system) : "", maxTokens: opts && opts.maxTokens ? Number(opts.maxTokens) : 0 });
       },
+      // apiRev 3: the app's own drafting pipeline (examples, brief, credits).
+      draft: function (fileId, cellIds, opts) { return call("ai.draft", { fileId: fileId, cellIds: cellIds, regenerate: !!(opts && opts.regenerate) }); },
+      draftParagraph: function (fileId, cellId) { return call("ai.draftParagraph", { fileId: fileId, cellId: cellId }); },
     },
     tell: function (message) { return call("tell", { message: String(message) }); },
     on: function (type, cb) {
@@ -170,6 +245,8 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   Object.freeze(aquilla.files); Object.freeze(aquilla.cells); Object.freeze(aquilla.terms);
   Object.freeze(aquilla.presence); Object.freeze(aquilla.comments); Object.freeze(aquilla.audio);
   Object.freeze(aquilla.storage); Object.freeze(aquilla.permissions); Object.freeze(aquilla.ui); Object.freeze(aquilla.ai);
+  Object.freeze(aquilla.editor); Object.freeze(aquilla.backtranslation); Object.freeze(aquilla.history); Object.freeze(aquilla.attachments);
+  Object.freeze(aquilla.rules); Object.freeze(aquilla.selection); Object.freeze(aquilla.suggestions);
   Object.defineProperty(window, "aquilla", { value: Object.freeze(aquilla), writable: false, configurable: false });
 
   // apiRev 2: focus handoff. App-wide shortcuts (Ctrl/Cmd+K search, the

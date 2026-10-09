@@ -74,6 +74,40 @@ through the global \`aquilla\` object the host injects before your code runs.
 - aquilla.on("editor.reveal", (e) => …) — e = { fileId, cellId }: the app asks the editor to show/focus that cell
   (also aquilla.context.file.revealCellId at load).
 
+### apiRev 3 — full editor surfaces (an "editor" mount reaches the app's own pipeline; other mounts get "not_available")
+- aquilla.editor.config(fileId) → { fileName, sourceLabel, targetLabel, lanes:[{tag,label,code}], activeLane, validationRequirement,
+    canEdit, canValidate, autoValidatesOwnEdits, sourceFontSize, targetFontSize, sourceDirection, targetDirection, lineNumbers,
+    cellLabels, ai:{configured,available}, backtranslation:{configured}, health, footnotes:"inline"|"tray"|"off", lens, lenses, panels }   scope read:cells
+- aquilla.editor.setLane(fileId, laneTag) / aquilla.editor.setLens("text"|"audio"|"agent") → boolean   scope read:cells
+- aquilla.editor.openSettings("target-language"|"lanes"|"terminology") — open the app's settings there.   scope read:cells
+- aquilla.cells.sections(fileId) → [{ key, kind, label, shortLabel, description, firstCellId, cellIds, translated, validated, total, subsections }]
+    chapters/sections for a navigator.   scope read:cells
+- aquilla.cells.signals(fileId) → { stale, upstreamStale, assignments, repetition, issues:{[cellId]:[{ruleId,ruleName,message,severity,spans,waived}]},
+    health, ai:{[cellId]:{phase,preview,error}}, backtranslating, remoteChanged }   scope read:cells
+- aquilla.cells.pericopes(fileId) → [{ key, label, detail, cellId }] — suggested passages to work on next.   scope read:cells
+- aquilla.cells.settle(fileId, cellId) — the user left a cell they edited (the host may propagate repetitions).   scope write:target
+- Editor-mount cells also carry: validators, validationStatus, paragraphStart, label, context, footnotes, hasAudio, attachmentCount,
+    hidden, waivedRuleIds, ribbon:{stage,background,score,label}, numberLabel, paragraph:{size,draftable}.
+- aquilla.terms.matches(fileId, [cellId…]) → { [cellId]: [{ side, start, end, term, conceptId, renderings, forbidden? }] }   scope read:terms
+- aquilla.terms.open(conceptId) — opens the term in the app.   scope read:terms
+- aquilla.ai.draft(fileId, [cellId…], { regenerate? }) / aquilla.ai.draftParagraph(fileId, cellId) — the app's own drafting (examples,
+    brief, credits); progress arrives as signals, the draft as cells.changed.   scope ai:draft
+- aquilla.backtranslation.list(fileId) → { [cellId]: { text, stale, polished, author, error } }   scope read:cells;
+    aquilla.backtranslation.run(fileId, cellId) (scope ai:draft); aquilla.backtranslation.save(fileId, cellId, text) (scope write:target)
+- aquilla.history.open(fileId, cellId) / aquilla.attachments.open(fileId, cellId) / aquilla.rules.open(fileId, cellId, ruleId)
+    — open the app's own panel for that cell.   scope read:cells
+- aquilla.presence.peers(fileId) → [{ username, color, cellId, editing, draftText, caret }]   scope read:cells
+- aquilla.presence.typing(fileId, cellId, { anchor, head, draftText } | null) — share your live draft (scope write:target);
+    aquilla.presence.view(fileId, cellId|null) — where you are (scope read:cells)
+- aquilla.audio.record(fileId, cellId) — opens the app's recorder; aquilla.audio.generate(fileId, cellId) — synthesize the line.   scope write:audio
+- aquilla.selection.set(fileId, [cellId…]) — select cells; the app shows its bulk actions bar.   scope read:cells
+- aquilla.suggestions.get(fileId, cellId, prefix) → [{ id, text, source }] ghost-text continuations;
+    aquilla.suggestions.feedback(fileId, cellId, id, accepted).   scope read:cells
+- aquilla.ui.strings([key…]) → { locale, dir, strings } — the app's own UI strings (editor./common./… keys) in the user's language.
+- Events: "signals.changed", "presence.peers" ({ peers }), "selection.changed" ({ cellIds }), "config.changed",
+    "backtranslation.changed", "cells.structure" (cells added/removed: re-page), "cells.loaded", "editor.chrome" ({ trailingWidth }
+    — the app draws its file toolbar over your top-right corner; keep that width clear).
+
 Every bridge error is an Error with a .code. Wrap awaits in try/catch and show errors in the UI.
 Start your script with: \`(async () => { … })()\` and render a loading state first.
 

@@ -35,12 +35,44 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   "comments.open": "read:comments",
   "audio.list": "read:cells",
   "audio.play": "read:cells",
+  // apiRev 3 (editor parity)
+  "editor.config": "read:cells",
+  "editor.setLane": "read:cells",
+  "editor.setLens": "read:cells",
+  "editor.openSettings": "read:cells",
+  "cells.sections": "read:cells",
+  "cells.signals": "read:cells",
+  "cells.pericopes": "read:cells",
+  // Settling a cell pays repetition propagation: more target writes.
+  "cells.settle": "write:target",
+  "terms.matches": "read:terms",
+  "terms.open": "read:terms",
+  "ai.draft": "ai:draft",
+  "ai.draftParagraph": "ai:draft",
+  "backtranslation.list": "read:cells",
+  "backtranslation.run": "ai:draft",
+  "backtranslation.save": "write:target",
+  "history.open": "read:cells",
+  "attachments.open": "read:cells",
+  "rules.open": "read:cells",
+  "presence.peers": "read:cells",
+  // Your live draft is shown to collaborators: the first half of an edit.
+  "presence.typing": "write:target",
+  "presence.view": "read:cells",
+  "audio.record": "write:audio",
+  "audio.generate": "write:audio",
+  "selection.set": "read:cells",
+  "suggestions.get": "read:cells",
+  "suggestions.feedback": "read:cells",
 }
 
 /** The event kind whose server role floor bounds each write scope. */
 const SCOPE_EVENT_KIND: Partial<Record<ToolScope, string>> = {
   "write:target": "target.cell.commit",
   "write:validation": "cell.validate",
+  // An AI draft lands as a target commit; generated/recorded audio as an attach.
+  "ai:draft": "target.cell.commit",
+  "write:audio": "cell.audio.attach",
 }
 
 /** Whether a user at `roleLevel` could perform this scope themselves. Reads

@@ -5,7 +5,7 @@
  * production hosting plan (dedicated tools origin).
  */
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AlertTriangle, Wand2, X } from "lucide-react"
 import { isToolStale, rebuildRequest } from "../../../shared/tools/api-rev"
 import { healRequest } from "./useEditTool"
@@ -39,12 +39,27 @@ export interface ToolFrameProps {
   services?: ToolHostServices
   /** apiRev 2: deep-linked cell to show (initial + live). */
   revealCellId?: string | null
+  /** apiRev 3: host chrome drawn over the frame's top-right corner (the
+   *  editor's own file toolbar). Its size is pushed to the extension as
+   *  `editor.chrome` so the extension keeps that corner clear. */
+  frameOverlay?: ReactNode
 }
 
-export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null }: ToolFrameProps) {
+export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null, frameOverlay }: ToolFrameProps) {
   const t = useT()
   const frameRef = useRef<HTMLIFrameElement | null>(null)
-  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId })
+  const overlayRef = useRef<HTMLDivElement | null>(null)
+  const [chrome, setChrome] = useState<{ trailingWidth: number; trailingHeight: number } | null>(null)
+  useEffect(() => {
+    const el = overlayRef.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const measure = () => setChrome({ trailingWidth: Math.ceil(el.offsetWidth), trailingHeight: Math.ceil(el.offsetHeight) })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [frameOverlay])
+  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome })
   // The first reveal rides in the boot data (so the editor opens there); later
   // ones are pushed live. Read once per frame load.
   const [initialReveal] = useState(revealCellId)
@@ -106,14 +121,25 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
           </Button>
         </div>
       )}
-      <iframe
-        ref={frameRef}
-        title={t("extensions.frame.title", { name: tool.name })}
-        sandbox={TOOL_SANDBOX}
-        referrerPolicy="no-referrer"
-        srcDoc={srcdoc}
-        className="min-h-0 w-full flex-1 border-0 bg-background"
-      />
+      <div className="relative flex min-h-0 w-full flex-1 flex-col">
+        <iframe
+          ref={frameRef}
+          title={t("extensions.frame.title", { name: tool.name })}
+          sandbox={TOOL_SANDBOX}
+          referrerPolicy="no-referrer"
+          srcDoc={srcdoc}
+          className="min-h-0 w-full flex-1 border-0 bg-background"
+        />
+        {frameOverlay && (
+          <div
+            ref={overlayRef}
+            data-testid="extension-frame-chrome"
+            className="absolute end-0 top-0 z-10 flex h-12 items-center pe-2"
+          >
+            {frameOverlay}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

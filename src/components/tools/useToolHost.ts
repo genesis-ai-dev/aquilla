@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { toast } from "@/components/ui/toast"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { useOutbox } from "@/context/OutboxContext"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -17,6 +18,7 @@ import { LiveToolData, type ToolHostServices } from "@/lib/tools/live-data"
 import { dispatchHostKey } from "@/lib/tools/host-keys"
 import { METHOD_SCOPES, applyPromptAnswer, decideScope, type PromptAnswer } from "@/lib/tools/permissions"
 import { readThemeVars } from "@/lib/tools/srcdoc"
+import { loadFrameFonts } from "@/lib/tools/frame-fonts"
 import { setToolGrant, type ToolDetail } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
 import type { PendingPrompt } from "./PermissionPrompt"
@@ -32,6 +34,8 @@ export interface UseToolHostArgs {
   services?: ToolHostServices
   /** apiRev 2: a cell the host wants the extension to show (deep link). */
   revealCellId?: string | null
+  /** apiRev 3: size of the host chrome drawn over the frame's top-right. */
+  chrome?: { trailingWidth: number; trailingHeight: number } | null
 }
 
 export interface ToolHostState {
@@ -46,7 +50,7 @@ export interface ToolHostState {
   ready: boolean
 }
 
-export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange, services, revealCellId }: UseToolHostArgs): ToolHostState {
+export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome }: UseToolHostArgs): ToolHostState {
   const { flushNow } = useOutbox()
   const [prompt, setPrompt] = useState<PendingPrompt | null>(null)
   const [errors, setErrors] = useState<ToolErrorReport[]>([])
@@ -60,6 +64,12 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   const flushRef = useRef(flushNow)
   const grantCbRef = useRef(onGrantChange)
   const hostRef = useRef<BridgeHost | null>(null)
+  const { locale } = useI18n()
+  const localeRef = useRef(locale)
+  useEffect(() => {
+    localeRef.current = locale
+  }, [locale])
+  const dataRef = useRef<LiveToolData | null>(null)
   const servicesRef = useRef<ToolHostServices | undefined>(services)
   useEffect(() => {
     servicesRef.current = services
@@ -138,6 +148,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       storageKey: `aquilla.tools.storage.v1:${session.username}:${projectId}:${toolId}`,
       services: () => servicesRef.current ?? {},
       hostKey: (key) => dispatchHostKey(key),
+      locale: () => localeRef.current,
     })
     const warmFile = servicesRef.current?.fileId
     if (warmFile) data.warm(warmFile)
@@ -154,6 +165,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       onToolError: (err) => setErrors((prev) => [...prev.slice(-4), err]),
     })
     hostRef.current = host
+    dataRef.current = data
     const stop = host.listen()
 
     // Live push: after any applied write to a file the tool has listed, drop
@@ -190,6 +202,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       unsubscribeRemote()
       if (timer) clearTimeout(timer)
       hostRef.current = null
+      dataRef.current = null
     }
   }, [projectId, session, toolId, toolVersion, codeHash, toolName, ask, frameRef])
 
@@ -207,6 +220,75 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     if (!ready || !commentCounts) return
     hostRef.current?.push({ type: "comments.changed", fileId: boundFile ?? null })
   }, [ready, commentCounts, boundFile])
+  // apiRev 3: the editor pipeline's live state. Each push names what changed;
+  // the extension re-reads through the bridge (scope-gated as usual).
+  const editor = services?.editor
+  const editorStore = editor?.store
+  useEffect(() => {
+    if (!ready || !editorStore || !boundFile) return
+    // Store bumps (own optimistic edits, AI drafts landing, remote edits via
+    // the project socket, revalidation): name exactly the cells the extension
+    // has read whose version moved. List changes (insert/remove/hide) re-page.
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const flush = () => {
+      timer = null
+      const data = dataRef.current
+      const current = servicesRef.current?.editor
+      if (!data || !current) return
+      const changed = data.editor.changedSinceSeen(current)
+      if (changed.length > 0) hostRef.current?.push({ type: "cells.changed", fileId: boundFile, cellIds: changed })
+    }
+    const unsubAll = editorStore.subscribeAll(() => {
+      if (!timer) timer = setTimeout(flush, 60)
+    })
+    // Only a real change to the cell list (insert, remove, hide, reorder) —
+    // the list version also moves on edits that leave the order alone.
+    let lastIds = editorStore.getCellIds().join("\u0001")
+    const unsubList = editorStore.subscribeList(() => {
+      const ids = editorStore.getCellIds().join("\u0001")
+      if (ids === lastIds) return
+      lastIds = ids
+      hostRef.current?.push({ type: "cells.structure", fileId: boundFile })
+    })
+    return () => {
+      unsubAll()
+      unsubList()
+      if (timer) clearTimeout(timer)
+    }
+  }, [ready, editorStore, boundFile])
+  const editorSignals = editor?.signals
+  const editorPeers = editor?.peers
+  const editorSelection = editor?.selection
+  const editorConfig = editor?.config
+  const editorBts = editor?.backtranslations
+  const editorLoading = editor?.storeLoading
+  const editorPericopes = editor?.pericopes
+  useEffect(() => {
+    if (ready && editorPericopes) hostRef.current?.push({ type: "pericopes.changed", fileId: boundFile ?? null })
+  }, [ready, editorPericopes, boundFile])
+  useEffect(() => {
+    if (ready && editorSignals) hostRef.current?.push({ type: "signals.changed", fileId: boundFile ?? null })
+  }, [ready, editorSignals, boundFile])
+  useEffect(() => {
+    if (ready && editorPeers) hostRef.current?.push({ type: "presence.peers", fileId: boundFile ?? null, peers: editorPeers })
+  }, [ready, editorPeers, boundFile])
+  useEffect(() => {
+    if (ready && editorSelection) hostRef.current?.push({ type: "selection.changed", fileId: boundFile ?? null, cellIds: [...editorSelection] })
+  }, [ready, editorSelection, boundFile])
+  useEffect(() => {
+    if (ready && editorConfig) hostRef.current?.push({ type: "config.changed", fileId: boundFile ?? null })
+  }, [ready, editorConfig, boundFile])
+  useEffect(() => {
+    if (ready && editorBts) hostRef.current?.push({ type: "backtranslation.changed", fileId: boundFile ?? null })
+  }, [ready, editorBts, boundFile])
+  useEffect(() => {
+    if (ready && editorLoading === false) hostRef.current?.push({ type: "cells.loaded", fileId: boundFile ?? null })
+  }, [ready, editorLoading, boundFile])
+  const chromeWidth = chrome?.trailingWidth ?? 0
+  const chromeHeight = chrome?.trailingHeight ?? 0
+  useEffect(() => {
+    if (ready) hostRef.current?.push({ type: "editor.chrome", trailingWidth: chromeWidth, trailingHeight: chromeHeight })
+  }, [ready, chromeWidth, chromeHeight])
   // Deep links (search result, navigation, ?cellId=): ask the extension to
   // show the cell, and hand it keyboard focus.
   useEffect(() => {
@@ -215,11 +297,35 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     frameRef.current?.contentWindow?.focus()
   }, [ready, revealCellId, boundFile, frameRef])
 
+  // apiRev 3: the app font's bytes, once the frame is listening.
+  useEffect(() => {
+    if (!ready) return
+    let alive = true
+    loadFrameFonts()
+      .then((fonts) => {
+        if (alive) hostRef.current?.push({ type: "fonts", fonts })
+      })
+      .catch((err) => console.warn("[tools] app font for the frame failed:", err))
+    return () => {
+      alive = false
+    }
+  }, [ready])
   // Theme: forward the app's CSS variables when light/dark flips.
   useEffect(() => {
     const observer = new MutationObserver(() => hostRef.current?.push({ type: "theme", vars: readThemeVars() }))
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "style"] })
-    return () => observer.disconnect()
+    // The app's breakpoints follow its viewport: re-send on resize.
+    let raf = 0
+    const onResize = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => hostRef.current?.push({ type: "theme", vars: readThemeVars() }))
+    }
+    window.addEventListener("resize", onResize)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", onResize)
+      cancelAnimationFrame(raf)
+    }
   }, [])
 
   return {

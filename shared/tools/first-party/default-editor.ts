@@ -19,10 +19,10 @@ export const FIRST_PARTY_DEFAULT_EDITOR = "default-editor"
 export const DEFAULT_EDITOR_MANIFEST: ToolManifest = {
   name: "Aquilla Editor",
   description:
-    "The standard translation editor, as a first-party extension: source and target side by side, rich text, validate, live edits and presence, comments and audio.",
-  scopes: ["read:cells", "write:target", "write:validation", "read:comments"],
+    "The standard translation editor, as a first-party extension: the full editing experience — rich text, validation, AI drafting, back-translation, key terms, rule issues, footnotes, live presence, comments, history and audio.",
+  scopes: ["read:cells", "read:terms", "write:target", "write:validation", "read:comments", "ai:draft", "write:audio"],
   mounts: ["page", "editor"],
-  apiRev: 2,
+  apiRev: 3,
 }
 
 export const DEFAULT_EDITOR_SOURCE = `<!doctype html>

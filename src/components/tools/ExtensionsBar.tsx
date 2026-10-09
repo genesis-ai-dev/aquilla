@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ExtensionEditorChoice } from "./ExtensionEditor"
-import { ExtensionEditorSwitcher } from "./ExtensionEditor"
+import { ExtensionEditorSwitcher, FirstPartyBadge } from "./ExtensionEditor"
 import { useToolsMount } from "./ToolsMountContext"
 
 export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
@@ -46,6 +46,7 @@ export function ExtensionsBar({ choice }: { choice: ExtensionEditorChoice }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-3 py-1 text-xs" data-testid="extensions-bar">
       <ExtensionEditorSwitcher choice={choice} />
+      <FirstPartyBadge toolId={choice.selected} />
       {pinned.map((tool) => (
         <Button key={tool.id} size="xs" variant="outline" onClick={() => ctx.openInPanel(tool.id)} data-testid="pinned-extension">
           <Pin className="size-3" aria-hidden />

@@ -7,7 +7,7 @@
  *   cell, which the tool receives as `aquilla.context.cell`.
  */
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { ExternalLink, Settings2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -33,6 +33,7 @@ export function MountedTool({
   className,
   services,
   revealCellId,
+  frameOverlay,
 }: {
   toolId: string
   mount: "panel" | "inline" | "editor"
@@ -42,6 +43,7 @@ export function MountedTool({
   /** apiRev 2: workspace services (editor mount). */
   services?: ToolHostServices
   revealCellId?: string | null
+  frameOverlay?: ReactNode
 }) {
   const ctx = useToolsMount()
   const { project, roleLevel } = useProject(ctx?.projectId ?? "")
@@ -68,6 +70,7 @@ export function MountedTool({
       className={className}
       {...(services ? { services } : {})}
       {...(revealCellId !== undefined ? { revealCellId } : {})}
+      {...(frameOverlay ? { frameOverlay } : {})}
     />
   )
 }

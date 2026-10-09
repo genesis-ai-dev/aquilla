@@ -77,6 +77,17 @@ export const THEME_VARS = [
   "--border",
   "--destructive",
   "--ring",
+  // apiRev 3: enough of the app's tokens to match it pixel for pixel.
+  "--popover",
+  "--popover-foreground",
+  "--secondary",
+  "--secondary-foreground",
+  "--input",
+  "--radius",
+  "--font-sans",
+  "--shadow-soft-xs",
+  "--shadow-soft-sm",
+  "--shadow-soft",
 ] as const
 
 /** Read the app's current theme variables from the host document. */
@@ -87,6 +98,12 @@ export function readThemeVars(doc: Document = document): Record<string, string> 
     const v = style.getPropertyValue(name).trim()
     if (v) out[name] = v
   }
+  // apiRev 3: light/dark, so an extension can pick its palette variants.
+  out["--aq-color-scheme"] = doc.documentElement.classList.contains("dark") ? "dark" : "light"
+  // The APP's viewport width: the app's own layout breakpoints (md/lg/xl)
+  // key off it, not off the frame's width.
+  const view = doc.defaultView
+  if (view) out["--aq-viewport-width"] = `${view.innerWidth}px`
   return out
 }
 

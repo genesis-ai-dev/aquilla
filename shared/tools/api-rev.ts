@@ -45,6 +45,20 @@ export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
     "audio.list / audio.play / audio.stop",
     "ui.hostKey (+ automatic forwarding of host shortcuts) and the editor.reveal event",
   ],
+  3: [
+    "editor.config / editor.setLane / editor.setLens (+ config.changed, editor.chrome events)",
+    "cells.sections / cells.signals / cells.settle (+ signals.changed, cells.structure, cells.loaded events)",
+    "editor-mount cell fields: validators, validationStatus, paragraphStart, label, context, footnotes, hasAudio, attachmentCount, hidden, waivedRuleIds, ribbon, numberLabel, paragraph",
+    "terms.matches / terms.open",
+    "ai.draft / ai.draftParagraph (scope ai:draft)",
+    "backtranslation.list / backtranslation.run / backtranslation.save (+ backtranslation.changed)",
+    "history.open / attachments.open / rules.open (host panels)",
+    "presence.peers / presence.typing / presence.view (+ presence.peers event)",
+    "audio.record / audio.generate (scope write:audio)",
+    "selection.set (+ selection.changed): the host's bulk selection bar",
+    "suggestions.get / suggestions.feedback: ghost text from host providers",
+    "ui.strings: the app's UI strings in the user's language; theme adds color scheme + viewport; fonts event carries the app font bytes",
+  ],
 }
 
 export function removedApi(method: string): RemovedApi | null {

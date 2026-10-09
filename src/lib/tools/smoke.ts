@@ -14,6 +14,8 @@ import { createBridgeHost, type ToolErrorReport } from "./host-bridge"
 import { createToolHandlers, type ToolAudioEntry, type ToolCellView, type ToolHostData, type ToolPresence } from "./host-handlers"
 import { TOOL_SANDBOX, buildToolSrcdoc } from "./srcdoc"
 import type { ToolManifest } from "../../../shared/tools/manifest"
+import { stubEditorData } from "./smoke-editor"
+import { uiStrings } from "./ui-strings"
 
 export const SMOKE_LOAD_TIMEOUT_MS = 8000
 export const SMOKE_QUIET_MS = 900
@@ -72,6 +74,7 @@ const SAMPLE_CELLS: ToolCellView[] = [
 function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostData {
   const store = new Map<string, unknown>()
   return {
+    ...stubEditorData(populated),
     listFiles: async () => (populated ? [{ fileId: "f1", name: "MAT", cellCount: SAMPLE_CELLS.length }, { fileId: "f2", name: "Empty", cellCount: 0 }] : []),
     listCells: async (fileId) => (populated && fileId === "f1" ? SAMPLE_CELLS.map((c) => ({ ...c })) : []),
     listTerms: async () =>
@@ -115,6 +118,7 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
     playAudio: async () => true,
     stopAudio: async () => true,
     hostKey: async () => false,
+    uiStrings: async (keys) => uiStrings("en", keys),
   }
 }
 

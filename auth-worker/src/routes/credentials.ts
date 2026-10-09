@@ -260,7 +260,7 @@ credentials.delete("/:id", authMiddleware, async (c) => {
   // credential gets the same 404 whether the id exists or not, rather than a
   // distinguishing 403 — collapsing an existence oracle on an otherwise-opaque
   // resource id. Only the real owner (or a platform admin) sees past this.
-  if (!row || (row.user_id !== String(user.id) && !isPlatformAdmin(c))) {
+  if (!row || (row.user_id !== String(user.id) && !(await isPlatformAdmin(c)))) {
     return c.json({ error: "not_found", message: "Credential not found." }, 404)
   }
 

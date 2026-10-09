@@ -127,7 +127,7 @@ mode = "smart"
 # NOTE: like placement/observability, [triggers] is NOT inherited by env
 # blocks — keep the env-block copies below in sync.
 [triggers]
-# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# Second/third entries: retention recap emails to the platform admins — weekly Monday
 # 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
@@ -176,11 +176,13 @@ GITLAB_URL = "https://git.genesisrnd.com"
 # AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-url>"
 # Site-wide admin surface (/api/v2/admin/*) identity, by ACCOUNT EMAIL — usernames
 # don't matter. Separate axis from the org role ladder; see platform-admin.ts.
+# Who is an admin lives in the `platform_admins` table, NOT here (AQU-1239: the
+# repo is public). ADMIN_EMAILS is an optional bootstrap var, set only by the
+# local dev-stack, e2e and self-hosters; deployed envs leave it unset.
 # ADMIN_REQUIRE_ELEVATION="true" adds the emailed 6-digit step-up code (→ 6h
 # session); bypassed under WRANGLER_LOCAL=1 (local dev-stack / e2e) so the local
-# console stays open. The named production profile re-declares both values below;
+# console stays open. The named production profile re-declares it below;
 # the unnamed profile is local-only and is never a production deploy source.
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (non-secret ids; empty defaults — set real values per
 # deploy). Secrets MONDAY_CLIENT_SECRET + MONDAY_SIGNING_SECRET go through
@@ -226,7 +228,7 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either.
 [env.production.triggers]
-# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# Second/third entries: retention recap emails to the platform admins — weekly Monday
 # 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
@@ -281,7 +283,6 @@ DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # PostHog ingest region + *project* token (public — same one shipped in the SPA
 # bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
@@ -333,7 +334,7 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either.
 [env.development.triggers]
-# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# Second/third entries: retention recap emails to the platform admins — weekly Monday
 # 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
 crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
@@ -410,7 +411,6 @@ GITLAB_URL = "https://git.genesisrnd.com"
 # own runtime, not a developer laptop. Local dev-stack injects either its
 # optional :8790 container or an explicitly configured remote endpoint.
 # AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-dev-url>"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"

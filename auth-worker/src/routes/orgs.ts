@@ -199,7 +199,7 @@ orgs.get("/", async (c) => {
     : list
   const memberItems = memberships.map((o) => toMemberItem(o, personalId))
 
-  if (!pickerMode || !isPlatformAdminEmail(c.env, user.email)) {
+  if (!pickerMode || !(await isPlatformAdminEmail(c.env, user.email))) {
     return c.json({ orgs: memberItems, nextCursor: null })
   }
 
@@ -301,7 +301,7 @@ orgs.get("/:orgId", async (c) => {
   ).bind(orgId).first<{ id: number; name: string | null }>()
   if (!row) return c.json({ error: "not found" }, 404)
   const membership = await getOrgMemberRole(c.env, orgId, user.id)
-  const platform = isPlatformAdminEmail(c.env, user.email)
+  const platform = await isPlatformAdminEmail(c.env, user.email)
   if (membership == null) {
     if (!platform) return c.json({ error: "forbidden" }, 403)
     return c.json({
@@ -348,7 +348,7 @@ async function resolvePortfolioOrgIds(
   const uniqueOrgIds = fromMemberships
     ? (await listUserOrgs(env, user)).map((org) => org.id)
     : [...new Set(orgIds)]
-  const isAdmin = isPlatformAdminEmail(env, user.email)
+  const isAdmin = await isPlatformAdminEmail(env, user.email)
   if (!isAdmin && !fromMemberships && uniqueOrgIds.length > 0) {
     const placeholders = uniqueOrgIds.map(() => "?").join(", ")
     const allowed = await env.AQUILLA_PG.prepare(
@@ -427,7 +427,7 @@ orgs.get("/:orgId/portfolio", async (c) => {
   // AQU-745: filter to the caller's visible projects (creator/direct/group, or
   // all when Maintainer+/admin) so the org dashboard never leaks project names
   // a regular member has no access to.
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const isAdmin = await isPlatformAdminEmail(c.env, user.email)
   const qRaw = (c.req.query("q") ?? "").trim()
   const q = qRaw.toLowerCase()
   const limitRaw = c.req.query("limit")
@@ -466,7 +466,7 @@ orgs.get("/:orgId/deleted-files", async (c) => {
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const isAdmin = await isPlatformAdminEmail(c.env, user.email)
   const files = await getOrgDeletedFiles(c.env, orgId, { userId: user.id, isAdmin })
   return c.json({ files })
 })
@@ -845,7 +845,7 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
   let orgRole = (await getOrgMemberRole(c.env, orgId, user.id)) ?? 0
   const teamRole = (await getTeamMemberRole(c.env, groupId, user.id)) ?? 0
   if (orgRole < ROLE.MAINTAINER && teamRole < ROLE.MAINTAINER) {
-    if (!isPlatformAdminEmail(c.env, user.email)) {
+    if (!(await isPlatformAdminEmail(c.env, user.email))) {
       return c.json({ error: "org or team role >= maintainer required to change team roles" }, 403)
     }
     if (!(await hasActiveElevation(c))) {
@@ -955,7 +955,7 @@ async function resolveOrgWriteRole(
   const user = c.get("user")
   const membership = (await getOrgMemberRole(c.env, orgId, user.id)) ?? 0
   if (membership >= minRole) return membership
-  if (!isPlatformAdminEmail(c.env, user.email)) {
+  if (!(await isPlatformAdminEmail(c.env, user.email))) {
     return c.json({ error: deniedError }, 403)
   }
   if (!(await hasActiveElevation(c))) {
@@ -1229,7 +1229,7 @@ orgs.delete("/:orgId/invites/:token", async (c) => {
   )
   if (typeof callerRole !== "number") return callerRole
 
-  const invite = isAdminActor(c.env, user)
+  const invite = await isAdminActor(c.env, user)
     ? await c.env.AQUILLA_PG.prepare(
         "SELECT role_level, email FROM org_invites WHERE token = ? AND org_id = ? AND used_at IS NULL",
       )

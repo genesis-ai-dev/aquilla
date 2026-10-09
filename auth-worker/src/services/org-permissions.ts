@@ -420,7 +420,7 @@ export async function getEffectiveOrgRole(
   user: AuthUser,
 ): Promise<number | null> {
   const membership = await getOrgMemberRole(env, orgId, user.id)
-  if (isPlatformAdminEmail(env, user.email)) {
+  if (await isPlatformAdminEmail(env, user.email)) {
     return Math.max(membership ?? 0, 700)
   }
   return membership

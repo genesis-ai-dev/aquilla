@@ -455,7 +455,7 @@ Verification evidence:
 
 ## Correct admin sandbox and local credentials — 2026-09-14
 
-Ryder confirms the verified admin@frontierrnd.com account mapping:
+Ryder confirms the verified Stripe admin account mapping (login email held privately, not in the repo):
 
 - Production account: `acct_1U47k85Mw0X7gcTS`.
 - Separate sandbox: `acct_1U47kG7SR91OrWMS`.

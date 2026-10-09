@@ -42,7 +42,7 @@ me.get("/create-targets", authMiddleware, async (c) => {
   // No lazy insert here: a GET must not create an org as a side effect.
   const personal = await findPersonalOrg(env, user.id)
 
-  const isAdmin = isPlatformAdminEmail(env, user.email)
+  const isAdmin = await isPlatformAdminEmail(env, user.email)
   // Mirrors getEffectiveOrgRole: platform operators resolve as owner (700)
   // on every org; everyone else needs a membership row >= maintainer.
   const rows = isAdmin

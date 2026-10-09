@@ -172,8 +172,9 @@ describe.each(MODES)("resolveProjectRoles, ACCESS_GRANTS_RESOLVER=%s", (mode) =>
     const five = countingDb()
     await resolveProjectRoles(envFor(mode, five.db), user, [...FIXTURE_PROJECTS])
 
-    // projects, then the three grant paths and/or the view's three reads.
-    expect(one.statements).toHaveLength({ off: 4, shadow: 7, on: 4 }[mode])
+    // projects, the platform_admins read, then the three grant paths and/or
+    // the view's three reads.
+    expect(one.statements).toHaveLength({ off: 5, shadow: 8, on: 5 }[mode])
     expect(five.statements).toHaveLength(one.statements.length)
   })
 })

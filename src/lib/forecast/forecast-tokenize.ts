@@ -36,6 +36,7 @@ export interface WordToken {
 
 const WORD_CLASS = "\\p{L}\\p{M}\\p{N}\\u200C\\u200D"
 const WORD_CHAR = new RegExp(`[${WORD_CLASS}]`, "u")
+const HAS_LETTER = /[\p{L}\p{N}]/u
 const FALLBACK_RE = new RegExp(
   `'?[${WORD_CLASS}]+(?:['’ʼ][${WORD_CLASS}]+)*'?`,
   "gu",
@@ -87,6 +88,8 @@ export function segmentWords(input: string): WordToken[] {
   const out: WordToken[] = []
   const push = (start: number, end: number) => {
     const surface = text.slice(start, end)
+    // A stray joiner or mark with no letter or digit is not a word.
+    if (!HAS_LETTER.test(surface)) return
     out.push({ surface, key: fold(surface), start, end })
   }
   if (!wordSegmenter) {

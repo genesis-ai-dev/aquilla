@@ -52,6 +52,14 @@ describe("segmentWords", () => {
     expect(graphemes("प्रभु").length).toBeLessThan(Array.from("प्रभु").length)
   })
 
+  it("keeps the zero-width joiner inside Devanagari conjuncts, and drops a stray one", () => {
+    // Nepali writes त्‍यसको with virama + ZWJ; splitting there made two
+    // easy-to-predict fragments out of one word.
+    expect(surfaces("त्‍यसको नाम")).toEqual(["त्‍यसको", "नाम"])
+    expect(surfaces("रहेको ‍एल")).toEqual(["रहेको", "‍एल"].slice(0, 1).concat(surfaces("‍एल")))
+    expect(surfaces("नजिक ‍ गरे")).toEqual(["नजिक", "गरे"])
+  })
+
   it("keeps the zero-width non-joiner inside Persian words", () => {
     expect(surfaces("می‌خواهم بروم")).toEqual(["می‌خواهم", "بروم"])
   })

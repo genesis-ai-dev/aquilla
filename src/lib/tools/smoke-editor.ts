@@ -88,6 +88,7 @@ export function stubEditorData(populated: boolean): ToolEditorHostData {
       populated ? [{ username: "someone", color: "#7c3aed", cellId: "c3", editing: true, draftText: "Jesús n", caret: { anchor: 7, head: 7 } }] : [],
     typing: yes,
     viewing: yes,
+    visible: yes,
     recordAudio: yes,
     generateAudio: yes,
     setSelection: yes,

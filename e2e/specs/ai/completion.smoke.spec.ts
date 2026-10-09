@@ -42,7 +42,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
 
   // Mock LLM's default response is "Traducción de prueba".
   await expect(
-    alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]'),
+    ws.cellRow(0).locator('[data-cell-type="target"]'),
   ).toContainText("Traducción de prueba", { timeout: 15_000 })
   // AQU-1041 removed the visible AI-draft tag — the cell header renders the
   // same as a human-typed draft (RTL: EditorTable.aiDraftBadge.test.tsx).

@@ -4,7 +4,7 @@
  * then emits the compensating events through the ordinary outbox.
  */
 
-import { emitCellUnvalidate, emitTargetCellCommits, type CellCommitInput } from "@/lib/sync/events-emit"
+import { emitCellUnvalidate, emitCellValidate, emitTargetCellCommits, type CellCommitInput } from "@/lib/sync/events-emit"
 import { planToolRevert, type RevertPlan } from "../../../shared/tools/revert"
 import type { ToolActivity } from "./tools-api"
 
@@ -12,10 +12,11 @@ export interface RevertOutcome {
   plan: RevertPlan
   restored: number
   unvalidated: number
+  revalidated: number
 }
 
-export function planFromActivity(activity: ToolActivity): RevertPlan {
-  return planToolRevert(activity.writes, activity.cells)
+export function planFromActivity(activity: ToolActivity, revertingAuthor?: string): RevertPlan {
+  return planToolRevert(activity.writes, activity.cells, revertingAuthor)
 }
 
 export async function executeToolRevert(args: {
@@ -53,6 +54,19 @@ export async function executeToolRevert(args: {
       surface: "batch",
     })
   }
-  if (commits.length > 0 || plan.unvalidates.length > 0) args.flush()
-  return { plan, restored: commits.length, unvalidated: plan.unvalidates.length }
+  // Validations the tool withdrew come back (the reverting user's own).
+  for (const v of plan.revalidates) {
+    await emitCellValidate({
+      projectId: args.projectId,
+      fileId: v.fileId,
+      cellId: v.cellId,
+      editEventId: v.editEventId,
+      ...(v.targetLang ? { targetLang: v.targetLang } : {}),
+      ...(v.laneId ? { laneId: v.laneId } : {}),
+      author: args.author,
+      surface: "batch",
+    })
+  }
+  if (commits.length > 0 || plan.unvalidates.length > 0 || plan.revalidates.length > 0) args.flush()
+  return { plan, restored: commits.length, unvalidated: plan.unvalidates.length, revalidated: plan.revalidates.length }
 }

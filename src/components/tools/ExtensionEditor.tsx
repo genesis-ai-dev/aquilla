@@ -7,7 +7,9 @@
  * (or project-wide), see src/lib/tools/editor-choice.ts.
  */
 
-import { useCallback, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
+import type { EditorTableHandle } from "@/components/EditorTable"
+import type { ToolFrameControl } from "./useToolHost"
 import { Link } from "react-router-dom"
 import { ShieldCheck, X } from "lucide-react"
 import type { ToolHostServices } from "@/lib/tools/live-data"
@@ -98,6 +100,7 @@ export function ExtensionEditorSurface({
   services,
   revealCellId,
   toolbarTrailing,
+  handleRef,
 }: {
   choice: ExtensionEditorChoice
   file: { fileId: string; name: string }
@@ -111,7 +114,33 @@ export function ExtensionEditorSurface({
    *  options), drawn by the host over the extension's chapter row — the same
    *  component the built-in editor shows there. */
   toolbarTrailing?: ReactNode
+  /** The workspace's EditorTable handle, served by the extension instead
+   *  (timeline chips, search results, cue drawers scroll it the same way). */
+  handleRef?: Ref<EditorTableHandle | null>
 }) {
+  const controlRef = useRef<ToolFrameControl | null>(null)
+  const ids = services?.editor?.store
+  useImperativeHandle(handleRef, () => {
+    const reveal = (cellId: string, focus: boolean) => {
+      controlRef.current?.push({ type: "editor.reveal", fileId: file.fileId, cellId, focus })
+      return Boolean(controlRef.current)
+    }
+    return {
+      scrollToCellId: (cellId) => reveal(cellId, false),
+      setMediaFollow: () => {},
+      focusCellEditorIndex: (index) => {
+        const id = ids?.getCellIds()[index]
+        if (id) reveal(id, true)
+      },
+      getCurrentIndex: () => -1,
+      flashCell: (cellId) => {
+        reveal(cellId, false)
+      },
+      pulseCells: (cellIds) => {
+        if (cellIds[0]) reveal(cellIds[0], false)
+      },
+    }
+  }, [file.fileId, ids])
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="extension-editor-surface">
       {bar}
@@ -125,6 +154,7 @@ export function ExtensionEditorSurface({
         {...(services ? { services } : {})}
         {...(revealCellId !== undefined ? { revealCellId } : {})}
         {...(toolbarTrailing ? { frameOverlay: toolbarTrailing } : {})}
+        controlRef={controlRef}
       />
     </div>
   )

@@ -60,14 +60,21 @@ export class ToolsPage {
     return frame
   }
 
-  /** The target textbox of one row in the default editor extension. */
+  /** The target surface of one row in the default editor extension (the
+   *  read view, which becomes the editing surface when activated — like the
+   *  built-in's TranslatedEditor). */
   translationBox(frame: FrameLocator, ref: string): Locator {
-    return frame.getByRole("textbox", { name: `Translation for ${ref}`, exact: true })
+    return frame.locator(`.cell[data-ref="${ref}"] [data-target-read-view]`)
   }
 
   /** One row (source, target, badges) of the default editor extension. */
   editorRow(frame: FrameLocator, ref: string): Locator {
-    return frame.locator(`.row[data-ref="${ref}"]`)
+    return frame.locator(`.cell[data-ref="${ref}"]`)
+  }
+
+  /** A row's text-validation control (same aria as the built-in's). */
+  validationButton(frame: FrameLocator, ref: string): Locator {
+    return this.editorRow(frame, ref).locator("[data-testid=validation-gutter] button")
   }
 
   /** The running tool's document (an opaque-origin sandboxed frame). */

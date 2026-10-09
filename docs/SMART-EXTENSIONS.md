@@ -117,14 +117,33 @@ which any `editor` extension gets.
   build env `VITE_EXTENSION_DEFAULT_EDITOR=off`. The e2e stack builds with it off so the
   editor smoke journeys keep guarding the built-in editor; the extension-editor specs opt in.
 
-What it covers, and what is still built-in only, is tracked in the PR (AQU-1793) gap table:
-the bridge now carries rich text, validation, live remote edits, presence/focus locks, comment
-counts and threads, audio playback, keyboard navigation and host shortcuts, and paged reads for
-long books. Not yet expressible as an extension: the AI drafting/forecast surfaces (sparkle
-completion, ghost text — forecasting is PR #1295), back-translation, health/rules
-infractions, terminology chips, footnote editing beyond preserving markers, audio
-recording/TTS, timeline/media lens, IDML slots, selection bar bulk actions, history drawer,
-assignments/staleness badges and presence drafts (live typing preview).
+**Parity.** `docs/SMART-EXTENSIONS-PARITY.md` is the feature-by-feature matrix against the
+built-in editor (EditorTable + TranslatedEditor + the workspace around them). In short: an
+`editor` mount gets the workspace's **editor services** (apiRev 3, `src/lib/tools/editor-services.ts`,
+assembled by `useExtensionEditorServices`). The extension reads the workspace's own cell store
+(the file is read once, not twice) and writes through the host's own commit/validate pipeline
+(auto-validate own edit, repetition propagation on `cells.settle`), attributed via `tool_origin`.
+Host-owned features (AI drafting with credits and evidence, back-translation, rules/health,
+key terms, TTS, the recorder, the history/comments/attachments drawers, the bulk selection bar)
+are reached as bridge calls or host panels. The extension takes EditorTable's place inside
+the same workspace layout, so the media lens's timeline and video, the footnote tray and the
+file toolbar (drawn by the host over the frame's chapter row, `editor.chrome`) are the host's
+own. The frame matches the app's tokens, light/dark, breakpoints (from the app viewport), font
+(sent as bytes) and strings (`ui.strings`, the user's locale).
+
+Added in apiRev 3 (additive): `editor.config/setLane/setLens/openSettings/visible`,
+`cells.sections/signals/pericopes/settle`, `terms.matches/open`, `ai.draft/draftParagraph`
+(scope `ai:draft`), `backtranslation.list/run/save`, `history.open`, `attachments.open`,
+`rules.open`, `presence.peers/typing/view`, `audio.record/generate` (scope `write:audio`),
+`selection.set`, `suggestions.get/feedback` (a host-side ghost-text provider registry,
+`src/lib/tools/suggestions.ts`: PR #1295's forecaster registers there; translation memory ships
+as the first provider) and `ui.strings`. Events: `signals.changed`, `presence.peers`,
+`selection.changed`, `config.changed`, `backtranslation.changed`, `pericopes.changed`,
+`cells.structure`, `cells.loaded`, `editor.chrome`, `fonts`.
+
+Revert now also **puts back validations an extension withdrew** (`revalidates` in
+`shared/tools/revert.ts`): only the reverting user's own, and only while the text they
+validated is still the live head.
 
 ## Prototype-only vs production follow-ups
 
@@ -155,6 +174,12 @@ assignments/staleness badges and presence drafts (live typing preview).
   `e2e/specs/tools/default-editor-perf.spec.ts` (full gospel, extension vs built-in; reports).
 - Unit (apiRev 2): `api-rev2.test.ts`, `live-data-rev2.test.ts`, `default-editor.test.ts`;
   auth-worker `tools-routes.test.ts` "first-party extensions".
+- Unit (apiRev 3): `api-rev3.test.ts` (store-backed reads, host pipeline delegation with
+  provenance, bound-file refusal, param validation, scopes, runtime round trips, ui.strings,
+  suggestion registry); `shared/tools/revert.test.ts` (re-validation).
+- E2E (apiRev 3): `e2e/specs/tools/default-editor-parity.spec.ts`; the core editor journeys run
+  against the extension editor with `E2E_EDITOR=extension` (`pnpm test:e2e:extension-editor`,
+  `e2e/helpers/editor-mode.ts`: the Workspace page object targets the extension's frame).
 - Recordings: `e2e/recordings/specs/aquilla-tools.showcase.ts` (real build),
   `extension-editor.showcase.ts`, `extension-editor-build.showcase.ts` (real build),
   `default-editor-extension.showcase.ts`.

@@ -66,8 +66,8 @@ test("Smart Extensions — the default editor is an extension", async ({ page, b
   await v12.pressSequentially(" a Isaac.", { delay: 28 })
   await v12.press("Enter")
   await page.waitForTimeout(700)
-  await tools.editorRow(frame, "MAT 1:2").getByRole("button", { name: "Validate MAT 1:2" }).click()
-  await expect(tools.editorRow(frame, "MAT 1:2").getByRole("button", { name: "Unvalidate MAT 1:2" })).toBeVisible()
+  await tools.validationButton(frame, "MAT 1:2").click()
+  await expect(tools.validationButton(frame, "MAT 1:2")).toBeVisible()
   timeline.validated = Date.now() - t0
   await page.waitForTimeout(1200)
 
@@ -75,7 +75,7 @@ test("Smart Extensions — the default editor is an extension", async ({ page, b
   const bobFrame = await bobTools.openFileInDefaultEditor(seeded.projectId, seeded.fileId, "MAT 1:3")
   const bob13 = bobTools.translationBox(bobFrame, "MAT 1:3")
   await bob13.click()
-  await expect(tools.editorRow(frame, "MAT 1:3")).toContainText("bob is editing")
+  await expect(tools.editorRow(frame, "MAT 1:3").locator("[data-cell-presence-state=editing]")).toBeVisible()
   timeline.bobLock = Date.now() - t0
   await page.waitForTimeout(1800)
   await bob13.pressSequentially("José le puso por nombre Jesús.", { delay: 20 })

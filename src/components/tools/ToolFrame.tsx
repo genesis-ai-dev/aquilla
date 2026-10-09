@@ -5,7 +5,7 @@
  * production hosting plan (dedicated tools origin).
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react"
 import { AlertTriangle, Wand2, X } from "lucide-react"
 import { isToolStale, rebuildRequest } from "../../../shared/tools/api-rev"
 import { healRequest } from "./useEditTool"
@@ -18,7 +18,7 @@ import type { ToolScope } from "../../../shared/tools/manifest"
 import { PermissionPrompt } from "./PermissionPrompt"
 import type { ToolHostServices } from "@/lib/tools/live-data"
 import { HOST_SHORTCUTS } from "@/lib/tools/host-keys"
-import { useToolHost } from "./useToolHost"
+import { useToolHost, type ToolFrameControl } from "./useToolHost"
 
 export interface ToolFrameProps {
   project: { id: string; name: string }
@@ -43,9 +43,11 @@ export interface ToolFrameProps {
    *  editor's own file toolbar). Its size is pushed to the extension as
    *  `editor.chrome` so the extension keeps that corner clear. */
   frameOverlay?: ReactNode
+  /** apiRev 3: host → frame commands (the editor handle adapter). */
+  controlRef?: MutableRefObject<ToolFrameControl | null>
 }
 
-export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null, frameOverlay }: ToolFrameProps) {
+export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null, frameOverlay, controlRef }: ToolFrameProps) {
   const t = useT()
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -59,7 +61,7 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
     ro.observe(el)
     return () => ro.disconnect()
   }, [frameOverlay])
-  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome })
+  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef })
   // The first reveal rides in the boot data (so the editor opens there); later
   // ones are pushed live. Read once per frame load.
   const [initialReveal] = useState(revealCellId)

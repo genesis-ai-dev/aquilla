@@ -65,6 +65,8 @@ export interface ToolEditorServices {
   /** The user left a cell they edited: pay any repetition propagation owed. */
   settle: (cellId: string) => void
   draft: (cellIds: string[], opts: { regenerate?: boolean }) => Promise<boolean>
+  /** AI isn't set up yet: open the host's "Set up AI" chooser. */
+  openAiSetup: () => void
   draftParagraph: (cellId: string) => Promise<boolean>
   backtranslate: (cellId: string) => Promise<boolean>
   saveBacktranslation: (cellId: string, text: string) => boolean
@@ -76,12 +78,16 @@ export interface ToolEditorServices {
   generateAudio: (cellId: string) => Promise<boolean>
   typing: (cellId: string, selection: ToolTypingSelection | null) => void
   viewing: (cellId: string | null) => void
+  /** The rows on screen (translate-as-read, parallel Bibles, footnote tray). */
+  visible: (cellIds: string[]) => void
   setSelection: (cellIds: string[]) => void
   setLane: (tag: string) => void
   setLens: (lens: ToolLens) => void
   openSettings: (section: "target-language" | "lanes" | "terminology") => void
   /** Gutter numbering + paragraph groups (editor-structure-cache.ts). */
   structureFor: (cellId: string) => ToolCellStructure
+  /** The voice a line speaks in (Audio lens). */
+  voiceFor?: (cellId: string) => { name: string; explicit: boolean } | null
   /** The health ribbon for a cell (null when health is off). */
   ribbonFor: (cellId: string) => ToolRibbon | null
   /** Suggestion providers (ghost text): see suggestions.ts. */
@@ -94,6 +100,7 @@ export interface ToolEditorServices {
 export interface ToolViewExtras {
   ribbonFor?: (cellId: string) => ToolRibbon | null
   structureFor?: (cellId: string) => ToolCellStructure
+  voiceFor?: (cellId: string) => { name: string; explicit: boolean } | null
   lineNumbers?: boolean
 }
 
@@ -142,6 +149,7 @@ export function cellToToolView(store: CellStore, cell: CellData, extras: ToolVie
         })
       : null,
     paragraph: structure?.paragraph ?? null,
+    voice: extras.voiceFor?.(cell.id) ?? null,
   }
 }
 

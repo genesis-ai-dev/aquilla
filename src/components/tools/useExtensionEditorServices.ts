@@ -59,6 +59,8 @@ export interface ExtensionEditorServicesArgs {
   examples: Map<string, ScoredPair[]>
   /** Bumps on every store change (drives the ribbon's neighbour smoothing). */
   storeVersion: number
+  /** The voice a line speaks in (cast assignment, else project default). */
+  voiceFor: (cellId: string) => { name: string; explicit: boolean } | null
   completing: Map<string, string>
   previews: Map<string, string>
   errors: Map<string, string>
@@ -75,6 +77,7 @@ export interface ExtensionEditorServicesArgs {
   completeSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   completeBatch: (cells: CellData[]) => void
   completeParagraph: (cellId: string) => void
+  openAiSetup: () => void
   runBacktranslation: (cell: CellData, source: "read-back" | "refresh" | "regenerate") => Promise<void> | void
   saveBacktranslation: (cell: CellData, text: string, polished: boolean) => void
   openHistory: (cellId: string) => void
@@ -85,6 +88,7 @@ export interface ExtensionEditorServicesArgs {
   generateAudio: (cellId: string) => Promise<boolean>
   targetPresenceSelection: (cellId: string, selection: TargetPresenceSelection | null) => void
   viewCell: (cellId: string | null) => void
+  visibleCells: (cellIds: string[]) => void
   setSelection: (ids: string[]) => void
   setLane: (tag: string) => void
   setLens: (lens: ToolLens) => void
@@ -128,7 +132,8 @@ function usePeers(store: ProjectPresenceStore, fileId: string | null): ToolPrese
         .map((p) => ({
           username: p.username,
           color: p.color,
-          cellId: p.focusedCell ?? p.viewingCell ?? null,
+          // Focus keys may be lane-qualified ("cellId@lane:x"): the cell is the head.
+          cellId: (p.focusedCell ?? p.viewingCell ?? "").split("@lane:")[0] || null,
           editing: p.isEditing,
           draftText: p.selection?.draftText ?? null,
           caret: p.selection ? { anchor: p.selection.anchor, head: p.selection.head } : null,
@@ -330,6 +335,7 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
       argsRef.current.completeBatch(cells)
       return true
     },
+    openAiSetup: () => argsRef.current.openAiSetup(),
     draftParagraph: async (cellId: string) => {
       cellOf(cellId)
       argsRef.current.completeParagraph(cellId)
@@ -357,6 +363,7 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
     typing: (cellId: string, sel: { anchor: number; head: number; draftText: string } | null) =>
       argsRef.current.targetPresenceSelection(cellId, sel ? { side: "target", anchor: sel.anchor, head: sel.head, draftText: sel.draftText } : null),
     viewing: (cellId: string | null) => argsRef.current.viewCell(cellId),
+    visible: (cellIds: string[]) => argsRef.current.visibleCells(cellIds),
     setSelection: (ids: string[]) => argsRef.current.setSelection(ids),
     setLane: (tag: string) => argsRef.current.setLane(tag),
     setLens: (lens: ToolLens) => argsRef.current.setLens(lens),
@@ -383,7 +390,8 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
       termMatching: args.termMatching,
       ribbonFor,
       structureFor,
+      voiceFor: args.voiceFor,
       ...actions,
     }
-  }, [pericopes, structureFor, args.enabled, args.store, args.storeLoading, args.concepts, args.termMatching, config, signals, peers, backtranslations, selection, actions, ribbonFor])
+  }, [args.voiceFor, pericopes, structureFor, args.enabled, args.store, args.storeLoading, args.concepts, args.termMatching, config, signals, peers, backtranslations, selection, actions, ribbonFor])
 }

@@ -71,4 +71,17 @@ describe("planToolRevert", () => {
     expect(plan.commits).toHaveLength(1)
     expect(plan.commits[0].targetLang).toBe("fr")
   })
+
+  it("puts back a validation the tool withdrew while the text it validated is still live (the reverting user's own)", () => {
+    const writes = [
+      write("v1", "c1", 1, { kind: "cell.unvalidate", editEventId: "h1", author: "alice" }),
+      write("v2", "c2", 2, { kind: "cell.unvalidate", editEventId: "old", author: "alice" }),
+      write("v3", "c3", 3, { kind: "cell.unvalidate", editEventId: "h3", author: "bob" }),
+      write("v4", "c4", 4, { kind: "cell.unvalidate", editEventId: "h4", author: "alice" }),
+      write("v5", "c4", 5, { kind: "cell.validate", editEventId: "h4", author: "alice" }),
+    ]
+    const cells = [cell("c1", "h1", "x", "x"), cell("c2", "h2", "y", "y"), cell("c3", "h3", "z", "z"), cell("c4", "h4", "w", "w")]
+    const plan = planToolRevert(writes, cells, "alice")
+    expect(plan.revalidates).toEqual([{ fileId: "f", cellId: "c1", targetLang: "", laneId: "lane-1", editEventId: "h1" }])
+  })
 })

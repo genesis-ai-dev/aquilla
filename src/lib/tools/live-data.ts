@@ -555,6 +555,7 @@ export class LiveToolData implements ToolHostData {
   listPeers = (fileId: string) => this.editor.listPeers(fileId)
   typing = (fileId: string, cellId: string, selection: ToolTypingParams | null) => this.editor.typing(fileId, cellId, selection)
   viewing = (fileId: string, cellId: string | null) => this.editor.viewing(fileId, cellId)
+  visible = (fileId: string, cellIds: string[]) => this.editor.visible(fileId, cellIds)
   recordAudio = (fileId: string, cellId: string) => this.editor.recordAudio(fileId, cellId)
   generateAudio = (fileId: string, cellId: string) => this.editor.generateAudio(fileId, cellId)
   setSelection = (fileId: string, cellIds: string[]) => this.editor.setSelection(fileId, cellIds)

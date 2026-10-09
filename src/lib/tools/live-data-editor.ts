@@ -56,7 +56,7 @@ export class LiveEditorData implements ToolEditorHostData {
   // ── Reads served from the workspace's store ──────────────────────────────
 
   private extras(s: ToolEditorServices): ToolViewExtras {
-    return { ribbonFor: s.ribbonFor, structureFor: s.structureFor, lineNumbers: s.config.lineNumbers }
+    return { ribbonFor: s.ribbonFor, structureFor: s.structureFor, voiceFor: s.voiceFor, lineNumbers: s.config.lineNumbers }
   }
 
   private remember(views: ToolCellView[], s: ToolEditorServices): ToolCellView[] {
@@ -216,13 +216,20 @@ export class LiveEditorData implements ToolEditorHostData {
 
   async draft(fileId: string, cellIds: string[], opts: { regenerate: boolean }): Promise<boolean> {
     const s = this.need(fileId)
-    if (!s.config.ai.configured) throw new BridgeError("ai_not_configured", "AI drafting is not set up for this project")
+    if (!s.config.ai.configured) {
+      // Same as the built-in's sparkle: open the "Set up AI" chooser.
+      s.openAiSetup()
+      throw new BridgeError("ai_not_configured", "AI drafting is not set up for this project")
+    }
     return s.draft(cellIds.filter((id) => s.store.getCellView(id)), opts)
   }
 
   async draftParagraph(fileId: string, cellId: string): Promise<boolean> {
     const s = this.need(fileId)
-    if (!s.config.ai.configured) throw new BridgeError("ai_not_configured", "AI drafting is not set up for this project")
+    if (!s.config.ai.configured) {
+      s.openAiSetup()
+      throw new BridgeError("ai_not_configured", "AI drafting is not set up for this project")
+    }
     return s.draftParagraph(cellId)
   }
 
@@ -269,6 +276,11 @@ export class LiveEditorData implements ToolEditorHostData {
 
   async viewing(fileId: string, cellId: string | null): Promise<boolean> {
     this.need(fileId).viewing(cellId)
+    return true
+  }
+
+  async visible(fileId: string, cellIds: string[]): Promise<boolean> {
+    this.need(fileId).visible(cellIds)
     return true
   }
 

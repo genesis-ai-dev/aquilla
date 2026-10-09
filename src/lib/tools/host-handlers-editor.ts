@@ -50,6 +50,7 @@ export interface ToolEditorHostData {
   listPeers: (fileId: string) => Promise<ToolPresencePeer[]>
   typing: (fileId: string, cellId: string, selection: ToolTypingParams | null) => Promise<boolean>
   viewing: (fileId: string, cellId: string | null) => Promise<boolean>
+  visible: (fileId: string, cellIds: string[]) => Promise<boolean>
   recordAudio: (fileId: string, cellId: string) => Promise<boolean>
   generateAudio: (fileId: string, cellId: string) => Promise<boolean>
   setSelection: (fileId: string, cellIds: string[]) => Promise<boolean>
@@ -179,6 +180,7 @@ export function createEditorHandlers(data: ToolEditorHostData): Record<string, B
       const cellId = p.cellId === null || p.cellId === undefined ? null : str(p.cellId, "cellId")
       return data.viewing(file(params), cellId)
     },
+    "editor.visible": async (params) => data.visible(file(params), ids(obj(params).cellIds, "cellIds", 500)),
     "audio.record": async (params) => {
       const ref = cell(params)
       return data.recordAudio(ref.fileId, ref.cellId)

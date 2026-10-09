@@ -27,6 +27,9 @@ export const EDITOR_EDIT = String.raw`
       if (range && r.read.contains(range.startContainer)) { var sel = doc.getSelection(); sel.removeAllRanges(); sel.addRange(range); placed = true; }
     }
     if (!placed) caretAt(r.read, where || "end");
+    // The read view may already hold focus (mousedown focused it before this
+    // click activated it), so no focus event follows: claim explicitly.
+    onEditorFocus(id);
     paintCell(id);
     return true;
   }
@@ -65,7 +68,8 @@ export const EDITOR_EDIT = String.raw`
     if (e.altKey && S.audio[id] && S.activeId !== id) { e.preventDefault(); aquilla.audio.play(S.fileId, id).catch(function () {}); }
   }
   function onEditorFocus(id) {
-    if (S.activeId !== id) return;
+    if (S.activeId !== id || S.claimed === id) return;
+    S.claimed = id;
     if (!S.locks[id]) aquilla.presence.claim(S.fileId, id).catch(function (err) { if (isDenied(err)) setReadOnly(); });
     S.focusRowId = id;
     aquilla.storage.set("pos:" + S.fileId, id).catch(function () {});
@@ -76,7 +80,8 @@ export const EDITOR_EDIT = String.raw`
     later(function () {
       var r = R(id);
       if (!r || S.activeId !== id) return;
-      if (r.read.contains(doc.activeElement) || (bubble && bubble.contains(doc.activeElement))) return;
+      // Focus left the frame (the app took it): that is a blur too.
+      if (doc.hasFocus() && (r.read.contains(doc.activeElement) || (bubble && bubble.contains(doc.activeElement)))) return;
       leaveCell(id);
     }, 0);
   }
@@ -86,6 +91,7 @@ export const EDITOR_EDIT = String.raw`
     });
     aquilla.presence.typing(S.fileId, id, null).catch(function () {});
     aquilla.presence.release(S.fileId, id).catch(function () {});
+    if (S.claimed === id) S.claimed = null;
     deactivate(id);
   }
 

@@ -61,6 +61,7 @@
     "test:e2e:guard": "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts scripts/lib/e2e-lock.test.ts scripts/lib/worktree-install-guard.test.ts",
     "test:e2e:affected": "pnpm run test:e2e:guard && tsx scripts/e2e-affected.ts",
     "test:e2e:smoke": "pnpm run test:e2e:guard && tsx scripts/e2e-shard.ts 3 -- smoke.spec",
+    "test:e2e:extension-editor": "pnpm run test:e2e:guard && E2E_EDITOR=extension tsx scripts/e2e-up.ts -- e2e/specs/validation/validate.smoke.spec.ts e2e/specs/validation/validation-persists-navigation.smoke.spec.ts e2e/specs/editor/comments.smoke.spec.ts e2e/specs/collab/concurrent-edit.smoke.spec.ts e2e/specs/ai/completion.smoke.spec.ts e2e/specs/tools/default-editor-extension.spec.ts e2e/specs/tools/default-editor-parity.spec.ts",
     "test:e2e": "pnpm run test:e2e:guard && tsx scripts/e2e-up.ts",
     "test:smart": "tsx scripts/smart-tests.ts",
     "test:smart:setup": "uv sync --project smart-tests --frozen",

@@ -55,6 +55,7 @@ export const DEFAULT_EDITOR_STYLE = String.raw`
   .vp-lg .chapter-row .slot { margin-inline-end: 0; flex: none; flex-shrink: 1; }
   .chapter-row .chrome-pad { flex-shrink: 0; }
   .vp-lg .chapter-row .chrome-pad { flex: 1 1 0%; }
+  .navw { min-width: 0; max-width: 100%; width: 100%; } .vp-lg .navw { width: auto; }
   .bgroup { display: flex; align-items: stretch; }
   .btn-o { display: inline-flex; align-items: center; justify-content: center; height: 32px; box-sizing: border-box; border: 1px solid var(--border);
            background: var(--background); box-shadow: var(--shadow-soft-xs, 0 1px 2px -1px rgb(0 0 0 / .08)); font-size: 14px; font-weight: 500;
@@ -204,7 +205,7 @@ export const DEFAULT_EDITOR_STYLE = String.raw`
   .vp-md .tcol { grid-column-start: auto; border-top: 0; background: transparent; padding: 0 36px 0 12px; }
   .ribbon { display: none; position: absolute; top: -8px; bottom: -8px; left: 0; z-index: 10; width: 12px; cursor: help; }
   .vp-md .ribbon { display: block; } .ribbon i { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; transition: opacity .5s; }
-  .ribbon-m { position: absolute; top: 0; bottom: 0; left: 0; width: 12px; } .vp-md .ribbon-m { display: none; } .ribbon-m i { position: absolute; inset: 0 auto 0 0; width: 2px; }
+  .ribbon-m { position: absolute; top: 0; bottom: 0; left: 0; z-index: 10; width: 12px; } .vp-md .ribbon-m { display: none; } .ribbon-m i { position: absolute; inset: 0 auto 0 0; width: 2px; }
   .tcol .lane { justify-content: flex-start; text-align: start; }
   .tbody { display: flex; flex: 1; gap: 6px; }
   .valg { display: flex; width: 24px; flex-shrink: 0; align-items: flex-start; padding-top: 4px; }
@@ -300,6 +301,9 @@ export const DEFAULT_EDITOR_STYLE = String.raw`
   .issue { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
   .issue:first-child { border-top: 0; } .issue svg { margin-top: 2px; } .issue.major svg { color: var(--aq-red-500); } .issue.minor svg { color: var(--aq-amber-500); }
   .issue.waived { opacity: .6; } .issue .b { flex: 1; min-width: 0; } .issue .b b { display: block; font-weight: 500; }
+
+  .vcard { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; } .vcard .k { font-size: 12px; color: var(--muted-foreground); }
+  .vcard .vrow { display: flex; align-items: center; gap: 6px; } .vstatus { display: inline-flex; align-items: center; gap: 6px; }
 
   /* Validators popover */
   .vpop { width: 288px; border-radius: var(--r-xl); padding: 8px; font-size: 12px; }

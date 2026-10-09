@@ -164,6 +164,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       config: function (fileId) { return call("editor.config", { fileId: fileId }); },
       setLane: function (fileId, lane) { return call("editor.setLane", { fileId: fileId, lane: String(lane || "") }); },
       setLens: function (lens) { return call("editor.setLens", { lens: lens }); },
+      visible: function (fileId, cellIds) { return call("editor.visible", { fileId: fileId, cellIds: cellIds }); },
       openSettings: function (section) { return call("editor.openSettings", { section: section }); },
     },
     backtranslation: {

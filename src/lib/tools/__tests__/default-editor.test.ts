@@ -143,7 +143,7 @@ describe("first-party default editor", () => {
     await vi.waitFor(() => expect(row("c2")).not.toBeNull())
     host.push({ type: "presence.changed", fileId: "f1", holders: { c2: { username: "bob" } } })
     await vi.waitFor(() => expect(tgt("c2").getAttribute("aria-readonly")).toBe("true"))
-    expect(row("c2")?.textContent).toContain("bob is editing")
+    expect(row("c2")?.querySelector("[data-cell-presence-state=editing]")?.getAttribute("title")).toContain("bob is editing")
     host.push({ type: "presence.changed", fileId: "f1", holders: {} })
     await vi.waitFor(() => expect(tgt("c2").getAttribute("aria-readonly")).toBe("false"))
     host.push({ type: "editor.reveal", fileId: "f1", cellId: "c1" })

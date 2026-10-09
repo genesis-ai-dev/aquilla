@@ -12279,6 +12279,10 @@ export function ProjectWorkspace() {
     validationCount, isReadOnly, projectRoleLevel, currentUsername, fontSizes.source, fontSizes.target, fileMeta.sourceTextDirection,
     fileMeta.targetTextDirection, fileMeta.lineNumbersEnabled, cellLabelsEnabled, sparkleReady, isCompletionAvailable,
     isBacktranslationConfigured, healthCalculationsEnabled, footnoteViewMode, lens, t])
+  const extensionVoiceFor = useCallback((cellId: string) => {
+    const voice = resolveCastVoice(tts.settings, cellId)
+    return voice ? { name: voice.name, explicit: Boolean(assignedCastVoiceId(tts.settings, cellId)) } : null
+  }, [tts.settings])
   const extensionEditorPipeline = useExtensionEditorServices({
     enabled: extensionEditorActive,
     fileId: activeFileId ?? null,
@@ -12295,6 +12299,7 @@ export function ProjectWorkspace() {
     healthEnabled: healthCalculationsEnabled,
     examples,
     storeVersion: cellStoreVersion,
+    voiceFor: extensionVoiceFor,
     completing,
     previews,
     errors,
@@ -12311,6 +12316,7 @@ export function ProjectWorkspace() {
     completeSingle: handleCompleteSingle,
     completeBatch,
     completeParagraph: handleCompleteParagraph,
+    openAiSetup: handleAiSetupNeeded,
     runBacktranslation,
     saveBacktranslation,
     openHistory: handleOpenHistory,
@@ -12321,6 +12327,7 @@ export function ProjectWorkspace() {
     generateAudio: handleGenerateCellVoice,
     targetPresenceSelection: handleTargetPresenceSelection,
     viewCell: handleViewCell,
+    visibleCells: handleVisibleCellIdsChange,
     setSelection: (ids) => setSelection(ids, ids[0] ?? null),
     setLane: setActiveLane,
     openSettings: (section) =>
@@ -13634,15 +13641,6 @@ export function ProjectWorkspace() {
           <div className="flex h-full w-full items-center justify-center" data-testid="editor-choice-pending">
             <Spinner />
           </div>
-        ) : activeFileId && activeFile && extensionEditorChoice.selected !== STANDARD_EDITOR ? (
-          <ExtensionEditorSurface
-            choice={extensionEditorChoice}
-            file={{ fileId: activeFileId, name: activeFile.name }}
-            bar={<ExtensionsBar choice={extensionEditorChoice} />}
-            services={extensionEditorServices}
-            revealCellId={searchParams.get("cellId")}
-            toolbarTrailing={fileChapterToolbar ?? undefined}
-          />
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
           <div className="relative flex h-full w-full flex-col">
@@ -14094,6 +14092,21 @@ export function ProjectWorkspace() {
                   its own "Video" header at the same height. */}
               {timelineStacked ? <div ref={uiSlotRef("media-chip-strip")} className="shrink-0 empty:hidden" /> : null}
               <div className="min-h-0 min-w-0 flex-1">
+              {extensionEditorActive && activeFileId && activeFile ? (
+                // Smart Extensions: the editor extension takes EditorTable's
+                // place INSIDE the same layout — the media lens's timeline and
+                // video, the footnote tray, the search overlay and the load
+                // strip stay the host's own, around it.
+                <ExtensionEditorSurface
+                  choice={extensionEditorChoice}
+                  file={{ fileId: activeFileId, name: activeFile.name }}
+                  bar={null}
+                  handleRef={editorRef}
+                  services={extensionEditorServices}
+                  revealCellId={searchParams.get("cellId")}
+                  {...(!timelineStacked && fileChapterToolbar ? { toolbarTrailing: fileChapterToolbar } : {})}
+                />
+              ) : (
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -14223,6 +14236,7 @@ export function ProjectWorkspace() {
             // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
+              )}
               </div>
               <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
               </div>

@@ -99,7 +99,7 @@ export const EDITOR_LAYOUT = String.raw`
       icon("chevron-down"),
     ]);
     var group = el("div", { class: "bgroup" }, [prev, trig, next]);
-    slot.appendChild(el("nav", { "aria-label": t("editor.milestone.region") }, [group]));
+    slot.appendChild(el("div", { class: "navw" }, [el("nav", { "aria-label": t("editor.milestone.region") }, [group])]));
     if (S.pericopes.length) {
       var pb = el("button", { class: "btn-g", type: "button", "aria-haspopup": "dialog", onclick: function () { openPericopes(pb); } }, [icon("sparkles", "s35"), t("editor.pericope.trigger")]);
       slot.appendChild(pb);
@@ -250,20 +250,23 @@ export const EDITOR_LAYOUT = String.raw`
     rows.style.height = V.total + "px";
     var top = sc.scrollTop - OVERSCAN, bottom = sc.scrollTop + sc.clientHeight + OVERSCAN;
     var start = indexAt(Math.max(0, top)), end = indexAt(bottom);
-    var keep = Object.create(null);
+    var keep = Object.create(null), prev = null;
     for (var i = start; i <= end; i++) {
       var id = S.ids[i];
       keep[id] = 1;
       var n = V.mounted[id];
-      if (!n) {
+      var fresh = !n;
+      if (fresh) {
         n = V.nodes[id] || (V.nodes[id] = buildCell(id));
         n.style.position = "absolute"; n.style.left = "0"; n.style.right = "0"; n.style.top = "0";
-        rows.appendChild(n);
         V.mounted[id] = n;
-        if (ro) ro.observe(n);
-        paintCell(id);
       }
+      // DOM order = document order (assistive tech, find-in-page, tests).
+      var want = prev ? prev.nextSibling : rows.firstChild;
+      if (n !== want) rows.insertBefore(n, want);
+      if (fresh) { if (ro) ro.observe(n); paintCell(id); }
       n.style.transform = "translateY(" + V.offsets[i] + "px)";
+      prev = n;
     }
     Object.keys(V.mounted).forEach(function (id) {
       if (keep[id] || id === S.activeId) return;
@@ -277,6 +280,7 @@ export const EDITOR_LAYOUT = String.raw`
     if (built.length > 600) built.forEach(function (id) { if (!V.mounted[id] && built.length-- > 400) delete V.nodes[id]; });
     V.start = start; V.end = end;
     requestTerms();
+    maybeView();
   }
   function rebuildList() {
     S.index = Object.create(null);

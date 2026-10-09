@@ -117,6 +117,7 @@ export async function readToolActivity(
       serverSeq: Number(r.server_seq),
       parentId: r.parent_id,
       editEventId: str(payload.editEventId),
+      author: r.author,
     })
     if (r.kind === "target.cell.commit") {
       const key = `${r.file_id}\u0000${r.cell_id}\u0000${targetLang}`

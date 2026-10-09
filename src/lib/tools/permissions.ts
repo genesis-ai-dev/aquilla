@@ -59,6 +59,7 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   // Your live draft is shown to collaborators: the first half of an edit.
   "presence.typing": "write:target",
   "presence.view": "read:cells",
+  "editor.visible": "read:cells",
   "audio.record": "write:audio",
   "audio.generate": "write:audio",
   "selection.set": "read:cells",

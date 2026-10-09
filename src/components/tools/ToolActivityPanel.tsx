@@ -59,10 +59,10 @@ export function ToolActivityPanel({
 
   const prepareRevert = () => {
     if (!activity) return
-    const plan = planFromActivity(activity)
+    const plan = planFromActivity(activity, author)
     setOutcome(null)
-    if (plan.commits.length === 0 && plan.unvalidates.length === 0) {
-      setOutcome({ plan, restored: 0, unvalidated: 0 })
+    if (plan.commits.length === 0 && plan.unvalidates.length === 0 && plan.revalidates.length === 0) {
+      setOutcome({ plan, restored: 0, unvalidated: 0, revalidated: 0 })
       return
     }
     setPendingPlan(plan)

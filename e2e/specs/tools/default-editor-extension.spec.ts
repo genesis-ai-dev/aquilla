@@ -82,8 +82,8 @@ test("the default editor is a first-party extension that edits, validates, shows
   expect(history[0].payload).toMatchObject({ tool_origin: { origin: "tool" } })
 
   // Validate MAT 1:2 through the extension.
-  await tools.editorRow(frame, "MAT 1:2").getByRole("button", { name: "Validate MAT 1:2" }).click()
-  await expect(tools.editorRow(frame, "MAT 1:2").getByRole("button", { name: "Unvalidate MAT 1:2" })).toHaveAttribute("aria-pressed", "true")
+  await tools.validationButton(frame, "MAT 1:2").click()
+  await expect(tools.validationButton(frame, "MAT 1:2")).toHaveAttribute("aria-pressed", "true")
   await expect.poll(async () => (await target(jwt, seeded, "MAT 1:2"))?.validated).toBe(true)
 
   // Bob, in his own browser, opens the same file (also the extension editor)
@@ -91,12 +91,12 @@ test("the default editor is a first-party extension that edits, validates, shows
   const bobFrame = await bobTools.openFileInDefaultEditor(seeded.projectId, seeded.fileId, "MAT 1:3")
   const bob13 = bobTools.translationBox(bobFrame, "MAT 1:3")
   await bob13.click()
-  await expect(tools.editorRow(frame, "MAT 1:3")).toContainText("bob is editing")
-  await expect(tools.translationBox(frame, "MAT 1:3")).toHaveAttribute("contenteditable", "false")
+  await expect(tools.editorRow(frame, "MAT 1:3").locator("[data-cell-presence-state=editing]")).toBeVisible()
+  await expect(tools.translationBox(frame, "MAT 1:3")).toHaveAttribute("aria-readonly", "true")
   await bob13.pressSequentially("José le puso por nombre Jesús.")
   await bob13.press("Enter")
   await expect(tools.translationBox(frame, "MAT 1:3")).toHaveText("José le puso por nombre Jesús.")
-  await expect(tools.editorRow(frame, "MAT 1:3")).not.toContainText("bob is editing")
+  await expect(tools.editorRow(frame, "MAT 1:3").locator("[data-cell-presence-state=editing]")).toHaveCount(0)
 
   // The built-in editor is one switch away, shows the same text, and back.
   await tools.switchEditor("Standard editor")

@@ -274,7 +274,7 @@ export const EDITOR_FEATURES = String.raw`
       else { Object.keys(V.mounted).forEach(function (id) { var r = R(id); if (r) { r.srcKey = null; r.readKey = null; } paintCell(id); }); }
     }, function () {});
   });
-  aquilla.on("editor.reveal", function (e) { if (e.cellId) reveal(e.cellId, true); });
+  aquilla.on("editor.reveal", function (e) { if (e.cellId) reveal(e.cellId, e.focus !== false); });
 
   function loadSignals() {
     return aquilla.cells.signals(S.fileId).then(function (sig) {
@@ -322,10 +322,22 @@ export const EDITOR_FEATURES = String.raw`
     if (focus) later(function () { if (!activate(id)) { var r = R(id); if (r) r.row.focus(); } }, 40);
     return true;
   }
-  var lastViewed = null;
+  // The rows on screen, for the host (translate-as-read, parallel Bibles).
+  var lastVisible = "", visTimer = null;
   function maybeView() {
-    var id = firstVisibleId();
-    if (id && id !== lastViewed && !S.activeId) { lastViewed = id; }
+    if (visTimer) return;
+    visTimer = later(function () {
+      visTimer = null;
+      var sc = $("scroller");
+      if (!sc || !S.ids.length) return;
+      layout();
+      var a = indexAt(sc.scrollTop), b = indexAt(sc.scrollTop + sc.clientHeight);
+      var ids = S.ids.slice(a, Math.min(b + 1, a + 500));
+      var key = ids.join(",");
+      if (key === lastVisible) return;
+      lastVisible = key;
+      aquilla.editor.visible(S.fileId, ids).catch(function () {});
+    }, 200);
   }
 
   // ── Boot ─────────────────────────────────────────────────────────────────
@@ -415,6 +427,6 @@ export const EDITOR_FEATURES = String.raw`
   }
   // Inspection hook for tests and debugging (frame-local; the frame has an
   // opaque origin, so nothing outside it can read this).
-  window.__AQ_EDITOR__ = { S: S, V: V, R: R };
+  window.__AQ_EDITOR__ = { S: S, V: V, R: R, scrollToCell: scrollToCell, activate: activate };
   boot();
 `

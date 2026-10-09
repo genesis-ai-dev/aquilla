@@ -146,7 +146,6 @@ test("default editor extension vs built-in editor on a full gospel", async ({ al
   const lane = (await readProjectLanes(jwt, seeded.projectId)).find((l) => l.role === "target")?.legacyTag ?? ""
   const verses = await translateAll(jwt, seeded, lane)
   expect(verses).toBeGreaterThan(1000)
-  const lastRef = "MAT 28:20"
   const midRef = "MAT 14:22"
 
   const tools = new ToolsPage(alice)
@@ -163,19 +162,26 @@ test("default editor extension vs built-in editor on a full gospel", async ({ al
     const frame = tools.toolFrame(DEFAULT_EDITOR)
     await expect(tools.translationBox(frame, "MAT 1:1")).toBeVisible({ timeout: 60_000 })
     const firstRender = Date.now() - t0
-    await expect(tools.translationBox(frame, lastRef)).toBeAttached({ timeout: 60_000 })
-    await expect(frame.locator("#progress")).not.toContainText("loading", { timeout: 60_000 })
-    const fullyLoaded = Date.now() - t0
     const f = alice.frames().find((x) => x.url() === "about:srcdoc" && x !== alice.mainFrame())
     expect(f, "extension frame").toBeTruthy()
-    const scroll = await measureScroll(f!, "#list")
+    // The whole book is in (the list is virtualized: rows mount on scroll, so
+    // "loaded" is the editor's own state, read through its inspection hook).
+    await expect.poll(() => f!.evaluate(`(() => { const E = window.__AQ_EDITOR__; return E && !E.S.loading ? E.S.ids.length : 0 })()`), { timeout: 60_000 })
+      .toBeGreaterThan(1000)
+    const fullyLoaded = Date.now() - t0
+    const rowsRendered = await frame.locator(".cell").count()
+    // The last verse is reachable (virtualized: scroll to it, then it mounts).
+    await f!.evaluate(`(() => { const E = window.__AQ_EDITOR__; E.scrollToCell(E.S.ids[E.S.ids.length - 1], "center", false) })()`)
+    await expect(tools.translationBox(frame, "MAT 28:20")).toBeVisible()
+    const scroll = await measureScroll(f!, "#scroller")
+    await f!.evaluate(`(() => { const E = window.__AQ_EDITOR__; const id = E.S.ids.find((x) => E.S.byId[x].ref === ${JSON.stringify(midRef)}); E.scrollToCell(id, "center", false) })()`)
     const box = tools.translationBox(frame, midRef)
-    await box.scrollIntoViewIfNeeded()
+    await expect(box).toBeVisible()
     await box.click()
     await alice.keyboard.press("End")
     const typing = await measureTyping(alice, f!, " editado")
     await box.press("Enter")
-    results.extension = { firstRenderMs: firstRender, fullyLoadedMs: fullyLoaded, rowsRendered: await frame.locator(".row").count(), scroll, typing }
+    results.extension = { firstRenderMs: firstRender, fullyLoadedMs: fullyLoaded, rowsRendered, scroll, typing }
   }
 
   // ── Built-in editor (one switch away) ──────────────────────────────────

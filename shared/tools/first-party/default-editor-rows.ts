@@ -21,6 +21,8 @@ export const EDITOR_ROWS = String.raw`
       wrap.appendChild(pb);
     }
     var row = el("div", { class: "row", "data-grid-row": "", tabindex: "0", "aria-label": t("editor.row.cellAria", { ref: cellRef(c) }) });
+    var ribbonM = el("span", { class: "ribbon-m", "data-testid": "health-ribbon-mobile", "aria-hidden": "true" }, [el("i")]);
+    row.appendChild(ribbonM);
     wrap.appendChild(row);
 
     // Gutter: select · badges · number
@@ -77,14 +79,16 @@ export const EDITOR_ROWS = String.raw`
     var exp = el("div", { class: "exp", hidden: true });
     wrap.appendChild(exp);
 
-    row.addEventListener("mouseenter", function () { rail.classList.add("on"); });
-    row.addEventListener("mouseleave", function () { if (!row.contains(doc.activeElement)) rail.classList.remove("on"); });
-    row.addEventListener("focusin", function () { rail.classList.add("on"); onRowFocus(id); });
-    row.addEventListener("focusout", function (e) { if (!row.contains(e.relatedTarget)) rail.classList.remove("on"); });
+    function railOn(on) { rail.classList.toggle("on", on); rail.setAttribute("data-revealed", on ? "true" : "false"); }
+    rail.setAttribute("data-revealed", "false");
+    row.addEventListener("mouseenter", function () { railOn(true); });
+    row.addEventListener("mouseleave", function () { if (!row.contains(doc.activeElement)) railOn(false); });
+    row.addEventListener("focusin", function () { railOn(true); onRowFocus(id); });
+    row.addEventListener("focusout", function (e) { if (!row.contains(e.relatedTarget)) railOn(false); });
     row.addEventListener("click", function (e) { if (e.metaKey || e.ctrlKey) { e.preventDefault(); toggleSelect(id); } });
     row.addEventListener("keydown", function (e) { onRowKey(id, e); });
 
-    wrap._r = { row: row, sel: sel, badges: badges, num: num, ctx: ctxLine, srcText: srcText, src: src, ribbon: ribbon, head: head, valg: valg, read: read, well: well,
+    wrap._r = { ribbonM: ribbonM, row: row, sel: sel, badges: badges, num: num, ctx: ctxLine, srcText: srcText, src: src, ribbon: ribbon, head: head, valg: valg, read: read, well: well,
                 after: after, prim: prim, more: more, chev: chev, rail: rail, exp: exp, tcol: tcol, srcKey: null, readKey: null };
     return wrap;
   }
@@ -144,7 +148,8 @@ export const EDITOR_ROWS = String.raw`
     // Source context lane + text (rebuilt only when inputs change)
     var showLabel = S.cfg && S.cfg.cellLabels && c.label;
     var rep = (S.signals.repetition || {})[id];
-    var srcKey = [c.source, c.sourceHtml, showLabel ? c.label : "", c.context, rep || 0, c.hidden ? 1 : 0, termKey(id, "source"), issueKey(issues, "source"), S.cfg ? S.cfg.sourceFontSize : 14].join("\u0001");
+    var audioLens = S.cfg && S.cfg.lens === "audio";
+    var srcKey = [audioLens ? "audio:" + (S.audio[id] ? 1 : 0) + ":" + (c.voice ? c.voice.name : "") + ":" + (c.target || "").length + ":" + (S.voicing[id] || "") : "", c.source, c.sourceHtml, showLabel ? c.label : "", c.context, rep || 0, c.hidden ? 1 : 0, termKey(id, "source"), issueKey(issues, "source"), S.cfg ? S.cfg.sourceFontSize : 14].join("\u0001");
     if (srcKey !== r.srcKey) {
       r.srcKey = srcKey;
       r.ctx.textContent = "";
@@ -153,8 +158,11 @@ export const EDITOR_ROWS = String.raw`
       if (c.context && !/^\d+:\d/.test(c.context) && c.context !== c.ref) r.ctx.appendChild(el("span", { class: "ctx", text: c.context }));
       if (rep > 1) { var rb = el("span", { class: "rep", "data-testid": "source-repetition-count", text: t("editor.repetition.badge", { count: rep }) }); tip(rb, t("editor.repetition.tooltip", { count: rep })); r.ctx.appendChild(rb); }
       if (c.hidden) r.ctx.appendChild(el("span", { "data-testid": "source-cell-hidden-badge", "aria-label": t("editor.row.hiddenBadgeAria") }, [icon("eye-off", "s35")]));
-      showInto(r.srcText, c.sourceHtml, c.source);
-      decorate(r.srcText, decorations(id, "source", issues));
+      if (audioLens) { r.ctx.textContent = ""; r.srcText.textContent = ""; r.srcText.appendChild(voiceCard(id)); }
+      else {
+        showInto(r.srcText, c.sourceHtml, c.source);
+        decorate(r.srcText, decorations(id, "source", issues));
+      }
       r.src.style.fontSize = (S.cfg ? S.cfg.sourceFontSize : 14) + "px";
       r.src.style.lineHeight = "1.6";
       r.srcText.setAttribute("dir", S.cfg && S.cfg.sourceDirection === "rtl" ? "rtl" : "auto");
@@ -166,26 +174,32 @@ export const EDITOR_ROWS = String.raw`
       r.ribbon.firstChild.style.backgroundImage = c.ribbon.background;
       r.ribbon.setAttribute("aria-label", c.ribbon.label + (major ? " · major automatic issue" : live.length ? " · automatic issue" : ""));
       r.ribbon.setAttribute("data-health-stage", c.ribbon.stage);
-    } else r.ribbon.hidden = true;
+      r.ribbonM.hidden = false;
+      r.ribbonM.firstChild.style.backgroundImage = c.ribbon.background;
+    } else { r.ribbon.hidden = true; r.ribbonM.hidden = true; }
 
     // Target header lane: label + collaborators
     r.head.textContent = "";
     if (showLabel) r.head.appendChild(el("span", { style: { "max-width": "60%" }, class: "lbl", text: c.label }));
-    var peers = (S.peersByCell[id] || []);
+    var peers = (S.peersByCell[id] || []).slice();
+    // The focus lock is the authoritative "editing" signal (the presence
+    // roster can lag it): fold its holder in as an editing peer.
+    if (lock) {
+      var holder = peers.filter(function (p) { return p.username === lock; })[0];
+      if (holder) holder = Object.assign({}, holder, { editing: true });
+      peers = peers.filter(function (p) { return p.username !== lock; });
+      peers.unshift(holder || { username: lock, color: "#64748b", cellId: id, editing: true, draftText: null, caret: null });
+    }
     if (peers.length) {
-      var pres = el("span", { class: "presence", "data-cell-presence": "", "data-cell-presence-state": peers.some(function (p) { return p.draftText; }) ? "typing" : peers.some(function (p) { return p.editing; }) ? "editing" : "viewing" });
+      var typing = peers.some(function (p) { return p.draftText; }), editingPeer = peers.some(function (p) { return p.editing; });
+      var pres = el("span", { class: "presence", "data-cell-presence": "", "data-cell-presence-state": typing ? "typing" : editingPeer ? "editing" : "viewing",
+        title: lock ? t("editor.row.lockedBy", { name: lock }) : null });
       peers.slice(0, 3).forEach(function (p) {
-        var a = el("span", { class: "avatar", style: { background: p.color }, title: p.username, text: initials(p.username) });
-        pres.appendChild(a);
+        pres.appendChild(el("span", { class: "avatar", style: { background: p.color }, title: p.username, text: initials(p.username) }));
       });
-      var stateText = peers.some(function (p) { return p.draftText; }) ? t("editor.presence.typing") : peers.some(function (p) { return p.editing; }) ? t("editor.presence.editing") : t("editor.presence.viewing");
-      pres.appendChild(el("span", { class: "state", text: stateText }));
+      pres.appendChild(el("span", { class: "state", text: typing ? t("editor.presence.typing") : editingPeer ? t("editor.presence.editing") : t("editor.presence.viewing") }));
       r.head.appendChild(pres);
     }
-    if (lock && !peers.some(function (p) { return p.username === lock; })) {
-      r.head.appendChild(el("span", { "data-cell-lock-holder": "", style: { "margin-inline-start": "auto", "font-size": "10px" }, text: t("editor.presence.heldBy", { name: lock }) }));
-    }
-
     paintValidation(id);
 
     // Target well
@@ -337,8 +351,12 @@ export const EDITOR_ROWS = String.raw`
   }
   function paintValidation(id) {
     var c = S.byId[id], r = R(id);
-    r.valg.textContent = "";
     var hasContent = !!(c.target || "").trim();
+    var vs0 = valState(c);
+    var valKey = [hasContent, vs0.state, vs0.self, vs0.validators.join(","), S.cfg && S.cfg.canValidate, S.readOnly, cellRef(c)].join("|");
+    if (valKey === r.valKey) return;
+    r.valKey = valKey;
+    r.valg.textContent = "";
     if (!hasContent) {
       var na = el("span", { class: "val-na", role: "img", "data-testid": "validation-unavailable", "aria-label": t("editor.validation.ariaNoContent", { ref: cellRef(c) }) }, [icon("circle")]);
       tip(na, t("editor.validation.noContentTooltip"));
@@ -389,11 +407,16 @@ export const EDITOR_ROWS = String.raw`
   // ── Action rail ──────────────────────────────────────────────────────────
   function paintRail(id) {
     var c = S.byId[id], r = R(id);
-    r.prim.textContent = "";
     var ai = (S.signals.ai || {})[id];
     var loading = !!(ai && ai.phase);
     var editable = editableCell(c);
     var conf = S.cfg ? S.cfg.ai : { configured: false, available: false };
+    // Rebuild the direct buttons only when what they show changes, so a
+    // button never detaches under the pointer on an unrelated repaint.
+    var railKey = [loading, editable, conf.configured, conf.available, c.validated, !!(c.target || "").trim(), c.paragraph ? c.paragraph.size + "/" + c.paragraph.draftable : ""].join("|");
+    if (railKey !== r.railKey) {
+    r.railKey = railKey;
+    r.prim.textContent = "";
     var tipText = !editable ? FALLBACK["read-only"] : !conf.configured ? t("editor.ai.setUpToEnable") : !conf.available ? t("editor.ai.serviceUnavailable") : loading ? t("editor.ai.generating") : t("editor.ai.translateWithAi");
     var spark = el("button", { class: "rbtn" + (loading ? " pulsing" : ""), type: "button", "aria-label": tipText, "data-tooltip": tipText,
       onclick: function (e) { e.stopPropagation(); requestDraft(id); } }, [icon("sparkles", "s35")]);
@@ -416,6 +439,7 @@ export const EDITOR_ROWS = String.raw`
       para.disabled = loading;
       tip(para, ptip);
       r.prim.appendChild(para);
+    }
     }
     // Attention dots
     var comments = S.comments[id] || 0;
@@ -453,11 +477,39 @@ export const EDITOR_ROWS = String.raw`
     add("history", t("agentWorkspace.editHistory"), function () { aquilla.history.open(S.fileId, id).catch(function (err) { toast(errText(err)); }); });
     popover(anchor, box, { side: "bottom", align: "end", role: "menu" });
   }
+  // ── Audio lens: the source column becomes the line's voice card (CellVoicePanel)
+  function voiceCard(id) {
+    var c = S.byId[id];
+    var editable = editableCell(c);
+    var card = el("div", { "data-voice-card": "", dir: "ltr", class: "vcard" });
+    var voice = c.voice ? c.voice.name : "";
+    if (S.audio[id]) {
+      card.appendChild(el("div", { class: "vrow" }, [
+        el("button", { class: "btn-s", type: "button", "aria-label": t("editor.voice.play"), onclick: function (e) { e.stopPropagation(); aquilla.audio.play(S.fileId, id).catch(function (err) { toast(errText(err)); }); } }, [icon("play", "s3"), t("editor.voice.play")]),
+        editable ? el("button", { class: "rbtn", type: "button", "aria-label": t("editor.audio.record"), title: t("editor.audio.record"), onclick: function (e) { e.stopPropagation(); aquilla.audio.record(S.fileId, id).catch(function () {}); } }, [icon("mic", "s35")]) : null,
+      ]));
+    } else if (S.voicing[id] === "busy") {
+      card.appendChild(el("span", { class: "k vstatus", role: "status" }, [icon("loader-circle", "s3 spin"), t("editor.voice.generatingAs", { voice: voice })]));
+    } else {
+      card.appendChild(el("span", { class: "k", text: t("editor.voice.noAudioYet") }));
+      var row = el("div", { class: "vrow" });
+      if (editable) row.appendChild(el("button", { class: "btn-s", type: "button", onclick: function (e) { e.stopPropagation(); aquilla.audio.record(S.fileId, id).catch(function () {}); } }, [icon("mic", "s3"), t("editor.voice.record")]));
+      var gen = el("button", { class: "btn-s", type: "button", "data-testid": "voice-card-generate", onclick: function (e) { e.stopPropagation(); generateVoice(id); } }, [icon("sparkles", "s3"), t("editor.voice.generateWith", { voice: voice })]);
+      if (!(c.target || "").trim() || !editable) gen.disabled = true;
+      tip(gen, !(c.target || "").trim() ? t("editor.voice.nothingToReadTooltip") : c.voice && !c.voice.explicit ? t("editor.voice.generateDefaultTooltip") : "");
+      row.appendChild(gen);
+      card.appendChild(row);
+    }
+    return card;
+  }
   function openComments(id) { aquilla.comments.open(S.fileId, id).catch(function (err) { toast(errText(err)); }); }
   function generateVoice(id) {
-    toast(t("editor.tts.generatingAudio"));
+    S.voicing[id] = "busy";
+    if (V.mounted[id]) paintCell(id);
+    if (!(S.cfg && S.cfg.lens === "audio")) toast(t("editor.tts.generatingAudio"));
     aquilla.audio.generate(S.fileId, id).then(function (ok) {
-      if (ok) { refreshAudio(); return aquilla.audio.play(S.fileId, id); }
-    }).catch(function (err) { toast(errText(err)); });
+      delete S.voicing[id];
+      if (ok) return refreshAudio().then(function () { return aquilla.audio.play(S.fileId, id); });
+    }).catch(function (err) { delete S.voicing[id]; if (V.mounted[id]) paintCell(id); toast(errText(err)); });
   }
 `

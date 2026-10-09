@@ -18,7 +18,7 @@ export const EDITOR_CORE = String.raw`
     sig: { stale: Object.create(null), upstream: Object.create(null), bt: Object.create(null), remote: Object.create(null) },
     peers: [], peersByCell: Object.create(null), locks: Object.create(null), comments: Object.create(null), audio: Object.create(null),
     bts: Object.create(null), terms: Object.create(null), termsAsked: Object.create(null),
-    selection: Object.create(null), selCount: 0, selAnchor: null, pericopes: [],
+    selection: Object.create(null), selCount: 0, selAnchor: null, pericopes: [], voicing: Object.create(null),
     activeId: null, focusRowId: null, expanded: Object.create(null), expTab: Object.create(null),
     drafts: Object.create(null), saved: Object.create(null), errors: Object.create(null),
     loading: true, readOnly: false, chromeW: 0, pendingReveal: ctx.file && ctx.file.revealCellId ? ctx.file.revealCellId : null,

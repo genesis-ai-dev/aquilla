@@ -79,6 +79,7 @@ through the global \`aquilla\` object the host injects before your code runs.
     canEdit, canValidate, autoValidatesOwnEdits, sourceFontSize, targetFontSize, sourceDirection, targetDirection, lineNumbers,
     cellLabels, ai:{configured,available}, backtranslation:{configured}, health, footnotes:"inline"|"tray"|"off", lens, lenses, panels }   scope read:cells
 - aquilla.editor.setLane(fileId, laneTag) / aquilla.editor.setLens("text"|"audio"|"agent") → boolean   scope read:cells
+- aquilla.editor.visible(fileId, [cellId…]) — the rows on screen (drives the app's draft-as-you-read, parallel Bibles).   scope read:cells
 - aquilla.editor.openSettings("target-language"|"lanes"|"terminology") — open the app's settings there.   scope read:cells
 - aquilla.cells.sections(fileId) → [{ key, kind, label, shortLabel, description, firstCellId, cellIds, translated, validated, total, subsections }]
     chapters/sections for a navigator.   scope read:cells

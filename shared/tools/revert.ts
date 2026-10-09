@@ -23,8 +23,10 @@ export interface ToolWrite {
   serverSeq: number
   /** For target.cell.commit: the chain parent the tool committed on. */
   parentId: string | null
-  /** For cell.validate: the edit event the validation anchored to. */
+  /** For cell.validate / cell.unvalidate: the edit event it anchored to. */
   editEventId?: string | null
+  /** Who the tool wrote as (the user running it). */
+  author?: string | null
 }
 
 /** A touched cell's state now, plus the value from before the tool's first
@@ -63,6 +65,17 @@ export interface RevertUnvalidate {
   editEventId: string
 }
 
+/** A validation the tool WITHDREW, to put back (only the reverting user's
+ *  own — a tool can only withdraw its user's validation — and only while it
+ *  would anchor to the same, still-live head). */
+export interface RevertRevalidate {
+  fileId: string
+  cellId: string
+  targetLang: string
+  laneId: string | null
+  editEventId: string
+}
+
 export interface RevertSkip {
   fileId: string
   cellId: string
@@ -75,6 +88,7 @@ export interface RevertSkip {
 export interface RevertPlan {
   commits: RevertCommit[]
   unvalidates: RevertUnvalidate[]
+  revalidates: RevertRevalidate[]
   skipped: RevertSkip[]
   /** Cells whose value already equals the prior value — nothing to do. */
   unchanged: number
@@ -87,9 +101,13 @@ export function slotKey(fileId: string, cellId: string, targetLang: string): str
 export function planToolRevert(
   writes: readonly ToolWrite[],
   cells: readonly TouchedCellState[],
+  /** The user running the revert (re-validations are only ever theirs). */
+  revertingAuthor?: string,
 ): RevertPlan {
   const commitsBySlot = new Map<string, Set<string>>()
   const validates: ToolWrite[] = []
+  // Last validation-state write per slot+anchor: validate or unvalidate.
+  const lastVote = new Map<string, ToolWrite>()
   for (const w of writes) {
     const key = slotKey(w.fileId, w.cellId, w.targetLang)
     if (w.kind === "target.cell.commit") {
@@ -99,10 +117,13 @@ export function planToolRevert(
     } else if (w.kind === "cell.validate") {
       validates.push(w)
     }
+    if ((w.kind === "cell.validate" || w.kind === "cell.unvalidate") && w.editEventId) {
+      lastVote.set(`${key}\u0000${w.editEventId}`, w)
+    }
   }
   const stateBySlot = new Map(cells.map((c) => [slotKey(c.fileId, c.cellId, c.targetLang), c]))
 
-  const plan: RevertPlan = { commits: [], unvalidates: [], skipped: [], unchanged: 0 }
+  const plan: RevertPlan = { commits: [], unvalidates: [], revalidates: [], skipped: [], unchanged: 0 }
   const restoredSlots = new Set<string>()
 
   for (const [key, toolEventIds] of commitsBySlot) {
@@ -159,6 +180,18 @@ export function planToolRevert(
       laneId: state.laneId,
       editEventId: v.editEventId,
     })
+  }
+  // A validation the tool removed (its last vote on that anchor was an
+  // unvalidate) comes back, if the text it validated is still the live head
+  // and nothing above restores a different value.
+  for (const w of lastVote.values()) {
+    if (w.kind !== "cell.unvalidate" || !w.editEventId) continue
+    if (revertingAuthor && w.author && w.author !== revertingAuthor) continue
+    const key = slotKey(w.fileId, w.cellId, w.targetLang)
+    const state = stateBySlot.get(key)
+    if (!state || state.headEventId !== w.editEventId) continue
+    if (plan.commits.some((c) => slotKey(c.fileId, c.cellId, c.targetLang) === key)) continue
+    plan.revalidates.push({ fileId: w.fileId, cellId: w.cellId, targetLang: w.targetLang, laneId: state.laneId, editEventId: w.editEventId })
   }
   return plan
 }

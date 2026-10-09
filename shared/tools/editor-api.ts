@@ -208,6 +208,9 @@ export interface ToolCellViewRev3 {
   /** On a paragraph's first cell: how many cells the paragraph has and how
    *  many are still draftable (drives "Draft paragraph"). */
   paragraph?: { size: number; draftable: number } | null
+  /** The voice this line speaks in (Audio lens): name, and whether someone
+   *  chose it (else the project default). */
+  voice?: { name: string; explicit: boolean } | null
 }
 
 export interface ToolRibbon {

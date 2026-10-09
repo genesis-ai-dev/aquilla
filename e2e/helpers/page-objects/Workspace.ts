@@ -1,4 +1,5 @@
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator, type FrameLocator, expect } from "@playwright/test"
+import { EXTENSION_EDITOR_FRAME, editorUnderTest } from "../editor-mode"
 
 // A cold editor route hydrates project access, file metadata, sync state, and
 // source/target cells before the first row can render. Three isolated smoke
@@ -23,6 +24,15 @@ export class Workspace {
 
   constructor(page: Page) {
     this.page = page
+  }
+
+  /** Where editor rows live: the page (built-in editor), or the first-party
+   *  extension editor's sandboxed frame when the run targets it
+   *  (E2E_EDITOR=extension, see e2e/helpers/editor-mode.ts). The extension
+   *  renders the same row anatomy (data-cell-id, data-cell-type, the read
+   *  view, the action rail and its aria-labels), so journeys run unchanged. */
+  private get root(): Page | FrameLocator {
+    return editorUnderTest() === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME) : this.page
   }
 
   /** Select a file and stop at the human-review preview boundary. */
@@ -481,7 +491,7 @@ export class Workspace {
 
   /** First-cell sparkle: Translate with AI, or Set up AI before the chooser. */
   private firstCellSparkle(): { row: Locator; sparkle: Locator } {
-    const row = this.page.locator("[data-cell-id]").first()
+    const row = this.root.locator("[data-cell-id]").first()
     const sparkle = row
       .locator(
         "[data-tooltip*='Translate with AI'] button, [data-tooltip*='Set up AI'] button, " +
@@ -552,7 +562,7 @@ export class Workspace {
     // force for the same reason as the sparkle above: the unrevealed rail
     // wrapper can still intercept the hit-test if idle-hide races the click.
     await overflow.click({ force: true })
-    const action = this.page.locator(`button[aria-label="${ariaLabel}"]`).first()
+    const action = this.root.locator(`button[aria-label="${ariaLabel}"]`).first()
     await expect(action).toBeVisible({ timeout: 5_000 })
     return action
   }
@@ -562,8 +572,8 @@ export class Workspace {
     // selector. Passing the expected id prevents a file navigation from being
     // satisfied by a stale row that belonged to the previously open file.
     const firstCell = expectedCellId
-      ? this.page.locator(`[data-cell-id="${expectedCellId}"]`)
-      : this.page.locator("[data-cell-id]").first()
+      ? this.root.locator(`[data-cell-id="${expectedCellId}"]`)
+      : this.root.locator("[data-cell-id]").first()
     await expect(firstCell).toBeVisible({
       timeout: EDITOR_READY_TIMEOUT_MS,
     })
@@ -584,8 +594,13 @@ export class Workspace {
     await expect(tab).toHaveAttribute("aria-selected", "true")
   }
 
+  /** Every rendered editor row (built-in table or extension frame). */
+  cellRows(): Locator {
+    return this.root.locator("[data-cell-id]")
+  }
+
   cellRow(index = 0): Locator {
-    return this.page.locator("[data-cell-id]").nth(index)
+    return this.root.locator("[data-cell-id]").nth(index)
   }
 
   private editableTarget(index: number): Locator {
@@ -1092,7 +1107,7 @@ export class Workspace {
     await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
     await validationButton.click()
 
-    const removeButton = this.page.getByRole("button", {
+    const removeButton = this.root.getByRole("button", {
       name: "Remove your validation",
       exact: true,
     })
@@ -1177,7 +1192,7 @@ export class Workspace {
 
   /** First editor row whose source column contains `sourceSubstring`. */
   async cellIndexWithSource(sourceSubstring: string): Promise<number> {
-    const rows = this.page.locator("[data-cell-id]")
+    const rows = this.root.locator("[data-cell-id]")
     await expect.poll(async () => {
       const n = await rows.count()
       for (let i = 0; i < n; i++) {

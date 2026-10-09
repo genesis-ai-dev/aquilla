@@ -4,7 +4,7 @@
  * cells.changed pushes and theme forwarding.
  */
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react"
 import { toast } from "@/components/ui/toast"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { useOutbox } from "@/context/OutboxContext"
@@ -34,6 +34,8 @@ export interface UseToolHostArgs {
   services?: ToolHostServices
   /** apiRev 2: a cell the host wants the extension to show (deep link). */
   revealCellId?: string | null
+  /** apiRev 3: lets the host push events to this frame (editor commands). */
+  controlRef?: MutableRefObject<ToolFrameControl | null>
   /** apiRev 3: size of the host chrome drawn over the frame's top-right. */
   chrome?: { trailingWidth: number; trailingHeight: number } | null
 }
@@ -50,7 +52,12 @@ export interface ToolHostState {
   ready: boolean
 }
 
-export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome }: UseToolHostArgs): ToolHostState {
+/** Host → frame commands for a mounted tool (apiRev 3). */
+export interface ToolFrameControl {
+  push: (event: { type: string } & Record<string, unknown>) => void
+}
+
+export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef }: UseToolHostArgs): ToolHostState {
   const { flushNow } = useOutbox()
   const [prompt, setPrompt] = useState<PendingPrompt | null>(null)
   const [errors, setErrors] = useState<ToolErrorReport[]>([])
@@ -284,6 +291,13 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   useEffect(() => {
     if (ready && editorLoading === false) hostRef.current?.push({ type: "cells.loaded", fileId: boundFile ?? null })
   }, [ready, editorLoading, boundFile])
+  useEffect(() => {
+    if (!controlRef) return
+    controlRef.current = ready ? { push: (event) => hostRef.current?.push(event) } : null
+    return () => {
+      controlRef.current = null
+    }
+  }, [controlRef, ready])
   const chromeWidth = chrome?.trailingWidth ?? 0
   const chromeHeight = chrome?.trailingHeight ?? 0
   useEffect(() => {

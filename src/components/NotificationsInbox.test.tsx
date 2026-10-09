@@ -72,7 +72,11 @@ describe("NotificationsInbox", () => {
     ])
     expect(screen.getByTestId("notifications-unread-count")).toHaveTextContent("1")
     await user.click(screen.getByTestId("notifications-inbox-trigger"))
-    expect(screen.getByText("Bob commented: Could @alice review this verse?")).toBeInTheDocument()
+    expect(screen.getByText("Bob mentioned you")).toBeInTheDocument()
+    const mention = screen.getByText("Bob mentioned you")
+    const message = screen.getByText("Could @alice review this verse?")
+    expect(mention.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByText(/commented/)).not.toBeInTheDocument()
     expect(screen.getByText("GEN 1:1")).toBeInTheDocument()
     const dot = screen.getByTestId("notification-unread-dot")
     expect(dot.parentElement).toHaveTextContent("GEN 1:1")
@@ -112,7 +116,8 @@ describe("NotificationsInbox", () => {
     )
     await user.click(screen.getByTestId("notifications-inbox-trigger"))
     expect(screen.getByText("The Creation")).toBeInTheDocument()
-    expect(screen.getByText("Bob commented: @alice look")).toBeInTheDocument()
+    expect(screen.getByText("Bob mentioned you")).toBeInTheDocument()
+    expect(screen.getByText("@alice look")).toBeInTheDocument()
     expect(screen.queryByText("Saved later")).not.toBeInTheDocument()
     expect(screen.queryByText(/Berean|Cell /)).not.toBeInTheDocument()
   })
@@ -247,7 +252,7 @@ describe("NotificationsInbox", () => {
     expect(screen.queryByRole("button", { name: /GEN 2:1\b/ })).not.toBeInTheDocument()
   })
 
-  it("moves through notifications with the arrow keys and opens the focused one", async () => {
+  it("does not highlight a row on open, then moves with the arrow keys and opens the focused one", async () => {
     const user = userEvent.setup()
     renderInbox([
       comment({ commentId: "a", body: "@[alice] one" }),
@@ -256,13 +261,36 @@ describe("NotificationsInbox", () => {
     await user.click(screen.getByTestId("notifications-inbox-trigger"))
     const first = screen.getByRole("button", { name: /GEN 1:1/ })
     const second = screen.getByRole("button", { name: /GEN 1:2/ })
+    expect(first).not.toHaveAttribute("data-active")
+    expect(second).not.toHaveAttribute("data-active")
+    expect(first).not.toHaveFocus()
+    await user.keyboard("{ArrowDown}")
     expect(first).toHaveFocus()
+    expect(first).toHaveAttribute("data-active", "true")
+    expect(second).not.toHaveAttribute("data-active")
     await user.keyboard("{ArrowDown}")
     expect(second).toHaveFocus()
+    expect(second).toHaveAttribute("data-active", "true")
+    expect(first).not.toHaveAttribute("data-active")
     await user.keyboard("{Enter}")
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/project/proj-1/editor/file/file-1?cellId=cell-2&comments=1&commentId=b",
     )
+  })
+
+  it("highlights the last row when ArrowUp is pressed before any row is highlighted", async () => {
+    const user = userEvent.setup()
+    renderInbox([
+      comment({ commentId: "a", body: "@[alice] one" }),
+      comment({ commentId: "b", cellId: "cell-2", cellRef: "GEN 1:2", body: "@[alice] two" }),
+    ])
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const first = screen.getByRole("button", { name: /GEN 1:1/ })
+    const second = screen.getByRole("button", { name: /GEN 1:2/ })
+    await user.keyboard("{ArrowUp}")
+    expect(second).toHaveFocus()
+    expect(second).toHaveAttribute("data-active", "true")
+    expect(first).not.toHaveAttribute("data-active")
   })
 
   it("shows only unread rows, and delete all read leaves the unread ones", async () => {

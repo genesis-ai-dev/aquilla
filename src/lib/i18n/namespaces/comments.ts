@@ -103,7 +103,7 @@ export const comments = defineNamespace({
     "comments.inbox.markAllRead": "Mark all as read",
     "comments.inbox.markRead": "Mark as read",
     "comments.inbox.markUnread": "Mark unread",
-    "comments.inbox.commented": "{author} commented: {excerpt}",
+    "comments.inbox.mentionedYou": "{author} mentioned you",
     "comments.inbox.unreadsOnly": "Show unreads only",
     "comments.inbox.actionsAria": "Notification actions",
     "comments.inbox.delete": "Delete notification",
@@ -541,13 +541,13 @@ export const comments = defineNamespace({
           "Item in the right-click menu on one notification. Marks that row unread again. " +
           "Shown only while the row is already read.",
       },
-      "comments.inbox.commented": {
+      "comments.inbox.mentionedYou": {
         description:
-          "Second line of a notification row. Names who wrote the comment, then the " +
-          "comment itself. Example: \"dev commented: @carol yes\".",
+          "Line under a notification's place title. Names the person who @mentioned " +
+          "the reader. The comment text is a separate line beneath this one, not part " +
+          "of the sentence. Example: \"Keean mentioned you\".",
         placeholders: {
-          author: "Display name of the person who wrote the comment.",
-          excerpt: "The comment text, with @mentions kept as @name.",
+          author: "Display name of the person who wrote the mention.",
         },
       },
       "comments.inbox.unreadsOnly": {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type Ref } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Bell, MailBadge, MailCheck, MailX, MoreHorizontal } from "lucide-react"
 import { useNavigate } from "react-router-dom"
@@ -40,8 +40,11 @@ import {
 import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
-/** Rough row height. Rows truncate to two lines, so a fixed estimate is enough. */
-const NOTICE_ROW_PX = 48
+/**
+ * Rough row height. Each row is the place, "{author} mentioned you", and the
+ * comment, so a fixed estimate is enough.
+ */
+const NOTICE_ROW_PX = 72
 
 type PendingDelete =
   | { kind: "one"; commentId: string }
@@ -53,7 +56,9 @@ type PendingDelete =
  * loaded for the open project — there is no notification table. Read and
  * dismissed state live on this device. Dismissing a row hides it here; the
  * comment stays. Rows show the cell as the title, an unread dot inline with
- * that title, "{author} commented: {excerpt}" under it, and the time on the right.
+ * that title, "{author} mentioned you" under it, the comment beneath that, and
+ * the time on the right. Opening the inbox does not highlight a row; keyboard
+ * navigation does.
  */
 export function NotificationsInbox({
   projectId,
@@ -78,7 +83,7 @@ export function NotificationsInbox({
   // The confirm dialog is portaled outside the popover. Hold the inbox open
   // across that outside press, then release on the next turn.
   const holdOpen = useRef(false)
-  const firstNoticeRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const readIds = useMentionReadIds(projectId, readerUsername)
   const dismissedIds = useMentionDismissedIds(projectId, readerUsername)
   const notices = useMemo(
@@ -203,7 +208,7 @@ export function NotificationsInbox({
           align="end"
           side="bottom"
           sideOffset={6}
-          initialFocus={shown.length > 0 ? firstNoticeRef : undefined}
+          initialFocus={shown.length > 0 ? listRef : undefined}
           className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-hidden pt-2 pr-0 pb-0 pl-2"
         >
           <header className="flex shrink-0 items-center justify-between gap-2 pr-2">
@@ -286,7 +291,7 @@ export function NotificationsInbox({
               readIds={readIds}
               files={files}
               cellTextById={cellTextById}
-              firstNoticeRef={firstNoticeRef}
+              listRef={listRef}
               markReadLabel={t("comments.inbox.markRead")}
               markUnreadLabel={t("comments.inbox.markUnread")}
               deleteLabel={t("comments.inbox.delete")}
@@ -328,7 +333,7 @@ function NotificationList({
   readIds,
   files,
   cellTextById,
-  firstNoticeRef,
+  listRef,
   markReadLabel,
   markUnreadLabel,
   deleteLabel,
@@ -343,7 +348,7 @@ function NotificationList({
   readIds: ReadonlySet<string>
   files: readonly { id: string; name: string }[]
   cellTextById: ReadonlyMap<string, string> | undefined
-  firstNoticeRef: Ref<HTMLButtonElement>
+  listRef: RefObject<HTMLDivElement | null>
   markReadLabel: string
   markUnreadLabel: string
   deleteLabel: string
@@ -353,12 +358,12 @@ function NotificationList({
   onMarkUnread: (commentId: string) => void
   onDelete: (commentId: string) => void
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null)
   const pendingFocus = useRef<number | null>(null)
-  const [activeIndex, setActiveIndex] = useState(0)
+  // No row is highlighted until the reader moves with the keyboard or focuses one.
+  const [activeIndex, setActiveIndex] = useState(-1)
   const virtualizer = useVirtualizer({
     count: notices.length,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => listRef.current,
     getItemKey: (index) => notices[index]?.commentId ?? index,
     estimateSize: () => NOTICE_ROW_PX,
     overscan: 8,
@@ -375,22 +380,22 @@ function NotificationList({
 
   const handleScrollRef = useCallback(
     (element: HTMLDivElement | null) => {
-      scrollRef.current = element
+      listRef.current = element
       if (element) virtualizer.measure()
     },
-    [virtualizer],
+    [listRef, virtualizer],
   )
 
   const focusRow = useCallback((index: number) => {
-    scrollRef.current
+    listRef.current
       ?.querySelector<HTMLButtonElement>(`[data-notice-index="${index}"]`)
       ?.focus()
-  }, [])
+  }, [listRef])
 
   useEffect(() => {
     const index = pendingFocus.current
     if (index == null) return
-    const button = scrollRef.current?.querySelector<HTMLButtonElement>(
+    const button = listRef.current?.querySelector<HTMLButtonElement>(
       `[data-notice-index="${index}"]`,
     )
     if (!button) return
@@ -408,7 +413,7 @@ function NotificationList({
     // In-window rows are already painted. Scroll when the destination is an
     // edge the current window does not contain, the same rule as the chapter
     // picker: the virtualizer follows the highlight, it does not own the keys.
-    const visible = scrollRef.current?.querySelector(`[data-notice-index="${next}"]`)
+    const visible = listRef.current?.querySelector(`[data-notice-index="${next}"]`)
     if (!visible || isStart || isEnd) {
       virtualizer.scrollToIndex(next, { align: isEnd ? "end" : "start" })
     }
@@ -420,8 +425,21 @@ function NotificationList({
     if (notices.length === 0) return
     const range = virtualizer.range
     const page = Math.max(1, range ? range.endIndex - range.startIndex : 1)
-    let next: number | null = null
-    if (event.key === "ArrowDown") next = activeIndex + 1
+    let next: number
+    // Nothing is highlighted yet. The first key starts at an end of the list
+    // instead of treating "no selection" as the first row.
+    if (activeIndex < 0) {
+      if (
+        event.key === "ArrowDown" ||
+        event.key === "Home" ||
+        event.key === "PageDown" ||
+        event.key === "PageUp"
+      ) {
+        next = 0
+      } else if (event.key === "ArrowUp" || event.key === "End") {
+        next = notices.length - 1
+      } else return
+    } else if (event.key === "ArrowDown") next = activeIndex + 1
     else if (event.key === "ArrowUp") next = activeIndex - 1
     else if (event.key === "Home") next = 0
     else if (event.key === "End") next = notices.length - 1
@@ -436,8 +454,9 @@ function NotificationList({
     <div
       ref={handleScrollRef}
       aria-label={label}
+      tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pr-2 pb-2"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pr-2 pb-2 outline-hidden"
     >
       <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
@@ -460,13 +479,14 @@ function NotificationList({
                 index={virtualItem.index}
                 setSize={notices.length}
                 active={virtualItem.index === activeIndex}
-                buttonRef={virtualItem.index === 0 ? firstNoticeRef : undefined}
+                tabbable={
+                  virtualItem.index === activeIndex ||
+                  (activeIndex < 0 && virtualItem.index === 0)
+                }
                 title={place || notice.authorLabel}
                 timeLabel={formatRelativeTime(notice.createdAt, t)}
-                subtitle={t("comments.inbox.commented", {
-                  author: notice.authorLabel,
-                  excerpt: notice.excerpt,
-                })}
+                mentionLabel={t("comments.inbox.mentionedYou", { author: notice.authorLabel })}
+                message={notice.excerpt}
                 markReadLabel={markReadLabel}
                 markUnreadLabel={markUnreadLabel}
                 deleteLabel={deleteLabel}
@@ -490,10 +510,11 @@ function NotificationRow({
   index,
   setSize,
   active,
-  buttonRef,
+  tabbable,
   title,
   timeLabel,
-  subtitle,
+  mentionLabel,
+  message,
   markReadLabel,
   markUnreadLabel,
   deleteLabel,
@@ -508,10 +529,11 @@ function NotificationRow({
   index: number
   setSize: number
   active: boolean
-  buttonRef?: Ref<HTMLButtonElement>
+  tabbable: boolean
   title: string
   timeLabel: string
-  subtitle: string
+  mentionLabel: string
+  message: string
   markReadLabel: string
   markUnreadLabel: string
   deleteLabel: string
@@ -527,8 +549,7 @@ function NotificationRow({
         render={
           <button
             type="button"
-            ref={buttonRef}
-            tabIndex={active ? 0 : -1}
+            tabIndex={tabbable ? 0 : -1}
             data-notice-index={index}
             aria-setsize={setSize}
             aria-posinset={index + 1}
@@ -560,9 +581,14 @@ function NotificationRow({
               {timeLabel}
             </span>
           </span>
-          <span className="mt-0.5 block truncate text-xs text-muted-foreground" data-ph-mask>
-            {subtitle}
+          <span className="mt-0.5 block truncate text-xs text-foreground/80" data-ph-mask>
+            {mentionLabel}
           </span>
+          {message ? (
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground" data-ph-mask>
+              {message}
+            </span>
+          ) : null}
         </span>
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-44">

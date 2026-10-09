@@ -202,14 +202,31 @@ export async function applyMemberLaneGrantsForProjects(
   }
 }
 
-/** Lane scopes named on a new membership. Existing rows are left in place. */
-export async function insertMemberLaneScopes(
+/**
+ * AQU-1808 — the kind='lane' scope rows an explicit lane choice names,
+ * replacing whatever rows the person already had on this project.
+ *
+ * Removing a member deletes only `project_members` (DELETE /members/:id and
+ * revoke-all alike), so the scope rows of an earlier membership survive. A
+ * re-add used to union the new choice into them, which kept a stale narrow
+ * row under "every current lane" — the client's lane list then forced the
+ * person onto that one lane. An empty list deletes the rows: that is what
+ * "every current lane" stores, and what a project lead holds (AD-12: a lead
+ * is never lane-scoped).
+ */
+export async function replaceMemberLaneScopes(
   db: AquillaDb,
   projectId: string,
   userId: number,
   laneIds: readonly string[],
   createdBy: number,
 ): Promise<void> {
+  await db
+    .prepare(
+      "DELETE FROM project_member_scopes WHERE project_id = ? AND user_id = ? AND kind = 'lane'",
+    )
+    .bind(projectId, userId)
+    .run()
   const now = Date.now()
   for (const laneId of laneIds) {
     await db

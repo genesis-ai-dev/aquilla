@@ -366,6 +366,14 @@ describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
     expect(scopedLanesFor(ROLE.OWNER, [lane("es")], lanes)).toBeNull()
   })
 
+  // AQU-1795 / AQU-1808: the read wall stops at project lead, and the server
+  // shows a lead every lane even when a scope row from before a promotion, or
+  // from a membership that was removed and re-added, is still stored. The
+  // client must not narrow them by it either.
+  it("leaves a project lead to every lane (null), whatever their scopes", () => {
+    expect(scopedLanesFor(ROLE.PROJECT_LEAD, [lane("es")], lanes)).toBeNull()
+  })
+
   it("leaves a member with no lane scopes on the AQU-608 rule (null)", () => {
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, [], lanes)).toBeNull()
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, null, lanes)).toBeNull()

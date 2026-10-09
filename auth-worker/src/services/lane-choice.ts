@@ -12,7 +12,9 @@
 // every lane (and a lead below the old Maintainer wall still receives a
 // grant on each current lane from the existing planner). A role change of
 // someone who is already a member does not ask again: the lanes they hold
-// stay, and only the level is rewritten.
+// stay, and only the level is rewritten. A choice that IS named on the add of
+// an existing member replaces their lanes, and a fresh membership starts from
+// no lane rows — the rows of a removed membership are not inherited.
 
 import { ROLE, type Env } from "../types"
 import { loadCurrentTargetLanes } from "../../../db/shared/lane-visibility"

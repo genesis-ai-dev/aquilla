@@ -96,7 +96,11 @@ import {
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
 import { loadLinkFileIds } from "../services/source-linking"
-import { applyDirectAddLaneGrants, insertMemberLaneScopes } from "../services/lane-grants"
+import {
+  applyDirectAddLaneGrants,
+  replaceMemberLaneScopes,
+  syncMemberLaneGrants,
+} from "../services/lane-grants"
 import { resolveExplicitLaneChoice } from "../services/lane-choice"
 import { createProjectShared } from "../../../db/shared/projects"
 import { countedFileSql } from "../../../db/shared/counted-files"
@@ -1635,18 +1639,32 @@ async function grantProjectMemberOne(
     .bind(projectId, target.id, role, callerUserId)
     .run()
 
-  // Limited lanes are stored before the grant planner runs, so an empty
-  // scope list is not read as "every lane". "Every current lane" writes no
-  // scope rows; the planner then grants each current lane.
+  // AQU-1808: the choice made on this add is the whole truth about the
+  // person's lanes. Removing a member deletes only `project_members`, so the
+  // scope and grant rows of an earlier membership survive the removal. Before
+  // this they narrowed a re-add that chose "every current lane" (the planner
+  // only re-levels grant rows that already exist, and the stale scope row kept
+  // the client on that one lane), and they kept an earlier every-lane grant
+  // set under a re-add that named one lane. So a fresh membership starts from
+  // no lane rows, and a lane list given for an existing member replaces the
+  // lanes they held. A project lead is never lane-scoped (AD-12): a promotion
+  // drops the stale scope rows the client's lane list would narrow by.
+  //
+  // AQU-1782: a role change of an existing member that names no lanes keeps
+  // the lanes they hold and rewrites only the level on those rows.
+  const freshMembership = !existing
   if (laneChoice.kind === "lanes") {
-    await insertMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+    await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+    await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+  } else if (laneChoice.kind === "all" || freshMembership) {
+    await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+    await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+  } else {
+    if (role >= ROLE.PROJECT_LEAD) {
+      await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+    }
+    await applyDirectAddLaneGrants(env.AQUILLA_PG, projectId, target.id, role, callerUserId)
   }
-  // AQU-1782: the membership row alone leaves a below-Maintainer member with
-  // no lane grants, so under the read wall they see no target lane, no target
-  // cells and 0% progress while the lead sees everything. Grants are written
-  // through the same planner invite acceptance uses, and a role change rewrites
-  // the level on the rows the member already has.
-  await applyDirectAddLaneGrants(env.AQUILLA_PG, projectId, target.id, role, callerUserId)
   await auditMembershipChange(env, actor, {
     action: roleBefore === null ? "project.member.grant" : "project.member.role",
     where: { scope: "project", projectId },

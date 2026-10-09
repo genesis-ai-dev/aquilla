@@ -559,6 +559,9 @@ export class Workspace {
    */
   async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
     await row.scrollIntoViewIfNeeded()
+    // A parked pointer can already be inside an idle-collapsed row. Leave it
+    // before entering again so this is a fresh reveal gesture.
+    await this.page.getByRole("banner").hover()
     await row.hover()
     const rail = row.locator('[data-slot="cell-action-rail"]')
     await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
@@ -681,7 +684,7 @@ export class Workspace {
       requestAt = Date.now()
     })
     const blurStarted = Date.now()
-    await this.page.locator("aside").click()
+    await this.blurEditor()
     const response = await committed
     await requestSeen
     const ackedAt = Date.now()
@@ -987,7 +990,7 @@ export class Workspace {
         return false
       }
     }, { timeout: 20_000 })
-    await this.page.locator("aside").click()
+    await this.blurEditor()
     await multilineCommitted
 
     const readView = this.targetReadView(index)
@@ -1185,6 +1188,16 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /Editor settings/i }).click()
   }
 
+  /** Confirm a draft for every empty cell in the current file. */
+  async draftAllEmptyCells(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Draft all \(review required\)/i }).click()
+    const dialog = this.page.getByRole("dialog", { name: "Draft this file", exact: true })
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    await dialog.getByRole("checkbox", { name: /empty cells$/ }).check()
+    await dialog.getByRole("button", { name: "Draft", exact: true }).click()
+  }
+
   /** Export lives in the file options overflow menu. */
   async openExportDialog(): Promise<void> {
     await this.openFileOverflowMenu()
@@ -1282,11 +1295,14 @@ export class Workspace {
     return destination
   }
 
-  /** Leave the active editor by clicking sidebar chrome. Unlike editCell this
+  /** Leave the active editor by clicking the source metadata lane. Unlike editCell this
    * does not wait for a commit — the value may already be committed by the
    * idle debounce, in which case blur only releases the focus lock. */
   async blurEditor(): Promise<void> {
-    await this.page.locator("aside").click()
+    // The sidebar's center can land on Comments and navigate away. The source
+    // metadata lane has inert padding and keeps the current editor mounted.
+    await this.page.getByTestId("source-context-line")
+      .filter({ visible: true }).first().click({ position: { x: 1, y: 1 } })
   }
 
   /** Open the per-cell "Edit history" drawer through the action overflow. */

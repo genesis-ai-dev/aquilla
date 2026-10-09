@@ -94,12 +94,7 @@ test("Draft all persists one ten-cell model package in one events request", asyn
     }
   }, { timeout: 30_000 })
 
-  await ws.openFileOverflowMenu()
-  await alice.getByRole("menuitem", { name: /Draft all \(review required\)/i }).click()
-  const dialog = alice.getByRole("dialog")
-  await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.getByRole("checkbox").click()
-  await dialog.getByRole("button", { name: /^Draft all$/i }).click()
+  await ws.draftAllEmptyCells()
 
   const request = await packagePost
   const body = request.postDataJSON() as {

@@ -1388,9 +1388,11 @@ export function ProjectWorkspace() {
   const extensionEditorChoice = useExtensionEditorChoice(currentUsername, projectId ?? "", activeFileId ?? null)
   const extensionPanelRequestSeq = useToolsMount()?.panelRequestSeq ?? 0
   // A pinned extension or palette entry asked for the side panel: show it.
+  // An explicit request: open the dock even when it is collapsed (and, below
+  // lg, open the dock's sheet — see AppShell dockOpenRequest).
   useEffect(() => {
-    if (extensionPanelRequestSeq > 0) selectDockTab("tools")
-  }, [extensionPanelRequestSeq, selectDockTab])
+    if (extensionPanelRequestSeq > 0) showDockTabProgrammatically("tools")
+  }, [extensionPanelRequestSeq, showDockTabProgrammatically])
   // Keep the ref in sync so effects declared earlier in the component can
   // access the resolved username without a hoisting issue.
   currentUsernameRef.current = currentUsername
@@ -12617,6 +12619,7 @@ export function ProjectWorkspace() {
   if (status === "loading") {
     return (
       <AppShell
+        dockOpenRequest={extensionPanelRequestSeq}
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
         leftDock={
@@ -13039,6 +13042,7 @@ export function ProjectWorkspace() {
       <ScrollToGroupHandler cellStore={cellStore} storeVersion={cellStoreVersion} editorRef={editorRef} />
       {/* The agent inherits the workspace's live file/cell location below. */}
       <AppShell
+        dockOpenRequest={extensionPanelRequestSeq}
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
         logoAccessory={

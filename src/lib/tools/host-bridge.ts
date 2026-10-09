@@ -31,6 +31,16 @@ export interface ToolErrorReport {
   stack: string
 }
 
+/** What the frame reports it draws (render.check). */
+export interface RenderReport {
+  /** Visible text length in the body. */
+  text: number
+  /** Elements with a real box (capped at 5). */
+  visible: number
+  /** Nothing to see: no text and fewer than 3 visible boxes. */
+  empty: boolean
+}
+
 export interface BridgeHostOptions {
   getFrameWindow: () => Window | null
   handlers: Readonly<Record<string, BridgeHandler>>
@@ -45,6 +55,8 @@ export interface BridgeHostOptions {
   /** Origins accepted from the frame. Default: the opaque origin "null". */
   allowedOrigins?: readonly string[]
   maxInFlight?: number
+  /** apiRev 3: the frame's answer to a render.check push. */
+  onRender?: (report: RenderReport) => void
 }
 
 export interface BridgeHost {
@@ -141,6 +153,12 @@ export function createBridgeHost(opts: BridgeHostOptions): BridgeHost {
     if (!isRecord(msg) || msg.channel !== "aquilla-tool") return
     if (msg.type === "ready") {
       opts.onReady?.()
+      return
+    }
+    if (msg.type === "render") {
+      const text = typeof msg.text === "number" ? msg.text : 0
+      const visible = typeof msg.visible === "number" ? msg.visible : 0
+      opts.onRender?.({ text, visible, empty: text === 0 && visible < 3 })
       return
     }
     if (msg.type === "error") {

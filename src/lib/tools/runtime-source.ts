@@ -77,6 +77,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     } else if (msg.type === "event" && msg.event && typeof msg.event.type === "string") {
       if (msg.event.type === "theme" && msg.event.vars) applyTheme(msg.event.vars);
       if (msg.event.type === "fonts") applyFonts(msg.event.fonts);
+      if (msg.event.type === "render.check") { renderReport(); return; }
       emit(msg.event);
     }
   });
@@ -265,6 +266,24 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     e.preventDefault();
     aquilla.ui.hostKey({ key: e.key, mod: !!(e.ctrlKey || e.metaKey), shift: e.shiftKey, alt: e.altKey }).catch(function () {});
   }, true);
+
+  // apiRev 3: is anything on screen? The host asks (render.check) to catch an
+  // extension that loads but draws nothing — the builder's smoke gate fails
+  // such a build, and a live mount shows a "nothing showing" banner.
+  function renderReport() {
+    var b = document.body;
+    var text = b ? String(b.innerText || "").trim().length : 0;
+    var visible = 0;
+    if (b) {
+      var all = b.querySelectorAll("*");
+      for (var i = 0; i < all.length && visible < 5; i++) {
+        var r = all[i].getBoundingClientRect();
+        var cs = getComputedStyle(all[i]);
+        if (r.width > 2 && r.height > 2 && cs.visibility !== "hidden" && cs.display !== "none" && cs.opacity !== "0") visible++;
+      }
+    }
+    post({ type: "render", text: text, visible: visible });
+  }
 
   window.addEventListener("load", function () { post({ type: "ready" }); });
 })();`

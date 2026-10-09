@@ -91,6 +91,12 @@ export class ToolsPage {
     return this.page.locator(`[data-testid="installed-tool"][data-tool-name="${name}"]`)
   }
 
+  /** The editor's extensions palette (bar button) → "<name>: open in side panel". */
+  async openInSidePanelFromPalette(name: string): Promise<void> {
+    await this.page.getByRole("button", { name: "Smart Extensions (⌘⇧E)", exact: true }).click()
+    await this.page.getByRole("option", { name: `${name}: open in side panel` }).click()
+  }
+
   /** An installed extension's "…" menu item. */
   async openToolMenu(name: string, item: string): Promise<void> {
     await this.installedTool(name).getByTestId("tool-menu").click()

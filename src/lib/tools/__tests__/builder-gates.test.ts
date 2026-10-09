@@ -45,12 +45,12 @@ describe("smoke gate", () => {
     expect(res.errors.map((e) => e.message)).toContain("kaboom")
   })
 
-  it("passes the starter heat map in both empty and populated states", async () => {
+  it("passes the starter heat map empty, and populated in every declared mount", async () => {
     const manifest = validateManifest(HEATMAP_MANIFEST).manifest
     expect(manifest).not.toBeNull()
     const res = await runToolSmoke(HEATMAP_SOURCE, manifest as ToolManifest, smokeOpts)
     expect(res.errors).toEqual([])
-    expect(res.calls["files.list"]).toBe(2)
+    expect(res.calls["files.list"]).toBe(1 + (manifest as ToolManifest).mounts.length)
     expect(res.calls["cells.list"]).toBeGreaterThanOrEqual(1)
   }, 30_000)
 })
@@ -103,4 +103,34 @@ describe("repair loop", () => {
     expect(out.ok).toBe(false)
     expect(calls).toBe(MAX_REPAIRS + 1)
   })
+})
+
+describe("render gate (a tool must show something in each mount)", () => {
+  const manifest: ToolManifest = { name: "Blank", description: "", scopes: ["read:cells"], mounts: ["page", "panel"], apiRev: 3 }
+
+  it("fails a tool that loads but draws nothing", async () => {
+    const res = await runToolSmoke(`<script>(async () => { await aquilla.files.list() })()</script>`, manifest, smokeOpts)
+    expect(res.ok).toBe(false)
+    expect(res.errors.map((e) => e.message).join("\n")).toMatch(/rendered nothing on screen in the "page" mount/)
+  }, 30_000)
+
+  it("fails a tool that draws in its page but not in its side panel", async () => {
+    const src = `<div id="out"></div><script>(async () => {
+      const files = await aquilla.files.list();
+      if (aquilla.context.mount === "page") document.getElementById("out").textContent = files.length + " files";
+    })()</script>`
+    const res = await runToolSmoke(src, manifest, smokeOpts)
+    const messages = res.errors.map((e) => `${e.state}: ${e.message}`)
+    expect(messages.some((m) => m.startsWith("populated (panel)") && /"panel" mount/.test(m))).toBe(true)
+    expect(messages.some((m) => m.startsWith("populated (page)"))).toBe(false)
+  }, 30_000)
+
+  it("passes a tool that shows its data in every mount", async () => {
+    const src = `<h1>Word count</h1><div id="out">Loading…</div><script>(async () => {
+      const files = await aquilla.files.list();
+      document.getElementById("out").textContent = files.length + " files";
+    })()</script>`
+    const res = await runToolSmoke(src, manifest, smokeOpts)
+    expect(res.errors).toEqual([])
+  }, 30_000)
 })

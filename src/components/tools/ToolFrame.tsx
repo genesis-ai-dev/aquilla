@@ -61,7 +61,7 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
     ro.observe(el)
     return () => ro.disconnect()
   }, [frameOverlay])
-  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef })
+  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage, blank } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef })
   // The first reveal rides in the boot data (so the editor opens there); later
   // ones are pushed live. Read once per frame load.
   const [initialReveal] = useState(revealCellId)
@@ -93,6 +93,17 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
             <Button size="sm" variant="outline" disabled={healing} onClick={() => onHeal(rebuildRequest(tool.apiRev, removedApi ?? undefined))}>
               <Wand2 className="size-3.5" aria-hidden />
               {healing ? t("extensions.heal.running") : t("extensions.stale.rebuild")}
+            </Button>
+          )}
+        </div>
+      )}
+      {blank && errors.length === 0 && !prompt && (
+        <div role="status" className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2 text-sm" data-testid="extension-blank">
+          <span className="min-w-0 flex-1 text-muted-foreground">{t("extensions.frame.blank")}</span>
+          {onHeal && (
+            <Button size="xs" variant="outline" disabled={healing} onClick={() => onHeal(healRequest(`It renders nothing on screen in the "${mount}" mount: the page stays blank. Always show the UI (heading, data or an empty state).`))}>
+              <Wand2 className="size-3" aria-hidden />
+              {healing ? t("extensions.heal.running") : t("extensions.heal.button")}
             </Button>
           )}
         </div>

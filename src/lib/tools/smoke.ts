@@ -10,10 +10,10 @@
  * server, next to secrets.
  */
 
-import { createBridgeHost, type ToolErrorReport } from "./host-bridge"
+import { createBridgeHost, type RenderReport, type ToolErrorReport } from "./host-bridge"
 import { createToolHandlers, type ToolAudioEntry, type ToolCellView, type ToolHostData, type ToolPresence } from "./host-handlers"
 import { TOOL_SANDBOX, buildToolSrcdoc } from "./srcdoc"
-import type { ToolManifest } from "../../../shared/tools/manifest"
+import type { ToolManifest, ToolMount } from "../../../shared/tools/manifest"
 import { stubEditorData } from "./smoke-editor"
 import { uiStrings } from "./ui-strings"
 
@@ -22,10 +22,14 @@ export const SMOKE_QUIET_MS = 900
 export const SMOKE_MAX_MS = 6000
 
 export interface SmokeFixture {
-  label: "empty" | "populated"
+  label: "empty" | "populated" | `populated (${string})`
   data: ToolHostData
   /** Push after the tool settles (e.g. a cells.changed). */
   afterSettle?: { type: string } & Record<string, unknown>
+  /** The mount to render as (default "smoke": no context). */
+  mount?: ToolMount
+  /** Fail the run if, once settled, the tool shows nothing (render.check). */
+  mustRender?: boolean
 }
 
 /** Where a smoke run renders. The default is a real hidden sandboxed iframe;
@@ -35,7 +39,7 @@ export interface SmokeFrame {
   readonly toolWindow: Window | null
   /** The window the host listens on for the tool's messages. */
   readonly hostWindow: Window
-  start: (srcdoc: string) => void
+  start: (srcdoc: string, width?: number) => void
   dispose: () => void
 }
 
@@ -50,7 +54,8 @@ export function createIframeSmokeFrame(label: string): SmokeFrame {
       return iframe.contentWindow
     },
     hostWindow: window,
-    start: (srcdoc) => {
+    start: (srcdoc, width) => {
+      if (width) iframe.style.width = `${width}px`
       iframe.srcdoc = srcdoc
       document.body.appendChild(iframe)
     },
@@ -122,16 +127,26 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
   }
 }
 
+/** Empty data once, then populated data in EVERY mount the manifest declares
+ *  — each populated render must actually show something (a tool that loads
+ *  but draws nothing in its side panel is a broken build). */
 export function defaultSmokeFixtures(manifest: ToolManifest): SmokeFixture[] {
+  const mounts: ToolMount[] = manifest.mounts.length > 0 ? [...manifest.mounts] : ["page"]
   return [
     { label: "empty", data: stubData(false, manifest.scopes) },
-    {
-      label: "populated",
+    ...mounts.map((mount, i): SmokeFixture => ({
+      label: mounts.length === 1 && mount === "page" ? "populated" : `populated (${mount})`,
       data: stubData(true, manifest.scopes),
-      afterSettle: { type: "cells.changed", fileId: "f1", cellIds: ["c2"] },
-    },
+      mount,
+      mustRender: true,
+      // The live push is exercised once.
+      ...(i === 0 ? { afterSettle: { type: "cells.changed", fileId: "f1", cellIds: ["c2"] } } : {}),
+    })),
   ]
 }
+
+/** Frame width per mount (the side panel is narrow). */
+const MOUNT_WIDTH: Record<string, number> = { panel: 320, inline: 640, editor: 1024, page: 1024 }
 
 function runOne(
   source: string,
@@ -149,8 +164,29 @@ function runOne(
     let quietTimer: ReturnType<typeof setTimeout> | null = null
     let pushed = false
     let done = false
+    let checkedRender = false
+    let lastRender: RenderReport | null = null
+    let renderWaiter: (() => void) | null = null
     const finish = () => {
       if (done) return
+      if (fixture.mustRender && !checkedRender) {
+        // Ask the frame what it draws, then finish (≤1 s for the answer).
+        checkedRender = true
+        const giveUp = setTimeout(() => renderWaiter?.(), 1000)
+        renderWaiter = () => {
+          clearTimeout(giveUp)
+          renderWaiter = null
+          if (!lastRender || lastRender.empty) {
+            errors.push({
+              message: `the tool rendered nothing on screen in the "${fixture.mount ?? "page"}" mount with sample data (blank body). It must always show its UI: a heading, the data, or an empty-state message.`,
+              stack: "",
+            })
+          }
+          finish()
+        }
+        host.push({ type: "render.check" })
+        return
+      }
       done = true
       if (quietTimer) clearTimeout(quietTimer)
       clearTimeout(loadTimer)
@@ -198,6 +234,10 @@ function runOne(
         armQuiet()
       },
       onToolError: (err) => errors.push(err),
+      onRender: (report) => {
+        lastRender = report
+        renderWaiter?.()
+      },
     })
     const stop = host.listen(frame.hostWindow)
     const loadTimer = setTimeout(() => {
@@ -210,9 +250,11 @@ function runOne(
       tool: { id: "smoke", name: manifest.name, version: 0 },
       project: { id: "smoke-project", name: "Smoke test project" },
       user: { username: "smoke", roleLevel: 700 },
-      mount: "smoke",
+      mount: fixture.mount ?? "smoke",
+      ...(fixture.mount === "editor" ? { file: { fileId: "f1", name: "MAT" } } : {}),
+      ...(fixture.mount === "inline" ? { cell: { fileId: "f1", cellId: "c1" } } : {}),
       theme: {},
-    }))
+    }), MOUNT_WIDTH[fixture.mount ?? "page"] ?? 1024)
   })
 }
 

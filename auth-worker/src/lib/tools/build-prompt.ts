@@ -21,6 +21,10 @@ through the global \`aquilla\` object the host injects before your code runs.
 - Keep it under ${Math.floor(MAX_TOOL_SOURCE_BYTES / 1024)} KB. No external fonts or images.
 - The tool MUST render something sensible in EVERY state: no files, a file with no cells,
   cells with empty translations, no terms. It must never throw on empty data.
+- It MUST render visibly in EVERY mount it declares (check aquilla.context.mount): the side
+  panel is ~300px wide, so lay out for that width too. The pre-save check renders each declared
+  mount with sample data and rejects a blank one. Put static UI (a heading, a "Loading…" line)
+  in the HTML so something shows before any await.
 - Style with the CSS variables the host provides (they track the app's light/dark theme):
   --background --foreground --card --card-foreground --muted --muted-foreground --primary
   --primary-foreground --accent --accent-foreground --border --destructive --ring.

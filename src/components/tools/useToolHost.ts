@@ -50,6 +50,8 @@ export interface ToolHostState {
   messages: string[]
   dismissMessage: (index: number) => void
   ready: boolean
+  /** apiRev 3: the frame loaded but shows nothing (render.check). */
+  blank: boolean
 }
 
 /** Host → frame commands for a mounted tool (apiRev 3). */
@@ -62,6 +64,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   const [prompt, setPrompt] = useState<PendingPrompt | null>(null)
   const [errors, setErrors] = useState<ToolErrorReport[]>([])
   const [ready, setReady] = useState(false)
+  const [blank, setBlank] = useState(false)
   const [removedApi, setRemovedApi] = useState<string | null>(null)
   const [messages, setMessages] = useState<string[]>([])
 
@@ -171,6 +174,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       onReady: () => setReady(true),
       onApiRemoved: (_method, message) => setRemovedApi(message),
       onToolError: (err) => setErrors((prev) => [...prev.slice(-4), err]),
+      onRender: (report) => setBlank(report.empty),
     })
     hostRef.current = host
     dataRef.current = data
@@ -312,6 +316,17 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     frameRef.current?.contentWindow?.focus()
   }, [ready, revealCellId, boundFile, frameRef])
 
+  // apiRev 3: catch a mount that loads but draws nothing (asked twice: a
+  // slow first load is not "blank").
+  useEffect(() => {
+    if (!ready) return
+    const a = setTimeout(() => hostRef.current?.push({ type: "render.check" }), 2500)
+    const b = setTimeout(() => hostRef.current?.push({ type: "render.check" }), 8000)
+    return () => {
+      clearTimeout(a)
+      clearTimeout(b)
+    }
+  }, [ready])
   // apiRev 3: the app font's bytes, once the frame is listening.
   useEffect(() => {
     if (!ready) return
@@ -348,6 +363,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     errors,
     clearErrors: () => setErrors([]),
     ready,
+    blank,
     removedApi,
     messages,
     dismissMessage: (index: number) => setMessages((prev) => prev.filter((_, i) => i !== index)),

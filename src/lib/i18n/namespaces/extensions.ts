@@ -88,6 +88,7 @@ export const extensions = defineNamespace({
     "extensions.prompt.deny": "Deny",
     "extensions.frame.title": "{name} (sandboxed extension)",
     "extensions.frame.error": "This extension hit an error: {message}",
+    "extensions.frame.blank": "This extension isn't showing anything here.",
     "extensions.activity.heading": "Activity",
     "extensions.activity.since": "Since",
     "extensions.activity.refresh": "Refresh",

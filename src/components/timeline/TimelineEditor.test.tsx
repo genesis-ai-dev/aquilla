@@ -727,6 +727,53 @@ describe("TimelineEditor", () => {
     expect(lastAudibility).toEqual({ source: false, target: true })
   })
 
+  // Sam, Oct 5: the playback-sound menu sits on the Source audio lane too, on
+  // the sublabel's line so the lane's name keeps its full width.
+  it("puts the playback-sound pill on the Source audio lane when offered", async () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor fileId="sndfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-sound-source-picker")).toBeNull()
+    rerender(
+      <TimelineEditor
+        fileId="sndfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        soundSource={{ value: "video", recordingName: "episode.wav", onChange }}
+      />,
+    )
+    const pill = screen.getByTestId("tl-sound-source-picker")
+    expect(pill).toHaveTextContent(/^Sound: Video$/)
+    // In the SOURCE row, with its speaker, not the target's...
+    let row: HTMLElement | null = pill.parentElement
+    while (row && !row.contains(screen.getByTestId("tl-speaker-source"))) row = row.parentElement
+    expect(row).not.toBeNull()
+    // (Target audio has no takes here, so since AQU-1682 it shows no speaker;
+    // tell the rows apart by name.)
+    expect(row).not.toHaveTextContent("Target audio")
+    // ...in place of the sublabel, so the name is untouched.
+    expect(row).toHaveTextContent("Source audio")
+    expect(row).not.toHaveTextContent("original speech")
+    fireEvent.click(pill)
+    fireEvent.click(await screen.findByTestId("video-sound-source-recording"))
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("recording")
+  })
+
+  it("keeps the playback-sound pill out of the collapsed gutter strip", () => {
+    localStorage.setItem("aquilla:tlGutterCollapsed:sndstrip", "1")
+    try {
+      render(
+        <TimelineEditor
+          fileId="sndstrip" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          soundSource={{ value: "video", recordingName: null, onChange: () => {} }}
+        />,
+      )
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+      expect(screen.queryByTestId("tl-sound-source-picker")).toBeNull()
+    } finally {
+      localStorage.removeItem("aquilla:tlGutterCollapsed:sndstrip")
+    }
+  })
+
   it("a muted-source preference persists across mounts", () => {
     localStorage.setItem("aquilla:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
     lastAudibility = null
@@ -4593,5 +4640,294 @@ describe("TimelineEditor — a focus-driven gutter scroll keeps the columns in s
     // — must not nudge the track column a second time.
     fireEvent.scroll(gutter)
     expect(scroll.scrollTop).toBe(30)
+  })
+})
+
+// ── AQU-1566 (Sam's option b): a linked video with no rows ──────────────────
+//
+// The workspace decides WHEN these are on offer (a maintainer, a linked video,
+// rows loaded and none there); these pin what the timeline does with that
+// answer: the caption track's menu, Attach captions without the track-editing
+// switch, and a viewer seeing nothing that writes.
+describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const tracks = deriveTracksForFile({ trackOverrides: {
+    "ep-captions": { kind: "source-subtitles", name: "Episode captions", contentFileId: "cue-file" },
+    "fr-captions": { kind: "target-subtitles", name: "French captions", contentFileId: "fr-file" },
+  } })
+  const base = {
+    fileId: "f1", coreMediaUrl: null, editable: true, cells: [] as CellData[],
+    onRetimeSubtitle: () => {}, tracks, textTrackCells: {},
+  }
+  // A maintainer always has the reorder grip, which is what marks the rows.
+  const menuBase = { ...base, onReorderTrack: vi.fn() }
+  const gutterRow = (name: string) => [...screen.getByTestId("tl-scroll").previousElementSibling!
+    .querySelectorAll<HTMLElement>("[data-tl-track-row]")]
+    .find(row => row.textContent?.includes(name))!
+
+  it("offers Use as this file's rows on a source caption track with content, and nothing writes until confirmed upstream", () => {
+    const onPromote = vi.fn()
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} onPromoteTrackToRows={onPromote} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    // First item, above Rename.
+    const items = screen.getAllByRole("menuitem")
+    expect(items[0]).toHaveTextContent("Use as this file's rows")
+    expect(screen.getByText("Rename")).toBeTruthy()
+    fireEvent.click(items[0])
+    expect(onPromote).toHaveBeenCalledWith("ep-captions")
+  })
+
+  it("never offers it on a target-text track or on a row with no captions of its own", () => {
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} onPromoteTrackToRows={vi.fn()} />)
+    fireEvent.contextMenu(gutterRow("French captions"))
+    expect(screen.getByText("Rename")).toBeTruthy()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+
+  it("is absent without the callback (a file with rows, or below maintainer)", () => {
+    render(<TimelineEditor {...menuBase} onRenameTrack={vi.fn()} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    expect(screen.getByText("Rename")).toBeTruthy()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+
+  it("is enough on its own to give the caption track a menu, and only that track", () => {
+    const onPromote = vi.fn()
+    render(<TimelineEditor {...menuBase} onPromoteTrackToRows={onPromote} />)
+    fireEvent.contextMenu(gutterRow("Episode captions"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Use as this file's rows" }))
+    expect(onPromote).toHaveBeenCalledWith("ep-captions")
+  })
+
+  it("enables Attach captions without the track-editing switch when the workspace says so", () => {
+    const attach = vi.fn()
+    render(<TimelineEditor {...base} onRequestImportCaptions={attach} canImportCaptions />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const item = screen.getByRole("menuitem", { name: "Attach captions" })
+    expect(item).not.toHaveAttribute("data-disabled")
+    expect(screen.queryByText("Enable track editing in Project Settings")).toBeNull()
+    fireEvent.click(item)
+    expect(attach).toHaveBeenCalledOnce()
+  })
+
+  it("still asks for the switch for a timeline-only track (a file with rows)", () => {
+    render(<TimelineEditor {...base} onRequestImportCaptions={vi.fn()} canImportCaptions={false}
+      onRequestImportCharacters={() => {}} canImportCharacters />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const item = screen.getByRole("menuitem", { name: "Attach captions" })
+    expect(item).toHaveAttribute("data-disabled")
+    // Just greyed out, with nothing beside the label (Sam, Oct 5); the reason
+    // is the row's hover text and its accessible description.
+    expect(within(item).queryByText("track editing off")).toBeNull()
+    expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project Settings.")
+    // The row is disabled, so its content has to take the pointer itself for
+    // the hover text to open.
+    expect(within(item).getByText("Attach captions").parentElement!.className).toMatch(/pointer-events-auto/)
+  })
+
+  // The viewer decision: a Viewer keeps "Open Media view" and may watch. What
+  // the workspace hands a viewer is exactly this (every setup row present but
+  // not theirs, no track callbacks), and none of it may surface.
+  it("gives a viewer no Sources menu, no Add track and no track menu", () => {
+    render(<TimelineEditor {...base}
+      onRequestLinkVideo={() => {}} canLinkVideo={false}
+      onRequestImportAudioVtt={() => {}} canImportAudioVtt={false}
+      onRequestImportCharacters={() => {}} canImportCharacters={false} />)
+    expect(screen.queryByTestId("tl-sources-menu")).toBeNull()
+    expect(screen.queryByTestId("tl-add-track")).toBeNull()
+    expect(document.querySelector('[data-testid^="tl-track-menu-"]')).toBeNull()
+    expect(screen.queryByText("Use as this file's rows")).toBeNull()
+  })
+})
+
+// Sam's D3 (2026-10-05): on a linked video with no rows each prompt is said
+// once, where it belongs — on the timeline, not repeated in the Text pane.
+describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
+  const LINKED = "https://www.youtube.com/watch?v=aqbHRKZ1bVs"
+  const linkedTracks = () =>
+    deriveTracksForFile(null, { isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false })
+  beforeEach(() => resetVideoDurationsForTests())
+
+  it("the Source text lane says there are no captions, with Attach captions inline", () => {
+    setVideoDurationSec(LINKED, 635)
+    const attach = vi.fn()
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        onRequestImportCaptions={attach} canImportCaptions linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+    expect(prompt.closest('[data-variant="subtitle"]')).toBeTruthy()
+    expect(prompt).toHaveTextContent(/^No captions yet\s*·\s*Attach captions$/)
+    fireEvent.click(within(prompt).getByRole("button", { name: "Attach captions" }))
+    expect(attach).toHaveBeenCalledOnce()
+  })
+
+  // ── Walk r3 (2026-10-05): the prompt on a short Free timing lane, and zoom ──
+  //
+  // happy-dom has no layout: every width is 0 and scrollLeft keeps whatever is
+  // written to it. These give the timeline's scroll column what a browser
+  // gives it — a view of `viewPx`, a scroll range set by the track inside it,
+  // and the browser's clamp on scrollLeft, which fires no scroll event when it
+  // leaves the column where it already was. Every other element is untouched.
+  function withScrollColumn(viewPx: number, run: () => void) {
+    const isColumn = (el: Element) => el.getAttribute("data-testid") === "tl-scroll"
+    const trackPx = (el: Element) => parseFloat((el.firstElementChild as HTMLElement | null)?.style.width ?? "") || 0
+    const rangeOf = (el: Element) => Math.max(viewPx, trackPx(el)) - viewPx
+    const left = new WeakMap<Element, number>()
+    const patches: Array<[object, string, PropertyDescriptor]> = []
+    const patch = (proto: object, key: string, make: (orig: PropertyDescriptor) => PropertyDescriptor) => {
+      const orig = Object.getOwnPropertyDescriptor(proto, key)!
+      patches.push([proto, key, orig])
+      Object.defineProperty(proto, key, { configurable: true, enumerable: orig.enumerable, ...make(orig) })
+    }
+    patch(HTMLElement.prototype, "clientWidth", (orig) => ({
+      get(this: HTMLElement) { return isColumn(this) ? viewPx : orig.get!.call(this) },
+    }))
+    patch(Element.prototype, "scrollWidth", (orig) => ({
+      get(this: Element) { return isColumn(this) ? viewPx + rangeOf(this) : orig.get!.call(this) },
+    }))
+    patch(Element.prototype, "scrollLeft", (orig) => ({
+      get(this: Element) { return isColumn(this) ? (left.get(this) ?? 0) : orig.get!.call(this) },
+      set(this: Element, v: number) {
+        if (isColumn(this)) left.set(this, Math.max(0, Math.min(v, rangeOf(this))))
+        else orig.set!.call(this, v)
+      },
+    }))
+    try { run() } finally {
+      for (const [proto, key, orig] of patches.reverse()) Object.defineProperty(proto, key, orig)
+    }
+  }
+
+  // The zoom buttons land their re-anchoring scroll in a rAF; queue and flush.
+  function withQueuedFrames(run: (flush: () => void) => void) {
+    const queued: FrameRequestCallback[] = []
+    const raf = vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+      queued.push(cb as FrameRequestCallback)
+      return queued.length
+    })
+    const flush = () => { act(() => { for (const cb of queued.splice(0)) cb(0) }) }
+    try { run(flush) } finally { raf.mockRestore() }
+  }
+
+  it("on a short Free timing lane, is one readable line at the view's left edge, at every zoom, and the ruler keeps its labels", () => {
+    setVideoDurationSec(LINKED, 635)
+    localStorage.removeItem("aquilla:timelineZoom:lv-ft-zoom")
+    const attach = vi.fn()
+    withScrollColumn(900, () => withQueuedFrames((flush) => {
+      render(
+        <TimelineEditor fileId="lv-ft-zoom" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" onRequestImportCaptions={attach} canImportCaptions
+          linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+      )
+      const column = screen.getByTestId("tl-scroll")
+      const laneWidthPx = () => parseFloat((column.firstElementChild as HTMLElement).style.width)
+      // The walk's file: an empty Free timing timeline is about two seconds,
+      // far shorter than the view, so the column cannot scroll at all.
+      expect(laneWidthPx()).toBeLessThan(200)
+
+      const check = (zoomStep: number) => {
+        const where = `after ${zoomStep} zoom-in(s)`
+        const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+        const css = getComputedStyle(prompt)
+        // Placed against the view's left edge by the browser, not from a
+        // remembered scroll offset: the same 10 px inset at every zoom.
+        expect(css.position, where).toBe("sticky")
+        expect(css.left, where).toBe("10px")
+        // As wide as its words on one line — never clipped to the short lane.
+        expect(css.width, where).toBe("max-content")
+        expect(css.overflow, where).not.toBe("hidden")
+        expect(prompt, where).toHaveTextContent(/^No captions yet\s*·\s*Attach captions$/)
+        // The column never scrolled, and neither did the ruler's window: its
+        // labels start at 0:00 (they windowed out past the timeline's end).
+        expect(column.scrollLeft, where).toBe(0)
+        expect(screen.getByTestId("tl-ruler").textContent, where).toContain("0:00")
+      }
+
+      check(0)
+      for (let i = 1; i <= 3; i++) {
+        const before = laneWidthPx()
+        fireEvent.click(screen.getByLabelText("Zoom in"))
+        flush()
+        expect(laneWidthPx()).toBeGreaterThan(before)
+        check(i)
+      }
+      fireEvent.click(within(screen.getByTestId("tl-linked-video-lane-prompt")).getByRole("button", { name: "Attach captions" }))
+      expect(attach).toHaveBeenCalledOnce()
+    }))
+  })
+
+  it("in a long lane, sits in the lane itself with a margin at each end, so scrolling never carries it past the lane's end", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        onRequestImportCaptions={() => {}} canImportCaptions linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const prompt = screen.getByTestId("tl-linked-video-lane-prompt")
+    // A sticky box stays within its containing block: the lane it is a direct
+    // child of, which in Original's timing is the whole film.
+    expect(prompt.parentElement).toHaveAttribute("data-testid", "tl-lane")
+    const css = getComputedStyle(prompt)
+    expect(css.position).toBe("sticky")
+    expect(css.marginLeft).toBe("10px")
+    expect(css.marginRight).toBe("10px")
+  })
+
+  it("is the statement alone for someone who cannot attach, and absent once captions are on the timeline", () => {
+    setVideoDurationSec(LINKED, 635)
+    const { rerender } = render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        canImportCaptions={false} linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    expect(screen.getByTestId("tl-linked-video-lane-prompt")).toHaveTextContent("No captions yet")
+    expect(within(screen.getByTestId("tl-linked-video-lane-prompt")).queryByRole("button")).toBeNull()
+    rerender(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        canImportCaptions={false} linkedVideoEmpty={{ captionTrackCount: 1 }} />,
+    )
+    expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
+  })
+
+  it("the dashed Source audio placeholder is the video's own sound, with no raw time range", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    const lane = screen.getByTestId("tl-source-regions")
+    expect(within(lane).getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(lane.textContent).not.toContain("10:35.0")
+  })
+
+  it("draws no placeholder in Free timing, where the video is hidden and silent", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        timingMode="audioFirst" linkedVideoEmpty={{ captionTrackCount: 0 }} />,
+    )
+    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
+    expect(screen.queryByText("The video's own sound")).toBeNull()
+  })
+
+  // Sam, Oct 5: once a linked video's captions are its rows, its Source audio
+  // row stays (tracks.ts), and with no audio cues on it the band is still the
+  // video's own sound. Only an empty linked video gets the lane prompt.
+  it("labels the band the video's own sound on any linked video with no audio cues", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
+    expect(screen.getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(screen.getByTestId("tl-source-regions").textContent).not.toContain("0:00.0–10:35.0")
+  })
+
+  it("leaves the gaps between audio cues unlabelled", () => {
+    setVideoDurationSec(LINKED, 635)
+    render(
+      <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
+        audioCues={[cell({ id: "c1", original: "Whoa there", startTime: 1, endTime: 2 })]} />,
+    )
+    expect(screen.queryByTestId("tl-source-gap-label")).toBeNull()
   })
 })

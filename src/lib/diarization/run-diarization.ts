@@ -158,6 +158,9 @@ async function applyTurns(
       slot: "recording",
       trimStartMs: s.trimStartMs,
       trimEndMs: s.trimEndMs,
+      // AQU-1565 follow-up: the re-cut rows still share the file's own
+      // recording. Without the role each new row's clip was stored as a dub.
+      role: "source",
       author: args.author,
     })
     pairs.push({ cellId, speaker: speakerLabel(s.speaker) })

@@ -38,15 +38,27 @@ vi.mock("@/lib/audio/play-queue", () => ({
   // so a test can still put the flag wherever it likes before rendering.
   getQueueAudibility: () => mockAudibility,
   setQueueAudibility: () => {},
+  stopQueue: () => stopQueue(),
+}))
+// Hoisted with the mock above, so the factory can reach it.
+const { stopQueue } = vi.hoisted(() => ({ stopQueue: vi.fn() }))
+
+// AQU-1565 follow-up: the sound menu stops both players before it hands the
+// transport over. Spied, so a test can see the pause without real audio.
+const pauseAllTransports = vi.fn()
+vi.mock("@/lib/audio/transport-pause", () => ({
+  pauseAllTransports: () => pauseAllTransports(),
 }))
 
 vi.mock("youtube-video-element", () => {
   class FakeYouTubeVideo extends HTMLElement {
-    config: Record<string, unknown> | null = null
     paused = true
     currentTime = 0
     readyState = 0
     muted = false
+    // The real element has a `config` property, so React hands the object over
+    // as a property rather than stringifying it into an attribute.
+    config: Record<string, unknown> | null = null
     play() { return Promise.resolve() }
     pause() {}
     load() {}
@@ -56,6 +68,7 @@ vi.mock("youtube-video-element", () => {
 })
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
+import { __resetPlaybackSourceForTests, playbackSourceKey } from "@/lib/audio/playback-source"
 import {
   getVideoBuffering,
   getVideoSoundingCellId,
@@ -1035,6 +1048,43 @@ describe("a YouTube link", () => {
     expect(config?.origin).toBe(window.location.origin)
   })
 
+  // Walk r2 (2026-10-05): the element's shadow :host carries min-width 300px,
+  // so at 1440 wide the picture ran 13px past a 287px pane.
+  it("lets the YouTube picture shrink below the element's 300px minimum", () => {
+    renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media") as HTMLElement
+    expect(media.style.minWidth).toMatch(/^0(px)?$/)
+    expect(media.style.minHeight).toMatch(/^0(px)?$/)
+  })
+
+  // Walk r3 (2026-10-05): Safari's YouTube player failed with error 153 (no
+  // Referer on the embed request) and the pane showed the error card.
+  it("asks the YouTube player's iframe to send the page's origin", () => {
+    renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media") as HTMLElement & { config?: Record<string, unknown> }
+    expect(media.config?.referrerpolicy).toBe("strict-origin-when-cross-origin")
+  })
+
+  // Sam, Oct 5: YouTube's own play button started only a silent picture when
+  // the uploaded recording was chosen. Clicks on the picture go to Aquilla's
+  // transport instead.
+  it("hands a click on the YouTube picture to Aquilla's transport", () => {
+    const onPictureClick = vi.fn()
+    renderPane({ src: YT, onPictureClick })
+    const layer = screen.getByTestId("video-pane-youtube-click-layer")
+    expect(layer).toHaveAttribute("aria-hidden", "true")
+    fireEvent.click(layer)
+    expect(onPictureClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("lays nothing over a plain video, or when no transport is handed in", () => {
+    const { unmount } = renderPane({ onPictureClick: vi.fn() })
+    expect(screen.queryByTestId("video-pane-youtube-click-layer")).toBeNull()
+    unmount()
+    renderPane({ src: YT })
+    expect(screen.queryByTestId("video-pane-youtube-click-layer")).toBeNull()
+  })
+
   it("still hears the element's media events", () => {
     const onVideoDuration = vi.fn()
     renderPane({ src: YT, onVideoDuration })
@@ -1047,5 +1097,111 @@ describe("a YouTube link", () => {
   it("a direct media file still uses <video>", () => {
     renderPane({ src: "https://cdn/episode.mp4" })
     expect(screen.getByTestId("video-pane-media").tagName.toLowerCase()).toBe("video")
+  })
+})
+
+// AQU-1565 follow-up. WHY: uploading the original recording to a file linked
+// to a YouTube video made the recording the master: the picture went silent
+// and followed the upload. Sam: the video keeps its own sound and picture by
+// default, and the recording plays only when the person picks it.
+describe("a YouTube link over an uploaded recording", () => {
+  const YT = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+  afterEach(() => {
+    localStorage.removeItem(playbackSourceKey("f1"))
+    __resetPlaybackSourceForTests()
+    mockQueue = { ...mockQueue, active: false, playing: false, running: false, cellId: null, kind: "idle" }
+  })
+
+  it("keeps playing the video with its own sound by default", () => {
+    renderPane({ src: YT })
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "standalone")
+    expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    expect(screen.getByTestId("video-sound-source-picker")).toHaveAttribute("data-sound-source", "video")
+  })
+
+  it("follows the recording once the person picks it, and remembers the pick", async () => {
+    renderPane({ src: YT })
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    const option = await screen.findByTestId("video-sound-source-recording")
+    // The recording is named from its rows, so the person knows which one.
+    expect(option).toHaveTextContent("episode-12.mp3")
+    fireEvent.click(option)
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+    expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    expect(localStorage.getItem(playbackSourceKey("f1"))).toBe("recording")
+  })
+
+  it("stops whatever is playing when the person switches sound, so the two never play together", async () => {
+    localStorage.setItem(playbackSourceKey("f1"), "recording")
+    renderPane({ src: YT })
+    pauseAllTransports.mockClear()
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    fireEvent.click(await screen.findByTestId("video-sound-source-video"))
+    expect(pauseAllTransports).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "standalone")
+    // Picking the source that is already on changes nothing and stops nothing.
+    pauseAllTransports.mockClear()
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    fireEvent.click(await screen.findByTestId("video-sound-source-video"))
+    expect(pauseAllTransports).not.toHaveBeenCalled()
+  })
+
+  // Walk 2026-10-02: switching back to the video's sound DURING playback left
+  // the picture running (a slaved picture has no controller for
+  // pauseAllTransports to reach, and the flip made the pane standalone before
+  // its sync effect could stop it), now unmuted. The queue was only paused,
+  // so it still owned the playback bar and Play resumed the recording under
+  // the video's sound.
+  it("stops the running picture and ends the recording's playback when switching back mid-play", async () => {
+    localStorage.setItem(playbackSourceKey("f1"), "recording")
+    sounding("c1")
+    renderPane({ src: YT })
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+    const media = screen.getByTestId("video-pane-media") as HTMLVideoElement
+    const pause = vi.spyOn(media, "pause")
+    stopQueue.mockClear()
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    fireEvent.click(await screen.findByTestId("video-sound-source-video"))
+    expect(pause).toHaveBeenCalled()
+    expect(stopQueue).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "standalone")
+  })
+
+  it("leaves a queue that is not on this file alone when switching", async () => {
+    renderPane({ src: YT })
+    stopQueue.mockClear()
+    fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+    fireEvent.click(await screen.findByTestId("video-sound-source-recording"))
+    expect(stopQueue).not.toHaveBeenCalled()
+  })
+
+  it("shows the corner controls to keyboard focus, not only to hover", () => {
+    renderPane({ src: "https://cdn/episode.webm" })
+    // CSS cannot run here; pin the reveal rule so a refactor cannot drop it.
+    expect(screen.getByTestId("video-audio-overlay").className).toContain("has-[:focus-visible]:opacity-100")
+  })
+
+  it("keeps the sound menu on screen over a YouTube picture, which swallows hover", () => {
+    renderPane({ src: YT })
+    const overlay = screen.getByTestId("video-audio-overlay")
+    expect(overlay.className).toContain("opacity-100")
+    expect(overlay.className).not.toContain("pointer-events-none")
+  })
+
+  it("starts on the recording when that was the stored choice", () => {
+    localStorage.setItem(playbackSourceKey("f1"), "recording")
+    renderPane({ src: YT })
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+  })
+
+  it("offers no sound menu when there is no recording to choose", () => {
+    render(<MediaVideoPane src={YT} fileId="f1" cells={[cell({ id: "s1", medium: "text", original: "Line one" })]} />)
+    expect(screen.queryByTestId("video-sound-source-picker")).toBeNull()
+  })
+
+  it("leaves a streamed film exactly as it was: the recording drives, no menu", () => {
+    renderPane({ src: "https://cdn/episode.webm" })
+    expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+    expect(screen.queryByTestId("video-sound-source-picker")).toBeNull()
   })
 })

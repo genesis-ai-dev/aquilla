@@ -13,7 +13,9 @@ import { v7 as uuidv7 } from "uuid"
 import { computeMediaSegmentSpecs } from "@/lib/import"
 import { recordMediaImportSeed, buildMediaSeedCells } from "@/lib/audio/auto-transcribe"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
-import { emitCellAudioAttach, emitSourceCellCreate } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitSourceCellCreate, InsufficientRoleError } from "@/lib/sync/events-emit"
+import { getCqrsOutboxBridge } from "@/lib/sync/cqrs-bridge"
+import { canAttachSourceAudio, SOURCE_AUDIO_ATTACH_FLOOR } from "@/lib/sync/role-policy"
 
 export interface AttachMediaContext {
   projectId: string
@@ -32,6 +34,7 @@ export async function attachMediaFileToTimeline(
   file: File,
   ctx: AttachMediaContext,
 ): Promise<{ segments: number }> {
+  assertMayAttachSourceAudio()
   const { durationMs, specs } = await computeMediaSegmentSpecs(file)
 
   const ext = (file.name.split(".").pop() || "bin").toLowerCase()
@@ -73,6 +76,11 @@ export async function attachMediaFileToTimeline(
           : {}),
         audioOrigin: "attach", // AQU-1572
         surface: "timeline",
+        // AQU-1565 follow-up: this clip is the file's own recording, shared by
+        // every row, not somebody's dub of one line. Without the role the
+        // server stored it as a dub, which put a mic on every row and read the
+        // whole file as "recorded".
+        role: "source",
         author: ctx.author,
       })
       prevCellId = s.cellId
@@ -116,6 +124,7 @@ export async function attachMediaUrlToTimeline(
   url: string,
   ctx: AttachMediaContext,
 ): Promise<{ durationMs: number }> {
+  assertMayAttachSourceAudio()
   const trimmed = url.trim()
   let parsed: URL
   try {
@@ -152,10 +161,26 @@ export async function attachMediaUrlToTimeline(
     durationMs: Math.round(durationMs),
     audioOrigin: "attach", // AQU-1572
     surface: "timeline",
+    // AQU-1565 follow-up: the file's own recording, not a dub (see above).
+    role: "source",
     author: ctx.author,
   })
 
   return { durationMs }
+}
+
+/**
+ * Refuse BEFORE anything is uploaded or emitted. The attach events would be
+ * refused below Project Lead anyway (`emitCellAudioAttach`), but by then the
+ * rows would already be queued and the bytes uploaded, leaving rows with no
+ * audio behind them. The UI only offers these actions at that rank; this is
+ * the backstop for any other caller.
+ */
+function assertMayAttachSourceAudio(): void {
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  if (!canAttachSourceAudio(roleLevel)) {
+    throw new InsufficientRoleError("cell.audio.attach", roleLevel ?? 0, SOURCE_AUDIO_ATTACH_FLOOR)
+  }
 }
 
 /** Display name for a URL-attached clip: the path's basename, else the host. */

@@ -214,17 +214,46 @@ export const editor = defineNamespace({
     //   timeline, so none of the attach-media copy above applies.
     "editor.media.linkedVideoTitle": "Linked to a YouTube video",
     "editor.media.linkedVideoTitleGeneric": "Linked to a video",
+    // AQU-1566: shown to everyone below maintainer. Under option b the first
+    // captions become this file's rows, and only a maintainer attaches them.
+    // Sam's D1 (2026-10-05): one sentence.
     "editor.media.linkedVideoNoCaptions":
-      "No captions on this video yet. Caption tracks are added on the Media " +
-      "view's timeline.",
+      "When a maintainer attaches captions, they become this file's rows.",
     "editor.media.linkedVideoCaptionsOn":
       "Its captions are on the Media view's timeline, in {tracks}.",
     "editor.media.openMediaView": "Open Media view",
-    "editor.media.linkedVideoUpload":
-      "Have the original recording? Drag & drop the audio or video here, or",
+    // Sam's D1 (2026-10-05): the empty state is one card with one action;
+    // an audio or video file is a quiet second way in, and its explanation
+    // waits on the step it explains.
+    // Sam, Oct 5: only the action is underlined, not the "or" that joins it to
+    // the button above, so the link is its own key inside the sentence. Also
+    // Oct 5: "the original recording" read as "record your own voice", so the
+    // link says what it does and what you bring.
+    "editor.media.linkedVideoUseRecording": "or {link}",
+    "editor.media.linkedVideoUseRecordingLink": "make rows from an audio or video file",
+    "editor.media.linkedVideoAddRecording": "Make rows from an audio or video file",
+    "editor.media.linkedVideoRecordingTitle": "Make rows from an audio or video file",
+    "editor.media.linkedVideoBackToCaptions": "Back to captions",
+    // AQU-1565 follow-up: two hints, because only a YouTube picture keeps its
+    // own sound after an upload and offers the sound menu.
     "editor.media.linkedVideoUploadHint":
-      "The recording has to run to the same timing as the linked video — its " +
-      "segments become this file's rows.",
+      "The file has to run to the same timing as the video. Its speech becomes " +
+      "this file's rows. The video keeps playing with its own sound; to hear the " +
+      "file instead, pick it from the Sound menu on the video.",
+    "editor.media.linkedVideoUploadHintGeneric":
+      "The file has to run to the same timing as the linked video. Its speech " +
+      "becomes this file's rows.",
+    // AQU-1566 (option b): on such a file the first captions attached become
+    // its OWN rows, so a maintainer gets the action in place, and a caption
+    // track that is already on the timeline can be turned into the rows.
+    "editor.media.linkedVideoAttachHint":
+      "Attach its captions (VTT, SRT or SBV) and they become this file's rows, ready to translate.",
+    // Sam, Oct 5: Aquilla can't take a YouTube video's captions or sound, but
+    // its owner can download both from YouTube Studio, so the card says where.
+    "editor.media.linkedVideoStudioCaptions": "The video's owner can download its captions from YouTube Studio.",
+    "editor.media.linkedVideoStudioVideo": "The video's owner can download the video file from YouTube Studio.",
+    "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
+    "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
 
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
     "editor.footnotes.label": "Footnotes",
@@ -960,6 +989,18 @@ export const editor = defineNamespace({
     "editor.timeline.audioTrackSearchAria": "Search languages",
     "editor.timeline.audioTrackNoMatch": "No language by that name.",
     "editor.timeline.audioTrackFilmAudio": "Film audio",
+    // AQU-1565 follow-up: which sound plays under a YouTube picture.
+    "editor.timeline.soundSourceTrigger": "Sound: {source}",
+    // Sam, Oct 5: the trigger is a text pill naming the choice, not a speaker
+    // icon (which read as mute/unmute), and the menu says what it chooses.
+    "editor.timeline.soundSourcePillVideo": "Sound: Video",
+    "editor.timeline.soundSourcePillRecording": "Sound: Recording",
+    "editor.timeline.soundSourceHeading": "Playback sound",
+    "editor.timeline.soundSourceVideo": "The video's own sound",
+    // Sam's D3 (2026-10-05): the empty Source text lane of a linked video.
+    "editor.timeline.noCaptionsYet": "No captions yet",
+    "editor.timeline.soundSourceRecording": "Uploaded recording ({name})",
+    "editor.timeline.soundSourceRecordingUnnamed": "Uploaded recording",
     "editor.timeline.pairingFromThis": "Pairing from this one — click a line on the other row",
     "editor.timeline.pairedClickToUnpair": "Paired · click to unpair",
     "editor.timeline.clickToPair": "Click to pair with the selected chip",
@@ -1054,6 +1095,15 @@ export const editor = defineNamespace({
       one: "Delete {count} track",
       other: "Delete {count} tracks",
     }),
+    // AQU-1566: a caption track on a linked video with no rows can become the
+    // file's rows. It asks first, because the track leaves the timeline.
+    "editor.timeline.trackUseAsRows": "Use as this file's rows",
+    "editor.timeline.useAsRowsTitle": "Use \"{track}\" as this file's rows?",
+    "editor.timeline.useAsRowsBody":
+      "Its captions become rows you can translate in the Text view. The track " +
+      "leaves the timeline and its captions show in the Source text row instead.",
+    "editor.timeline.useAsRowsConfirm": "Use as rows",
+    "editor.timeline.useAsRowsFailed": "Couldn't use this track as the file's rows.",
     "editor.timeline.trackAdd": "Add track",
     "editor.timeline.trackAddTrack": "Audio track",
     "editor.timeline.trackAddFolder": "Folder",
@@ -1102,6 +1152,9 @@ export const editor = defineNamespace({
     "editor.timeline.badgeNotLinked": "not linked",
     "editor.timeline.badgeNotImported": "not imported",
     "editor.timeline.badgeImportedCount": "{count} imported",
+    // Sam, Oct 5: the Sources menu's track rows are just greyed out when track
+    // editing is off; this is what hovering one says.
+    "editor.timeline.trackEditingOffHint": "Track editing is off. Turn it on in Project Settings.",
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
@@ -1672,6 +1725,11 @@ export const editor = defineNamespace({
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
       "Import an audio or video file, or record a take, to populate the media layer.",
+    // AQU-1565 follow-up: the same empty file for someone who cannot add its
+    // recording (it is the file's source audio, Project Lead and up), so
+    // telling them to import or record would be a dead end.
+    "editor.empty.mediaLayerWaiting":
+      "This file's recording hasn't been added yet. A project lead can add it.",
 
     // — USFM note chips in the source text ————————————————————————
     "editor.note.footnote": "Footnote",
@@ -2249,6 +2307,14 @@ export const editor = defineNamespace({
           count: "How many audio cues are imported on this file.",
         },
       },
+      "editor.timeline.trackEditingOffHint": {
+        description:
+          "Tooltip on the Sources menu's greyed-out 'Attach captions' and 'Align " +
+          "script' rows. They are unavailable because the project's track-editing " +
+          "setting ('Let maintainers add and edit timeline tracks') is off, and only " +
+          "people who can turn it on see these rows. 'Project Settings' is the name " +
+          "of the settings page.",
+      },
       "editor.timeline.noSpeechHere": {
         description:
           "Tooltip on a dashed empty chip covering a stretch of film where nobody " +
@@ -2812,11 +2878,11 @@ export const editor = defineNamespace({
       },
       "editor.media.linkedVideoNoCaptions": {
         description:
-          "Line under that heading when no caption track has been attached yet. " +
-          "'Captions' are the timed lines of text the translator works from. The " +
-          "Media view is the editor's video-and-timeline view; its timeline is the " +
-          "only place caption tracks are attached, which is the point of the " +
-          "sentence. Match the Media-view name used in the view switcher.",
+          "Line under that heading when the file has no captions yet, shown to " +
+          "someone who cannot attach them (below maintainer). 'Captions' are the " +
+          "timed lines of text the translator works from; once attached they " +
+          "become this file's rows, which the reader will then translate. " +
+          "'Maintainer' is the project role name; match the members screen.",
       },
       "editor.media.linkedVideoCaptionsOn": {
         description:
@@ -2837,18 +2903,186 @@ export const editor = defineNamespace({
           "'Media view' must match the name in the view switcher.",
         maxLength: 24,
       },
-      "editor.media.linkedVideoUpload": {
+      "editor.media.linkedVideoUseRecording": {
         description:
-          "Offer under the linked-video empty state to upload the original audio " +
-          "or video recording, which does produce rows for this file. Like " +
-          "editor.media.dropHint it ends with 'or' on purpose — the file-picker " +
-          "button follows and completes the sentence.",
+          "Quiet line under the 'Attach captions' button in the linked-video empty " +
+          "state, offering a second way in. Lower-case and starting with 'or' " +
+          "because it continues the button above it. {link} is the clickable part " +
+          "(editor.media.linkedVideoUseRecordingLink); only it is underlined.",
+        placeholders: {
+          link: "The clickable words, editor.media.linkedVideoUseRecordingLink.",
+        },
+        maxLength: 40,
+      },
+      "editor.media.linkedVideoUseRecordingLink": {
+        description:
+          "The clickable part of that line. It opens a second step for uploading " +
+          "an audio or video file of this same video instead; its speech is split " +
+          "into rows for this file. Lower-case: it continues the sentence.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoAddRecording": {
+        description:
+          "The same link when there is no 'Attach captions' button above it (the " +
+          "person may upload a file but not attach captions), so it stands on its " +
+          "own and starts with a capital.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoRecordingTitle": {
+        description:
+          "Heading of that second step of the linked-video empty state: upload an " +
+          "audio or video file of this same video, and its speech becomes this " +
+          "file's rows.",
+        maxLength: 44,
+      },
+      "editor.media.linkedVideoBackToCaptions": {
+        description:
+          "Link at the bottom of that second step that goes back to the first " +
+          "one, where captions are attached.",
+        maxLength: 32,
       },
       "editor.media.linkedVideoUploadHint": {
         description:
-          "Caveat under that offer. The uploaded recording is cut into this file's " +
-          "rows by its own timings, so a recording that runs to a different " +
-          "timing than the linked video would put the rows out of step with it.",
+          "Caveat under that offer, for a YouTube video. The uploaded file is cut " +
+          "into this file's rows where its speech is, so a file that runs to a " +
+          "different timing than the video would put the rows out of step with it. " +
+          "The last sentence says the video keeps its own sound after the upload; " +
+          "'Sound menu' is the 'Sound: …' button in the video's bottom-right " +
+          "corner (editor.timeline.soundSourcePillVideo).",
+      },
+      "editor.media.linkedVideoUploadHintGeneric": {
+        description:
+          "The same caveat for a linked video that is not on YouTube, where there " +
+          "is no Sound menu: the uploaded file becomes what plays.",
+      },
+      "editor.media.linkedVideoAttachHint": {
+        description:
+          "Line under the linked-video empty state's heading, shown to a maintainer " +
+          "when the file has no captions yet. Attaching a caption file (the next " +
+          "button, 'Attach captions') turns its timed lines into this file's own " +
+          "rows, which is what the translator then works on. VTT, SRT and SBV are " +
+          "file formats; keep them as they are.",
+      },
+      "editor.media.linkedVideoStudioCaptions": {
+        description:
+          "Second line under that one, only for a YouTube video. Aquilla cannot read " +
+          "a YouTube video's captions itself, but whoever uploaded the video can " +
+          "download them as a caption file in YouTube Studio (YouTube's site for " +
+          "channel owners) and attach it here. 'YouTube Studio' is a product name; " +
+          "keep it as it is.",
+      },
+      "editor.media.linkedVideoStudioVideo": {
+        description:
+          "Line on the 'Make rows from an audio or video file' step, only for a " +
+          "YouTube video. " +
+          "Whoever uploaded the video can download it as a video file in YouTube " +
+          "Studio, and that file can be uploaded on this step. 'YouTube Studio' is a " +
+          "product name; keep it as it is.",
+      },
+      "editor.media.useTrackAsRows": {
+        description:
+          "Button in the same empty state, one per caption track already on the " +
+          "Media view's timeline. Pressing it (after a confirmation) copies that " +
+          "track's captions into this file as its rows, ready to translate.",
+        placeholders: {
+          track: "The caption track's name, user-authored, left untranslated.",
+        },
+        maxLength: 60,
+      },
+      "editor.media.useTrackAsRowsHint": {
+        description:
+          "Note under those buttons when there is more than one caption track: " +
+          "only the chosen track becomes rows, the others stay on the timeline.",
+      },
+      "editor.timeline.trackUseAsRows": {
+        description:
+          "Item in a caption track's right-click menu on the Media view's " +
+          "timeline, offered only on a linked video that has no rows yet. It turns " +
+          "this track's captions into the file's own rows (after a confirmation).",
+        maxLength: 32,
+      },
+      "editor.timeline.useAsRowsTitle": {
+        description:
+          "Heading of the confirmation that item opens. A question; the answer " +
+          "buttons are 'Cancel' and editor.timeline.useAsRowsConfirm.",
+        placeholders: {
+          track: "The caption track's name, user-authored, left untranslated.",
+        },
+      },
+      "editor.timeline.useAsRowsBody": {
+        description:
+          "Body of that confirmation. 'Text view' and 'Source text' must match the " +
+          "view switcher's Text tab and the timeline row named Source text. The " +
+          "track disappears from the timeline because its captions are now the " +
+          "file's rows, which the Source text row draws.",
+      },
+      "editor.timeline.useAsRowsConfirm": {
+        description: "Confirm button of that confirmation. Short imperative.",
+        maxLength: 24,
+      },
+      "editor.timeline.useAsRowsFailed": {
+        description:
+          "Error shown in that confirmation when the change could not be saved " +
+          "(for example the track changed meanwhile). The dialog stays open.",
+      },
+      "editor.timeline.soundSourceTrigger": {
+        description:
+          "Tooltip and accessible name of the 'Sound: …' button in a YouTube " +
+          "video's bottom-right corner, on a file that also has an uploaded " +
+          "recording. Says which sound is playing under the picture now.",
+        placeholders: {
+          source:
+            "The current choice, exactly as listed in the menu: " +
+            "editor.timeline.soundSourceVideo or editor.timeline.soundSourceRecording.",
+        },
+      },
+      "editor.timeline.soundSourcePillVideo": {
+        description:
+          "Text of that button when the video plays with its own sound (the " +
+          "default). Short: it sits over a small video picture, with a down arrow " +
+          "after it that opens the menu. 'Sound' is a noun, as in audio.",
+        maxLength: 18,
+      },
+      "editor.timeline.soundSourcePillRecording": {
+        description:
+          "Text of the same button when the uploaded recording plays instead and " +
+          "the video is silent. Short, like editor.timeline.soundSourcePillVideo.",
+        maxLength: 18,
+      },
+      "editor.timeline.soundSourceHeading": {
+        description:
+          "Heading of that menu: which sound plays with the video. A noun phrase, " +
+          "as in the audio you hear during playback, not a verb.",
+        maxLength: 24,
+      },
+      "editor.timeline.soundSourceVideo": {
+        description:
+          "Menu choice: play the YouTube video with its own soundtrack. The default. " +
+          "Also the label of the dashed placeholder on the timeline's Source audio " +
+          "lane of a linked video with no rows yet: what that lane holds is the " +
+          "video's own sound.",
+        maxLength: 40,
+      },
+      "editor.timeline.noCaptionsYet": {
+        description:
+          "Shown inside the empty 'Source text' lane of the Media view's timeline " +
+          "on a linked video with no rows yet. A maintainer sees an 'Attach " +
+          "captions' link after it (importExport.captionTrack.attach).",
+        maxLength: 32,
+      },
+      "editor.timeline.soundSourceRecording": {
+        description:
+          "Menu choice: play the recording the user uploaded to this file instead " +
+          "of the video's own sound. The video is then silent and follows the " +
+          "recording.",
+        placeholders: {
+          name: "The uploaded recording's file name, e.g. episode.wav. Left as is.",
+        },
+      },
+      "editor.timeline.soundSourceRecordingUnnamed": {
+        description:
+          "The same choice when the recording has no file name to show.",
+        maxLength: 40,
       },
       "editor.footnotes.label": {
         description:
@@ -6359,6 +6593,13 @@ export const editor = defineNamespace({
           "Body under editor.empty.noMediaSegments, listing the two ways to get " +
           "clips: import a file, or record. 'Media layer' is the audio/video track " +
           "of the file.",
+      },
+      "editor.empty.mediaLayerWaiting": {
+        description:
+          "Body under editor.empty.noMediaSegments for someone who cannot add the " +
+          "file's recording themselves (below Project Lead, or a viewer): nothing " +
+          "is here until a project lead uploads the audio or video. 'Project lead' " +
+          "is the project role name; match the members screen.",
       },
       "editor.note.footnote": {
         description:

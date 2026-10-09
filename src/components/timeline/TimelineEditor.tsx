@@ -53,6 +53,8 @@ import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
+import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
+import type { PlaybackSource } from "@/lib/audio/playback-source"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
@@ -77,7 +79,7 @@ import {
   type TrackKind,
 } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
-import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+import { secToPx, pxToSec, clampScrollLeft, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 import {
   chipHeightPx,
   chipPadPx,
@@ -156,6 +158,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { Button } from "@/components/ui/button"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -254,6 +257,17 @@ export interface TimelineEditorProps {
   onRequestImportAudioVtt?(): void
   onRequestImportCaptions?(): void
   canImportCaptions?: boolean
+  /**
+   * Sam's D3 (2026-10-05): this file is a linked video whose rows have loaded
+   * and there are none. Each prompt is said once, where it belongs: the empty
+   * Source text lane reads "No captions yet" with Attach captions inline (the
+   * same caption dialog as the Sources menu), and the dashed Source audio
+   * placeholder reads "The video's own sound" instead of a raw time range.
+   * `captionTrackCount` > 0 means captions are on the timeline already, in
+   * their own tracks, so the Source text lane does not claim there are none.
+   * Absent/null for every other file.
+   */
+  linkedVideoEmpty?: { captionTrackCount: number } | null
   onRequestAlignScript?(): void
   canAlignScript?: boolean
   /**
@@ -421,6 +435,17 @@ export interface TimelineEditorProps {
   /** Pre-merge round: change THIS FILE's mode (file.timing.set). Absent = the
    *  control is read-only (the server requires maintainer to write it). */
   onChangeTimingMode?(mode: AudioTimingMode): void
+  /**
+   * The file's playback sound, offered on the Source audio lane beside its mute
+   * button (Sam, Oct 5): the same choice as the "Sound: …" pill in the video's
+   * corner, read and changed through the same store. Absent unless the file
+   * has both a YouTube video's own sound and an uploaded recording.
+   */
+  soundSource?: {
+    value: PlaybackSource
+    recordingName: string | null
+    onChange(next: PlaybackSource): void
+  }
   /** AQU-646 stage 1: withhold the timing-mode control altogether. A subtitle
    *  import resolves to Original timing whatever it has stored, so there is
    *  only one mode it can be in — a picker with a single choice, or a label
@@ -517,6 +542,13 @@ export interface TimelineEditorProps {
    * track editing on, and the server treats it as ordinary maintainer work.
    */
   onSetTrackColor?(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
+  /**
+   * AQU-1566 (Sam's option b): turn this caption track into the file's own
+   * rows. The workspace passes it only on a linked video with no rows, to a
+   * maintainer, and asks for confirmation before anything is written. Like
+   * rename it is NOT part of `trackEditing`: it needs no track-editing switch.
+   */
+  onPromoteTrackToRows?(trackId: string): void
   /**
    * …and everything that RESTRUCTURES the timeline. Present only when the
    * caller has both maintainer clearance and the project's `allowTrackEditing`
@@ -651,12 +683,59 @@ interface LaneLabelReorder {
   onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
 }
 
+/** How far the lane prompt keeps from the visible left edge, and from the end
+ *  of a lane long enough to hold it. */
+const LANE_PROMPT_INSET_PX = 10
+
+/**
+ * Sam's D3 (2026-10-05): the empty Source text lane of a linked video with no
+ * rows says what is missing, in the lane where the captions will appear, with
+ * the way to add them right there. Below the people who may attach captions it
+ * is the statement alone.
+ *
+ * PLACED BY THE BROWSER, NOT BY A SCROLL OFFSET. It is `position: sticky` with
+ * a left inset, so it sits a few pixels in from the timeline's visible left
+ * edge however the column is scrolled, and its margins keep it inside a lane
+ * long enough to hold it: scrolled to a long lane's end, it stops short of
+ * that end rather than running past it.
+ *
+ * It is always one line and exactly as wide as its words. In Free timing an
+ * empty file's timeline is about two seconds, a lane of about 76 px at normal
+ * zoom, and the prompt simply runs past that lane's end. It was once held to
+ * the lane and clipped there ("No captior" over "· Attach c"), and once placed
+ * from the editor's remembered scroll offset, which a zoom on a timeline that
+ * cannot scroll pushed past the lane altogether (walk r3, 2026-10-05).
+ */
+function LinkedVideoLanePrompt({ onAttach }: { onAttach?: () => void }) {
+  const t = useT()
+  return (
+    <div data-testid="tl-linked-video-lane-prompt"
+      className="pointer-events-none z-10 flex h-full items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground"
+      style={{
+        position: "sticky",
+        left: `${LANE_PROMPT_INSET_PX}px`,
+        marginLeft: `${LANE_PROMPT_INSET_PX}px`,
+        marginRight: `${LANE_PROMPT_INSET_PX}px`,
+        width: "max-content",
+      }}>
+      <span>{t("editor.timeline.noCaptionsYet")}</span>
+      {onAttach && <>
+        <span aria-hidden>·</span>
+        <Button variant="link" size="xs" className="pointer-events-auto h-auto px-0 text-xs" onClick={onAttach}>
+          {t("importExport.captionTrack.attach")}
+        </Button>
+      </>}
+    </div>
+  )
+}
+
 function LaneLabel({
   name,
   sub,
   dot,
   hueVars,
   trailing,
+  subSlot,
   reorder,
   folder,
   indented,
@@ -669,6 +748,11 @@ function LaneLabel({
 }: {
   name: string
   sub: string
+  /** Drawn on the sublabel's line instead of `sub`, and gated the same way
+   *  (gone in short rows and in the collapsed strip). Sam, Oct 5: the Source
+   *  audio lane's "Sound: Video ▾" pill lives here, because on the name's line
+   *  beside the speaker it cut "Source audio" down to "Sour…". */
+  subSlot?: ReactNode
   dot: string
   /**
    * AQU-646 stage 7: the row's hue, as inherited custom properties.
@@ -951,7 +1035,7 @@ function LaneLabel({
             MIN_LABEL_SUB_H_PX — and it is gone outright when the gutter is a
             strip, where even the NAME does not fit. */}
         {!collapsed && ownRowH >= MIN_LABEL_SUB_H_PX && (
-          <span className="truncate text-[10px] text-muted-foreground">{sub}</span>
+          subSlot ?? <span className="truncate text-[10px] text-muted-foreground">{sub}</span>
         )}
       </div>
       {/* ONE FLEX CHILD, NOT A FRAGMENT'S WORTH.
@@ -1047,6 +1131,7 @@ export function TimelineEditor({
   onRequestImportAudioVtt,
   onRequestImportCaptions,
   canImportCaptions = true,
+  linkedVideoEmpty = null,
   onRequestAlignScript,
   canAlignScript = false,
   onRequestExtractSubtitles,
@@ -1084,6 +1169,7 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
+  soundSource,
   onCollapseSection,
   onCollapseTextSection,
   onToggleTextFullscreen,
@@ -1101,6 +1187,7 @@ export function TimelineEditor({
   onRetimeTextTrack,
   onReorderTrack,
   onRenameTrack,
+  onPromoteTrackToRows,
   onSetTrackColor,
   trackEditing,
 }: TimelineEditorProps) {
@@ -1206,7 +1293,7 @@ export function TimelineEditor({
   /** Is there anything to put in a track's menu at all? With neither rename
    *  clearance nor the editing setting there is not, and the row renders
    *  exactly as it did before this stage — no trigger, no `⋯`, nothing. */
-  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing)
+  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows)
 
   /**
    * AQU-646 stage 2b: which TRACKS are selected.
@@ -1315,6 +1402,7 @@ export function TimelineEditor({
         canRename: Boolean(onRenameTrack),
         canColour: Boolean(onSetTrackColor),
         canEdit: Boolean(trackEditing),
+        canPromote: Boolean(onPromoteTrackToRows),
       }),
     )
   }
@@ -1390,6 +1478,7 @@ export function TimelineEditor({
       t,
       onRename: onRenameTrack ? setRenamingTrackId : undefined,
       onSetColor: onSetTrackColor,
+      onPromote: onPromoteTrackToRows,
       editing: trackEditing
         ? {
             onLeaveFolder: trackEditing.onLeaveFolder,
@@ -2023,6 +2112,10 @@ export function TimelineEditor({
 
   const sourceMenuItems = useMemo<OverflowMenuItem[]>(() => {
     const items: OverflowMenuItem[] = []
+    // Why a track row is off, as the row's hover text: the row itself stays
+    // clean and greyed out (Sam, Oct 5 — a badge beside "Attach captions" was
+    // too many words for one row).
+    const trackEditingOff = t("editor.timeline.trackEditingOffHint")
     if (onRequestLinkVideo) {
       items.push({
         id: "film",
@@ -2057,9 +2150,7 @@ export function TimelineEditor({
       items.push({
         id: "caption-track", label: t("importExport.captionTrack.attach"),
         icon: ClipboardCheck, disabled: !canImportCaptions,
-        badge: canImportCaptions ? undefined : <span className="text-[11px] text-muted-foreground">
-          {t("importExport.captionTrack.enableTracks")}
-        </span>,
+        disabledReason: trackEditingOff,
         onClick: onRequestImportCaptions,
       })
     }
@@ -2067,9 +2158,7 @@ export function TimelineEditor({
       items.push({
         id: "align-script", label: t("importExport.scriptAlignment.align"),
         icon: ClipboardCheck, disabled: !canAlignScript,
-        badge: canAlignScript ? undefined : <span className="text-[11px] text-muted-foreground">
-          {t("importExport.captionTrack.enableTracks")}
-        </span>,
+        disabledReason: trackEditingOff,
         onClick: onRequestAlignScript,
       })
     }
@@ -2547,9 +2636,16 @@ export function TimelineEditor({
     session: session ?? null,
   })
 
-  function scrollTrackTo(left: number) {
+  function scrollTrackTo(requested: number) {
     const el = scrollRef.current
     if (!el) return
+    // Only as far as the column can actually scroll. The browser clamps the
+    // write below on its own, but when the clamped offset is the one it was
+    // already at, nothing moves and no scroll event comes to correct the state
+    // — a zoom on a timeline shorter than the view remembered an offset the
+    // column never had, and the ruler's labels windowed out (see
+    // `clampScrollLeft`).
+    const left = clampScrollLeft(requested, el.scrollWidth, el.clientWidth)
     lastProgrammaticScrollAt.current = performance.now()
     el.scrollLeft = left
     // Belt and braces for the axis test in handleTrackScroll: the scroll event
@@ -3087,7 +3183,12 @@ export function TimelineEditor({
     // Stamp as programmatic: zoom re-anchoring must not read as a manual
     // scroll and disengage follow-playhead mid-glide.
     lastProgrammaticScrollAt.current = performance.now()
-    el.scrollLeft = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
+    const wanted = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
+    const left = clampScrollLeft(wanted, el.scrollWidth, el.clientWidth)
+    el.scrollLeft = left
+    // The glide step already put `wanted` in state. Past what the column can
+    // scroll, the DOM may not move at all, so no scroll event would correct it.
+    if (left !== wanted) setScrollLeft(left)
   }, [pxPerSec])
 
   // ── AQU-646 stage 5: dragging the playhead ────────────────────────────────
@@ -3501,6 +3602,10 @@ export function TimelineEditor({
             key={track.id}
             cells={subtitle}
             variant="subtitle"
+            emptyPrompt={linkedVideoEmpty && linkedVideoEmpty.captionTrackCount === 0 ? (
+              <LinkedVideoLanePrompt
+                onAttach={onRequestImportCaptions && canImportCaptions ? onRequestImportCaptions : undefined} />
+            ) : undefined}
             retimable={!audioFirst}
             // AQU-646: THE LOCK IS THE ONLY ANSWER to "may this move?".
             //
@@ -3594,6 +3699,19 @@ export function TimelineEditor({
             retimable={!timingLocked}
             onRetime={onRetimeCue}
             snapEnabled={snapOn}
+            // Sam's D3: on an empty linked video the row is one dashed chip
+            // the length of the film, and what it stands for is the video's
+            // own sound. In Free timing the video is hidden and silent, so
+            // the row says nothing at all rather than claim it. (Sam, Oct 5:
+            // the same holds once the captions are rows — a linked video with
+            // no audio cues keeps the one labelled band.)
+            gapLabel={
+              (linkedVideoEmpty || (coreMediaUrl && (audioCues?.length ?? 0) === 0)) && !audioFirst
+                ? t("editor.timeline.soundSourceVideo")
+                : undefined
+            }
+            hideGaps={Boolean(linkedVideoEmpty) && audioFirst}
+            scrollLeftPx={scrollLeft}
           />
         )
       case "target-subtitles":
@@ -4361,6 +4479,22 @@ export function TimelineEditor({
                       trackDrag?.trackId === track.id && trackDrag.target
                         ? trackDrag.target.groupId != null
                         : row.depth === 1
+                    }
+                    // Sam, Oct 5: the playback-sound menu belongs on the Source
+                    // audio lane too. It takes the sublabel's line, under the
+                    // name and next to the speaker, so the name keeps its full
+                    // width; like the sublabel it is gone in short rows and in
+                    // the collapsed strip, where the video's corner pill (always
+                    // shown on such a file) is still there.
+                    subSlot={
+                      speaker === "source" && soundSource && !renaming ? (
+                        <VideoSoundSourcePicker
+                          variant="lane"
+                          value={soundSource.value}
+                          recordingName={soundSource.recordingName}
+                          onChange={soundSource.onChange}
+                        />
+                      ) : undefined
                     }
                     trailing={
                       <>

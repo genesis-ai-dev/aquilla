@@ -28,11 +28,12 @@ describe("companion subtitles in the upload dialog", () => {
       timescale: 1_000_000, durations: [1, 2_000_000],
     })], "clip.m4a", { type: "audio/mp4" })
     fireEvent.change(input, { target: { files: [media] } })
-    const wording = await screen.findByRole("textbox", { name: "Segment 1 wording" })
+    fireEvent.click(await screen.findByRole("button", { name: "Edit caption 1" }))
+    const wording = screen.getByRole("textbox", { name: "Caption 1 wording" })
     expect(wording).toHaveValue("Heading")
     expect(screen.getByRole("button", { name: "Continue import" })).toBeDisabled()
     expect(importFile).not.toHaveBeenCalled()
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Segment 1 end (seconds)" }),
+    fireEvent.change(screen.getByRole("textbox", { name: "Caption 1 end" }),
       { target: { value: "0.001" } })
     fireEvent.click(screen.getByRole("button", { name: "Continue import" }))
     await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))
@@ -51,9 +52,9 @@ describe("companion subtitles in the upload dialog", () => {
       new File(["audio"], "clip.mp3", { type: "audio/mpeg" }),
       new File(["1\n00:00:01,000 --> 00:00:05,000\nToo long"], "clip.srt"),
     ] } })
-    await screen.findByRole("textbox", { name: "Segment 1 wording" })
+    await screen.findByRole("button", { name: "Edit caption 1" })
     expect(screen.getByRole("button", { name: "Continue import" })).toBeDisabled()
-    expect(screen.getByText("ends after the media.")).toBeVisible()
+    expect(screen.getByText("This caption ends after the media.")).toBeVisible()
     expect(importFile).not.toHaveBeenCalled()
   })
   it("prepares real captions, waits for review, and commits only the paired media", async () => {
@@ -67,7 +68,8 @@ describe("companion subtitles in the upload dialog", () => {
     const media = new File(["audio"], "clip.mp3", { type: "audio/mpeg" })
     const captions = new File([text], "clip.srt", { type: "text/plain" })
     fireEvent.change(input, { target: { files: [media, captions] } })
-    const wording = await screen.findByRole("textbox", { name: "Segment 1 wording" })
+    fireEvent.click(await screen.findByRole("button", { name: "Edit caption 1" }))
+    const wording = screen.getByRole("textbox", { name: "Caption 1 wording" })
     expect(wording).toHaveValue("Original wording")
     expect(importFile).not.toHaveBeenCalled()
     fireEvent.change(wording, { target: { value: "Reviewed wording" } })

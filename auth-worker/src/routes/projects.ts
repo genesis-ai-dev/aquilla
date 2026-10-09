@@ -99,6 +99,7 @@ import {
 import { loadLinkFileIds } from "../services/source-linking"
 import { applyDirectAddLaneGrants } from "../services/lane-grants"
 import { createProjectShared } from "../../../db/shared/projects"
+import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
@@ -809,8 +810,10 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     : null
   let sourceLinkUpstreamFileCount: number | null = null
   if (sourceLinkFileIds && row.source_project_id) {
+    // AQU-1566: the files a person can pick, so a cue sheet or a caption
+    // track's hidden content file never shows up as "3 of 5 files".
     const countRow = await c.env.AQUILLA_PG.prepare(
-      `SELECT COUNT(*) AS n FROM files WHERE project_id = ? AND deleted_at IS NULL`,
+      `SELECT COUNT(*) AS n FROM files f WHERE f.project_id = ? AND ${countedFileSql("f")}`,
     )
       .bind(row.source_project_id)
       .first<{ n: number | string }>()

@@ -823,9 +823,20 @@ interface EditorTableProps {
    *  direct-media-URL field that cannot take a watch page.
    *  See `deriveLinkedVideoEmptyState`. */
   linkedVideoEmptyState?: LinkedVideoEmptyState | null
+  /** Sam's D3 (2026-10-05): "media" when this table is the Media view's Text
+   *  pane, where that empty state shrinks to one line pointing at the
+   *  timeline's Source text lane. "text" (the default) everywhere else. */
+  linkedVideoEmptyPlacement?: "text" | "media"
   /** Switch this file to the Media view from that empty state. Absent when the
    *  table is already rendering under the timeline. */
   onOpenMediaView?: () => void
+  /** AQU-1566: on that empty state, attach a caption file that becomes this
+   *  file's rows. The workspace passes it only to maintainers, and only once
+   *  the rows have loaded and there are none. */
+  onAttachCaptions?: () => void
+  /** AQU-1566: on that empty state, turn a caption track already on the
+   *  timeline into this file's rows (the workspace confirms first). Same gate. */
+  onUseCaptionTrackAsRows?: (trackId: string) => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -1081,7 +1092,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   audioTrackColor, onSetAudioTrackColor,
-  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, onOpenMediaView,
+  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
+  onAttachCaptions, onUseCaptionTrackAsRows,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -2917,6 +2929,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
   }
 
+  const hideColumnHeaders = displayCellIds.length === 0 && isTimeOrdered && Boolean(linkedVideoEmptyState)
+
   // Smart edits (flag `smartEdits`): one passage request around the active
   // cell; rows read their own suggestions through SmartEditsProvider.
   const smartEditsContext = useSmartEditsPassage({
@@ -2970,7 +2984,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         {renderChapterNavigation()}
-        <div className={cn(
+        {/* Sam's D1 (2026-10-05): an empty linked video has no rows for the
+            column headings to describe — select-all, #, Source, Target — so
+            the bar goes until it has some, in the Text view and the Media
+            view's Text pane alike. */}
+        {!hideColumnHeaders && (
+        <div data-testid="table-column-headers" className={cn(
             "grid grid-cols-2 gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground",
             castGutter
               ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
@@ -3126,6 +3145,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
         </div>
+        )}
       </div>
 
       {displayCellIds.length > 0 ? (
@@ -3176,9 +3196,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex-1">
             <TimelineLinkedVideoEmpty
               isYouTube={linkedVideoEmptyState.isYouTube}
-              captionTrackNames={linkedVideoEmptyState.captionTrackNames}
+              captionTracks={linkedVideoEmptyState.captionTracks}
+              placement={linkedVideoEmptyPlacement}
               onAttachFile={canEdit ? onAttachMediaFile : undefined}
               onOpenMediaView={onOpenMediaView}
+              onAttachCaptions={canEdit ? onAttachCaptions : undefined}
+              onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
             />
           </div>
         ) : canEdit && onAttachMediaFile && onAttachMediaUrl ? (
@@ -3192,7 +3215,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               className="h-full py-10"
               icon={Music}
               title={t("editor.empty.noMediaSegments")}
-              description={t("editor.empty.mediaLayerHint")}
+              // AQU-1565 follow-up: this branch is reached only by someone
+              // with no upload (below Project Lead, or read-only), and a file
+              // with no rows has nothing to record a take on, so "import or
+              // record" would send them nowhere.
+              description={t("editor.empty.mediaLayerWaiting")}
             />
           </div>
         )

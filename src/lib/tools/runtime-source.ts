@@ -96,7 +96,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   if (boot.theme) applyTheme(boot.theme);
 
   var aquilla = {
-    apiRev: 1,
+    apiRev: 2,
     context: Object.freeze({
       tool: boot.tool || null,
       project: boot.project || null,
@@ -110,13 +110,33 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     },
     cells: {
       list: function (fileId, opts) { return call("cells.list", { fileId: fileId, lane: opts && opts.lane ? opts.lane : "" }); },
+      // apiRev 2: one server page at a time (long books), and a targeted re-read.
+      page: function (fileId, opts) {
+        return call("cells.page", { fileId: fileId, lane: opts && opts.lane ? opts.lane : "", cursor: opts && opts.cursor ? opts.cursor : null, limit: opts && opts.limit ? Number(opts.limit) : 500 });
+      },
+      get: function (fileId, cellIds, opts) { return call("cells.get", { fileId: fileId, cellIds: cellIds, lane: opts && opts.lane ? opts.lane : "" }); },
       commit: function (edits) { return call("cells.commit", { edits: edits }); },
       validate: function (items) { return call("cells.validate", { items: items }); },
+      unvalidate: function (items) { return call("cells.unvalidate", { items: items }); },
       // Removed-API marker (apiRev 1): the host answers with api_removed.
       save: function (edit) { return call("cells.save", edit === undefined ? null : edit); },
     },
     terms: {
       list: function () { return call("terms.list"); },
+    },
+    presence: {
+      list: function (fileId) { return call("presence.list", { fileId: fileId }); },
+      claim: function (fileId, cellId) { return call("presence.claim", { fileId: fileId, cellId: cellId }); },
+      release: function (fileId, cellId) { return call("presence.release", { fileId: fileId, cellId: cellId }); },
+    },
+    comments: {
+      counts: function (fileId) { return call("comments.counts", { fileId: fileId }); },
+      open: function (fileId, cellId) { return call("comments.open", { fileId: fileId, cellId: cellId }); },
+    },
+    audio: {
+      list: function (fileId) { return call("audio.list", { fileId: fileId }); },
+      play: function (fileId, cellId) { return call("audio.play", { fileId: fileId, cellId: cellId }); },
+      stop: function () { return call("audio.stop"); },
     },
     storage: {
       get: function (key) { return call("storage.get", { key: key }); },
@@ -129,6 +149,9 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     },
     ui: {
       notify: function (message) { return call("ui.notify", { message: String(message) }); },
+      hostKey: function (k) {
+        return call("ui.hostKey", { key: String(k && k.key || ""), mod: !!(k && k.mod), shift: !!(k && k.shift), alt: !!(k && k.alt) });
+      },
     },
     ai: {
       generate: function (prompt, opts) {
@@ -145,8 +168,25 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
     },
   };
   Object.freeze(aquilla.files); Object.freeze(aquilla.cells); Object.freeze(aquilla.terms);
+  Object.freeze(aquilla.presence); Object.freeze(aquilla.comments); Object.freeze(aquilla.audio);
   Object.freeze(aquilla.storage); Object.freeze(aquilla.permissions); Object.freeze(aquilla.ui); Object.freeze(aquilla.ai);
   Object.defineProperty(window, "aquilla", { value: Object.freeze(aquilla), writable: false, configurable: false });
+
+  // apiRev 2: focus handoff. App-wide shortcuts (Ctrl/Cmd+K search, the
+  // extensions palette, …) would die inside the frame. The host lists them in
+  // boot.hostShortcuts ("mod+shift+e" form); those chords are forwarded to the
+  // host (and kept from the frame's browser defaults). Only the key identity
+  // crosses, and the host re-checks its own allowlist.
+  var hostShortcuts = Array.isArray(boot.hostShortcuts) ? boot.hostShortcuts : [];
+  function chordOf(e) {
+    var k = String(e.key || "").toLowerCase();
+    return ((e.ctrlKey || e.metaKey) ? "mod+" : "") + (e.shiftKey ? "shift+" : "") + (e.altKey ? "alt+" : "") + k;
+  }
+  window.addEventListener("keydown", function (e) {
+    if (!e.key || e.key.length > 20 || hostShortcuts.indexOf(chordOf(e)) < 0) return;
+    e.preventDefault();
+    aquilla.ui.hostKey({ key: e.key, mod: !!(e.ctrlKey || e.metaKey), shift: e.shiftKey, alt: e.altKey }).catch(function () {});
+  }, true);
 
   window.addEventListener("load", function () { post({ type: "ready" }); });
 })();`

@@ -177,6 +177,8 @@ import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { ToolsDockPanel } from "./tools/ToolMounts"
 import { ExtensionEditorSurface, useExtensionEditorChoice } from "./tools/ExtensionEditor"
+import { Spinner } from "@/components/ui/spinner"
+import type { ToolHostServices } from "@/lib/tools/live-data"
 import { ExtensionsBar } from "./tools/ExtensionsBar"
 import { useToolsMount } from "./tools/ToolsMountContext"
 import { STANDARD_EDITOR } from "@/lib/tools/editor-choice"
@@ -7826,6 +7828,18 @@ export function ProjectWorkspace() {
     setDrawerRuleId(null); setCommentsCellId(null); setAttachmentsDrawerOpen(false)
     setHistoryCellId(cellId)
   }, [])
+  // Smart Extensions (apiRev 2): what an `editor` extension mounted for the
+  // active file can reach through the bridge — the same live focus locks,
+  // comment feed and comment/history panels the built-in editor uses. Memoized
+  // so the frame only sees new identities when the underlying data changes.
+  const extensionEditorServices = useMemo<ToolHostServices>(() => ({
+    fileId: activeFileId ?? undefined,
+    lockHolders: cellLockHolders,
+    claimCell: handleClaimCell,
+    releaseCell: handleReleaseCell,
+    commentCounts: liveCellOpenCommentCount,
+    openComments: handleOpenComments,
+  }), [activeFileId, cellLockHolders, handleClaimCell, handleReleaseCell, liveCellOpenCommentCount, handleOpenComments])
   // AQU-777: one aside panel at a time, same as the three above.
   const handleOpenAttachment = useCallback((_cellId: string, attachmentId: string) => {
     setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(null)
@@ -13471,11 +13485,20 @@ export function ProjectWorkspace() {
               onVisibleCellIdsChange: handleVisibleCellIdsChange,
             }}
           />
+        ) : activeFileId && activeFile && extensionEditorChoice.pending ? (
+          // Smart Extensions: the default editor may be the first-party
+          // extension — wait for the project's extensions rather than flash
+          // the built-in editor first.
+          <div className="flex h-full w-full items-center justify-center" data-testid="editor-choice-pending">
+            <Spinner />
+          </div>
         ) : activeFileId && activeFile && extensionEditorChoice.selected !== STANDARD_EDITOR ? (
           <ExtensionEditorSurface
             choice={extensionEditorChoice}
             file={{ fileId: activeFileId, name: activeFile.name }}
             bar={<ExtensionsBar choice={extensionEditorChoice} />}
+            services={extensionEditorServices}
+            revealCellId={searchParams.get("cellId")}
           />
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor

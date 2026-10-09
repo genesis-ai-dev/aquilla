@@ -325,6 +325,8 @@ export interface OutboxEventPayloads {
   }
   "cell.unvalidate": {
     editEventId: string
+    /** Aquilla Tools: the tool that withdrew this validation (provenance, apiRev 2). */
+    tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string }
     /** AQU-538: lane of the target row being unvalidated. Omitted for `''`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

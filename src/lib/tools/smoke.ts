@@ -11,7 +11,7 @@
  */
 
 import { createBridgeHost, type ToolErrorReport } from "./host-bridge"
-import { createToolHandlers, type ToolCellView, type ToolHostData } from "./host-handlers"
+import { createToolHandlers, type ToolAudioEntry, type ToolCellView, type ToolHostData, type ToolPresence } from "./host-handlers"
 import { TOOL_SANDBOX, buildToolSrcdoc } from "./srcdoc"
 import type { ToolManifest } from "../../../shared/tools/manifest"
 
@@ -63,10 +63,10 @@ export interface SmokeResult {
 }
 
 const SAMPLE_CELLS: ToolCellView[] = [
-  { cellId: "c1", ref: "MAT 1:1", source: "The book of the genealogy of Jesus Christ", target: "Libro de la genealogía de Jesucristo", validated: true, chapter: "MAT 1" },
+  { cellId: "c1", ref: "MAT 1:1", source: "The book of the genealogy of Jesus Christ", target: "Libro de la genealogía de Jesucristo", validated: true, chapter: "MAT 1", targetHtml: "<p>Libro de la <b>genealogía</b> de Jesucristo</p>" },
   { cellId: "c2", ref: "MAT 1:2", source: "Abraham was the father of Isaac", target: "Abraham engendró a Isaac", validated: false, chapter: "MAT 1" },
   { cellId: "c3", ref: "MAT 2:1", source: "Jesus was born in Bethlehem", target: "", validated: false, chapter: "MAT 2" },
-  { cellId: "c4", ref: null, source: "Heading", target: "Encabezado", validated: false, chapter: null },
+  { cellId: "c4", ref: null, source: "Heading", target: "Encabezado", validated: false, chapter: null, type: "heading" },
 ]
 
 function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostData {
@@ -95,6 +95,26 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
     tell: () => {},
     grantedScopes: () => [...scopes],
     requestScope: async () => true,
+    // apiRev 2
+    pageCells: async (fileId, _lane, cursor, limit) => {
+      const all = populated && fileId === "f1" ? SAMPLE_CELLS.map((c) => ({ ...c })) : []
+      const start = cursor ? Number(cursor) || 0 : 0
+      const cells = all.slice(start, start + limit)
+      const next = start + limit < all.length ? String(start + limit) : null
+      return { cells, nextCursor: next, total: all.length }
+    },
+    getCells: async (fileId, cellIds) =>
+      populated && fileId === "f1" ? SAMPLE_CELLS.filter((c) => cellIds.includes(c.cellId)).map((c) => ({ ...c })) : [],
+    unvalidate: async (items) => ({ validated: items.map((i) => i.cellId), failed: [] }),
+    listPresence: async (): Promise<ToolPresence> => (populated ? { c3: { username: "someone" } } : {}),
+    claimCell: async () => true,
+    releaseCell: async () => true,
+    commentCounts: async (fileId): Promise<Record<string, number>> => (populated && fileId === "f1" ? { c2: 1 } : {}),
+    openComments: async () => true,
+    listAudio: async (fileId): Promise<Record<string, ToolAudioEntry>> => (populated && fileId === "f1" ? { c1: { hasAudio: true, durationMs: 1200 } } : {}),
+    playAudio: async () => true,
+    stopAudio: async () => true,
+    hostKey: async () => false,
   }
 }
 

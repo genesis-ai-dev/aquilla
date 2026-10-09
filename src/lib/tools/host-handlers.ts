@@ -21,6 +21,33 @@ export interface ToolCellView {
   target: string
   validated: boolean
   chapter: string | null
+  /** apiRev 2 (additive). Rich-text variants, sanitized by the host to the
+   *  editor's inline allowlist (b/i/u/s/em/strong/code/p/br/span + footnote
+   *  markers). Null for plain-text cells. */
+  sourceHtml?: string | null
+  targetHtml?: string | null
+  /** Cell type from the importer ("heading", "paratext", … or null). */
+  type?: string | null
+  lastEditor?: string | null
+  lastEditAt?: number | null
+  /** The current target is an untouched machine draft. */
+  aiDrafted?: boolean
+}
+
+export interface ToolCellPage {
+  cells: ToolCellView[]
+  /** Opaque cursor for the next page; null on the last page. */
+  nextCursor: string | null
+  /** Total cells in the file (when the server knows it), else null. */
+  total: number | null
+}
+
+/** Who holds each cell's focus lock right now (other people only). */
+export type ToolPresence = Record<string, { username: string }>
+
+export interface ToolAudioEntry {
+  hasAudio: boolean
+  durationMs: number | null
 }
 
 export interface ToolTermView {
@@ -34,6 +61,8 @@ export interface ToolEdit {
   fileId: string
   cellId: string
   value: string
+  /** apiRev 2: rich-text value. The host sanitizes it before it is written. */
+  html?: string
 }
 
 export interface ToolWriteResult {
@@ -63,7 +92,34 @@ export interface ToolHostData {
   grantedScopes: () => ToolScope[]
   /** Explicit permission request (aquilla.permissions.request). */
   requestScope: (scope: ToolScope) => Promise<boolean>
+
+  // ── apiRev 2 ────────────────────────────────────────────────────────────
+  /** One server page of a file (paged reads for long books). */
+  pageCells: (fileId: string, lane: string, cursor: string | null, limit: number) => Promise<ToolCellPage>
+  /** A fresh read of specific cells (targeted refresh after cells.changed). */
+  getCells: (fileId: string, cellIds: string[], lane: string) => Promise<ToolCellView[]>
+  unvalidate: (items: { fileId: string; cellId: string }[]) => Promise<ToolValidateResult>
+  listPresence: (fileId: string) => Promise<ToolPresence>
+  claimCell: (fileId: string, cellId: string) => Promise<boolean>
+  releaseCell: (fileId: string, cellId: string) => Promise<boolean>
+  commentCounts: (fileId: string) => Promise<Record<string, number>>
+  openComments: (fileId: string, cellId: string) => Promise<boolean>
+  listAudio: (fileId: string) => Promise<Record<string, ToolAudioEntry>>
+  playAudio: (fileId: string, cellId: string) => Promise<boolean>
+  stopAudio: () => Promise<boolean>
+  /** A host shortcut pressed inside the frame (allowlisted by the host). */
+  hostKey: (key: HostKey) => Promise<boolean>
 }
+
+export interface HostKey {
+  key: string
+  mod: boolean
+  shift: boolean
+  alt: boolean
+}
+
+export const MAX_PAGE_LIMIT = 2000
+export const MAX_GET_CELLS = 500
 
 export const MAX_EDITS_PER_CALL = 2000
 export const MAX_VALUE_CHARS = 20_000
@@ -104,8 +160,32 @@ export function parseEdits(params: unknown): ToolEdit[] {
     const value = (raw[i] as Record<string, unknown>).value
     if (typeof value !== "string") bad(`edits[${i}].value must be a string`)
     if (value.length > MAX_VALUE_CHARS) bad(`edits[${i}].value exceeds ${MAX_VALUE_CHARS} characters`)
-    return { ...ref, value }
+    const html = (raw[i] as Record<string, unknown>).html
+    if (html !== undefined && html !== null && typeof html !== "string") bad(`edits[${i}].html must be a string`)
+    if (typeof html === "string" && html.length > MAX_VALUE_CHARS * 2) bad(`edits[${i}].html exceeds ${MAX_VALUE_CHARS * 2} characters`)
+    return typeof html === "string" ? { ...ref, value, html } : { ...ref, value }
   })
+}
+
+function fileOnly(params: unknown): string {
+  if (!isRecord(params)) bad("params must be an object")
+  return str(params.fileId, "fileId")
+}
+
+function cellRef(params: unknown): { fileId: string; cellId: string } {
+  if (!isRecord(params)) bad("params must be an object")
+  return { fileId: str(params.fileId, "fileId"), cellId: str(params.cellId, "cellId") }
+}
+
+function laneOf(params: Record<string, unknown>): string {
+  return typeof params.lane === "string" ? params.lane.slice(0, 100) : ""
+}
+
+/** Parse a host-key request. Only the key identity crosses; never text. */
+export function parseHostKey(params: unknown): HostKey {
+  if (!isRecord(params)) bad("params must be an object")
+  const key = str(params.key, "key", 20)
+  return { key, mod: params.mod === true, shift: params.shift === true, alt: params.alt === true }
 }
 
 export function createToolHandlers(data: ToolHostData): Record<string, BridgeHandler> {
@@ -152,6 +232,45 @@ export function createToolHandlers(data: ToolHostData): Record<string, BridgeHan
       data.tell(params.message.slice(0, 1000))
       return true
     },
+    "cells.page": async (params) => {
+      if (!isRecord(params)) bad("params must be an object")
+      const cursor = typeof params.cursor === "string" && params.cursor.length > 0 ? params.cursor.slice(0, 500) : null
+      const rawLimit = typeof params.limit === "number" && Number.isFinite(params.limit) ? Math.floor(params.limit) : 500
+      const limit = Math.max(1, Math.min(rawLimit, MAX_PAGE_LIMIT))
+      return data.pageCells(str(params.fileId, "fileId"), laneOf(params), cursor, limit)
+    },
+    "cells.get": async (params) => {
+      if (!isRecord(params)) bad("params must be an object")
+      if (!Array.isArray(params.cellIds)) bad("cellIds must be an array")
+      if (params.cellIds.length > MAX_GET_CELLS) bad(`at most ${MAX_GET_CELLS} cellIds per call`)
+      const ids = params.cellIds.map((id, i) => str(id, `cellIds[${i}]`))
+      return data.getCells(str(params.fileId, "fileId"), ids, laneOf(params))
+    },
+    "cells.unvalidate": async (params) => {
+      if (!isRecord(params)) bad("params must be an object")
+      return data.unvalidate(cellRefs(params.items, "items"))
+    },
+    "presence.list": async (params) => data.listPresence(fileOnly(params)),
+    "presence.claim": async (params) => {
+      const ref = cellRef(params)
+      return data.claimCell(ref.fileId, ref.cellId)
+    },
+    "presence.release": async (params) => {
+      const ref = cellRef(params)
+      return data.releaseCell(ref.fileId, ref.cellId)
+    },
+    "comments.counts": async (params) => data.commentCounts(fileOnly(params)),
+    "comments.open": async (params) => {
+      const ref = cellRef(params)
+      return data.openComments(ref.fileId, ref.cellId)
+    },
+    "audio.list": async (params) => data.listAudio(fileOnly(params)),
+    "audio.play": async (params) => {
+      const ref = cellRef(params)
+      return data.playAudio(ref.fileId, ref.cellId)
+    },
+    "audio.stop": async () => data.stopAudio(),
+    "ui.hostKey": async (params) => data.hostKey(parseHostKey(params)),
     "ui.notify": async (params) => {
       if (!isRecord(params) || typeof params.message !== "string") bad("message must be a string")
       data.notify(params.message.slice(0, 300))

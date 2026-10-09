@@ -8,23 +8,50 @@
  * resolves it from its own read, so a tool cannot aim a write at a stale head.
  */
 
-import { fetchAllFileCells, fetchProjectFiles } from "@/lib/sync/cells-read"
+import { fetchAllFileCells, fetchCellsByIds, fetchFileCells, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { fetchConcepts } from "@/lib/sync/concepts-read"
 import { fetchProjectSettings } from "@/lib/sync/project-settings"
 import { FRONTIER_CHAT_URL } from "@/lib/completion/completion-service"
-import { emitCellValidate, emitTargetCellCommits, type CellCommitInput } from "@/lib/sync/events-emit"
+import { emitCellUnvalidate, emitCellValidate, emitTargetCellCommits, type CellCommitInput } from "@/lib/sync/events-emit"
+import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
+import { slotSelections } from "@/lib/sync/cell-audio-read-types"
+import { getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { sanitizeSourceDisplayHtml } from "@/lib/richtext/editor-content"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import type { ToolOrigin, ToolScope } from "../../../shared/tools/manifest"
 import type {
+  HostKey,
+  ToolAudioEntry,
+  ToolCellPage,
   ToolCellView,
   ToolEdit,
   ToolFileView,
   ToolHostData,
+  ToolPresence,
   ToolTermView,
   ToolValidateResult,
   ToolWriteResult,
 } from "./host-handlers"
+
+/**
+ * Workspace services a mounted extension can reach (apiRev 2). Supplied by the
+ * surface that mounts the frame — the editor mount gets the workspace's live
+ * focus locks and comment feed; other mounts get none, and the bridge answers
+ * those calls with empty results. Read through a getter so the latest values
+ * apply without re-creating the bridge.
+ */
+export interface ToolHostServices {
+  /** Other people's focus locks: lock key (cellId, or cellId@lane:x) → user. */
+  lockHolders?: ReadonlyMap<string, string>
+  claimCell?: (cellId: string) => void
+  releaseCell?: (cellId: string) => void
+  /** Open (unresolved) root comment threads per cellId. */
+  commentCounts?: ReadonlyMap<string, number>
+  openComments?: (cellId: string) => void
+  /** The file this mount is bound to (claims/comments outside it are refused). */
+  fileId?: string
+}
 
 export type SyncTokenFor = (projectId: string, fileId: string) => Promise<string | null>
 
@@ -52,6 +79,10 @@ export interface LiveToolDataOptions {
   requestScope: (scope: ToolScope) => Promise<boolean>
   /** Per-tool, per-user storage namespace. */
   storageKey: string
+  /** apiRev 2: workspace services (presence, comments) for this mount. */
+  services?: () => ToolHostServices
+  /** apiRev 2: replay an allowlisted host shortcut (host-keys.ts). */
+  hostKey?: (key: HostKey) => boolean
 }
 
 const CHAPTER_RE = /^(.+?)\s+(\d+)[:.]/
@@ -89,6 +120,12 @@ export function pairRows(rows: CellRow[], lane: string, laneId: string | null = 
         target: t?.value ?? "",
         validated: t?.validated ?? false,
         chapter: chapterOf(ref),
+        sourceHtml: s.valueHtml ? sanitizeSourceDisplayHtml(s.valueHtml) : null,
+        targetHtml: t?.valueHtml ? sanitizeSourceDisplayHtml(t.valueHtml) : null,
+        type: s.type ?? null,
+        lastEditor: t?.lastEditor ?? null,
+        lastEditAt: t?.lastEditAt ?? null,
+        aiDrafted: t?.aiDrafted === true,
       },
       targetEventId: t?.eventId || null,
       sourceEventId: s.eventId || null,
@@ -108,6 +145,13 @@ export class LiveToolData implements ToolHostData {
 
   constructor(opts: LiveToolDataOptions) {
     this.opts = opts
+  }
+
+  /** Start the lane lookup and the file's sync token while the frame boots,
+   *  so the extension's first read is one request, not three in a row. */
+  warm(fileId: string): void {
+    void this.resolveLane("")
+    void this.opts.tokenFor(this.opts.projectId, fileId).catch(() => null)
   }
 
   private async token(fileId: string): Promise<string> {
@@ -132,8 +176,22 @@ export class LiveToolData implements ToolHostData {
     return this.defaultLane
   }
 
+  /** Cells whose cached head may be behind the server (after cells.changed). */
+  private readonly stale = new Map<string, Set<string>>()
+
   invalidate(fileId: string): void {
     this.cache.delete(fileId)
+    this.stale.delete(fileId)
+  }
+
+  /** apiRev 2: mark just these cells stale (a remote edit to one verse must
+   *  not cost the next write a whole-book re-read). Empty = whole file. */
+  invalidateCells(fileId: string, cellIds: readonly string[]): void {
+    if (cellIds.length === 0) return this.invalidate(fileId)
+    if (!this.cache.has(fileId)) return
+    const set = this.stale.get(fileId) ?? new Set<string>()
+    for (const id of cellIds) set.add(id)
+    this.stale.set(fileId, set)
   }
 
   async listFiles(): Promise<ToolFileView[]> {
@@ -148,8 +206,55 @@ export class LiveToolData implements ToolHostData {
     const rows = await fetchAllFileCells(this.opts.projectId, fileId, await this.token(fileId), undefined, resolved.tag || undefined)
     const paired = pairRows(rows, resolved.tag, resolved.id)
     this.cache.set(fileId, paired)
+    this.stale.delete(fileId)
     this.watchedFiles.add(fileId)
     return paired
+  }
+
+  private mergeCache(fileId: string, paired: Map<string, CachedCell>): void {
+    const existing = this.cache.get(fileId)
+    if (!existing) {
+      this.cache.set(fileId, new Map(paired))
+    } else {
+      for (const [id, c] of paired) existing.set(id, c)
+    }
+    this.watchedFiles.add(fileId)
+  }
+
+  /** apiRev 2: one server page (complete source/target groups per cell). */
+  async pageCells(fileId: string, lane: string, cursor: string | null, limit: number): Promise<ToolCellPage> {
+    const resolved = await this.resolveLane(lane)
+    const page = await fetchFileCells(
+      this.opts.projectId,
+      fileId,
+      { paired: true, limit, ...(cursor ? { cursor } : {}), ...(resolved.tag ? { lane: resolved.tag } : {}) },
+      await this.token(fileId),
+    )
+    if (page.completeRows !== true) {
+      // An older sync-worker cannot keep a cell's rows on one page: fall back
+      // to one complete read so no page ever shows half a cell.
+      const all = await this.loadFile(fileId, lane)
+      return { cells: [...all.values()].map((c) => c.view), nextCursor: null, total: all.size }
+    }
+    if (!cursor) this.cache.delete(fileId)
+    const paired = pairRows(page.cells, resolved.tag, resolved.id)
+    this.mergeCache(fileId, paired)
+    const stale = this.stale.get(fileId)
+    if (stale) for (const id of paired.keys()) stale.delete(id)
+    return { cells: [...paired.values()].map((c) => c.view), nextCursor: page.nextCursor ?? null, total: null }
+  }
+
+  /** apiRev 2: re-read specific cells (after cells.changed) instead of the file. */
+  async getCells(fileId: string, cellIds: string[], lane: string): Promise<ToolCellView[]> {
+    if (cellIds.length === 0) return []
+    const resolved = await this.resolveLane(lane)
+    const rows = await fetchCellsByIds(this.opts.projectId, fileId, cellIds, await this.token(fileId), resolved.tag || undefined)
+    const paired = pairRows(rows, resolved.tag, resolved.id)
+    this.mergeCache(fileId, paired)
+    const stale = this.stale.get(fileId)
+    if (stale) for (const id of paired.keys()) stale.delete(id)
+    const wanted = new Set(cellIds)
+    return [...paired.values()].filter((c) => wanted.has(c.view.cellId)).map((c) => c.view)
   }
 
   async listCells(fileId: string, lane: string): Promise<ToolCellView[]> {
@@ -168,6 +273,11 @@ export class LiveToolData implements ToolHostData {
   }
 
   private async cellFor(fileId: string, cellId: string): Promise<CachedCell | undefined> {
+    const stale = this.stale.get(fileId)
+    if (stale?.has(cellId) && this.cache.has(fileId)) {
+      stale.delete(cellId)
+      await this.getCells(fileId, [cellId], "")
+    }
     const cached = this.cache.get(fileId) ?? (await this.loadFile(fileId, ""))
     return cached.get(cellId)
   }
@@ -183,7 +293,8 @@ export class LiveToolData implements ToolHostData {
         failed.push({ cellId: edit.cellId, reason: "not_found" })
         continue
       }
-      if (cell.view.target === edit.value) {
+      const html = edit.html !== undefined ? sanitizeSourceDisplayHtml(edit.html) : undefined
+      if (cell.view.target === edit.value && (html === undefined || html === (cell.view.targetHtml ?? ""))) {
         committed.push(edit.cellId)
         continue
       }
@@ -196,6 +307,7 @@ export class LiveToolData implements ToolHostData {
         ...(cell.targetLang ? { targetLang: cell.targetLang } : {}),
         ...(cell.laneId ? { laneId: cell.laneId } : {}),
         value: edit.value,
+        ...(html !== undefined ? { valueHtml: html } : {}),
         author: this.opts.author,
         toolOrigin: this.opts.toolOrigin,
       })
@@ -207,7 +319,14 @@ export class LiveToolData implements ToolHostData {
       // on the event we just minted, not the stale read.
       ids.forEach((id, i) => {
         touched[i].targetEventId = id
-        touched[i].view = { ...touched[i].view, target: inputs[i].value, validated: false }
+        touched[i].view = {
+          ...touched[i].view,
+          target: inputs[i].value,
+          targetHtml: inputs[i].valueHtml ?? null,
+          validated: false,
+          aiDrafted: false,
+          lastEditor: this.opts.author,
+        }
         committed.push(inputs[i].cellId)
       })
       this.opts.flush()
@@ -240,6 +359,148 @@ export class LiveToolData implements ToolHostData {
     }
     if (validated.length > 0) this.opts.flush()
     return { validated, failed }
+  }
+
+  async unvalidate(items: { fileId: string; cellId: string }[]): Promise<ToolValidateResult> {
+    const validated: string[] = []
+    const failed: ToolValidateResult["failed"] = []
+    for (const item of items) {
+      const cell = await this.cellFor(item.fileId, item.cellId)
+      if (!cell?.targetEventId) {
+        failed.push({ cellId: item.cellId, reason: cell ? "no_translation" : "not_found" })
+        continue
+      }
+      await emitCellUnvalidate({
+        projectId: this.opts.projectId,
+        fileId: item.fileId,
+        cellId: item.cellId,
+        editEventId: cell.targetEventId,
+        ...(cell.targetLang ? { targetLang: cell.targetLang } : {}),
+        ...(cell.laneId ? { laneId: cell.laneId } : {}),
+        author: this.opts.author,
+        surface: "batch",
+        toolOrigin: this.opts.toolOrigin,
+      })
+      cell.view = { ...cell.view, validated: false }
+      validated.push(item.cellId)
+    }
+    if (validated.length > 0) this.opts.flush()
+    return { validated, failed }
+  }
+
+  private services(): ToolHostServices {
+    return this.opts.services?.() ?? {}
+  }
+
+  /** Services bound to one file refuse calls about another file. */
+  private boundTo(fileId: string): boolean {
+    const bound = this.services().fileId
+    return !bound || bound === fileId
+  }
+
+  async listPresence(fileId: string): Promise<ToolPresence> {
+    const holders = this.services().lockHolders
+    if (!holders || !this.boundTo(fileId)) return {}
+    const out: ToolPresence = {}
+    for (const [key, username] of holders) {
+      // Lane-qualified lock keys (focusLockKey) carry "@lane:"; the cell id
+      // is the part before it.
+      out[key.split("@lane:")[0]] = { username }
+    }
+    return out
+  }
+
+  async claimCell(fileId: string, cellId: string): Promise<boolean> {
+    const claim = this.services().claimCell
+    if (!claim || !this.boundTo(fileId)) return false
+    claim(cellId)
+    return true
+  }
+
+  async releaseCell(fileId: string, cellId: string): Promise<boolean> {
+    const release = this.services().releaseCell
+    if (!release || !this.boundTo(fileId)) return false
+    release(cellId)
+    return true
+  }
+
+  async commentCounts(fileId: string): Promise<Record<string, number>> {
+    const counts = this.services().commentCounts
+    if (!counts || !this.boundTo(fileId)) return {}
+    const cells = this.cache.get(fileId)
+    const out: Record<string, number> = {}
+    for (const [cellId, n] of counts) if (n > 0 && (!cells || cells.has(cellId))) out[cellId] = n
+    return out
+  }
+
+  async openComments(fileId: string, cellId: string): Promise<boolean> {
+    const open = this.services().openComments
+    if (!open || !this.boundTo(fileId)) return false
+    open(cellId)
+    return true
+  }
+
+  private audioCache = new Map<string, Promise<Map<string, { audioId: string; ext: string; durationMs: number | null }>>>()
+  private playing: HTMLAudioElement | null = null
+
+  private loadAudio(fileId: string): Promise<Map<string, { audioId: string; ext: string; durationMs: number | null }>> {
+    let p = this.audioCache.get(fileId)
+    if (!p) {
+      p = (async () => {
+        const lane = await this.resolveLane("")
+        const res = await fetchFileAudioAttachments(this.opts.projectId, fileId, await this.token(fileId), lane.tag)
+        const out = new Map<string, { audioId: string; ext: string; durationMs: number | null }>()
+        for (const [cellId, entry] of Object.entries(res.cells ?? {})) {
+          const selected = Object.values(slotSelections(entry))
+          const att = selected.map((id) => entry.attachments[id]).find(Boolean) ?? Object.values(entry.attachments)[0]
+          const parsed = att ? parseFrontierAudioUrl(att.url) : null
+          if (att && parsed) out.set(cellId, { ...parsed, durationMs: att.durationMs ?? null })
+        }
+        return out
+      })()
+      this.audioCache.set(fileId, p)
+      p.catch(() => this.audioCache.delete(fileId))
+    }
+    return p
+  }
+
+  async listAudio(fileId: string): Promise<Record<string, ToolAudioEntry>> {
+    this.audioCache.delete(fileId)
+    const audio = await this.loadAudio(fileId)
+    const out: Record<string, ToolAudioEntry> = {}
+    for (const [cellId, a] of audio) out[cellId] = { hasAudio: true, durationMs: a.durationMs }
+    return out
+  }
+
+  /** Playback happens in the HOST: the frame has no network (CSP), so it
+   *  could not load the media even with a URL — and never gets one. */
+  async playAudio(fileId: string, cellId: string): Promise<boolean> {
+    const a = (await this.loadAudio(fileId)).get(cellId)
+    if (!a) return false
+    const url = await getCellAudioStreamUrl({
+      projectId: this.opts.projectId,
+      fileId,
+      audioId: a.audioId,
+      ext: a.ext,
+      getSyncToken: this.opts.tokenFor,
+    })
+    if (!url) return false
+    await this.stopAudio()
+    const el = new Audio(url)
+    this.playing = el
+    await el.play()
+    return true
+  }
+
+  async stopAudio(): Promise<boolean> {
+    if (!this.playing) return false
+    this.playing.pause()
+    this.playing = null
+    return true
+  }
+
+  async hostKey(key: HostKey): Promise<boolean> {
+    return this.opts.hostKey?.(key) ?? false
   }
 
   private readStore(): Record<string, unknown> {

@@ -30,6 +30,9 @@ export interface ToolSummary {
   origin: ToolVersionOrigin
   /** The caller's standing grant. */
   grantedScopes: ToolScope[]
+  /** Set on a first-party extension Aquilla ships (e.g. "default-editor")
+   *  while its current version is the shipped code (apiRev 2). */
+  firstParty: string | null
 }
 
 export interface ToolVersionRow {
@@ -58,6 +61,7 @@ interface ToolJoinRow {
   manifest: unknown
   origin: ToolVersionOrigin
   scopes: unknown
+  first_party: string | null
 }
 
 function iso(v: string | Date): string {
@@ -101,6 +105,7 @@ function toSummary(r: ToolJoinRow): ToolSummary {
     manifest: toManifest(r.manifest),
     origin: r.origin,
     grantedScopes: toScopes(r.scopes),
+    firstParty: r.first_party ?? null,
   }
 }
 
@@ -108,6 +113,7 @@ const SUMMARY_SELECT = `
   SELECT t.id, t.project_id, t.name, t.description, t.current_version, t.upstream_tool_id,
          t.created_by_user_id, t.created_at, t.updated_at,
          v.code_hash, v.api_rev, v.manifest, v.origin,
+         v.build_meta->>'firstParty' AS first_party,
          COALESCE(g.scopes, '[]'::jsonb) AS scopes
     FROM project_tools t
     JOIN project_tool_versions v ON v.tool_id = t.id AND v.version = t.current_version
@@ -199,8 +205,10 @@ export async function createTool(
   userId: number,
   input: SaveVersionInput,
   checked: { manifest: ToolManifest; codeHash: string },
+  /** A fixed id (first-party installs); default a fresh UUID. */
+  fixedId?: string,
 ): Promise<string> {
-  const id = crypto.randomUUID()
+  const id = fixedId ?? crypto.randomUUID()
   await db.batch([
     db
       .prepare(
@@ -291,4 +299,31 @@ export async function archiveTool(db: AquillaDb, projectId: string, toolId: stri
     .bind(toolId, projectId)
     .all<{ id: string }>()
   return results.length > 0
+}
+
+/** Whether `userId` has ever had a standing grant row for this tool (an
+ *  empty row = they revoked everything, which first-party installs respect). */
+export async function hasGrantRow(db: AquillaDb, toolId: string, userId: number): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 AS one FROM project_tool_grants WHERE tool_id = ? AND user_id = ?`)
+    .bind(toolId, userId)
+    .first<{ one: number }>()
+  return row != null
+}
+
+/** The bare row of a tool by id, archived or not (first-party lookups). */
+export async function toolRow(
+  db: AquillaDb,
+  projectId: string,
+  toolId: string,
+): Promise<{ archived: boolean; codeHash: string; firstParty: string | null } | null> {
+  const row = await db
+    .prepare(
+      `SELECT t.archived_at, v.code_hash, v.build_meta->>'firstParty' AS first_party
+         FROM project_tools t JOIN project_tool_versions v ON v.tool_id = t.id AND v.version = t.current_version
+        WHERE t.id = ? AND t.project_id = ?`,
+    )
+    .bind(toolId, projectId)
+    .first<{ archived_at: string | Date | null; code_hash: string; first_party: string | null }>()
+  return row ? { archived: row.archived_at != null, codeHash: row.code_hash, firstParty: row.first_party ?? null } : null
 }

@@ -8,9 +8,13 @@
  * scopes it needs; the user approves them once as a standing grant.
  */
 
-/** Bridge API revision. Bump when a bridge call is removed or changes shape;
- *  tools built against an older revision are flagged "rebuild". */
-export const TOOLS_API_REV = 1
+/** Bridge API revision. Bump when a bridge call is added, removed or changes
+ *  shape; tools built against an older revision still run while it is at or
+ *  above TOOLS_MIN_API_REV (api-rev.ts), and are flagged "rebuild" below it.
+ *  Rev 2 (additive only): the surfaces the first-party default editor needs —
+ *  rich text, paged/targeted reads, unvalidate, presence, comments, audio and
+ *  host shortcuts. See API_REV_ADDITIONS in api-rev.ts. */
+export const TOOLS_API_REV = 2
 
 /** Every scope a manifest may declare. Reads of project metadata (name, the
  *  current user, theme) need no scope. */
@@ -20,6 +24,7 @@ export const TOOL_SCOPES = [
   "write:target",
   "write:validation",
   "ai:generate",
+  "read:comments",
 ] as const
 
 export type ToolScope = (typeof TOOL_SCOPES)[number]
@@ -30,6 +35,7 @@ export const TOOL_SCOPE_LABELS: Record<ToolScope, string> = {
   "write:target": "edit translations",
   "write:validation": "mark cells validated",
   "ai:generate": "use AI on your behalf",
+  "read:comments": "see comment counts and open comment threads",
 }
 
 export function isToolScope(value: unknown): value is ToolScope {

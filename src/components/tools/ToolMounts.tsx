@@ -19,6 +19,7 @@ import type { ToolMount } from "../../../shared/tools/manifest"
 import { ToolFrame } from "./ToolFrame"
 import { useMountedTool, useToolsMount } from "./ToolsMountContext"
 import { useEditTool } from "./useEditTool"
+import type { ToolHostServices } from "@/lib/tools/live-data"
 
 function toolsFor(tools: ToolSummary[], mount: ToolMount): ToolSummary[] {
   return tools.filter((t) => t.manifest.mounts.includes(mount))
@@ -30,12 +31,17 @@ export function MountedTool({
   cell,
   file,
   className,
+  services,
+  revealCellId,
 }: {
   toolId: string
   mount: "panel" | "inline" | "editor"
   cell?: { fileId: string; cellId: string }
   file?: { fileId: string; name: string }
   className?: string
+  /** apiRev 2: workspace services (editor mount). */
+  services?: ToolHostServices
+  revealCellId?: string | null
 }) {
   const ctx = useToolsMount()
   const { project, roleLevel } = useProject(ctx?.projectId ?? "")
@@ -60,6 +66,8 @@ export function MountedTool({
       }}
       healing={edit.busy}
       className={className}
+      {...(services ? { services } : {})}
+      {...(revealCellId !== undefined ? { revealCellId } : {})}
     />
   )
 }

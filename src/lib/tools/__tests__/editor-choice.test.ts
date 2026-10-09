@@ -17,6 +17,21 @@ describe("extension editor choice", () => {
     expect(resolveEditor(s, "f4", ["ext-1"])).toBe("ext-1")
   })
 
+  it("defaults to the first-party editor extension when installed; an explicit standard pick wins", () => {
+    const fp = "fp-editor"
+    expect(resolveEditor({ project: null, files: {} }, "f1", [fp], fp)).toBe(fp)
+    // Not installed (removed / flag off upstream) → standard.
+    expect(resolveEditor({ project: null, files: {} }, "f1", [], fp)).toBe(STANDARD_EDITOR)
+    let s = chooseEditor({ project: null, files: {} }, "f1", STANDARD_EDITOR, false)
+    expect(resolveEditor(s, "f1", [fp], fp)).toBe(STANDARD_EDITOR)
+    expect(resolveEditor(s, "f2", [fp], fp)).toBe(fp)
+    s = chooseEditor(s, "f2", STANDARD_EDITOR, true)
+    expect(s.project).toBe(STANDARD_EDITOR)
+    expect(resolveEditor(s, "f9", [fp], fp)).toBe(STANDARD_EDITOR)
+    // A remembered extension that is gone falls back to the default editor.
+    expect(resolveEditor({ project: "gone", files: {} }, "f1", [fp], fp)).toBe(fp)
+  })
+
   it("falls back to standard when the remembered extension is gone", () => {
     expect(resolveEditor({ project: "gone", files: {} }, "f1", [])).toBe(STANDARD_EDITOR)
   })

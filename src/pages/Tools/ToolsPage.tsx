@@ -173,6 +173,11 @@ export function ToolsPage() {
                   <span className="font-medium">{tool.name}</span>
                   <Badge variant="outline">{t("extensions.version", { version: tool.currentVersion })}</Badge>
                   <Badge variant="outline" className="font-mono">{t("extensions.codeHash", { hash: tool.codeHash.slice(0, 8) })}</Badge>
+                  {tool.firstParty && (
+                    <Badge variant="outline" data-testid="first-party-badge">
+                      {t("extensions.firstParty.badge")}
+                    </Badge>
+                  )}
                   {jwt && <ReviewCopiedExtension projectId={projectId} tool={tool} jwt={jwt} />}
                   <div className="ml-auto flex gap-2">
                     <Button size="sm" render={<Link to={`/project/${projectId}/extensions/${tool.id}`} />}>

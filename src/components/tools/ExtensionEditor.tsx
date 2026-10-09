@@ -8,6 +8,10 @@
  */
 
 import { useCallback, useMemo, useState, type ReactNode } from "react"
+import { Link } from "react-router-dom"
+import { ShieldCheck } from "lucide-react"
+import type { ToolHostServices } from "@/lib/tools/live-data"
+import { useScopeLabel } from "./scope-label"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   STANDARD_EDITOR,
@@ -25,6 +29,9 @@ export interface ExtensionEditorChoice {
   /** STANDARD_EDITOR or an extension id. */
   selected: string
   choose: (editorId: string, wholeProject: boolean) => void
+  /** The default may be an extension but the project's extensions have not
+   *  loaded yet: show a placeholder, not a flash of the built-in editor. */
+  pending: boolean
 }
 
 export function useExtensionEditorChoice(username: string, projectId: string, fileId: string | null): ExtensionEditorChoice {
@@ -37,7 +44,7 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
     setStateKey(`${username}:${projectId}`)
     setState(readEditorChoice(username, projectId))
   }
-  const selected = fileId ? resolveEditor(state, fileId, editors.map((e) => e.id)) : STANDARD_EDITOR
+  const selected = fileId ? resolveEditor(state, fileId, editors.map((e) => e.id), ctx?.defaultEditorId ?? null) : STANDARD_EDITOR
   const choose = useCallback(
     (editorId: string, wholeProject: boolean) => {
       if (!fileId) return
@@ -49,7 +56,9 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
     },
     [fileId, username, projectId],
   )
-  return { editors, selected, choose }
+  const explicitStandard = fileId ? (state.files[fileId] ?? state.project) === STANDARD_EDITOR : false
+  const pending = Boolean(fileId && ctx?.defaultEditorEnabled && ctx.session && !ctx.toolsReady && !explicitStandard)
+  return { editors, selected, choose, pending }
 }
 
 export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorChoice }) {
@@ -69,7 +78,7 @@ export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorCho
           <option value={STANDARD_EDITOR}>{t("extensions.editor.standard")}</option>
           {choice.editors.map((ed) => (
             <option key={ed.id} value={ed.id}>
-              {ed.name}
+              {ed.firstParty ? t("extensions.editor.firstPartyOption", { name: ed.name }) : ed.name}
             </option>
           ))}
         </select>
@@ -86,22 +95,62 @@ export function ExtensionEditorSurface({
   choice,
   file,
   bar,
+  services,
+  revealCellId,
 }: {
   choice: ExtensionEditorChoice
   file: { fileId: string; name: string }
   /** The extensions bar (switcher, pins, palette) shown above the editor. */
   bar: ReactNode
+  /** apiRev 2: the workspace's live focus locks, comments, … for this file. */
+  services?: ToolHostServices
+  /** apiRev 2: a deep-linked cell (?cellId=) to show. */
+  revealCellId?: string | null
 }) {
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="extension-editor-surface">
       {bar}
+      <FirstPartyNotice toolId={choice.selected} />
       <MountedTool
         key={`${choice.selected}:${file.fileId}`}
         toolId={choice.selected}
         mount="editor"
         file={file}
         className="flex min-h-0 flex-1 flex-col"
+        {...(services ? { services } : {})}
+        {...(revealCellId !== undefined ? { revealCellId } : {})}
       />
+    </div>
+  )
+}
+
+/** Explicit, visible auto-grant: a first-party extension is granted its
+ *  scopes without the install dialog, so the editor says so (and links to
+ *  where it can be revoked). */
+function FirstPartyNotice({ toolId }: { toolId: string }) {
+  const t = useT()
+  const scopeLabel = useScopeLabel()
+  const ctx = useToolsMount()
+  const tool = ctx?.tools.find((x) => x.id === toolId)
+  if (!ctx || !tool?.firstParty) return null
+  const scopes = tool.grantedScopes.map(scopeLabel).join(", ")
+  const fresh = ctx.autoGranted.length > 0
+  return (
+    <div
+      className="flex items-start gap-2 border-b bg-muted/20 px-3 py-1 text-[11px] leading-4 text-muted-foreground"
+      data-testid="first-party-notice"
+      role="note"
+    >
+      <ShieldCheck className="mt-px size-3.5 shrink-0 text-emerald-600" aria-hidden />
+      <p className="min-w-0 flex-1">
+        {t(fresh ? "extensions.firstParty.autoGranted" : "extensions.firstParty.granted", {
+          name: tool.name,
+          scopes: scopes || t("extensions.firstParty.none"),
+        })}{" "}
+        <Link className="underline" to={`/project/${ctx.projectId}/extensions`}>
+          {t("extensions.firstParty.manage")}
+        </Link>
+      </p>
     </div>
   )
 }

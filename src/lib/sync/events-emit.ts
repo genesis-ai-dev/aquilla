@@ -451,6 +451,7 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
       editEventId: input.editEventId,
       // AQU-538: '' (default lane) is omitted from the wire.
       ...targetLaneFields(input),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
     clientTs: input.clientTs,
   })

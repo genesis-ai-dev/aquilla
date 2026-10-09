@@ -8,7 +8,7 @@
 export const STANDARD_EDITOR = "standard"
 
 export interface EditorChoiceState {
-  /** Project-wide default extension id (null = standard editor). */
+  /** Project-wide choice: an extension id or "standard" (null = the default). */
   project: string | null
   /** Per-file choice: an extension id or "standard". Wins over the default. */
   files: Record<string, string>
@@ -47,17 +47,27 @@ export function writeEditorChoice(username: string, projectId: string, state: Ed
 }
 
 /** The editor to use for `fileId`, given which editor extensions are installed.
- *  A remembered extension that is no longer installed falls back to standard. */
-export function resolveEditor(state: EditorChoiceState, fileId: string, installed: readonly string[]): string {
-  const pick = state.files[fileId] ?? state.project ?? STANDARD_EDITOR
-  return pick === STANDARD_EDITOR || installed.includes(pick) ? pick : STANDARD_EDITOR
+ *  With no remembered choice the default applies: the first-party editor
+ *  extension when it is installed (`defaultEditor`), else the standard editor.
+ *  A remembered extension that is no longer installed falls back to it too. */
+export function resolveEditor(
+  state: EditorChoiceState,
+  fileId: string,
+  installed: readonly string[],
+  defaultEditor: string | null = null,
+): string {
+  const fallback = defaultEditor && installed.includes(defaultEditor) ? defaultEditor : STANDARD_EDITOR
+  const pick = state.files[fileId] ?? state.project ?? fallback
+  return pick === STANDARD_EDITOR || installed.includes(pick) ? pick : fallback
 }
 
 /** Choose an editor for one file, or (wholeProject) as the project default. */
 export function chooseEditor(state: EditorChoiceState, fileId: string, editorId: string, wholeProject: boolean): EditorChoiceState {
   if (wholeProject) {
-    // A project-wide pick clears per-file overrides so it takes effect everywhere.
-    return { project: editorId === STANDARD_EDITOR ? null : editorId, files: {} }
+    // A project-wide pick clears per-file overrides so it takes effect
+    // everywhere. "standard" is stored explicitly: it must win over a
+    // default editor extension.
+    return { project: editorId, files: {} }
   }
   return { ...state, files: { ...state.files, [fileId]: editorId } }
 }

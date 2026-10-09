@@ -53,9 +53,18 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
 - **Bridge.** `src/lib/tools/runtime-source.ts` is a source string (tests evaluate the exact
   bytes that ship). Boot data is embedded with `embedJson` (escapes `<`, `>`, `&`, U+2028/9).
   The host validates `event.source` and origin; the runtime only accepts its parent.
-  Surfaces: `files.list`, `cells.list`, `terms.list`, `cells.commit`, `cells.validate`,
+  Surfaces (apiRev 1): `files.list`, `cells.list`, `terms.list`, `cells.commit`, `cells.validate`,
   `storage.get/set/remove`, `permissions.request/list`, `ui.notify`, `tell`, `ai.generate`,
-  `on("cells.changed")`. A tool never supplies a parent id: the host chains on the live head.
+  `on("cells.changed")`. Added in apiRev 2 (additive only — rev-1 extensions run unchanged):
+  `cells.page` / `cells.get` (server-paged and targeted reads), rich-text fields on every cell
+  (`sourceHtml`, `targetHtml`, `type`, `lastEditor`, `lastEditAt`, `aiDrafted`) and an optional
+  `html` per `cells.commit` edit (sanitized by the host to the editor's inline allowlist in
+  both directions), `cells.unvalidate`, `presence.list/claim/release` + `presence.changed`,
+  `comments.counts/open` + `comments.changed` (new scope `read:comments`), `audio.list/play/stop`
+  (playback happens in the host — the frame has no network), `ui.hostKey` + automatic
+  forwarding of the app's own shortcuts (`boot.hostShortcuts`; the host replays only its
+  allowlist), and `editor.reveal` (+ `context.file.revealCellId`) for deep links.
+  A tool never supplies a parent id: the host chains on the live head.
 - **Permissions.** Scopes `read:cells`, `read:terms`, `write:target`, `write:validation`,
   `ai:generate`. Install approves a standing grant (reads pre-checked, writes ask on first use);
   an ungranted call pauses on "<Extension> wants to <scope>. Allow once / Always allow / Deny".
@@ -80,6 +89,43 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
 - **Capability twins.** `capability-contract.test.ts` keeps runtime, handlers, permission map,
   smoke stub and builder prompt in agreement.
 
+## The default editor is an extension
+
+The standard translation editor ships as a **first-party extension**, "Aquilla Editor"
+(`shared/tools/first-party/default-editor*.ts`), and is the default editor for every file. It
+runs exactly like any other extension — the same sandboxed frame, CSP, bridge, permission gate
+and event path, with tool provenance on every write — so it doubles as the proof that the
+extension API can carry the whole editing experience. Nothing privileged: it reaches the
+workspace's live focus locks and comment panels only through the apiRev 2 bridge calls above,
+which any `editor` extension gets.
+
+- **Install.** The SERVER installs it (`POST /tools/first-party {key:"default-editor"}`) from
+  the repo's reviewed source — a client cannot choose the bytes. Idempotent via a deterministic
+  per-project tool id (no schema change). Upgraded in place to the shipped code only while the
+  current version is pristine (a project's "Change it" edit is left alone). Removing it on the
+  management page keeps it removed (the built-in editor becomes the default again).
+- **Grants — explicit and visible.** Its declared scopes (`read:cells`, `write:target`,
+  `write:validation`, `read:comments`) are auto-granted to each user the first time only; a
+  later revoke sticks. The editor bar says so ("…granted these permissions automatically…",
+  with a Manage link), the switcher labels it "(default)", and its card on the management page
+  carries a "First-party · auto-granted at install" badge. Role ceilings and the server's
+  `authorize()` apply as for any extension.
+- **Fallback.** The built-in editor stays one switch away ("Standard editor" in the editor
+  switcher; remembered per file or project-wide). The client waits for the project's
+  extensions before choosing, so the built-in never flashes first.
+- **Off switch.** `localStorage["aquilla.extensions.defaultEditor"]="off"` (per browser) or
+  build env `VITE_EXTENSION_DEFAULT_EDITOR=off`. The e2e stack builds with it off so the
+  editor smoke journeys keep guarding the built-in editor; the extension-editor specs opt in.
+
+What it covers, and what is still built-in only, is tracked in the PR (AQU-1793) gap table:
+the bridge now carries rich text, validation, live remote edits, presence/focus locks, comment
+counts and threads, audio playback, keyboard navigation and host shortcuts, and paged reads for
+long books. Not yet expressible as an extension: the AI drafting/forecast surfaces (sparkle
+completion, ghost text — forecasting is PR #1295), back-translation, health/rules
+infractions, terminology chips, footnote editing beyond preserving markers, audio
+recording/TTS, timeline/media lens, IDML slots, selection bar bulk actions, history drawer,
+assignments/staleness badges and presence drafts (live typing preview).
+
 ## Prototype-only vs production follow-ups
 
 - **Origin.** Prototype uses srcdoc + meta CSP. Production: serve frames from a dedicated
@@ -103,6 +149,12 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
   choice, capability twins), `shared/tools/revert.test.ts`.
 - Workers: `auth-worker/src/__tests__/tools-routes.test.ts`, `tools-builder.test.ts`;
   `sync-worker/src/__tests__/tool-provenance.test.ts`.
-- E2E: `e2e/specs/tools/tools-heatmap.spec.ts`, `e2e/specs/tools/extension-editor.spec.ts`.
+- E2E: `e2e/specs/tools/tools-heatmap.spec.ts`, `e2e/specs/tools/extension-editor.spec.ts`,
+  `e2e/specs/tools/default-editor-extension.spec.ts` (first-party default editor: edit, rich
+  text, validate, a second user's lock + live edit, switch to built-in and back, revert since T),
+  `e2e/specs/tools/default-editor-perf.spec.ts` (full gospel, extension vs built-in; reports).
+- Unit (apiRev 2): `api-rev2.test.ts`, `live-data-rev2.test.ts`, `default-editor.test.ts`;
+  auth-worker `tools-routes.test.ts` "first-party extensions".
 - Recordings: `e2e/recordings/specs/aquilla-tools.showcase.ts` (real build),
-  `extension-editor.showcase.ts`, `extension-editor-build.showcase.ts` (real build).
+  `extension-editor.showcase.ts`, `extension-editor-build.showcase.ts` (real build),
+  `default-editor-extension.showcase.ts`.

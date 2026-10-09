@@ -9,6 +9,8 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { ROLE } from "../types"
+import { TOOLS_API_REV } from "../../../shared/tools/manifest"
+import { DEFAULT_EDITOR_MANIFEST, DEFAULT_EDITOR_SOURCE, firstPartyToolId } from "../../../shared/tools/first-party/default-editor"
 
 const PROJECT = "proj-tools"
 
@@ -62,7 +64,7 @@ describe("tools API", () => {
     const { tool } = (await res.json()) as ToolBody
     expect(tool.currentVersion).toBe(1)
     expect(tool.codeHash).toMatch(/^[0-9a-f]{64}$/)
-    expect(tool.apiRev).toBe(1)
+    expect(tool.apiRev).toBe(TOOLS_API_REV)
     // write:validation was not declared → never granted.
     expect(tool.grantedScopes).toEqual(["read:cells"])
 
@@ -178,5 +180,78 @@ describe("tools API", () => {
     expect(body.events.map((e) => e.id)).toEqual(["e2"])
     expect(body.events[0].verified).toBe(true)
     expect(body.cells).toEqual([expect.objectContaining({ headEventId: "e2", priorValue: "before" })])
+  })
+})
+
+// apiRev 2: the first-party default editor is installed BY THE SERVER from the
+// repo's source — idempotently, auto-granted once per user (a revoke sticks),
+// upgraded only while pristine, and a removal is respected.
+describe("first-party extensions", () => {
+  interface Ensure { tool: (ToolBody["tool"] & { firstParty: string | null; origin: string }) | null; removed: boolean; created?: boolean; autoGranted: string[] }
+  const ensure = async (jwt: string, key = "default-editor") => call("/tools/first-party", jwt, { method: "POST", body: { key } })
+
+  it("installs once, auto-grants each user once, and shows up as first-party", async () => {
+    await seedProject()
+    const owner = await jwtFor("owner")
+    const first = await ensure(owner)
+    expect(first.status).toBe(201)
+    const a = (await first.json()) as Ensure
+    expect(a.tool?.id).toBe(await firstPartyToolId(PROJECT, "default-editor"))
+    expect(a.tool?.firstParty).toBe("default-editor")
+    expect(a.tool?.origin).toBe("starter")
+    expect(a.tool?.source).toBe(DEFAULT_EDITOR_SOURCE)
+    expect(a.autoGranted.sort()).toEqual([...DEFAULT_EDITOR_MANIFEST.scopes].sort())
+    expect(a.tool?.grantedScopes.sort()).toEqual([...DEFAULT_EDITOR_MANIFEST.scopes].sort())
+
+    const again = await ensure(owner)
+    expect(again.status).toBe(200)
+    const b = (await again.json()) as Ensure
+    expect(b.tool?.id).toBe(a.tool?.id)
+    expect(b.tool?.currentVersion).toBe(1)
+    expect(b.autoGranted).toEqual([])
+
+    // Any member may trigger it (the code is ours; writes are still authorized per event).
+    const viewer = (await (await ensure(await jwtFor("viewer"))).json()) as Ensure
+    expect(viewer.tool?.id).toBe(a.tool?.id)
+    expect(viewer.autoGranted.length).toBeGreaterThan(0)
+
+    const list = (await (await call("/tools", owner)).json()) as { tools: { id: string; firstParty: string | null }[] }
+    expect(list.tools).toEqual([expect.objectContaining({ id: a.tool?.id, firstParty: "default-editor" })])
+  })
+
+  it("a revoke sticks, a removal stays removed, unknown keys 404", async () => {
+    await seedProject()
+    const owner = await jwtFor("owner")
+    const { tool } = (await (await ensure(owner)).json()) as Ensure
+    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: ["read:cells"] } })
+    const after = (await (await ensure(owner)).json()) as Ensure
+    expect(after.autoGranted).toEqual([])
+    expect(after.tool?.grantedScopes).toEqual(["read:cells"])
+
+    expect((await call(`/tools/${tool!.id}`, owner, { method: "DELETE" })).status).toBe(200)
+    const removed = (await (await ensure(owner)).json()) as Ensure
+    expect(removed).toMatchObject({ tool: null, removed: true })
+    expect((await ensure(owner, "nope")).status).toBe(404)
+  })
+
+  it("upgrades a pristine install to the shipped code, never an edited one", async () => {
+    await seedProject()
+    const owner = await jwtFor("owner")
+    const { tool } = (await (await ensure(owner)).json()) as Ensure
+    // Simulate an older shipped build.
+    await env.AQUILLA_PG.prepare("UPDATE project_tool_versions SET code_hash = ? WHERE tool_id = ?").bind("0".repeat(64), tool!.id).run()
+    const upgraded = (await (await ensure(owner)).json()) as Ensure
+    expect(upgraded.tool?.currentVersion).toBe(2)
+    expect(upgraded.tool?.firstParty).toBe("default-editor")
+
+    // The project changes it ("Change it" → origin edit, no firstParty mark): ours now, left alone.
+    const edited = await call(`/tools/${tool!.id}/versions`, owner, {
+      method: "POST",
+      body: { source: DEFAULT_EDITOR_SOURCE.replace("Translate…", "Type here…"), manifest: DEFAULT_EDITOR_MANIFEST, origin: "edit" },
+    })
+    expect(edited.status).toBe(201)
+    const kept = (await (await ensure(owner)).json()) as Ensure
+    expect(kept.tool?.currentVersion).toBe(3)
+    expect(kept.tool?.firstParty).toBeNull()
   })
 })

@@ -1,5 +1,8 @@
 import { expect, type FrameLocator, type Locator, type Page } from "@playwright/test"
 
+/** The first-party default editor extension's name. */
+export const DEFAULT_EDITOR = "Aquilla Editor"
+
 /**
  * Smart Extensions (prototype): the management page (/project/:id/extensions), a mounted
  * tool's sandboxed frame and its host-side permission prompt.
@@ -37,6 +40,34 @@ export class ToolsPage {
   /** Pick an editor in the file view's editor switcher ("Standard editor" or an extension). */
   async switchEditor(label: string): Promise<void> {
     await this.page.getByRole("combobox", { name: "Edit with" }).first().selectOption({ label })
+  }
+
+  /** Opt this page's browser context into the first-party default editor
+   *  extension (the e2e stack builds with it off so the built-in editor smoke
+   *  journeys keep their editor). Call before navigating. */
+  async optIntoDefaultEditorExtension(): Promise<void> {
+    await this.page.context().addInitScript(() => {
+      localStorage.setItem("aquilla.extensions.defaultEditor", "on")
+    })
+  }
+
+  /** Open a file straight into whichever editor is the default, waiting for
+   *  the first-party extension editor's frame to render its rows. */
+  async openFileInDefaultEditor(projectId: string, fileId: string, firstRef: string): Promise<FrameLocator> {
+    await this.page.goto(`/project/${projectId}/editor/file/${fileId}`)
+    const frame = this.toolFrame(DEFAULT_EDITOR)
+    await expect(this.translationBox(frame, firstRef)).toBeVisible({ timeout: 30_000 })
+    return frame
+  }
+
+  /** The target textbox of one row in the default editor extension. */
+  translationBox(frame: FrameLocator, ref: string): Locator {
+    return frame.getByRole("textbox", { name: `Translation for ${ref}`, exact: true })
+  }
+
+  /** One row (source, target, badges) of the default editor extension. */
+  editorRow(frame: FrameLocator, ref: string): Locator {
+    return frame.locator(`.row[data-ref="${ref}"]`)
   }
 
   /** The running tool's document (an opaque-origin sandboxed frame). */

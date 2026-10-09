@@ -23,6 +23,18 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   "cells.commit": "write:target",
   "cells.validate": "write:validation",
   "ai.generate": "ai:generate",
+  // apiRev 2
+  "cells.page": "read:cells",
+  "cells.get": "read:cells",
+  "cells.unvalidate": "write:validation",
+  "presence.list": "read:cells",
+  // A focus lease is the first half of an edit: it needs the edit scope.
+  "presence.claim": "write:target",
+  "presence.release": "write:target",
+  "comments.counts": "read:comments",
+  "comments.open": "read:comments",
+  "audio.list": "read:cells",
+  "audio.play": "read:cells",
 }
 
 /** The event kind whose server role floor bounds each write scope. */

@@ -31,6 +31,22 @@ export const REMOVED_APIS: readonly RemovedApi[] = [
   { method: "cells.save", removedIn: 1, replacement: "aquilla.cells.commit([{ fileId, cellId, value }])" },
 ]
 
+/** Additive surfaces per revision (nothing here is removed or reshaped, so an
+ *  older extension keeps working unchanged; it simply does not call them). */
+export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
+  2: [
+    "cells.page",
+    "cells.get",
+    "cells.unvalidate",
+    "cells.list/page/get: sourceHtml, targetHtml, type, lastEditor, lastEditAt, aiDrafted",
+    "cells.commit: optional html per edit (sanitized by the host)",
+    "presence.list / presence.claim / presence.release + presence.changed event",
+    "comments.counts / comments.open + comments.changed event (scope read:comments)",
+    "audio.list / audio.play / audio.stop",
+    "ui.hostKey (+ automatic forwarding of host shortcuts) and the editor.reveal event",
+  ],
+}
+
 export function removedApi(method: string): RemovedApi | null {
   return REMOVED_APIS.find((r) => r.method === method) ?? null
 }

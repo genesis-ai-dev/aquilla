@@ -442,6 +442,8 @@ export interface EventPayloads {
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
     editEventId: string
+    /** Aquilla Tools: the tool that withdrew this validation (provenance, apiRev 2). */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
     /**
      * When a maintainer is removing another user's validation, set this to
      * the username of the validator whose row should be deleted. If omitted

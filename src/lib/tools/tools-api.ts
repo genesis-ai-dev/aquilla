@@ -24,6 +24,9 @@ export interface ToolSummary {
   manifest: ToolManifest
   origin: ToolVersionOrigin
   grantedScopes: ToolScope[]
+  /** A first-party extension Aquilla ships ("default-editor"), while its
+   *  current version is the shipped code. Absent from older workers. */
+  firstParty?: string | null
 }
 
 export interface ToolDetail extends ToolSummary {
@@ -194,4 +197,19 @@ export async function buildToolAttempt(
   },
 ): Promise<BuildAttempt> {
   return request<BuildAttempt>(jwt, `${p(projectId)}/build`, { method: "POST", body })
+}
+
+export interface FirstPartyEnsureResult {
+  tool: ToolDetail | null
+  /** The project removed it; it stays removed. */
+  removed: boolean
+  created?: boolean
+  /** Scopes granted to the caller automatically by THIS call (first use). */
+  autoGranted: ToolScope[]
+}
+
+/** Ensure a first-party extension is installed and current (server-side
+ *  install from the repo's reviewed source; idempotent). */
+export async function ensureFirstPartyTool(jwt: string, projectId: string, key: string): Promise<FirstPartyEnsureResult> {
+  return request<FirstPartyEnsureResult>(jwt, `${p(projectId)}/first-party`, { method: "POST", body: { key } })
 }

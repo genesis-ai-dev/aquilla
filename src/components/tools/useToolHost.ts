@@ -13,7 +13,8 @@ import { subscribeAppliedEvents } from "@/lib/sync/outbox-flush"
 import { subscribeProjectApplied, type ProjectAppliedFrame } from "@/lib/tools/project-applied-bus"
 import { BridgeError, createBridgeHost, type BridgeHost, type ToolErrorReport } from "@/lib/tools/host-bridge"
 import { createToolHandlers } from "@/lib/tools/host-handlers"
-import { LiveToolData } from "@/lib/tools/live-data"
+import { LiveToolData, type ToolHostServices } from "@/lib/tools/live-data"
+import { dispatchHostKey } from "@/lib/tools/host-keys"
 import { METHOD_SCOPES, applyPromptAnswer, decideScope, type PromptAnswer } from "@/lib/tools/permissions"
 import { readThemeVars } from "@/lib/tools/srcdoc"
 import { setToolGrant, type ToolDetail } from "@/lib/tools/tools-api"
@@ -27,6 +28,10 @@ export interface UseToolHostArgs {
   session: FrontierSession
   roleLevel: number | null
   onGrantChange?: (scopes: ToolScope[]) => void
+  /** apiRev 2: workspace services for this mount (editor mounts). */
+  services?: ToolHostServices
+  /** apiRev 2: a cell the host wants the extension to show (deep link). */
+  revealCellId?: string | null
 }
 
 export interface ToolHostState {
@@ -41,7 +46,7 @@ export interface ToolHostState {
   ready: boolean
 }
 
-export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange }: UseToolHostArgs): ToolHostState {
+export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onGrantChange, services, revealCellId }: UseToolHostArgs): ToolHostState {
   const { flushNow } = useOutbox()
   const [prompt, setPrompt] = useState<PendingPrompt | null>(null)
   const [errors, setErrors] = useState<ToolErrorReport[]>([])
@@ -55,6 +60,10 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   const flushRef = useRef(flushNow)
   const grantCbRef = useRef(onGrantChange)
   const hostRef = useRef<BridgeHost | null>(null)
+  const servicesRef = useRef<ToolHostServices | undefined>(services)
+  useEffect(() => {
+    servicesRef.current = services
+  }, [services])
   // Declared scopes via a ref so a refetched tool object (same version) does
   // not re-create the bridge mid-session.
   const declaredRef = useRef(tool.manifest.scopes)
@@ -127,7 +136,11 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       grantedScopes: () => [...standingRef.current],
       requestScope: (scope) => ask(scope),
       storageKey: `aquilla.tools.storage.v1:${session.username}:${projectId}:${toolId}`,
+      services: () => servicesRef.current ?? {},
+      hostKey: (key) => dispatchHostKey(key),
     })
+    const warmFile = servicesRef.current?.fileId
+    if (warmFile) data.warm(warmFile)
     const host = createBridgeHost({
       getFrameWindow: () => frameRef.current?.contentWindow ?? null,
       handlers: createToolHandlers(data),
@@ -161,7 +174,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       timer = setTimeout(() => {
         timer = null
         for (const [fileId, cells] of pending) {
-          data.invalidate(fileId)
+          data.invalidateCells(fileId, [...cells])
           host.push({ type: "cells.changed", fileId, cellIds: [...cells] })
         }
         pending.clear()
@@ -179,6 +192,28 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       hostRef.current = null
     }
   }, [projectId, session, toolId, toolVersion, codeHash, toolName, ask, frameRef])
+
+  // apiRev 2 live pushes from workspace services: focus locks and comments.
+  const lockHolders = services?.lockHolders
+  const commentCounts = services?.commentCounts
+  const boundFile = services?.fileId
+  useEffect(() => {
+    if (!ready || !lockHolders) return
+    const holders: Record<string, { username: string }> = {}
+    for (const [key, username] of lockHolders) holders[key.split("@lane:")[0]] = { username }
+    hostRef.current?.push({ type: "presence.changed", fileId: boundFile ?? null, holders })
+  }, [ready, lockHolders, boundFile])
+  useEffect(() => {
+    if (!ready || !commentCounts) return
+    hostRef.current?.push({ type: "comments.changed", fileId: boundFile ?? null })
+  }, [ready, commentCounts, boundFile])
+  // Deep links (search result, navigation, ?cellId=): ask the extension to
+  // show the cell, and hand it keyboard focus.
+  useEffect(() => {
+    if (!ready || !revealCellId) return
+    hostRef.current?.push({ type: "editor.reveal", fileId: boundFile ?? null, cellId: revealCellId })
+    frameRef.current?.contentWindow?.focus()
+  }, [ready, revealCellId, boundFile, frameRef])
 
   // Theme: forward the app's CSS variables when light/dark flips.
   useEffect(() => {

@@ -52,11 +52,14 @@ export interface ToolBoot {
   project: { id: string; name: string }
   user: { username: string; roleLevel: number | null }
   mount: "page" | "panel" | "inline" | "editor" | "smoke"
-  /** Editor mounts: the file being edited. */
-  file?: { fileId: string; name: string }
+  /** Editor mounts: the file being edited (`revealCellId`: a deep-linked
+   *  cell to open on, apiRev 2). */
+  file?: { fileId: string; name: string; revealCellId?: string | null }
   /** Inline mounts: the cell the tool sits under. */
   cell?: { fileId: string; cellId: string }
   theme: Record<string, string>
+  /** apiRev 2: app shortcuts the runtime forwards to the host ("mod+k"). */
+  hostShortcuts?: readonly string[]
 }
 
 /** CSS variable names the host forwards into the tool so it can match the app. */

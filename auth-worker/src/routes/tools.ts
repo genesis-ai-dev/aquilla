@@ -11,6 +11,8 @@
 //   POST   /:projectId/tools/:toolId/copy      share as an OWNED copy into { targetProjectId }
 //   GET    /:projectId/tools/:toolId/source?version=N   one version's source (code review)
 //   POST   /:projectId/tools/build                 one builder attempt (routes/tools-build.ts)
+//   POST   /:projectId/tools/first-party           { key } ensure a first-party extension
+//                                                  (the default editor) is installed + current
 //
 // Authorization: any member can list/run tools (a tool can do nothing its
 // user cannot — every write is an ordinary event the sync-worker authorizes).
@@ -30,7 +32,9 @@ import {
   checkVersion,
   createTool,
   getTool,
+  hasGrantRow,
   listTools,
+  toolRow,
   listVersions,
   setGrant,
   type SaveVersionInput,
@@ -38,6 +42,7 @@ import {
 } from "../lib/tools/store"
 import { readToolActivity } from "../lib/tools/activity"
 import { buildToolRoute } from "./tools-build"
+import { FIRST_PARTY_TOOLS, firstPartyToolId } from "../../../shared/tools/first-party/default-editor"
 
 const tools = new Hono<AuthHonoEnv>()
 
@@ -103,6 +108,57 @@ tools.post("/:projectId/tools", authMiddleware, async (c) => {
 
   const tool = await getTool(c.env.AQUILLA_PG, projectId, toolId, userId)
   return c.json({ tool }, 201)
+})
+
+// First-party extensions (apiRev 2): code Aquilla ships, installed by the
+// SERVER from this repo's reviewed source — a client cannot pick the bytes.
+// Idempotent (deterministic id), any member may trigger it (the code is ours;
+// every write it makes is still an ordinary event the sync-worker authorizes
+// against the user's role). A project that removed it keeps it removed. The
+// shipped version is upgraded in place only while the current version is the
+// pristine first-party code (an edited copy is the project's own). The
+// caller's scopes are AUTO-GRANTED the first time only — a later revoke
+// sticks — and the response says so, so the UI can show it.
+tools.post("/:projectId/tools/first-party", authMiddleware, async (c) => {
+  if ((await roleFor(c)) == null) return err(c, 404, "not_found", "project not found")
+  const body = (await c.req.json().catch(() => null)) as { key?: unknown } | null
+  const spec = typeof body?.key === "string" ? FIRST_PARTY_TOOLS[body.key] : undefined
+  if (!spec) return err(c, 404, "not_found", "unknown first-party extension")
+  const projectId = pid(c)
+  const userId = c.get("user").id
+  const input: SaveVersionInput = { source: spec.source, manifest: spec.manifest, origin: "starter", buildMeta: { firstParty: spec.key } }
+  const checked = await checkVersion(input)
+  if (!checked.ok) return err(c, 500, "first_party_invalid", "the shipped extension failed its own save gates")
+  const id = await firstPartyToolId(projectId, spec.key)
+
+  let row = await toolRow(c.env.AQUILLA_PG, projectId, id)
+  let created = false
+  if (!row) {
+    try {
+      await createTool(c.env.AQUILLA_PG, projectId, userId, input, checked, id)
+      created = true
+    } catch (e) {
+      // A concurrent ensure won the insert: fall through to its row.
+      console.warn("[tools/first-party] create raced:", e)
+    }
+    row = await toolRow(c.env.AQUILLA_PG, projectId, id)
+    if (!row) return err(c, 500, "first_party_failed", "could not install the first-party extension")
+  }
+  if (row.archived) return c.json({ tool: null, removed: true, autoGranted: [] })
+  if (row.firstParty === spec.key && row.codeHash !== checked.codeHash) {
+    try {
+      await addVersion(c.env.AQUILLA_PG, projectId, id, userId, input, checked)
+    } catch (e) {
+      console.warn("[tools/first-party] upgrade raced:", e)
+    }
+  }
+  let autoGranted: ToolScope[] = []
+  if (!(await hasGrantRow(c.env.AQUILLA_PG, id, userId))) {
+    autoGranted = [...checked.manifest.scopes]
+    await setGrant(c.env.AQUILLA_PG, projectId, id, userId, autoGranted)
+  }
+  const tool = await getTool(c.env.AQUILLA_PG, projectId, id, userId)
+  return c.json({ tool, removed: false, created, autoGranted }, created ? 201 : 200)
 })
 
 tools.get("/:projectId/tools/:toolId", authMiddleware, async (c) => {

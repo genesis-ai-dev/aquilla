@@ -35,12 +35,29 @@ through the global \`aquilla\` object the host injects before your code runs.
 - aquilla.files.list() → [{ fileId, name, cellCount }]                      scope read:cells
 - aquilla.cells.list(fileId, { lane? }) → [{                                scope read:cells
     cellId, ref /* e.g. "MAT 1:1" or null */, source /* plain text */, target /* plain text */,
-    validated /* boolean */, chapter /* string|null, parsed from ref */ }]  (document order)
+    validated /* boolean */, chapter /* string|null, parsed from ref */,
+    sourceHtml, targetHtml /* sanitized inline HTML (b,i,u,s,em,strong,code,p,br,span) or null */,
+    type /* "heading"|… or null */, lastEditor, lastEditAt, aiDrafted /* boolean */ }]  (document order)
+- aquilla.cells.page(fileId, { cursor?, limit? /* ≤2000, default 500 */, lane? }) → { cells, nextCursor, total }
+    scope read:cells. Long books: render the first page, then follow nextCursor until null.
+- aquilla.cells.get(fileId, [cellId, …] /* ≤500 */, { lane? }) → cells   scope read:cells
+    Re-read just the cells a cells.changed event names instead of the whole file.
 - aquilla.terms.list() → [{ id, term, renderings:[{ rendering, status }], notes }]   scope read:terms
-- aquilla.cells.commit([{ fileId, cellId, value }]) → { committed:[cellId], failed:[{cellId, reason}] }
-    Writes translations as the current user (scope write:target). value is plain text.
+- aquilla.cells.commit([{ fileId, cellId, value, html? }]) → { committed:[cellId], failed:[{cellId, reason}] }
+    Writes translations as the current user (scope write:target). value is plain text; html (optional)
+    is the rich-text form, sanitized by the host to the same inline allowlist.
     Batch many edits into ONE call. The host chains each edit on the cell's live head.
 - aquilla.cells.validate([{ fileId, cellId }]) → { validated:[cellId], failed:[...] }   scope write:validation
+- aquilla.cells.unvalidate([{ fileId, cellId }]) → { validated:[cellId], failed:[...] } — withdraws your validation.  scope write:validation
+- aquilla.presence.list(fileId) → { [cellId]: { username } } — who else is editing which cell.   scope read:cells
+- aquilla.presence.claim(fileId, cellId) / aquilla.presence.release(fileId, cellId) → boolean — take/leave the
+    cell's focus lease while editing it (others see "X is editing"). scope write:target. Editor mount only (else false).
+- aquilla.comments.counts(fileId) → { [cellId]: openThreadCount }   scope read:comments
+- aquilla.comments.open(fileId, cellId) → boolean — opens that cell's comment thread in the app.   scope read:comments
+- aquilla.audio.list(fileId) → { [cellId]: { hasAudio, durationMs } }   scope read:cells
+- aquilla.audio.play(fileId, cellId) / aquilla.audio.stop() — the HOST plays the cell's audio (the frame has no network).
+- aquilla.ui.hostKey({ key, mod, shift, alt }) → boolean — hand an app shortcut to the host (the runtime already
+    forwards the app's own shortcuts such as Ctrl/Cmd+K automatically).
 - aquilla.storage.get(key) / aquilla.storage.set(key, jsonValue) / aquilla.storage.remove(key) — small per-tool, per-user storage.
 - aquilla.permissions.request(scope) → boolean; aquilla.permissions.list() → [scope].
     Calls needing an ungranted scope pause on a user prompt automatically; a denied call
@@ -52,6 +69,10 @@ through the global \`aquilla\` object the host injects before your code runs.
 - aquilla.on("cells.changed", (e) => …) — e = { type, fileId, cellIds }. Fired after any write
   to a file the tool has listed (its own writes and other people's). Re-read and re-render.
   aquilla.on returns an unsubscribe function.
+- aquilla.on("presence.changed", (e) => …) — e = { fileId, holders: { [cellId]: { username } } }.
+- aquilla.on("comments.changed", (e) => …) — re-read aquilla.comments.counts.
+- aquilla.on("editor.reveal", (e) => …) — e = { fileId, cellId }: the app asks the editor to show/focus that cell
+  (also aquilla.context.file.revealCellId at load).
 
 Every bridge error is an Error with a .code. Wrap awaits in try/catch and show errors in the UI.
 Start your script with: \`(async () => { … })()\` and render a loading state first.

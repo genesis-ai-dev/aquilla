@@ -18,6 +18,8 @@ export function useScopeLabel(): (scope: ToolScope) => string {
           return t("extensions.scope.writeValidation")
         case "ai:generate":
           return t("extensions.scope.aiGenerate")
+        case "read:comments":
+          return t("extensions.scope.readComments")
       }
     },
     [t],

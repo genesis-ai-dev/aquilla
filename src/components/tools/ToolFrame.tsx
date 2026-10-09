@@ -5,7 +5,7 @@
  * production hosting plan (dedicated tools origin).
  */
 
-import { useMemo, useRef } from "react"
+import { useMemo, useRef, useState } from "react"
 import { AlertTriangle, Wand2, X } from "lucide-react"
 import { isToolStale, rebuildRequest } from "../../../shared/tools/api-rev"
 import { healRequest } from "./useEditTool"
@@ -16,6 +16,8 @@ import { TOOL_SANDBOX, buildToolSrcdoc, readThemeVars } from "@/lib/tools/srcdoc
 import type { ToolDetail } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { PermissionPrompt } from "./PermissionPrompt"
+import type { ToolHostServices } from "@/lib/tools/live-data"
+import { HOST_SHORTCUTS } from "@/lib/tools/host-keys"
 import { useToolHost } from "./useToolHost"
 
 export interface ToolFrameProps {
@@ -33,12 +35,19 @@ export interface ToolFrameProps {
   onHeal?: (request: string) => void
   healing?: boolean
   className?: string
+  /** apiRev 2: workspace services (editor mounts: presence, comments). */
+  services?: ToolHostServices
+  /** apiRev 2: deep-linked cell to show (initial + live). */
+  revealCellId?: string | null
 }
 
-export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className }: ToolFrameProps) {
+export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null }: ToolFrameProps) {
   const t = useT()
   const frameRef = useRef<HTMLIFrameElement | null>(null)
-  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange })
+  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId })
+  // The first reveal rides in the boot data (so the editor opens there); later
+  // ones are pushed live. Read once per frame load.
+  const [initialReveal] = useState(revealCellId)
 
   // Built once per tool version: re-rendering the srcdoc would reload the tool.
   const srcdoc = useMemo(
@@ -49,8 +58,9 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
         user: { username: session.username, roleLevel },
         mount,
         ...(cell ? { cell } : {}),
-        ...(file ? { file } : {}),
+        ...(file ? { file: { ...file, revealCellId: initialReveal } } : {}),
         theme: readThemeVars(),
+        hostShortcuts: HOST_SHORTCUTS,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on a new version, not on role/theme changes (pushed live)
     [tool.id, tool.currentVersion, tool.source, project.id, cell?.fileId, cell?.cellId, file?.fileId],

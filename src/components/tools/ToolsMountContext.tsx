@@ -9,7 +9,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useParams } from "react-router-dom"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { getTool, listTools, type ToolDetail, type ToolSummary } from "@/lib/tools/tools-api"
+import { ensureFirstPartyTool, getTool, listTools, type FirstPartyEnsureResult, type ToolDetail, type ToolSummary } from "@/lib/tools/tools-api"
+import { defaultEditorExtensionEnabled } from "@/lib/tools/default-editor-flag"
+import { FIRST_PARTY_DEFAULT_EDITOR } from "../../../shared/tools/first-party/default-editor"
+import type { ToolScope } from "../../../shared/tools/manifest"
 
 export interface ToolsMountValue {
   projectId: string
@@ -29,6 +32,16 @@ export interface ToolsMountValue {
   openInPanel: (toolId: string) => void
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
+  /** The first-party default editor extension's id, when it is the default
+   *  (flag on, installed, not removed). */
+  defaultEditorId: string | null
+  /** Scopes the first-party editor was auto-granted for this user on this
+   *  open (shown on the editor bar; empty once acknowledged/revisited). */
+  autoGranted: ToolScope[]
+  /** The first-party default editor is enabled (flag) for this browser. */
+  defaultEditorEnabled: boolean
+  /** The project's extensions (and the first-party install) have loaded. */
+  toolsReady: boolean
 }
 
 interface ExtensionPrefs {
@@ -106,20 +119,45 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     [setDockSelection],
   )
 
+  const [autoGranted, setAutoGranted] = useState<ToolScope[]>([])
+  const [defaultEditorOn] = useState(() => defaultEditorExtensionEnabled())
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
   useEffect(() => {
     if (!jwt || !projectId) return
     let cancelled = false
-    listTools(jwt, projectId)
-      .then((next) => {
-        if (!cancelled) setTools(next)
-      })
-      .catch(() => {
-        // Tools are an optional surface: a failed list never blocks the editor.
-      })
+    // First-party default editor: the server installs (or upgrades) it from
+    // the repo's reviewed source. Best-effort — a failure leaves the built-in
+    // editor as the default, never blocks the list. Runs IN PARALLEL with the
+    // list (one round trip to first paint), and its answer carries the
+    // editor's source, which seeds the detail cache so mounting it needs no
+    // further fetch.
+    const ensured: Promise<FirstPartyEnsureResult | null> = defaultEditorOn && version === 0
+      ? ensureFirstPartyTool(jwt, projectId, FIRST_PARTY_DEFAULT_EDITOR).catch((err: unknown) => {
+          console.warn("[extensions] first-party editor install failed:", err)
+          return null
+        })
+      : Promise.resolve(null)
+    const listed = listTools(jwt, projectId).catch(() => null)
+    void Promise.all([ensured, listed]).then(([res, list]) => {
+      if (cancelled) return
+      let next = list ?? []
+      const fresh = res?.tool ?? null
+      if (fresh) {
+        details.set(`${fresh.id}@${fresh.currentVersion}`, Promise.resolve(fresh))
+        // The list may have been read before this ensure installed/upgraded it.
+        const { source: _source, ...summary } = fresh
+        next = next.some((t) => t.id === fresh.id) ? next.map((t) => (t.id === fresh.id ? summary : t)) : [summary, ...next]
+      }
+      if (res && res.autoGranted.length > 0) setAutoGranted(res.autoGranted)
+      // Tools are an optional surface: a failed list never blocks the editor.
+      setTools(next)
+      setLoadedFor(projectId)
+    })
     return () => {
       cancelled = true
     }
-  }, [jwt, projectId, version])
+  }, [jwt, projectId, version, defaultEditorOn, details])
+  const toolsReady = loadedFor === projectId
 
   const refresh = useCallback(() => {
     details.clear()
@@ -142,6 +180,10 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     [jwt, projectId, tools, details],
   )
 
+  const defaultEditorId = defaultEditorOn
+    ? (tools.find((t) => t.firstParty === FIRST_PARTY_DEFAULT_EDITOR && t.manifest.mounts.includes("editor"))?.id ?? null)
+    : null
+
   const value = useMemo(
     () => ({
       projectId,
@@ -157,8 +199,12 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
       openInPanel,
       paletteOpen,
       setPaletteOpen,
+      defaultEditorId,
+      autoGranted,
+      defaultEditorEnabled: defaultEditorOn,
+      toolsReady,
     }),
-    [projectId, session, tools, refresh, loadTool, prefs, togglePin, setDockSelection, panelRequestSeq, openInPanel, paletteOpen],
+    [projectId, session, tools, refresh, loadTool, prefs, togglePin, setDockSelection, panelRequestSeq, openInPanel, paletteOpen, defaultEditorId, autoGranted, defaultEditorOn, toolsReady],
   )
   return <ToolsMountContext.Provider value={value}>{children}</ToolsMountContext.Provider>
 }

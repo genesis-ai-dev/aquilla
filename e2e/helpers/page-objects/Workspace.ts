@@ -1185,6 +1185,16 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /Editor settings/i }).click()
   }
 
+  /** Confirm a draft for every empty cell in the current file. */
+  async draftAllEmptyCells(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Draft all \(review required\)/i }).click()
+    const dialog = this.page.getByRole("dialog", { name: "Draft this file", exact: true })
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    await dialog.getByRole("checkbox", { name: /empty cells$/ }).check()
+    await dialog.getByRole("button", { name: "Draft", exact: true }).click()
+  }
+
   /** Export lives in the file options overflow menu. */
   async openExportDialog(): Promise<void> {
     await this.openFileOverflowMenu()

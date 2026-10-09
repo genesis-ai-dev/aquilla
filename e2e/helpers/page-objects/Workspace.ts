@@ -559,6 +559,9 @@ export class Workspace {
    */
   async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
     await row.scrollIntoViewIfNeeded()
+    // A parked pointer can already be inside an idle-collapsed row. Leave it
+    // before entering again so this is a fresh reveal gesture.
+    await this.page.getByRole("banner").hover()
     await row.hover()
     const rail = row.locator('[data-slot="cell-action-rail"]')
     await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })

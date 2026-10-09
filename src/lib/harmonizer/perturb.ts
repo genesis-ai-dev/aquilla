@@ -16,7 +16,7 @@
 
 import type { HarmonizerCell } from "./types"
 
-export type PerturbationKind = "quote_close" | "reference_switch" | "sentence_broken_off" | "sentence_run_on"
+export type PerturbationKind = "quote_close" | "reference_switch" | "sentence_broken_off" | "sentence_run_on" | "connective_swap"
 
 export interface Perturbation {
   kind: PerturbationKind
@@ -149,9 +149,43 @@ export function perturbSentenceRunOn(cells: readonly HarmonizerCell[], i: number
   }
 }
 
+/** The first few source words, for postpositive particles (γάρ, οὖν, δέ sit
+ *  second or third). */
+const opening = (source: string) => source.normalize("NFC").split(/\s+/).slice(0, 4).join(" ")
+
+// Whitespace-bounded: JS \b only knows ASCII word characters, so it never
+// matches between Greek letters.
+const particle = (p: string) => new RegExp(`(?:^|\\s)(?:${p})(?=[\\s,·.;]|$)`, "u")
+const SWAPS: { target: RegExp; source: RegExp; to: string; relation: string }[] = [
+  { target: /^For /, source: particle("γάρ|γὰρ"), to: "So ", relation: "reason → inference" },
+  { target: /^(?:Therefore|So) /, source: particle("οὖν"), to: "For ", relation: "inference → reason" },
+  { target: /^But /, source: particle("ἀλλά|ἀλλὰ|ἀλλ’|ἀλλ'"), to: "So ", relation: "contrast → inference" },
+]
+
+/** A verse-initial connective whose relation the source confirms is swapped
+ *  for one that reverses the logic ("For" → "So" where the Greek has γάρ). */
+export function perturbConnectiveSwap(cells: readonly HarmonizerCell[], i: number): Perturbation | null {
+  if (i === 0) return null
+  const t = cells[i].target
+  const src = opening(cells[i].source)
+  for (const swap of SWAPS) {
+    const m = swap.target.exec(t)
+    if (!m || !swap.source.test(src)) continue
+    return {
+      kind: "connective_swap",
+      cells: replaceCell(cells, i, swap.to + t.slice(m[0].length)),
+      expectCell: i,
+      expectCheck: "textual.connective",
+      note: `"${m[0].trim()}" → "${swap.to.trim()}" (${swap.relation})`,
+    }
+  }
+  return null
+}
+
 export const PERTURBATIONS: Record<PerturbationKind, (cells: readonly HarmonizerCell[], i: number) => Perturbation | null> = {
   quote_close: perturbQuoteClose,
   reference_switch: perturbReferenceSwitch,
   sentence_broken_off: perturbSentenceBrokenOff,
   sentence_run_on: perturbSentenceRunOn,
+  connective_swap: perturbConnectiveSwap,
 }

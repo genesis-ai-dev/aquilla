@@ -34,9 +34,9 @@ enabled = true
 # bundle). Enables slow-request / 4xx / 5xx log shipping to PostHog Logs
 # (src/posthog-logs.ts). Mirrors auth-worker and sync-worker.
 # AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
-# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
-# EMPTY until the EU project exists — the retired US project token must not be
-# posted to an EU endpoint, and `shipLog` no-ops on a blank key.
+# so a deploy never relies on the code default. Live profiles use the verified
+# Frontier R&D EU project (282623); keep the token aligned with config/posthog.json.
+# The local profile leaves the key empty so development logs stay local.
 [vars]
 POSTHOG_HOST = "https://eu.i.posthog.com"
 POSTHOG_KEY = ""
@@ -77,7 +77,7 @@ enabled = true
 
 [env.development.vars]
 POSTHOG_HOST = "https://eu.i.posthog.com"
-POSTHOG_KEY = ""
+POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 
 [[env.development.containers]]
 class_name = "Sandbox"
@@ -108,7 +108,7 @@ enabled = true
 
 [env.production.vars]
 POSTHOG_HOST = "https://eu.i.posthog.com"
-POSTHOG_KEY = ""
+POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 
 [[env.production.containers]]
 class_name = "Sandbox"

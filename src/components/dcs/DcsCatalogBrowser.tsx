@@ -14,6 +14,9 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
+import { nameForLanguageCode } from "@/lib/languages/catalog"
+import { codeForLanguageLabel } from "@/lib/lanes/backfill-plan"
 import {
   Select,
   SelectContent,
@@ -75,9 +78,14 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
   // A stable client instance across renders (real network unless injected).
   const clientRef = useRef<DcsClient>(client ?? new DcsClient())
 
-  // Seed the language filter from a DCS-friendly ISO code — NEVER a display
-  // name (DCS matches `?lang=en`, not `?lang=English`). Empty seed → "en".
+  // The catalog query is always a code. The name field is what people type;
+  // the code field is the derived tag and stays editable when that derivation
+  // is wrong (AQU-1792). Empty seed → "en".
+  const [languageName, setLanguageName] = useState(
+    () => nameForLanguageCode(toDcsLangSeed(defaultLang) || "en") ?? "",
+  )
   const [lang, setLang] = useState(() => toDcsLangSeed(defaultLang) || "en")
+  const codeTouched = useRef(false)
   const [owner, setOwner] = useState<string>("unfoldingWord")
   const [ownerText, setOwnerText] = useState("")
   const [subject, setSubject] = useState<string>(ANY)
@@ -145,18 +153,41 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
 
       {/* Filters */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">{t("importExport.dcs.languageFilterLabel")}</span>
-          <Input
-            value={lang}
-            onChange={(e) => setLang(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void runSearch() }}
-            // i18n-exempt example BCP-47 language codes
-            placeholder="en, es-419, hbo…"
-            aria-label={t("importExport.dcs.languageCodeAriaLabel")}
-            className="h-8 text-sm"
-          />
-        </label>
+        <div className="flex flex-col gap-1 text-xs">
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground">{t("importExport.dcs.languageFilterLabel")}</span>
+            <LanguageComboboxInput
+              value={languageName}
+              onValueChange={(next) => {
+                setLanguageName(next)
+                if (codeTouched.current) return
+                const derived = codeForLanguageLabel(next)
+                if (derived) setLang(derived)
+              }}
+              placeholder={t("importExport.dcs.languageNamePlaceholder")}
+              aria-label={t("importExport.dcs.languageFilterLabel")}
+              className="h-8 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void runSearch()
+              }}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground">{t("importExport.dcs.languageCodeAriaLabel")}</span>
+            <Input
+              value={lang}
+              onChange={(e) => {
+                codeTouched.current = true
+                setLang(e.target.value)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void runSearch()
+              }}
+              aria-label={t("importExport.dcs.languageCodeAriaLabel")}
+              className="h-8 text-sm"
+            />
+          </label>
+        </div>
 
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">{t("importExport.dcs.ownerFilterLabel")}</span>

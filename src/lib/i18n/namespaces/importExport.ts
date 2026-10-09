@@ -28,17 +28,30 @@ export const importExport = defineNamespace({
     "importExport.captionTrack.replace": "Overwrite caption track",
     "importExport.captionTrack.invalidFile": "Choose a VTT, SRT, or SBV caption file.",
     "importExport.captionTrack.saveFailed": "Couldn't save this caption track.",
+    // AQU-1566: on a linked video with no rows the same dialog adds the
+    // captions as the file's own rows, so it asks for no track.
+    "importExport.captionTrack.rowsDescription":
+      "These captions become this file's rows, ready to translate. Check their " +
+      "wording and timing first.",
+    "importExport.captionTrack.addAsRows": "Add captions as rows",
+    "importExport.captionTrack.rowsExist": "Someone already added rows to this file. They're showing now.",
+    "importExport.captionTrack.rowsFailed": "Couldn't add these captions as rows. Try again.",
     "importExport.mediaPreview.title": "Import {name}",
     "importExport.mediaPreview.description": "Review wording and timing before importing. Your original files are preserved.",
     "importExport.mediaPreview.textSource": "Text source",
     "importExport.mediaPreview.automatic": "Transcribe audio",
     "importExport.mediaPreview.automaticHint": "Split the audio at pauses. You can choose automatic transcription after import.",
-    "importExport.mediaPreview.segmentCount": plural({ one: "{count} segment", other: "{count} segments" }),
-    "importExport.mediaPreview.needsAttention": plural({ one: "{count} segment needs attention", other: "{count} segments need attention" }),
-    "importExport.mediaPreview.wording": "Segment {number} wording",
-    "importExport.mediaPreview.start": "Segment {number} start (seconds)",
-    "importExport.mediaPreview.end": "Segment {number} end (seconds)",
-    "importExport.mediaPreview.remove": "Remove segment {number}",
+    // Sam's D2 (2026-10-05): a compact list, one line per caption, edited in
+    // place. The times are typed the way the list shows them (`1:02.5`).
+    "importExport.mediaPreview.captionCount": plural({ one: "{count} caption", other: "{count} captions" }),
+    "importExport.mediaPreview.needsAttention": plural({ one: "{count} needs attention", other: "{count} need attention" }),
+    "importExport.mediaPreview.listLabel": "Captions to import",
+    "importExport.mediaPreview.noWording": "No wording",
+    "importExport.mediaPreview.edit": "Edit caption {number}",
+    "importExport.mediaPreview.wording": "Caption {number} wording",
+    "importExport.mediaPreview.start": "Caption {number} start",
+    "importExport.mediaPreview.end": "Caption {number} end",
+    "importExport.mediaPreview.remove": "Remove caption {number}",
     "importExport.mediaPreview.confidence": "Alignment confidence: {percent}%",
     "importExport.mediaPreview.empty": "Choose a text source with at least one segment.",
     "importExport.mediaPreview.continue": "Continue import",
@@ -382,7 +395,9 @@ export const importExport = defineNamespace({
     "importExport.youtube.name": "Video name",
     "importExport.youtube.previewImport": "Preview import",
     "importExport.youtube.linkVideo": "Link video",
-    "importExport.youtube.pictureHint": "You can add caption tracks later in the media timeline. Enable track editing in Project Settings to use this option.",
+    // AQU-1566 (option b): a link-only file's first captions become its rows,
+    // attached by a maintainer from its Text view, with no track-editing switch.
+    "importExport.youtube.pictureHint": "A maintainer can attach captions later from this file's Text view. They become its rows, ready to translate.",
     "importExport.youtube.media": "Your original audio or video",
     "importExport.youtube.mediaHint": "Upload the original recording with the same timing as the YouTube video. Generate captions using your ASR settings, or review embedded caption tracks if present.",
     "importExport.youtube.captionHint": "Export your captions from YouTube Studio as VTT, SRT, or SBV. YouTube’s player can display captions, but does not share caption text or audio with Aquilla. Text drawn into the video picture is not a subtitle track.",
@@ -441,7 +456,7 @@ export const importExport = defineNamespace({
       "Import a Bible translation from the {link} — over 1,000 versions with section " +
       "headings and formatting. You can import the whole bible, a single testament, or individual books.",
     "importExport.helloao.apiLinkText": "Free Use Bible API",
-    "importExport.helloao.searchPlaceholder": "Search by language, name, or id (e.g. 'eng', 'BSB')",
+    "importExport.helloao.searchPlaceholder": "Search by language, name, or id (e.g. 'English', 'BSB')",
     "importExport.helloao.searchAriaLabel": "Search Bible translations",
     "importExport.helloao.failedToLoadList": "Failed to load list: {error}",
     "importExport.helloao.loadingTranslations": "Loading translations...",
@@ -478,7 +493,7 @@ export const importExport = defineNamespace({
     "importExport.ebible.targetDescription":
       "Match eBible verses to existing source cells by canonical reference (e.g. GEN 1:1) and " +
       "fill the target column. A review step lets you keep or replace any existing target content.",
-    "importExport.ebible.searchPlaceholder": "Search by language, title, or id (e.g. 'eng', 'KJV')",
+    "importExport.ebible.searchPlaceholder": "Search by language, title, or id (e.g. 'English', 'KJV')",
     "importExport.ebible.searchAriaLabel": "Search eBible translations",
     "importExport.ebible.otBooks": "{count} OT",
     "importExport.ebible.ntBooks": "{count} NT",
@@ -1058,6 +1073,7 @@ export const importExport = defineNamespace({
       "cells.",
     "importExport.dcs.languageCodeAriaLabel": "Language code",
     "importExport.dcs.languageFilterLabel": "Language",
+    "importExport.dcs.languageNamePlaceholder": "English, Traditional Han…",
     "importExport.dcs.loadingCatalog": "Loading catalog…",
     "importExport.dcs.noResults": "No released resources match these filters.",
     "importExport.dcs.noResultsHint": "Try a broader language, owner, or subject.",
@@ -1433,41 +1449,55 @@ export const importExport = defineNamespace({
           name: "Filename of the media being imported — literal data, not translated.",
         },
       },
-      "importExport.mediaPreview.segmentCount": {
+      "importExport.mediaPreview.captionCount": {
         description:
-          "Live status line under the text-source picker: how many segments the selected text source contains. Count-governed. When some segments are invalid it is followed by ' · ' and mediaPreview.needsAttention on the same line.",
+          "Start of the live summary line above the caption list in the media import preview: how many captions the selected text source holds. Count-governed. The time span the captions cover follows after ' · ' as plain numbers, and when some captions are invalid mediaPreview.needsAttention follows after another ' · '.",
         placeholders: {
           count:
-            "Number of segments in the selected text source; also governs the plural form.",
+            "Number of captions in the selected text source; also governs the plural form.",
         },
       },
       "importExport.mediaPreview.needsAttention": {
         description:
-          "Second clause of that same status line, appended after ' · ' when some segments have missing wording or timings outside the media. Count-governed, and a fragment rather than a sentence — it continues the line mediaPreview.segmentCount starts.",
+          "Last clause of that same summary line, appended after ' · ' when some captions have missing wording or timings outside the media. Count-governed, and a fragment rather than a sentence — it continues the line mediaPreview.captionCount starts, so the captions are understood.",
         placeholders: {
           count:
-            "Number of segments that currently fail validation; also governs the plural form.",
+            "Number of captions that currently fail validation; also governs the plural form.",
         },
+      },
+      "importExport.mediaPreview.listLabel": {
+        description:
+          "Accessible name of the list of captions in the media import preview, announced by a screen reader when it enters the list. Not shown on screen.",
+      },
+      "importExport.mediaPreview.noWording": {
+        description:
+          "Shown in place of the wording on a caption line that has no text, in muted italics. A short state, not an instruction.",
+        maxLength: 24,
+      },
+      "importExport.mediaPreview.edit": {
+        description:
+          "Accessible name of the small pencil button on one caption line in the media import preview; it opens that line's wording and times for editing in place. Names the caption because one sits on every line.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.wording": {
         description:
-          "Label of the textarea holding one segment's text in the media import preview. Short field label, not an instruction.",
-        placeholders: { number: "1-based position of the segment in the list on screen." },
+          "Accessible name of the text box holding one caption's wording while that line is open for editing in the media import preview.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.start": {
         description:
-          "Label of the number input for one segment's start time in the media import preview. The '(seconds)' unit matters — the field takes a decimal second offset, not a timecode.",
-        placeholders: { number: "1-based position of the segment in the list on screen." },
+          "Accessible name of the field for one caption's start time while that line is open for editing. The field takes a time as the list shows it (1:02.5) or plain seconds.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.end": {
         description:
-          "Label of the number input for one segment's end time in the media import preview. As with mediaPreview.start, the unit is decimal seconds rather than a timecode.",
-        placeholders: { number: "1-based position of the segment in the list on screen." },
+          "Accessible name of the field for one caption's end time while that line is open for editing, as mediaPreview.start.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.remove": {
         description:
-          "Button that drops one segment from the import in the media import preview. Names the segment because several buttons with the same wording sit in the list.",
-        placeholders: { number: "1-based position of the segment in the list on screen." },
+          "Accessible name of the small X button that drops one caption from the import in the media import preview. Names the caption because one sits on every line.",
+        placeholders: { number: "1-based position of the caption in the list on screen." },
       },
       "importExport.mediaPreview.confidence": {
         description:
@@ -1482,6 +1512,31 @@ export const importExport = defineNamespace({
         placeholders: {
           name: "Filename of the media the captions attach to — literal data, not translated.",
         },
+      },
+      "importExport.captionTrack.rowsDescription": {
+        description:
+          "Subtitle of the Attach captions dialog when the file is a linked video " +
+          "with no rows yet: the chosen caption file's timed lines become the " +
+          "file's own rows instead of a timeline track. The review screen that " +
+          "follows lets the person correct wording and timing.",
+      },
+      "importExport.captionTrack.addAsRows": {
+        description:
+          "Confirm button of that dialog in the same case. Replaces " +
+          "importExport.captionTrack.add.",
+        maxLength: 32,
+      },
+      "importExport.captionTrack.rowsExist": {
+        description:
+          "Error in that dialog (and in the Use-as-rows confirmation) when someone " +
+          "else gave the file rows meanwhile, so these captions cannot become its " +
+          "rows. The editor has already loaded those rows behind the dialog.",
+      },
+      "importExport.captionTrack.rowsFailed": {
+        description:
+          "Error in the same dialog when adding the captions as rows failed for any " +
+          "other reason (the connection, or the file changed). Pressing the button " +
+          "again retries without adding anything twice.",
       },
       "importExport.captionTrack.overwrite": {
         description:
@@ -2639,10 +2694,9 @@ export const importExport = defineNamespace({
       },
       "importExport.dcs.languageCodeAriaLabel": {
         description:
-          "Accessible name, read aloud by screen readers, for the same box the " +
-          "visible Language label sits above. It is more specific than the visible " +
-          "label because the box takes a short standard language code rather than a " +
-          "language name.",
+          "Accessible name of the editable language-code field under the Door43 " +
+          "language name. The code is derived from the name; the reader corrects " +
+          "it here when that derivation is wrong.",
       },
       "importExport.dcs.languageFilterLabel": {
         description:
@@ -2650,6 +2704,11 @@ export const importExport = defineNamespace({
           "the resources they want to find in the Door43 catalog. A noun naming " +
           "what the box filters on, not an instruction and not the language of the " +
           "interface.",
+      },
+      "importExport.dcs.languageNamePlaceholder": {
+        description:
+          "Placeholder in the Door43 language box. Examples are language names, " +
+          "never codes. The code is derived into the box beneath and can be edited.",
       },
       "importExport.dcs.loadingCatalog": {
         description:

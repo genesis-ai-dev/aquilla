@@ -2,6 +2,7 @@ import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
 import {
+  audioDenominator,
   deadlineStatus,
   emptyPortfolioAggregate,
   latestActivityAt,
@@ -13,6 +14,7 @@ import {
 export {
   AOE_GRACE_MS,
   DEADLINE_SOON_WINDOW_MS,
+  audioDenominator,
   audioPct,
   deadlineStatus,
   isDeadlineOverdue,
@@ -45,6 +47,8 @@ export interface PortfolioLane {
   position?: number
   /** AQU-1458. Absent on older servers, which means "not archived". */
   archived?: boolean
+  /** Source rows are for the language pair. Chips list target lanes only. */
+  role?: "source" | "target"
 }
 
 export interface PortfolioProject {
@@ -67,6 +71,15 @@ export interface PortfolioProject {
    */
   aiDraftedCells: number
   lastEditAt: number | null
+  /**
+   * AQU-1566: what audio coverage is measured against. A dubbing project
+   * records against its hidden cue sheet, not its subtitles, and the two have
+   * different counts, so this is each file's cue sheet where it has one and
+   * the file itself otherwise: the plan board's own rule. Optional because an
+   * older server sends none; `audioDenominator` then falls back to the text
+   * total, as it always did.
+   */
+  audioTotalCells?: number
   audioCells: number
   /**
    * AQU-508: cells whose selected audio take has been validated by a reviewer —
@@ -111,12 +124,41 @@ export interface PortfolioProject {
  * when only one side is set, and null when neither is — callers render nothing
  * in that case rather than a broken "→" or empty label.
  */
+const LANE_PLACEHOLDER_LABELS = new Set(["Source", "Untitled lane"])
+
+function laneLabelText(lane: PortfolioLane | undefined): string | null {
+  const name = lane?.name?.trim()
+  if (!name || LANE_PLACEHOLDER_LABELS.has(name)) return null
+  return name
+}
+
+/** Source language from the source lane row, else a payload that still sends the field. */
+export function portfolioSourceLabel(p: {
+  lanes?: PortfolioLane[]
+  sourceLanguage?: string | null
+}): string | null {
+  const fromLane = laneLabelText(p.lanes?.find((lane) => lane.role === "source"))
+  return fromLane || p.sourceLanguage?.trim() || null
+}
+
+/** The former default lane's label, else a payload that still sends targetLanguage. */
+export function portfolioTargetLabel(p: {
+  lanes?: PortfolioLane[]
+  targetLanguage?: string | null
+}): string | null {
+  const fromLane = laneLabelText(
+    p.lanes?.find((lane) => lane.role !== "source" && lane.lane === ""),
+  )
+  return fromLane || p.targetLanguage?.trim() || null
+}
+
 export function languagePairLabel(p: {
+  lanes?: PortfolioLane[]
   sourceLanguage?: string | null
   targetLanguage?: string | null
 }): string | null {
-  const source = p.sourceLanguage?.trim() || null
-  const target = p.targetLanguage?.trim() || null
+  const source = portfolioSourceLabel(p)
+  const target = portfolioTargetLabel(p)
   if (source && target) return `${source} → ${target}`
   return target ?? source ?? null
 }
@@ -318,7 +360,8 @@ export function aiDraftedPct(p: PortfolioProject): number {
  * knowing, so the tile's tooltip carries it as a second sentence.
  */
 export function audioValidatedPct(p: PortfolioProject): number {
-  return p.totalCells > 0 ? Math.min(1, p.validatedAudioCells / p.totalCells) : 0
+  const total = audioDenominator(p)
+  return total > 0 ? Math.min(1, p.validatedAudioCells / total) : 0
 }
 
 /**

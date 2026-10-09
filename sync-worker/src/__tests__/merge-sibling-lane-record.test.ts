@@ -68,15 +68,11 @@ async function seedPair(db: TestDb, cells: number, hostSettings?: Record<string,
     [HOST_FILE, HOST, DONOR_FILE, DONOR],
   )
   await db.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-     SELECT $1, $2, 'c-' || g, 'source', '', 'Verse ' || g, 'hsrc-' || g, 'lead', 1, $3
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) SELECT $1, $2, 'c-' || g, 'source', 'Verse ' || g, 'hsrc-' || g, 'lead', 1, $3 FROM generate_series(1, $4::int) g`,
     [HOST, HOST_FILE, HOST_SOURCE_LANE, cells],
   )
   await db.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-     SELECT $1, $2, 'c-' || g, 'target', '', 'Verset ' || g, 'dtgt-' || g, 'translator', 1, $3
-       FROM generate_series(1, $4::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) SELECT $1, $2, 'c-' || g, 'target', 'Verset ' || g, 'dtgt-' || g, 'translator', 1, $3 FROM generate_series(1, $4::int) g`,
     [DONOR, DONOR_FILE, DONOR_DEFAULT_LANE, cells],
   )
 }
@@ -110,9 +106,11 @@ async function hostLanes(db: TestDb): Promise<LaneRow[]> {
 
 async function hostLaneCells(db: TestDb, tag: string): Promise<Array<{ cell_id: string; value: string; lane_id: string }>> {
   const r = await db.pg.query<{ cell_id: string; value: string; lane_id: string }>(
-    `SELECT cell_id, value, lane_id FROM cells
-      WHERE project_id = $1 AND side = 'target' AND target_lang = $2
-      ORDER BY cell_id`,
+    `SELECT c.cell_id, c.value, c.lane_id
+       FROM cells c
+       JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1 AND c.side = 'target' AND l.legacy_tag = $2
+      ORDER BY c.cell_id`,
     [HOST, tag],
   )
   return r.rows
@@ -246,8 +244,7 @@ describe("mergeSibling — the fold's lane is a real lane (AQU-1550)", () => {
     t = await realLaneDb()
     await seedPair(t, 0)
     await t.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, lane_id)
-       VALUES ($1, $2, 'orphan', 'target', '', 'Orphelin', 'dtgt-orphan', 'translator', 1, $3)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, lane_id) VALUES ($1, $2, 'orphan', 'target', 'Orphelin', 'dtgt-orphan', 'translator', 1, $3)`,
       [DONOR, DONOR_FILE, DONOR_DEFAULT_LANE],
     )
 

@@ -41,7 +41,7 @@ function makeEnv(db: AquillaDb) {
 // ── vendor-side setup (out-of-band; the agent never sees any of this) ────────
 
 async function seedVendor(): Promise<TestDb> {
-  return makeTestDb({
+  const tdb = await makeTestDb({
     projects: [
       { id: PROJECT, name: 'Vendor Project', created_by: 99, org_id: null },
       { id: OTHER_PROJECT, name: 'Someone Elses Project', created_by: 98, org_id: null },
@@ -64,6 +64,12 @@ async function seedVendor(): Promise<TestDb> {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
+  return tdb
 }
 
 async function mintCred(tdb: TestDb, credentialId: string, mode: 'ask' | 'act'): Promise<string> {
@@ -222,7 +228,7 @@ interface DiscoveredCell {
 
 /** Steps 1–4 of the cold start: discover capabilities, identity, the project,
  *  its files, and its source cells — using nothing but catalog + payloads. */
-async function discover(agent: ColdStartAgent): Promise<{ projectId: string; cells: DiscoveredCell[] }> {
+async function discover(agent: ColdStartAgent): Promise<{ projectId: string; laneId: string; cells: DiscoveredCell[] }> {
   // get_capabilities describes itself as "the recommended first call".
   const caps = await agent.callOk('get_capabilities')
   expect(typeof caps.credentialMode).toBe('string')
@@ -252,8 +258,17 @@ async function discover(agent: ColdStartAgent): Promise<{ projectId: string; cel
     throw new Error(`cold-start: file listing items carry no "fileId" key (got keys: ${Object.keys(files[0]).join(', ')})`)
   }
 
+  // get_project returns the lanes this caller may use. read_content and
+  // prepare_translations both require that id; a language tag is not accepted.
+  const detail = await agent.callOk('get_project', { projectId })
+  const lanes = detail.lanes as { id?: string; role?: string }[] | undefined
+  const laneId = lanes?.find((lane) => lane.role === 'target' && typeof lane.id === 'string')?.id
+  if (!laneId) {
+    throw new Error(`cold-start: get_project returned no target lane (keys: ${Object.keys(detail).join(', ')})`)
+  }
+
   // "provide fileId to READ that file's cells (source + target)".
-  const cellsOut = await agent.callOk('read_content', { projectId, fileId })
+  const cellsOut = await agent.callOk('read_content', { projectId, fileId, lane: laneId })
   const rows = cellsOut.data as Record<string, unknown>[]
   expect(rows.length).toBeGreaterThan(0)
   // prepare_translations' item schema requires cellId + fileId + value; the
@@ -262,12 +277,12 @@ async function discover(agent: ColdStartAgent): Promise<{ projectId: string; cel
     .filter((r) => r.side === 'source' && typeof r.cellId === 'string' && typeof r.value === 'string')
     .map((r) => ({ cellId: r.cellId as string, fileId, value: r.value as string }))
   if (cells.length < 2) throw new Error('cold-start: could not discover 2 source cells to translate')
-  return { projectId, cells }
+  return { projectId, laneId, cells }
 }
 
 /** Derive translation values from what was read (never invented out-of-band). */
-function draft(cells: DiscoveredCell[]): { cellId: string; fileId: string; value: string }[] {
-  return cells.slice(0, 2).map((c) => ({ cellId: c.cellId, fileId: c.fileId, value: `[fr] ${c.value}` }))
+function draft(cells: DiscoveredCell[], laneId: string): { cellId: string; fileId: string; laneId: string; value: string }[] {
+  return cells.slice(0, 2).map((c) => ({ cellId: c.cellId, fileId: c.fileId, laneId, value: `[fr] ${c.value}` }))
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -283,8 +298,8 @@ describe('cold start — act mode (gate 10)', () => {
     const agent = new ColdStartAgent(env, await mintCred(tdb, CRED_ACT, 'act'))
     await agent.boot()
 
-    const { projectId, cells } = await discover(agent)
-    const translations = draft(cells)
+    const { projectId, laneId, cells } = await discover(agent)
+    const translations = draft(cells, laneId)
 
     // prepare_translations description: "Returns { changesetId, summary,
     // digest, mode, approvalUrl? } ... If mode is 'act', call confirm_changeset".
@@ -306,7 +321,7 @@ describe('cold start — act mode (gate 10)', () => {
     expect(receipt.appliedCount).toBe(2)
 
     // Re-read: the translations are now visible through the same read tool.
-    const after = await agent.callOk('read_content', { projectId, fileId: translations[0].fileId })
+    const after = await agent.callOk('read_content', { projectId, fileId: translations[0].fileId, lane: laneId })
     const targets = (after.data as Record<string, unknown>[]).filter((r) => r.side === 'target')
     for (const t of translations) {
       expect(targets.some((r) => r.cellId === t.cellId && r.value === t.value)).toBe(true)
@@ -350,8 +365,8 @@ describe('cold start — ask mode (gate 10 + gate 6)', () => {
     const agent = new ColdStartAgent(env, await mintCred(tdb, CRED_ASK, 'ask'))
     await agent.boot()
 
-    const { projectId, cells } = await discover(agent)
-    const translations = draft(cells)
+    const { projectId, laneId, cells } = await discover(agent)
+    const translations = draft(cells, laneId)
 
     const prep = await agent.callOk('prepare_translations', { projectId, translations })
     expect(prep.mode).toBe('ask')

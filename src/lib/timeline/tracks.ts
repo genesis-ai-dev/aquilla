@@ -210,6 +210,10 @@ export interface TrackDerivationContext {
   /** An audio-cue sibling file exists for this file, so there are cues for a
    *  Source-audio row to draw. */
   hasAudioCues: boolean
+  /** The file plays a linked video with its sound on (Original's timing), so
+   *  the Source-audio row has the video's own sound to stand for even with no
+   *  cues. Absent reads as false. */
+  hasLinkedVideoSound?: boolean
 }
 
 /** Own-key check rather than `in`, because these strings arrive from remote
@@ -296,7 +300,11 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
     trackRow("target-subtitles"),
     // No audio VTT imported yet means no cues, and a row with nothing to draw
     // is worse than no row: it reads as "this episode has no speech".
-    ...(context.hasAudioCues ? [trackRow("source-audio")] : []),
+    //
+    // A linked video's own sound IS something to draw (Sam, Oct 5): the row
+    // stays as one dashed band, "The video's own sound", with its mute button,
+    // the same row the file had before its captions became rows (AQU-1566).
+    ...(context.hasAudioCues || context.hasLinkedVideoSound ? [trackRow("source-audio")] : []),
     trackRow("target-audio"),
   ]
 }

@@ -244,12 +244,17 @@ describe("AdminInvitesSection", () => {
       expect(submit).toBeDisabled()
 
       await user.click(screen.getByRole("checkbox", { name: "Project 1" }))
-      expect(submit).toBeEnabled()
+      expect(submit).toBeDisabled()
       await user.click(screen.getByRole("checkbox", { name: "Project 2" }))
+      await user.click(screen.getByRole("checkbox", { name: /every current target lane/i }))
+      expect(submit).toBeEnabled()
       await user.click(submit)
 
       await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
-      expect(create).toHaveBeenCalledWith("test-jwt", { projectIds: ["p1", "p2"] })
+      expect(create).toHaveBeenCalledWith("test-jwt", {
+        projectIds: ["p1", "p2"],
+        allCurrentLanes: true,
+      })
       expect(await screen.findByText("multi-token")).toBeInTheDocument()
     })
 
@@ -261,6 +266,7 @@ describe("AdminInvitesSection", () => {
       })
       const user = await openInviteDialog()
       await user.click(screen.getByRole("checkbox", { name: "Project 1" }))
+      await user.click(screen.getByRole("checkbox", { name: /every current target lane/i }))
       const toastSpy = vi.spyOn(toastModule.toast, "add")
       await user.click(screen.getByRole("button", { name: "Create invite" }))
       await waitFor(() => expect(isElevationRequired()).toBe(true))

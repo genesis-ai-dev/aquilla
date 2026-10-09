@@ -4,6 +4,7 @@ import path from "node:path"
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
 import { isReleaseBranch } from "./release-plan.mjs"
+import { hostedPosthog } from "./hosted-posthog.mjs"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
 const deploymentManifest = JSON.parse(
@@ -905,6 +906,8 @@ describe("PostHog EU region contract (AQU-854)", () => {
     ["sync-worker", "wrangler.toml"],
     ["agent-worker", "wrangler.toml"],
     ["config", "cloudflare-deployments.json"],
+    ["config", "posthog.json"],
+    ["scripts", "hosted-posthog.mjs"],
     [".env.example"],
     ["auth-worker", ".dev.vars.example"],
     ["sync-worker", ".dev.vars.example"],
@@ -967,11 +970,11 @@ describe("PostHog EU region contract (AQU-854)", () => {
     }
   })
 
-  it("retires the US project token in the deployment manifest without pinning the host", () => {
-    // Blank until the EU project token exists (account-side dependency); a
-    // blank key makes `shipLog` a no-op instead of posting a retired token.
-    // The plainText check above asserts this against the real wrangler section.
-    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY).toBe("")
+  it("pins the verified EU token in the deployment manifest without pinning the host", () => {
+    // The manifest must not restore the old blank key on the next deploy.
+    // The plainText check above also compares it with the real wrangler section.
+    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY)
+      .toBe(hostedPosthog.projectToken)
 
     // POSTHOG_HOST is deliberately NOT manifest-pinned. auth-worker's
     // environment-guard turns every identity plainText key into a hard runtime

@@ -62,7 +62,7 @@ image = (
         f"git clone {REPO} {SEED_VC_DIR} && cd {SEED_VC_DIR} && git checkout {REPO_COMMIT}",
         f"cd {SEED_VC_DIR} && pip install -r requirements.txt",
     )
-    .pip_install("fastapi[standard]", "python-multipart")  # for the asgi endpoint
+    .pip_install("fastapi[standard]==0.115.14", "python-multipart==0.0.20")  # for the asgi endpoint
     .env(
         {
             "HF_HOME": f"{CACHE_DIR}/hf",

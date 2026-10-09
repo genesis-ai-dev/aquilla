@@ -54,6 +54,10 @@ describe("createMediaFileCommit", () => {
         }),
       ]),
     )
+    // AQU-1565 follow-up: the imported recording is the file's shared source
+    // audio on EVERY row, never a dub, or every row reads as recorded.
+    expect(lastPost.attachments.length).toBeGreaterThan(0)
+    for (const attachment of lastPost.attachments) expect(attachment.role).toBe("source")
 
     const puts = requests.filter((request) => request.init.method === "PUT")
     expect(puts).toHaveLength(1)

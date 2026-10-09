@@ -27,7 +27,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { OptionalMark } from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -249,8 +248,6 @@ function withStyledTerms(
 
 interface Baseline {
   name: string
-  sourceLanguage: string
-  targetLanguage: string
   username: string
   provider: CompletionProvider
   endpoint: string
@@ -307,8 +304,6 @@ interface Baseline {
 function buildBaseline(project: ProjectRecord): Baseline {
   return {
     name: project.name,
-    sourceLanguage: project.sourceLanguage,
-    targetLanguage: project.targetLanguage,
     username: project.username || "local",
     provider: project.completionSettings ? resolveProvider(project.completionSettings) : "frontier",
     endpoint: project.completionSettings?.endpoint ?? "",
@@ -368,8 +363,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
 /** Baseline fields whose stored value lives only in the shared settings blob.
  *  Each is written to the blob on Save, so each must be read back from it. */
 const BLOB_BACKED_KEYS = [
-  "sourceLanguage",
-  "targetLanguage",
   "validationCount",
   "validationCountAudio",
   "validationRoleFloor",
@@ -482,7 +475,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
     lanes: sharedLanes,
-    refresh: refreshSharedSettings,
+    refreshAfterWrite: refreshSharedSettingsAfterWrite,
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
@@ -541,6 +534,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
 
+  // AQU-1816: the lane-row endpoints write around `patchShared`, which is the
+  // only path that told the page behind this modal (overview, workspace) that
+  // the settings row moved — so a lane added here stayed invisible behind the
+  // dialog until a reload (the AQU-1570 shape, for lanes). Every lane write
+  // below re-reads through `refreshSharedSettingsAfterWrite`, which broadcasts
+  // first and then refreshes this instance.
+  //
   // AQU-1592: the languages screen sends the identity fields the user touched —
   // the language, or a nullable name/code override. A null clears an override
   // rather than writing a derived value back.
@@ -552,37 +552,43 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!jwt || !id) return "invalid" as const
     const result = await renameProjectLane(jwt, id, laneId, edit)
     if (result.kind === "ok") {
-      await refreshSharedSettings()
+      await refreshSharedSettingsAfterWrite()
       return "ok" as const
     }
     if (result.kind === "duplicate") return "duplicate" as const
     if (result.kind === "malformed_code") return "malformed_code" as const
     return "invalid" as const
-  }, [session?.jwt, id, refreshSharedSettings])
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const createLane = useCallback(async (
-    input: { name: string; language: string; code?: string | null },
+    input: {
+      name: string
+      language: string
+      code?: string | null
+      /** AQU-1784: the section already warned about the duplicate inline. */
+      allowDuplicateName?: boolean
+    },
   ) => {
     const jwt = session?.jwt
     if (!jwt || !id) return "invalid" as const
     const result = await createProjectLane(jwt, id, input)
     if (result.kind === "ok") {
-      await refreshSharedSettings()
+      await refreshSharedSettingsAfterWrite()
       return "ok" as const
     }
     if (result.kind === "duplicate") return "duplicate" as const
     if (result.kind === "malformed_code") return "malformed_code" as const
     return "invalid" as const
-  }, [session?.jwt, id, refreshSharedSettings])
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
     const jwt = session?.jwt
     if (!jwt || !id) return false
     const result = await setProjectLaneArchived(jwt, id, laneId, archived)
     if (result.kind !== "ok") return false
-    await refreshSharedSettings()
+    await refreshSharedSettingsAfterWrite()
     return true
-  }, [session?.jwt, id, refreshSharedSettings])
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   // AQU-1464: the archive confirmation asks when the lane was last translated in.
   // No session or project id means we genuinely cannot answer — report that as an
@@ -685,8 +691,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [name, setName] = useState("")
   // AQU-765: inline validation for an empty/whitespace-only rename.
   const [nameError, setNameError] = useState<string | null>(null)
-  const [sourceLanguage, setSourceLanguage] = useState("")
-  const [targetLanguage, setTargetLanguage] = useState("")
   const [username, setUsername] = useState("")
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
@@ -761,8 +765,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   const applyBaseline = useCallback((b: Baseline) => {
     setName(b.name)
-    setSourceLanguage(b.sourceLanguage)
-    setTargetLanguage(b.targetLanguage)
     setUsername(b.username)
     setProvider(b.provider)
     setEndpoint(b.endpoint)
@@ -858,8 +860,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], seed[key]))
     if (changed.length === 0) return
     const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
-      sourceLanguage: setSourceLanguage,
-      targetLanguage: setTargetLanguage,
       validationCount: setValidationCount,
       validationCountAudio: setValidationCountAudio,
       validationRoleFloor: setValidationRoleFloor,
@@ -961,8 +961,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!baseline) return false
     return (
       name !== baseline.name ||
-      sourceLanguage !== baseline.sourceLanguage ||
-      targetLanguage !== baseline.targetLanguage ||
       username !== baseline.username ||
       provider !== baseline.provider ||
       endpoint !== baseline.endpoint ||
@@ -1004,7 +1002,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
-    baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
+    baseline, name, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
@@ -1211,8 +1209,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
 
       const sharedUpdates: ProjectWideSettings = {}
-      if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
-      if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
       if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
@@ -1288,8 +1284,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // the seed and leave the form dirty (AQU-1744).
       const newBaseline: Baseline = {
         name: trimmedName,
-        sourceLanguage,
-        targetLanguage,
         username,
         provider,
         endpoint: endpoint.trim(),
@@ -1365,7 +1359,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setSaving(false)
     }
   }, [
-    id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
+    id, baseline, name, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
@@ -2057,36 +2051,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   {nameError}
                 </p>
               ) : null}
-              <SettingsRow
-                label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
-                control={
-                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
-                    <LanguageComboboxInput
-                      id="sl"
-                      value={sourceLanguage}
-                      onValueChange={setSourceLanguage}
-                      disabled={!canEditLanguages}
-                      aria-label={t("projectSettings.info.sourceLanguageLabel")}
-                      className="w-40 bg-background"
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
-              <SettingsRow
-                label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
-                control={
-                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
-                    <LanguageComboboxInput
-                      id="tl"
-                      value={targetLanguage}
-                      onValueChange={setTargetLanguage}
-                      disabled={!canEditLanguages}
-                      aria-label={t("projectSettings.info.targetLanguageLabel")}
-                      className="w-40 bg-background"
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
               <SettingsRow
                 label={<label htmlFor="smart-quotes">{t("projectSettings.info.smartQuotesLabel")}</label>}
                 description={

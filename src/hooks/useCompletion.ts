@@ -78,6 +78,8 @@ import {
   idmlCompletionSystemAddendum,
   normalizeProtectedCompletionWithRepair,
 } from "@/lib/idml/completion"
+import { alignIdmlStyles, cellCanAlignStyles } from "@/lib/idml/align-styles"
+import { t } from "@/lib/i18n/standalone"
 
 // Cap per LLM call. Above this we split into independent review packages.
 // Tuned for typical context windows; revisit if real selections start brushing
@@ -353,8 +355,7 @@ export function useCompletion(
 
   const draftProvenance = useCallback((
     mode: AiDraftProvenance["mode"],
-    exampleIds: string[],
-    approvedExampleCount: number,
+    approvedExamples: readonly ValidatedPair[],
     evidence?: TranslationEvidenceSnapshot,
     interventionId?: string,
   ): AiDraftProvenance => ({
@@ -362,13 +363,18 @@ export function useCompletion(
     model: modelName,
     provider,
     promptVersion: `${PROMPT_VERSION}:${promptFingerprint(effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}`,
-    exampleIds,
+    exampleIds: uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
+    exampleTexts: approvedExamples.map((example, index) => ({
+      cellId: example.cellId ?? `example-${index}`,
+      source: example.source,
+      target: example.target,
+    })),
     generatedAt: Date.now(),
     mode,
     projectState: {
       sourceLanguage,
       targetLanguage,
-      approvedExampleCount,
+      approvedExampleCount: approvedExamples.length,
       ...(evidence ? {
         evidenceCoverage: evidence.coverage,
         evidenceWeight: evidence.weight,
@@ -542,7 +548,7 @@ export function useCompletion(
         cell,
         committedText,
         llmAuthor,
-        draftProvenance(mode, exampleIds, approvedExamples.length, evidence.snapshot, interventionId),
+        draftProvenance(mode, approvedExamples, evidence.snapshot, interventionId),
       )
       recordModelCall?.({
         callId: interventionId,
@@ -582,6 +588,103 @@ export function useCompletion(
       return false
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
+
+  // Move an existing translation into the source cell's style runs. The model
+  // does not rewrite the words; a placement that would change them is refused.
+  const alignCellStyles = useCallback(async (
+    cell: CellData,
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    if (!isConfigured || !isAvailable) return false
+    setErrors((p) => {
+      if (!p.has(lk(cell.id))) return p
+      const next = new Map(p)
+      next.delete(lk(cell.id))
+      return next
+    })
+    if (!cellCanAlignStyles(cell)) {
+      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+      setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnavailable")))
+      return false
+    }
+    setCompleting((p) => new Map(p).set(lk(cell.id), "aligning"))
+    try {
+      // AQU-1656: kept for the AI intervention trail, like every other draft.
+      let sentMessages: ModelCallRecord["messages"] = []
+      let rawOutput = ""
+      const aligned = await alignIdmlStyles(cell, async (messages) => {
+        sentMessages = messages
+        rawOutput = await complete({
+          settings: { ...effectiveSettings, temperature: 0 },
+          session,
+          messages: [...messages],
+          stream: false,
+          signal,
+        })
+        return rawOutput
+      })
+      if (!aligned.changed) {
+        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnchanged")))
+        return false
+      }
+      posthog.capture("ai styles aligned", {
+        provider,
+        model: modelName,
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+      })
+      const interventionId = crypto.randomUUID()
+      const committedText = aligned.completion.valueHtml ?? aligned.completion.value
+      await commitCompletedCell?.(
+        cell,
+        committedText,
+        modelName,
+        {
+          interventionId,
+          model: modelName,
+          provider,
+          promptVersion: "align-styles-v1",
+          exampleIds: [],
+          generatedAt: Date.now(),
+          mode: "align-styles",
+          projectState: {
+            sourceLanguage,
+            targetLanguage,
+            approvedExampleCount: 0,
+          },
+        },
+      )
+      recordModelCall?.({
+        callId: interventionId,
+        kind: "draft",
+        mode: "align-styles",
+        model: modelName,
+        provider,
+        messages: sentMessages,
+        rawOutput,
+        cells: [{
+          interventionId,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          basedOnEventId: cell.targetEventId ?? null,
+          output: committedText,
+          exampleCellIds: [],
+        }],
+      })
+      setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+      return true
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        return false
+      }
+      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+      setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+      return false
+    }
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -895,8 +998,7 @@ export function useCompletion(
                 author: llmAuthor,
                 provenance: draftProvenance(
                   "batch",
-                  uniqueExampleIds(batchApprovedExamples.map((example) => example.cellId)),
-                  batchApprovedExamples.length,
+                  batchApprovedExamples,
                   undefined,
                   crypto.randomUUID(),
                 ),
@@ -1256,7 +1358,7 @@ export function useCompletion(
           cell,
           committedText,
           llmAuthor,
-          draftProvenance("paragraph", paragraphExampleIds, approvedExamples.length, undefined, interventionId),
+          draftProvenance("paragraph", approvedExamples, undefined, interventionId),
         )
         committedIds.add(cellId)
         recordedCells.push({
@@ -1350,5 +1452,5 @@ export function useCompletion(
   const completingForLane = useMemo(() => sliceCompletionLaneMap(completing, lane), [completing, lane])
   const errorsForLane = useMemo(() => sliceCompletionLaneMap(errors, lane), [errors, lane])
 
-  return { completeSingle, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
+  return { completeSingle, alignCellStyles, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
 }

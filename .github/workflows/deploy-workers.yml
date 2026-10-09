@@ -60,8 +60,12 @@ jobs:
       auth: ${{ steps.f.outputs.auth }}
     steps:
       - id: f
+        env:
+          # Passed via env, never interpolated into the script body, so the
+          # input can't become shell syntax if it ever stops being a `choice`.
+          WORKER_INPUT: ${{ github.event.inputs.worker }}
         run: |
-          w="${{ github.event.inputs.worker }}"
+          w="$WORKER_INPUT"
           case "$w" in
             all|web|sync-worker|auth-worker) ;;
             *) echo "::error::Unknown Worker selection '$w'"; exit 1 ;;

@@ -3,27 +3,26 @@
 // "Add languages from the org dashboard" without opening /project/:id/editor settings.
 // Same validation as ProjectSettings' LanguagesSection (trim / <=64 / case-
 // insensitive dedupe against the default target language + existing lanes),
-// then PATCHes that project's `settings.targetLanes`.
-//
-// The settings PATCH is optimistic-concurrency guarded (ifMatchVersion), so we
-// fetch the current settings on open to learn the version, the default target
-// language (for dedupe), and the existing lane registry. A stale version yields
-// a 409 (conflict) surfaced inline; a below-maintainer caller yields a 403
-// (forbidden) surfaced inline — the caller need not know their role up front
-// (§3.2: "if absent for a row, show and let the PATCH 403 surface gracefully").
+// then creates a target lane on that project. A below-maintainer caller gets
+// a 403 surfaced inline — the caller need not know their role up front
+// (§3.2: "if absent for a row, show and let the 403 surface gracefully").
 
 import { useState } from "react"
 import { Languages, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import {
+  createProjectLane,
   fetchProjectSettings,
-  patchProjectSettings,
+  type ProjectLaneView,
+  type ProjectSettingsResponse,
 } from "@/lib/sync/project-settings"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { laneLanguage } from "@/lib/lanes/lane-display"
 import { laneLanguageForTag } from "@/lib/lanes/lane-language"
+import { isPrimaryRegistryLane } from "@/lib/lanes/registry-lanes"
 
 const MAX_LANE_LENGTH = 64
 
@@ -48,14 +47,25 @@ function validateNewLane(
   if (trimmed.length > MAX_LANE_LENGTH) {
     return t("projectSettings.create.extraLanguagesTooLongError", { max: MAX_LANE_LENGTH })
   }
-  const lower = trimmed.toLowerCase()
-  if (lower === defaultTargetLanguage.trim().toLowerCase()) {
+  if (defaultTargetLanguage && isPrimaryRegistryLane(trimmed, defaultTargetLanguage)) {
     return t("projectSettings.languages.alreadyDefaultError")
   }
-  if (existingLanes.some((l) => l.toLowerCase() === lower)) {
+  if (existingLanes.some((lane) => isPrimaryRegistryLane(trimmed, lane))) {
     return t("projectSettings.languages.alreadyExistsError")
   }
   return null
+}
+
+function laneLanguagesOf(res: ProjectSettingsResponse): string[] {
+  const rows = (res.lanes ?? []).filter((lane): lane is ProjectLaneView => lane.role === "target")
+  if (rows.length > 0) {
+    return rows
+      .map((lane) =>
+        laneLanguage(lane, { settings: res.settings, role: "target", legacyTag: lane.legacyTag }),
+      )
+      .filter((language) => language.length > 0)
+  }
+  return (res.settings.targetLanes ?? []).filter((lane) => lane.trim().length > 0)
 }
 
 type Phase = "idle" | "loading" | "ready" | "saving"
@@ -69,9 +79,8 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
   // Snapshot of the current settings, loaded on open — needed for the version
   // pin (ifMatchVersion), default-language dedupe, and existing-lane dedupe.
   const [snapshot, setSnapshot] = useState<{
-    version: number
     defaultTargetLanguage: string
-    targetLanes: string[]
+    laneLanguages: string[]
   } | null>(null)
 
   async function loadSettings() {
@@ -85,9 +94,8 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
       return
     }
     setSnapshot({
-      version: res.version,
       defaultTargetLanguage: laneLanguageForTag("", res.lanes, res.settings) ?? "",
-      targetLanes: res.settings.targetLanes ?? [],
+      laneLanguages: laneLanguagesOf(res),
     })
     setPhase("ready")
   }
@@ -104,17 +112,17 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
     }
   }
 
-  async function handleAdd() {
+  async function handleAdd(language?: string) {
     if (!snapshot) {
       setError(t("org.addLanguagePopover.loadError"))
       return
     }
-    const trimmed = value.trim()
+    const trimmed = (language ?? value).trim()
     const validationError = validateNewLane(
       t,
       trimmed,
       snapshot.defaultTargetLanguage,
-      snapshot.targetLanes,
+      snapshot.laneLanguages,
     )
     if (validationError) {
       setError(validationError)
@@ -122,40 +130,29 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
     }
     setPhase("saving")
     setError(null)
-    const result = await patchProjectSettings(
-      jwt,
-      projectId,
-      { targetLanes: [...snapshot.targetLanes, trimmed] },
-      snapshot.version,
-    )
+    const result = await createProjectLane(jwt, projectId, { name: "", language: trimmed })
     if (result.kind === "ok") {
       setValue("")
       setSnapshot({
-        version: result.value.version,
-        defaultTargetLanguage: laneLanguageForTag("", result.value.lanes, result.value.settings) ?? snapshot.defaultTargetLanguage,
-        targetLanes: result.value.settings.targetLanes ?? [...snapshot.targetLanes, trimmed],
+        defaultTargetLanguage: snapshot.defaultTargetLanguage,
+        laneLanguages: [...snapshot.laneLanguages, trimmed],
       })
       setPhase("ready")
       onAdded?.(trimmed)
       setOpen(false)
       return
     }
-    if (result.kind === "conflict") {
-      setSnapshot({
-        version: result.latest.version,
-        defaultTargetLanguage: laneLanguageForTag("", result.latest.lanes, result.latest.settings) ?? snapshot.defaultTargetLanguage,
-        targetLanes: result.latest.settings.targetLanes ?? snapshot.targetLanes,
-      })
-      setError(t("org.addLanguagePopover.conflictError"))
+    if (result.kind === "duplicate") {
+      setError(t("projectSettings.languages.alreadyExistsError"))
       setPhase("ready")
       return
     }
-    if (result.kind === "forbidden") {
+    if (result.kind === "error" && result.message.includes("(403)")) {
       setError(t("org.addLanguagePopover.forbiddenError"))
       setPhase("ready")
       return
     }
-    setError(result.message || t("projectSettings.languages.savingFailedGeneric"))
+    setError(result.kind === "error" ? result.message : t("projectSettings.languages.savingFailedGeneric"))
     setPhase("ready")
   }
 
@@ -196,13 +193,25 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
           </div>
         ) : (
           <div className="flex items-end gap-2">
-            <Input
+            <LanguageComboboxInput
               autoFocus
               value={value}
-              onChange={(e) => {
-                setValue(e.target.value)
+              onValueChange={(next) => {
+                setValue(next)
                 setError(null)
               }}
+              onEnterSelect={(name) => {
+                setValue(name)
+                setError(null)
+                void handleAdd(name)
+              }}
+              exclude={
+                snapshot
+                  ? [snapshot.defaultTargetLanguage, ...snapshot.laneLanguages].filter(
+                      (language) => language.trim().length > 0,
+                    )
+                  : []
+              }
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault()

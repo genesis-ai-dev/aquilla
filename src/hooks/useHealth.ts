@@ -392,7 +392,6 @@ export function useHealth(
       projectOpenCommentCount: aux.projectOpenCommentCount,
       cellOpenCommentCount: aux.cellOpenCommentCount,
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [decay, infractions, aux, effectiveProjectHealth, effectiveFileHealth],
   )
 

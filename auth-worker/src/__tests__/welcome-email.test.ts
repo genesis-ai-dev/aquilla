@@ -36,13 +36,13 @@ function makeEnv(overrides: Partial<Env> = {}): { env: Env; email: ReturnType<ty
 describe("sendWelcomeEmail — honest support path (no dead-end noreply promise)", () => {
   it("no-ops when the EMAIL binding is absent", async () => {
     const email = makeEmailBinding()
-    await sendWelcomeEmail({ EMAIL: undefined } as unknown as Env, "u@example.com", "Ryder")
+    await sendWelcomeEmail({ EMAIL: undefined } as unknown as Env, "u@example.com", "Alex")
     expect(email.send).not.toHaveBeenCalled()
   })
 
   it("routes replies to a monitored inbox, not back at the unmonitored noreply sender", async () => {
     const { env, email } = makeEnv()
-    await sendWelcomeEmail(env, "u@example.com", "Ryder")
+    await sendWelcomeEmail(env, "u@example.com", "Alex")
     const msg = email.send.mock.calls[0][0]
     // Reply-To must exist and must NOT loop back to the noreply From address.
     expect(msg.replyTo).toBeTruthy()
@@ -52,13 +52,13 @@ describe("sendWelcomeEmail — honest support path (no dead-end noreply promise)
 
   it("honors an EMAIL_REPLY_TO override for the reply address", async () => {
     const { env, email } = makeEnv({ EMAIL_REPLY_TO: "hello@example.org" } as Partial<Env>)
-    await sendWelcomeEmail(env, "u@example.com", "Ryder")
+    await sendWelcomeEmail(env, "u@example.com", "Alex")
     expect(email.send.mock.calls[0][0].replyTo).toBe("hello@example.org")
   })
 
   it("offers the live Discord community as a support channel in both html and text", async () => {
     const { env, email } = makeEnv()
-    await sendWelcomeEmail(env, "u@example.com", "Ryder")
+    await sendWelcomeEmail(env, "u@example.com", "Alex")
     const msg = email.send.mock.calls[0][0]
     expect(msg.html).toContain("https://discord.gg/T2EndwXe4W")
     expect(msg.text).toContain("https://discord.gg/T2EndwXe4W")
@@ -66,7 +66,7 @@ describe("sendWelcomeEmail — honest support path (no dead-end noreply promise)
 
   it("keeps sending from the configured EMAIL_FROM address", async () => {
     const { env, email } = makeEnv()
-    await sendWelcomeEmail(env, "u@example.com", "Ryder")
+    await sendWelcomeEmail(env, "u@example.com", "Alex")
     expect(email.send.mock.calls[0][0].from).toBe("noreply@support.aquilla.app")
   })
 })

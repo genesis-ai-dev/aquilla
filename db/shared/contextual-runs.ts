@@ -13,6 +13,7 @@
 // reports `invalid_state` instead of silently clobbering.
 
 import type { AquillaDb } from "../shim/postgres"
+import { targetLaneIdSql, wireLegacyTagSql } from "./lane-sql"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
 import { laneRef, liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
 
@@ -416,7 +417,7 @@ function rowToRun(r: RunRow): ContextualRun {
   }
 }
 
-const RUN_COLS = `id, project_id, file_id, target_lang, lane_id, status, initiated_by, role_snapshot,
+const RUN_COLS = `id, project_id, file_id, ${wireLegacyTagSql("contextual_runs")} AS target_lang, lane_id, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
   last_error, steering_cursor, blocked_on_decision_id, span_allowance, park_reason,
   anchor_cell_id, scope_group, created_at, updated_at`
@@ -487,7 +488,7 @@ function rowToDraft(r: DraftRow): ContextualDraft {
   }
 }
 
-const DRAFT_COLS = `id, run_id, project_id, file_id, cell_id, target_lang, lane_id, scene_brief_id, text,
+const DRAFT_COLS = `id, run_id, project_id, file_id, cell_id, ${wireLegacyTagSql("contextual_drafts")} AS target_lang, lane_id, scene_brief_id, text,
   verdicts, provenance, status, created_at, reviewed_at, reviewed_by`
 
 interface RunEventRow {
@@ -915,21 +916,21 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
   try {
     const row = await db
       .prepare(
-        // AQU-1610: lane_id is bound, not resolved in SQL from the tag. NULL
-        // when the ref named no lane — the pre-AQU-1610 scalar subquery left
-        // the same NULL, which the backfill (or, under test, the lane-fill
-        // trigger) fills.
+        // A resolved lane id is bound as itself. A tag with no lane row
+        // resolves through the same subquery the cell writers use: NULL in
+        // production (the NOT NULL column rejects it), and under the test
+        // harness the lane is minted from the tag. The projection column
+        // is not filled either way.
         `INSERT INTO contextual_runs
-            (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
+            (id, project_id, file_id, status, initiated_by, role_snapshot,
              anchor_cell_id, scope_group, span_allowance, lane_id)
-         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?, ?)
+         VALUES (?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?, ${lane.laneId ? "?" : targetLaneIdSql("?", "?")})
          RETURNING ${RUN_COLS}`,
       )
       .bind(
         uuidv7(),
         input.projectId,
         input.fileId,
-        lane.targetLang,
         input.initiatedBy ?? null,
         input.roleSnapshot ?? null,
         input.anchorCellId ?? null,
@@ -941,7 +942,7 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
           : input.spanAllowance === null
             ? null
             : Math.max(0, Math.round(input.spanAllowance)),
-        lane.laneId,
+        ...(lane.laneId ? [lane.laneId] : [input.projectId, lane.targetLang]),
       )
       .first<RunRow>()
     if (!row) throw new Error("insert returned no row")
@@ -1662,8 +1663,8 @@ export async function insertDrafts(
         // row may belong to a sibling lane, the row ends up owned by the
         // writer whose text it now carries.
         `INSERT INTO contextual_drafts
-              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance, lane_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
+              (id, run_id, project_id, file_id, cell_id, scene_brief_id, text, verdicts, provenance, lane_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
            ON CONFLICT (project_id, file_id, cell_id, ${liveKey}) WHERE status = 'proposed'
            DO UPDATE SET
              id = EXCLUDED.id,
@@ -1673,7 +1674,6 @@ export async function insertDrafts(
              verdicts = EXCLUDED.verdicts,
              provenance = EXCLUDED.provenance,
              lane_id = EXCLUDED.lane_id,
-             target_lang = EXCLUDED.target_lang,
              created_at = now()`,
         )
         .bind(
@@ -1682,7 +1682,6 @@ export async function insertDrafts(
           input.projectId,
           input.fileId,
           d.cellId,
-          laneTag,
           input.sceneBriefId ?? null,
           d.text,
           d.verdicts ?? null,
@@ -1751,7 +1750,7 @@ export async function listDraftsByRun(
           .bind(projectId, runId)
       : db
           .prepare(
-            `SELECT ${DRAFT_COLS}
+            `SELECT *
                FROM (
                  SELECT ${DRAFT_COLS} FROM contextual_drafts
                   WHERE project_id = ? AND run_id = ?
@@ -1809,7 +1808,7 @@ export async function listDraftPageByRun(
   )
   const { results } = await db
     .prepare(
-      `SELECT ${DRAFT_COLS}
+      `SELECT *
          FROM (
            SELECT ${DRAFT_COLS} FROM contextual_drafts
             WHERE ${where.join(" AND ")}
@@ -2322,7 +2321,7 @@ export async function getProjectAutopilotSummary(
     .prepare(
       `WITH newest AS (
          SELECT DISTINCT ON (file_id, lane_id)
-                id, file_id, target_lang, lane_id, status, done_spans, total_spans, failed_spans,
+                id, file_id, ${wireLegacyTagSql("contextual_runs")} AS target_lang, lane_id, status, done_spans, total_spans, failed_spans,
                 units_spent, last_error, park_reason, updated_at
           FROM contextual_runs
          WHERE project_id = ?

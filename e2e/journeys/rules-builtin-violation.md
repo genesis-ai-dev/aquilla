@@ -19,7 +19,7 @@ Smoke twin: `e2e/specs/rules/violation.smoke.spec.ts`
 
 ## Expected end state
 
-- The second cell's line-number pill (inside the element labelled **Line 1**) tints amber, marking a minor rule violation.
+- The second cell's line-number pill tints amber, and its accessible name is **Line 1. Extra whitespace — Extra whitespace in translation**.
 - The typed text with its double space is visible in the cell's target column.
 
 ## Counts as a failure
@@ -36,4 +36,4 @@ On a fresh project the built-in rules, including **Extra whitespace**, are alrea
 
 Typing a run of consecutive spaces with the normal `type`/`fill` commands can lose the doubling. The editor is a ProseMirror surface that normalizes plain keystroke-by-keystroke input. Use `agent-browser keyboard inserttext "..."` after focusing the cell's editable element; it dispatches one input event instead of individual keydowns, so the doubled spaces survive.
 
-The line-number pill is not part of an interactive-only (`-i`) snapshot; read its class or text with `eval` (`row.querySelector('[aria-label="Line 1"] span').className`) rather than looking for it in a snapshot.
+The line-number pill is not part of an interactive-only (`-i`) snapshot. After the violation, the flag's accessible name starts with `Line 1.` and states the check. Read the tint with `eval` (`row.querySelector('[data-testid="cell-issue-flag"] span').className`) rather than looking for it in a snapshot.

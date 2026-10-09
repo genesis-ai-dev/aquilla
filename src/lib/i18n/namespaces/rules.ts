@@ -245,8 +245,15 @@ export const rules = defineNamespace({
 
     // ── RuleDrawer (editor sidebar — one rule's breaking/passing cells) ────
     "rules.drawer.closeAriaLabel": "Close rule details",
-    "rules.drawer.autofixUnavailable": "Autofix is unavailable in this build",
-    "rules.drawer.autofixUnavailableAriaLabel": "Autofix unavailable",
+    // AQU-1805: the fix path is wired again, so "unavailable in this build" is
+    // retired in favour of reasons a user can act on.
+    "rules.drawer.openCellAriaLabel": "Open cell {cellId} in the editor",
+    "rules.drawer.fixCellTooltip": "Propose a fix for this cell",
+    "rules.drawer.fixCellAriaLabel": "Fix this cell with AI",
+    "rules.drawer.tryToFixAllTooltip": "Propose a fix for every cell breaking this rule",
+    "rules.drawer.proposingFix": "Proposing…",
+    "rules.drawer.aiNotConfigured": "Set up AI to propose fixes",
+    "rules.drawer.fixNotPermitted": "You do not have permission to apply fixes in this project",
     "rules.drawer.amendRuleButton": "Amend rule",
     "rules.drawer.savedAutofix": "Saved autofix: /{pattern}/{flags} → {replacement}",
     "rules.drawer.noSavedFix": "No saved fix yet",
@@ -697,8 +704,31 @@ export const rules = defineNamespace({
       "rules.drawer.closeAriaLabel": {
         description: "Accessible label for the rule drawer's close button.",
       },
-      "rules.drawer.autofixUnavailableAriaLabel": {
-        description: "Accessible label for a disabled per-cell autofix button in the rule drawer.",
+      "rules.drawer.openCellAriaLabel": {
+        description:
+          "Accessible label for an example row in the rule drawer; activating it takes the editor to that cell.",
+        placeholders: { cellId: "The cell's own identifier — content, never translated." },
+      },
+      "rules.drawer.fixCellTooltip": {
+        description: "Hover text for the per-cell AI fix button in the rule drawer.",
+      },
+      "rules.drawer.fixCellAriaLabel": {
+        description: "Accessible label for the per-cell AI fix button in the rule drawer.",
+      },
+      "rules.drawer.tryToFixAllTooltip": {
+        description:
+          "Hover text for the rule drawer's button that proposes one fix across every cell breaking the rule.",
+      },
+      "rules.drawer.proposingFix": {
+        description: "Busy label while the model is being asked for a fix.",
+      },
+      "rules.drawer.aiNotConfigured": {
+        description:
+          "Hover text explaining that a fix button is disabled because AI is not set up for this project.",
+      },
+      "rules.drawer.fixNotPermitted": {
+        description:
+          "Hover text explaining that a fix button is disabled because the user's role may not apply rule fixes.",
       },
       "rules.drawer.savedAutofix": {
         description:

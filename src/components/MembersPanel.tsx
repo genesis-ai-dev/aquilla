@@ -9,6 +9,8 @@ import { RoleSelect } from "@/components/RoleSelect";
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar";
 import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
 import type { GrantScope } from "@/lib/access/grant-scope-sentence";
+import type { MemberLaneAccess } from "@/lib/lanes/lane-access-choice";
+import type { TargetLaneOption } from "@/hooks/useCurrentTargetLanes";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
 import { useI18n } from "@/lib/i18n/I18nProvider";
 
@@ -82,7 +84,11 @@ interface MembersPanelProps {
    * and keeps the ones who failed staged, naming them. Implementations send a
    * single batch request (never a client-side fan-out).
    */
-  onAdd: (usernames: string[], role: number) => Promise<MemberAddOutcome[]>;
+  onAdd: (
+    usernames: string[],
+    role: number,
+    laneAccess?: MemberLaneAccess,
+  ) => Promise<MemberAddOutcome[]>;
   /**
    * AQU-780: map a whole-batch add failure (a thrown error where nothing
    * landed — e.g. a 403 owner-gate, a 429, or a 5xx) to the message shown
@@ -116,6 +122,8 @@ interface MembersPanelProps {
   emptySuggestionsHint?: string;
   /** AQU-1030: scope of the add row's grant sentence. Omit to keep the plain Add label. */
   grantScope?: GrantScope;
+  /** AQU-1808: current target lanes the add row must choose among. */
+  targetLanes?: readonly TargetLaneOption[];
 }
 
 export function MembersPanel({
@@ -133,6 +141,7 @@ export function MembersPanel({
   suggestions,
   emptySuggestionsHint,
   grantScope,
+  targetLanes,
 }: MembersPanelProps) {
   const { t } = useI18n();
   // AQU-553: the scopes editor is shown only when project context is supplied
@@ -236,6 +245,7 @@ export function MembersPanel({
         suggestions={suggestions}
         emptySuggestionsHint={emptySuggestionsHint}
         grantScope={grantScope}
+        targetLanes={targetLanes}
       />
     </div>
   );

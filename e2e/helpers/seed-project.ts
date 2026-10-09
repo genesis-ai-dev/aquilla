@@ -38,7 +38,7 @@ import {
 } from "../../src/lib/parsers/helloao"
 import { aquillaImportMetadata, normalizeTranslatableStrings } from "../../src/lib/import/normalized-manifest"
 import { readPersistedSession } from "./auth-state"
-import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
+import { createProjectServerSide, setProjectLanguagePair } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
@@ -264,12 +264,20 @@ export async function seedProjectWithFile(
   })
   // A seeded project stands in for one a team has actually set up: autopilot
   // refuses to start without both languages and an answered brief question
-  // (AQU-827). Pass `steeringContext: false` to seed the unconfigured project
-  // a spec covering that gate needs.
+  // (AQU-827). Languages are lane rows (AQU-1594 / AQU-1595): English on the
+  // source lane this create already inserted, and one Swahili target lane
+  // (the old settings `targetLanguage: "sw"`). Only the brief goes through
+  // the settings PUT.
+  //
+  // `steeringContext: false` is the unconfigured project a spec covering that
+  // gate needs: no brief, no target lane, and the source lane's language left
+  // empty. No current caller passes the flag; the meaning stays that opt-out.
   if (opts.steeringContext !== false) {
-    await updateProjectSettings(jwt, projectId, {
-      sourceLanguage: "en",
-      targetLanguage: "sw",
+    await setProjectLanguagePair(jwt, projectId, {
+      sourceLanguage: "English",
+      sourceCode: "en",
+      targetLanguage: "Swahili",
+      targetCode: "sw",
       translationBrief: { parameters: { purpose: "Seeded fixture project" } },
     })
   }

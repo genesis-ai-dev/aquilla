@@ -126,13 +126,13 @@ export class Workspace {
     captions: FilePayload,
   ): Promise<void> {
     await this.chooseImportFiles([media, captions])
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   async previewEmbeddedMedia(media: FilePayload): Promise<void> {
     await this.chooseImportFiles(media)
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
@@ -160,7 +160,7 @@ export class Workspace {
     await this.page.getByTestId("tl-sources-menu").click()
     await this.page.getByRole("menuitem", { name: /Attach captions/i }).click()
     await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
@@ -168,6 +168,21 @@ export class Workspace {
     await this.page.getByRole("button", {
       name: overwrite ? "Overwrite caption track" : "Add caption track", exact: true,
     }).click()
+    await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  /** AQU-1566: on a linked video with no rows, the empty table's "Attach
+   * captions" adds the reviewed captions as the file's own rows. */
+  async attachCaptionsAsRows(captions: FilePayload): Promise<void> {
+    const empty = this.page.getByTestId("linked-video-empty")
+    await empty.getByRole("button", { name: "Attach captions", exact: true })
+      .click({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // Rows mode asks for no destination track or track name.
+    await expect(this.page.getByLabel("Destination track", { exact: true })).toHaveCount(0)
+    await this.page.getByRole("button", { name: "Add captions as rows", exact: true }).click()
     await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
@@ -344,27 +359,58 @@ export class Workspace {
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
   }
 
+  /** Accessible name of the dialog still covering the workspace, so a stuck
+   *  import names itself instead of timing out on a click the overlay ate. */
+  private async openDialogAccessibleName(): Promise<string> {
+    const dialog = this.modalDialogs().first()
+    const labelled = (await dialog.getAttribute("aria-label").catch(() => null))?.trim()
+    if (labelled) return labelled
+    const title = (await dialog.locator('[data-slot="dialog-title"]').first().textContent().catch(() => null))?.trim()
+    if (title) return title
+    const heading = (await dialog.getByRole("heading").first().textContent().catch(() => null))?.trim()
+    return heading || "dialog"
+  }
+
   private async waitForImportSettled(): Promise<void> {
     // A hidden confirm button is only the transient "Uploading…" state, not a
     // success signal. Wait for the authoritative sidebar row, while surfacing
     // any import error immediately instead of timing out on an unrelated row.
+    // A file row under an open dialog is not settled: the overlay still eats
+    // the next click. If that overlay is still up when the wait ends, the
+    // error names the dialog.
     const fileActions = this.page
       .locator("aside")
       .locator('button[aria-label="File actions"]')
       .first()
     const importError = this.page.getByText(/^Import failed:/i).first()
+    const overlay = this.page.locator(
+      '[data-slot="dialog-overlay"][data-open], [data-slot="alert-dialog-overlay"][data-open]',
+    )
     let outcome = "pending"
-    await expect.poll(async () => {
-      if (await importError.isVisible()) {
-        outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
-        return "settled"
-      }
-      if (await fileActions.isVisible()) {
-        outcome = "success"
-        return "settled"
-      }
-      return "pending"
-    }, { timeout: 30_000 }).toBe("settled")
+    let blockedBy = ""
+    try {
+      await expect.poll(async () => {
+        if (await importError.isVisible().catch(() => false)) {
+          outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
+          return "settled"
+        }
+        const rowReady = await fileActions.isVisible().catch(() => false)
+        const overlayOpen = rowReady && await overlay.first().isVisible().catch(() => false)
+        if (rowReady && overlayOpen) {
+          blockedBy = await this.openDialogAccessibleName()
+          return "blocked"
+        }
+        if (rowReady) {
+          outcome = "success"
+          blockedBy = ""
+          return "settled"
+        }
+        return "pending"
+      }, { timeout: 30_000 }).toBe("settled")
+    } catch (error) {
+      if (blockedBy) throw new Error(`Import dialog still open: ${blockedBy}`)
+      throw error
+    }
     if (outcome.startsWith("error:")) throw new Error(outcome.slice("error:".length))
   }
 
@@ -513,6 +559,9 @@ export class Workspace {
    */
   async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
     await row.scrollIntoViewIfNeeded()
+    // A parked pointer can already be inside an idle-collapsed row. Leave it
+    // before entering again so this is a fresh reveal gesture.
+    await this.page.getByRole("banner").hover()
     await row.hover()
     const rail = row.locator('[data-slot="cell-action-rail"]')
     await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
@@ -544,6 +593,13 @@ export class Workspace {
     // Media view selects Voices; ensure Files without toggling an open panel.
     if (await files.getAttribute("aria-pressed") !== "true") await files.click()
     await expect(files).toHaveAttribute("aria-pressed", "true")
+  }
+
+  async openTextView(): Promise<void> {
+    const tab = this.page.getByRole("tab", { name: "Text", exact: true })
+    await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true")
   }
 
   async openMediaView(): Promise<void> {
@@ -628,7 +684,7 @@ export class Workspace {
       requestAt = Date.now()
     })
     const blurStarted = Date.now()
-    await this.page.locator("aside").click()
+    await this.blurEditor()
     const response = await committed
     await requestSeen
     const ackedAt = Date.now()
@@ -934,7 +990,7 @@ export class Workspace {
         return false
       }
     }, { timeout: 20_000 })
-    await this.page.locator("aside").click()
+    await this.blurEditor()
     await multilineCommitted
 
     const readView = this.targetReadView(index)
@@ -1132,6 +1188,16 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /Editor settings/i }).click()
   }
 
+  /** Confirm a draft for every empty cell in the current file. */
+  async draftAllEmptyCells(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Draft all \(review required\)/i }).click()
+    const dialog = this.page.getByRole("dialog", { name: "Draft this file", exact: true })
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    await dialog.getByRole("checkbox", { name: /empty cells$/ }).check()
+    await dialog.getByRole("button", { name: "Draft", exact: true }).click()
+  }
+
   /** Export lives in the file options overflow menu. */
   async openExportDialog(): Promise<void> {
     await this.openFileOverflowMenu()
@@ -1229,11 +1295,14 @@ export class Workspace {
     return destination
   }
 
-  /** Leave the active editor by clicking sidebar chrome. Unlike editCell this
+  /** Leave the active editor by clicking the source metadata lane. Unlike editCell this
    * does not wait for a commit — the value may already be committed by the
    * idle debounce, in which case blur only releases the focus lock. */
   async blurEditor(): Promise<void> {
-    await this.page.locator("aside").click()
+    // The sidebar's center can land on Comments and navigate away. The source
+    // metadata lane has inert padding and keeps the current editor mounted.
+    await this.page.getByTestId("source-context-line")
+      .filter({ visible: true }).first().click({ position: { x: 1, y: 1 } })
   }
 
   /** Open the per-cell "Edit history" drawer through the action overflow. */

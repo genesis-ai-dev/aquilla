@@ -77,6 +77,13 @@ function chain(lines: Line[], file = F) {
 type Db = Parameters<typeof fullProgressRecomputeStmts>[0]
 
 async function recompute(db: Db, file = F) {
+  // A '' progress row is written only when that lane exists. Source-only
+  // fixtures still assert that row, so the bridge lane is created first.
+  await db.prepare(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('bridge01', ?, 'target', '', 0)
+     ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`,
+  ).bind(P).run()
   for (const stmt of fullProgressRecomputeStmts(db, P, file, TS)) await stmt.run()
 }
 
@@ -185,8 +192,7 @@ describe("a line with no reference counts in the chapter of the line above it (A
     const { db, pg } = await makeTestDb({ cells: chain(JONAH) })
     await recompute(db)
     await pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, last_edit_at, event_id)
-       VALUES ($1, $2, 'x2', 'target', '', 'translated', $3, 'tev-x2')`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, last_edit_at, event_id) VALUES ($1, $2, 'x2', 'target', 'translated', $3, 'tev-x2')`,
       [P, F, TS],
     )
     await sectionsProgressRecomputeStmt(db, P, F, TS, ["x2"]).run()
@@ -430,8 +436,7 @@ describe("a heading counts with the verse below it (AQU-1493)", () => {
     })
     await recompute(db)
     await pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, last_edit_at, event_id)
-       VALUES ($1, $2, 'hExo', 'target', '', 'translated', $3, 'tev-hExo')`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, last_edit_at, event_id) VALUES ($1, $2, 'hExo', 'target', 'translated', $3, 'tev-hExo')`,
       [P, F, TS],
     )
     await sectionsProgressRecomputeStmt(db, P, F, TS, ["hExo"]).run()
@@ -684,8 +689,7 @@ describe("only the full recompute walks the anchor chain (AQU-1493)", () => {
 
     statements.length = 0
     await pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, last_edit_at, event_id)
-       VALUES ($1, $2, 'h2', 'target', '', 'The Seventh Day', $3, 'tev-h2')`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, last_edit_at, event_id) VALUES ($1, $2, 'h2', 'target', 'The Seventh Day', $3, 'tev-h2')`,
       [P, F, TS],
     )
     await sectionsProgressRecomputeStmt(db, P, F, TS, ["h2"]).run()

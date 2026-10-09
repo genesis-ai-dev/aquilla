@@ -29,9 +29,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
-import { laneComboboxOptions } from "@/components/lane-options"
+import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
+import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
+import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
   type CellFootnoteDetails,
   type CellStore,
@@ -48,7 +50,9 @@ import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { formatCellIssueLine, summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { CellIssueLines } from "@/components/cell/CellIssueLines"
 import { isPartnerScriptureCell } from "@/lib/partners/registry"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
@@ -62,7 +66,13 @@ import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commi
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
-import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
+import { HighlightedText, buildHighlightsFromExamples, type HealthDisplaySpan } from "./HighlightedText"
+import {
+  buildDraftHealthSpans,
+  clipDraftHealthExcerpt,
+  resolveDraftHealthExamples,
+} from "@/lib/completion/draft-health-spans"
+import { useHealthScoreColorCoding } from "@/lib/store/health-score-color-coding-pref"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
@@ -86,6 +96,8 @@ import {
 } from "@/lib/completion/bt-record"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { AlignStylesButton } from "./cell/AlignStylesButton"
+import { cellCanAlignStyles } from "@/lib/idml/align-styles"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
@@ -213,6 +225,7 @@ import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { findConceptMatches } from "@/lib/terminology/match"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
@@ -755,6 +768,13 @@ interface EditorTableProps {
    * Falls back to the tag (or `defaultLaneLabel` for `''`) when a row has no name.
    */
   laneLabels?: Readonly<Record<string, string>>
+  /**
+   * AQU-1784: code OVERRIDES by lane tag (`laneCodesByTag`). Two lanes that
+   * display the same string are told apart by a suffix — the lane's code when
+   * it has one, otherwise its position among the colliding lanes — so the
+   * switcher and the TARGET pill name them differently.
+   */
+  laneCodes?: Readonly<Record<string, string>>
   /** AQU-583: opens the project's language settings so the target language is
    *  changeable from the TARGET column header. When provided, the target-language
    *  tag is always actionable — a single-lane project shows a clickable pill, a
@@ -804,9 +824,20 @@ interface EditorTableProps {
    *  direct-media-URL field that cannot take a watch page.
    *  See `deriveLinkedVideoEmptyState`. */
   linkedVideoEmptyState?: LinkedVideoEmptyState | null
+  /** Sam's D3 (2026-10-05): "media" when this table is the Media view's Text
+   *  pane, where that empty state shrinks to one line pointing at the
+   *  timeline's Source text lane. "text" (the default) everywhere else. */
+  linkedVideoEmptyPlacement?: "text" | "media"
   /** Switch this file to the Media view from that empty state. Absent when the
    *  table is already rendering under the timeline. */
   onOpenMediaView?: () => void
+  /** AQU-1566: on that empty state, attach a caption file that becomes this
+   *  file's rows. The workspace passes it only to maintainers, and only once
+   *  the rows have loaded and there are none. */
+  onAttachCaptions?: () => void
+  /** AQU-1566: on that empty state, turn a caption track already on the
+   *  timeline into this file's rows (the workspace confirms first). Same gate. */
+  onUseCaptionTrackAsRows?: (trackId: string) => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -885,6 +916,9 @@ interface EditorTableProps {
    *  `cellId` as one model call. Omit to keep the rail button hidden
    *  (legacy/prop-less callers render unchanged). */
   onCompleteParagraph?: (cellId: string) => void
+  /** Move this cell's existing translation into the source style runs.
+   *  Omit to hide the overflow action (callers that are not the editor). */
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
   rules?: TranslationRule[]
@@ -1039,11 +1073,11 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
-  onCompleteSingle, onPrefetchCompletion, onCompleteBatch, onCompleteParagraph, healthMap,
+  onCompleteSingle, onPrefetchCompletion, onCompleteBatch, onCompleteParagraph, onAlignStyles, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
@@ -1059,7 +1093,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   audioTrackColor, onSetAudioTrackColor,
-  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, onOpenMediaView,
+  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
+  onAttachCaptions, onUseCaptionTrackAsRows,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -1088,18 +1123,38 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   chapterNavTrailing,
 }, ref) {
   const t = useT()
-  // The switcher trigger and the closed pill name the lane the same way.
-  // A renamed lane wins; otherwise the tag. The default lane falls back to
-  // the project's target language, then to the "set a language" prompt.
-  const activeLaneLabel =
-    (laneLabels?.[activeLane]
-      ?? (activeLane ? activeLane : project.targetLanguage))
-    || t("editor.lane.setTargetLanguage")
   // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
   // lane-limited member over the lanes the read wall left them (`scopedLanes`).
   // One lane is enough (AQU-1601). "Add lane" is maintainer-only.
   const canManageLanes = canSwitchLanes(project.syncRole?.level)
   const switchableLanes = canManageLanes ? lanes : scopedLanes
+  // AQU-1784: one label list for the switcher AND the closed pill, computed
+  // over the lanes THIS reader can see. Two lanes that resolve to the same
+  // string get a suffix here; a member with no lane scope sees only the lane
+  // they are in, so a lone lane never collides and never hints at a sibling
+  // the read wall hides (AQU-1421).
+  const laneOptionList = useMemo(
+    () =>
+      laneOptionLabels({
+        lanes: switchableLanes ?? [activeLane],
+        laneLabels,
+        laneCodes,
+        defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
+        archivedLanes,
+      }),
+    [switchableLanes, activeLane, laneLabels, laneCodes, defaultLaneLabel, archivedLanes, t],
+  )
+  // The switcher trigger and the closed pill name the lane the same way.
+  // A renamed lane wins; otherwise the tag. The default lane falls back to
+  // the project's target language, then to the "set a language" prompt — a
+  // base the option list does not share, so the pill keeps its own and
+  // borrows only the collision suffix.
+  const activeLaneLabel = withLaneLabelSuffix(
+    (laneLabels?.[activeLane]
+      ?? (activeLane ? activeLane : project.targetLanguage))
+    || t("editor.lane.setTargetLanguage"),
+    laneOptionList.find((option) => option.value === activeLane)?.suffix ?? null,
+  )
   const showLaneSwitcher = Boolean(onLaneChange && switchableLanes && switchableLanes.length >= 1)
   const showAddLane = canManageLanes && !!onAddLane
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
@@ -2484,7 +2539,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // `MemoizedRowProps.paragraphGroupInFlight`.
           const paragraphGroupInFlight = paragraphGroupInfo?.memberIds?.some((id) => {
             const state = completing.get(id)
-            return state === "searching" || state === "generating"
+            return state === "searching" || state === "generating" || state === "aligning"
           }) ?? false
           // AQU-646 / AQU-1068: the row's STRUCTURAL controls — add a cell
           // here, take one back. One map lookup and one predicate call per
@@ -2620,7 +2675,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getPendingTargetEventId={getPendingTargetEventId}
           reservePendingTargetCommit={reservePendingTargetCommit}
           onOptimisticEdit={onOptimisticEdit}
-          lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          lockHolderLabel={lockHolderForCell(cellLockHolders, cell.id, activeLane)}
           presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
           onClaimCell={onClaimCell}
@@ -2639,6 +2694,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ruleMap={ruleMap}
           onCompleteSingle={onCompleteSingle}
           onCompleteParagraph={onCompleteParagraph}
+          onAlignStyles={onAlignStyles}
           paragraphGroupSize={paragraphGroupInfo?.size}
           paragraphDraftableCount={paragraphGroupInfo?.draftableCount}
           paragraphGroupInFlight={paragraphGroupInFlight}
@@ -2784,6 +2840,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onClaimCell,
     onCompleteSingle,
     onCompleteParagraph,
+    onAlignStyles,
     paragraphGroupInfoByCellId,
     onFootnoteCreated,
     onJumpToCell,
@@ -2873,6 +2930,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
   }
 
+  const hideColumnHeaders = displayCellIds.length === 0 && isTimeOrdered && Boolean(linkedVideoEmptyState)
+
   // Smart edits (flag `smartEdits`): one passage request around the active
   // cell; rows read their own suggestions through SmartEditsProvider.
   const smartEditsContext = useSmartEditsPassage({
@@ -2926,7 +2985,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         {renderChapterNavigation()}
-        <div className={cn(
+        {/* Sam's D1 (2026-10-05): an empty linked video has no rows for the
+            column headings to describe — select-all, #, Source, Target — so
+            the bar goes until it has some, in the Text view and the Media
+            view's Text pane alike. */}
+        {!hideColumnHeaders && (
+        <div data-testid="table-column-headers" className={cn(
             "grid grid-cols-2 gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground",
             castGutter
               ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
@@ -3001,12 +3065,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={laneComboboxOptions({
-                  lanes: switchableLanes,
-                  laneLabels,
-                  defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
-                  archivedLanes,
-                })}
+                options={toLaneComboboxOptions(laneOptionList)}
                 value={activeLane}
                 onValueChange={onLaneChange}
                 searchPlaceholder={t("editor.lane.searchPlaceholder")}
@@ -3087,6 +3146,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
         </div>
+        )}
       </div>
 
       {displayCellIds.length > 0 ? (
@@ -3137,9 +3197,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex-1">
             <TimelineLinkedVideoEmpty
               isYouTube={linkedVideoEmptyState.isYouTube}
-              captionTrackNames={linkedVideoEmptyState.captionTrackNames}
+              captionTracks={linkedVideoEmptyState.captionTracks}
+              placement={linkedVideoEmptyPlacement}
               onAttachFile={canEdit ? onAttachMediaFile : undefined}
               onOpenMediaView={onOpenMediaView}
+              onAttachCaptions={canEdit ? onAttachCaptions : undefined}
+              onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
             />
           </div>
         ) : canEdit && onAttachMediaFile && onAttachMediaUrl ? (
@@ -3153,7 +3216,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               className="h-full py-10"
               icon={Music}
               title={t("editor.empty.noMediaSegments")}
-              description={t("editor.empty.mediaLayerHint")}
+              // AQU-1565 follow-up: this branch is reached only by someone
+              // with no upload (below Project Lead, or read-only), and a file
+              // with no rows has nothing to record a take on, so "import or
+              // record" would send them nowhere.
+              description={t("editor.empty.mediaLayerWaiting")}
             />
           </div>
         )
@@ -3757,6 +3824,7 @@ interface MemoizedRowProps {
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
    *  `cell.paragraphStart === true` (computed by the parent from the ordered
    *  cell list). undefined ⇒ not a paragraph start, or a 1-cell group. */
@@ -3902,7 +3970,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getEditorActivationVersion,
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
-    ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
+    ruleMap, onCompleteSingle, onCompleteParagraph, onAlignStyles, paragraphGroupSize,
     paragraphDraftableCount, paragraphGroupInFlight,
     insertAboveReason, insertBelowReason, removeReason,
     structuralEditing, untimedInserts,
@@ -3943,7 +4011,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     [cellInfractions, cell.waivers],
   )
 
-  const isLoading = completingState === "searching" || completingState === "generating"
+  const isLoading = completingState === "searching" || completingState === "generating" || completingState === "aligning"
   // p1-paragraph-ui-wiring (coordinator follow-up): `paragraphGroupInFlight`
   // is true while ANY cell in this row's paragraph group is ACTIVELY
   // completing — not just this row's own (a validated start cell never gets
@@ -3956,12 +4024,14 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   // tokens arrive in real time instead of waiting for the LLM to finish
   // AND the commit-to-outbox chain to land (which adds a network hop).
   const completionPreview = previewText
-  const loadingPhase: "searching" | "generating" | null =
+  const loadingPhase: "searching" | "generating" | "aligning" | null =
     completingState === "searching"
       ? "searching"
       : completingState === "generating"
         ? "generating"
-        : null
+        : completingState === "aligning"
+          ? "aligning"
+          : null
   const error = cellError
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
@@ -4033,6 +4103,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         ruleMap={ruleMap}
         onCompleteSingle={onCompleteSingle}
         onCompleteParagraph={onCompleteParagraph}
+        onAlignStyles={onAlignStyles}
         paragraphGroupSize={paragraphGroupSize}
         paragraphDraftableCount={paragraphDraftableCount}
         paragraphGroupInFlight={paragraphGroupInFlight}
@@ -4190,7 +4261,7 @@ interface EditorRowProps {
   completionPreview: string | undefined
   /** Which phase of the completion is currently running, if any. Drives the
    *  placeholder copy ("Looking up examples…" vs "Generating…"). */
-  loadingPhase: "searching" | "generating" | null
+  loadingPhase: "searching" | "generating" | "aligning" | null
   cellExamples: ScoredPair[]
   exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   highlights: ReturnType<typeof buildHighlightsFromExamples>
@@ -4203,6 +4274,7 @@ interface EditorRowProps {
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
    *  `cell.paragraphStart === true`. undefined ⇒ not a start, or a 1-cell group. */
   paragraphGroupSize?: number
@@ -4803,6 +4875,7 @@ function textNodePositionForOffset(
 function TargetReadText({
   text,
   ranges,
+  healthSpans = [],
   concepts,
   onRangeClick,
   onTermChipClick,
@@ -4812,6 +4885,7 @@ function TargetReadText({
 }: {
   text: string
   ranges: RangeHighlight[]
+  healthSpans?: HealthDisplaySpan[]
   concepts: Concept[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
@@ -4827,6 +4901,7 @@ function TargetReadText({
         text={text}
         concepts={concepts}
         ranges={ranges}
+        healthSpans={healthSpans}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
         showKeyTermHighlights={showKeyTermHighlights}
@@ -4866,6 +4941,7 @@ function TargetReadText({
           text={seg.text}
           concepts={concepts}
           ranges={clipRangesToSegment(ranges, seg)}
+          healthSpans={clipRangesToSegment(healthSpans, seg)}
           onRangeClick={onRangeClick}
           onTermChipClick={onTermChipClick}
           showKeyTermHighlights={showKeyTermHighlights}
@@ -4881,6 +4957,7 @@ export function TargetDecoratedText({
   text,
   concepts,
   ranges,
+  healthSpans = [],
   onRangeClick,
   onTermChipClick,
   showKeyTermHighlights = false,
@@ -4888,6 +4965,7 @@ export function TargetDecoratedText({
   text: string
   concepts: Concept[]
   ranges: RangeHighlight[]
+  healthSpans?: HealthDisplaySpan[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   showKeyTermHighlights?: boolean
@@ -4926,6 +5004,7 @@ export function TargetDecoratedText({
         text={text}
         highlights={EMPTY_HIGHLIGHTS}
         ranges={ranges}
+        healthSpans={healthSpans}
         showEvidence={false}
         onRangeClick={onRangeClick}
       />
@@ -4943,6 +5022,7 @@ export function TargetDecoratedText({
           text={before}
           highlights={EMPTY_HIGHLIGHTS}
           ranges={clipRangesToTextSlice(ranges, cursor, match.start)}
+          healthSpans={clipRangesToTextSlice(healthSpans, cursor, match.start)}
           showEvidence={false}
           onRangeClick={onRangeClick}
         />,
@@ -4976,6 +5056,7 @@ export function TargetDecoratedText({
             text={matchedText}
             highlights={EMPTY_HIGHLIGHTS}
             ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
+            healthSpans={clipRangesToTextSlice(healthSpans, match.start, match.end)}
             showEvidence={false}
             onRangeClick={onRangeClick}
           />
@@ -4987,26 +5068,27 @@ export function TargetDecoratedText({
 
   if (cursor < text.length) {
     parts.push(
-      <HighlightedText
-        key="t-tail"
-        text={text.slice(cursor)}
-        highlights={EMPTY_HIGHLIGHTS}
-        ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
-        showEvidence={false}
-        onRangeClick={onRangeClick}
-      />,
+        <HighlightedText
+          key="t-tail"
+          text={text.slice(cursor)}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
+          healthSpans={clipRangesToTextSlice(healthSpans, cursor, text.length)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />,
     )
   }
 
   return <span>{parts}</span>
 }
 
-function clipRangesToTextSlice(
-  ranges: readonly RangeHighlight[],
+function clipRangesToTextSlice<T extends { start: number; end: number }>(
+  ranges: readonly T[],
   sliceStart: number,
   sliceEnd: number,
-): RangeHighlight[] {
-  const out: RangeHighlight[] = []
+): T[] {
+  const out: T[] = []
   for (const range of ranges) {
     const start = Math.max(range.start, sliceStart)
     const end = Math.min(range.end, sliceEnd)
@@ -5137,7 +5219,7 @@ function EditorRow({
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
-  onCompleteParagraph, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
+  onCompleteParagraph, onAlignStyles, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
   insertAboveReason = null, insertBelowReason = null, removeReason = null,
   structuralEditing, untimedInserts,
   insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
@@ -5181,6 +5263,7 @@ function EditorRow({
   // preference is on, the same rows also carry a solid leading-edge accent.
   // Per-row subscription, like the media-cursor and presence hooks above it.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
+  const healthScoreColorCoding = useHealthScoreColorCoding()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -5517,7 +5600,7 @@ function EditorRow({
     ? t("editor.source.idmlProtected")
     : sourceReadOnlyReason
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
-  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const showCompletionOverlay = isLoading && (!hasTranslatedText || loadingPhase === "aligning")
   const sourceCellDirection = useMemo(
     () =>
       resolveTextDirection(
@@ -5571,7 +5654,11 @@ function EditorRow({
   const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
-  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+  const terminologyConcepts = conceptsForLaneTag(
+    project.terminology ?? EMPTY_CONCEPTS,
+    activeLane,
+    project.lanes ?? [],
+  )
   const showTargetKeyTermHighlights =
     targetKeyTermHighlightMode === "always" ||
     (targetKeyTermHighlightMode === "focused" && isRowFocused)
@@ -5736,6 +5823,40 @@ function EditorRow({
     }
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+  const healthDisplaySpans = useMemo<HealthDisplaySpan[]>(() => {
+    if (!healthScoreColorCoding || !cell.aiDrafted) return []
+    const draftText = liveTargetText ?? visibleTranslated
+    if (!draftText?.trim()) return []
+    const examples = resolveDraftHealthExamples({
+      live: cellExamples,
+      persisted: cell.aiDraft?.exampleTexts,
+      exampleIds: cell.aiDraft?.exampleIds,
+      lookup: (id) => {
+        const view = previewCellStore?.getCellView(id)
+        if (!view?.translated.trim()) return undefined
+        return { source: view.original, target: view.translated }
+      },
+    })
+    return buildDraftHealthSpans(draftText, examples).map((span) => ({
+      ...span,
+      title: span.kind === "supported" && span.exampleSource != null && span.exampleTarget != null
+        ? t("editor.health.citedExample", {
+            source: clipDraftHealthExcerpt(span.exampleSource),
+            target: clipDraftHealthExcerpt(span.exampleTarget),
+          })
+        : undefined,
+    }))
+  }, [
+    healthScoreColorCoding,
+    cell.aiDrafted,
+    cell.aiDraft?.exampleIds,
+    cell.aiDraft?.exampleTexts,
+    cellExamples,
+    liveTargetText,
+    visibleTranslated,
+    previewCellStore,
+    t,
+  ])
   const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // AQU-1484: the commit path below validates a human edit by itself, and that
@@ -5952,6 +6073,20 @@ function EditorRow({
       savedTimerRef.current = null
     }, 2400)
   }, [onCompleteSingle, cell, onActivateEditor, getEditorActivationVersion])
+
+  const alignStylesAndReturn = useCallback(async () => {
+    if (!onAlignStyles) return
+    const activationVersion = getEditorActivationVersion()
+    const saved = await onAlignStyles(cell)
+    onActivateEditor(cell.id, { ifActivationVersion: activationVersion })
+    if (!saved) return
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setShowSaved(true)
+    savedTimerRef.current = setTimeout(() => {
+      setShowSaved(false)
+      savedTimerRef.current = null
+    }, 2400)
+  }, [onAlignStyles, cell, onActivateEditor, getEditorActivationVersion])
 
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
@@ -6631,12 +6766,22 @@ function EditorRow({
   const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
-  // The cell number tints by worst severity. That's the whole signal — the
-  // concrete issue list lives in the expansion's Issues tab, not in a hover
-  // popover here. (Replaced the old severity stripe / warning triangle / dot;
-  // the cast label moved to the target column header lane so it isn't squished
-  // into this 44px gutter.)
+  // The cell number tints by worst severity. Hover names every active check
+  // and why it fired (AQU-757); the Issues tab is where you waive one.
+  // (Replaced the old severity stripe / warning triangle / dot; the cast label
+  // moved to the target column header lane so it isn't squished into this
+  // 44px gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
+  const issueLines = useMemo(
+    () => summarizeCellIssues(cellInfractions, ruleMap, t),
+    [cellInfractions, ruleMap, t],
+  )
+  const issueHint = issueLines.length === 0 && cellNeedsAttention
+    ? t("editor.issues.notYetValidated")
+    : undefined
+  const issueSummary = issueLines.length > 0
+    ? issueLines.map(formatCellIssueLine).join(". ")
+    : issueHint
   const numberLabel = cellNumberLabel({
     lineNumbersEnabled,
     cellType: cell.type,
@@ -6679,22 +6824,32 @@ function EditorRow({
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
   const gutterLanguageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
+  const lineAria = t("editor.row.lineAria", { number: numberLabel ?? "" })
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
     // both set on the source well below) and center it, so the number keeps
     // riding that line as the reader changes font size. A fixed height only
-    // happens to line up at one size.
-    <span
-      className="flex items-center justify-center leading-none"
-      style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
-      aria-label={t("editor.row.lineAria", { number: numberLabel })}
+    // happens to line up at one size. The tooltip is only there when the
+    // tint means something — a clean line stays a plain number.
+    <AppTooltip
+      content={issueLines.length > 0 ? <CellIssueLines lines={issueLines} /> : issueHint}
+      side="right"
+      className="max-w-xs"
     >
-      <CellNumberPill
-        number={numberLabel}
-        plain
-        tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
-      />
-    </span>
+      <span
+        className="flex items-center justify-center leading-none"
+        style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+        aria-label={issueSummary ? `${lineAria}. ${issueSummary}` : lineAria}
+        role={issueSummary ? "img" : undefined}
+        data-testid={issueSummary ? "cell-issue-flag" : undefined}
+      >
+        <CellNumberPill
+          number={numberLabel}
+          plain
+          tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
+        />
+      </span>
+    </AppTooltip>
   )
 
   // ── Hover / focus state for the floating action rail ─────────────────────
@@ -7274,6 +7429,8 @@ function EditorRow({
             point={healthRibbonPoint}
             hasMajorIssue={hasMajorInfraction}
             hasIssue={hasAnyIssue}
+            issues={issueLines}
+            issueHint={issueHint}
             className="top-0 bottom-0 md:hidden"
             testId="health-ribbon-mobile"
           />
@@ -7757,6 +7914,8 @@ function EditorRow({
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
               hasIssue={hasAnyIssue}
+              issues={issueLines}
+              issueHint={issueHint}
               className="hidden md:block"
             />
           ) : undefined}
@@ -7879,6 +8038,7 @@ function EditorRow({
                     }}
                     ariaLabel={editorAriaLabel}
                     onEscapeToGrid={onEscapeToGrid}
+                    healthSpans={healthDisplaySpans}
                   />
                 ) : (
                   <EditorTargetReadSurface
@@ -7964,6 +8124,7 @@ function EditorRow({
                           <TargetReadText
                             text={visibleTranslated}
                             ranges={targetRanges}
+                            healthSpans={healthDisplaySpans}
                             concepts={terminologyConcepts}
                             onRangeClick={openInlineRule}
                             onTermChipClick={handleTermChipClick}
@@ -8029,7 +8190,9 @@ function EditorRow({
                       <span>
                         {loadingPhase === "searching"
                           ? t("editor.ai.lookingUpExamples")
-                          : t("editor.ai.generatingTranslation")}
+                          : loadingPhase === "aligning"
+                            ? t("editor.ai.aligningStyles")
+                            : t("editor.ai.generatingTranslation")}
                       </span>
                     </div>
                   )}
@@ -8116,10 +8279,12 @@ function EditorRow({
               className="sr-only"
             >
               {isLoading && !completionPreview
-                ? // i18n-exempt "searching" is a loading-phase tag, not copy
+                ? // i18n-exempt "searching" / "aligning" are loading-phase tags, not copy
                   (loadingPhase === "searching"
                     ? t("editor.row.draftSearching", { cellRef })
-                    : t("editor.row.draftGenerating", { cellRef }))
+                    : loadingPhase === "aligning"
+                      ? t("editor.row.aligningStyles", { cellRef })
+                      : t("editor.row.draftGenerating", { cellRef }))
                 : isLoading && completionPreview
                   ? t("editor.row.draftPreviewReady", { cellRef })
                   : null}
@@ -8473,6 +8638,20 @@ function EditorRow({
                   onClick={() => onSeekToCue(cell.id)}
                 />
               ))}
+
+              {onAlignStyles && cellCanAlignStyles(cell) && (
+                <AlignStylesButton
+                  hasText={Boolean(visibleTranslated.trim())}
+                  editable={editable}
+                  isAnonymous={Boolean(isAnonymous)}
+                  isCompletionConfigured={isCompletionConfigured}
+                  isCompletionAvailable={isCompletionAvailable}
+                  aligning={loadingPhase === "aligning"}
+                  busy={isLoading}
+                  onAlign={alignStylesAndReturn}
+                  onAiSetupNeeded={onAiSetupNeeded}
+                />
+              )}
             </CellActionRail>
           </div>
         </div>

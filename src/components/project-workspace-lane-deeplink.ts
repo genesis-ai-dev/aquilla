@@ -120,6 +120,9 @@ export function defaultLaneDraftReviewHref(
  */
 export const OPEN_COMMENTS_PARAM = "comments"
 
+/** The comment (often a reply) a deep link asks the open thread to scroll to. */
+export const FOCUS_COMMENT_PARAM = "commentId"
+
 /**
  * The cell whose comment thread a deep link asks to have open, or `null`.
  *
@@ -149,8 +152,43 @@ export function editorCommentHref(
   projectId: string,
   fileId: string,
   cellId?: string | null,
+  commentId?: string | null,
 ): string {
   const base = `/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(fileId)}`
   if (!cellId) return base
-  return `${base}?cellId=${encodeURIComponent(cellId)}&${OPEN_COMMENTS_PARAM}=1`
+  const query = [
+    `cellId=${encodeURIComponent(cellId)}`,
+    `${OPEN_COMMENTS_PARAM}=1`,
+    commentId ? `${FOCUS_COMMENT_PARAM}=${encodeURIComponent(commentId)}` : "",
+  ].filter(Boolean).join("&")
+  return `${base}?${query}`
+}
+
+/**
+ * The comment a deep link asks the open thread to scroll to and highlight,
+ * or `null` when the link only names the cell.
+ */
+export function focusedCommentFromSearchParams(
+  searchParams: Pick<URLSearchParams, "get">,
+): string | null {
+  const commentId = searchParams.get(FOCUS_COMMENT_PARAM)
+  return commentId ? commentId : null
+}
+
+/**
+ * Search string after the comments panel closes.
+ *
+ * Drops the open flag and the focused comment so the URL no longer asks the
+ * editor to open the thread. `cellId` stays: it is the row the editor is on,
+ * and a bare cell link must not reopen the panel. When neither comment param
+ * is present the original string is returned unchanged, so a close that did
+ * not come from a deep link does not rewrite the address.
+ */
+export function searchWithoutCommentDeepLink(search: string): string {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search)
+  if (!params.has(OPEN_COMMENTS_PARAM) && !params.has(FOCUS_COMMENT_PARAM)) return search
+  params.delete(OPEN_COMMENTS_PARAM)
+  params.delete(FOCUS_COMMENT_PARAM)
+  const next = params.toString()
+  return next ? `?${next}` : ""
 }

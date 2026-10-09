@@ -84,7 +84,13 @@ Status: **built** = in a PR; otherwise ordered by value ÷ cost.
    then only judges the target side.
 
 ### Conjunction (how clauses relate)
-8. **Connective relation matches the source.** γάρ gives a reason, οὖν an
+8. **Connective relation matches the source.** *Built*: `textual.connective`,
+   AQU-1676. 45% recall at 0.6, with one false alarm in 200 clean passages. The eval
+   changed the rule from "the relations differ" to "the target **reverses**
+   the source": reason ↔ inference, or contrast → inference. A weak source
+   relation (καί, narrative δέ) is rendered "When", "So" or "But" all the
+   time in good translation, and it produced every clean-text alarm. The
+   original design text follows. γάρ gives a reason, οὖν an
    inference, δέ a development or contrast, καί an addition. Jev classifies
    the source relation at each boundary and whether the target's connective
    expresses it. The project's connective inventory is learned from validated
@@ -149,6 +155,7 @@ Status: **built** = in a PR; otherwise ordered by value ÷ cost.
   | sentence: run-on | **88%** (0.6) | 0.03 |
   | quotation close (broken spans only) | **38%** (0.6) | 0.07 |
   | sentence: broken-off | **18%** (0.6) | 0.00 |
+  | connective reversal | **45%** (0.6) | 0.005 |
   | reference (unregistered) | 28% | about 0.55 from this check alone |
 
   The first run scored far lower, for two reasons:

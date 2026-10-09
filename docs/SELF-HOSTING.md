@@ -336,7 +336,6 @@ EMAIL_FROM = "noreply@mail.example.org"
 EMAIL_REPLY_TO = "support@example.org"
 CONTACT_EMAIL = "support@example.org"
 LEGACY_USER_MIGRATION_ENABLED = "false"
-ADMIN_EMAILS = "<your-operator-email>"
 ADMIN_REQUIRE_ELEVATION = "true"
 ```
 
@@ -765,8 +764,17 @@ workspace and import a representative source file. Register a second account
 for collaboration and access checks. Do not use the development seed routes
 or insert example passwords into the production database.
 
-Set `ADMIN_EMAILS` to the actual account emails of your operators. Platform
-administrator access differs from organization ownership. Keep
+Platform administrators are rows in the `platform_admins` table, keyed by
+account email in lowercase. Add your operators after the migrations have run:
+
+```sql
+INSERT INTO platform_admins (email, note)
+VALUES ('operator@example.com', 'self-host operator');
+```
+
+`ADMIN_EMAILS` (comma-separated) remains an optional bootstrap variable. Use it
+to name a first operator before any row exists; an email in either place counts.
+Platform administrator access differs from organization ownership. Keep
 `ADMIN_REQUIRE_ELEVATION=true` and verify the emailed elevation code before
 depending on the administrator console.
 
@@ -889,7 +897,7 @@ one fixed monthly price or server size.
 | Sync rejects a token | Identical `SYNC_SECRET_KEY`, correct API host, token scope, and system clocks |
 | Live collaboration fails | `ProjectSync` binding and migrations, WebSocket route, and intervening proxy rules |
 | Password reset says sent but no mail arrives | Actual Email Service delivery logs, verified sender, recipient restrictions, and `EMAIL` binding |
-| Administrator console cannot elevate | Correct account email allowlist and working elevation email |
+| Administrator console cannot elevate | Account email present in `platform_admins` and working elevation email |
 | File deletion leaves blobs | Matching `ADMIN_SECRET` and correct `SYNC_WORKER_URL` |
 | Imported artifacts or audio disappear | Shared private bucket, key prefixes, upload result, and database references |
 | AI requests fail | Identity's OpenRouter key, provider balance, model IDs, limits, and network access |

@@ -82,7 +82,7 @@ users.get("/search", async (c) => {
     c.req.query("scoped") === "1" || c.req.query("scoped") === "true"
   )
   const matches =
-    wantsUnscoped && isPlatformAdmin(c)
+    wantsUnscoped && await isPlatformAdmin(c)
       ? await searchUsersByPrefix(c.env, prefix, limit)
       : await searchUsersByScopedPrefix(c.env, user.id, prefix, limit)
 

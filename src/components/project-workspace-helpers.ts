@@ -9,6 +9,8 @@ import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
+import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 
 /**
@@ -410,6 +412,26 @@ export function workspaceTerminology(
 }
 
 /**
+ * The active lane's slice of the editor's concept list, for Check file and
+ * the term-lookup popover (AQU-1721, AQU-1508).
+ *
+ * One rule serves both lists: a subscribed rendering arrives from route #8
+ * already stamped with THIS project's lane id (mapped from its termbase lane
+ * by language, AQU-1777), so `conceptsForLaneTag` over this project's lane
+ * rows reads it exactly like a local one. With no subscriptions the editor
+ * list IS `local`, so the local slice is reused and keeps its identity.
+ */
+export function editorConceptsForLane(
+  editor: Concept[],
+  local: Concept[],
+  laneLocal: Concept[],
+  activeLane: string,
+  laneRows: readonly LaneLanguageRow[],
+): Concept[] {
+  return editor === local ? laneLocal : conceptsForLaneTag(editor, activeLane, laneRows)
+}
+
+/**
  * AQU-1752: timeline Space and "Play from this cue" wait for the file's
  * audio-attachment read.
  *
@@ -425,4 +447,28 @@ export function workspaceTerminology(
  */
 export function timelinePlayReady(audioHasLoaded: boolean): boolean {
   return audioHasLoaded
+}
+
+/**
+ * AQU-1805: how a reviewed rule fix may be committed to one cell.
+ *
+ * A rule fix rewrites target text, which on an IDML cell means rewriting
+ * protected runs. AQU-742 is what happens when that is done carelessly: the
+ * anchors InDesign needs are dropped and the file stops round-tripping. So
+ * only a fix carrying a literal find/replace pair may be re-applied inside
+ * protected HTML (`replaceProtectedIdmlText` needs that pair); a regex sweep
+ * has no such pair and would be committed as flattened text.
+ *
+ *  - `plain`     — commit `preview.after` as-is.
+ *  - `protected` — re-apply the literal pair inside the protected HTML.
+ *  - `refuse`    — cannot be applied safely; the whole sweep is abandoned so
+ *                  one bad cell cannot leave it half-written.
+ */
+export function ruleFixPreflight(
+  isIdmlCell: boolean,
+  preview: { find?: string; replace?: string },
+): "plain" | "protected" | "refuse" {
+  if (!isIdmlCell) return "plain"
+  if (preview.find === undefined || preview.replace === undefined) return "refuse"
+  return "protected"
 }

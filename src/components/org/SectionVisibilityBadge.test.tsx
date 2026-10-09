@@ -62,6 +62,79 @@ describe("SectionVisibilityBadge", () => {
 
     await waitFor(() => expect(onChangeMinRole).toHaveBeenCalledWith(ROLE.VIEWER))
   })
+
+  // AQU-1779: a floor the caller can't apply is disabled, explained, and never
+  // reaches onChangeMinRole.
+  it("disables options below minSelectableRole, shows the hint, and never calls back for them", async () => {
+    const onChangeMinRole = vi.fn(async () => {})
+    render(
+      <SectionVisibilityBadge
+        minRole={ROLE.MAINTAINER}
+        canEdit
+        onChangeMinRole={onChangeMinRole}
+        minSelectableRole={ROLE.PROJECT_LEAD}
+        belowMinSelectableHint="Lower the other setting first."
+      />,
+    )
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+
+    const everyone = await screen.findByRole("option", { name: /everyone with access/i })
+    expect(everyone).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("option", { name: /contributors and up/i })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("option", { name: /project leads and up/i })).not.toHaveAttribute("aria-disabled", "true")
+
+    fireEvent.pointerMove(everyone)
+    fireEvent.mouseMove(everyone)
+    fireEvent.keyDown(everyone, { key: "Enter" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(onChangeMinRole).not.toHaveBeenCalled()
+
+    const lead = screen.getByRole("option", { name: /project leads and up/i })
+    fireEvent.pointerMove(lead)
+    fireEvent.mouseMove(lead)
+    fireEvent.keyDown(lead, { key: "Enter" })
+    await waitFor(() => expect(onChangeMinRole).toHaveBeenCalledWith(ROLE.PROJECT_LEAD))
+  })
+
+  it("keeps the why behind a circled-i that expands and collapses it", async () => {
+    render(
+      <SectionVisibilityBadge
+        minRole={ROLE.MAINTAINER}
+        canEdit
+        onChangeMinRole={vi.fn()}
+        minSelectableRole={ROLE.PROJECT_LEAD}
+        belowMinSelectableHint="Lower the other setting first."
+      />,
+    )
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    const info = await screen.findByRole("button", { name: /why some options are unavailable/i })
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "closed")
+
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent("Lower the other setting first.")
+
+    fireEvent.click(info)
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "closed")
+  })
+
+  it("shows no hint when every option is selectable", async () => {
+    render(
+      <SectionVisibilityBadge
+        minRole={ROLE.MAINTAINER}
+        canEdit
+        onChangeMinRole={vi.fn()}
+        minSelectableRole={ROLE.VIEWER}
+        belowMinSelectableHint="Lower the other setting first."
+      />,
+    )
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    await screen.findByRole("combobox", { name: /who can see this section/i })
+    expect(screen.queryByRole("button", { name: /why some options are unavailable/i })).not.toBeInTheDocument()
+  })
 })
 
 describe("SectionVisibilityGate", () => {

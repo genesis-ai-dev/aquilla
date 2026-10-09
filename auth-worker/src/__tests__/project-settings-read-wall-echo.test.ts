@@ -10,14 +10,17 @@
 // language-only diff is admitted at the org's languageEditMinRole, so the
 // write was allowed.
 //
-// The rule this pins: a caller cannot change what it cannot see. The route puts
-// the stored hidden parts back before it diffs and saves, refuses an explicit
-// replacement of a hidden primary language, and filters every body it returns
-// (200 and 409) exactly as the GET does.
+// The rule this pins: a caller cannot change what it cannot see. The client
+// omits the four lane keys before it sends (AQU-1595: they are lane rows, not
+// settings), and the route copies the stored values back so no write rewrites
+// them, refuses a body that names one of them, puts the hidden parts back
+// before it diffs, and filters every body it returns (200 and 409) exactly as
+// the GET does.
 import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 
 /** French is the default lane. German is archived. dan and carla are granted
  *  Spanish only, so the read wall hides French and German from them. */
@@ -116,10 +119,17 @@ async function patchSettings(
   )
 }
 
+/** What patchProjectSettings sends: the blob without the retired lane keys. */
+function clientBody(settings: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...settings }
+  for (const key of RETIRED_LANE_SETTINGS_KEYS) delete next[key]
+  return next
+}
+
 /** What useProjectSettings sends: the caller's own GET with one edit on top. */
 async function echoWrite(username: string, edit: Record<string, unknown>): Promise<Response> {
   const seen = await getSettings(username)
-  return patchSettings(username, { ...seen.settings, ...edit }, seen.version)
+  return patchSettings(username, { ...clientBody(seen.settings), ...edit }, seen.version)
 }
 
 function targetLaneIds(body: SettingsBody): string[] {
@@ -131,50 +141,65 @@ afterEach(() => {
 })
 
 describe("settings writes behind the lane read wall (AQU-1750)", () => {
-  it("the filtered read a lead's client echoes back really does lack the hidden lanes and primary", async () => {
-    // The premise of every test below. If the GET stops filtering, these
-    // writes stop being echoes of a filtered read and prove nothing.
+  it("a project lead sees every target lane; a contributor still sees only grants (AQU-1795)", async () => {
     await seed()
     env.LANE_READ_WALL = "1"
-    const seen = await getSettings("dan")
-    expect(seen.settings.targetLanguage).toBe("")
-    expect(seen.settings.targetLanes).toEqual(["es"])
-    expect(seen.settings.archivedLanes).toEqual([])
-    expect(targetLaneIds(seen)).toEqual(["ln-es"])
+    const lead = await getSettings("dan")
+    expect(lead.settings.targetLanguage).toBe("French")
+    expect(lead.settings.targetLanes).toEqual(["de", "es"])
+    expect(targetLaneIds(lead).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+    const ungrantedLead = await getSettings("erin")
+    expect(targetLaneIds(ungrantedLead).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
+
+    const contributor = await getSettings("carla")
+    expect(contributor.settings.targetLanguage).toBe("")
+    expect(contributor.settings.targetLanes).toEqual(["es"])
+    expect(targetLaneIds(contributor)).toEqual(["ln-es"])
   })
 
   it.each([
     ["dan", "a grant on one lane"],
     ["erin", "no lane grants"],
-  ])("a source-language edit by a lead with %s (%s) keeps the lanes and primary it cannot see", async (username) => {
-    // The reported data loss: Project Info saves the whole echoed blob, and the
-    // language-only diff is admitted at languageEditMinRole 500.
+  ])("a lead's write with %s (%s) keeps the lanes and primary it cannot see", async (username) => {
+    // The reported data loss: Project Info saved the whole echoed blob. The
+    // client now omits the lane keys and the route copies the stored values
+    // back, so nothing the caller could not see is touched. An autopilot-only
+    // diff is admitted at project lead.
     await seed()
     env.LANE_READ_WALL = "1"
-    const res = await echoWrite(username, { sourceLanguage: "Hebrew" })
+    const res = await echoWrite(username, { autopilotEnabled: true })
     expect(res.status).toBe(200)
-    expect(await storedSettings()).toEqual({ ...STORED, sourceLanguage: "Hebrew" })
+    expect(await storedSettings()).toEqual({ ...STORED, autopilotEnabled: true })
   })
 
-  it("a lead still removes and adds the lanes it can see", async () => {
-    // Restoring hidden entries must not freeze the caller's own lanes.
+  it("a lead cannot add or remove lanes through settings, seen or not", async () => {
+    // Lanes are rows (AQU-1595). A body that names targetLanes is refused
+    // before any diff, so the echo can neither drop a hidden lane nor carry a
+    // new one in under a visible edit.
     await seed()
     env.LANE_READ_WALL = "1"
-    expect((await echoWrite("dan", { targetLanes: [] })).status).toBe(200)
-    expect(await storedSettings()).toEqual({ ...STORED, targetLanes: ["de"] })
-
-    expect((await echoWrite("dan", { targetLanes: ["Italian"] })).status).toBe(200)
-    expect(await storedSettings()).toEqual({ ...STORED, targetLanes: ["de", "Italian"] })
+    expect((await echoWrite("dan", { targetLanes: [] })).status).toBe(400)
+    expect((await echoWrite("dan", { targetLanes: ["es", "Italian"] })).status).toBe(400)
+    expect(await storedSettings()).toEqual(STORED)
   })
 
   it("a lead cannot replace a primary language it cannot see", async () => {
     // dan sees "" and may take the project for a source-only one. Setting a
-    // primary here would overwrite French without dan ever having seen it, so
-    // the write is refused rather than dropped without a word.
+    // primary here would overwrite French without dan ever having seen it. The
+    // write is refused rather than dropped without a word — and because the
+    // key is a lane row now, it is refused for every caller (AQU-1595).
     await seed()
     env.LANE_READ_WALL = "1"
     const res = await echoWrite("dan", { targetLanguage: "Spanish" })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(400)
+    expect(await storedSettings()).toEqual(STORED)
+  })
+
+  it("a source-language edit is refused the same way: languages live on the lane rows", async () => {
+    await seed()
+    env.LANE_READ_WALL = "1"
+    const res = await echoWrite("dan", { sourceLanguage: "Hebrew" })
+    expect(res.status).toBe(400)
     expect(await storedSettings()).toEqual(STORED)
   })
 
@@ -194,13 +219,13 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     // response must not hand them to dan: the client keeps it as server truth.
     await seed()
     env.LANE_READ_WALL = "1"
-    const res = await echoWrite("dan", { sourceLanguage: "Hebrew" })
+    const res = await echoWrite("dan", { autopilotEnabled: true })
     expect(res.status).toBe(200)
     const body = (await res.json()) as SettingsBody
     expect(body.settings).toEqual({ ...(await getSettings("dan")).settings })
-    expect(body.settings.targetLanguage).toBe("")
-    expect(body.settings.targetLanes).toEqual(["es"])
-    expect(targetLaneIds(body)).toEqual(["ln-es"])
+    expect(body.settings.targetLanguage).toBe("French")
+    expect(body.settings.targetLanes).toEqual(["de", "es"])
+    expect(targetLaneIds(body).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
   })
 
   it("the 409 body is filtered like the GET, and the retry built on it loses nothing", async () => {
@@ -211,39 +236,43 @@ describe("settings writes behind the lane read wall (AQU-1750)", () => {
     await seed()
     env.LANE_READ_WALL = "1"
     const seen = await getSettings("dan")
-    const edit = { sourceLanguage: "Hebrew" }
-    const res = await patchSettings("dan", { ...seen.settings, ...edit }, 0)
+    const edit = { autopilotEnabled: true }
+    const res = await patchSettings("dan", { ...clientBody(seen.settings), ...edit }, 0)
     expect(res.status).toBe(409)
     const body = (await res.json()) as { current: SettingsBody }
-    expect(body.current.settings.targetLanguage).toBe("")
-    expect(body.current.settings.targetLanes).toEqual(["es"])
-    expect(body.current.settings.archivedLanes).toEqual([])
-    expect(targetLaneIds(body.current)).toEqual(["ln-es"])
+    expect(body.current.settings.targetLanguage).toBe("French")
+    expect(body.current.settings.targetLanes).toEqual(["de", "es"])
+    expect(body.current.settings.archivedLanes).toEqual(["de"])
+    expect(targetLaneIds(body.current).sort()).toEqual(["ln-de", "ln-es", "ln-main"])
     expect(await storedSettings()).toEqual(STORED)
 
-    const retry = await patchSettings("dan", { ...body.current.settings, ...edit }, body.current.version)
+    const retry = await patchSettings("dan", { ...clientBody(body.current.settings), ...edit }, body.current.version)
     expect(retry.status).toBe(200)
     expect(await storedSettings()).toEqual({ ...STORED, ...edit })
   })
 
-  it("a maintainer still sees and writes every lane", async () => {
-    // The wall does not apply at Maintainer+, so nothing is restored: the
-    // owner may delete a lane dan cannot see.
+  it("a maintainer still sees every lane, and its write keeps them", async () => {
+    // The wall does not apply at Maintainer+, so nothing is filtered or
+    // restored. The stored lane keys are kept for the owner too: they are
+    // rows, and the settings write never carries them (AQU-1595).
     await seed()
     env.LANE_READ_WALL = "1"
-    const res = await echoWrite("alice", { targetLanes: ["es"] })
+    const res = await echoWrite("alice", { systemPrompt: "Keep it plain." })
     expect(res.status).toBe(200)
-    expect(await storedSettings()).toEqual({ ...STORED, targetLanes: ["es"] })
+    expect(await storedSettings()).toEqual({ ...STORED, systemPrompt: "Keep it plain." })
     const body = (await res.json()) as SettingsBody
     expect(body.settings.targetLanguage).toBe("French")
+    expect(body.settings.targetLanes).toEqual(["de", "es"])
   })
 
-  it("with the wall off, a lead sees and may remove every lane", async () => {
+  it("with the wall off, a lead sees every lane and its write keeps them too", async () => {
     // Local and e2e run without the wall. Nothing is hidden there, so nothing
-    // may be restored.
+    // is restored; the stored lane keys still come from the row, not the body.
     await seed()
-    const res = await echoWrite("dan", { targetLanes: ["es"] })
+    const seen = await getSettings("dan")
+    expect(seen.settings.targetLanes).toEqual(["de", "es"])
+    const res = await echoWrite("dan", { autopilotEnabled: true })
     expect(res.status).toBe(200)
-    expect(await storedSettings()).toEqual({ ...STORED, targetLanes: ["es"] })
+    expect(await storedSettings()).toEqual({ ...STORED, autopilotEnabled: true })
   })
 })

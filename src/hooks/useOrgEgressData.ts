@@ -14,8 +14,15 @@
 import { useCallback, useEffect, useState } from "react"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
-import { getPortfolio, type PortfolioLane, type PortfolioProject } from "@/lib/frontier/portfolio"
+import {
+  getPortfolio,
+  portfolioSourceLabel,
+  portfolioTargetLabel,
+  type PortfolioLane,
+  type PortfolioProject,
+} from "@/lib/frontier/portfolio"
 import { displayLanes } from "@/components/org/project-lanes"
+import { isHiddenTimelineFile } from "@/lib/parsers/types"
 
 export interface EgressFileRow {
   fileId: string
@@ -83,10 +90,10 @@ function buildLaneOptions(
     const pf = portfolioById.get(p.id)
     for (const l of pf ? displayLanes(pf) : [FALLBACK_DEFAULT_LANE]) {
       if (l.lane === "") {
-        const t = pf?.targetLanguage?.trim()
+        const t = l.name?.trim() || (pf ? portfolioTargetLabel(pf) : "") || ""
         if (t) defaultLabels.add(t)
       } else {
-        named.add(l.lane)
+        named.add(l.name?.trim() || l.lane)
       }
     }
   }
@@ -152,8 +159,8 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
       const projectMeta = new Map<string, EgressProjectMeta>()
       for (const p of projectsRes.projects) {
         const pf = portfolioById.get(p.id)
-        const sourceLanguage = pf?.sourceLanguage?.trim() ?? ""
-        const targetLanguage = pf?.targetLanguage?.trim() ?? ""
+        const sourceLanguage = pf ? portfolioSourceLabel(pf) ?? "" : ""
+        const targetLanguage = pf ? portfolioTargetLabel(pf) ?? "" : ""
         projectMeta.set(p.id, {
           projectId: p.id,
           projectName: p.name,
@@ -163,6 +170,11 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
         })
         const lanes = pf ? displayLanes(pf) : [FALLBACK_DEFAULT_LANE]
         for (const f of p.files ?? []) {
+          // AQU-1566: a cue sheet or a caption track's content is timeline data,
+          // not a file of the project. The files listing the export checks the
+          // selection against no longer returns them, so offering one here
+          // would only report it as missing.
+          if (isHiddenTimelineFile({ role: f.role ?? undefined })) continue
           rows.push({
             fileId: f.id,
             fileName: f.name,

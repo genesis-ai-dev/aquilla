@@ -18,12 +18,16 @@ export type NeonTargetCommand =
   | "backfill-progress"
   | "backfill-activity"
   | "backfill-lanes"
+  | "backfill-lane-batch"
+  | "repair-lane-grants"
   | "verify-lanes"
 
 export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
   if (command === "backfill-activity") return "scripts/neon-backfill-activity.ts"
   if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
+  if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
+  if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
   if (command === "verify-lanes") return "scripts/neon-verify-lanes.ts"
   return "scripts/neon-migrate.ts"
 }
@@ -31,11 +35,12 @@ export function scriptFor(command: NeonTargetCommand): string {
 /**
  * The child's argv, after the runtime. `passthrough` is whatever followed the
  * command on our own command line — `--missing-books`, `--apply`,
- * `--require-complete` — and is meaningful only to the backfill and
- * verify-lanes scripts, which read `process.argv` themselves.
+ * `--require-complete` — and is meaningful only to the backfill, verify-lanes,
+ * and repair-lane-grants scripts, which read `process.argv` themselves.
  */
 export function childArgs(command: NeonTargetCommand, passthrough: readonly string[]): string[] {
   const script = scriptFor(command)
-  const forwardsFlags = command.startsWith("backfill-") || command === "verify-lanes"
+  const forwardsFlags =
+    command.startsWith("backfill-") || command === "verify-lanes" || command === "repair-lane-grants"
   return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

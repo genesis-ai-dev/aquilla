@@ -60,6 +60,7 @@ import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../ser
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
+import { applyTeamMemberLaneGrants, applyTeamProjectLaneGrants } from "../services/lane-grants"
 
 const orgs = new Hono<AuthHonoEnv>()
 
@@ -198,7 +199,7 @@ orgs.get("/", async (c) => {
     : list
   const memberItems = memberships.map((o) => toMemberItem(o, personalId))
 
-  if (!pickerMode || !isPlatformAdminEmail(c.env, user.email)) {
+  if (!pickerMode || !(await isPlatformAdminEmail(c.env, user.email))) {
     return c.json({ orgs: memberItems, nextCursor: null })
   }
 
@@ -300,7 +301,7 @@ orgs.get("/:orgId", async (c) => {
   ).bind(orgId).first<{ id: number; name: string | null }>()
   if (!row) return c.json({ error: "not found" }, 404)
   const membership = await getOrgMemberRole(c.env, orgId, user.id)
-  const platform = isPlatformAdminEmail(c.env, user.email)
+  const platform = await isPlatformAdminEmail(c.env, user.email)
   if (membership == null) {
     if (!platform) return c.json({ error: "forbidden" }, 403)
     return c.json({
@@ -347,7 +348,7 @@ async function resolvePortfolioOrgIds(
   const uniqueOrgIds = fromMemberships
     ? (await listUserOrgs(env, user)).map((org) => org.id)
     : [...new Set(orgIds)]
-  const isAdmin = isPlatformAdminEmail(env, user.email)
+  const isAdmin = await isPlatformAdminEmail(env, user.email)
   if (!isAdmin && !fromMemberships && uniqueOrgIds.length > 0) {
     const placeholders = uniqueOrgIds.map(() => "?").join(", ")
     const allowed = await env.AQUILLA_PG.prepare(
@@ -426,7 +427,7 @@ orgs.get("/:orgId/portfolio", async (c) => {
   // AQU-745: filter to the caller's visible projects (creator/direct/group, or
   // all when Maintainer+/admin) so the org dashboard never leaks project names
   // a regular member has no access to.
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const isAdmin = await isPlatformAdminEmail(c.env, user.email)
   const qRaw = (c.req.query("q") ?? "").trim()
   const q = qRaw.toLowerCase()
   const limitRaw = c.req.query("limit")
@@ -465,7 +466,7 @@ orgs.get("/:orgId/deleted-files", async (c) => {
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const isAdmin = await isPlatformAdminEmail(c.env, user.email)
   const files = await getOrgDeletedFiles(c.env, orgId, { userId: user.id, isAdmin })
   return c.json({ files })
 })
@@ -750,6 +751,11 @@ async function grantGroupMemberOne(
   if (result === "not-org-member") {
     return { ok: false, username, code: "not_org_member", message: "user is not a member of this org" }
   }
+  // AQU-1801: the group_members row opens every project the team is attached
+  // to, but under the lane read wall a below-Maintainer member reads a target
+  // lane only through a grant row — so without this they reach each project
+  // and see no target lane at all, with every indicator still green.
+  await applyTeamMemberLaneGrants(env.AQUILLA_PG, groupId, target.id, addedBy)
   await auditMembershipChange(env, actor, {
     action: "team.member.add",
     where: { scope: "team", orgId, groupId },
@@ -839,7 +845,7 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
   let orgRole = (await getOrgMemberRole(c.env, orgId, user.id)) ?? 0
   const teamRole = (await getTeamMemberRole(c.env, groupId, user.id)) ?? 0
   if (orgRole < ROLE.MAINTAINER && teamRole < ROLE.MAINTAINER) {
-    if (!isPlatformAdminEmail(c.env, user.email)) {
+    if (!(await isPlatformAdminEmail(c.env, user.email))) {
       return c.json({ error: "org or team role >= maintainer required to change team roles" }, 403)
     }
     if (!(await hasActiveElevation(c))) {
@@ -949,7 +955,7 @@ async function resolveOrgWriteRole(
   const user = c.get("user")
   const membership = (await getOrgMemberRole(c.env, orgId, user.id)) ?? 0
   if (membership >= minRole) return membership
-  if (!isPlatformAdminEmail(c.env, user.email)) {
+  if (!(await isPlatformAdminEmail(c.env, user.email))) {
     return c.json({ error: deniedError }, 403)
   }
   if (!(await hasActiveElevation(c))) {
@@ -1223,7 +1229,7 @@ orgs.delete("/:orgId/invites/:token", async (c) => {
   )
   if (typeof callerRole !== "number") return callerRole
 
-  const invite = isAdminActor(c.env, user)
+  const invite = await isAdminActor(c.env, user)
     ? await c.env.AQUILLA_PG.prepare(
         "SELECT role_level, email FROM org_invites WHERE token = ? AND org_id = ? AND used_at IS NULL",
       )
@@ -1453,6 +1459,10 @@ orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), as
   const result = await attachGroupProject(c.env, orgId, groupId, projectId, roleLevel, user.id)
   if (result === "no-project") return c.json({ error: "project not found" }, 404)
   if (result === "cross-org") return c.json({ error: "project is not in this org" }, 409)
+  // AQU-1801: every member of the team reaches this project now, so each one
+  // below Maintainer needs grants on its target lanes (same reason as the
+  // team-member add above).
+  await applyTeamProjectLaneGrants(c.env.AQUILLA_PG, groupId, projectId, user.id)
   await auditMembershipChange(c.env, user, {
     action: "team.project.attach",
     where: { scope: "team", orgId, groupId },
@@ -1476,6 +1486,10 @@ orgs.patch("/:orgId/groups/:groupId/projects/:projectId", zValidator("json", rol
   if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
   const ok = await updateGroupProjectRole(c.env, groupId, projectId, roleLevel)
   if (!ok) return c.json({ error: "attachment not found" }, 404)
+  // AQU-1801: the attachment's new role has to reach the grant rows too, or a
+  // demotion leaves the team still editing and a promotion still read-only.
+  // Only the level moves — the lanes a member already reads are unchanged.
+  await applyTeamProjectLaneGrants(c.env.AQUILLA_PG, groupId, projectId, user.id)
   await auditMembershipChange(c.env, user, {
     action: "team.project.role",
     where: { scope: "team", orgId, groupId },

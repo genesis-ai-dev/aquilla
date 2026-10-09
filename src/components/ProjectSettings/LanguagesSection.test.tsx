@@ -31,9 +31,10 @@ beforeEach(() => {
 })
 
 describe("LanguagesSection", () => {
-  it("renders the default target language read-only", () => {
+  it("lists the project's target language with the other target lanes", () => {
     renderSection({ defaultTargetLanguage: "French" })
-    expect(screen.getByText("French")).toBeTruthy()
+    expect(screen.getByTestId("target-lanes-list").textContent).toContain("French")
+    expect(screen.queryByText("Default target language")).toBeNull()
   })
 
   it("renders the existing lanes list", () => {
@@ -43,16 +44,16 @@ describe("LanguagesSection", () => {
     expect(list.textContent).toContain("fr-BE")
   })
 
-  it("shows an empty state when there are no extra lanes", () => {
-    renderSection({ targetLanes: [] })
+  it("shows an empty state when there are no target lanes", () => {
+    renderSection({ defaultTargetLanguage: "", targetLanes: [] })
     expect(screen.queryByTestId("target-lanes-list")).toBeNull()
-    expect(screen.getByText(/no additional lanes yet/i)).toBeTruthy()
+    expect(screen.getByText(/no target lanes yet/i)).toBeTruthy()
   })
 
   it("rejects an empty lane", async () => {
     const { patch } = renderSection({ targetLanes: [] })
     fireEvent.click(screen.getByTestId("add-target-lang-btn"))
-    await waitFor(() => expect(screen.getByText(/enter a language tag/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/enter a language name/i)).toBeTruthy())
     expect(patch).not.toHaveBeenCalled()
   })
 
@@ -102,7 +103,12 @@ describe("LanguagesSection", () => {
     fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "es" } })
     fireEvent.click(screen.getByTestId("add-target-lang-btn"))
     // AQU-1592: the name is sent only when the user typed one.
-    await waitFor(() => expect(onCreateLane).toHaveBeenCalledWith({ name: "", language: "es", code: null }))
+    await waitFor(() => expect(onCreateLane).toHaveBeenCalledWith({
+        name: "",
+        language: "es",
+        code: null,
+        allowDuplicateName: false,
+      }))
     expect(patch).not.toHaveBeenCalled()
   })
 
@@ -440,6 +446,12 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     expect(screen.getByText("es")).toBeTruthy()
   })
 
+  it("suggests language names when changing a lane's language", () => {
+    renderIdentity()
+    const field = screen.getByTestId("lane-language-lane-yo")
+    expect(field.getAttribute("role")).toBe("combobox")
+  })
+
   it("submits a language edit as a language, not a rename", async () => {
     const { onRenameLane } = renderIdentity()
     const field = screen.getByTestId("lane-language-lane-yo")
@@ -505,6 +517,48 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     expect(screen.getByText(/not a valid language code/i)).toBeTruthy()
   })
 
+  it("creates the first target from a source-only project without patching settings", async () => {
+    const source: ProjectLaneView = {
+      id: "lane-source",
+      role: "source",
+      language: "English",
+      name: null,
+      langCode: null,
+      legacyTag: null,
+      position: 0,
+      archivedAt: null,
+    }
+    const patch = vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))
+    const onCreateLane = vi.fn(async () => "ok" as const)
+    render(
+      <LanguagesSection
+        defaultTargetLanguage="Spanish"
+        targetLanes={[]}
+        canEdit
+        disabledTooltip={null}
+        patch={patch}
+        laneRecords={[source]}
+        onRenameLane={vi.fn(async () => "ok" as const)}
+        onCreateLane={onCreateLane}
+        onSetLaneArchived={vi.fn(async () => true)}
+      />,
+    )
+    expect(screen.queryByText("Spanish")).toBeNull()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "French" },
+    })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() =>
+      expect(onCreateLane).toHaveBeenCalledWith({
+        name: "",
+        language: "French",
+        code: null,
+        allowDuplicateName: false,
+      }),
+    )
+    expect(patch).not.toHaveBeenCalled()
+  })
+
   it("creates a lane from a language alone, submitting no name", async () => {
     const { onCreateLane } = renderIdentity()
     fireEvent.change(screen.getByTestId("add-target-lang-input"), {
@@ -514,7 +568,12 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     // name: "" — the server stores null, so the lane shows its language. A
     // derived "Swahili" name here is what AQU-1585 is about.
     await waitFor(() =>
-      expect(onCreateLane).toHaveBeenCalledWith({ name: "", language: "Swahili", code: null }),
+      expect(onCreateLane).toHaveBeenCalledWith({
+        name: "",
+        language: "Swahili",
+        code: null,
+        allowDuplicateName: false,
+      }),
     )
   })
 
@@ -551,8 +610,20 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
         name: "",
         language: "Spanish",
         code: "es-MX",
+        allowDuplicateName: false,
       }),
     )
+  })
+
+  it("fills the empty code box with the code derived from the language name (AQU-1792)", async () => {
+    renderIdentity()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "Turkana" },
+    })
+    fireEvent.click(screen.getByTestId("add-lane-advanced-toggle"))
+    const code = screen.getByTestId("add-lane-code-input") as HTMLInputElement
+    expect(code.value).toBe("")
+    await waitFor(() => expect(code.placeholder).toBe("tuv"))
   })
 
   it("reports a malformed code from the create path", async () => {
@@ -649,5 +720,130 @@ describe("LanguagesSection — the former default lane archives like any other (
     expect(button.hasAttribute("disabled")).toBe(true)
     await expectTooltip(button, /project lead/i)
 
+  })
+})
+
+// AQU-1784: two lanes may read the same string — the same language with no
+// name override on either, or the same name typed twice. The switcher numbers
+// them; this screen has to say the same thing, and it must let a maintainer
+// deliberately create the second one instead of refusing it after the fact.
+describe("LanguagesSection — lanes that read the same (AQU-1784)", () => {
+  const TSHANGLA_A: ProjectLaneView = {
+    id: "lane-a",
+    role: "target",
+    language: "Tshangla",
+    name: null,
+    langCode: null,
+    legacyTag: "Tshangla",
+    position: 1,
+    archivedAt: null,
+  }
+  const TSHANGLA_B: ProjectLaneView = { ...TSHANGLA_A, id: "lane-b", legacyTag: "a3f09c1e", position: 2 }
+  const SOURCE: ProjectLaneView = {
+    id: "lane-source",
+    role: "source",
+    language: "English",
+    name: null,
+    langCode: null,
+    legacyTag: null,
+    position: 0,
+    archivedAt: null,
+  }
+
+  function renderLanes(
+    lanes: ProjectLaneView[],
+    onCreateLane = vi.fn(async () => "ok" as const),
+  ) {
+    render(
+      <LanguagesSection
+        defaultTargetLanguage="Tshangla"
+        targetLanes={["Tshangla"]}
+        canEdit
+        disabledTooltip={null}
+        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
+        laneRecords={lanes}
+        onRenameLane={vi.fn(async () => "ok" as const)}
+        onCreateLane={onCreateLane}
+        onSetLaneArchived={vi.fn(async () => true)}
+      />,
+    )
+    return { onCreateLane }
+  }
+
+  it("says how the numbered lane is shown, and nothing on the one that reads plainly", () => {
+    // The first colliding lane keeps the bare label, which its own language
+    // field already shows — so only the suffixed one carries the note.
+    renderLanes([SOURCE, TSHANGLA_A, TSHANGLA_B])
+    expect(screen.queryByTestId("lane-shown-as-lane-a")).toBeNull()
+    expect(screen.getByTestId("lane-shown-as-lane-b").textContent).toBe('Shown as "Tshangla · 2"')
+  })
+
+  it("prefers a colliding lane's code override to its position", () => {
+    renderLanes([SOURCE, TSHANGLA_A, { ...TSHANGLA_B, langCode: "tsj" }])
+    expect(screen.getByTestId("lane-shown-as-lane-b").textContent).toBe('Shown as "Tshangla · tsj"')
+  })
+
+  it("says nothing on a lane whose label is already unique", () => {
+    renderLanes([SOURCE, TSHANGLA_A, { ...TSHANGLA_B, language: "Dzongkha" }])
+    expect(screen.queryByTestId("lane-shown-as-lane-a")).toBeNull()
+    expect(screen.queryByTestId("lane-shown-as-lane-b")).toBeNull()
+  })
+
+  it("warns inline while a duplicate name is typed, before anything is saved", () => {
+    const { onCreateLane } = renderLanes([SOURCE, TSHANGLA_A])
+    expect(screen.queryByTestId("add-lane-duplicate-notice")).toBeNull()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Tshangla" } })
+    expect(screen.getByTestId("add-lane-duplicate-notice").textContent).toContain("Tshangla")
+    expect(onCreateLane).not.toHaveBeenCalled()
+  })
+
+  it("still adds the warned duplicate, telling the server it was warned about", async () => {
+    const { onCreateLane } = renderLanes([SOURCE, TSHANGLA_A])
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Tshangla" } })
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() =>
+      expect(onCreateLane).toHaveBeenCalledWith({
+        name: "",
+        language: "Tshangla",
+        code: null,
+        allowDuplicateName: true,
+      }),
+    )
+  })
+
+  it("does not warn, or waive the refusal, for a name that is not taken", async () => {
+    const { onCreateLane } = renderLanes([SOURCE, TSHANGLA_A])
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Dzongkha" } })
+    expect(screen.queryByTestId("add-lane-duplicate-notice")).toBeNull()
+    fireEvent.click(screen.getByTestId("add-target-lang-btn"))
+    await waitFor(() =>
+      expect(onCreateLane).toHaveBeenCalledWith({
+        name: "",
+        language: "Dzongkha",
+        code: null,
+        allowDuplicateName: false,
+      }),
+    )
+  })
+
+  it("compares what the lane will SHOW, so a name override decides the collision", () => {
+    // A typed name is what the lane displays, so "Tshangla" as the language
+    // with a different name does not collide, and a name matching an existing
+    // lane's display does.
+    renderLanes([SOURCE, TSHANGLA_A])
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Tshangla" } })
+    fireEvent.change(screen.getByTestId("add-lane-name-input"), { target: { value: "Tshangla East" } })
+    expect(screen.queryByTestId("add-lane-duplicate-notice")).toBeNull()
+    fireEvent.change(screen.getByTestId("add-lane-name-input"), { target: { value: "tshangla" } })
+    expect(screen.getByTestId("add-lane-duplicate-notice")).toBeTruthy()
+  })
+
+  it("does not warn about an ARCHIVED lane of the same name", () => {
+    // Restoring it is what the maintainer wants, so the server's refusal
+    // stands and this screen does not waive it.
+    renderLanes([SOURCE, { ...TSHANGLA_A, archivedAt: "2026-10-01T00:00:00Z" }, TSHANGLA_B])
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Tshangla" } })
+    // lane-b is active and reads the same, so the notice is about lane-b…
+    expect(screen.getByTestId("add-lane-duplicate-notice")).toBeTruthy()
   })
 })

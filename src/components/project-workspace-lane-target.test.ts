@@ -12,12 +12,13 @@ describe("resolveActiveTargetLanguage (AQU-602)", () => {
     expect(resolveActiveTargetLanguage("fr-CA", "fr-BE", { targetLanguage: "French" })).toBe("fr-CA")
   })
 
-  it("uses only the project target for the default lane, ignoring the file (AQU-583)", () => {
-    // The per-file target is an import-time snapshot. On the default lane the
-    // project setting is authoritative: it wins over any file value...
-    expect(resolveActiveTargetLanguage("", "fr", { targetLanguage: "es" })).toBe("es")
-    expect(resolveActiveTargetLanguage("", null, { targetLanguage: "es" })).toBe("es")
-    expect(resolveActiveTargetLanguage("", undefined, { targetLanguage: "es" })).toBe("es")
+  it("ignores the file stamp and settings for the default lane when there is no row (AQU-1595)", () => {
+    // The per-file target is an import-time snapshot, and the settings key is
+    // not the lane. With no row, `''` names no language — so the caller shows
+    // "Set target language" rather than either of those strings.
+    expect(resolveActiveTargetLanguage("", "fr", { targetLanguage: "es" })).toBeUndefined()
+    expect(resolveActiveTargetLanguage("", null, { targetLanguage: "es" })).toBeUndefined()
+    expect(resolveActiveTargetLanguage("", undefined, { targetLanguage: "es" })).toBeUndefined()
   })
 
   it("returns undefined when the project has no target, even if a file carries one (AQU-583)", () => {
@@ -88,8 +89,14 @@ describe("resolveActiveTargetLanguage — the language comes from the lane row (
         { id: "defa0001", language: "French", name: null, langCode: null, legacyTag: "" },
       ]),
     ).toBe("French")
-    // No rows: the former default lane still answers from settings.
-    expect(resolveActiveTargetLanguage("", "fr", { targetLanguage: "es" })).toBe("es")
+    // No rows: settings are not the default lane's language.
+    expect(resolveActiveTargetLanguage("", "fr", { targetLanguage: "es" })).toBeUndefined()
+    // An un-backfilled row answers from its name, not from settings.
+    expect(
+      resolveActiveTargetLanguage("", "fr", { targetLanguage: "es" }, [
+        { id: "defa0001", language: null, name: "Nuer", langCode: null, legacyTag: "" },
+      ]),
+    ).toBe("Nuer")
   })
 
   // AGENTS.md rule 12: run the real PRODUCER's output through the consumer.
@@ -165,8 +172,17 @@ describe("laneTargetLanguages — the Import dialog's translation check (AQU-136
     ])
   })
 
-  it("falls back to the tag only when there are no rows at all", () => {
+  it("uses a non-empty tag when no row matches, and a row's name rather than settings", () => {
+    // `''` is not a language, and settings are not consulted. `tt` has no row,
+    // so the tag itself is the language a pre-lane server can still name.
     expect(laneTargetLanguages(["", "tt"], "tt", { targetLanguage: "Siberian Tatar" }, {})).toEqual([
+      { language: "tt", label: null, active: true },
+    ])
+    expect(
+      laneTargetLanguages(["", "tt"], "tt", { targetLanguage: "Spanish" }, {}, [
+        { id: "defl0001", role: "target", language: null, name: "Siberian Tatar", langCode: null, legacyTag: "" },
+      ]),
+    ).toEqual([
       { language: "Siberian Tatar", label: null, active: false },
       { language: "tt", label: null, active: true },
     ])

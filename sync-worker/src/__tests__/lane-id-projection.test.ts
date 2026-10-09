@@ -23,6 +23,7 @@ import { fullProgressRecomputeStmts } from '../events/progress-projection'
 import { laneIdResolveBindingBinds, laneIdResolveBindingSql } from '../events/lane-id-sql'
 import type { EventKind } from '../events/types'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
+import { handleCellEvent } from '../events/handlers/cell-events'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
 const PROJECT = 'proj-lane-id'
@@ -89,8 +90,13 @@ async function replayViaRebuild(t: TestDb): Promise<void> {
 
 async function laneIdOf(t: TestDb, side: 'source' | 'target', targetLang: string): Promise<string | null> {
   const r = await t.pg.query<{ lane_id: string | null }>(
-    `SELECT lane_id FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND side = $3 AND target_lang = $4`,
+    `SELECT c.lane_id FROM cells c
+       JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = $1 AND c.file_id = $2 AND c.side = $3
+        AND (
+          ($3 = 'source' AND l.role = 'source')
+          OR ($3 = 'target' AND l.role = 'target' AND l.legacy_tag IS NOT DISTINCT FROM $4)
+        )`,
     [PROJECT, FILE, side, targetLang],
   )
   return r.rows[0]?.lane_id ?? null
@@ -152,10 +158,7 @@ describe('lane_id resolution — canonical per-event projection', () => {
     await t.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
     await expect(
       t.pg.query(
-        `INSERT INTO cells
-           (project_id, file_id, cell_id, side, target_lang, value, event_id,
-            last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
-         VALUES ($1, $2, 'cell-1', 'target', '', 'Coucou', 'tc-raw', 'alice', 1, 0, 1, 'h', NULL)
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, word_count, content_hash, lane_id) VALUES ($1, $2, 'cell-1', 'target', 'Coucou', 'tc-raw', 'alice', 1, 0, 1, 'h', NULL)
          ON CONFLICT (project_id, file_id, cell_id, lane_id) DO UPDATE SET
            value   = excluded.value,
            lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
@@ -237,14 +240,15 @@ describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
       }),
     ])
 
-    const r = await t.pg.query<{ target_lang: string; lane_id: string | null }>(
-      `SELECT target_lang, lane_id FROM cell_validators
-        WHERE project_id = $1 ORDER BY target_lang`,
+    const r = await t.pg.query<{ lane_id: string | null }>(
+      `SELECT lane_id FROM cell_validators
+        WHERE project_id = $1 ORDER BY lane_id`,
       [PROJECT],
     )
+    // The projection column is gone. The lane id is the identity.
     expect(r.rows).toEqual([
-      { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
-      { target_lang: 'es', lane_id: ES_LANE },
+      { lane_id: DEFAULT_TARGET_LANE },
+      { lane_id: ES_LANE },
     ])
   })
 
@@ -253,20 +257,18 @@ describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
     await project(t, [SOURCE, LEGACY_TARGET, ES_TARGET])
     for (const s of fullProgressRecomputeStmts(t.db, PROJECT, FILE, 5000)) await s.run()
 
-    const r = await t.pg.query<{ target_lang: string; lane_id: string | null }>(
-      `SELECT DISTINCT target_lang, lane_id FROM file_section_progress
+    const r = await t.pg.query<{ lane_id: string | null }>(
+      `SELECT DISTINCT lane_id FROM file_section_progress
         WHERE project_id = $1 ORDER BY lane_id`,
       [PROJECT],
     )
     // AQU-1599: one row set per row of `lanes`, the SOURCE lane included — it
-    // carries the lane-independent numbers. Ordered by lane_id because
-    // `target_lang` no longer identifies a row: the source lane's `legacy_tag`
-    // is NULL, so its row carries '' exactly as the default lane's does, which
-    // is why every reader resolves a lane id instead of matching the column.
+    // carries the lane-independent numbers. Identity is lane_id; the
+    // projection target_lang column was dropped in 0155.
     expect(r.rows).toEqual([
-      { target_lang: '', lane_id: SOURCE_LANE },
-      { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
-      { target_lang: 'es', lane_id: ES_LANE },
+      { lane_id: SOURCE_LANE },
+      { lane_id: DEFAULT_TARGET_LANE },
+      { lane_id: ES_LANE },
     ])
   })
 })
@@ -298,12 +300,117 @@ describe('lane_id composite FK (slice 8)', () => {
     await seedLanes(t)
     await expect(
       t.pg.query(
-        `INSERT INTO cells
-           (project_id, file_id, cell_id, side, target_lang, value, event_id,
-            last_editor, last_edit_at, validated, word_count, content_hash, lane_id)
-         VALUES ($1, $2, 'ghost', 'target', '', 'x', 'e-ghost', 'alice', 1, 0, 1, 'h', 'no-such-lane')`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, word_count, content_hash, lane_id) VALUES ($1, $2, 'ghost', 'target', 'x', 'e-ghost', 'alice', 1, 0, 1, 'h', 'no-such-lane')`,
         [PROJECT, FILE],
       ),
     ).rejects.toThrow(/foreign key constraint/i)
+  })
+})
+
+describe('default target write creates the blank bridge (AQU-1594)', () => {
+  const CLAIMS = { username: 'alice', userId: 1, role: 600, projectId: PROJECT, fileId: FILE }
+  let serverSeq = 0
+
+  function commit(
+    id: string,
+    opts: { targetLang?: string; parentId?: string | null } = {},
+  ) {
+    return {
+      event: {
+        id,
+        schemaVersion: 1 as const,
+        kind: 'target.cell.commit' as const,
+        projectId: PROJECT,
+        fileId: FILE,
+        cellId: 'cell-1',
+        parentId: opts.parentId ?? null,
+        payload:
+          opts.targetLang === undefined
+            ? { value: 'Bonjour' }
+            : { value: 'Hola', targetLang: opts.targetLang },
+        clientTs: 1,
+      },
+      claims: CLAIMS,
+    } as never
+  }
+
+  async function write(id: string, opts: { targetLang?: string; parentId?: string | null } = {}) {
+    await t.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+    serverSeq += 1
+    const result = handleCellEvent(t.db, commit(id, opts), 5_000, {
+      serverSeq,
+      updateProjection: true,
+      deferFileCounters: true,
+    })
+    await t.db.batch(result.stmts)
+  }
+
+  async function targetLanes() {
+    return t.pg.query<{ id: string; legacy_tag: string | null; language: string | null }>(
+      `SELECT id, legacy_tag, language FROM lanes
+        WHERE project_id = $1 AND role = 'target'
+        ORDER BY legacy_tag`,
+      [PROJECT],
+    )
+  }
+
+  it('creates one blank lane on a default commit, and a second commit does not add another', async () => {
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag)
+       VALUES ('src00001', $1, 'source', 'en', NULL)`,
+      [PROJECT],
+    )
+    await write('tc-1')
+    const created = await targetLanes()
+    expect(created.rows).toHaveLength(1)
+    expect(created.rows[0]?.legacy_tag).toBe('')
+    expect(await laneIdOf(t, 'target', '')).toBe(created.rows[0]?.id)
+
+    await write('tc-2', { parentId: 'tc-1' })
+    const again = await targetLanes()
+    expect(again.rows).toEqual(created.rows)
+  })
+
+  it('does not create a blank lane when the write names an existing tagged lane', async () => {
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag) VALUES
+         ('src00001', $1, 'source', 'en', NULL),
+         ('swlane01', $1, 'target', 'sw', 'sw')`,
+      [PROJECT],
+    )
+    await write('tc-sw', { targetLang: 'sw' })
+    const lanes = await targetLanes()
+    expect(lanes.rows.map((row) => row.legacy_tag)).toEqual(['sw'])
+    expect(await laneIdOf(t, 'target', 'sw')).toBe('swlane01')
+  })
+
+  it('does not insert a blank lane when a tagged target lane already exists', async () => {
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag) VALUES
+         ('src00001', $1, 'source', 'en', NULL),
+         ('swlane01', $1, 'target', 'sw', 'sw')`,
+      [PROJECT],
+    )
+    await expect(write('tc-sw-default')).rejects.toThrow(/not-null constraint/i)
+    const lanes = await targetLanes()
+    expect(lanes.rows.map((row) => row.legacy_tag)).toEqual(['sw'])
+    const cells = await t.pg.query(
+      `SELECT cell_id FROM cells WHERE project_id = $1 AND side = 'target'`,
+      [PROJECT],
+    )
+    expect(cells.rows).toEqual([])
+  })
+
+  it('keeps an existing blank lane, including its tag and language', async () => {
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag) VALUES
+         ('src00001', $1, 'source', 'en', NULL),
+         ('keepme01', $1, 'target', 'Spanish', '')`,
+      [PROJECT],
+    )
+    await write('tc-keep')
+    const lanes = await targetLanes()
+    expect(lanes.rows).toEqual([{ id: 'keepme01', legacy_tag: '', language: 'Spanish' }])
+    expect(await laneIdOf(t, 'target', '')).toBe('keepme01')
   })
 })

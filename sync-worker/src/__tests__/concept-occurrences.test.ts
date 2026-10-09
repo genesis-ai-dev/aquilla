@@ -101,6 +101,36 @@ describe("GET concept occurrences", () => {
     ])
   })
 
+  // AQU-1566: a promoted caption keeps its cues in a deleted staging file, and
+  // a caption track or cue sheet is a hidden copy of text that lives elsewhere.
+  // Neither is a place a term occurs.
+  it("does not count a term in a deleted or hidden timeline file", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        { id: "file-x", project_id: PROJECT, name: "Episode", kind: "srt", event_id: "e-f1" },
+        { id: "staged", project_id: PROJECT, name: "captions.srt", kind: "srt", role: "timeline-content",
+          anchor_file_id: "file-x", event_id: "e-f2", deleted_at: 5 },
+        { id: "cues", project_id: PROJECT, name: "Episode audio", kind: "vtt", role: "audio-cues",
+          anchor_file_id: "file-x", event_id: "e-f3" },
+      ],
+      cells: [
+        cell({ cell_id: "c1", side: "source", value: "by grace alone" }),
+        cell({ cell_id: "q1", side: "source", value: "by grace alone", file_id: "staged" }),
+        cell({ cell_id: "q2", side: "source", value: "by grace alone", file_id: "cues" }),
+      ],
+      concepts: [{
+        concept_id: "c1", project_id: PROJECT, source_term: "grace",
+        renderings: [{ rendering: "favor", status: "preferred" }], status: "active",
+        case_sensitive: 0, match_options: null, created_at: 1, updated_at: 1,
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: PROJECT })
+    const res = await get(db, `/api/v1/projects/${PROJECT}/concepts/c1/occurrences`, token)
+    const page = parseTermOccurrencePage(await res.json())
+    expect(page!.total).toBe(1)
+    expect(page!.occurrences.map((o) => o.cellId)).toEqual(["c1"])
+  })
+
   it("keeps pointed and wildcard hits that full-text search would drop", async () => {
     const pointed = "\u05D3\u05BC\u05B8\u05D1\u05B8\u05E8"
     const bare = "\u05D3\u05D1\u05E8"

@@ -4,14 +4,18 @@
  * Full journey, not a smoke test. Alice owns the project. Bob is an org
  * member she staffs as a contributor on the second lane only.
  *
- *   1. Alice translates the default lane, then adds a second lane.
+ *   1. Alice translates her first lane (fr), then adds a second lane.
  *   2. She staffs Bob on that lane from the project overview.
  *   3. Bob's switcher offers only that lane, and settings plus the cells
  *      read do too.
- *   4. A commit and a validation aimed at the default lane are rejected.
+ *   4. A commit and a validation aimed at Alice's lane are rejected.
  *      The staffed lane accepts a translation and a validation.
  *   5. The two lanes keep their own text and validation. A source edit is
  *      shared, and each lane's existing translation goes stale on its own.
+ *
+ * AQU-1594: a new project's first target lane is tagged with its language
+ * ("fr"), not the blank default tag, and a lane added from Languages is a lane
+ * row only — it is not mirrored into `settings.targetLanes`.
  */
 
 import { randomUUID } from "node:crypto"
@@ -91,7 +95,7 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   await expect(bobWs.laneSwitcher()).toBeVisible()
   await bobWs.laneSwitcher().click()
   await expect(bob.getByTestId("lane-option-es")).toBeVisible()
-  await expect(bob.getByTestId("lane-option-")).toHaveCount(0)
+  await expect(bob.getByTestId("lane-option-fr")).toHaveCount(0)
   await expect(bob.getByTestId("add-lane")).toHaveCount(0)
   await bob.keyboard.press("Escape")
   await expect(bobWs.cellRow(0)).not.toContainText(frenchText)
@@ -99,11 +103,13 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   const bobJwt = await jwtFor("bob")
   const aliceJwt = await jwtFor("alice")
   const bobSettings = await readProjectSettings(bobJwt, projectId)
-  const aliceSettings = await readProjectSettings(aliceJwt, projectId)
-  expect(aliceSettings.targetLanguage).toBe("fr")
+  // Languages are lane rows (AQU-1594 / AQU-1595): the settings blob carries
+  // none, so Alice's lanes are read from the rows. Bob's lane is checked there
+  // below. The settings blob must still not hand him Alice's lane.
+  const aliceTargets = (await readProjectLanes(aliceJwt, projectId)).filter((lane) => lane.role === "target")
+  expect(aliceTargets.map((lane) => lane.legacyTag ?? "")).toEqual(expect.arrayContaining(["fr", "es"]))
   expect(bobSettings.targetLanguage ?? "").toBe("")
   const bobLaneLabels = Array.isArray(bobSettings.targetLanes) ? bobSettings.targetLanes : []
-  expect(bobLaneLabels).toContain("es")
   expect(bobLaneLabels).not.toContain("fr")
   const bobTargets = (await readProjectLanes(bobJwt, projectId)).filter((lane) => lane.role === "target")
   expect(bobTargets.length).toBeGreaterThan(0)
@@ -136,7 +142,7 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
           parentId: randomUUID(),
           kind: "target.cell.commit",
           author: "bob",
-          payload: { value: forgedText },
+          payload: { value: forgedText, targetLang: "fr" },
           clientTs: Date.now(),
         },
         {
@@ -148,7 +154,7 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
           parentId: randomUUID(),
           kind: "cell.validate",
           author: "bob",
-          payload: {},
+          payload: { targetLang: "fr" },
           clientTs: Date.now(),
         },
       ],
@@ -172,7 +178,7 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
 
   await alice.goto(`/project/${projectId}/editor/file/${fileId}`)
   await aliceWs.waitForEditor()
-  if ((await aliceWs.readActiveLane()) !== "") await aliceWs.switchLane("")
+  if ((await aliceWs.readActiveLane()) !== "fr") await aliceWs.switchLane("fr")
   await expect(aliceWs.cellRow(0)).toContainText(frenchText, { timeout: 10_000 })
   expect(await aliceWs.readTargetText(0)).not.toContain(spanishText)
   // Alice's own translation auto-validates on commit. Bob's validation of the
@@ -198,7 +204,7 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   await sourceEditor.blur()
   await expect(aliceWs.cellRow(0)).toContainText(nextSource, { timeout: 10_000 })
   await expect(aliceWs.cellRow(0).getByTestId("stale-source-indicator")).toBeVisible({ timeout: 10_000 })
-  await aliceWs.switchLane("")
+  await aliceWs.switchLane("fr")
   await expect(aliceWs.cellRow(0)).toContainText(nextSource, { timeout: 10_000 })
   await expect(aliceWs.cellRow(0)).toContainText(frenchText)
   await expect(aliceWs.cellRow(0).getByTestId("stale-source-indicator")).toBeVisible({ timeout: 10_000 })

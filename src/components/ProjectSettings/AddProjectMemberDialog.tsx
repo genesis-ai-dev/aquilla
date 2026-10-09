@@ -7,6 +7,8 @@ import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { InviteLinkTab } from "@/components/ProjectMembersPage"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
+import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
+import type { MemberLaneAccess } from "@/lib/lanes/lane-access-choice"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
@@ -111,6 +113,7 @@ export function AddProjectMemberDialog({
     [visibleOrgMembers, directGrantUserIds],
   )
 
+  const { lanes: targetLanes } = useCurrentTargetLanes(open ? projectId : null)
   const grantableRoles = useMemo(
     () => grantableProjectRoles(callerLevel),
     [callerLevel],
@@ -120,8 +123,16 @@ export function AddProjectMemberDialog({
     scopePath?.find((crumb) => crumb.type === "project" && !crumb.hidden)?.name,
   )
 
-  const handleAddMany = useCallback(async (usernames: string[], role: number) => {
-    const results = await addMany(usernames.map((username) => ({ username, role })))
+  const handleAddMany = useCallback(async (
+    usernames: string[],
+    role: number,
+    laneAccess?: MemberLaneAccess,
+  ) => {
+    const results = await addMany(usernames.map((username) => ({
+      username,
+      role,
+      ...(laneAccess ? { laneAccess } : {}),
+    })))
     return results.map((r) => ({
       username: r.username,
       ok: r.ok,
@@ -170,8 +181,9 @@ export function AddProjectMemberDialog({
               roleOptions={grantableRoles}
               defaultRole={ROLE.CONTRIBUTOR}
               grantScope={{ kind: "project", projectName, lanes: "all" }}
-              onAdd={async (usernames, role) => {
-                const outcomes = await handleAddMany(usernames, role)
+              targetLanes={targetLanes}
+              onAdd={async (usernames, role, laneAccess) => {
+                const outcomes = await handleAddMany(usernames, role, laneAccess)
                 if (outcomes.some((o) => o.ok)) onAdded?.()
                 if (outcomes.every((o) => o.ok)) onOpenChange(false)
                 return outcomes

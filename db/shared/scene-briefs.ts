@@ -15,6 +15,7 @@
 // from either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
+import { targetLaneIdSql, wireLegacyTagSql } from "./lane-sql"
 import { liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
 
@@ -223,7 +224,7 @@ function rowToBrief(r: SceneBriefRow): SceneBrief {
   }
 }
 
-const BRIEF_COLS = `id, project_id, file_id, start_cell_id, end_cell_id, target_lang, lane_id,
+const BRIEF_COLS = `id, project_id, file_id, start_cell_id, end_cell_id, ${wireLegacyTagSql("scene_briefs")} AS target_lang, lane_id,
   construal, ambiguity_register, l1_summary, l1_generated_at, l1_model_id, status,
   human_edited, stale_since, stale_reason, provenance, created_by, reviewed_by,
   version, created_at, updated_at`
@@ -266,16 +267,17 @@ export async function proposeSceneBrief(
   })
   if (err) return { status: "validation_failed", message: err.message }
 
-  // AQU-1610: the lane is resolved to its id once, here; the tag is only
-  // what the un-dropped target_lang column stores.
+  // AQU-1610: the lane is resolved to its id once, here. The wire tag
+  // comes back from lanes.legacy_tag. The projection target_lang column
+  // is left at its default (AQU-1611b).
   const lane = await resolveLane(db, input.projectId, input)
   const row = await db
     .prepare(
       `INSERT INTO scene_briefs
-          (id, project_id, file_id, start_cell_id, end_cell_id, target_lang,
+          (id, project_id, file_id, start_cell_id, end_cell_id,
            construal, ambiguity_register, l1_summary, l1_generated_at,
            l1_model_id, status, provenance, created_by, lane_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 'proposed', ?::jsonb, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, 'proposed', ?::jsonb, ?, ${lane.laneId ? "?" : targetLaneIdSql("?", "?")})
        RETURNING ${BRIEF_COLS}`,
     )
     .bind(
@@ -284,7 +286,6 @@ export async function proposeSceneBrief(
       input.fileId,
       input.startCellId,
       input.endCellId,
-      lane.targetLang,
       input.construal,
       // postgres.js infers both cast parameters as jsonb and applies its JSON
       // serializer. Keep them structured here: pre-stringifying would store
@@ -296,7 +297,7 @@ export async function proposeSceneBrief(
       input.l1ModelId ?? null,
       input.provenance ?? null,
       input.createdBy ?? null,
-      lane.laneId,
+      ...(lane.laneId ? [lane.laneId] : [input.projectId, lane.targetLang]),
     )
     .first<SceneBriefRow>()
   if (!row) return { status: "validation_failed", message: "failed to insert scene brief" }
@@ -359,7 +360,7 @@ export async function listSceneBriefsByRun(
           .bind(projectId, runId)
       : db
           .prepare(
-            `SELECT ${BRIEF_COLS}
+            `SELECT *
                FROM (
                  SELECT ${BRIEF_COLS} FROM scene_briefs
                   WHERE project_id = ? AND provenance ->> 'runId' = ?

@@ -9,6 +9,7 @@ import { assertSafeDeploymentArtifacts } from "./verify-deployment-artifacts.mjs
 
 import { cleanupStalePreviews } from "./cloudflare-preview-cleanup.mjs"
 import { commentOnPreview } from "./cloudflare-preview-comment.mjs"
+import { hostedPosthog, hostedPosthogEnv } from "./hosted-posthog.mjs"
 
 export const PREVIEW_WORKERS = {
   web: "aquilla-web-preview",
@@ -41,6 +42,8 @@ export function previewConfig(surface, { cwd, urls = {} }) {
   config.previews.version_metadata = { binding: "CF_VERSION_METADATA" }
   config.previews.vars = {
     ENVIRONMENT: "development",
+    POSTHOG_HOST: hostedPosthog.ingestHost,
+    POSTHOG_KEY: hostedPosthog.projectToken,
     DEPLOYMENT_WORKER_NAME: name,
     BASE_URL: urls.web ?? UNREADY,
     // AQU-730 lane wall, on as it is for the development Workers whose rows
@@ -142,7 +145,7 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
     await deploy("auth")
     await deploy("sync")
     const buildEnv = {
-      ...env,
+      ...hostedPosthogEnv(env),
       VITE_AUTH_BASE: `${urls.auth}/identity`,
       VITE_CHAT_BASE: `${urls.auth}/chat`,
       VITE_SYNC_WORKER_HOST: `${new URL(urls.sync).host}/sync`,

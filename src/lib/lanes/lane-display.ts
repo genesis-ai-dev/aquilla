@@ -18,12 +18,11 @@
  * label. Nothing can drift if nothing derived is stored — so the derivation
  * lives here, on the read path, and every reader goes through it.
  *
- * MIGRATION FALLBACK: rows that predate migration 0152 carry their label in
- * `name` and a write-time-derived code in `langCode`, with `language` NULL.
- * `laneLanguage` therefore falls back to `name`, and a stored `langCode` is
- * honoured as an override. The batch backfill (AQU-1616) is what fills
- * `language` and clears the names and codes that were derived; until it runs,
- * these fallbacks are what make an un-backfilled row read correctly.
+ * Rows that predate migration 0152 carry their label in `name` and a
+ * write-time-derived code in `langCode`, with `language` NULL. `laneLanguage`
+ * therefore falls back to `name`, then (when a context was passed) the tag and
+ * the code. It does not read project settings. The batch backfill (AQU-1616)
+ * fills `language`; until it runs, the name is what an un-backfilled row says.
  */
 
 import { BLANK_LANE_PLACEHOLDER, codeForLanguageLabel, SOURCE_LANE_PLACEHOLDER } from "./backfill-plan"
@@ -43,8 +42,8 @@ export interface LaneIdentity {
 }
 
 /**
- * Project settings, consulted only by the migration fallback inside
- * {@link laneLanguage}. Callers pass the object; they do not read the keys.
+ * Kept so existing callers still type-check. {@link laneLanguage} does not
+ * read these keys (AQU-1595). Backfill code reads them on its own.
  */
 export interface LaneLanguageSettings {
   sourceLanguage?: unknown
@@ -78,10 +77,10 @@ function usableLanguage(value: unknown): string | null {
 /**
  * The language this lane translates into, as the user typed it.
  *
- * A typed `language` wins, and the migration fallback never overrides it.
- * When `language` is null the source lane and the `legacy_tag ''` lane may
- * still answer from project settings, then the name → tag → code chain. An
- * 8-hex lane id is never a language. Returns "" when nothing names one.
+ * A typed `language` wins. When `language` is null the name → tag → code
+ * chain answers. Project settings are not consulted: a null `language` does
+ * not read `settings.sourceLanguage` or `settings.targetLanguage`. An 8-hex
+ * lane id is never a language. Returns "" when nothing names one.
  *
  * Without `context`, this is the name fallback alone (display and code
  * derivation). Tag and code are consulted only when the caller passed a
@@ -92,22 +91,7 @@ export function laneLanguage(lane: LaneIdentity, context?: LaneLanguageContext):
   const typed = usableLanguage(lane.language)
   if (typed) return typed
 
-  const role = lane.role ?? context?.role
   const legacyTag = context?.legacyTag
-
-  // MIGRATION FALLBACK (AQU-1616 / removed by AQU-1595): an unbackfilled row
-  // has `language` NULL. Until the backfill runs, the source lane still
-  // answers with settings.sourceLanguage and the former default lane
-  // (legacy_tag '') still answers with settings.targetLanguage. AQU-1595
-  // deletes this branch. It runs before the name → tag → code chain, and it
-  // does not apply to any other lane.
-  if (role === "source") {
-    const fromSettings = usableLanguage(context?.settings?.sourceLanguage)
-    if (fromSettings) return fromSettings
-  } else if (legacyTag === "") {
-    const fromSettings = usableLanguage(context?.settings?.targetLanguage)
-    if (fromSettings) return fromSettings
-  }
 
   const name = usableLanguage(lane.name)
   if (name) return name

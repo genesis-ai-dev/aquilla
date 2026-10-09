@@ -1076,9 +1076,7 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
     expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'first', '')).toBe('h')
 
     // With the front matter done, chapter 2's pre-verse text precedes 2:1.
-    await db.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, validated, endorsement_count, word_count)
-                      VALUES (?, ?, 'h', 'target', '', 'Titel', 'tev-h', 'alice', 2, 1, 1, 1),
-                             (?, ?, 'mt', 'target', '', 'Titel', 'tev-mt', 'alice', 2, 1, 1, 1)`)
+    await db.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at, validated, endorsement_count, word_count) VALUES (?, ?, 'h', 'target', 'Titel', 'tev-h', 'alice', 2, 1, 1, 1), (?, ?, 'mt', 'target', 'Titel', 'tev-mt', 'alice', 2, 1, 1, 1)`)
       .bind(PROJECT, 'bible', PROJECT, 'bible').run()
     expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'untranslated', '')).toBe('c2pre')
   })
@@ -1120,5 +1118,62 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(bad.status).toBe(400)
+  })
+})
+
+describe('file progress follows the lanes that exist (AQU-1594)', () => {
+  const P = 'proj-sw-progress'
+  const F = 'file-sw-progress'
+
+  async function recompute(lanes: Array<Record<string, unknown>>) {
+    const { db, pg } = await makeTestDb({
+      files: [{ id: F, project_id: P, name: 'Genesis', event_id: 'file-event' }],
+      lanes,
+      cells: [{
+        project_id: P, file_id: F, cell_id: 'c1', side: 'source',
+        value: 'In the beginning', canonical_ref: 'GEN 1:1', event_id: 'source-c1',
+        last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
+      }],
+    })
+    // Production has no lane-fill trigger. A manufactured '' row must fail here,
+    // not get a lane minted on the way in.
+    await pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    return pg.query<{
+      scope: string
+      lane_id: string
+      total_count: number
+      filled_count: number
+    }>(
+      `SELECT scope, lane_id, total_count, filled_count
+         FROM file_section_progress
+        WHERE project_id = $1 AND scope = 'file'
+        ORDER BY lane_id`,
+      [P],
+    )
+  }
+
+  it('writes the sw lane, with a lane id, and does not insert a blank tag', async () => {
+    const { rows } = await recompute([
+      { id: 'srcsw001', project_id: P, role: 'source', legacy_tag: null },
+      { id: 'tgtsw001', project_id: P, role: 'target', language: 'sw', legacy_tag: 'sw' },
+    ])
+    // One row per lane that exists: the source lane's own row (AQU-1599) and
+    // the sw lane's, keyed by lane_id. No blank-tag target lane is made up.
+    expect(rows).toEqual([
+      { scope: 'file', lane_id: 'srcsw001', total_count: 1, filled_count: 0 },
+      { scope: 'file', lane_id: 'tgtsw001', total_count: 1, filled_count: 0 },
+    ])
+  })
+
+  it('still writes the blank tag when that lane exists', async () => {
+    const { rows } = await recompute([
+      { id: 'srcblank', project_id: P, role: 'source', legacy_tag: null },
+      { id: 'tgtblank', project_id: P, role: 'target', language: 'sw', legacy_tag: '' },
+    ])
+    expect(rows).toEqual([
+      { scope: 'file', lane_id: 'srcblank', total_count: 1, filled_count: 0 },
+      { scope: 'file', lane_id: 'tgtblank', total_count: 1, filled_count: 0 },
+    ])
   })
 })

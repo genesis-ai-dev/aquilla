@@ -44,6 +44,20 @@ export const workspace = defineNamespace({
     // writes (src/lib/offline/leader-watchdog.ts). Restarting the app fixes it.
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
+    // Desktop update prompt (DesktopUpdatePrompt.tsx).
+    "workspace.update.readyToast": "Aquilla {version} is ready to install.",
+    "workspace.update.restartToUpdate": "Restart to update",
+    "workspace.update.stuckToast": plural({
+      one: "Aquilla {version} is ready, but {count} change hasn't reached the server yet. If you update now, it stays saved on this device and sends after the restart.",
+      other: "Aquilla {version} is ready, but {count} changes haven't reached the server yet. If you update now, they stay saved on this device and send after the restart.",
+    }),
+    // Refused rows never resend, so don't promise they will.
+    "workspace.update.refusedToast": plural({
+      one: "Aquilla {version} is ready, but {count} change hasn't reached the server — it was refused, so it won't send on its own. If you update now, it stays saved on this device.",
+      other: "Aquilla {version} is ready, but {count} changes haven't reached the server, and some were refused and won't send on their own. If you update now, they all stay saved on this device.",
+    }),
+    "workspace.update.unknownToast": "Aquilla {version} is ready, but this device couldn't check whether all your changes have reached the server. If you update now, anything unsent stays saved on this device.",
+    "workspace.update.updateAnyway": "Update anyway",
     // Tauri offline mode: the server refuses to sync a downloaded project —
     // deleted, access removed, archived or frozen (src/lib/offline/project-access.ts).
     "workspace.offline.projectUnavailableToast": "“{name}” is no longer available to you on the server, so this device has stopped syncing it.",
@@ -53,6 +67,19 @@ export const workspace = defineNamespace({
       other: "{count} changes on this device haven't been sent and can't be until your access is restored. Ask a project lead before removing the offline copy.",
     }),
     "workspace.offline.projectUnavailableRemove": "Remove offline copy",
+    // Tauri offline mode: queued edits the server refused for good
+    // (src/lib/offline/refused-writes.ts).
+    "workspace.offline.refusedToast": plural({
+      one: "{count} change you made offline couldn't be saved — the server refused it.",
+      other: "{count} changes you made offline couldn't be saved — the server refused them.",
+    }),
+    "workspace.offline.refusedRetry": "Retry",
+    "workspace.offline.refusedDiscard": "Discard",
+    "workspace.offline.refusedDiscardConfirm": plural({
+      one: "Discard {count} change? It can't be recovered.",
+      other: "Discard {count} changes? They can't be recovered.",
+    }),
+    "workspace.offline.refusedKeep": "Keep",
     // Tauri offline mode (Phase 5): connectivity status chip in AppShell,
     // reading the Rust-side connectivity loop (src-tauri/src/connectivity.rs).
     "workspace.offline.connectivityOnline": "Online",
@@ -562,6 +589,63 @@ export const workspace = defineNamespace({
           "Action button on the 'changes aren't being saved' toast; quits and " +
           "relaunches the desktop app. Short imperative.",
       },
+      "workspace.update.readyToast": {
+        description:
+          "Title of a persistent toast in the Tauri desktop app when a new app " +
+          "version has been downloaded and every offline change has reached the " +
+          "server. Paired with a 'Restart to update' action " +
+          "(workspace.update.restartToUpdate). Full sentence with a period.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+        },
+      },
+      "workspace.update.restartToUpdate": {
+        description:
+          "Action button on the 'update ready' toast; quits the desktop app, " +
+          "installs the update and relaunches. Short imperative.",
+      },
+      "workspace.update.stuckToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when a " +
+          "new app version is downloaded but some changes made on this device " +
+          "still haven't been sent to the server. Reassures that updating keeps " +
+          "them. Paired with an 'Update anyway' action " +
+          "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
+          "'sync' jargon.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+          count: "How many changes haven't been sent yet.",
+        },
+      },
+      "workspace.update.refusedToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when a " +
+          "new app version is downloaded but some unsent changes were refused " +
+          "by the server and won't send on their own. Must not promise they'll " +
+          "send after the update. Paired with an 'Update anyway' action " +
+          "(workspace.update.updateAnyway). Plain language — no 'queue' or " +
+          "'sync' jargon.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+          count: "How many changes haven't been sent yet.",
+        },
+      },
+      "workspace.update.unknownToast": {
+        description:
+          "Title of a persistent warning toast in the Tauri desktop app when a " +
+          "new app version is downloaded but the app couldn't open its local " +
+          "storage to check for unsent changes. Paired with an 'Update anyway' " +
+          "action (workspace.update.updateAnyway). Plain language — no 'queue', " +
+          "'store' or 'sync' jargon.",
+        placeholders: {
+          version: "The new app version number, e.g. 1.4.0.",
+        },
+      },
+      "workspace.update.updateAnyway": {
+        description:
+          "Action button on the 'changes not sent yet' update toast; installs " +
+          "the update and relaunches without waiting. Short imperative.",
+      },
       "workspace.offline.projectUnavailableToast": {
         description:
           "Title of a persistent toast in the Tauri desktop app when the server " +
@@ -591,6 +675,35 @@ export const workspace = defineNamespace({
         description:
           "Action button on the 'no longer available' toast; deletes this " +
           "project's copy from the device. Short imperative.",
+      },
+      "workspace.offline.refusedToast": {
+        description:
+          "Title of a persistent error toast in the Tauri desktop app when edits " +
+          "made offline were refused by the server (e.g. the user's role or the " +
+          "language lane changed meanwhile). Paired with 'Retry' and 'Discard' " +
+          "buttons. One full sentence with a period. Plain language.",
+        placeholders: {
+          count: "How many refused changes are on this device.",
+        },
+      },
+      "workspace.offline.refusedRetry": {
+        description: "Button on the refused-changes toast; tries sending the changes again. Short imperative.",
+      },
+      "workspace.offline.refusedDiscard": {
+        description:
+          "Button on the refused-changes toast that deletes the changes from the " +
+          "device (asks to confirm first), and the confirm button itself. Short imperative.",
+      },
+      "workspace.offline.refusedDiscardConfirm": {
+        description:
+          "Toast title asking the user to confirm deleting refused offline changes. " +
+          "A question, then a short warning sentence.",
+        placeholders: {
+          count: "How many changes would be deleted.",
+        },
+      },
+      "workspace.offline.refusedKeep": {
+        description: "Button that cancels discarding refused changes and keeps them. Short imperative.",
       },
       "workspace.projectCard.deletedBy": {
         description:

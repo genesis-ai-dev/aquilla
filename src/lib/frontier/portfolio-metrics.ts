@@ -21,6 +21,13 @@ export interface PortfolioMetricsProject {
   validatedCells: number
   filledCells: number
   lastEditAt: number | null
+  /**
+   * AQU-1566: what audio coverage is measured against — each file's cue sheet
+   * where it has one, the file itself otherwise (the plan board's own rule).
+   * Optional because an older server sends none; `audioDenominator` then
+   * falls back to `totalCells`.
+   */
+  audioTotalCells?: number
   audioCells: number
   deadlineAt: string | null
   lanes?: readonly LaneActivity[]
@@ -50,9 +57,19 @@ export function translatedPct(p: Pick<PortfolioMetricsProject, "totalCells" | "f
  * that is a tile reading "140%".
  */
 
+/**
+ * AQU-1566: the cells audio is measured against. `totalCells` stopped carrying
+ * the hidden cue sheet, so dividing the cue sheet's takes by it read a
+ * part-recorded dubbing episode as 100% recorded.
+ */
+export function audioDenominator(p: Pick<PortfolioMetricsProject, "totalCells" | "audioTotalCells">): number {
+  return p.audioTotalCells ?? p.totalCells
+}
+
 /** fraction of cells that have audio, 0..1 (0 when no cells). */
-export function audioPct(p: Pick<PortfolioMetricsProject, "totalCells" | "audioCells">): number {
-  return p.totalCells > 0 ? Math.min(1, p.audioCells / p.totalCells) : 0
+export function audioPct(p: Pick<PortfolioMetricsProject, "totalCells" | "audioTotalCells" | "audioCells">): number {
+  const total = audioDenominator(p)
+  return total > 0 ? Math.min(1, p.audioCells / total) : 0
 }
 
 /**

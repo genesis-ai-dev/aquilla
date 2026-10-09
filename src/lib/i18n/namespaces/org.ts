@@ -603,6 +603,11 @@ export const org = defineNamespace({
       "Who can see each teammate's assignment progress on this project.",
     "org.projectOverview.membersVisibilityDescription":
       "Who can see the member roster on this project.",
+    // AQU-1779: under the Team card's "Who can see this section" picker when
+    // the lower options are disabled. The Team card lists people, so it can
+    // never be more open than the member list.
+    "org.projectOverview.teamVisibilityRosterFloorHint":
+      "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -694,9 +699,9 @@ export const org = defineNamespace({
     "org.addLanguagePopover.description":
       "Registers a new lane on this project. Manage or remove lanes in project settings.",
     "org.addLanguagePopover.loadingLanguages": "Loading languages…",
-    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
-    "org.addLanguagePopover.inputAriaLabel": "New target language tag",
-    // "Enter a language tag." → projectSettings.create.extraLanguagesEmptyError (identical text)
+    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
+    "org.addLanguagePopover.inputAriaLabel": "New target language",
+    // "Enter a language name." → projectSettings.create.extraLanguagesEmptyError (identical text)
     // too-long error → projectSettings.create.extraLanguagesTooLongError (identical text)
     // already-default error → projectSettings.languages.alreadyDefaultError (identical text)
     // lane-already-exists error → projectSettings.languages.alreadyExistsError (identical text)
@@ -949,6 +954,7 @@ export const org = defineNamespace({
     "org.sectionVisibilityBadge.rolePickerOwner": "Owners only",
     "org.sectionVisibilityBadge.changeVisibilityAriaLabel": "{label}. Change section visibility",
     "org.sectionVisibilityBadge.whoCanSeeLabel": "Who can see this section",
+    "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": "Why some options are unavailable",
 
     // -- WorkloadRollup: org Overview team-workload manager rollup --
     "org.workloadRollup.title": "Team workload",
@@ -1034,6 +1040,15 @@ export const org = defineNamespace({
     "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New lane code",
     // "Add" → common.add (identical text)
     "org.memberLaneScopeEditor.saveScopesButton": "Save scopes",
+    // AQU-1783: the read wall decides from lane GRANTS, not from these scopes,
+    // so the inspector reports the grants rather than claiming "full access".
+    "org.memberLaneScopeEditor.grantsLegend": "Lanes they can read",
+    "org.memberLaneScopeEditor.laneNoAccess": "no access",
+    "org.memberLaneScopeEditor.grantGapWarning":
+      "This member is unscoped, but has no grant for every lane. The lanes marked \u201cno access\u201d read as empty for them.",
+    "org.memberLaneScopeEditor.grantAllButton": "Grant all current lanes",
+    "org.memberLaneScopeEditor.grantAllHint": "Takes effect for them within 15 minutes, or on their next sign-in.",
+    "org.memberLaneScopeEditor.visibleByRole": "Every lane is visible to this member through their role.",
 
     // -- MemberMultiAddRow: shared staged-multi-add affordance (AQU-734) --
     "org.memberMultiAddRow.peopleToAddAriaLabel": "People to add",
@@ -2639,6 +2654,17 @@ export const org = defineNamespace({
           total: "Whole-number count of cells total in this assignment's scope.",
           pct: "Whole-number completion percentage, e.g. 40.",
         },
+      },
+      "org.projectOverview.teamVisibilityRosterFloorHint": {
+        description:
+          "Note in the project overview's Team card visibility popover, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the card shows people, so it can't be more open than the member list) and where to lower the member list first. 'Members card' is the card of that name on the same page; 'Settings → Security' is the org settings page — use the localized names of both.",
+        placeholders: {
+          floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
+        },
+      },
+      "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": {
+        description:
+          "Accessible name for the small circled-i button beside 'Who can see this section'. It appears only when some options in that picker are greyed out, and clicking it expands a sentence explaining why.",
       },
       "org.sectionVisibilityBadge.changeVisibilityAriaLabel": {
         description:

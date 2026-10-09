@@ -21,7 +21,16 @@ export default defineConfig({
   test: {
     name: "scripts-node",
     environment: "node",
-    include: ["**/*.test.mjs"],
+    include: [
+      "**/*.test.mjs",
+      // Real Node, not the app project's browser polyfills. See the matching
+      // exclude in the root vitest config.
+      "lib/e2e-lock.test.ts",
+      "lib/worktree-install-guard.test.ts",
+      "lib/spawn-command.test.ts",
+      "lib/playwright-loader-env.test.ts",
+      "lib/listening-pids.test.ts",
+    ],
     passWithNoTests: false,
   },
 })

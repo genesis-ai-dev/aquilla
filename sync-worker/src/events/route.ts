@@ -410,7 +410,7 @@ async function prefetchCellHeads(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, side, target_lang, event_id FROM cells
+      `SELECT project_id, file_id, cell_id, side, COALESCE((SELECT l.legacy_tag FROM public.lanes l WHERE l.project_id = cells.project_id AND l.id = cells.lane_id), '') AS target_lang, event_id FROM cells
        WHERE (project_id, file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
@@ -544,7 +544,7 @@ async function prefetchLastEditors(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, target_lang, event_id, last_editor FROM cells
+      `SELECT project_id, file_id, cell_id, COALESCE((SELECT l.legacy_tag FROM public.lanes l WHERE l.project_id = cells.project_id AND l.id = cells.lane_id), '') AS target_lang, event_id, last_editor FROM cells
        WHERE side = 'target' AND (project_id, file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)

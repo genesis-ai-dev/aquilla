@@ -520,10 +520,9 @@ describe("stageEvents — lanes (AQU-1447)", () => {
   it("chains on lane B's own head once lane B has a commit", async () => {
     const LANE_B_HEAD = "77777777-7777-4777-8777-777777777777"
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'target', ?, 'Am Anfang', 'GEN 1:1', ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', 'Am Anfang', 'GEN 1:1', ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
     )
-      .bind(PROJECT, FILE, CELL, LANE_B, LANE_B_HEAD)
+      .bind(PROJECT, FILE, CELL, LANE_B_HEAD, PROJECT, LANE_B)
       .run()
     const result = await stageEvents(
       env.AQUILLA_PG,

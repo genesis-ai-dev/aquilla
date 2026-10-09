@@ -5,7 +5,7 @@
 // recap of seed data every Monday.
 
 import type { Env } from "../types"
-import { parseAdminEmails } from "../middleware/platform-admin"
+import { loadPlatformAdminEmails } from "../middleware/platform-admin"
 import { sendRetentionReportEmail } from "../services/email"
 import { loadRetentionMetrics } from "./retention-load"
 import { buildRetentionReport, reportWindow, type ReportPeriod } from "./retention-report"
@@ -30,7 +30,7 @@ export async function sendScheduledRetentionReport(
   const period = RETENTION_CRONS[cron]
   if (!period) return "not-a-recap-cron"
   if (env.ENVIRONMENT !== "production") return "skipped-non-production"
-  const to = Array.from(parseAdminEmails(env))
+  const to = Array.from(await loadPlatformAdminEmails(env))
   if (to.length === 0) return "skipped-no-recipients"
 
   const window = reportWindow(period, now)

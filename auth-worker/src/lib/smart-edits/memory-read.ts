@@ -141,13 +141,14 @@ export async function loadScoreInputs(
       const anchors = s.anchors.map(tsWord).filter(Boolean)
       const anchorSql = anchors.length
         ? `AND EXISTS (SELECT 1 FROM cells src WHERE src.project_id = t.project_id AND src.file_id = t.file_id
-              AND src.cell_id = t.cell_id AND src.side = 'source' AND src.target_lang = ''
+              AND src.cell_id = t.cell_id AND src.side = 'source'
               AND src.value_tsv @@ plainto_tsquery('simple', ?))`
         : ""
       return db
         .prepare(
           `SELECT COUNT(*)::int AS n FROM cells t
-            WHERE t.project_id = ? AND t.side = 'target' AND t.target_lang = ?
+            WHERE t.project_id = ? AND t.side = 'target'
+              AND t.lane_id = (SELECT id FROM public.lanes WHERE project_id = t.project_id AND role = 'target' AND legacy_tag = ?)
               AND t.tombstoned_at IS NULL AND (t.validated > 0 OR t.ai_drafted = 0)
               AND t.value_tsv @@ phraseto_tsquery('simple', ?) ${anchorSql}`,
         )
@@ -168,7 +169,9 @@ export async function loadScoreInputs(
     const { results } = await db
       .prepare(
         `SELECT file_id, cell_id, value FROM cells
-          WHERE project_id = ? AND side = 'target' AND target_lang = ? AND (file_id, cell_id) IN (${tuple})`,
+          WHERE project_id = ? AND side = 'target'
+            AND lane_id = (SELECT id FROM public.lanes WHERE project_id = cells.project_id AND role = 'target' AND legacy_tag = ?)
+            AND (file_id, cell_id) IN (${tuple})`,
       )
       .bind(projectId, lane, ...cellPairs.flatMap((o) => o.cellKey.split(CELL_KEY_SEP).slice(0, 2)))
       .all<{ file_id: string; cell_id: string; value: string }>()

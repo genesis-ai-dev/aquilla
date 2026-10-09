@@ -1327,7 +1327,11 @@ export function ProjectOverview() {
   // PortfolioLane the tabs are filtered to (null = "All"); when set, the
   // Translated/Validated tiles + bars read that lane, and the cross-language
   // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
-  const projectLanes: PortfolioLane[] = audio?.lanes ?? []
+  // AQU-1796: a source lane rides along in the portfolio with lane "" so the
+  // source-language label can find it. It is not a target lane. Listing it
+  // here put the source language in the Languages table and, because the
+  // former default target also uses lane "", opened two staff popovers.
+  const projectLanes: PortfolioLane[] = (audio?.lanes ?? []).filter((lane) => lane.role !== "source")
   // AQU-1458: an archived lane is not another active language. The progress
   // tabs stay hidden for a single active lane, and the Languages section
   // still renders when an archived lane needs a place to live.

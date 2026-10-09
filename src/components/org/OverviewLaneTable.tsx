@@ -86,6 +86,11 @@ function laneTagId(lane: string): string {
   return lane === "" ? "default" : lane
 }
 
+/** Staff opens one popover. Two rows can share a tag (`""`); the lane id cannot. */
+function laneStaffKey(lane: PortfolioLane): string {
+  return lane.laneId ?? laneTagId(lane.lane)
+}
+
 function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | null }): string {
   const key = lane.laneId || lane.lane
   if (!key) return `/project/${projectId}/editor?lane=`
@@ -287,9 +292,9 @@ export function OverviewLaneTable({
                     projectName={projectName}
                     orgId={orgId}
                     anchorOnly
-                    open={staffLane === row.original.lane}
+                    open={staffLane === laneStaffKey(row.original)}
                     onOpenChange={(next) => {
-                      setStaffLane(next ? row.original.lane : null)
+                      setStaffLane(next ? laneStaffKey(row.original) : null)
                     }}
                     trigger={
                       <span
@@ -348,8 +353,8 @@ export function OverviewLaneTable({
     >
       <DataTable
         columns={columns}
-        data={lanes}
-        getRowId={(l) => laneTagId(l.lane)}
+        data={lanes.filter((lane) => lane.role !== "source")}
+        getRowId={(l) => l.laneId ?? laneTagId(l.lane)}
         getRowAttributes={(l) => ({
           "data-testid": `overview-lane-row-${laneTagId(l.lane)}`,
         })}
@@ -371,7 +376,7 @@ export function OverviewLaneTable({
               </MenuItem>
               <MenuItem
                 data-testid={`overview-lane-staff-menu-${tagId}`}
-                onClick={() => setStaffLane(l.lane)}
+                onClick={() => setStaffLane(laneStaffKey(l))}
               >
                 <UserPlus className="size-4" />
                 {t("org.overviewLaneTable.staffAction")}

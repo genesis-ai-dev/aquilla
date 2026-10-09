@@ -56,6 +56,16 @@ describe("AQU-730 read wall", () => {
     const allBody = (await all.json()) as { cells: Array<{ value: string }> }
     expect(allBody.cells.map((c) => c.value).sort()).toEqual(["bonjour", "default-hola", "hola", "source-text"])
 
+    const lead = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role: 500 })
+    const leadRead = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {
+        headers: { Authorization: `Bearer ${lead}` },
+      }),
+      envWith(db, true),
+    ))!
+    const leadBody = (await leadRead.json()) as { cells: Array<{ value: string }> }
+    expect(leadBody.cells.map((c) => c.value).sort()).toEqual(["bonjour", "default-hola", "hola", "source-text"])
+
     const dark = (await handleCellsReadRequest(
       new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {
         headers: { Authorization: `Bearer ${contributor}` },

@@ -79,6 +79,7 @@ import {
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "../services/team-roles"
+import { loadLaneMateIds, selectMentionCandidates } from "../services/mention-candidates"
 import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { projectElevationDenial } from "../services/elevation-gate"
 import { lookupUserByUsername } from "../services/user-lookup"
@@ -1507,6 +1508,45 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
       secondarySources: m.secondarySources,
     })),
   })
+})
+
+/**
+ * AQU-1815: GET /api/v2/projects/:projectId/mention-candidates — the people
+ * the caller may @-mention in a comment, readable by every project member.
+ *
+ * The comment composer used to draw on GET …/members, so everyone below the
+ * effective roster floor (AQU-485 / AQU-1308) saw "No one on this project to
+ * mention" and, since a mention is only stored when a suggestion is picked,
+ * could mention nobody at all. A caller who may read the roster gets the
+ * roster; everyone else gets their lane-mates plus Maintainer and above, with
+ * `restricted: true`. Usernames and ids only — never emails. See
+ * services/mention-candidates.ts for the rule.
+ */
+projects.get("/:projectId/mention-candidates", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+
+  const project = await c.env.AQUILLA_PG.prepare(
+    "SELECT created_by, org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ created_by: number; org_id: number | null }>()
+  if (!project) return c.json({ error: "project not found" }, 404)
+
+  const callerCanViewRoster =
+    project.org_id == null ||
+    canViewRoster(role.level, await getProjectRosterViewMinRole(c.env, project.org_id))
+
+  const [members, laneMateIds] = await Promise.all([
+    listEffectiveProjectMembers(c.env, projectId, project.org_id, project.created_by),
+    callerCanViewRoster
+      ? Promise.resolve(new Set<number>())
+      : loadLaneMateIds(c.env, projectId, user.id),
+  ])
+
+  return c.json(selectMentionCandidates({ members, callerCanViewRoster, laneMateIds }))
 })
 
 // ──────────────────────────────────────────────────────────────────────────

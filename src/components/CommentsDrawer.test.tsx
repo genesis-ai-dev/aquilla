@@ -150,3 +150,53 @@ describe("CommentsDrawer — @mention a project member (AQU-761)", () => {
     expect(onNewThread).toHaveBeenCalledWith("Please review @[bob] ")
   })
 })
+
+/**
+ * AQU-1815: the editor passes the drawer the caller's lane-scoped mention
+ * list when the org hides the roster from them. The drawer must carry the
+ * restricted flag to the composer, so an empty list reads "no one in your
+ * lanes", never "no one on this project".
+ */
+describe("CommentsDrawer — lane-scoped mention list (AQU-1815)", () => {
+  it("passes the restricted flag through to the new-thread composer", async () => {
+    const user = userEvent.setup()
+    render(
+      <CommentsDrawer
+        project={makeProject(ROLE.COMMENTER)}
+        cell={CELL}
+        onClose={noop}
+        onNewThread={noop}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        currentUsername="carol"
+        mentionRoster={[]}
+        mentionRestricted
+      />,
+    )
+    await user.type(screen.getByRole("textbox", { name: "New thread" }), "@")
+    expect(screen.getByText("No one in your lanes to mention yet.")).toBeInTheDocument()
+    expect(screen.queryByText("No one on this project to mention.")).not.toBeInTheDocument()
+  })
+
+  it("still offers the lane-scoped names it was given", async () => {
+    const user = userEvent.setup()
+    render(
+      <CommentsDrawer
+        project={makeProject(ROLE.COMMENTER)}
+        cell={CELL}
+        onClose={noop}
+        onNewThread={noop}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        currentUsername="carol"
+        mentionRoster={[{ username: "bob" }, { username: "mia" }]}
+        mentionRestricted
+      />,
+    )
+    await user.type(screen.getByRole("textbox", { name: "New thread" }), "@")
+    expect(screen.getByRole("option", { name: "@bob" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "@mia" })).toBeInTheDocument()
+  })
+})

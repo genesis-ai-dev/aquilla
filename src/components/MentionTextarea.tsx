@@ -18,6 +18,11 @@ interface MentionTextareaProps {
   onChange: (value: string) => void
   /** Project members who can be mentioned. The composer does not fetch them. */
   candidates?: readonly MentionCandidate[]
+  /**
+   * AQU-1815: `candidates` is the lane-scoped subset the org allows this
+   * caller to name, not the roster. Only changes the empty-list copy.
+   */
+  restricted?: boolean
   /** Signed-in username, excluded from the list. */
   currentUsername?: string | null
   placeholder?: string
@@ -35,8 +40,9 @@ interface MentionTextareaProps {
 /**
  * Comment composer with a project-roster @mention picker.
  *
- * Calls no data hooks: the caller already has the roster (the editor loads it
- * for the assignee picker; the comments page receives the same list). Enter
+ * Calls no data hooks: the caller passes the list (`useMentionCandidates` —
+ * the roster when the caller may read it, the caller's lane-mates plus
+ * maintainers when the org hides the roster from them, AQU-1815). Enter
  * and Tab pick a row only while the list is open and has something to pick,
  * so Cmd/Ctrl+Enter still submits. Escape closes the list and leaves the
  * typed `@name` as plain text. Only Enter, Tab, or a click stores a mention.
@@ -45,6 +51,7 @@ export function MentionTextarea({
   value,
   onChange,
   candidates = [],
+  restricted = false,
   currentUsername,
   placeholder,
   rows = 2,
@@ -240,9 +247,11 @@ export function MentionTextarea({
         >
           {suggestions.length === 0 ? (
             <p className="px-1.5 py-1 text-sm text-muted-foreground">
-              {candidates.length === 0
-                ? t("comments.mention.noMembers")
-                : t("comments.mention.noResults")}
+              {candidates.length > 0
+                ? t("comments.mention.noResults")
+                : restricted
+                  ? t("comments.mention.restricted")
+                  : t("comments.mention.noMembers")}
             </p>
           ) : (
             <ul>

@@ -51,6 +51,11 @@ interface CommentsDrawerProps {
   /** Project members the @mention picker may name. The drawer does not fetch them. */
   mentionRoster?: readonly MentionCandidate[]
   /**
+   * AQU-1815: `mentionRoster` is the caller's lane-scoped subset because the
+   * org hides the roster from them; the composer's empty state says so.
+   */
+  mentionRestricted?: boolean
+  /**
    * Scroll this comment into view and highlight it. A notification click names
    * the reply; opening the cell from its comment badge does not.
    */
@@ -95,7 +100,7 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
   })
 }
 
-export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, onEdit, onDelete, currentUsername, isError = false, isLoadingRest = false, onRetry, mentionRoster = [], focusCommentId = null }: CommentsDrawerProps) {
+export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, onEdit, onDelete, currentUsername, isError = false, isLoadingRest = false, onRetry, mentionRoster = [], mentionRestricted = false, focusCommentId = null }: CommentsDrawerProps) {
   const t = useT()
   const [newThreadText, setNewThreadText] = useState("")
   const permissions = useProjectPermissions(project)
@@ -261,6 +266,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
                 fileId={cell.fileId}
                 cellId={cell.id}
                 mentionRoster={mentionRoster}
+                mentionRestricted={mentionRestricted}
                 currentUsername={currentUsername}
                 highlightCommentId={focusCommentId}
               />
@@ -275,6 +281,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
               onChange={setNewThreadText}
               onKeyDown={handleNewThreadKeyDown}
               candidates={mentionRoster}
+              restricted={mentionRestricted}
               currentUsername={currentUsername}
               aria-label={t("comments.drawer.newThreadHeading")}
               placeholder={t("comments.drawer.newThreadPlaceholder")}

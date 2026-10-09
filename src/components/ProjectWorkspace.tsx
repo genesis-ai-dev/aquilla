@@ -484,6 +484,7 @@ import { ProjectHandedOut } from "./ProjectHandedOut"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { assignedFileIds } from "@/lib/assignments/assigned-files"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useMentionCandidates } from "@/hooks/useMentionCandidates"
 import { useMyScopeGrant } from "@/hooks/useMyScopes"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
@@ -6354,6 +6355,13 @@ export function ProjectWorkspace() {
   // or a network/server error).
   const projectRosterUnavailable: "hidden" | "load-failed" | null =
     projectRosterHidden ? "hidden" : projectRosterError ? "load-failed" : null
+  // AQU-1815: the comment composer's @mention list. The roster whenever this
+  // caller may read it; below the org's roster floor, the lane-scoped subset
+  // from GET …/mention-candidates instead of an empty picker.
+  const { candidates: mentionCandidates, restricted: mentionRestricted } = useMentionCandidates(
+    project?.id ?? null,
+    { members: projectMembers, rosterHidden: projectRosterHidden },
+  )
 
   // Current user's open assignments in this project, fetched once on mount and
   // on each new assignment (assignmentsRefreshKey increment).
@@ -14580,7 +14588,8 @@ export function ProjectWorkspace() {
                 onEdit={(commentId, body) => { void editComment(commentId, body) }}
                 onDelete={(commentId) => { void deleteComment(commentId) }}
                 currentUsername={currentUsername}
-                mentionRoster={projectMembers}
+                mentionRoster={mentionCandidates}
+                mentionRestricted={mentionRestricted}
                 focusCommentId={focusedCommentFromSearchParams(searchParams)}
                 isError={commentsIsError}
                 isLoadingRest={commentsIsLoadingRest}

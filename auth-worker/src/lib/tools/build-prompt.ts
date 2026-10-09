@@ -114,6 +114,28 @@ through the global \`aquilla\` object the host injects before your code runs.
     "backtranslation.changed", "cells.structure" (cells added/removed: re-page), "cells.loaded", "editor.chrome" ({ trailingWidth }
     — the app draws its file toolbar over your top-right corner; keep that width clear).
 
+### apiRev 4 — the last editor surfaces (editor mount; elsewhere "not_available")
+- aquilla.audio.takes(fileId) → { column:"off"|"checking"|"on", requirement, takes:{[cellId]:[{ audioId, label, slot, validators,
+    validatorCount, isGenerated, canValidate, blockedReason, unrecorded }]} } — per-take audio validation.   scope read:cells
+    aquilla.audio.validate(fileId, cellId, audioId) / aquilla.audio.unvalidate(fileId, cellId, audioId)   scope write:validation
+- aquilla.audio.take(fileId, cellId) → { audioId, durationMs, trimStartMs, trimEndMs, trimmable, peaks:[0..1], isGenerated, takeVoiceName } | null
+    (scope read:cells); aquilla.audio.trim(fileId, cellId, audioId, startMs, endMs) (scope write:audio);
+    aquilla.audio.voices(fileId) → { voices:[{id,name}], current:{[cellId]:{id,name,explicit}}, canClone } (scope read:cells);
+    aquilla.audio.assignVoice(fileId, cellId, voiceId|null) and aquilla.audio.clone(fileId, cellId) (opens the app's voice cloning)   scope write:audio
+- aquilla.source.actions(fileId, cellId) → { edit, timestamps?, hide?, insertAbove?, insertBelow?, remove? } — what the source cell menu
+    offers (a string = why it is disabled, null = available, absent = not offered).   scope read:cells
+    aquilla.source.commit(fileId, cellId, value, html?), aquilla.source.setHidden(fileId, cellId, hidden), aquilla.source.insert(fileId, cellId,
+    "above"|"below"), aquilla.source.remove(fileId, cellId) (the app confirms), aquilla.source.retime(fileId, cellId, startSec, endSec)   scope write:source
+- aquilla.ai.examples(fileId, cellId) → [{ band, percent, source, target, fileName, isTranslationMemory, canInsert }]   scope read:cells
+- aquilla.ai.contextual(fileId) → { [cellId]: { draftId, text, spanLabel } } (autopilot drafts; scope read:cells);
+    aquilla.ai.reviewContextual(fileId, cellId, draftId, accept) — accept writes it as the translation   scope write:target
+- aquilla.ai.smartEdits(fileId, cellId) → [{ id, start, end, old, new, tier, reason, flagOnly }];
+    aquilla.ai.smartEditFeedback(fileId, cellId, id, "accept"|"dismiss")   scope read:cells
+- aquilla.terms.selection(fileId, cellId, text) → { match, canAdd, blockedReason }; aquilla.terms.view(fileId, cellId, text, rect) /
+    aquilla.terms.add(fileId, cellId, text, rect) open the app's term popovers at rect (frame px)   scope read:terms
+- aquilla.agent.ask(fileId, cellId, text) — opens the app's AI chat with the selected source text as context.   scope read:cells
+- Events: "audio.changed" (re-read audio.takes / audio.take), "contextual.changed".
+
 Every bridge error is an Error with a .code. Wrap awaits in try/catch and show errors in the UI.
 Start your script with: \`(async () => { … })()\` and render a loading state first.
 

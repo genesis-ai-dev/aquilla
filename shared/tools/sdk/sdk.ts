@@ -26,6 +26,7 @@ import { SDK_ICONS } from "./sdk-icons"
 import { SDK_KIT, SDK_KIT_STYLE } from "./sdk-kit"
 import { SDK_LIST } from "./sdk-list"
 import { SDK_ROW } from "./sdk-row"
+import { SDK_REV4, SDK_REV4_STYLE } from "./sdk-rev4"
 import { SDK_EDITOR_STYLE } from "./sdk-style-editor"
 import { stringKeysOf } from "./string-keys"
 
@@ -33,7 +34,7 @@ export const AQ_SDK_VERSION = "1.0"
 /** SDK majors this host can inject (manifest.sdk). */
 export const AQ_SDK_MAJORS: readonly number[] = [1]
 
-const PARTS = [SDK_CORE, SDK_DATA, SDK_LIST, SDK_EDIT, SDK_ACTIONS, SDK_CELLS, SDK_ROW, SDK_KIT, SDK_API]
+const PARTS = [SDK_CORE, SDK_DATA, SDK_LIST, SDK_EDIT, SDK_ACTIONS, SDK_CELLS, SDK_ROW, SDK_REV4, SDK_KIT, SDK_API]
 
 const MILESTONE_VOCABS = ["chapter", "slide", "story", "section", "timeRange", "part", "group", "milestone"]
 const MILESTONE_KEYS = MILESTONE_VOCABS.flatMap((v) =>
@@ -60,6 +61,8 @@ const SDK_FALLBACK: Record<string, string> = {
     "This cell is validated — replacing it clears the validation. The current text is preserved in cell history and can be recovered.",
   "sdk.replace.action": "Replace",
   "sdk.openRule": "Open rule",
+  "sdk.apply": "Apply",
+  "sdk.badSpan": "The end must come after the start.",
 }
 
 /** The SDK's public surface (window.aq), for the capability-twin test and
@@ -73,6 +76,7 @@ export const AQ_SDK_EXPORTS: readonly string[] = [
   "actions.suggestNext", "actions.nextUnfinished", "actions.goNextUnfinished", "actions.edit", "actions.reveal", "actions.select", "actions.addFootnote",
   "CellList", "CellRow", "SourceText", "TargetEditor", "ValidateButton", "CommentBadge", "AudioBadge", "StatusBadges", "CellNumber", "SelectBox",
   "HealthRibbon", "PresenceStack", "CellNotes", "FootnoteLine", "VoiceCard", "DraftButton", "DraftActions", "CellMenu", "cellMenuItems",
+  "AudioValidateButton", "ExamplePanel", "ContextualDraftCard", "SourceMenuButton",
   "ChapterPicker", "Toolbar", "ColumnHeader", "ReadOnlyBanner",
   "ui.Page", "ui.Panel", "ui.Card", "ui.Stack", "ui.Heading", "ui.Text", "ui.Button", "ui.IconButton", "ui.Badge", "ui.Stat", "ui.Progress",
   "ui.Tabs", "ui.Input", "ui.Textarea", "ui.Checkbox", "ui.Select", "ui.Spinner", "ui.Empty", "ui.Avatar", "ui.Kbd", "ui.Divider", "ui.Menu",
@@ -93,4 +97,5 @@ ${PARTS.join("\n")}
 
 export const AQ_SDK_STYLE = `${SDK_EDITOR_STYLE}
   .aq-layout { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+${SDK_REV4_STYLE}
 ${SDK_KIT_STYLE}`

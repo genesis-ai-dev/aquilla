@@ -1544,6 +1544,8 @@ export interface SourceCellCommitInput {
   id?: string
   author: string
   clientTs?: number
+  /** Aquilla Tools: provenance when an extension makes the edit. */
+  toolOrigin?: OutboxPayloadFor<"source.cell.commit">["tool_origin"]
 }
 
 /**
@@ -1570,6 +1572,7 @@ export async function emitSourceCellCommit(input: SourceCellCommitInput): Promis
       value: input.value,
       ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
+      ...(input.toolOrigin ? { tool_origin: input.toolOrigin } : {}),
     },
     ...(input.id !== undefined ? { id: input.id } : {}),
     clientTs: input.clientTs,

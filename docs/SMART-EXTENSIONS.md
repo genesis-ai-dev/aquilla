@@ -141,6 +141,15 @@ as the first provider) and `ui.strings`. Events: `signals.changed`, `presence.pe
 `selection.changed`, `config.changed`, `backtranslation.changed`, `pericopes.changed`,
 `cells.structure`, `cells.loaded`, `editor.chrome`, `fonts`.
 
+Added in apiRev 4 (additive) — the last seven built-in surfaces, so the matrix is 72/72:
+`audio.takes/validate/unvalidate` (per-take audio validation), `audio.take/trim/voices/assignVoice/clone`
+(the Audio lens's waveform, trim, voice and cloning), `source.actions/commit/setHidden/insert/remove/retime`
+(source editing and the cell menu, new scope `write:source`), `ai.examples/contextual/reviewContextual/
+smartEdits/smartEditFeedback` (translation memory, autopilot drafts, smart edits), `terms.selection/view/add`
+and `agent.ask` (the source selection toolbar; the popovers and the chat are the host's). Cell views on
+editor mounts carry `idml` (the slot markup to edit) and the footnote tray is fed from `editor.visible`.
+Events: `audio.changed`, `contextual.changed`, `examples.changed`, `smartedits.changed`.
+
 ## The extension SDK (`window.aq`, apiRev 4)
 
 A manifest with `"sdk": 1` gets the **extension SDK** injected next to the bridge runtime

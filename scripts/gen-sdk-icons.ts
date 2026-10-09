@@ -20,7 +20,7 @@ export const EDITOR_ICONS = [
   // UI kit (aq.ui) extras for extensions
   "list", "layout-grid", "chart-column", "settings", "star", "funnel", "eye", "copy", "circle-check", "circle-alert", "clock", "users",
   "book", "bookmark", "save", "arrow-left", "arrow-up", "arrow-down", "external-link", "minus", "grip-vertical", "sliders-horizontal",
-  "wand-sparkles", "target", "circle-dot", "hourglass", "gauge",
+  "wand-sparkles", "target", "circle-dot", "hourglass", "gauge", "ellipsis-vertical",
 ] as const
 
 type Node = [string, Record<string, string>]

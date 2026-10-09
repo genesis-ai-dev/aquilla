@@ -269,6 +269,8 @@ export interface EventPayloads {
   'source.cell.commit': {
     value?: string
     valueHtml?: string
+    /** Aquilla Tools: an extension's source edit (verified server-side). */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
     /** AQU-847 / AQU-646: corrected source text for a MEDIA section. An
      *  imported media cell's `value` is the import filename, so the user's
      *  edit lands here — the field `effectiveSourceText` (and therefore export

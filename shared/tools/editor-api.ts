@@ -199,6 +199,11 @@ export interface ToolCellViewRev3 {
   hidden?: boolean
   /** IDML slot names when the cell is an IDML frame (edit inside slots only). */
   idmlSlots?: string[] | null
+  /** apiRev 4: an IDML cell's editable form — its translation as protected
+   *  slot/token markup (data-idml-*), editable only inside editable slots;
+   *  commit it back as `html` (the host validates the anchors). `error`: the
+   *  cell cannot be edited safely (the reason). */
+  idml?: { html: string; error: string | null } | null
   /** The health ribbon beside the target, as the host computes it (smoothed
    *  over neighbours): a CSS background for a 2px line, plus a label. */
   ribbon?: ToolRibbon | null

@@ -22,6 +22,7 @@ import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import type { ToolOrigin, ToolScope } from "../../../shared/tools/manifest"
 import type { ToolEditorServices } from "./editor-services"
 import { LiveEditorData } from "./live-data-editor"
+import { rev4Delegates, type ToolRev4HostData } from "./host-handlers-rev4"
 import { uiStrings, type UiStrings } from "./ui-strings"
 import type { ToolSettingsSection, ToolTypingParams } from "./host-handlers-editor"
 import type { ToolLens } from "../../../shared/tools/editor-api"
@@ -145,6 +146,11 @@ export function pairRows(rows: CellRow[], lane: string, laneId: string | null = 
   return out
 }
 
+// apiRev 4 methods are delegated wholesale (rev4Delegates, constructor).
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging -- the rev-4 delegates are assigned in the constructor
+export interface LiveToolData extends ToolRev4HostData {}
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging -- see above
 export class LiveToolData implements ToolHostData {
   private readonly opts: LiveToolDataOptions
   private readonly cache = new Map<string, Map<string, CachedCell>>()
@@ -162,6 +168,7 @@ export class LiveToolData implements ToolHostData {
       boundFile: () => this.services().fileId,
       origin: opts.toolOrigin,
     })
+    Object.assign(this, rev4Delegates((fileId) => this.editor.rev4(fileId), opts.toolOrigin))
   }
 
   /** Start the lane lookup and the file's sync token while the frame boots,

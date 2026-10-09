@@ -49,18 +49,22 @@ export const SDK_CELLS = String.raw`
     opts = opts || {};
     var lane = el("div", { class: "lane", "data-testid": "source-context-line" });
     var txt = el("div", { class: "txt", dir: "auto" });
+    var menu = opts.menu === false ? null : SourceMenuButton(id);
     var src = el("div", { class: "src", "data-editor-cell-surface": "source", "data-cell-type": "source", "aria-label": t("editor.source.textAria") }, opts.lane === false ? [txt] : [lane, txt]);
+    if (menu) { src.appendChild(menu); src.addEventListener("mouseenter", menu.__check); }
+    if (opts.examples !== false) src.appendChild(ExamplePanel(id));
     txt.addEventListener("click", function (e) { onDecoClick(id, e); });
+    if (opts.selectionToolbar !== false) txt.addEventListener("mouseup", function (e) { onSourceMouseUp(id, src, e); });
     var key = null;
     return bindCell(id, src, function () {
       var c = S.byId[id];
-      if (!c) return;
+      if (!c || S.srcEditing === id) return;
       wantTerms(id);
       var st = cellState(id), cf = cfg();
       var showLabel = cf.cellLabels && c.label;
       var rep = (S.signals.repetition || {})[id];
       var audioLens = cf.lens === "audio" && opts.lens !== false;
-      var k = [audioLens ? "audio:" + (st.hasAudio ? 1 : 0) + ":" + (c.voice ? c.voice.name : "") + ":" + (c.target || "").length + ":" + (st.voicing || "") + ":" + st.editable : "",
+      var k = [audioLens ? "audio:" + (st.hasAudio ? 1 : 0) + ":" + (c.voice ? c.voice.name : "") + ":" + (c.target || "").length + ":" + (st.voicing || "") + ":" + st.editable + ":" + JSON.stringify(S.voiceTakes && S.voiceTakes[id] || null).length + ":" + (S.voices && S.voices.current[id] ? S.voices.current[id].id : "") : "",
         c.source, c.sourceHtml, showLabel ? c.label : "", c.context, rep || 0, c.hidden ? 1 : 0, termKey(id, "source"), issueKey(st.issues, "source"), cf.sourceFontSize].join("\u0001");
       if (k === key) return;
       key = k;
@@ -358,31 +362,6 @@ export const SDK_CELLS = String.raw`
     ]);
   }
   actions.addFootnote = addFootnote;
-
-  // ── VoiceCard (the Audio lens' source column) ────────────────────────────
-  function VoiceCard(id) {
-    var c = S.byId[id], st = cellState(id);
-    var card = el("div", { "data-voice-card": "", dir: "ltr", class: "vcard" });
-    var voice = c.voice ? c.voice.name : "";
-    if (st.hasAudio) {
-      card.appendChild(el("div", { class: "vrow" }, [
-        el("button", { class: "btn-s", type: "button", "aria-label": t("editor.voice.play"), onclick: function (e) { e.stopPropagation(); actions.playAudio(id); } }, [icon("play", "s3"), t("editor.voice.play")]),
-        st.editable ? el("button", { class: "rbtn", type: "button", "aria-label": t("editor.audio.record"), title: t("editor.audio.record"), onclick: function (e) { e.stopPropagation(); actions.recordAudio(id); } }, [icon("mic", "s35")]) : null,
-      ]));
-    } else if (st.voicing === "busy") {
-      card.appendChild(el("span", { class: "k vstatus", role: "status" }, [icon("loader-circle", "s3 spin"), t("editor.voice.generatingAs", { voice: voice })]));
-    } else {
-      card.appendChild(el("span", { class: "k", text: t("editor.voice.noAudioYet") }));
-      var row = el("div", { class: "vrow" });
-      if (st.editable) row.appendChild(el("button", { class: "btn-s", type: "button", onclick: function (e) { e.stopPropagation(); actions.recordAudio(id); } }, [icon("mic", "s3"), t("editor.voice.record")]));
-      var gen = el("button", { class: "btn-s", type: "button", "data-testid": "voice-card-generate", onclick: function (e) { e.stopPropagation(); generateVoice(id); } }, [icon("sparkles", "s3"), t("editor.voice.generateWith", { voice: voice })]);
-      if (!(c.target || "").trim() || !st.editable) gen.disabled = true;
-      tip(gen, !(c.target || "").trim() ? t("editor.voice.nothingToReadTooltip") : c.voice && !c.voice.explicit ? t("editor.voice.generateDefaultTooltip") : "");
-      row.appendChild(gen);
-      card.appendChild(row);
-    }
-    return card;
-  }
 
   // ── AI draft buttons (TargetDraftActions) ────────────────────────────────
   var sparkDrag = null;

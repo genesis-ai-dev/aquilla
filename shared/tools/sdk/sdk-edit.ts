@@ -34,6 +34,7 @@ export const SDK_EDIT = String.raw`
     read.addEventListener("focus", function () { if (EDS[id] !== read) EDS[id] = read; onEditorFocus(id); });
     read.addEventListener("blur", function () { onEditorBlur(id); });
     read.addEventListener("paste", function (e) { onPaste(id, e); });
+    read.addEventListener("beforeinput", function (e) { idmlGuard(id, read, e); });
     var readKey = null;
     read.__repaint = function () { readKey = null; };
     return bindCell(id, well, function () {
@@ -55,10 +56,13 @@ export const SDK_EDIT = String.raw`
         read.setAttribute("contenteditable", "false");
         var peers = peersFor(id);
         var peerDraft = peers.filter(function (p) { return p.draftText !== null && p.draftText !== undefined; })[0];
-        var key = [targetPlain, d && d.dirty ? d.html : c.targetHtml, peerDraft ? peerDraft.username + ":" + peerDraft.draftText : "", termKey(id, "target"), issueKey(st.issues, "target"), st.drafting ? 1 : 0].join("\u0001");
+        var idml = c.idml && !c.idml.error ? c.idml : null;
+        var key = [targetPlain, d && d.dirty ? d.html : c.targetHtml, peerDraft ? peerDraft.username + ":" + peerDraft.draftText : "", termKey(id, "target"), issueKey(st.issues, "target"), st.drafting ? 1 : 0, idml ? idml.html : ""].join("\u0001");
         if (key !== readKey) {
           readKey = key;
-          if (peerDraft) {
+          if (idml && !peerDraft) {
+            idmlInto(read, d && d.dirty ? d.html : idml.html);
+          } else if (peerDraft) {
             read.textContent = "";
             read.appendChild(el("span", { class: "remote-draft", "data-remote-presence-draft": "" }, [peerDraft.draftText]));
             read.appendChild(el("span", { class: "rcaret" }, [el("i", { style: { background: peerDraft.color } }), el("b", { style: { background: peerDraft.color }, text: peerDraft.username })]));
@@ -71,6 +75,7 @@ export const SDK_EDIT = String.raw`
           }
         }
         read.classList.toggle("empty", !(targetPlain || "").trim() && !peerDraft);
+        if (S.smart[id] && S.smart[id].length) markSmart(id);
         read.tabIndex = st.editable ? 0 : -1;
       } else readKey = null;
       read.classList.toggle("subdued", st.drafting && !!(targetPlain || "").trim());
@@ -108,9 +113,11 @@ export const SDK_EDIT = String.raw`
     if (S.activeId && S.activeId !== id) deactivate(S.activeId);
     var r = ed(id);
     if (!r) return false;
+    if (c.idml && c.idml.error) { S.errors[id] = c.idml.error; notify([id]); return false; }
     S.activeId = id;
     var d = S.drafts[id];
-    showInto(r.read, d && d.dirty ? d.html : c.targetHtml, d && d.dirty ? d.value : c.target);
+    if (c.idml) idmlInto(r.read, d && d.dirty ? d.html : c.idml.html);
+    else showInto(r.read, d && d.dirty ? d.html : c.targetHtml, d && d.dirty ? d.value : c.target);
     r.read.__repaint();
     r.read.classList.remove("empty");
     r.read.setAttribute("contenteditable", "true");
@@ -120,11 +127,17 @@ export const SDK_EDIT = String.raw`
       var range = doc.caretRangeFromPoint(e.clientX, e.clientY);
       if (range && r.read.contains(range.startContainer)) { var sel = doc.getSelection(); sel.removeAllRanges(); sel.addRange(range); placed = true; }
     }
-    if (!placed) caretAt(r.read, where || "end");
+    if (!placed) {
+      // IDML: the caret goes into an editable slot, never between anchors.
+      var slots = c.idml ? r.read.querySelectorAll('[data-idml-protected="slot"]:not([contenteditable="false"])') : null;
+      if (slots && slots.length) caretAt(slots[where === "start" ? 0 : slots.length - 1], where || "end");
+      else caretAt(r.read, where || "end");
+    }
     // The read view may already hold focus (mousedown focused it before this
     // click activated it), so no focus event follows: claim explicitly.
     onEditorFocus(id);
     notify([id]);
+    loadSmart(id);
     return true;
   }
   function deactivate(id) {
@@ -189,7 +202,7 @@ export const SDK_EDIT = String.raw`
     var d = S.drafts[id] || (S.drafts[id] = {});
     d.dirty = true;
     d.value = plainOf(r.read);
-    d.html = htmlOf(r.read);
+    d.html = S.byId[id] && S.byId[id].idml ? idmlHtmlOf(r.read) : htmlOf(r.read);
     delete S.saved[id];
     if (d.timer) clearTimeout(d.timer);
     d.timer = later(function () { d.timer = null; commit(id); }, IDLE_MS);
@@ -338,6 +351,7 @@ export const SDK_EDIT = String.raw`
     return cand && cand.nodeType === 1 && cand.hasAttribute("data-usfm-footnote") ? cand : null;
   }
   function format(cmd) {
+    if (S.activeId && S.byId[S.activeId] && S.byId[S.activeId].idml) return;   // IDML slots carry no marks
     if (cmd === "code") {
       var sel = doc.getSelection();
       if (!sel || sel.isCollapsed) return;
@@ -383,6 +397,23 @@ export const SDK_EDIT = String.raw`
     return id;
   }
 
+  /** IDML: only text inside an editable slot may change; anchors (tokens,
+   *  locked slots, the paragraph) are protected, like TranslatedEditor's guard. */
+  function idmlGuard(id, read, e) {
+    var c = S.byId[id];
+    if (!c || !c.idml || S.activeId !== id) return;
+    var sel = doc.getSelection();
+    if (!sel || !sel.rangeCount) { e.preventDefault(); return; }
+    var r = sel.getRangeAt(0);
+    var a = idmlSlotAt(r.startContainer), b = idmlSlotAt(r.endContainer);
+    if (!a || a !== b) { e.preventDefault(); return; }
+    if (r.collapsed && /^delete/.test(e.inputType)) {
+      var edge = caretEdge(a);
+      if ((e.inputType.indexOf("Backward") > 0 && edge.start) || (e.inputType.indexOf("Forward") > 0 && edge.end)) e.preventDefault();
+    }
+    if (e.inputType === "insertParagraph" || /^format/.test(e.inputType)) e.preventDefault();
+  }
+
   // ── Formatting bubble ────────────────────────────────────────────────────
   var bubble = null;
   function hideBubble() { if (bubble) { bubble.remove(); bubble = null; } }
@@ -414,6 +445,7 @@ export const SDK_EDIT = String.raw`
   function suggest(id) {
     var r = ed(id);
     if (!r || S.activeId !== id) return;
+    if (S.byId[id] && S.byId[id].idml) return;
     var edge = caretEdge(r.read);
     if (!edge.collapsed || !edge.end) return;
     var prefix = plainOf(r.read);

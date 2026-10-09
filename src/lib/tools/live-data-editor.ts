@@ -5,6 +5,9 @@
  * "not available" instead of reaching across files.
  */
 
+import type { ToolRev4Services } from "./host-handlers-rev4"
+import { hasIdmlCellMetadata } from "@/lib/richtext/idml-editor"
+import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 import { BridgeError } from "./host-bridge"
 import type { ToolSettingsSection, ToolTypingParams, ToolEditorHostData } from "./host-handlers-editor"
 import type { ToolCellPage, ToolCellView, ToolEdit, ToolValidateResult, ToolWriteResult } from "./host-handlers"
@@ -45,6 +48,14 @@ export class LiveEditorData implements ToolEditorHostData {
     if (!s) return null
     const bound = this.boundFile()
     return bound && bound !== fileId ? null : s
+  }
+
+  /** apiRev 4 surfaces for `fileId` (not_available off an editor mount, or
+   *  when the workspace does not lend them). */
+  rev4(fileId: string): ToolRev4Services {
+    const r = this.need(fileId).rev4
+    if (!r) throw new BridgeError("not_available", "this editor does not offer that here")
+    return r
   }
 
   private need(fileId: string): ToolEditorServices {
@@ -125,7 +136,9 @@ export class LiveEditorData implements ToolEditorHostData {
         failed.push({ cellId: edit.cellId, reason: "not_found" })
         continue
       }
-      const valueHtml = edit.html !== undefined ? sanitize(edit.html) : edit.value
+      // IDML cells keep their protected slot/token markup (the host's commit
+      // path validates it against the source anchors).
+      const valueHtml = edit.html !== undefined ? (hasIdmlCellMetadata(cell.metadata) ? sanitizeIdmlEditorHtml(edit.html) : sanitize(edit.html)) : edit.value
       if (cell.translated === edit.value && (edit.html === undefined || valueHtml === (cell.translatedHtml ?? ""))) {
         committed.push(edit.cellId)
         continue

@@ -88,6 +88,7 @@ export const SDK_API = String.raw`
     CommentBadge: CommentBadge, AudioBadge: AudioBadge, StatusBadges: StatusBadges, CellNumber: CellNumber, SelectBox: SelectBox,
     HealthRibbon: HealthRibbon, PresenceStack: PresenceStack, CellNotes: CellNotes, FootnoteLine: FootnoteLine, VoiceCard: VoiceCard,
     DraftButton: DraftButton, DraftActions: DraftActions, CellMenu: openCellMenu, cellMenuItems: cellMenuItems,
+    AudioValidateButton: AudioValidateButton, ExamplePanel: ExamplePanel, ContextualDraftCard: ContextualDraftCard, SourceMenuButton: SourceMenuButton,
     ChapterPicker: ChapterPicker, Toolbar: Toolbar, ColumnHeader: ColumnHeader, ReadOnlyBanner: ReadOnlyBanner,
     ui: ui,
     cell: {

@@ -76,6 +76,7 @@ export const extensions = defineNamespace({
     "extensions.editor.loadFailed": "Could not load: {reason}",
     "extensions.scope.aiDraft": "draft and back-translate with AI (uses project AI credits)",
     "extensions.scope.writeAudio": "record and generate audio",
+    "extensions.scope.writeSource": "edit source text and add, remove or hide cells",
     "extensions.tell.label": "Message from {name}",
     "extensions.installDialog.title": "Install {name}?",
     "extensions.installDialog.body":

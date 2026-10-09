@@ -28,6 +28,7 @@ import type { ToolCellStructure } from "@/lib/tools/editor-services"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ToolEditorServices } from "@/lib/tools/editor-services"
+import type { ToolRev4Services } from "@/lib/tools/host-handlers-rev4"
 import { suggestFor, recordSuggestionFeedback, setSuggestionMemory } from "@/lib/tools/suggestions"
 import type { ToolOrigin } from "../../../shared/tools/manifest"
 import type {
@@ -93,6 +94,9 @@ export interface ExtensionEditorServicesArgs {
   setLane: (tag: string) => void
   setLens: (lens: ToolLens) => void
   openSettings: (section: "target-language" | "lanes" | "terminology") => void
+  /** apiRev 4 surfaces (useExtensionEditorRev4) and what changes them. */
+  rev4?: ToolRev4Services
+  rev4Versions?: { audio: unknown; contextual: unknown; smartEdits: unknown; examples: unknown }
 }
 
 const EMPTY_IDS: readonly string[] = []
@@ -392,6 +396,7 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
       structureFor,
       voiceFor: args.voiceFor,
       ...actions,
+      ...(args.rev4 ? { rev4: args.rev4, rev4Versions: args.rev4Versions } : {}),
     }
-  }, [args.voiceFor, pericopes, structureFor, args.enabled, args.store, args.storeLoading, args.concepts, args.termMatching, config, signals, peers, backtranslations, selection, actions, ribbonFor])
+  }, [args.rev4, args.rev4Versions, args.voiceFor, pericopes, structureFor, args.enabled, args.store, args.storeLoading, args.concepts, args.termMatching, config, signals, peers, backtranslations, selection, actions, ribbonFor])
 }

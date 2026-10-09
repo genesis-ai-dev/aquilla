@@ -41,6 +41,10 @@ Components (pass a cellId; they stay live):
                     state, errors, footnotes), aq.FootnoteLine(id), aq.VoiceCard(id), aq.DraftButton(id) (one AI button),
                     aq.DraftActions(id) (draft / regenerate / paragraph), aq.CellMenu(id, anchor, items?) with
                     aq.cellMenuItems(id) → [{ key, icon, label, run }].
+                  aq.AudioValidateButton(id) (per-take audio validation, the audio column), aq.ExamplePanel(id) (translation-memory
+                    matches, Insert on exact), aq.ContextualDraftCard(id) (autopilot draft: accept / dismiss), aq.SourceMenuButton(id)
+                    (the source cell menu: edit text, timestamps, hide, insert, remove; scope write:source). aq.SourceText also offers the
+                    selection toolbar (View term / Ask AI / Add to terminology) and aq.VoiceCard has the waveform, trim and voice picker.
                   aq.Toolbar({ start:[…], end:[…] }) — the editor's top row; aq.ChapterPicker() — chapter navigator;
                   aq.ColumnHeader() — source/target header; aq.ReadOnlyBanner().
 Actions (Promises; they confirm where the app does): aq.actions.commit(id, text, html?), aq.actions.validate(id),

@@ -158,6 +158,8 @@ export const SDK_DATA = String.raw`
     });
   }
   var booted = null;
+  /** Loaders other parts add, run once the file is in (sdk-rev4). */
+  var bootExtras = [];
   /** Bind the SDK to a file (default: the mount's, else the first with cells). */
   function boot(fileId) {
     if (fileId && fileId !== S.fileId) { S.fileId = fileId; booted = null; S.ids = []; S.byId = Object.create(null); S.index = Object.create(null); S.ready = false; S.loading = true; }
@@ -189,6 +191,7 @@ export const SDK_DATA = String.raw`
         aquilla.presence.list(S.fileId).then(function (h) { Object.keys(h || {}).forEach(function (id) { S.locks[id] = h[id].username; }); notify(Object.keys(h || {})); emit("presence"); }, noop);
         aquilla.presence.peers(S.fileId).then(applyPeers, noop);
         if (S.cfg.backtranslation.configured) loadBts();
+        bootExtras.forEach(function (fn) { try { fn(); } catch (e) { console.error(e); } });
       } catch (err) {
         S.loading = false; S.ready = true;
         S.failed = isDenied(err) ? t("extensions.editor.denied") : t("extensions.editor.loadFailed", { reason: errText(err) });

@@ -282,7 +282,7 @@ export const SDK_LIST = String.raw`
     var lastKey = null;
     return bindCell("*", head, function () {
       if (!S.cfg) return;
-      var c = S.cfg, audioCol = Object.keys(S.audio).length > 0;
+      var c = S.cfg, audioCol = S.audioVal && S.audioVal.column !== "off" ? true : ctx.mount !== "editor" && Object.keys(S.audio).length > 0;
       var chapters = S.sections.length && S.sections.every(function (x) { return /chapter|preface/.test(x.kind); });
       var key = [c.sourceLabel, c.targetLabel, c.activeLane, (c.lanes || []).map(function (l) { return l.tag + l.label; }).join(","), audioCol, chapters, c.canManageLanes].join("|");
       if (key === lastKey) return;

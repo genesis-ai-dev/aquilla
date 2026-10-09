@@ -15,6 +15,7 @@ import { createToolHandlers, type ToolAudioEntry, type ToolCellView, type ToolHo
 import { TOOL_SANDBOX, buildToolSrcdoc } from "./srcdoc"
 import type { ToolManifest, ToolMount } from "../../../shared/tools/manifest"
 import { stubEditorData } from "./smoke-editor"
+import { stubRev4Data } from "./smoke-rev4"
 import { uiStrings } from "./ui-strings"
 
 export const SMOKE_LOAD_TIMEOUT_MS = 8000
@@ -80,6 +81,7 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
   const store = new Map<string, unknown>()
   return {
     ...stubEditorData(populated),
+    ...stubRev4Data(populated),
     listFiles: async () => (populated ? [{ fileId: "f1", name: "MAT", cellCount: SAMPLE_CELLS.length }, { fileId: "f2", name: "Empty", cellCount: 0 }] : []),
     listCells: async (fileId) => (populated && fileId === "f1" ? SAMPLE_CELLS.map((c) => ({ ...c })) : []),
     listTerms: async () =>

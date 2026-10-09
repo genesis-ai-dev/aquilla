@@ -60,6 +60,11 @@ export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
     "ui.strings: the app's UI strings in the user's language; theme adds color scheme + viewport; fonts event carries the app font bytes",
   ],
   4: [
+    "audio.takes / audio.validate / audio.unvalidate: per-take audio validation (the audio column)",
+    "audio.take / audio.trim / audio.voices / audio.assignVoice / audio.clone: the Audio lens's take, waveform peaks, trim, voice and cloning (+ audio.changed event)",
+    "source.actions / source.commit / source.setHidden / source.insert / source.remove / source.retime: source editing and the cell menu (scope write:source)",
+    "ai.examples / ai.contextual / ai.reviewContextual / ai.smartEdits / ai.smartEditFeedback: the AI surfaces beside a cell (+ contextual.changed event)",
+    "terms.selection / terms.view / terms.add / agent.ask: the source selection toolbar",
     "manifest.sdk (1): the host injects the extension SDK as window.aq — live data hooks (useFile, useCells, useCell, useSelection, usePresence), Aquilla components (CellList, CellRow, SourceText, TargetEditor, ValidateButton, ChapterPicker, …), a UI kit (aq.ui) and actions (aq.actions); see AQ_SDK_EXPORTS",
   ],
 }

@@ -9,6 +9,7 @@ import { BridgeError, type BridgeHandler } from "./host-bridge"
 import { isToolScope, type ToolScope } from "../../../shared/tools/manifest"
 import type { ToolCellViewRev3 } from "../../../shared/tools/editor-api"
 import { createEditorHandlers, type ToolEditorHostData } from "./host-handlers-editor"
+import { createRev4Handlers, type ToolRev4HostData } from "./host-handlers-rev4"
 import { MAX_UI_STRING_KEYS, type UiStrings } from "./ui-strings"
 
 export interface ToolFileView {
@@ -78,7 +79,7 @@ export interface ToolValidateResult {
   failed: { cellId: string; reason: string }[]
 }
 
-export interface ToolHostData extends ToolEditorHostData {
+export interface ToolHostData extends ToolEditorHostData, ToolRev4HostData {
   listFiles: () => Promise<ToolFileView[]>
   listCells: (fileId: string, lane: string) => Promise<ToolCellView[]>
   listTerms: () => Promise<ToolTermView[]>
@@ -196,6 +197,7 @@ export function parseHostKey(params: unknown): HostKey {
 export function createToolHandlers(data: ToolHostData): Record<string, BridgeHandler> {
   return {
     ...createEditorHandlers(data),
+    ...createRev4Handlers(data),
     "files.list": async () => data.listFiles(),
     "cells.list": async (params) => {
       if (!isRecord(params)) bad("params must be an object")

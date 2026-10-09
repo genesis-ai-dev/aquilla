@@ -14,6 +14,7 @@
 import type { CellData } from "@/hooks/useCells"
 import type { CellStore } from "@/hooks/useActiveCellStore"
 import { sanitizeSourceDisplayHtml } from "@/lib/richtext/editor-content"
+import { hasIdmlCellMetadata, prepareIdmlEditorContent, resolveIdmlEditorConfiguration } from "@/lib/richtext/idml-editor"
 import { findConceptMatches } from "@/lib/terminology/match"
 import { cellNumberLabel, importDisplayLabel, verseRangeLabel } from "@/lib/scripture-reference"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
@@ -31,6 +32,7 @@ import type {
   ToolPericope,
 } from "../../../shared/tools/editor-api"
 import type { ToolCellPage, ToolCellView } from "./host-handlers"
+import type { ToolRev4Services } from "./host-handlers-rev4"
 
 export interface ToolTypingSelection {
   anchor: number
@@ -93,6 +95,11 @@ export interface ToolEditorServices {
   /** Suggestion providers (ghost text): see suggestions.ts. */
   suggest: (cellId: string, prefix: string) => Promise<ToolSuggestion[]>
   suggestionFeedback: (cellId: string, suggestionId: string, accepted: boolean) => void
+  /** apiRev 4: audio validation, the Audio lens's take, source editing, the AI
+   *  surfaces beside a cell and the source selection toolbar. */
+  rev4?: ToolRev4Services
+  /** Identity changes the host pushes as audio.changed / contextual.changed / smartedits.changed. */
+  rev4Versions?: { audio: unknown; contextual: unknown; smartEdits: unknown; examples: unknown }
 }
 
 /** The cell view an editor extension gets from the shared store (apiRev 3
@@ -150,7 +157,17 @@ export function cellToToolView(store: CellStore, cell: CellData, extras: ToolVie
       : null,
     paragraph: structure?.paragraph ?? null,
     voice: extras.voiceFor?.(cell.id) ?? null,
+    idml: idmlViewOf(cell),
   }
+}
+
+/** apiRev 4: an IDML cell's editable form (TranslatedEditor's preparation). */
+function idmlViewOf(cell: CellData): { html: string; error: string | null } | null {
+  if (!hasIdmlCellMetadata(cell.metadata)) return null
+  const config = resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml)
+  if (!config) return null
+  const prepared = prepareIdmlEditorContent(config, cell.translatedHtml, cell.translated ?? "")
+  return { html: prepared.html, error: prepared.error }
 }
 
 /** One page of the shared store: cursor = the index of the first cell. */

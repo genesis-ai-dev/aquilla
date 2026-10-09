@@ -121,6 +121,37 @@ export const SDK_CORE = String.raw`
     target.textContent = "";
     target.appendChild(tpl.content);
   }
+  /** IDML: the host-prepared slot/token markup, kept as is (only the
+   *  data-idml-* anchors and their contenteditable survive this pass). */
+  function idmlInto(target, html) {
+    var tpl = doc.createElement("template");
+    tpl.innerHTML = html || "";
+    (function walk(node) {
+      Array.prototype.slice.call(node.childNodes).forEach(function (c) {
+        if (c.nodeType === 1) {
+          if (c.tagName !== "P" && c.tagName !== "SPAN" && c.tagName !== "BR") { c.remove(); return; }
+          Array.prototype.slice.call(c.attributes).forEach(function (a) {
+            if (a.name.indexOf("data-idml-") !== 0 && a.name !== "contenteditable") c.removeAttribute(a.name);
+          });
+          walk(c);
+        } else if (c.nodeType !== 3) c.remove();
+      });
+    })(tpl.content);
+    target.textContent = "";
+    target.appendChild(tpl.content);
+  }
+  /** The editable slot a DOM point sits in (null outside one). */
+  function idmlSlotAt(node) {
+    var n = node && node.nodeType === 3 ? node.parentNode : node;
+    var slot = n && n.closest ? n.closest('[data-idml-protected="slot"]') : null;
+    return slot && slot.getAttribute("contenteditable") !== "false" ? slot : null;
+  }
+  function idmlHtmlOf(node) {
+    var clone = node.cloneNode(true);
+    Array.prototype.forEach.call(clone.querySelectorAll(".ghost, .ghost-hint"), function (g) { g.remove(); });
+    return clone.innerHTML;
+  }
+
   /** Render footnote markers found in text nodes (plain values carry raw USFM). */
   function chipFootnotes(root) {
     var n = 0;

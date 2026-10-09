@@ -38,6 +38,7 @@ export const TOOL_SCOPES = [
   "read:comments",
   "ai:draft",
   "write:audio",
+  "write:source",
 ] as const
 
 export type ToolScope = (typeof TOOL_SCOPES)[number]
@@ -51,6 +52,7 @@ export const TOOL_SCOPE_LABELS: Record<ToolScope, string> = {
   "read:comments": "see comment counts and open comment threads",
   "ai:draft": "draft and back-translate with Aquilla's AI (uses your project's AI credits)",
   "write:audio": "record and generate audio for cells",
+  "write:source": "edit source text and add, remove or hide cells",
 }
 
 export function isToolScope(value: unknown): value is ToolScope {

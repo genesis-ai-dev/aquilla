@@ -496,6 +496,8 @@ import {
 } from "@/lib/review/batch-validate-summary"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
+import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
+import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
 import {
@@ -12242,6 +12244,15 @@ export function ProjectWorkspace() {
   const extensionEditorActive = Boolean(
     activeFileId && !extensionEditorChoice.pending && extensionEditorChoice.selected !== STANDARD_EDITOR,
   )
+  // Footnote tray (apiRev 4): the extension editor reports its visible rows
+  // (editor.visible); the host feeds the same tray the built-in table does.
+  const extensionVisibleIds = useEditorViewportVisibleCellIds(extensionEditorActive && footnoteViewMode === "tray")
+  useEffect(() => {
+    if (!extensionEditorActive || footnoteViewMode !== "tray") return
+    const order = new Map(readAtVersion(cellStoreVersion, () => cellStore.getCellIds()).map((id, i) => [id, i]))
+    handleVisibleFootnotesChange(readAtVersion(cellStoreVersion, () =>
+      visibleFootnoteEntriesFor(cellStore, extensionVisibleIds, (id) => order.get(id) ?? 0)))
+  }, [extensionEditorActive, footnoteViewMode, extensionVisibleIds, cellStore, cellStoreVersion, handleVisibleFootnotesChange])
   const projectRoleLevel = project?.syncRole?.level ?? null
   const extensionEditorConfig = useMemo(() => (activeFile && project ? {
     fileName: activeFile.name,
@@ -12285,6 +12296,52 @@ export function ProjectWorkspace() {
     const voice = resolveCastVoice(tts.settings, cellId)
     return voice ? { name: voice.name, explicit: Boolean(assignedCastVoiceId(tts.settings, cellId)) } : null
   }, [tts.settings])
+  // apiRev 4: the last built-in surfaces for an extension editor (audio
+  // validation, the Audio lens's take, source editing, AI surfaces beside a
+  // cell, the source selection toolbar), over the same handlers.
+  const extensionEditorRev4 = useExtensionEditorRev4({
+    enabled: extensionEditorActive,
+    project: project ?? null,
+    fileId: activeFileId ?? null,
+    lane: activeLane,
+    store: cellStore,
+    storeVersion: cellStoreVersion,
+    username: currentUsername,
+    isTimeOrdered: activeFileTimeOrdered,
+    jwt: frontierSession?.jwt ?? null,
+    getSyncToken: (_pid, fid) => getTokenForFile(fid),
+    concepts: laneEditorConcepts,
+    termMatching: project?.termMatching,
+    addConceptBlockedReason,
+    canApproveConcept,
+    onAddConcept: handleAddConceptFromSelection,
+    onViewConcept: handleOpenTerminologyConcept,
+    onSetUpAffixes: () =>
+      navigate(`/project/${projectId}/settings?q=terminology`, { state: { backgroundLocation: location, projectSettingsModalDepth: 1 } }),
+    onAskAi: handleAskAiFromSelection,
+    fileName: activeFile?.name ?? "",
+    examples,
+    exampleOrigin: (fid) => exampleOriginFor(fid) ?? null,
+    commitTarget: handleAgentTargetCommit,
+    sourceLineEditing,
+    onInsertCellBeside: handleInsertCellBeside,
+    onAddLineAt: handleAddLineAt,
+    onRemoveCell: handleRemoveCell,
+    onSetCellHidden: handleSetCellHiddenStable,
+    onRetimeCell: handleRetimeSubtitle,
+    timingLocked,
+    canUnlockTiming,
+    onCellCommitted: (cellId) => { void handleCellCommitted(cellId) },
+    myScopes,
+    linkedTakesByCell,
+    ttsSettings: tts.settings,
+    onAssignCastVoice: handleAssignCastVoice,
+    onClearCastVoice: handleClearCastVoice,
+    onCloneVoice: (cellId) => {
+      setMakeCharacterSeedCellId(cellId)
+      setMakeCharacterOpen(true)
+    },
+  })
   const extensionEditorPipeline = useExtensionEditorServices({
     enabled: extensionEditorActive,
     fileId: activeFileId ?? null,
@@ -12313,6 +12370,8 @@ export function ProjectWorkspace() {
     concepts: laneEditorConcepts,
     termMatching: project?.termMatching,
     commitTarget: handleAgentTargetCommit,
+    rev4: extensionEditorRev4.services,
+    rev4Versions: extensionEditorRev4.versions,
     setValidation: handleAgentValidationChange,
     onCellValidated: handleCellValidated,
     completeSingle: handleCompleteSingle,
@@ -14101,6 +14160,7 @@ export function ProjectWorkspace() {
                 // place INSIDE the same layout — the media lens's timeline and
                 // video, the footnote tray, the search overlay and the load
                 // strip stay the host's own, around it.
+                <>
                 <ExtensionEditorSurface
                   choice={extensionEditorChoice}
                   file={{ fileId: activeFileId, name: activeFile.name }}
@@ -14110,6 +14170,8 @@ export function ProjectWorkspace() {
                   revealCellId={searchParams.get("cellId")}
                   {...(!timelineStacked && fileChapterToolbar ? { toolbarTrailing: fileChapterToolbar } : {})}
                 />
+                {extensionEditorRev4.overlay}
+                </>
               ) : (
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}

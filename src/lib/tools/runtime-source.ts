@@ -161,6 +161,23 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       list: function () { return call("terms.list"); },
       matches: function (fileId, cellIds) { return call("terms.matches", { fileId: fileId, cellIds: cellIds }); },
       open: function (conceptId) { return call("terms.open", { conceptId: conceptId }); },
+      // apiRev 4: the source selection toolbar (host popovers anchored at rect).
+      selection: function (fileId, cellId, text) { return call("terms.selection", { fileId: fileId, cellId: cellId, text: String(text || "") }); },
+      view: function (fileId, cellId, text, rect) { return call("terms.view", { fileId: fileId, cellId: cellId, text: String(text || ""), rect: rect || null }); },
+      add: function (fileId, cellId, text, rect) { return call("terms.add", { fileId: fileId, cellId: cellId, text: String(text || ""), rect: rect || null }); },
+    },
+    // apiRev 4: Ask AI about a selection (the host's chat, with the selection as context).
+    agent: {
+      ask: function (fileId, cellId, text) { return call("agent.ask", { fileId: fileId, cellId: cellId, text: String(text || "") }); },
+    },
+    // apiRev 4: source editing and the cell menu (scope write:source).
+    source: {
+      actions: function (fileId, cellId) { return call("source.actions", { fileId: fileId, cellId: cellId }); },
+      commit: function (fileId, cellId, value, html) { return call("source.commit", { fileId: fileId, cellId: cellId, value: String(value), html: html === undefined ? null : html }); },
+      setHidden: function (fileId, cellId, hidden) { return call("source.setHidden", { fileId: fileId, cellId: cellId, hidden: !!hidden }); },
+      insert: function (fileId, cellId, side) { return call("source.insert", { fileId: fileId, cellId: cellId, side: side }); },
+      remove: function (fileId, cellId) { return call("source.remove", { fileId: fileId, cellId: cellId }); },
+      retime: function (fileId, cellId, startSec, endSec) { return call("source.retime", { fileId: fileId, cellId: cellId, startSec: Number(startSec), endSec: Number(endSec) }); },
     },
     // apiRev 3: the host editor's configuration and workspace controls.
     editor: {
@@ -211,6 +228,15 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       // apiRev 3: the HOST records (it owns the microphone) and synthesizes.
       record: function (fileId, cellId) { return call("audio.record", { fileId: fileId, cellId: cellId }); },
       generate: function (fileId, cellId) { return call("audio.generate", { fileId: fileId, cellId: cellId }); },
+      // apiRev 4: per-take validation, the Audio lens's take (peaks, trim), voices.
+      takes: function (fileId) { return call("audio.takes", { fileId: fileId }); },
+      validate: function (fileId, cellId, audioId) { return call("audio.validate", { fileId: fileId, cellId: cellId, audioId: audioId }); },
+      unvalidate: function (fileId, cellId, audioId) { return call("audio.unvalidate", { fileId: fileId, cellId: cellId, audioId: audioId }); },
+      take: function (fileId, cellId) { return call("audio.take", { fileId: fileId, cellId: cellId }); },
+      trim: function (fileId, cellId, audioId, startMs, endMs) { return call("audio.trim", { fileId: fileId, cellId: cellId, audioId: audioId, startMs: Number(startMs), endMs: Number(endMs) }); },
+      voices: function (fileId) { return call("audio.voices", { fileId: fileId }); },
+      assignVoice: function (fileId, cellId, voiceId) { return call("audio.assignVoice", { fileId: fileId, cellId: cellId, voiceId: voiceId || null }); },
+      clone: function (fileId, cellId) { return call("audio.clone", { fileId: fileId, cellId: cellId }); },
     },
     storage: {
       get: function (key) { return call("storage.get", { key: key }); },
@@ -236,6 +262,12 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       // apiRev 3: the app's own drafting pipeline (examples, brief, credits).
       draft: function (fileId, cellIds, opts) { return call("ai.draft", { fileId: fileId, cellIds: cellIds, regenerate: !!(opts && opts.regenerate) }); },
       draftParagraph: function (fileId, cellId) { return call("ai.draftParagraph", { fileId: fileId, cellId: cellId }); },
+      // apiRev 4: the AI surfaces beside a cell.
+      examples: function (fileId, cellId) { return call("ai.examples", { fileId: fileId, cellId: cellId }); },
+      contextual: function (fileId) { return call("ai.contextual", { fileId: fileId }); },
+      reviewContextual: function (fileId, cellId, draftId, accept) { return call("ai.reviewContextual", { fileId: fileId, cellId: cellId, draftId: draftId, accept: !!accept }); },
+      smartEdits: function (fileId, cellId) { return call("ai.smartEdits", { fileId: fileId, cellId: cellId }); },
+      smartEditFeedback: function (fileId, cellId, id, action) { return call("ai.smartEditFeedback", { fileId: fileId, cellId: cellId, id: id, action: action }); },
     },
     tell: function (message) { return call("tell", { message: String(message) }); },
     on: function (type, cb) {
@@ -251,6 +283,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   Object.freeze(aquilla.storage); Object.freeze(aquilla.permissions); Object.freeze(aquilla.ui); Object.freeze(aquilla.ai);
   Object.freeze(aquilla.editor); Object.freeze(aquilla.backtranslation); Object.freeze(aquilla.history); Object.freeze(aquilla.attachments);
   Object.freeze(aquilla.rules); Object.freeze(aquilla.selection); Object.freeze(aquilla.suggestions);
+  Object.freeze(aquilla.agent); Object.freeze(aquilla.source);
   Object.defineProperty(window, "aquilla", { value: Object.freeze(aquilla), writable: false, configurable: false });
 
   // apiRev 2: focus handoff. App-wide shortcuts (Ctrl/Cmd+K search, the

@@ -69,7 +69,7 @@ call goes through the scope gate; no extension gets anything privileged.
 | 36 | Empty cell | faded unavailable circle | ✅ | — |
 | 37 | Auto-validate own edit | `shouldAutoValidateHumanEdit` after commit | ✅ same host path | host `commitTarget` |
 | 38 | Repetition propagation | on settle (leaving the cell) / explicit validate, with Undo toast | ✅ same host path | `cells.settle` |
-| 39 | Audio validation column | separate check column for files with audio | 🟡 header shows the audio check mark; per-row audio validate isn't drawn | — |
+| 39 | Audio validation column | separate check column for files with audio | ✅ per-take vote with the built-in's states (mic / ✓ / ✓✓, filled capsule for others, "1/2" on multi-take lines), validators popover with remove, the faded "no audio" mic and the checking placeholder; drawn only on files with audio | `audio.takes`, `audio.validate`, `audio.unvalidate`, `audio.changed` |
 | **Editing** |||||
 | 40 | Activation | click read view → editor, caret at click point | ✅ | — |
 | 41 | Commit | idle 1.2s, blur, Enter, Tab, page hide | ✅ (hide → blur) | host `commitTarget` |
@@ -78,12 +78,12 @@ call goes through the scope gate; no extension gets anything privileged.
 | 44 | Formatting | Cmd/Ctrl+B/I/U, bubble menu B I U S code | ✅ | sanitized `html` |
 | 45 | Paste | plain text only | ✅ | — |
 | 46 | Footnotes | add dialog (numbered/lettered), inline panel edit/delete, Backspace confirm | ✅ | — |
-| 47 | Footnote tray mode | `FootnotesTray` beside the table | 🟡 the host tray is mounted, but the frame doesn't feed it the visible footnotes; footnotes show inline in the rows instead | — |
+| 47 | Footnote tray mode | `FootnotesTray` beside the table | ✅ the host's tray, fed from the frame's visible rows (`editor.visible`) through the same entry builder the table uses (`visibleFootnoteEntriesFor`); edits there commit like the built-in's | `editor.visible` |
 | 48 | Write failure | red inline alert + dismiss | ✅ | — |
 | 49 | "Saved" confirmation | ✓ Saved after commit | ✅ | — |
 | 50 | Ghost text | **not on this branch** (forecasting is PR #1295) | ✅ generic hook: providers register host-side, Tab/→ accepts, Esc rejects; translation memory ships as the first provider | `suggestions.get/feedback` |
-| 51 | IDML slot editing | protected slots in TipTap | 🟡 the host validates every commit (`validateIdmlEditorCommit`), but the frame edits as rich text | host `commitTarget` |
-| 52 | Source editing / cell menu (edit source, timestamps, insert/remove/hide) | `CellSourceMenu` | ❌ needs `source.*` write scopes; not added in this round | — |
+| 51 | IDML slot editing | protected slots in TipTap | ✅ the frame renders the host-prepared slot/token markup and edits only inside editable slots (a `beforeinput` guard refuses typing, deleting or formatting across anchors, as the TipTap guard does); the commit keeps the markup and the host validates the anchors (`validateIdmlEditorCommit`) | cell `idml`, `cells.commit {html}` |
+| 52 | Source editing / cell menu (edit source, timestamps, insert/remove/hide) | `CellSourceMenu` | ✅ the ⋮ menu on hover with the same items, reasons and gates (role floors, DCS pin, IDML, timing lock): edit the source in place (`source.cell.commit`, chained on the head, with `tool_origin`), timestamps, hide/show, insert above/below, remove (the host's own confirmation). New scope `write:source` (auto-granted to the first-party editor) | `source.*` |
 | **AI** |||||
 | 53 | Draft one cell | ✨ with confirm-before-replace (and "don't ask again") | ✅ | `ai.draft` |
 | 54 | Regenerate | ↻ on unvalidated text | ✅ | `ai.draft {regenerate}` |
@@ -92,8 +92,8 @@ call goes through the scope gate; no extension gets anything privileged.
 | 57 | Streaming preview, phase pill, progress bar | overlay + fills | ✅ | `cells.signals.ai` |
 | 58 | Set up AI | opens the chooser when not configured | ✅ host opens it | `ai.draft` → host |
 | 59 | Translate as you read | File options checkbox, drafts visible cells | ✅ menu is the host's; visible rows reported | `editor.visible` |
-| 60 | Examples panel / smart edits / contextual draft card | flag- and evidence-gated | ❌ not built in this round (flagged features) | — |
-| 61 | Ask AI / add term from source selection | `SourceSelectionToolbar` | ❌ not built in this round | — |
+| 60 | Examples panel / smart edits / contextual draft card | flag- and evidence-gated | ✅ translation-memory matches (bands, diff, origin, Insert on exact), the autopilot draft card (accept writes it, dismiss reviews it), smart edits behind the same flags (underlined in the read view, accept / dismiss with feedback) | `ai.examples`, `ai.contextual`, `ai.reviewContextual`, `ai.smartEdits`, `ai.smartEditFeedback` |
+| 61 | Ask AI / add term from source selection | `SourceSelectionToolbar` | ✅ the toolbar on a source selection (View term only on a matcher hit); Ask AI opens the host's chat with the selection as a chip, View term and Add to terminology open the host's own popovers at the selection | `terms.selection`, `terms.view`, `terms.add`, `agent.ask` |
 | **Panels and actions** |||||
 | 62 | Rail: comments, history | overflow buttons | 🧩 opens the host drawers | `comments.open`, `history.open` |
 | 63 | History drawer + restore/promote | `HistoryDrawer` | 🧩 | `history.open` |
@@ -104,7 +104,7 @@ call goes through the scope gate; no extension gets anything privileged.
 | 68 | Cell details: health tab | text summary | ✅ | `ribbon` |
 | 69 | Cell details: back-translation | read back, regenerate, edit, stale warning | ✅ | `backtranslation.*` |
 | 70 | Cell details: issues | list with severity, waived state, open rule | ✅ (waive from the rule card) | `cells.signals.issues` |
-| 71 | Audio lens | source column becomes the voice card | 🟡 voice card with play/record/generate·voice; no waveform/trim/clone | `voice`, `audio.*` |
+| 71 | Audio lens | source column becomes the voice card | ✅ voice card with the take's waveform (host-decoded peaks), drag-to-trim (persisted on the take), play/record, the voice picker, "make a character" (the host's clone dialog) and the take-voice pill; no per-line volume slider (a device preference) | `audio.take`, `audio.trim`, `audio.voices`, `audio.assignVoice`, `audio.clone` |
 | 72 | Media/timeline lens (time-ordered files) | timeline + video stacked above/left of the table | 🧩 the extension takes EditorTable's slot **inside** the same media layout; timeline chips, cue drawers and search jumps drive it through the same editor handle (`scrollToCellId`, `focusCellEditorIndex`); playback-follow scrolling is not drawn by the frame | `editor.reveal {focus}` |
 | **Not in the built-in (brief items)** |||||
 | — | AI-draft badge | removed in AQU-1041 | n/a | `aiDrafted` still delivered |
@@ -112,18 +112,18 @@ call goes through the scope gate; no extension gets anything privileged.
 | — | Alt+arrow shortcuts | don't exist | n/a | — |
 | — | "Revert removing validations" | no such built-in feature | ✅ Smart Extensions revert now **puts back validations an extension withdrew** (`shared/tools/revert.ts` `revalidates`) | — |
 
-**Count:** of the 72 rows, 58 are ✅, 7 are 🧩 (host panel, identical by construction), 4 are 🟡 and 3 are ❌.
+**Count:** of the 72 rows, 65 are ✅ and 7 are 🧩 (host panel, identical by construction): **72/72 at parity**. The last seven (39, 47, 51, 52, 60, 61, 71) landed in apiRev 4.
 So 65 of 72 are at parity, 4 are partial and 3 are gaps.
 
-## Remaining gaps, and why
+## Remaining differences
 
-- **Source editing / cell menu (52).** These are `source.*` events (PROJECT_LEAD+). They need new
-  write scopes and their own revert semantics. That's a design call to make, not a technical blocker.
-- **Examples, smart edits, contextual draft card, selection toolbar (60, 61).** These are flag- or
-  evidence-gated surfaces. They'd be bridged the same way as AI drafting (the host computes, the
-  frame renders). Not built in this round.
-- **Partial rows (39, 47, 51, 71).** The data is all available over the bridge; these are
-  rendering work.
+None of the 72 rows is partial. Small, deliberate differences, stated in their rows: smart edits
+underline the read view rather than the open editor (they are flag-gated and off by default), and
+the Audio lens has no per-line volume slider (a per-device preference). Structural source edits
+(insert / remove / hide) run through the host's own handlers, so they are attributed to the user
+without a `tool_origin` stamp; the source text commit carries one. Tool revert ("revert since T")
+covers target and validation writes, not structural source changes — `write:source` is a separate,
+explicit scope for that reason.
 
 ## Sandbox notes
 

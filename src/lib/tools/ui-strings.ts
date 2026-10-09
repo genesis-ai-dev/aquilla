@@ -10,7 +10,7 @@
 import { CATALOGS } from "@/lib/i18n/messages"
 import { DEFAULT_LOCALE, directionFor } from "@/lib/i18n/locales"
 
-export const UI_STRING_PREFIXES = ["editor.", "common.", "extensions.", "comments.", "workspace.", "agentWorkspace."] as const
+export const UI_STRING_PREFIXES = ["editor.", "common.", "extensions.", "comments.", "workspace.", "agentWorkspace.", "search.", "autopilot."] as const
 export const MAX_UI_STRING_KEYS = 600
 
 export type UiStringValue = string | { forms: Record<string, string>; countVar: string }

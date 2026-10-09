@@ -63,7 +63,8 @@ export const SDK_ROW = String.raw`
       if (want) slot.appendChild(el("span", { style: { "max-width": "60%" }, class: "lbl", text: want }));
     });
     var tcol = el("div", { class: "tcol", "data-editor-cell-surface": "target-column", dir: "ltr" }, [
-      HealthRibbon(id), head, el("div", { class: "tbody" }, [ValidateButton(id), opts.target ? opts.target(id) : TargetEditor(id)]), CellNotes(id),
+      HealthRibbon(id), head, el("div", { class: "tbody" }, [ValidateButton(id), AudioValidateButton(id), opts.target ? opts.target(id) : TargetEditor(id)]),
+      ContextualDraftCard(id), CellNotes(id),
     ]);
     row.appendChild(tcol);
     bindCell(id, tcol, function () { tcol.style.fontSize = cfg().targetFontSize + "px"; tcol.style.lineHeight = "1.6"; });

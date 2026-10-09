@@ -24,6 +24,8 @@ export function useScopeLabel(): (scope: ToolScope) => string {
           return t("extensions.scope.aiDraft")
         case "write:audio":
           return t("extensions.scope.writeAudio")
+        case "write:source":
+          return t("extensions.scope.writeSource")
       }
     },
     [t],

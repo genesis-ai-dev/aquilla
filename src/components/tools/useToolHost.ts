@@ -275,6 +275,23 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   const editorBts = editor?.backtranslations
   const editorLoading = editor?.storeLoading
   const editorPericopes = editor?.pericopes
+  // apiRev 4: audio takes, autopilot drafts and smart edits changed.
+  const rev4Audio = editor?.rev4Versions?.audio
+  const rev4Contextual = editor?.rev4Versions?.contextual
+  const rev4Smart = editor?.rev4Versions?.smartEdits
+  const rev4Examples = editor?.rev4Versions?.examples
+  useEffect(() => {
+    if (ready && rev4Examples !== undefined) hostRef.current?.push({ type: "examples.changed", fileId: boundFile ?? null })
+  }, [ready, rev4Examples, boundFile])
+  useEffect(() => {
+    if (ready && rev4Audio !== undefined) hostRef.current?.push({ type: "audio.changed", fileId: boundFile ?? null })
+  }, [ready, rev4Audio, boundFile])
+  useEffect(() => {
+    if (ready && rev4Contextual !== undefined) hostRef.current?.push({ type: "contextual.changed", fileId: boundFile ?? null })
+  }, [ready, rev4Contextual, boundFile])
+  useEffect(() => {
+    if (ready && rev4Smart !== undefined) hostRef.current?.push({ type: "smartedits.changed", fileId: boundFile ?? null })
+  }, [ready, rev4Smart, boundFile])
   useEffect(() => {
     if (ready && editorPericopes) hostRef.current?.push({ type: "pericopes.changed", fileId: boundFile ?? null })
   }, [ready, editorPericopes, boundFile])

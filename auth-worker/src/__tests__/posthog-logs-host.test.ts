@@ -60,8 +60,7 @@ describe("auth-worker PostHog ingest region (AQU-854)", () => {
   })
 
   it("ships nothing when POSTHOG_KEY is blank, so a region cutover cannot leak the retired token", async () => {
-    // wrangler.toml intentionally carries POSTHOG_KEY = "" until the EU project
-    // token exists; a blank key must be a clean no-op, not a keyless POST.
+    // Local and e2e profiles omit the key; a blank key must be a clean no-op.
     const spy = stubFetch()
     await shipLog({ POSTHOG_KEY: "" }, "identity", "error", "boom")
     await shipLog({}, "identity", "error", "boom")

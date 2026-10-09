@@ -278,6 +278,39 @@ describe("NotificationsInbox", () => {
     )
   })
 
+  it("moves the highlight when arrow keys land on the inbox shell or the unread filter", async () => {
+    const user = userEvent.setup()
+    renderInbox([
+      comment({ commentId: "a", body: "@[alice] one" }),
+      comment({ commentId: "b", cellId: "cell-2", cellRef: "GEN 1:2", body: "@[alice] two" }),
+    ])
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const first = screen.getByRole("button", { name: /GEN 1:1/ })
+    const second = screen.getByRole("button", { name: /GEN 1:2/ })
+    const popup = document.querySelector("[data-slot='popover-content']")
+    if (!(popup instanceof HTMLElement)) throw new Error("inbox popover missing")
+    popup.focus()
+    expect(popup).toHaveFocus()
+    await user.keyboard("{ArrowDown}")
+    expect(first).toHaveFocus()
+    expect(first).toHaveAttribute("data-active", "true")
+    screen.getByTestId("notifications-unreads-only").focus()
+    await user.keyboard("{ArrowDown}")
+    expect(second).toHaveFocus()
+    expect(second).toHaveAttribute("data-active", "true")
+    expect(first).not.toHaveAttribute("data-active")
+  })
+
+  it("leaves the actions menu in charge of its own arrow keys", async () => {
+    const user = userEvent.setup()
+    renderInbox([comment({ commentId: "a", body: "@[alice] one" })])
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    await user.click(screen.getByTestId("notifications-actions"))
+    expect(await screen.findByRole("menuitem", { name: "Mark all as read" })).toBeInTheDocument()
+    await user.keyboard("{ArrowDown}")
+    expect(screen.getByRole("button", { name: /GEN 1:1/ })).not.toHaveAttribute("data-active")
+  })
+
   it("highlights the last row when ArrowUp is pressed before any row is highlighted", async () => {
     const user = userEvent.setup()
     renderInbox([

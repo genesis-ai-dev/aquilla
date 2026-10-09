@@ -84,6 +84,11 @@ export function NotificationsInbox({
   // across that outside press, then release on the next turn.
   const holdOpen = useRef(false)
   const listRef = useRef<HTMLDivElement>(null)
+  // Arrow keys are handled here, on the popover, so they still move the
+  // highlight when focus is on the popup shell or a header control. The list
+  // publishes the handler; portaled menus sit outside this DOM node and keep
+  // their own keys.
+  const listKeyDownRef = useRef<(event: KeyboardEvent<HTMLElement>) => void>(() => {})
   const readIds = useMentionReadIds(projectId, readerUsername)
   const dismissedIds = useMentionDismissedIds(projectId, readerUsername)
   const notices = useMemo(
@@ -210,6 +215,11 @@ export function NotificationsInbox({
           sideOffset={6}
           initialFocus={shown.length > 0 ? listRef : undefined}
           className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-hidden pt-2 pr-0 pb-0 pl-2"
+          onKeyDown={(event) => {
+            const target = event.target
+            if (target instanceof Node && !event.currentTarget.contains(target)) return
+            listKeyDownRef.current(event)
+          }}
         >
           <header className="flex shrink-0 items-center justify-between gap-2 pr-2">
             <h3 className="text-base font-semibold tracking-tight">{t("comments.inbox.title")}</h3>
@@ -292,6 +302,7 @@ export function NotificationsInbox({
               files={files}
               cellTextById={cellTextById}
               listRef={listRef}
+              keyDownRef={listKeyDownRef}
               markReadLabel={t("comments.inbox.markRead")}
               markUnreadLabel={t("comments.inbox.markUnread")}
               deleteLabel={t("comments.inbox.delete")}
@@ -334,6 +345,7 @@ function NotificationList({
   files,
   cellTextById,
   listRef,
+  keyDownRef,
   markReadLabel,
   markUnreadLabel,
   deleteLabel,
@@ -349,6 +361,7 @@ function NotificationList({
   files: readonly { id: string; name: string }[]
   cellTextById: ReadonlyMap<string, string> | undefined
   listRef: RefObject<HTMLDivElement | null>
+  keyDownRef: RefObject<(event: KeyboardEvent<HTMLElement>) => void>
   markReadLabel: string
   markUnreadLabel: string
   deleteLabel: string
@@ -387,9 +400,11 @@ function NotificationList({
   )
 
   const focusRow = useCallback((index: number) => {
+    // preventScroll: the browser otherwise centers an absolutely positioned
+    // virtual row, which jumps the list by a whole screen.
     listRef.current
       ?.querySelector<HTMLButtonElement>(`[data-notice-index="${index}"]`)
-      ?.focus()
+      ?.focus({ preventScroll: true })
   }, [listRef])
 
   useEffect(() => {
@@ -399,28 +414,37 @@ function NotificationList({
       `[data-notice-index="${index}"]`,
     )
     if (!button) return
-    button.focus()
+    button.focus({ preventScroll: true })
     pendingFocus.current = null
   })
+
+  function rowIsInView(index: number): boolean {
+    const scroller = listRef.current
+    const node = scroller?.querySelector(`[data-notice-index="${index}"]`)
+    if (!scroller || !(node instanceof HTMLElement)) return false
+    const port = scroller.getBoundingClientRect()
+    const row = node.getBoundingClientRect()
+    if (port.height <= 0 || row.height <= 0) return false
+    return row.top >= port.top - 1 && row.bottom <= port.bottom + 1
+  }
 
   function focusIndex(index: number) {
     const count = notices.length
     const next = ((index % count) + count) % count
     setActiveIndex(next)
     pendingFocus.current = next
-    const isStart = next === 0
-    const isEnd = next === count - 1
-    // In-window rows are already painted. Scroll when the destination is an
-    // edge the current window does not contain, the same rule as the chapter
-    // picker: the virtualizer follows the highlight, it does not own the keys.
-    const visible = listRef.current?.querySelector(`[data-notice-index="${next}"]`)
-    if (!visible || isStart || isEnd) {
-      virtualizer.scrollToIndex(next, { align: isEnd ? "end" : "start" })
+    // Overscan mounts rows that are still outside the scrollport. Follow the
+    // highlight whenever the destination is not actually on screen.
+    if (!rowIsInView(next)) {
+      const isEnd = next === count - 1
+      virtualizer.scrollToIndex(next, {
+        align: next === 0 ? "start" : isEnd ? "end" : "auto",
+      })
     }
     focusRow(next)
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     if (notices.length === 0) return
     const range = virtualizer.range
@@ -450,12 +474,19 @@ function NotificationList({
     focusIndex(next)
   }
 
+  keyDownRef.current = onKeyDown
+  useEffect(() => {
+    const ref = keyDownRef
+    return () => {
+      ref.current = () => {}
+    }
+  }, [keyDownRef])
+
   return (
     <div
       ref={handleScrollRef}
       aria-label={label}
       tabIndex={-1}
-      onKeyDown={onKeyDown}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pr-2 pb-2 outline-hidden"
     >
       <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>

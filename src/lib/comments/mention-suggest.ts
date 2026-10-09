@@ -1,11 +1,13 @@
 /**
- * @mention token rules shared by the comment composer and `extractMentions`.
+ * @mention picker rules for the comment composer.
  *
- * The notification path (email and the in-app inbox) only reads a mention that
- * `extractMentions` can parse: an `@` at the start of the text or after
- * whitespace, then a username that starts with a letter. Opening the picker on
- * any `@` — including the one inside `me@example.com` — used to insert a token
- * that path can never see.
+ * The picker opens on an `@` at the start of the text or after whitespace,
+ * never on the one inside `me@example.com`, and stays open while the text
+ * after it still looks like a username: a letter first, then any run of
+ * non-space characters. Hyphenated or dotted usernames (`qa-bot-2`,
+ * `john.doe`) keep filtering the list instead of closing it. The stored form
+ * `@[username]` (see `extractMentions`) is bracket-delimited and takes any
+ * roster username, whatever its characters.
  */
 
 export interface MentionCandidate {
@@ -19,7 +21,7 @@ export interface MentionToken {
   query: string
 }
 
-const QUERY = /^[a-zA-Z][a-zA-Z0-9_]*$/
+const QUERY = /^\p{L}[^\s[\]]*$/u
 
 /**
  * The mention token the caret is inside, or null when the `@` before the caret

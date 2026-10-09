@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { MENTION_CHIP_CLASS } from "@/lib/comments/comment-helpers"
+import { MENTION_CHIP_CLASS, mentionTokenRegex } from "@/lib/comments/comment-helpers"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -277,8 +277,6 @@ export function MentionTextarea({
   )
 }
 
-const MENTION_TOKEN = /@\[([a-zA-Z][a-zA-Z0-9_]*)\]/g
-
 function readField(root: HTMLElement): string {
   let out = ""
   const visit = (node: Node) => {
@@ -362,7 +360,7 @@ function placeCaret(root: HTMLElement, target: number) {
 
 function writeField(root: HTMLElement, value: string) {
   root.replaceChildren()
-  const re = new RegExp(MENTION_TOKEN.source, "g")
+  const re = mentionTokenRegex()
   let last = 0
   let match: RegExpExecArray | null
   while ((match = re.exec(value)) !== null) {

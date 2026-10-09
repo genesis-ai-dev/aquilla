@@ -1,5 +1,5 @@
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
-import { extractMentions } from "./comment-helpers"
+import { extractMentions, mentionDisplayText } from "./comment-helpers"
 
 /**
  * One row in the in-app notifications inbox.
@@ -54,7 +54,7 @@ function cellTextOf(comment: CommentRecord, byId: ReadonlyMap<string, CommentRec
 }
 
 function excerptOf(body: string): string {
-  const flat = body.replace(/@\[([a-zA-Z][a-zA-Z0-9_]*)\]/g, "@$1").replace(/\s+/g, " ").trim()
+  const flat = mentionDisplayText(body).replace(/\s+/g, " ").trim()
   if (flat.length <= EXCERPT_LENGTH) return flat
   return `${flat.slice(0, EXCERPT_LENGTH - 1)}…`
 }

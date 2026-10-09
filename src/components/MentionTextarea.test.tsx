@@ -3,24 +3,30 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { MentionTextarea } from "./MentionTextarea"
+import type { MentionCandidate } from "@/lib/comments/mention-suggest"
 
 const ROSTER = [{ username: "bob" }, { username: "bobby" }, { username: "carol" }]
 
 function Harness({
   onKeyDown,
+  candidates = ROSTER,
 }: {
   onKeyDown?: (event: React.KeyboardEvent<HTMLDivElement>) => void
+  candidates?: readonly MentionCandidate[]
 }) {
   const [value, setValue] = useState("Check ")
   return (
-    <MentionTextarea
-      value={value}
-      onChange={setValue}
-      candidates={ROSTER}
-      currentUsername="alice"
-      aria-labelledby="label"
-      onKeyDown={onKeyDown}
-    />
+    <>
+      <MentionTextarea
+        value={value}
+        onChange={setValue}
+        candidates={candidates}
+        currentUsername="alice"
+        aria-labelledby="label"
+        onKeyDown={onKeyDown}
+      />
+      <pre data-testid="stored">{value}</pre>
+    </>
   )
 }
 
@@ -45,6 +51,21 @@ describe("MentionTextarea", () => {
 
     await user.keyboard("{Meta>}{Enter}{/Meta}")
     expect(onKeyDown.mock.calls.some(([event]) => event.key === "Enter" && event.metaKey)).toBe(true)
+  })
+
+  // AQU-761 bot walk: picking `@qa-bot-2` left the plain text `@[qa-bot-2]`
+  // in the composer and the posted comment, so no chip and no notice.
+  it("stores a hyphenated username as one chip", async () => {
+    const user = userEvent.setup()
+    render(<Harness candidates={[{ username: "qa-bot-2" }, { username: "qa_bot_mention" }]} />)
+    const field = screen.getByRole("textbox")
+    await user.type(field, "@qa-b")
+    expect(screen.getByRole("option", { name: "@qa-bot-2" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.queryByRole("option", { name: "@qa_bot_mention" })).not.toBeInTheDocument()
+    await user.keyboard("{Enter}")
+    expect(field.querySelector("[data-mention='qa-bot-2']")).toHaveTextContent("@qa-bot-2")
+    expect(field).toHaveTextContent("Check @qa-bot-2")
+    expect(screen.getByTestId("stored")).toHaveTextContent("Check @[qa-bot-2]")
   })
 
   it("does not offer a mention for an email address", async () => {

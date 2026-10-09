@@ -38,6 +38,17 @@ describe("mentionNoticesFor", () => {
     expect(notices[0]).toMatchObject({ authorLabel: "Bob", cellRef: "GEN 1:1" })
   })
 
+  // AQU-761 bot walk: the picker offered `@qa-bot-2`, but the bell stayed on
+  // "No mentions yet" because the token class rejected the hyphen.
+  it("lists a mention of a hyphenated username and shows it as @name", () => {
+    const notices = mentionNoticesFor(
+      [comment({ commentId: "hyphen", authorId: "qa-bot", body: "Please check @[qa-bot-2]" })],
+      "qa-bot-2",
+    )
+    expect(notices.map((n) => n.commentId)).toEqual(["hyphen"])
+    expect(notices[0]?.excerpt).toBe("Please check @qa-bot-2")
+  })
+
   it("keeps the verse ref and a text fallback for a cell that has neither", () => {
     const notices = mentionNoticesFor(
       [

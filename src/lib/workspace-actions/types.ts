@@ -63,6 +63,12 @@ export interface WorkspaceAction {
   group: "primary" | "secondary"
   isAvailable: (ctx: WorkspaceActionContext) => boolean
   isDefault?: (ctx: WorkspaceActionContext) => boolean
+  /**
+   * AQU-983: open the file-context batch modal instead of the plain confirm
+   * dialog. The modal is where the reader chooses empty cells versus a
+   * refresh, and ready cells versus untouched AI drafts.
+   */
+  opensFileModal?: "validate" | "draft-next" | "draft-all"
   requiresConfirmation?: {
     titleKey: MessageKey
     /**

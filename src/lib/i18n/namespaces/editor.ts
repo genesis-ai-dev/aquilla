@@ -717,6 +717,65 @@ export const editor = defineNamespace({
       one: "{count} still needs a translation",
       other: "{count} still need a translation",
     }),
+    "editor.batchValidate.skip.aiDraft": plural({
+      one: "{count} AI draft was left for individual review",
+      other: "{count} AI drafts were left for individual review",
+    }),
+    "editor.batchValidate.skip.notChosen": plural({
+      one: "{count} you left unchecked",
+      other: "{count} you left unchecked",
+    }),
+    "editor.batchFile.validateTitle": "Batch validate this file",
+    "editor.batchFile.draftTitle": "Draft this file",
+    "editor.batchFile.legend": "What this run includes",
+    "editor.batchFile.ready": plural({
+      one: "{count} cell ready for your check",
+      other: "{count} cells ready for your check",
+    }),
+    "editor.batchFile.readyHelp":
+      "Committed text you have not signed off, including lines someone else already checked.",
+    "editor.batchFile.aiDrafts": plural({
+      one: "{count} AI draft nobody has checked",
+      other: "{count} AI drafts nobody has checked",
+    }),
+    "editor.batchFile.aiDraftsHelp":
+      "Leave this off to review each one yourself. Turn it on to sign them off together, under your name.",
+    "editor.batchFile.aiDraftsLocked":
+      "A translator reviews these one at a time. A reviewer or a project lead can include them here.",
+    "editor.batchFile.empty": plural({
+      one: "{count} empty cell",
+      other: "{count} empty cells",
+    }),
+    "editor.batchFile.emptyHelp": "Source text with no translation yet.",
+    "editor.batchFile.refresh": plural({
+      one: "{count} untouched AI draft to refresh",
+      other: "{count} untouched AI drafts to refresh",
+    }),
+    "editor.batchFile.refreshHelp":
+      "Replaces the current AI draft. Cells a person translated are left alone.",
+    "editor.batchFile.humanLeft": plural({
+      one: "{count} cell a person already translated stays as it is.",
+      other: "{count} cells a person already translated stay as they are.",
+    }),
+    "editor.batchFile.hiddenLeft": plural({
+      one: "{count} hidden cell stays parked.",
+      other: "{count} hidden cells stay parked.",
+    }),
+    "editor.batchFile.scopeLegend": "How many",
+    "editor.batchFile.scopeNext": plural({
+      one: "Next {count}",
+      other: "Next {count}",
+    }),
+    "editor.batchFile.scopeAll": plural({
+      one: "All {count}",
+      other: "All {count}",
+    }),
+    "editor.batchFile.draftWill": plural({
+      one: "This drafts {count} cell. Every draft still needs a person to review it.",
+      other: "This drafts {count} cells. Every draft still needs a person to review it.",
+    }),
+    "editor.batchFile.nothingToDraft": "Nothing in this file can be drafted with these choices.",
+    "editor.batchFile.confirmDraft": "Draft",
     "editor.batchValidate.skip.alreadyMine": plural({
       one: "{count} you had already validated",
       other: "{count} you had already validated",
@@ -4774,6 +4833,124 @@ export const editor = defineNamespace({
         placeholders: {
           count: "How many cells had no translation. Selects the plural form.",
         },
+      },
+      "editor.batchValidate.skip.aiDraft": {
+        description:
+          "One clause inside {reasons}: untouched AI drafts this file-wide run "
+          + "left for individual review because the reader did not include them. "
+          + "A fragment, not a sentence. Not a refusal of cells someone else "
+          + "has already checked.",
+        placeholders: {
+          count: "How many untouched AI drafts were left out. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.skip.notChosen": {
+        description:
+          "One clause inside {reasons}: cells that were eligible, which the "
+          + "reader left unticked in the batch modal. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many eligible cells the reader left unchecked. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.validateTitle": {
+        description: "Title of the batch-validate modal for the open file.",
+        maxLength: 40,
+      },
+      "editor.batchFile.draftTitle": {
+        description: "Title of the batch-draft modal for the open file.",
+        maxLength: 32,
+      },
+      "editor.batchFile.legend": {
+        description: "Legend over the checkboxes that choose what this run includes.",
+        maxLength: 40,
+      },
+      "editor.batchFile.ready": {
+        description:
+          "Checkbox label for committed text this reader has not signed off, "
+          + "including a second pass on lines someone else already checked.",
+        placeholders: {
+          count: "How many such cells are in the open file. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.readyHelp": {
+        description: "Help under that checkbox.",
+      },
+      "editor.batchFile.aiDrafts": {
+        description:
+          "Checkbox label for AI drafts nobody has validated yet. Off unless "
+          + "a reviewer or project lead turns it on.",
+        placeholders: {
+          count: "How many untouched AI drafts are in the open file. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.aiDraftsHelp": {
+        description: "Help under that checkbox when the reader may turn it on.",
+      },
+      "editor.batchFile.aiDraftsLocked": {
+        description:
+          "Help under that checkbox when the reader is a contributor and cannot "
+          + "bulk-validate untouched AI drafts.",
+      },
+      "editor.batchFile.empty": {
+        description: "Checkbox label for cells with source text and no translation.",
+        placeholders: {
+          count: "How many empty cells are in the open file. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.emptyHelp": {
+        description: "Help under the empty-cells checkbox.",
+      },
+      "editor.batchFile.refresh": {
+        description:
+          "Checkbox label for replacing untouched AI drafts. Off by default, "
+          + "because it spends a new draft.",
+        placeholders: {
+          count: "How many untouched AI drafts can be refreshed. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.refreshHelp": {
+        description: "Help under the refresh checkbox. Says human translations are not replaced.",
+      },
+      "editor.batchFile.humanLeft": {
+        description: "Note that cells a person already translated are not drafted.",
+        placeholders: {
+          count: "How many such cells. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.hiddenLeft": {
+        description: "Note that hidden cells stay parked and are not drafted.",
+        placeholders: {
+          count: "How many hidden cells. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.scopeLegend": {
+        description: "Legend over the choice between the next package and the whole selection.",
+        maxLength: 24,
+      },
+      "editor.batchFile.scopeNext": {
+        description: "Radio label for drafting only the next package.",
+        placeholders: {
+          count: "How many cells that package will draft. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.scopeAll": {
+        description: "Radio label for drafting every ticked cell.",
+        placeholders: {
+          count: "How many cells the full selection contains. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.draftWill": {
+        description: "Sentence under the draft choices stating how many cells this run will draft.",
+        placeholders: {
+          count: "How many cells will be drafted. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.nothingToDraft": {
+        description: "Shown when the current ticks would draft nothing.",
+      },
+      "editor.batchFile.confirmDraft": {
+        description: "Confirm button of the draft modal. Imperative.",
+        maxLength: 16,
       },
       "editor.batchValidate.skip.alreadyMine": {
         description:

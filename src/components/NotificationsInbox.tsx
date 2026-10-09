@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Bell, MailBadge, MailCheck, MailX, MoreHorizontal } from "lucide-react"
 import { useNavigate } from "react-router-dom"
@@ -46,6 +46,17 @@ import type { CommentRecord } from "@/lib/sync/comments-read-types"
  */
 const NOTICE_ROW_PX = 72
 
+/** The fields both a React key event and a window KeyboardEvent provide. */
+type InboxKeyEvent = {
+  key: string
+  altKey: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  shiftKey: boolean
+  preventDefault: () => void
+  stopPropagation: () => void
+}
+
 type PendingDelete =
   | { kind: "one"; commentId: string }
   | { kind: "all" }
@@ -84,11 +95,9 @@ export function NotificationsInbox({
   // across that outside press, then release on the next turn.
   const holdOpen = useRef(false)
   const listRef = useRef<HTMLDivElement>(null)
-  // Arrow keys are handled here, on the popover, so they still move the
-  // highlight when focus is on the popup shell or a header control. The list
-  // publishes the handler; portaled menus sit outside this DOM node and keep
-  // their own keys.
-  const listKeyDownRef = useRef<(event: KeyboardEvent<HTMLElement>) => void>(() => {})
+  // The list publishes this. A window listener reads it while the inbox is
+  // open, so arrows work even when focus never entered the popover.
+  const listKeyDownRef = useRef<(event: InboxKeyEvent) => void>(() => {})
   const readIds = useMentionReadIds(projectId, readerUsername)
   const dismissedIds = useMentionDismissedIds(projectId, readerUsername)
   const notices = useMemo(
@@ -168,6 +177,19 @@ export function NotificationsInbox({
     dismissMentions(projectId, readerUsername, ids)
   }
 
+  // Capture phase, so an editor row does not take the arrow first. Menus are
+  // portaled outside the popover and keep their own keys.
+  useEffect(() => {
+    if (!open || pendingDelete) return
+    function onKey(event: globalThis.KeyboardEvent) {
+      const target = event.target
+      if (target instanceof Element && target.closest("[role='menu']")) return
+      listKeyDownRef.current(event)
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [open, pendingDelete])
+
   const deleteCopy =
     pendingDelete?.kind === "all"
       ? { title: t("comments.inbox.deleteAllTitle"), description: t("comments.inbox.deleteAllDescription") }
@@ -215,11 +237,6 @@ export function NotificationsInbox({
           sideOffset={6}
           initialFocus={shown.length > 0 ? listRef : undefined}
           className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-hidden pt-2 pr-0 pb-0 pl-2"
-          onKeyDown={(event) => {
-            const target = event.target
-            if (target instanceof Node && !event.currentTarget.contains(target)) return
-            listKeyDownRef.current(event)
-          }}
         >
           <header className="flex shrink-0 items-center justify-between gap-2 pr-2">
             <h3 className="text-base font-semibold tracking-tight">{t("comments.inbox.title")}</h3>
@@ -361,7 +378,7 @@ function NotificationList({
   files: readonly { id: string; name: string }[]
   cellTextById: ReadonlyMap<string, string> | undefined
   listRef: RefObject<HTMLDivElement | null>
-  keyDownRef: RefObject<(event: KeyboardEvent<HTMLElement>) => void>
+  keyDownRef: RefObject<(event: InboxKeyEvent) => void>
   markReadLabel: string
   markUnreadLabel: string
   deleteLabel: string
@@ -444,7 +461,7 @@ function NotificationList({
     focusRow(next)
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
+  function onKeyDown(event: InboxKeyEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     if (notices.length === 0) return
     const range = virtualizer.range
@@ -471,16 +488,20 @@ function NotificationList({
     else if (event.key === "PageUp") next = Math.max(0, activeIndex - page)
     else return
     event.preventDefault()
+    event.stopPropagation()
     focusIndex(next)
   }
 
-  keyDownRef.current = onKeyDown
-  useEffect(() => {
-    const ref = keyDownRef
+  // Assign in the layout effect, not during render. StrictMode replays the
+  // effect as setup → cleanup → setup, and a cleanup that only clears the
+  // ref would leave arrow keys on a no-op until some later render (a click)
+  // published the handler again.
+  useLayoutEffect(() => {
+    keyDownRef.current = onKeyDown
     return () => {
-      ref.current = () => {}
+      keyDownRef.current = () => {}
     }
-  }, [keyDownRef])
+  })
 
   return (
     <div

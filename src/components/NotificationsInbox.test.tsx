@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -32,8 +33,8 @@ function LocationProbe() {
   return <div data-testid="location">{location.pathname}{location.search}</div>
 }
 
-function renderInbox(comments: CommentRecord[]) {
-  return render(
+function renderInbox(comments: CommentRecord[], { strict = false }: { strict?: boolean } = {}) {
+  const tree = (
     <>
     <Toaster />
     <MemoryRouter initialEntries={["/project/proj-1/editor/file/file-1"]}>
@@ -55,6 +56,7 @@ function renderInbox(comments: CommentRecord[]) {
     </MemoryRouter>
     </>
   )
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree)
 }
 
 describe("NotificationsInbox", () => {
@@ -276,6 +278,26 @@ describe("NotificationsInbox", () => {
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/project/proj-1/editor/file/file-1?cellId=cell-2&comments=1&commentId=b",
     )
+  })
+
+  it("moves the highlight on the first open even when focus is still outside the inbox", async () => {
+    const user = userEvent.setup()
+    renderInbox(
+      [
+        comment({ commentId: "a", body: "@[alice] one" }),
+        comment({ commentId: "b", cellId: "cell-2", cellRef: "GEN 1:2", body: "@[alice] two" }),
+      ],
+      { strict: true },
+    )
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const outside = document.activeElement
+    if (outside instanceof HTMLElement) outside.blur()
+    const first = screen.getByRole("button", { name: /GEN 1:1/ })
+    expect(first).not.toHaveFocus()
+    await user.keyboard("{ArrowDown}")
+    expect(first).toHaveAttribute("data-active", "true")
+    await user.keyboard("{ArrowDown}")
+    expect(screen.getByRole("button", { name: /GEN 1:2/ })).toHaveAttribute("data-active", "true")
   })
 
   it("moves the highlight when arrow keys land on the inbox shell or the unread filter", async () => {

@@ -1844,6 +1844,8 @@ export const editor = defineNamespace({
     "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
+    "editor.issues.notYetValidated":
+      "Not yet validated — confidence on this line is still low",
 
     // — Draft-a-whole-paragraph confirm dialog ——————————————————————
     "editor.paragraph.confirmTitle": "Draft this paragraph?",
@@ -7132,6 +7134,12 @@ export const editor = defineNamespace({
           "accept, so they no longer count against the cell. Past participle of " +
           "'to waive' — a deliberate exemption, not something ignored by accident.",
         maxLength: 16,
+      },
+      "editor.issues.notYetValidated": {
+        description:
+          "Hover text on a cell whose number is tinted only because confidence " +
+          "is still low — no specific check has fired. Explains the tint. One " +
+          "sentence, no period.",
       },
       "editor.paragraph.confirmTitle": {
         description:

@@ -63,8 +63,12 @@ import type { WordTiming } from "@/lib/codex-editor/types"
 const project = {
   id: "p1",
   sourceLanguage: "en",
-  targetLanguage: "hy",
+  targetLanguage: "en",
   audioMediaStrategy: "lazy",
+  // A take voices the lane's language. Settings keys are not consulted.
+  lanes: [
+    { id: "lanehy01", role: "target", language: "hy", name: null, langCode: null, legacyTag: "" },
+  ],
 } as unknown as ProjectRecord
 
 /** A cue holding one take, as `mergeCellsWithAudio` leaves it. */

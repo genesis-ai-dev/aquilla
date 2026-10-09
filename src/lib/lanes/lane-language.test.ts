@@ -5,6 +5,7 @@ import {
   laneLabelsByTag,
   laneLabelSuffixesById,
   laneLanguageForTag,
+  laneOptionLabel,
   laneRowLabel,
   laneRowLanguage,
   type LaneLanguageRow,
@@ -102,6 +103,29 @@ describe("laneRowLabel (AQU-1586)", () => {
 
   it("is null rather than the lane id", () => {
     expect(laneRowLabel(row({ id: "a3f09c1e", name: "a3f09c1e" }))).toBeNull()
+  })
+})
+
+describe("laneOptionLabel", () => {
+  it("uses the language code when the row has no name, never the lane id", () => {
+    expect(
+      laneOptionLabel(
+        row({ id: "a3f09c1e", name: "", langCode: "es-MX", legacyTag: "a3f09c1e" }),
+        "Main language",
+      ),
+    ).toBe("es-MX")
+  })
+
+  it("uses the fallback when the row names nothing and its tag is its id", () => {
+    expect(
+      laneOptionLabel(row({ id: "a3f09c1e", name: "", langCode: null, legacyTag: "a3f09c1e" }), "Main language"),
+    ).toBe("Main language")
+  })
+
+  it("keeps a real tag when the row names nothing else", () => {
+    expect(laneOptionLabel(row({ id: "lane0001", name: "", langCode: null, legacyTag: "tt" }), "Main language")).toBe(
+      "tt",
+    )
   })
 })
 

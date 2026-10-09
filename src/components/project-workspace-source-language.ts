@@ -1,10 +1,10 @@
-// AQU-848 / AQU-1593: resolve the editor's active SOURCE language.
+// AQU-848 / AQU-1593 / AQU-1595: resolve the editor's active SOURCE language.
 //
 // The source lane's row is the language. A file's `sourceLanguage` is only
-// ever an import-time snapshot and is ignored. Until AQU-1616 backfills a
-// null `language`, `laneLanguage` still answers from settings inside the
-// migration fallback — callers pass the settings object and do not read the
-// key themselves.
+// ever an import-time snapshot and is ignored. Project settings are not
+// consulted either: a null `language` answers from the row's name, then its
+// tag, then its code. Callers still pass the settings object so the signature
+// stays stable; `laneLanguage` does not read the keys.
 //
 // Pure helper, isolated from the heavyweight ProjectWorkspace component so the
 // rule can be unit-tested without a harness.
@@ -15,9 +15,9 @@ import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
 /**
  * The source language the editor should display and translate from.
  *
- * The source lane's typed `language` when the row has one. An unbackfilled
- * source lane (`language` null) falls back to settings inside `laneLanguage`.
- * The per-file import-time stamp is ignored.
+ * The source lane's typed `language` when the row has one. An un-backfilled
+ * source lane (`language` null) answers from its name, then its tag, then its
+ * code. Settings are ignored. The per-file import-time stamp is ignored.
  *
  * Returns `undefined` when nothing records a source language.
  */

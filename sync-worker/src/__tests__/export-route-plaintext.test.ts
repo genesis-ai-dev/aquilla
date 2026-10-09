@@ -110,7 +110,9 @@ describe("GET /source — plain text (AQU-1472)", () => {
 
     expect(res.status).toBe(200)
     expect(res.headers.get("X-Export-Mode")).toBeNull()
-    expect(res.headers.get("Content-Disposition")).toBe('attachment; filename="blog.txt"')
+    expect(res.headers.get("Content-Disposition")).toBe(
+      "attachment; filename=\"blog.txt\"; filename*=UTF-8''blog.txt",
+    )
     // c2 is untranslated and keeps its source text inside the first paragraph;
     // c4 is untranslated and stands as its own paragraph.
     expect(await res.text()).toBe("Hola. How are you?\n\nSegundo & párrafo.\n\nThird paragraph.\n")

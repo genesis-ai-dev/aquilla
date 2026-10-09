@@ -202,6 +202,16 @@ export const EDITOR_EDIT = String.raw`
     if (mod && !e.shiftKey && (e.key === "b" || e.key === "i" || e.key === "u")) { e.preventDefault(); format(e.key === "b" ? "bold" : e.key === "i" ? "italic" : "underline"); return; }
     if (mod && e.shiftKey && (e.key === "x" || e.key === "X" || e.key === "s" || e.key === "S")) { e.preventDefault(); format("strikeThrough"); return; }
     if (mod && (e.key === "e" || e.key === "E")) { e.preventDefault(); format("code"); return; }
+    // Home/End/PageUp/PageDown at the caret's limit would fall through to
+    // scrolling the whole list (the browser's default when the caret can't
+    // move). Inside a cell they only ever move the caret.
+    if ((e.key === "End" || e.key === "Home") && !mod) {
+      e.preventDefault();
+      var hs = doc.getSelection();
+      if (hs && hs.modify) hs.modify(e.shiftKey ? "extend" : "move", e.key === "End" ? "forward" : "backward", "lineboundary");
+      return;
+    }
+    if ((e.key === "PageDown" || e.key === "PageUp") && !mod) { e.preventDefault(); return; }
     if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !mod && !e.shiftKey && !e.altKey) {
       var edge = caretEdge(r.read);
       if (e.key === "ArrowDown" && edge.collapsed && edge.lastLine) { e.preventDefault(); move(id, 1, "start"); return; }

@@ -124,7 +124,7 @@ export const DEFAULT_EDITOR_STYLE = String.raw`
   .readonly-banner { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); background: oklch(98.7% 0.022 95.277); color: oklch(41.4% 0.112 45.904);
                      padding: 8px 16px; font-size: 12px; flex-shrink: 0; }
   html.dark .readonly-banner { background: color-mix(in oklab, oklch(27.9% 0.077 45.635) 40%, transparent); color: oklch(87.9% 0.169 91.605); }
-  #scroller { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; position: relative; }
+  #scroller { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; position: relative; overflow-anchor: none; }
   #rows { position: relative; }
   .empty-state { display: flex; height: 100%; align-items: center; justify-content: center; padding: 24px; font-size: 14px; color: var(--muted-foreground); gap: 8px; }
   .spin { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }

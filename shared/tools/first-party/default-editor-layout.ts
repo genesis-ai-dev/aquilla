@@ -228,8 +228,7 @@ export const EDITOR_LAYOUT = String.raw`
     });
     if (V.dirty) {
       layout();
-      $("rows").style.height = V.total + "px";
-      positionMounted();
+      renderSpacers();
       if (shift && sc) sc.scrollTop = anchorTop + shift;
     }
   }) : null;
@@ -237,39 +236,56 @@ export const EDITOR_LAYOUT = String.raw`
     if (V.raf) return;
     V.raf = requestAnimationFrame(function () { V.raf = 0; renderWindow(); updateActiveSection(); maybeView(); });
   }
-  function positionMounted() {
-    Object.keys(V.mounted).forEach(function (id) {
-      var n = V.mounted[id];
-      n.style.transform = "translateY(" + V.offsets[S.index[id]] + "px)";
-    });
+  function positionMounted() { renderSpacers(); }
+  function spacers() {
+    var rows = $("rows");
+    var top = rows.querySelector(":scope > .sp-top"), bottom = rows.querySelector(":scope > .sp-bottom");
+    if (!top) { top = el("div", { class: "sp-top", "aria-hidden": "true" }); rows.insertBefore(top, rows.firstChild); }
+    if (!bottom) { bottom = el("div", { class: "sp-bottom", "aria-hidden": "true" }); rows.appendChild(bottom); }
+    return { top: top, bottom: bottom };
   }
+  function renderSpacers() {
+    if (!S.ids.length || V.end < V.start) return;
+    layout();
+    var sp = spacers();
+    sp.top.style.height = V.offsets[V.start] + "px";
+    var endBottom = V.offsets[V.end] + heightOf(S.ids[V.end]);
+    sp.bottom.style.height = Math.max(0, V.total - endBottom) + "px";
+  }
+  // Rows sit in normal flow between two spacers (classic windowing): the
+  // browser's own caret reveal, find and focus behave exactly as in a plain
+  // list. The open editor's row is always inside the window.
   function renderWindow() {
     var sc = $("scroller"), rows = $("rows");
     if (!sc || !rows || !S.ids.length) return;
     layout();
-    rows.style.height = V.total + "px";
     var top = sc.scrollTop - OVERSCAN, bottom = sc.scrollTop + sc.clientHeight + OVERSCAN;
     var start = indexAt(Math.max(0, top)), end = indexAt(bottom);
-    var keep = Object.create(null), prev = null;
+    if (S.activeId && has(S.index, S.activeId)) {
+      var ai = S.index[S.activeId];
+      if (ai < start - 300 || ai > end + 300) leaveCell(S.activeId);
+      else { start = Math.min(start, ai); end = Math.max(end, ai); }
+    }
+    var sp = spacers();
+    var keep = Object.create(null), prev = sp.top;
     for (var i = start; i <= end; i++) {
       var id = S.ids[i];
       keep[id] = 1;
       var n = V.mounted[id];
       var fresh = !n;
-      if (fresh) {
-        n = V.nodes[id] || (V.nodes[id] = buildCell(id));
-        n.style.position = "absolute"; n.style.left = "0"; n.style.right = "0"; n.style.top = "0";
-        V.mounted[id] = n;
+      if (fresh) { n = V.nodes[id] || (V.nodes[id] = buildCell(id)); V.mounted[id] = n; }
+      var want = prev.nextSibling;
+      // Never move the row holding focus (moving a focused node blurs it):
+      // move the node in its way instead.
+      if (n !== want) {
+        if (n.contains(doc.activeElement) && n.isConnected && want && want !== sp.bottom) rows.insertBefore(want, n.nextSibling);
+        else rows.insertBefore(n, want);
       }
-      // DOM order = document order (assistive tech, find-in-page, tests).
-      var want = prev ? prev.nextSibling : rows.firstChild;
-      if (n !== want) rows.insertBefore(n, want);
       if (fresh) { if (ro) ro.observe(n); paintCell(id); }
-      n.style.transform = "translateY(" + V.offsets[i] + "px)";
       prev = n;
     }
     Object.keys(V.mounted).forEach(function (id) {
-      if (keep[id] || id === S.activeId) return;
+      if (keep[id]) return;
       var n = V.mounted[id];
       if (ro) ro.unobserve(n);
       n.remove();
@@ -279,6 +295,7 @@ export const EDITOR_LAYOUT = String.raw`
     var built = Object.keys(V.nodes);
     if (built.length > 600) built.forEach(function (id) { if (!V.mounted[id] && built.length-- > 400) delete V.nodes[id]; });
     V.start = start; V.end = end;
+    renderSpacers();
     requestTerms();
     maybeView();
   }
@@ -290,7 +307,6 @@ export const EDITOR_LAYOUT = String.raw`
     var rows = $("rows");
     if (rows && !S.ids.length) {
       rows.textContent = "";
-      rows.style.height = "";
       if (!S.loading) rows.appendChild(el("div", { class: "empty-state", text: t("extensions.editor.noCells") }));
       return;
     }

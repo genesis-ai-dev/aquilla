@@ -158,7 +158,8 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       locale: () => localeRef.current,
     })
     const warmFile = servicesRef.current?.fileId
-    if (warmFile) data.warm(warmFile)
+    // Editor mounts read the workspace's store: nothing to warm.
+    if (warmFile && !servicesRef.current?.editor) data.warm(warmFile)
     const host = createBridgeHost({
       getFrameWindow: () => frameRef.current?.contentWindow ?? null,
       handlers: createToolHandlers(data),

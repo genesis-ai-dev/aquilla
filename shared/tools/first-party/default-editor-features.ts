@@ -348,8 +348,8 @@ export const EDITOR_FEATURES = String.raw`
       S.ids.push(c.cellId);
     });
   }
-  function loadPages(cursor, first) {
-    return aquilla.cells.page(S.fileId, { cursor: cursor, limit: first ? 120 : 2000 }).then(function (page) {
+  function loadPages(cursor, first, pending) {
+    return (pending || aquilla.cells.page(S.fileId, { cursor: cursor, limit: first ? 60 : 2000 })).then(function (page) {
       addCells(page.cells || []);
       rebuildList();
       if (first) $("rows").setAttribute("data-ready", "true");
@@ -401,6 +401,9 @@ export const EDITOR_FEATURES = String.raw`
         S.fileName = f0 ? f0.name : "";
       }
       if (!S.fileId) { $("rows").textContent = ""; $("rows").appendChild(el("div", { class: "empty-state", text: t("extensions.editor.noFile") })); return; }
+      // Everything the first paint needs, in parallel: one round of bridge
+      // calls (the first page waits on the workspace's own store load).
+      var firstPageP = aquilla.cells.page(S.fileId, { limit: 60 });
       var cfgP = aquilla.editor.config(S.fileId).catch(function () { return null; });
       var savedP = S.pendingReveal ? Promise.resolve(null) : aquilla.storage.get("pos:" + S.fileId).catch(function () { return null; });
       var skipP = aquilla.storage.get("skipReplaceConfirm").catch(function () { return null; });
@@ -409,7 +412,7 @@ export const EDITOR_FEATURES = String.raw`
         backtranslation: { configured: false }, footnotes: "inline", sourceFontSize: 14, targetFontSize: 14, lineNumbers: true, cellLabels: false, lens: "text", lenses: [] };
       skipReplaceConfirm = (await skipP) === true;
       renderHeader(); renderBanner();
-      await loadPages(null, true);
+      await loadPages(null, true, firstPageP);
       S.loading = false;
       rebuildList();
       var saved = await savedP;
@@ -427,6 +430,6 @@ export const EDITOR_FEATURES = String.raw`
   }
   // Inspection hook for tests and debugging (frame-local; the frame has an
   // opaque origin, so nothing outside it can read this).
-  window.__AQ_EDITOR__ = { S: S, V: V, R: R, scrollToCell: scrollToCell, activate: activate };
+  window.__AQ_EDITOR__ = { S: S, V: V, R: R, ro: ro, scrollToCell: scrollToCell, activate: activate };
   boot();
 `

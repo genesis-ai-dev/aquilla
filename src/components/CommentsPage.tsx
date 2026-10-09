@@ -5,21 +5,26 @@
 //
 // AQU-185: filter/sort/show-resolved/navigate/@mention/FTS
 
-import { useMemo, useState, useRef, useEffect } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
-  MessageCircle, CheckCircle, ChevronDown, ChevronRight,
+  MessageCircle, MessageCircleCheck, ChevronsUpDown, ChevronsDownUp,
   AlertCircle, Search, Settings2, ArrowUpRight,
-  MoreHorizontal, Pencil, Trash2, RefreshCw,
+  MoreHorizontal, Pencil, Trash2, RefreshCw, Check, Undo2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
-import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   InputGroup,
   InputGroupAddon,
@@ -44,7 +49,8 @@ import {
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import DOMPurify from "dompurify"
-import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
+import { MentionTextarea } from "@/components/MentionTextarea"
+import type { MentionCandidate } from "@/lib/comments/mention-suggest"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   Popover,
@@ -110,206 +116,11 @@ function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>, t: TFu
   return t("common.project")
 }
 
-// ── @mention typeahead in comment composer ────────────────────────────────
-
-interface MentionTypeaheadProps {
-  value: string
-  onChange: (val: string) => void
-  placeholder?: string
-  rows?: number
-  className?: string
-  onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
-}
-
-function MentionTextarea({
-  value,
-  onChange,
-  placeholder,
-  rows = 2,
-  className,
-  onKeyDown,
-}: MentionTypeaheadProps) {
-  const t = useT()
-  const [mentionQuery, setMentionQuery] = useState("")
-  const [mentionOpen, setMentionOpen] = useState(false)
-  const [mentionStart, setMentionStart] = useState(0)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  const { results, isLoading, needsMorePrefix } = useUserSearch(
-    mentionOpen ? mentionQuery : ""
-  )
-
-  // Close on outside click
-  useEffect(() => {
-    if (!mentionOpen) return
-    function onDocClick(e: MouseEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) setMentionOpen(false)
-    }
-    document.addEventListener("mousedown", onDocClick)
-    return () => document.removeEventListener("mousedown", onDocClick)
-  }, [mentionOpen])
-
-  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const raw = e.target.value
-    onChange(raw)
-
-    const cursor = e.target.selectionStart ?? raw.length
-    // Find the @ that opens the current mention token
-    const textUpToCursor = raw.slice(0, cursor)
-    const atIdx = textUpToCursor.lastIndexOf("@")
-    if (atIdx !== -1) {
-      const afterAt = textUpToCursor.slice(atIdx + 1)
-      // Only trigger if there's no space after @
-      if (!/\s/.test(afterAt)) {
-        setMentionQuery(afterAt)
-        setMentionStart(atIdx)
-        setMentionOpen(true)
-        return
-      }
-    }
-    setMentionOpen(false)
-  }
-
-  function insertMention(result: UserSearchResult) {
-    const before = value.slice(0, mentionStart)
-    const after = value.slice(mentionStart + 1 + mentionQuery.length)
-    const newVal = `${before}@${result.username} ${after}`
-    onChange(newVal)
-    setMentionOpen(false)
-    // Re-focus
-    setTimeout(() => {
-      textareaRef.current?.focus()
-    }, 0)
-  }
-
-  return (
-    <div ref={containerRef} className="relative">
-      <Textarea
-        ref={textareaRef}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        rows={rows}
-        className={cn("resize-none", className)}
-      />
-      {mentionOpen && (
-        <div className="absolute start-0 end-0 top-full mt-0.5 z-50 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
-          {needsMorePrefix && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("comments.mention.typeMore")}</p>
-          )}
-          {!needsMorePrefix && isLoading && (
-            <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
-              <Spinner className="size-3" /> {t("common.searching")}
-            </p>
-          )}
-          {!needsMorePrefix && !isLoading && results.length === 0 && mentionQuery.length >= 2 && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("comments.mention.noResults")}</p>
-          )}
-          {results.length > 0 && (
-            <ul className="py-0.5">
-              {results.map((u) => (
-                <li key={u.id}>
-                  <button
-                    type="button"
-                    onClick={() => insertMention(u)}
-                    className="flex w-full items-center px-3 py-1.5 text-start text-sm hover:bg-muted"
-                  >
-                    @{u.username}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Single comment bubble ─────────────────────────────────────────────────
-
-interface CommentBubbleProps {
-  comment: CommentRecord
-  currentUsername?: string
-  onEdit?: (commentId: string, currentBody: string) => void
-  onDelete?: (commentId: string) => void
-}
-
-function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBubbleProps) {
-  const { t } = useI18n()
-  const isDeleted = comment.deletedAt !== null
-  const isOwn = !!currentUsername && comment.authorId === currentUsername
-  const canMutate = isOwn && !isDeleted
-
-  return (
-    <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "ps-6" : "")}>
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <UsernameWithAvatar
-          username={comment.authorLabel ?? comment.authorId}
-          size="xs"
-          nameClassName="text-xs font-medium text-foreground"
-        />
-        <DateTooltip value={comment.createdAt} label={t("common.date.posted")} />
-        {comment.updatedAt !== comment.createdAt && (
-          <span className="italic">{t("comments.bubble.edited")}</span>
-        )}
-        {canMutate && onEdit && onDelete && (
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="ms-auto size-5"
-                  aria-label={t("comments.bubble.actionsLabel")}
-                >
-                  <MoreHorizontal className="h-3 w-3" />
-                </Button>
-              }
-            />
-            <PopoverContent side="bottom" align="end" className="w-28 p-1">
-              <button
-                type="button"
-                onClick={() => onEdit(comment.commentId, comment.body)}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted"
-              >
-                <Pencil className="h-3 w-3" />
-                {t("common.edit")}
-              </button>
-              <button
-                type="button"
-                onClick={() => onDelete(comment.commentId)}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs text-destructive hover:bg-muted"
-              >
-                <Trash2 className="h-3 w-3" />
-                {t("common.delete")}
-              </button>
-            </PopoverContent>
-          </Popover>
-        )}
-      </div>
-      {isDeleted ? (
-        <p className="italic text-xs text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
-      ) : (
-        // eslint-disable-next-line react/no-danger
-        <div
-          className="text-sm"
-          // Session-replay mask (docs/OPSEC.md): comment bodies quote draft
-          // text and name collaborators.
-          data-ph-mask=""
-          dangerouslySetInnerHTML={{
-            __html: DOMPurify.sanitize(renderCommentHtml(comment.body), {
-              ALLOWED_TAGS: ["b", "i", "code", "br", "span"],
-              ALLOWED_ATTR: ["class"],
-            }),
-          }}
-        />
-      )}
-    </div>
-  )
+function safeCommentHtml(text: string): string {
+  return DOMPurify.sanitize(renderCommentHtml(text), {
+    ALLOWED_TAGS: ["b", "i", "code", "br", "span"],
+    ALLOWED_ATTR: ["class"],
+  })
 }
 
 // ── Thread (top-level + replies) ─────────────────────────────────────────
@@ -333,13 +144,14 @@ interface ThreadProps {
   onEdit: (commentId: string, body: string) => Promise<void>
   onDelete: (commentId: string) => Promise<void>
   onNavigate?: (root: CommentRecord) => void
+  mentionRoster?: readonly MentionCandidate[]
 }
 
 function CommentThreadCard({
   root, replies, currentUsername, roleLevel = null, floors = DEFAULT_COMMENT_FLOORS,
-  fileMap, onResolve, onEdit, onDelete, onNavigate,
+  fileMap, onResolve, onEdit, onDelete, onNavigate, mentionRoster = [],
 }: ThreadProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   // AQU-1000: this page offered Resolve / Reopen to every reader, including
   // roles the server refuses. `useComments.resolveThread` flips `resolved`
   // optimistically, so the refusal showed up as a thread that closed and then
@@ -355,9 +167,13 @@ function CommentThreadCard({
           minRole: resolveRoleName(t, floors.resolveMinRole, { plural: true }),
         })
       : denialMessage(t, ROLE.COMMENTER, roleLevel)
-  const [open, setOpen] = useState(!root.resolved)
-  const [replyText, setReplyText] = useState("")
-
+  const [expanded, setExpanded] = useState(!root.resolved)
+  const wasResolved = useRef(root.resolved)
+  useEffect(() => {
+    const becameResolved = !wasResolved.current && root.resolved
+    wasResolved.current = root.resolved
+    if (becameResolved) setExpanded(false)
+  }, [root.resolved])
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBody, setEditBody] = useState("")
@@ -366,14 +182,6 @@ function CommentThreadCard({
   // Delete confirm state
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [isDeletingConfirm, setIsDeletingConfirm] = useState(false)
-
-  function handleReplyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault()
-      // Reply submit is a no-op here (CommentsPage is read-only for new replies)
-      // The cell-scoped CommentThread.tsx handles replies in-editor.
-    }
-  }
 
   function startEdit(commentId: string, currentBody: string) {
     setEditingId(commentId)
@@ -414,7 +222,207 @@ function CommentThreadCard({
     setIsDeletingConfirm(false)
   }
 
-  const allComments = [root, ...replies]
+  const messages = [root, ...replies]
+  const authors = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(
+    [...new Set(messages.map((message) => message.authorLabel ?? message.authorId))],
+  )
+  const resolvedSummary = t("comments.thread.resolvedSummary", {
+    count: messages.length,
+    authors,
+  })
+  const fileMissing = !!root.fileId && !resolveFileName(root.fileId, fileMap, t).exists
+  const canOpenFile = !!onNavigate && root.scopeKind === "cell" && !!root.fileId && !!root.cellId
+
+  function openFileButton() {
+    if (!canOpenFile || !onNavigate) return null
+    if (fileMissing) {
+      return (
+        <AppTooltip content={t("comments.fileDeletedTooltip")}>
+          <Button type="button" variant="ghost" size="xs" className="cursor-not-allowed opacity-50" disabled>
+            <ArrowUpRight data-icon="inline-start" />
+            {t("comments.openFile")}
+          </Button>
+        </AppTooltip>
+      )
+    }
+    return (
+      <AppTooltip content={t("comments.goToCell")}>
+        <Button type="button" variant="ghost" size="xs" onClick={() => onNavigate(root)}>
+          <ArrowUpRight data-icon="inline-start" />
+          {t("comments.openFile")}
+        </Button>
+      </AppTooltip>
+    )
+  }
+
+  const threadBody = (
+    <>
+      <ul className="divide-y">
+        {messages.map((comment, index) => {
+          const isOwn = !!currentUsername && comment.authorId === currentUsername
+          const canMutate = isOwn && comment.deletedAt == null
+          const editing = editingId === comment.commentId
+          return (
+            <li key={comment.commentId} className="p-2">
+              {index === 0 && (
+                <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="min-w-0 flex-1 truncate">{scopeLabel(root, fileMap, t)}</span>
+                  {fileMissing && (
+                    <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
+                      {t("comments.file.deletedBadge")}
+                    </Badge>
+                  )}
+                  {openFileButton()}
+                </div>
+              )}
+              <div className="flex items-center gap-1.5 text-xs">
+                <UsernameWithAvatar
+                  username={comment.authorLabel ?? comment.authorId}
+                  size="xs"
+                  nameClassName="text-xs"
+                />
+                <span className="text-muted-foreground">
+                  <DateTooltip
+                    value={comment.createdAt}
+                    label=""
+                    variant="ago"
+                    side="top"
+                    editedAt={comment.deletedAt ? null : comment.updatedAt}
+                    editedNotice={t("comments.bubble.edited")}
+                  />
+                </span>
+                {(index === 0 || canMutate) && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="ms-auto"
+                          aria-label={t("comments.thread.actionsAria")}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="end" className="min-w-44">
+                      {canMutate && (
+                        <DropdownMenuItem onClick={() => startEdit(comment.commentId, comment.body)}>
+                          <Pencil />
+                          {t("common.edit")}
+                        </DropdownMenuItem>
+                      )}
+                      {index === 0 && (
+                        <AppTooltip content={!canResolve ? (resolveDenialReason ?? "") : ""}>
+                          <DropdownMenuItem
+                            data-testid="thread-resolve"
+                            aria-disabled={!canResolve || undefined}
+                            className={cn(!canResolve && "cursor-not-allowed opacity-50")}
+                            onClick={() => {
+                              if (!canResolve) return
+                              onResolve(root.commentId, !root.resolved)
+                            }}
+                          >
+                            {root.resolved ? <Undo2 /> : <Check />}
+                            {root.resolved ? t("comments.thread.reopen") : t("comments.thread.resolve")}
+                          </DropdownMenuItem>
+                        </AppTooltip>
+                      )}
+                      {canMutate && (
+                        <DropdownMenuItem onClick={() => requestDelete(comment.commentId)}>
+                          <Trash2 />
+                          {t("common.delete")}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
+              {editing ? (
+                <div className="mt-1 ps-7">
+                  <MentionTextarea
+                    value={editBody}
+                    onChange={setEditBody}
+                    candidates={mentionRoster}
+                    currentUsername={currentUsername}
+                    placeholder={t("comments.composer.editPlaceholder")}
+                    autoHeight
+                    caretAtEnd
+                    className="min-h-5 border-0 bg-transparent p-0 text-sm shadow-none rounded-none focus-visible:border-transparent focus-visible:ring-0 data-[empty=true]:before:start-0 data-[empty=true]:before:top-0"
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        cancelEdit()
+                        return
+                      }
+                      if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || e.nativeEvent.isComposing) return
+                      e.preventDefault()
+                      void saveEdit()
+                    }}
+                  />
+                  <div className="mt-1.5 flex justify-end gap-1.5">
+                    <Button type="button" size="xs" variant="ghost" onClick={cancelEdit} disabled={isSavingEdit}>
+                      {t("common.cancel")}
+                    </Button>
+                    <Button type="button" size="xs" onClick={() => { void saveEdit() }} disabled={isSavingEdit || !editBody.trim()}>
+                      {isSavingEdit ? <Spinner className="size-3" /> : t("common.save")}
+                    </Button>
+                  </div>
+                </div>
+              ) : comment.deletedAt != null ? (
+                <p className="mt-1 ps-7 text-sm text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onNavigate?.(comment)}
+                  disabled={!onNavigate}
+                  className="mt-1 block w-full ps-7 text-start text-sm disabled:cursor-default"
+                >
+                  <div data-ph-mask="" dangerouslySetInnerHTML={{ __html: safeCommentHtml(comment.body) }} />
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
+
+  const shell = root.resolved ? (
+    <CollapsiblePrimitive.Root
+      data-slot="collapsible"
+      open={expanded}
+      onOpenChange={setExpanded}
+      className="mb-3 rounded-lg border text-sm"
+    >
+      {expanded ? (
+        <>
+          <CollapsiblePrimitive.Trigger
+            data-slot="collapsible-trigger"
+            className="flex w-full items-center gap-2 border-b p-2 text-start text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            <span className="min-w-0 flex-1">{t("comments.thread.collapse")}</span>
+            <ChevronsDownUp className="size-4 shrink-0" aria-hidden />
+          </CollapsiblePrimitive.Trigger>
+          <CollapsiblePrimitive.Panel data-slot="collapsible-content">{threadBody}</CollapsiblePrimitive.Panel>
+        </>
+      ) : (
+        <div className="flex items-center gap-2 p-2">
+          <CollapsiblePrimitive.Trigger
+            data-slot="collapsible-trigger"
+            className="flex min-w-0 flex-1 items-center gap-2 text-start outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            <MessageCircleCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{resolvedSummary}</span>
+            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          </CollapsiblePrimitive.Trigger>
+          {openFileButton()}
+        </div>
+      )}
+    </CollapsiblePrimitive.Root>
+  ) : (
+    <div className="mb-3 rounded-lg border text-sm">{threadBody}</div>
+  )
 
   return (
     <>
@@ -422,171 +430,15 @@ function CommentThreadCard({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("comments.deleteDialog.title")}</DialogTitle>
-            <DialogDescription>
-              {t("comments.deleteDialog.description")}
-            </DialogDescription>
+            <DialogDescription>{t("comments.deleteDialog.description")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={cancelDelete}>{t("common.cancel")}</Button>
-            <Button
-              variant="destructive"
-              onClick={confirmDelete}
-            >
-              {t("common.delete")}
-            </Button>
+            <Button variant="destructive" onClick={() => { void confirmDelete() }}>{t("common.delete")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <Card className={cn("mb-3 overflow-hidden", root.resolved && "opacity-70")}>
-          <CardHeader className="flex flex-row items-start gap-2 space-y-0 py-2 px-3">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
-                <span className="truncate">{scopeLabel(root, fileMap, t)}</span>
-                {root.fileId && !resolveFileName(root.fileId, fileMap, t).exists && (
-                  <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
-                    {t("comments.file.deletedBadge")}
-                  </Badge>
-                )}
-                {root.resolved && (
-                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                    <CheckCircle className="me-0.5 h-2.5 w-2.5" />
-                    {t("comments.status.resolved")}
-                  </Badge>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (() => {
-                const { exists } = resolveFileName(root.fileId, fileMap, t)
-                return exists ? (
-                  <AppTooltip content={t("comments.goToCell")}>
-                    <Button
-                      variant="ghost"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => onNavigate(root)}
-                    >
-                      <ArrowUpRight className="me-0.5 h-3 w-3" />
-                      {t("comments.openFile")}
-                    </Button>
-                  </AppTooltip>
-                ) : (
-                  <AppTooltip content={t("comments.fileDeletedTooltip")}>
-                    <Button
-                      variant="ghost"
-                      className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
-                      disabled
-                    >
-                      <ArrowUpRight className="me-0.5 h-3 w-3" />
-                      {t("comments.openFile")}
-                    </Button>
-                  </AppTooltip>
-                )
-              })()}
-              {canResolve ? (
-                <Button
-                  variant="ghost"
-                  className="h-6 px-2 text-xs"
-                  data-testid="thread-resolve"
-                  onClick={() => onResolve(root.commentId, !root.resolved)}
-                >
-                  {root.resolved ? t("comments.reopen") : t("comments.resolve")}
-                </Button>
-              ) : (
-                // Disabled, not absent: the reader can see the action exists and
-                // why it is closed to them (09-design-and-ux.md → "Never disable
-                // silently"). `aria-disabled` keeps it focusable so the tooltip
-                // is reachable without a mouse.
-                <AppTooltip content={resolveDenialReason ?? ""}>
-                  <Button
-                    variant="ghost"
-                    className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
-                    data-testid="thread-resolve"
-                    aria-disabled
-                  >
-                    {root.resolved ? t("comments.reopen") : t("comments.resolve")}
-                  </Button>
-                </AppTooltip>
-              )}
-              <CollapsibleTrigger asChild>
-                <Button size="icon" variant="ghost" className="h-6 w-6">
-                  {open ? (
-                    <ChevronDown className="h-3 w-3" />
-                  ) : (
-                    <ChevronRight className="h-3 w-3" />
-                  )}
-                </Button>
-              </CollapsibleTrigger>
-            </div>
-          </CardHeader>
-          <CollapsibleContent>
-            <CardContent className="pt-0 px-3 pb-3 flex flex-col gap-3">
-              {allComments.map((c) => (
-                <div key={c.commentId}>
-                  {editingId === c.commentId ? (
-                    <div className="flex flex-col gap-1.5">
-                      <MentionTextarea
-                        value={editBody}
-                        onChange={setEditBody}
-                        placeholder={t("comments.composer.editPlaceholder")}
-                        rows={3}
-                        onKeyDown={(e) => {
-                          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                            e.preventDefault()
-                            void saveEdit()
-                          }
-                          if (e.key === "Escape") {
-                            cancelEdit()
-                          }
-                        }}
-                      />
-                      <div className="flex gap-1.5">
-                        <Button
-                          className="h-6 px-2 text-xs"
-                          onClick={saveEdit}
-                          disabled={isSavingEdit || !editBody.trim()}
-                        >
-                          {isSavingEdit ? <Spinner className="size-3" /> : t("common.save")}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          className="h-6 px-2 text-xs"
-                          onClick={cancelEdit}
-                          disabled={isSavingEdit}
-                        >
-                          {t("common.cancel")}
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <CommentBubble
-                      comment={c}
-                      currentUsername={currentUsername}
-                      onEdit={startEdit}
-                      onDelete={requestDelete}
-                    />
-                  )}
-                </div>
-              ))}
-              {/* Reply composer with @mention typeahead */}
-              <div className="mt-1 space-y-1.5">
-                <MentionTextarea
-                  value={replyText}
-                  onChange={setReplyText}
-                  placeholder={t("comments.composer.replyPlaceholder")}
-                  rows={2}
-                  onKeyDown={handleReplyKeyDown}
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  {t("comments.reply.notWired")}
-                  {/* SWARM-TODO: wire reply submission from CommentsPage when a cell-reply endpoint is available */}
-                </p>
-              </div>
-            </CardContent>
-          </CollapsibleContent>
-        </Card>
-      </Collapsible>
+      {shell}
     </>
   )
 }
@@ -827,9 +679,11 @@ interface CommentsPageProps {
   /** Reuse the workspace's already-resolved project for file labels instead
    * of starting a second project query when this pane opens. */
   project?: ProjectRecord | null
+  /** Project members offered by the @mention picker. Empty until the roster arrives. */
+  mentionRoster?: readonly MentionCandidate[]
 }
 
-export function CommentsPage({ project: workspaceProject }: CommentsPageProps = {}) {
+export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: CommentsPageProps = {}) {
   const t = useT()
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -927,12 +781,10 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
     const { exists } = resolveFileName(root.fileId, fileMap, t)
     if (!exists) return
     // AQU-1259: ?cellId= scrolls to the row, and `&comments=1` opens that
-    // cell's thread on arrival. Scrolling alone was the gap the consultant hit:
-    // the user clicks a thread here and lands on a row with the thread still
-    // collapsed, so the comment they just clicked has to be hunted for again.
-    // Resolved threads take the same link — the drawer lists them too, which is
-    // where "reopen" lives.
-    navigate(editorCommentHref(projectId, root.fileId, root.cellId))
+    // cell's thread on arrival. `commentId` names the message they clicked —
+    // a reply lower in the thread — so the drawer scrolls to it instead of
+    // stopping at the first comment.
+    navigate(editorCommentHref(projectId, root.fileId, root.cellId, root.commentId))
   }
 
   const activeFilterCount = countActiveFilters(filter)
@@ -1021,6 +873,7 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
               onEdit={editComment}
               onDelete={deleteComment}
               onNavigate={handleNavigate}
+              mentionRoster={mentionRoster}
             />
           ))}
         </div>

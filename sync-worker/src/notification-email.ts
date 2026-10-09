@@ -25,17 +25,31 @@
 import { ROLE } from './events/role-policy'
 
 /**
+ * Stored form of a confirmed mention. The brackets delimit the username, so
+ * the capture takes anything a roster username can hold (`qa-bot-2`,
+ * `john.doe`); only brackets and line breaks are excluded. Typed `@name` is
+ * plain text and never matches.
+ * KEEP IN SYNC with src/lib/comments/comment-helpers.ts MENTION_TOKEN_SOURCE.
+ */
+const MENTION_TOKEN_SOURCE = String.raw`@\[([^\[\]\r\n]+)\]`
+
+/**
  * Extract @username mentions from a comment body.
  * Mirrors src/lib/comments/comment-helpers.ts extractMentions — keep in sync.
  */
 export function extractMentions(text: string): string[] {
   const mentions = new Set<string>()
-  const re = /(?:^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g
+  const re = new RegExp(MENTION_TOKEN_SOURCE, 'g')
   let match: RegExpExecArray | null
   while ((match = re.exec(text)) !== null) {
     mentions.add(match[1])
   }
   return Array.from(mentions)
+}
+
+/** Show a confirmed mention as @name in plain-text mail. */
+export function mentionDisplayText(text: string): string {
+  return text.replace(new RegExp(MENTION_TOKEN_SOURCE, 'g'), '@$1')
 }
 
 export interface NotificationEmailPayload {
@@ -145,7 +159,8 @@ const MAX_THREAD_TOPIC_CHARS = 60
  * an empty topic — an empty subject would defeat the grouping this exists for.
  */
 export function threadTopicFromBody(body: string): string {
-  const flattened = body.replace(/\s+/g, ' ').trim()
+  // A stored mention reads `@name` in the subject, as it does in the excerpt.
+  const flattened = mentionDisplayText(body).replace(/\s+/g, ' ').trim()
   if (!flattened) return 'Comment thread'
   return flattened.length > MAX_THREAD_TOPIC_CHARS
     ? flattened.slice(0, MAX_THREAD_TOPIC_CHARS - 1) + '\u2026'
@@ -513,7 +528,7 @@ export async function sendCommentNotifications(
     ])
 
     const commentsUrl = `${baseUrl}/project/${projectId}/comments`
-    const excerpt = body.slice(0, 200)
+    const excerpt = mentionDisplayText(body).slice(0, 200)
     const authorDisplay = author
     const threadTopic = threadTopicFromBody(rootBody ?? body)
 

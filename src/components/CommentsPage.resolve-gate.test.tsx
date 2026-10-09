@@ -106,6 +106,14 @@ function renderPage(roleLevel: number | null) {
   )
 }
 
+async function openThreadMenu() {
+  const user = userEvent.setup()
+  const summary = screen.queryByRole("button", { name: /resolved comment from/i })
+  if (summary) await user.click(summary)
+  await user.click(screen.getByRole("button", { name: "Comment actions" }))
+  return user
+}
+
 describe("CommentsPage — Resolve gate (AQU-1000)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -113,41 +121,47 @@ describe("CommentsPage — Resolve gate (AQU-1000)", () => {
     mockComments.mockReturnValue([makeComment()])
   })
 
-  it("refuses Resolve on a foreign thread for a Commenter", () => {
+  it("refuses Resolve on a foreign thread for a Commenter", async () => {
     renderPage(ROLE.COMMENTER)
+    await openThreadMenu()
     expect(screen.getByTestId("thread-resolve")).toHaveAttribute("aria-disabled", "true")
   })
 
   it("never enqueues a resolve from the refused control — the flip-then-revert guard", async () => {
     renderPage(ROLE.COMMENTER)
-    await userEvent.click(screen.getByTestId("thread-resolve"))
+    const user = await openThreadMenu()
+    await user.click(screen.getByTestId("thread-resolve"))
     expect(mockResolveThread).not.toHaveBeenCalled()
   })
 
   it("explains the refusal in a tooltip that names the role that could do it", async () => {
     renderPage(ROLE.COMMENTER)
+    await openThreadMenu()
     await expectTooltip(screen.getByTestId("thread-resolve"), /contributor/i)
   })
 
   it("offers Resolve on the reader's OWN thread at Commenter", async () => {
     mockComments.mockReturnValue([makeComment({ authorId: "bob", authorLabel: "Bob" })])
     renderPage(ROLE.COMMENTER)
+    const user = await openThreadMenu()
     const button = screen.getByTestId("thread-resolve")
     expect(button).not.toHaveAttribute("aria-disabled")
-    await userEvent.click(button)
+    await user.click(button)
     expect(mockResolveThread).toHaveBeenCalledWith("c1", true)
   })
 
   it("offers Resolve on a foreign thread to a Contributor", async () => {
     renderPage(ROLE.CONTRIBUTOR)
+    const user = await openThreadMenu()
     const button = screen.getByTestId("thread-resolve")
     expect(button).not.toHaveAttribute("aria-disabled")
-    await userEvent.click(button)
+    await user.click(button)
     expect(mockResolveThread).toHaveBeenCalledWith("c1", true)
   })
 
   it("refuses a Viewer, who could previously resolve anything from this page", async () => {
     renderPage(ROLE.VIEWER)
+    await openThreadMenu()
     const button = screen.getByTestId("thread-resolve")
     expect(button).toHaveAttribute("aria-disabled", "true")
     // Below the self floor, so the sentence is about the role bar itself.
@@ -161,15 +175,17 @@ describe("CommentsPage — Resolve gate (AQU-1000)", () => {
     // way a user would, so this covers the real path to a Reopen button.
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
     fireEvent.click(screen.getByRole("switch", { name: /Show resolved/i }))
+    const user = await openThreadMenu()
     const button = screen.getByTestId("thread-resolve")
-    expect(button).toHaveTextContent("Reopen")
+    expect(button).toHaveTextContent("Reopen thread")
     expect(button).toHaveAttribute("aria-disabled", "true")
-    await userEvent.click(button)
+    await user.click(button)
     expect(mockResolveThread).not.toHaveBeenCalled()
   })
 
-  it("leaves local / git-imported projects alone (no syncRole)", () => {
+  it("leaves local / git-imported projects alone (no syncRole)", async () => {
     renderPage(null)
+    await openThreadMenu()
     expect(screen.getByTestId("thread-resolve")).not.toHaveAttribute("aria-disabled")
   })
 })

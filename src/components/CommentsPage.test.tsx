@@ -272,7 +272,9 @@ describe("CommentsPage — jump to a comment", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
 
-    expect(jumpedTo()).toBe("/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1")
+    expect(jumpedTo()).toBe(
+      "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=c1",
+    )
   })
 
   it("carries the flag for a resolved thread too", () => {
@@ -289,5 +291,26 @@ describe("CommentsPage — jump to a comment", () => {
     fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
 
     expect(jumpedTo()).toContain("comments=1")
+    expect(jumpedTo()).toContain("commentId=c1")
+  })
+
+  it("scrolls to the reply that was clicked, not the top of the thread", () => {
+    mockComments.mockReturnValue([
+      makeComment({ commentId: "root", body: "the question" }),
+      makeComment({
+        commentId: "reply-9",
+        parentCommentId: "root",
+        body: "the answer further down",
+        authorId: "bob",
+        authorLabel: "Bob",
+      }),
+    ])
+    renderWithEditorRoute()
+
+    fireEvent.click(screen.getByRole("button", { name: /the answer further down/i }))
+
+    expect(jumpedTo()).toBe(
+      "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=reply-9",
+    )
   })
 })

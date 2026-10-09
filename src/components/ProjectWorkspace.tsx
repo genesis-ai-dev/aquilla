@@ -126,8 +126,10 @@ import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import {
+  focusedCommentFromSearchParams,
   openCommentsCellFromSearchParams,
   resolveDeepLinkLaneSelection,
+  searchWithoutCommentDeepLink,
 } from "./project-workspace-lane-deeplink"
 import {
   restoreMayPark, stepPendingScroll,
@@ -207,6 +209,7 @@ import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import type { FixPreview, ProposalKind } from "@/lib/rules/autofix"
 import { CommentsDrawer } from "./CommentsDrawer"
+import { NotificationsInbox } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
@@ -1225,6 +1228,21 @@ export function ProjectWorkspace() {
     setAttachmentsDrawerOpen(false)
     setCommentsCellId(cellId)
   }, [searchParams])
+  // Closing the panel must drop `comments` and `commentId`. Leaving them makes
+  // the same notification a no-op: navigate() to the identical URL never
+  // changes searchParams, so the effect above does not open the drawer again.
+  // Read location through a ref so this stays one identity. The editor row
+  // callbacks below are memoized, and a new function on every address change
+  // would rerender every visible row.
+  const locationRef = useRef(location)
+  locationRef.current = location
+  const closeCommentsPanel = useCallback(() => {
+    setCommentsCellId(null)
+    const current = locationRef.current
+    const nextSearch = searchWithoutCommentDeepLink(current.search)
+    if (nextSearch === current.search) return
+    navigate(`${current.pathname}${nextSearch}${current.hash}`, { replace: true })
+  }, [navigate])
   // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
   // LLM). Findings are session-local: held here, never persisted or synced.
   const [checkOpen, setCheckOpen] = useState(false)
@@ -1706,6 +1724,14 @@ export function ProjectWorkspace() {
     [mayParkCellsInProject, hiddenCellCount, showHiddenCellsPref],
   )
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
+  const mentionCellText = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const cell of cellSummaries) {
+      const text = cell.original.trim() || cell.translated.trim()
+      if (text) map.set(cell.id, text)
+    }
+    return map
+  }, [cellSummaries])
   // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
   // cell page reaching the store — but a file that legitimately has no cells,
   // a load that failed, and the no-file-open case must all release the gate
@@ -5064,6 +5090,8 @@ export function ProjectWorkspace() {
     isError: commentsIsError,
     isLoadingRest: commentsIsLoadingRest,
     addComment: addCommentEvent,
+    editComment,
+    deleteComment,
     resolveThread: resolveCommentThread,
     refresh: refreshComments,
   } = useComments({
@@ -6803,7 +6831,7 @@ export function ProjectWorkspace() {
     if (!activeFileId || checkRunning) return
     // One aside panel at a time (matches the existing drawer pattern).
     setDrawerRuleId(null)
-    setCommentsCellId(null)
+    closeCommentsPanel()
     setHistoryCellId(null)
     setAttachmentsDrawerOpen(false)
     setCheckOpen(true)
@@ -6826,7 +6854,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -7849,24 +7877,24 @@ export function ProjectWorkspace() {
   // rows are React.memo'd, so a new function identity here would fail the
   // shallow-compare for every visible row on every ProjectWorkspace render.
   const handleInfractionClick = useCallback((ruleId: string) => {
-    setCommentsCellId(null); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
+    closeCommentsPanel(); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
     setDrawerRuleId(ruleId)
-  }, [])
+  }, [closeCommentsPanel])
   const handleOpenComments = useCallback((cellId: string) => {
     setDrawerRuleId(null); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
     setCommentsCellId(cellId)
   }, [])
   const handleOpenHistory = useCallback((cellId: string) => {
-    setDrawerRuleId(null); setCommentsCellId(null); setAttachmentsDrawerOpen(false)
+    setDrawerRuleId(null); closeCommentsPanel(); setAttachmentsDrawerOpen(false)
     setHistoryCellId(cellId)
-  }, [])
+  }, [closeCommentsPanel])
   // AQU-777: one aside panel at a time, same as the three above.
   const handleOpenAttachment = useCallback((_cellId: string, attachmentId: string) => {
-    setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(null)
+    setDrawerRuleId(null); closeCommentsPanel(); setHistoryCellId(null)
     setCheckOpen(false)
     setAttachmentDrawerFocusId(attachmentId)
     setAttachmentsDrawerOpen(true)
-  }, [])
+  }, [closeCommentsPanel])
   // AQU-777: an attach just landed — show the link before the outbox flush
   // does, then reconcile against the server on the next refresh.
   const handleAttachmentAdded = useCallback((record: CellAttachmentRecord) => {
@@ -13351,6 +13379,15 @@ export function ProjectWorkspace() {
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
             editorHref={workspaceBreadcrumb.editorHref}
           >
+            {project && (
+              <NotificationsInbox
+                projectId={project.id}
+                readerUsername={currentUsername}
+                comments={allProjectComments}
+                files={project.files.map((file) => ({ id: file.id, name: file.name }))}
+                cellTextById={mentionCellText}
+              />
+            )}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
                 when project_settings has no dcsUpstream cursor. */}
@@ -13510,7 +13547,7 @@ export function ProjectWorkspace() {
                           setActiveFileId(first.fileId)
                         }
                         setDrawerRuleId(null)
-                        setCommentsCellId(null)
+                        closeCommentsPanel()
                         setHistoryCellId(first.cellId)
                       }
                       clearStaleSiblings()
@@ -13615,7 +13652,7 @@ export function ProjectWorkspace() {
           // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("workspace.loadingComments")} />}>
-              <CommentsPageContent project={project} />
+              <CommentsPageContent project={project} mentionRoster={projectMembers} />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (
@@ -14532,12 +14569,16 @@ export function ProjectWorkspace() {
                 liveComments={allProjectComments.filter(
                   (c) => c.cellId === commentsCell.id && c.deletedAt === null
                 )}
-                onClose={() => setCommentsCellId(null)}
+                onClose={closeCommentsPanel}
                 onNewThread={(text) => addThread(commentsCell.id, text)}
                 onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
                 onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
                 onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+                onEdit={(commentId, body) => { void editComment(commentId, body) }}
+                onDelete={(commentId) => { void deleteComment(commentId) }}
                 currentUsername={currentUsername}
+                mentionRoster={projectMembers}
+                focusCommentId={focusedCommentFromSearchParams(searchParams)}
                 isError={commentsIsError}
                 isLoadingRest={commentsIsLoadingRest}
                 onRetry={() => { void refreshComments() }}

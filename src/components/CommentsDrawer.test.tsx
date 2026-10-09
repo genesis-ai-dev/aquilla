@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { CommentsDrawer } from "./CommentsDrawer"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -107,18 +108,45 @@ describe("CommentsDrawer — the new-thread field has a real accessible name", (
    * disappears on the first keystroke and which screen readers and DOM-reading
    * agents may never announce. A live Jev journey stalled on this field.
    */
-  it("names the field from the visible heading, not the placeholder", () => {
+  it("names the field without a visible heading", () => {
     renderDrawer(makeProject(ROLE.COMMENTER))
-    const field = screen.getByRole("textbox", { name: "New thread" })
-    expect(field).toBeInTheDocument()
-    expect(field.getAttribute("aria-labelledby")).toBe(
-      screen.getByText("New thread").getAttribute("id"),
-    )
+    expect(screen.getByRole("textbox", { name: "New thread" })).toHaveAttribute("aria-label", "New thread")
+    expect(screen.queryByText("New thread")).not.toBeInTheDocument()
   })
 
   it("keeps the placeholder as an additional hint", () => {
     renderDrawer(makeProject(ROLE.COMMENTER))
     expect(screen.getByRole("textbox", { name: "New thread" }))
-      .toHaveAttribute("placeholder", "Start a new comment thread...")
+      .toHaveAttribute("placeholder", "Leave a comment...")
+    expect(screen.getByRole("button", { name: "Post" })).toHaveAttribute("data-variant", "outline")
+  })
+})
+
+describe("CommentsDrawer — @mention a project member (AQU-761)", () => {
+  it("suggests roster members and inserts the one that is picked", async () => {
+    const user = userEvent.setup()
+    const onNewThread = vi.fn()
+    render(
+      <CommentsDrawer
+        project={makeProject(ROLE.COMMENTER)}
+        cell={CELL}
+        onClose={noop}
+        onNewThread={onNewThread}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        currentUsername="alice"
+        mentionRoster={[{ username: "alice" }, { username: "bob" }, { username: "carol" }]}
+      />,
+    )
+    const field = screen.getByRole("textbox", { name: "New thread" })
+    await user.type(field, "Please review @b")
+    expect(screen.getByRole("option", { name: "@bob" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "@alice" })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("option", { name: "@bob" }))
+    expect(field.querySelector("[data-mention='bob']")).toHaveTextContent("@bob")
+    expect(screen.getByRole("button", { name: "Post" })).toHaveAttribute("data-variant", "default")
+    await user.click(screen.getByRole("button", { name: "Post" }))
+    expect(onNewThread).toHaveBeenCalledWith("Please review @[bob] ")
   })
 })

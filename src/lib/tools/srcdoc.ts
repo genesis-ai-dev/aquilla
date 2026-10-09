@@ -15,6 +15,7 @@
  * CSP; srcdoc then becomes a `src=` to that origin. See docs/SMART-EXTENSIONS.md.
  */
 
+import { AQ_SDK_SCRIPT, AQ_SDK_STYLE } from "../../../shared/tools/sdk/sdk"
 import { TOOL_RUNTIME_SOURCE } from "./runtime-source"
 
 /** The iframe sandbox for every tool frame (and the smoke frame). Never add
@@ -48,7 +49,9 @@ export function embedJson(value: unknown): string {
 }
 
 export interface ToolBoot {
-  tool: { id: string; name: string; version: number }
+  /** `scopes`: what the manifest declares (apiRev 4; the SDK only makes
+   *  optional calls within them, so it never prompts for an unused scope). */
+  tool: { id: string; name: string; version: number; scopes?: readonly string[] }
   project: { id: string; name: string }
   user: { username: string; roleLevel: number | null }
   mount: "page" | "panel" | "inline" | "editor" | "smoke"
@@ -111,17 +114,24 @@ const BASE_STYLE =
   "html,body{margin:0;padding:0;background:var(--background,#fff);color:var(--foreground,#111);" +
   "font:14px/1.45 system-ui,-apple-system,'Segoe UI',sans-serif}*{box-sizing:border-box}"
 
+export interface SrcdocOptions {
+  /** apiRev 4: inject the extension SDK (window.aq) of this major. */
+  sdk?: number
+}
+
 /** Splits a tool source into head/body parts. Tools may be a full document or
- *  a fragment; either way the host's CSP, boot data and runtime go FIRST so no
- *  tool code runs before the bridge exists. */
-export function buildToolSrcdoc(source: string, boot: ToolBoot): string {
+ *  a fragment; either way the host's CSP, boot data and runtime (and the SDK,
+ *  when the manifest asks for it) go FIRST so no tool code runs before the
+ *  bridge exists. */
+export function buildToolSrcdoc(source: string, boot: ToolBoot, opts: SrcdocOptions = {}): string {
   const head =
     `<meta charset="utf-8">` +
     `<meta http-equiv="Content-Security-Policy" content="${TOOL_CSP}">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
     `<style>${BASE_STYLE}</style>` +
     `<script>window.__AQUILLA_BOOT__=${embedJson(boot)};</script>` +
-    `<script>${TOOL_RUNTIME_SOURCE}</script>`
+    `<script>${TOOL_RUNTIME_SOURCE}</script>` +
+    (opts.sdk === 1 ? `<style>${AQ_SDK_STYLE}</style><script>${AQ_SDK_SCRIPT}</script>` : "")
 
   const doctype = /^\s*<!doctype[^>]*>/i
   const body = source.replace(doctype, "")

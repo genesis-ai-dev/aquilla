@@ -1,5 +1,5 @@
 import { type Page, type Locator, type FrameLocator, expect } from "@playwright/test"
-import { EXTENSION_EDITOR_FRAME, editorUnderTest } from "../editor-mode"
+import { EXTENSION_EDITOR_FRAME, editorUnderTest, type EditorUnderTest } from "../editor-mode"
 
 // A cold editor route hydrates project access, file metadata, sync state, and
 // source/target cells before the first row can render. Three isolated smoke
@@ -21,9 +21,13 @@ interface FilePayload {
 /** Page object for the project workspace route ("/project/:id/editor"). */
 export class Workspace {
   private readonly page: Page
+  private readonly editor: EditorUnderTest
 
-  constructor(page: Page) {
+  /** `editor`: drive this editor regardless of E2E_EDITOR (a spec that
+   *  switches editors itself, e.g. the perf comparison). */
+  constructor(page: Page, editor: EditorUnderTest = editorUnderTest()) {
     this.page = page
+    this.editor = editor
   }
 
   /** Where editor rows live: the page (built-in editor), or the first-party
@@ -32,7 +36,7 @@ export class Workspace {
    *  renders the same row anatomy (data-cell-id, data-cell-type, the read
    *  view, the action rail and its aria-labels), so journeys run unchanged. */
   private get root(): Page | FrameLocator {
-    return editorUnderTest() === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME) : this.page
+    return this.editor === "extension" ? this.page.frameLocator(EXTENSION_EDITOR_FRAME) : this.page
   }
 
   /** Select a file and stop at the human-review preview boundary. */

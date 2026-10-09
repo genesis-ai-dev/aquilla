@@ -92,7 +92,7 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
 ## The default editor is an extension
 
 The standard translation editor ships as a **first-party extension**, "Aquilla Editor"
-(`shared/tools/first-party/default-editor*.ts`), and is the default editor for every file. It
+(`shared/tools/first-party/default-editor*.ts`, on the SDK below), and is the default editor for every file. It
 runs exactly like any other extension — the same sandboxed frame, CSP, bridge, permission gate
 and event path, with tool provenance on every write — so it doubles as the proof that the
 extension API can carry the whole editing experience. Nothing privileged: it reaches the
@@ -140,6 +140,42 @@ Added in apiRev 3 (additive): `editor.config/setLane/setLens/openSettings/visibl
 as the first provider) and `ui.strings`. Events: `signals.changed`, `presence.peers`,
 `selection.changed`, `config.changed`, `backtranslation.changed`, `pericopes.changed`,
 `cells.structure`, `cells.loaded`, `editor.chrome`, `fonts`.
+
+## The extension SDK (`window.aq`, apiRev 4)
+
+A manifest with `"sdk": 1` gets the **extension SDK** injected next to the bridge runtime
+(`shared/tools/sdk/`, ~2.2k lines of plain ES2020 + CSS; `buildToolSrcdoc(…, { sdk })`). It is a
+high-level layer *inside* the sandbox, on top of `aquilla.*` — it holds no privilege, every read
+is scoped and every write goes through the host's pipeline with tool provenance, and the bridge
+stays available as the escape hatch. It gives an extension:
+
+- **Live data hooks** — `aq.useFile()`, `aq.useCells()` (paged in, first page fast),
+  `aq.useCell(id)` (cell + validation, issues, AI phase, comments, audio, lock, peers, selection,
+  unsaved typing), `aq.useSelection()`, `aq.usePresence()`. Each is `{ value, subscribe }` and
+  follows every bridge event (`cells.changed`, signals, presence, selection, config, …).
+- **The built-in editor's own components** — `aq.CellList` (the virtualized list, measured
+  heights, scroll anchoring), `aq.CellRow` (the full row), `aq.SourceText`, `aq.TargetEditor`
+  (rich text, 1.2 s idle autosave, Tab/arrow navigation, lock-aware, live presence drafts, ghost
+  text), `aq.ValidateButton` (N of M), `aq.CommentBadge`, `aq.AudioBadge`, `aq.DraftActions`,
+  `aq.ChapterPicker`, `aq.Toolbar`, `aq.ColumnHeader`, … Components bind to a cell id and repaint
+  themselves; build once, never re-render.
+- **A UI kit** (`aq.ui.Page/Panel/Card/Stack/Button/Badge/Stat/Tabs/Input/…`, menus, dialogs,
+  toasts) over the app's tokens, light/dark.
+- **Actions** — `aq.actions.draft/validate/unvalidate/openHistory/openComments/playAudio/
+  suggestNext/nextUnfinished/…`, with the app's confirmations (replace-before-draft).
+
+Optional background reads stay inside the manifest's declared scopes (`aquilla.context.tool.scopes`),
+so the SDK never prompts for something an extension does not use. Versioning: `AQ_SDK_VERSION`
+is `major.minor`; the manifest pins the major (`TOOLS_SDK_MAJORS`), minors only add. The public
+surface is listed in `AQ_SDK_EXPORTS` and a capability-twin test checks it against the frame's
+real `window.aq` and the builder prompt (`auth-worker/src/lib/tools/build-prompt-sdk.ts`, which
+teaches the model the SDK with two worked examples). Side panels now receive the editor's open
+file as `aquilla.context.file`, so `aq.useCells()` in a panel follows the file being edited.
+
+**The default editor is written on it.** `shared/tools/first-party/default-editor-app.ts` is the
+whole editor: ~110 lines composing `aq.Toolbar`, `aq.ChapterPicker`, `aq.ColumnHeader` and
+`aq.CellList` of `aq.CellRow`s, plus its cell-details panel (health / back-translation /
+footnotes / issues). Before the SDK the editor was 2,533 lines of extension code.
 
 Revert now also **puts back validations an extension withdrew** (`revalidates` in
 `shared/tools/revert.ts`): only the reverting user's own, and only while the text they

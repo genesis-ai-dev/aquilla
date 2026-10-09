@@ -13078,7 +13078,7 @@ export function ProjectWorkspace() {
               // the per-line voice controls show alongside the panel.
               if (t === "voices" && lens !== "audio") switchLens("audio")
             }}
-            toolsPanel={<ToolsDockPanel />}
+            toolsPanel={<ToolsDockPanel file={activeFile ? { fileId: activeFile.id, name: activeFile.name } : undefined} />}
             voicesPanel={
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">

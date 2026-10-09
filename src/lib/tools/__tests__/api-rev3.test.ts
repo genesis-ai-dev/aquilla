@@ -20,7 +20,7 @@ import { memorySuggestions, registerSuggestionProvider, suggestFor } from "../su
 import { METHOD_SCOPES } from "../permissions"
 import { buildToolSrcdoc } from "../srcdoc"
 import { createFakeFramePair } from "./fake-frame"
-import { TOOL_SCOPES } from "../../../../shared/tools/manifest"
+import { TOOLS_API_REV, TOOL_SCOPES } from "../../../../shared/tools/manifest"
 import type { ToolOrigin } from "../../../../shared/tools/manifest"
 import type { Concept } from "@/lib/terminology/types"
 
@@ -162,7 +162,7 @@ describe("apiRev 3 — handlers, scopes and the shipped runtime", () => {
     pair.run(buildToolSrcdoc("<script></script>", { tool: { id: "t", name: "T", version: 1 }, project: { id: "p", name: "P" }, user: { username: "u", roleLevel: 400 }, mount: "editor", file: { fileId: "f1", name: "MAT" }, theme: {} }))
     type Aq = Record<string, Record<string, (...a: unknown[]) => Promise<unknown>>> & { apiRev: number }
     const aq = pair.frame.aquilla as Aq
-    expect(aq.apiRev).toBe(3)
+    expect(aq.apiRev).toBe(TOOLS_API_REV)
     expect(await aq.editor.config("f1")).toMatchObject({ fileId: "f1", ai: { configured: true } })
     expect(await aq.cells.sections("f1")).toHaveLength(2)
     expect(await aq.cells.signals("f1")).toMatchObject({ stale: ["c2"] })

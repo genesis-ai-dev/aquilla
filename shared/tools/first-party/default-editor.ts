@@ -8,11 +8,15 @@
  * source is the reviewed code in this repo. Its scopes are AUTO-GRANTED on
  * first use (stated on the editor bar and the management page); revoking them
  * on the Smart Extensions page sticks.
+ *
+ * It is written on the extension SDK (manifest `sdk: 1`, window.aq): the
+ * same components and hooks any extension can use, so "an editor that
+ * behaves like Aquilla's" is a composition, not a rewrite.
  */
 
 import type { ToolManifest } from "../manifest"
-import { DEFAULT_EDITOR_SCRIPT } from "./default-editor-script"
-import { DEFAULT_EDITOR_STYLE } from "./default-editor-style"
+import { stringKeysOf } from "../sdk/string-keys"
+import { DEFAULT_EDITOR_APP } from "./default-editor-app"
 
 export const FIRST_PARTY_DEFAULT_EDITOR = "default-editor"
 
@@ -22,16 +26,20 @@ export const DEFAULT_EDITOR_MANIFEST: ToolManifest = {
     "The standard translation editor, as a first-party extension: the full editing experience — rich text, validation, AI drafting, back-translation, key terms, rule issues, footnotes, live presence, comments, history and audio.",
   scopes: ["read:cells", "read:terms", "write:target", "write:validation", "read:comments", "ai:draft", "write:audio"],
   mounts: ["page", "editor"],
-  apiRev: 3,
+  apiRev: 4,
+  sdk: 1,
 }
+
+/** App string keys the editor's own code asks for (the SDK loads its own;
+ *  exported for the catalog test). */
+export const DEFAULT_EDITOR_STRING_KEYS: readonly string[] = stringKeysOf(DEFAULT_EDITOR_APP)
 
 export const DEFAULT_EDITOR_SOURCE = `<!doctype html>
 <html>
-<head>
-<style>${DEFAULT_EDITOR_STYLE}</style>
-</head>
+<head></head>
 <body>
-<script>${DEFAULT_EDITOR_SCRIPT}</script>
+<script>var STRING_KEYS = ${JSON.stringify(DEFAULT_EDITOR_STRING_KEYS)};
+${DEFAULT_EDITOR_APP}</script>
 </body>
 </html>`
 

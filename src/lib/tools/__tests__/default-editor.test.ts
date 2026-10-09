@@ -30,7 +30,7 @@ function mount(data: ToolHostData) {
       file: { fileId: "f1", name: "MAT" },
       theme: {},
       hostShortcuts: HOST_SHORTCUTS,
-    }),
+    }, { sdk: DEFAULT_EDITOR_MANIFEST.sdk }),
   )
   const q = (sel: string) => pair.doc.querySelector(sel) as HTMLElement | null
   const row = (cellId: string) => q(`.cell[data-cell-id="${cellId}"]`)
@@ -76,9 +76,9 @@ describe("first-party default editor", () => {
     await vi.waitFor(() => expect(tgt("c3").getAttribute("data-target-locked-by")).toBe("someone"))
     expect(tgt("c3").getAttribute("aria-readonly")).toBe("true")
     await vi.waitFor(() => expect(row("c3")?.querySelector("[data-cell-presence]")).not.toBeNull())
-    await vi.waitFor(() => expect(q("#nav-slot nav")?.textContent).toContain("Matthew 1"))
+    await vi.waitFor(() => expect(q(".chapter-row nav")?.textContent).toContain("Matthew 1"))
     expect(q("[data-testid=lane-switcher]")?.textContent).toContain("Español")
-    expect(q("#nav-slot")?.textContent).toContain("Suggested passages")
+    expect(q(".chapter-row")?.textContent).toContain("Suggested passages")
     stop()
   })
 

@@ -17,8 +17,15 @@
  *  the host's editor config, chapter sections, per-cell signals, AI drafting,
  *  back-translation, key terms, live presence drafts, suggestions, host
  *  panels (history, attachments, rules, recorder) and the bulk selection.
- *  See API_REV_ADDITIONS in api-rev.ts. */
-export const TOOLS_API_REV = 3
+ *  Rev 4 (additive only): `manifest.sdk` — the host injects the in-frame
+ *  extension SDK (`window.aq`: live data hooks, Aquilla components, UI kit,
+ *  actions) on top of the bridge. See API_REV_ADDITIONS in api-rev.ts. */
+export const TOOLS_API_REV = 4
+
+/** SDK majors the host can inject (manifest.sdk; shared/tools/sdk/sdk.ts). */
+export const TOOLS_SDK_MAJORS: readonly number[] = [1]
+/** First apiRev that knows manifest.sdk. */
+export const TOOLS_SDK_MIN_API_REV = 4
 
 /** Every scope a manifest may declare. Reads of project metadata (name, the
  *  current user, theme) need no scope. */
@@ -62,6 +69,8 @@ export interface ToolManifest {
   scopes: ToolScope[]
   mounts: ToolMount[]
   apiRev: number
+  /** apiRev 4: the extension SDK major to inject as `window.aq` (absent: none). */
+  sdk?: number
 }
 
 export interface ManifestValidation {
@@ -119,8 +128,15 @@ export function validateManifest(input: unknown): ManifestValidation {
     : TOOLS_API_REV
   if (apiRev > TOOLS_API_REV) errors.push(`manifest.apiRev ${apiRev} is newer than this host (${TOOLS_API_REV})`)
 
+  let sdk: number | undefined
+  if (input.sdk !== undefined && input.sdk !== null) {
+    if (typeof input.sdk === "number" && TOOLS_SDK_MAJORS.includes(input.sdk)) sdk = input.sdk
+    else errors.push(`manifest.sdk ${String(input.sdk)} is not an SDK this host offers (${TOOLS_SDK_MAJORS.join(", ")})`)
+    if (apiRev < TOOLS_SDK_MIN_API_REV) errors.push(`manifest.sdk needs apiRev ${TOOLS_SDK_MIN_API_REV} or later`)
+  }
+
   if (errors.length > 0) return { ok: false, manifest: null, errors }
-  return { ok: true, manifest: { name, description, scopes, mounts, apiRev }, errors }
+  return { ok: true, manifest: { name, description, scopes, mounts, apiRev, ...(sdk ? { sdk } : {}) }, errors }
 }
 
 /** The provenance a tool write carries in its event payload (`tool_origin`).
@@ -157,6 +173,8 @@ export async function toolCodeHash(source: string, manifest: ToolManifest): Prom
       scopes: [...manifest.scopes].sort(),
       mounts: [...manifest.mounts].sort(),
       apiRev: manifest.apiRev,
+      // Only when set, so every pre-SDK tool keeps its hash.
+      ...(manifest.sdk ? { sdk: manifest.sdk } : {}),
     },
   })
   const bytes = new TextEncoder().encode(canonical)

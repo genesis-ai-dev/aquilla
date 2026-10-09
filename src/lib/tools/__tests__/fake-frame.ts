@@ -73,9 +73,9 @@ export function createFakeFramePair(): FakeFramePair {
     const scripts = [...srcdoc.matchAll(SCRIPT_RE)].map((m) => m[1])
     for (const code of scripts) {
       try {
-        const aquilla = frame.aquilla
+        const { aquilla, aq } = frame
         // eslint-disable-next-line @typescript-eslint/no-implied-eval -- test harness: runs the shipped runtime/tool source in a fake frame
-        new Function("window", "document", "aquilla", code)(frame, doc, aquilla)
+        new Function("window", "document", "aquilla", "aq", code)(frame, doc, aquilla, aq)
       } catch (error) {
         const ev = new Event("error")
         Object.defineProperties(ev, { error: { value: error }, message: { value: String(error) } })

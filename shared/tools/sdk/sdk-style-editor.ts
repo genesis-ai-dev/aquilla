@@ -1,5 +1,5 @@
 /**
- * Styles for the first-party default editor extension (see default-editor.ts).
+ * Aquilla extension SDK — styles for its components (see sdk.ts).
  *
  * A hand-written replica of the built-in editor's Tailwind classes
  * (EditorTable, EditorCellSurface, TargetValidationControl, CellActionRail,
@@ -8,7 +8,7 @@
  * classes on <html> (vp-md, vp-lg, vp-xl) come from the APP's viewport, so the
  * responsive layout switches exactly where the built-in's does.
  */
-export const DEFAULT_EDITOR_STYLE = String.raw`
+export const SDK_EDITOR_STYLE = String.raw`
   :root {
     --aq-green-500: oklch(72.3% 0.219 149.579);
     --aq-blue-400: oklch(70.7% 0.165 254.624);
@@ -35,9 +35,10 @@ export const DEFAULT_EDITOR_STYLE = String.raw`
   }
   html.dark { --aq-issue: var(--aq-amber-400); --aq-major: oklch(70.4% 0.191 22.216); }
   html { font-size: 16px; }
-  html, body { height: 100%; }
-  body { margin: 0; display: flex; flex-direction: column; overflow: hidden; font-family: var(--font-sans, 'Geist Variable', system-ui, sans-serif);
-         font-size: 16px; line-height: 1.5; user-select: none; }
+  body.aq { margin: 0; font-family: var(--font-sans, 'Geist Variable', system-ui, sans-serif); font-size: 16px; line-height: 1.5; }
+  html:has(body.aq-fill), body.aq-fill { height: 100%; }
+  body.aq-fill { display: flex; flex-direction: column; overflow: hidden; user-select: none; }
+  .aq-slot, .aq-nav, .aq-banner { display: contents; }
   button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
   button:disabled { cursor: default; }
   svg.i { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
@@ -54,6 +55,7 @@ export const DEFAULT_EDITOR_STYLE = String.raw`
   .chapter-row .slot { margin-inline-end: auto; display: flex; min-width: 96px; max-width: 100%; flex: 1 1 0%; align-items: center; }
   .vp-lg .chapter-row .slot { margin-inline-end: 0; flex: none; flex-shrink: 1; }
   .chapter-row .chrome-pad { flex-shrink: 0; }
+  .chapter-row .tb-end { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
   .vp-lg .chapter-row .chrome-pad { flex: 1 1 0%; }
   .navw { min-width: 0; max-width: 100%; width: 100%; } .vp-lg .navw { width: auto; }
   .bgroup { display: flex; align-items: stretch; }
@@ -124,8 +126,8 @@ export const DEFAULT_EDITOR_STYLE = String.raw`
   .readonly-banner { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); background: oklch(98.7% 0.022 95.277); color: oklch(41.4% 0.112 45.904);
                      padding: 8px 16px; font-size: 12px; flex-shrink: 0; }
   html.dark .readonly-banner { background: color-mix(in oklab, oklch(27.9% 0.077 45.635) 40%, transparent); color: oklch(87.9% 0.169 91.605); }
-  #scroller { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; position: relative; overflow-anchor: none; }
-  #rows { position: relative; }
+  .aq-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; position: relative; overflow-anchor: none; }
+  .aq-rows { position: relative; }
   .empty-state { display: flex; height: 100%; align-items: center; justify-content: center; padding: 24px; font-size: 14px; color: var(--muted-foreground); gap: 8px; }
   .spin { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -278,7 +280,7 @@ export const DEFAULT_EDITOR_STYLE = String.raw`
   .rbtn.pulsing { animation: pulse 2s cubic-bezier(.4,0,.6,1) infinite; }
   .rbtn .dot { pointer-events: none; position: absolute; inset-inline-end: 2px; top: 2px; width: 6px; height: 6px; border-radius: 999px; box-shadow: 0 0 0 2px var(--background); }
   .dot.amber { background: var(--aq-amber-500); } .dot.red { background: var(--aq-red-500); } .dot.primary { background: var(--primary); } .dot.emerald { background: var(--aq-emerald-500); }
-  .chev { display: flex; transition: opacity .15s; opacity: .3; } .chev:hover, .rail.on .chev { opacity: 1; }
+  .chev { display: flex; height: 25px; transition: opacity .15s; opacity: .3; } .chev:hover, .rail.on .chev { opacity: 1; }
   .chev svg { transition: transform .2s; } .chev.open svg { transform: rotate(180deg); } .chev.open .rbtn { background: var(--card); color: var(--foreground); }
   .overflow { display: flex; flex-direction: row; align-items: center; padding: 4px; }
 

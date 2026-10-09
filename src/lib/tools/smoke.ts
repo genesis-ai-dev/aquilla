@@ -247,14 +247,14 @@ function runOne(
     const maxTimer = setTimeout(finish, SMOKE_LOAD_TIMEOUT_MS + SMOKE_MAX_MS)
 
     frame.start(buildToolSrcdoc(source, {
-      tool: { id: "smoke", name: manifest.name, version: 0 },
+      tool: { id: "smoke", name: manifest.name, version: 0, scopes: manifest.scopes },
       project: { id: "smoke-project", name: "Smoke test project" },
       user: { username: "smoke", roleLevel: 700 },
       mount: fixture.mount ?? "smoke",
       ...(fixture.mount === "editor" ? { file: { fileId: "f1", name: "MAT" } } : {}),
       ...(fixture.mount === "inline" ? { cell: { fileId: "f1", cellId: "c1" } } : {}),
       theme: {},
-    }), MOUNT_WIDTH[fixture.mount ?? "page"] ?? 1024)
+    }, { sdk: manifest.sdk }), MOUNT_WIDTH[fixture.mount ?? "page"] ?? 1024)
   })
 }
 

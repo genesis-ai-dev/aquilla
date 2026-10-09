@@ -70,7 +70,7 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
   const srcdoc = useMemo(
     () =>
       buildToolSrcdoc(tool.source, {
-        tool: { id: tool.id, name: tool.name, version: tool.currentVersion },
+        tool: { id: tool.id, name: tool.name, version: tool.currentVersion, scopes: tool.manifest.scopes },
         project: { id: project.id, name: project.name },
         user: { username: session.username, roleLevel },
         mount,
@@ -78,9 +78,9 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
         ...(file ? { file: { ...file, revealCellId: initialReveal } } : {}),
         theme: readThemeVars(),
         hostShortcuts: HOST_SHORTCUTS,
-      }),
+      }, { sdk: tool.manifest.sdk }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on a new version, not on role/theme changes (pushed live)
-    [tool.id, tool.currentVersion, tool.source, project.id, cell?.fileId, cell?.cellId, file?.fileId],
+    [tool.id, tool.currentVersion, tool.source, tool.manifest.sdk, project.id, cell?.fileId, cell?.cellId, file?.fileId],
   )
 
   return (

@@ -4,6 +4,7 @@
 // src/lib/tools/host-handlers.ts (what the host answers).
 
 import { TOOLS_API_REV, TOOL_SCOPES } from "../../../../shared/tools/manifest"
+import { TOOLS_SDK_PROMPT } from "./build-prompt-sdk"
 import { MAX_TOOL_SOURCE_BYTES } from "../../../../shared/tools/lint"
 
 export const TOOLS_BUILDER_SYSTEM_PROMPT = `You build "tools" for Aquilla, a Bible/content translation workspace.
@@ -116,9 +117,11 @@ through the global \`aquilla\` object the host injects before your code runs.
 Every bridge error is an Error with a .code. Wrap awaits in try/catch and show errors in the UI.
 Start your script with: \`(async () => { … })()\` and render a loading state first.
 
+${TOOLS_SDK_PROMPT}
+
 ## Output format — exactly two fenced blocks, nothing else
 \`\`\`json
-{ "name": "…", "description": "one sentence", "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit] }
+{ "name": "…", "description": "one sentence", "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1 }
 \`\`\`
 \`\`\`html
 <!doctype html>

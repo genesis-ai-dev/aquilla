@@ -1,7 +1,8 @@
 # Smart Extensions editor parity (AQU-1793)
 
 The product's default editor is **Aquilla Editor**, a first-party Smart Extension
-(`shared/tools/first-party/default-editor*.ts`). It runs in the same sandboxed,
+(`shared/tools/first-party/default-editor*.ts`), written on the extension SDK
+(`window.aq`, `shared/tools/sdk/`, see SMART-EXTENSIONS.md). It runs in the same sandboxed,
 opaque-origin, no-network frame as any extension and reaches Aquilla only through
 the `aquilla.*` bridge. This matrix compares it, feature by feature, with the
 built-in editor (`EditorTable` + `TranslatedEditor` + what `ProjectWorkspace`

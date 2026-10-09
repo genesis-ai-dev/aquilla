@@ -97,7 +97,9 @@ function ToolPicker({ tools, value, onChange }: { tools: ToolSummary[]; value: s
   )
 }
 
-export function ToolsDockPanel() {
+/** `file`: the file open in the editor, handed to panel extensions as
+ *  aquilla.context.file (the SDK binds to it). */
+export function ToolsDockPanel({ file }: { file?: { fileId: string; name: string } } = {}) {
   const t = useT()
   const ctx = useToolsMount()
   const panelTools = toolsFor(ctx?.tools ?? [], "panel")
@@ -119,7 +121,7 @@ export function ToolsDockPanel() {
         </Button>
       </div>
       {selected ? (
-        <MountedTool key={selected} toolId={selected} mount="panel" className="flex min-h-0 flex-1 flex-col" />
+        <MountedTool key={selected} toolId={selected} mount="panel" {...(file ? { file } : {})} className="flex min-h-0 flex-1 flex-col" />
       ) : (
         <p className="p-3 text-xs text-muted-foreground">{t("extensions.dock.empty")}</p>
       )}

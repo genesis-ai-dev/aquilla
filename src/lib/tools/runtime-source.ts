@@ -19,6 +19,8 @@
  *
  * Expects `window.__AQUILLA_BOOT__` to be set by the host before this runs.
  */
+
+import { TOOLS_API_REV } from "../../../shared/tools/manifest"
 export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   "use strict";
   var host = window.parent;
@@ -124,7 +126,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   if (boot.theme) applyTheme(boot.theme);
 
   var aquilla = {
-    apiRev: 3,
+    apiRev: ${TOOLS_API_REV},
     context: Object.freeze({
       tool: boot.tool || null,
       project: boot.project || null,

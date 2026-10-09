@@ -207,7 +207,7 @@ test("default editor extension vs built-in editor on a full gospel", async ({ al
     const scroll = await measureScroll(alice, "[data-perf-scroller]")
     // Activate a verse's target the way a translator does (the built-in mounts
     // its rich-text editor on activation), then type.
-    const ws = new Workspace(alice)
+    const ws = new Workspace(alice, "builtin")
     await ws.activateTargetCell(5)
     await alice.keyboard.press("End")
     const typing = await measureTyping(alice, alice, " editado")

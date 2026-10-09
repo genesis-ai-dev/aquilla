@@ -1,36 +1,17 @@
 /**
- * First-party editor extension — part 1/5: shared state, DOM helpers, i18n,
- * icons, rich-text in/out (footnotes as atomic markers), floating UI.
- * Plain ES2020 in a classic script, evaluated in the sandboxed frame; parts
- * are concatenated inside ONE closure (default-editor-script.ts). The editor
- * talks to Aquilla only through `aquilla.*`.
+ * Aquilla extension SDK — part 1: DOM helpers, icons, the app's UI strings,
+ * rich text in/out (USFM footnotes as atomic marker chips), floating UI
+ * (popover, tooltip, dialog, toast). Plain ES2020 inside the SDK closure
+ * (sdk.ts); everything here talks to Aquilla only through `aquilla.*`.
  */
-export const EDITOR_CORE = String.raw`
+export const SDK_CORE = String.raw`
   var ctx = aquilla.context;
   var doc = document;
-  var S = {
-    fileId: ctx.file ? ctx.file.fileId : null,
-    fileName: ctx.file ? ctx.file.name : "",
-    cfg: null,
-    ids: [], byId: Object.create(null), index: Object.create(null),
-    sections: [], sectionIdx: Object.create(null),
-    signals: { stale: [], upstreamStale: [], assignments: {}, repetition: {}, issues: {}, health: {}, ai: {}, backtranslating: [], remoteChanged: [] },
-    sig: { stale: Object.create(null), upstream: Object.create(null), bt: Object.create(null), remote: Object.create(null) },
-    peers: [], peersByCell: Object.create(null), locks: Object.create(null), comments: Object.create(null), audio: Object.create(null),
-    bts: Object.create(null), terms: Object.create(null), termsAsked: Object.create(null),
-    selection: Object.create(null), selCount: 0, selAnchor: null, pericopes: [], voicing: Object.create(null),
-    activeId: null, focusRowId: null, expanded: Object.create(null), expTab: Object.create(null),
-    drafts: Object.create(null), saved: Object.create(null), errors: Object.create(null),
-    loading: true, readOnly: false, chromeW: 0, pendingReveal: ctx.file && ctx.file.revealCellId ? ctx.file.revealCellId : null,
-    username: ctx.user ? ctx.user.username : "",
-  };
-  var IDLE_MS = 1200;          // TranslatedEditor COMMIT_IDLE_MS
-  var TYPING_MS = 650;         // presence draft cadence (TE onSelectionChange)
-  var SUGGEST_MS = 450;
   var later = function (fn, ms) { return setTimeout(fn, ms || 0); };
-  function $(id) { return doc.getElementById(id); }
   function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  function noop() {}
 
+  /** h("div", { class, style: {...}, text, onclick, ...attrs }, [children]) */
   function el(tag, attrs, kids) {
     var n = doc.createElement(tag);
     Object.keys(attrs || {}).forEach(function (k) {
@@ -39,14 +20,21 @@ export const EDITOR_CORE = String.raw`
       if (k === "text") n.textContent = v;
       else if (k === "class") n.className = v;
       else if (k === "style" && typeof v === "object") Object.keys(v).forEach(function (s) { n.style.setProperty(s, v[s]); });
-      else if (k.indexOf("on") === 0) n.addEventListener(k.slice(2), v);
+      else if (k.indexOf("on") === 0 && typeof v === "function") n.addEventListener(k.slice(2), v);
       else n.setAttribute(k, v === true ? "" : v);
     });
-    (kids || []).forEach(function (c) { if (c !== null && c !== undefined && c !== false) n.appendChild(typeof c === "string" ? doc.createTextNode(c) : c); });
+    append(n, kids);
     return n;
   }
+  function append(n, kids) {
+    (Array.isArray(kids) ? kids : kids === undefined ? [] : [kids]).forEach(function (c) {
+      if (c === null || c === undefined || c === false) return;
+      if (Array.isArray(c)) append(n, c);
+      else n.appendChild(typeof c === "string" || typeof c === "number" ? doc.createTextNode(String(c)) : c);
+    });
+  }
 
-  // ── Icons: the built-in's lucide glyphs (generated, see default-editor-icons.ts).
+  // ── Icons: the app's lucide glyphs (generated, sdk-icons.ts).
   var SVGNS = "http://www.w3.org/2000/svg";
   function icon(name, cls) {
     var s = doc.createElementNS(SVGNS, "svg");
@@ -57,8 +45,8 @@ export const EDITOR_CORE = String.raw`
     return s;
   }
 
-  // ── i18n: the app's own editor strings, in the user's language.
-  var STR = Object.create(null), LOCALE = "en";
+  // ── The app's UI strings, in the user's language (aquilla.ui.strings).
+  var STR = Object.create(null), LOCALE = "en", FALLBACK = Object.create(null);
   var plural = null;
   function t(key, vars) {
     var v = STR[key];
@@ -73,18 +61,25 @@ export const EDITOR_CORE = String.raw`
     if (vars) Object.keys(vars).forEach(function (k) { out = out.split("{" + k + "}").join(String(vars[k])); });
     return out;
   }
-  function loadStrings() {
-    return aquilla.ui.strings(STRING_KEYS).then(function (res) {
-      STR = res.strings || STR;
-      LOCALE = res.locale || "en";
-      doc.documentElement.lang = LOCALE;
-      doc.documentElement.dir = res.dir || "ltr";
-    }, function () {});
+  /** Ask the host for more app strings (merged into t()). */
+  function loadStrings(keys) {
+    var want = (keys || []).filter(function (k) { return !has(STR, k); });
+    if (!want.length) return Promise.resolve();
+    var chunks = [];
+    for (var i = 0; i < want.length; i += 500) chunks.push(want.slice(i, i + 500));
+    return Promise.all(chunks.map(function (ks) {
+      return aquilla.ui.strings(ks).then(function (res) {
+        Object.keys(res.strings || {}).forEach(function (k) { STR[k] = res.strings[k]; });
+        LOCALE = res.locale || LOCALE;
+        doc.documentElement.lang = LOCALE;
+        doc.documentElement.dir = res.dir || "ltr";
+      }, noop);
+    })).then(noop);
   }
 
   function errText(err) { return err && err.message ? err.message : String(err); }
   function isDenied(err) { return err && err.code === "permission_denied"; }
-  function toast(msg) { aquilla.ui.notify(msg).catch(function () {}); }
+  function toast(msg) { aquilla.ui.notify(msg).catch(noop); }
 
   // ── Rich text. The host sanitizes everything it hands us and everything we
   // write; this second pass keeps the frame inert (no attributes but the
@@ -134,8 +129,7 @@ export const EDITOR_CORE = String.raw`
     for (var node = walker.nextNode(); node; node = walker.nextNode()) {
       if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute("data-usfm-footnote")) {
         n++;
-        var raw = node.getAttribute("data-usfm-footnote");
-        node.replaceWith(fnChip(raw, n));
+        node.replaceWith(fnChip(node.getAttribute("data-usfm-footnote"), n));
       } else if (node.nodeType === 3 && node.nodeValue.indexOf("\\f") >= 0) texts.push(node);
     }
     texts.forEach(function (tn) {
@@ -157,12 +151,13 @@ export const EDITOR_CORE = String.raw`
     d.textContent = text || "";
     return d.innerHTML.replace(/\n/g, "<br>");
   }
+  /** Show cell text in a node: sanitized html when there is some, else plain. */
   function showInto(target, html, plain) {
     if (html) cleanInto(target, html);
     else target.innerHTML = plainToHtml(plain);
     chipFootnotes(target);
   }
-  /** Plain text of an edited cell: <br> and block ends become newlines,
+  /** Plain text of an edited node: <br> and block ends become newlines,
    *  footnote chips become their raw USFM again (byte-for-byte). */
   function plainOf(node) {
     var out = "";
@@ -199,16 +194,15 @@ export const EDITOR_CORE = String.raw`
     var r = doc.createRange();
     r.selectNodeContents(root);
     try { r.setEnd(container, offset); } catch (e) { return 0; }
-    var frag = r.cloneContents(), d = doc.createElement("div");
-    d.appendChild(frag);
+    var d = doc.createElement("div");
+    d.appendChild(r.cloneContents());
     return plainOf(d).length;
   }
   /** Wrap [start,end) plain-text ranges of a rendered node with spans. */
   function decorate(root, ranges) {
     if (!ranges.length) return;
     ranges.sort(function (a, b) { return a.start - b.start; });
-    var pos = 0, i = 0;
-    var nodes = [];
+    var pos = 0, nodes = [];
     var walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (var n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
     nodes.forEach(function (tn) {
@@ -222,14 +216,17 @@ export const EDITOR_CORE = String.raw`
         if (a < at) a = at;
         if (b <= a) return;
         if (a > at) frag.appendChild(doc.createTextNode(text.slice(at, a)));
-        var span = el("span", r.attrs, [text.slice(a, b)]);
-        frag.appendChild(span);
+        frag.appendChild(el("span", r.attrs, [text.slice(a, b)]));
         at = b;
       });
       if (at < text.length) frag.appendChild(doc.createTextNode(text.slice(at)));
       tn.replaceWith(frag);
     });
-    void i;
+  }
+  function rawFootnotes(text) { var out = [], m; FN_RE.lastIndex = 0; while ((m = FN_RE.exec(text || ""))) out.push({ raw: m[0], index: m.index }); return out; }
+  function makeFootnote(caller, ref, text) {
+    var clean = String(text).replace(/\\f\*?|\\/g, "").trim();
+    return "\\f " + (caller || "+") + (ref ? " \\fr " + ref : "") + " \\ft " + clean + "\\f*";
   }
 
   // ── Floating UI: one popover at a time, tooltips, dialogs.
@@ -273,15 +270,17 @@ export const EDITOR_CORE = String.raw`
     });
     target.addEventListener("mouseleave", hideTip);
     target.addEventListener("mousedown", hideTip);
+    return target;
   }
+  /** A modal: title, body nodes, actions [{ label, primary, danger, run }]. */
   function dialog(title, body, actions) {
     closePop();
     var scrim = el("div", { class: "scrim" });
-    var box = el("div", { class: "dialog", role: "alertdialog", "aria-modal": "true", "aria-label": title }, [el("h2", { text: title })].concat(body));
+    var box = el("div", { class: "dialog", role: "alertdialog", "aria-modal": "true", "aria-label": title }, [el("h2", { text: title })].concat(body || []));
     var row = el("div", { class: "row-b" });
     function close() { scrim.remove(); }
-    actions.forEach(function (a) {
-      row.appendChild(el("button", { class: "btn-s" + (a.primary ? " primary" : ""), type: "button", onclick: function () { close(); if (a.run) a.run(); } }, [a.label]));
+    (actions || [{ label: t("common.close") }]).forEach(function (a) {
+      row.appendChild(el("button", { class: "btn-s" + (a.primary ? " primary" : "") + (a.danger ? " danger" : ""), type: "button", onclick: function () { close(); if (a.run) a.run(); } }, [a.label]));
     });
     box.appendChild(row);
     scrim.appendChild(box);

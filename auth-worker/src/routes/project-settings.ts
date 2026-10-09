@@ -72,6 +72,7 @@ import {
 } from "../../../db/shared/lanes"
 import {
   filterSettingsToVisibleLanes,
+  READ_WALL_MAINTAINER,
   restoreHiddenLaneSettings,
 } from "../../../src/lib/lanes/read-wall"
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
@@ -225,10 +226,15 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
     c.env.AQUILLA_PG, c.env.LANE_READ_WALL, projectId, user.id, role.level,
   )
   // AQU-1039: local and e2e leave the read wall off, but a member staffed on
-  // one lane still must not be handed the other lanes. Maintainer and an
-  // unscoped member are unchanged. Does not read lanes.language, so a row
-  // the backfill has not filled yet filters the same way.
-  if (visible === null && role.level < ROLE.MAINTAINER) {
+  // one lane still must not be handed the other lanes. An unscoped member is
+  // unchanged. Does not read lanes.language, so a row the backfill has not
+  // filled yet filters the same way.
+  //
+  // AQU-1795: this runs whenever the wall left the caller unrestricted, wall
+  // on or off, so it stops at the wall's own floor. A project lead who still
+  // carries a scope row from before a promotion sees every lane, the same as
+  // the sync worker's scopeReadClause and the portfolio give them.
+  if (visible === null && role.level < READ_WALL_MAINTAINER) {
     const scoped = await laneScopeValuesFor(c.env.AQUILLA_PG, projectId, user.id)
     if (scoped.length > 0) {
       const identities = await loadTargetLaneIdentities(c.env.AQUILLA_PG, projectId)

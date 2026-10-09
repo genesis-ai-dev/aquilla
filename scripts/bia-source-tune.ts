@@ -1,7 +1,11 @@
 // Tune the source-alignment mix for BIA on DEV data only.
 //
 //   pnpm bia:tune-source [-- --positions 400 --alphas 0.5,1 --lambdas 8,16
-//                            --mixes add,boost --powers 1,2 --idfs 0,1 --slices early|all --out file.md]
+//                            --mixes add,boost --powers 1,2 --idfs 0,1 --stems 0,4 --betas 0,1
+//                            --slices early|all --all-pairs yes --out file.md]
+//
+// Only the LOW-RESOURCE pairs (scripts/bia-parallel-pairs.ts) drive tuning by
+// default; Spanish→English is a reference, never a tuning target.
 //
 // For each parallel pair and slice, the eval's TEST verses (every 10th) are
 // never touched: the training verses are split again (every 10th → dev), the
@@ -31,32 +35,48 @@ const LAMBDAS = list("lambdas", "0,2,4,8").map(Number)
 const MIXES = list("mixes", "add") as SourceMix[]
 const POWERS = list("powers", "1").map(Number)
 const IDFS = list("idfs", "0").map(Number)
-const slices = arg("slices") === "early" ? SLICES.filter(([, limit]) => limit !== undefined) : SLICES
+const STEMS = list("stems", "0").map(Number)
+const BETAS = list("betas", "0").map(Number)
+// Next-word chains (Daniel's 2024 per-distance forecaster): 0 off, 1 on, only = chains without BIA.
+const CHAINS = list("chains", "0")
+const chainOpts = (c: string): SuggestOptions => (c === "0" ? { chains: false } : c === "1" ? { chains: true } : { chains: true, chainsOnly: true })
+// Low-resource targets only, unless asked: they are who the tool is for.
+const pairs = arg("all-pairs") === "yes" ? PARALLEL_PAIRS : PARALLEL_PAIRS.filter((p) => p.lowResource)
+const slices = arg("slices") === "early" ? SLICES.filter(([, limit]) => limit !== undefined) : arg("slices") === "full" ? SLICES.filter(([, limit]) => limit === undefined) : SLICES
 const outName = arg("out") ?? "bia-source-tuning.md"
 
-const variants: Record<string, SuggestOptions> = { "no source": { sourceWeight: 0 } }
-for (const mix of MIXES) for (const p of POWERS) for (const q of IDFS) for (const a of ALPHAS) for (const l of LAMBDAS) {
-  if (a === 0) continue
-  variants[`${mix} a=${a} l=${l} p=${p} q=${q}`] = {
-    sourceWeight: a, sourceLambda: l, sourceMix: mix, sourcePower: p, sourceTargetIdf: q,
+const variants: Record<string, SuggestOptions> = {}
+for (const c of CHAINS) {
+  variants[`no source c=${c}`] = { sourceWeight: 0, ...chainOpts(c) }
+  for (const mix of MIXES) for (const p of POWERS) for (const q of IDFS) for (const a of ALPHAS) for (const l of LAMBDAS) for (const b of BETAS) {
+    if (a === 0) continue
+    variants[`${mix} a=${a} l=${l} p=${p} q=${q} c=${c} b=${b}`] = {
+      sourceWeight: a, sourceLambda: l, sourceMix: mix, sourcePower: p, sourceTargetIdf: q, sourceStemWeight: b, ...chainOpts(c),
+    }
   }
 }
 
 const totals = new Map<string, number[]>()
 const rows: string[] = []
-for (const pair of PARALLEL_PAIRS) {
+for (const pair of pairs) {
   const src = readFileSync(resolve(dir, pair.source), "utf8").split("\n")
   const tgt = readFileSync(resolve(dir, pair.target), "utf8").split("\n")
   for (const [slice, limit] of slices) {
     const { train } = splitParallel(src, tgt, 10, limit)
     const { train: fit, dev } = devSplit(train, 10)
-    const report = runForecastEval(fit, dev, { maxPositions, methods: "variants", variants })
-    for (const name of Object.keys(variants)) {
-      const n = report.next[`bia ${name}`]
-      const f = report.infill[`bia ${name}`]
-      const mean = (n.top1 + n.top3 + f.top1 + f.top3) / 4
-      totals.set(name, [...(totals.get(name) ?? []), mean])
-      rows.push(`| ${pair.label} | ${slice} | ${name} | ${(n.top1 * 100).toFixed(1)} | ${(n.top3 * 100).toFixed(1)} | ${(f.top1 * 100).toFixed(1)} | ${(f.top3 * 100).toFixed(1)} |`)
+    for (const stem of STEMS) {
+      // The stem length is an index property: one index per length.
+      const report = runForecastEval(fit, dev, { maxPositions, methods: "variants", variants, index: { stemGraphemes: stem } })
+      for (const base of Object.keys(variants)) {
+        // Stem length only matters when the stem back-off is on.
+        if (stem !== STEMS[0] && !/b=(?!0$)/.test(base)) continue
+        const name = /b=(?!0$)/.test(base) ? `${base} k=${stem}` : base
+        const n = report.next[`bia ${base}`]
+        const f = report.infill[`bia ${base}`]
+        const mean = (n.top1 + n.top3 + f.top1 + f.top3) / 4
+        totals.set(name, [...(totals.get(name) ?? []), mean])
+        rows.push(`| ${pair.label} | ${slice} | ${name} | ${(n.top1 * 100).toFixed(1)} | ${(n.top3 * 100).toFixed(1)} | ${(f.top1 * 100).toFixed(1)} | ${(f.top3 * 100).toFixed(1)} |`)
+      }
     }
     console.log(`tuned ${pair.label} ${slice} (${fit.length} fit / ${dev.length} dev)`)
   }

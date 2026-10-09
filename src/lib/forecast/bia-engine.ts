@@ -56,11 +56,19 @@
  *   - Daniel's notes allow the Markov chain to "filter or weight"; the editor
  *     ships "weight" plus 1/|d| vote decay (FAITHFUL_OPTIONS keeps the
  *     Python behaviour for comparison; see the eval results).
+ *   - Next-word without a source signal restores the per-distance chains of
+ *     Daniel's 2024 forecaster (full counts of the word 1, 2, 3 places after
+ *     each word, product of experts) — see `chains`. With a source verse the
+ *     bigram factor + source lexicon measured better, so it stays.
  *   - Infill may optionally apply the Markov chain on both sides
  *     (`can_be_next` on the left and the unused `can_preclude` on the right).
  */
 
 import { isSpaceless, isWordChar, joiner, segmentWords, wordKeys } from "./forecast-tokenize"
+import { mixScores, type SourceMix } from "./mix"
+import { wordsThatFit as thesaurus, type ThesaurusOptions } from "./thesaurus"
+
+export { mixScores, type SourceMix } from "./mix"
 import { BiaIndex } from "./bia-index"
 
 export type MarkovMode = "filter" | "weight" | "off"
@@ -118,9 +126,23 @@ export interface SuggestOptions extends Pick<PredictOptions, "neighbors" | "deca
    * the left context, where BIA + Markov already predict them well.
    */
   sourceTargetIdf?: number
+  /** Weight β of the grapheme-stem back-off in the source lexicon (0 = off). */
+  sourceStemWeight?: number
+  /**
+   * Next-word mode only: weight candidates by the per-distance chains of
+   * Daniel's 2024 forecaster, Π_k (P_k(w | word k back) + ε·P(w))^(1/k) for
+   * k = 1..3, instead of the bigram factor 1 + ln(1 + count(prev→w)).
+   * Default: on exactly when there is no source signal for the cell (see
+   * `fill`); with a source verse the bigram factor measured better.
+   */
+  chains?: boolean
+  /**
+   * With chains: skip the BIA vote and rank only the chains' own candidates.
+   * Default: on whenever chains are on by default (same accuracy on dev,
+   * 5–20× faster).
+   */
+  chainsOnly?: boolean
 }
-
-export type SourceMix = "add" | "boost"
 
 /**
  * The Python's behaviour, for evals and comparisons: hard Markov filter, one
@@ -147,13 +169,12 @@ export const SOURCE_LAMBDA = 8
 export const SOURCE_MIX: SourceMix = "add"
 export const SOURCE_POWER = 2
 export const SOURCE_TARGET_IDF = 3
-/** In "boost" mixing, how much a source-only word scores relative to α·src. */
-export const BOOST_FLOOR = 0.25
+export const SOURCE_STEM_WEIGHT = 0
+/** Unigram smoothing ε in the per-distance chain factor. */
+const CHAIN_EPSILON = 0.001
+
 
 export const DEFAULT_ANCHORS = 15
-export const THESAURUS_ANCHORS = 7
-export const THESAURUS_SAMPLES = 100
-const THESAURUS_PER_SAMPLE = 20
 const MULTI_WORD_TOP = 4
 
 /** True when `left` ends inside a word (the caret follows a word character). */
@@ -221,7 +242,8 @@ export class BiaEngine {
     return this.rank(votes)
   }
 
-  private rank(scores: Map<string, number>): Ranked {
+  /** Scores, best first; ties by corpus frequency, then alphabetically. */
+  rank(scores: Map<string, number>): Ranked {
     const { index } = this
     return Array.from(scores.entries()).sort(
       (a, b) => b[1] - a[1] || index.frequency(b[0]) - index.frequency(a[0]) || (a[0] < b[0] ? -1 : 1),
@@ -229,9 +251,28 @@ export class BiaEngine {
   }
 
   /** Apply the Markov chain to a ranked list (Python `get_possible_next`). */
-  private markov(ranked: Ranked, prev: string | undefined, next: string | undefined, mode: MarkovMode, limit: number): Ranked {
+  private markov(
+    ranked: Ranked,
+    prev: string | undefined,
+    next: string | undefined,
+    mode: MarkovMode,
+    limit: number,
+    chainContext?: readonly string[],
+  ): Ranked {
     if (mode === "off" || (prev === undefined && next === undefined)) return ranked
     const { index } = this
+    if (mode === "weight" && chainContext && next === undefined) {
+      const depth = Math.min(index.chainDepth, chainContext.length)
+      const chained = ranked.map(([w, s]): [string, number] => {
+        let log = 0
+        const floor = CHAIN_EPSILON * index.probability(w)
+        for (let k = 1; k <= depth; k++) {
+          log += Math.log(index.chainProbability(k, chainContext[chainContext.length - k], w) + floor) / k
+        }
+        return [w, s * Math.exp(log)]
+      })
+      return chained.sort((a, b) => b[1] - a[1] || index.frequency(b[0]) - index.frequency(a[0]))
+    }
     if (mode === "filter") {
       return ranked
         .slice(0, limit * 4)
@@ -263,27 +304,34 @@ export class BiaEngine {
     const prev = leftTokens.at(-1)
     const next = rightTokens[0]
     const fits = (w: string) => w.startsWith(prefix) && w !== prefix
-    let ranked = this.predictAt(tokens, target, {
+    const source = this.sourceTokens(opts.source)
+    const alpha = opts.sourceWeight ?? SOURCE_WEIGHT
+    // Is there anything for the source term to say? (A verse, a weight, and
+    // translated pairs to have learned a lexicon from.)
+    const sourceSignal = source.length > 0 && alpha > 0 && this.index.lexicon.pairCount > 0
+    const nextWord = rightTokens.length === 0
+    const chains = nextWord && (opts.chains ?? !sourceSignal)
+    const chainsOnly = chains && (opts.chainsOnly ?? opts.chains === undefined)
+    let ranked = chainsOnly ? this.chainCandidates(leftTokens) : this.predictAt(tokens, target, {
       excludeCellId: opts.excludeCellId,
       neighbors: opts.neighbors,
       decay: opts.decay ?? SHIPPED_DECAY,
     })
-    const source = this.sourceTokens(opts.source)
-    const alpha = opts.sourceWeight ?? SOURCE_WEIGHT
-    if (source.length > 0 && alpha > 0) {
+    if (sourceSignal) {
       const aligned = this.index.lexicon.scoreTargets(source, {
         left: leftTokens,
         right: rightTokens,
         excludeCellId: opts.excludeCellId,
         lambda: opts.sourceLambda ?? SOURCE_LAMBDA,
         power: opts.sourcePower ?? SOURCE_POWER,
+        stemWeight: opts.sourceStemWeight ?? SOURCE_STEM_WEIGHT,
       })
       const q = opts.sourceTargetIdf ?? SOURCE_TARGET_IDF
       if (q !== 0) for (const [t, v] of aligned) aligned.set(t, v * this.index.idf(t) ** q)
       ranked = this.rank(mixScores(ranked, aligned, alpha, opts.sourceMix ?? SOURCE_MIX))
     }
     if (prefix) ranked = ranked.filter(([w]) => fits(w))
-    ranked = this.markov(ranked, prev, next, mode, limit)
+    ranked = this.markov(ranked, prev, next, mode, limit, chains ? leftTokens : undefined)
     const out = ranked.slice(0, limit).map(([word, score]) => ({ word, score, source: "bia" as const }))
     if (out.length > 0 || opts.fallback === false) return out
 
@@ -299,6 +347,15 @@ export class BiaEngine {
       .filter(([w]) => fits(w))
       .slice(0, limit)
       .map(([word, score]) => ({ word, score, source: "frequency" as const }))
+  }
+
+  /** Every word the per-distance chains have seen after the last 3 words (score 1). */
+  private chainCandidates(left: readonly string[]): Ranked {
+    const seen = new Set<string>()
+    for (let k = 1; k <= Math.min(this.index.chainDepth, left.length); k++) {
+      for (const w of this.index.chainFollowers(k, left[left.length - k])) seen.add(w)
+    }
+    return Array.from(seen, (w): [string, number] => [w, 1])
   }
 
   private sourceTokens(source: SuggestOptions["source"]): readonly string[] {
@@ -357,133 +414,10 @@ export class BiaEngine {
   }
 
   /**
-   * Thesaurus: words that fit where `word` fits (Python `synonimize` +
-   * `combine_votes`). With `context`, the sentence being edited is one more
-   * sample, so the list also reflects "here".
+   * Thesaurus: words that fit where `word` fits — see thesaurus.ts.
    */
-  wordsThatFit(
-    word: string,
-    opts: {
-      context?: { left: string; right: string }
-      limit?: number
-      samples?: number
-      excludeCellId?: string
-      /** "idf2" = the Python `combine_votes`; "votes" (default) = vote share. */
-      weighting?: "idf2" | "votes"
-      /** The verse's source: words translating the same source word rank up. */
-      source?: string | readonly string[]
-      sourceWeight?: number
-    } = {},
-  ): Array<{ word: string; score: number }> {
-    const target = wordKeys(word)[0]
-    if (!target) return []
-    const { index } = this
-    const posting = index.postingsOf(target)
-    const sampleIds = posting ? Array.from(posting.keys()) : []
-    const orders = sampleIds.map((id) => index.cell(id)?.order ?? 0)
-    const bound: readonly [number, number] | undefined =
-      orders.length > 0 ? [Math.min(...orders), Math.max(...orders)] : undefined
-    sampleIds.sort((a, b) => (index.cell(a)?.order ?? 0) - (index.cell(b)?.order ?? 0))
-    const cap = opts.samples ?? THESAURUS_SAMPLES
-    const step = Math.max(1, Math.floor(sampleIds.length / cap))
-    const samples: Array<{ tokens: readonly string[]; at: number }> = []
-    for (let i = 0; i < sampleIds.length; i += step) {
-      const id = sampleIds[i]
-      if (id === opts.excludeCellId) continue
-      const cell = index.cell(id)
-      const at = posting?.get(id)
-      if (cell && at !== undefined) samples.push({ tokens: cell.tokens, at })
-    }
-    if (opts.context) {
-      const left = wordKeys(opts.context.left)
-      samples.push({ tokens: [...left, target, ...wordKeys(opts.context.right)], at: left.length })
-    }
-
-    const faithful = opts.weighting === "idf2"
-    const combined = new Map<string, number>()
-    for (const sample of samples) {
-      const ranked = this.predictAt(sample.tokens, sample.at, {
-        topN: THESAURUS_ANCHORS,
-        bound,
-        excludeCellId: opts.excludeCellId,
-        decay: faithful ? 0 : SHIPPED_DECAY,
-      }).filter(([candidate]) => candidate !== target)
-      if (faithful) {
-        for (const [candidate] of ranked) {
-          const idf = index.idf(candidate)
-          combined.set(candidate, (combined.get(candidate) ?? 0) + idf * idf)
-        }
-        continue
-      }
-      // Default weighting keeps the Python's IDF² but scales it by the
-      // candidate's vote share in the sample (a stray single-anchor landing
-      // scores little) over the top THESAURUS_PER_SAMPLE candidates that the
-      // Markov chain allows between the blank's neighbours. The faithful
-      // IDF²-for-every-candidate ranks hapaxes first (pace, processions,
-      // bereaving for "king"); this gives men, people, house, father.
-      const prev = sample.tokens[sample.at - 1]
-      const next = sample.tokens[sample.at + 1]
-      const fitsLeft = (c: string) => prev === undefined || index.canBeNext(prev, c)
-      const fitsRight = (c: string) => next === undefined || index.canPrecede(c, next)
-      // Both neighbours when possible; one side when a rare neighbour (only
-      // ever seen beside the word itself) would otherwise rule out everything.
-      let fitting = ranked.filter(([c]) => fitsLeft(c) && fitsRight(c))
-      if (fitting.length === 0) fitting = ranked.filter(([c]) => fitsLeft(c) || fitsRight(c))
-      const top = fitting[0]?.[1] ?? 0
-      for (const [candidate, votes] of fitting.slice(0, THESAURUS_PER_SAMPLE)) {
-        const idf = index.idf(candidate)
-        combined.set(candidate, (combined.get(candidate) ?? 0) + (votes / top) * idf * idf)
-      }
-    }
-    combined.delete(target)
-    const source = this.sourceTokens(opts.source)
-    const alpha = opts.sourceWeight ?? SOURCE_WEIGHT
-    const scored = source.length > 0 && alpha > 0
-      ? mixScores(this.rank(combined), this.sourceAlternatives(target, source, opts.excludeCellId), alpha)
-      : combined
-    scored.delete(target)
-    const total = Array.from(scored.values()).reduce((a, b) => a + b, 0)
-    return this.rank(scored)
-      .slice(0, opts.limit ?? 10)
-      .map(([w, s]) => ({ word: index.display(w), score: total > 0 ? s / total : 0 }))
-  }
-
-  /**
-   * Other target words for the source word(s) `target` translates here:
-   * sum over the verse's source words s of idf(s) * dice(s, target) * dice(s, t).
-   */
-  private sourceAlternatives(target: string, source: readonly string[], excludeCellId?: string): Map<string, number> {
-    const { lexicon } = this.index
-    const pairs = lexicon.pairCount
-    const out = new Map<string, number>()
-    for (const s of new Set(source)) {
-      const assoc = lexicon.associations(s, excludeCellId)
-      const anchor = assoc.find(([t]) => t === target)?.[1] ?? 0
-      if (anchor === 0) continue
-      const weight = lexicon.idf(s, pairs) * anchor
-      for (const [t, d] of assoc) out.set(t, (out.get(t) ?? 0) + weight * d)
-    }
-    return out
+  wordsThatFit(word: string, opts: ThesaurusOptions = {}): Array<{ word: string; score: number }> {
+    return thesaurus(this, word, opts, { decay: SHIPPED_DECAY, sourceWeight: SOURCE_WEIGHT })
   }
 }
 
-/** Max-normalise both score sets and add alpha x the second to the first. */
-export function mixScores(
-  primary: Ranked,
-  secondary: ReadonlyMap<string, number>,
-  alpha: number,
-  mode: SourceMix = "add",
-): Map<string, number> {
-  const topPrimary = primary[0]?.[1] ?? 0
-  let topSecondary = 0
-  for (const v of secondary.values()) if (v > topSecondary) topSecondary = v
-  const out = new Map<string, number>()
-  for (const [w, v] of primary) out.set(w, topPrimary > 0 ? v / topPrimary : 0)
-  if (topSecondary === 0) return out
-  for (const [w, v] of secondary) {
-    const s = (alpha * v) / topSecondary
-    const b = out.get(w) ?? 0
-    out.set(w, mode === "boost" ? b * (1 + s) + BOOST_FLOOR * s : b + s)
-  }
-  return out
-}

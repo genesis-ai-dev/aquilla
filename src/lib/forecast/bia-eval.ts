@@ -8,7 +8,7 @@
 
 import { fold, wordKeys } from "./forecast-tokenize"
 import { BiaEngine, FAITHFUL_OPTIONS, type SuggestOptions } from "./bia-engine"
-import { BiaIndex, type ForecastCell } from "./bia-index"
+import { BiaIndex, type BiaIndexOptions, type ForecastCell } from "./bia-index"
 
 export interface Accuracy {
   top1: number
@@ -16,6 +16,8 @@ export interface Accuracy {
   /** Share of positions where the method offered anything at all. */
   coverage: number
   n: number
+  /** Mean wall time per prediction, milliseconds. */
+  ms: number
 }
 
 export interface EvalReport {
@@ -37,6 +39,8 @@ export interface EvalOptions {
    */
   methods?: "baseline" | "source" | "variants"
   variants?: Record<string, SuggestOptions>
+  /** Index construction options (e.g. the stem length). */
+  index?: BiaIndexOptions
 }
 
 /** A held-out verse: its target text, and its source when evaluating alignment. */
@@ -44,8 +48,9 @@ export type EvalItem = string | { text: string; source?: string }
 
 export const FAITHFUL = "bia faithful (python: markov filter)"
 export const SHIPPED = "bia shipped (decay + markov weight + fallback)"
-export const NO_SOURCE = "bia shipped, no source"
-export const WITH_SOURCE = "bia shipped + source"
+export const NO_SOURCE = "BIA"
+export const WITH_CHAINS = "BIA + chains (no source)"
+export const WITH_SOURCE = "BIA + source"
 export const SOURCE_ONLY = "source lexicon only"
 
 type Predictor = (left: string[], right: string[], source: string | undefined) => string[]
@@ -61,9 +66,9 @@ class Tally {
     if (predicted[0] === gold) this.hits1++
     if (predicted.slice(0, 3).includes(gold)) this.hits3++
   }
-  result(): Accuracy {
+  result(elapsedMs = 0): Accuracy {
     const d = Math.max(1, this.n)
-    return { top1: this.hits1 / d, top3: this.hits3 / d, coverage: this.offered / d, n: this.n }
+    return { top1: this.hits1 / d, top3: this.hits3 / d, coverage: this.offered / d, n: this.n, ms: elapsedMs / d }
   }
 }
 
@@ -79,7 +84,7 @@ function positions(tests: readonly string[][], minIndex: number, trailing: numbe
 }
 
 export function runForecastEval(train: readonly ForecastCell[], testItems: readonly EvalItem[], opts: EvalOptions = {}): EvalReport {
-  const index = new BiaIndex()
+  const index = new BiaIndex(opts.index)
   index.upsert(train)
   const engine = new BiaEngine(index)
   const unigram = index.vocabularyByFrequency().slice(0, 3).map(([w]) => w)
@@ -106,7 +111,8 @@ export function runForecastEval(train: readonly ForecastCell[], testItems: reado
       ? Object.fromEntries(Object.entries(opts.variants ?? {}).map(([name, o]) => [`bia ${name}`, bia(o)]))
       : opts.methods === "source"
         ? {
-            [NO_SOURCE]: bia({ sourceWeight: 0 }),
+            [NO_SOURCE]: bia({ sourceWeight: 0, chains: false }),
+            [WITH_CHAINS]: bia({ sourceWeight: 0 }),
             [WITH_SOURCE]: bia({}),
             ["bia " + SOURCE_ONLY]: bia({ sourceWeight: 1000 }),
           }
@@ -114,7 +120,7 @@ export function runForecastEval(train: readonly ForecastCell[], testItems: reado
             [FAITHFUL]: bia(FAITHFUL_OPTIONS),
             "bia votes only (no markov)": bia({ ...FAITHFUL_OPTIONS, markov: "off" }),
             "bia + markov weight": bia({ ...FAITHFUL_OPTIONS, markov: "weight" }),
-            [SHIPPED]: bia({ sourceWeight: 0 }),
+            [SHIPPED]: bia({ sourceWeight: 0, chains: false }),
           }
   const baselines = opts.methods !== "variants"
 
@@ -146,13 +152,14 @@ export function runForecastEval(train: readonly ForecastCell[], testItems: reado
     const out: Record<string, Accuracy> = {}
     for (const [name, predict] of Object.entries(methods)) {
       const tally = new Tally()
+      const t0 = performance.now()
       for (const [c, i] of pts) {
         const tokens = tests[c]
         const predicted = predict(tokens.slice(0, i), infill ? tokens.slice(i + 1) : [], items[c].source)
-        if (name.startsWith("bia")) queries++
+        if (name !== "unigram" && name !== "bigram-markov") queries++
         tally.add(predicted, tokens[i])
       }
-      out[name] = tally.result()
+      out[name] = tally.result(performance.now() - t0)
     }
     return out
   }

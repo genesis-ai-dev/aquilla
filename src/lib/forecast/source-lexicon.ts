@@ -34,7 +34,16 @@ export interface PairCells {
   target(id: string): { tokens: readonly string[]; weight: number } | undefined
   /** Number of target cells containing `word`. */
   targetDf(word: string): number
+  /** Back-off stem of a target word ("" when stemming is off). */
+  stemOf(word: string): string
+  /** Number of target cells containing a word of `stem`. */
+  stemDf(stem: string): number
+  /** Forms (word → weighted count) a stem expands to. */
+  formsOf(stem: string): ReadonlyMap<string, number> | undefined
 }
+
+/** Forms of a stem a stem association expands to (most frequent first). */
+const FORMS_PER_STEM = 6
 
 export interface SourceScoreOptions {
   /** Target words before the blank (the cursor is after the last one). */
@@ -46,6 +55,8 @@ export interface SourceScoreOptions {
   lambda: number
   /** Exponent on Dice (default 1). */
   power?: number
+  /** Weight of the stem back-off relative to exact-word Dice (0 = off). */
+  stemWeight?: number
 }
 
 export class SourceLexicon {
@@ -53,6 +64,7 @@ export class SourceLexicon {
   /** source word → cells that have both this word in the source AND target text. */
   private readonly postings = new Map<string, Set<string>>()
   private readonly cache = new Map<string, Array<[string, number]>>()
+  private readonly stemCache = new Map<string, Array<[string, number]>>()
   /** Paired cells → [source tokens, target tokens] counted into the ratio. */
   private readonly paired = new Map<string, [number, number]>()
   private pairSourceTokens = 0
@@ -83,6 +95,7 @@ export class SourceLexicon {
     this.pairSourceTokens += tokens.length
     this.pairTargetTokens += target.tokens.length
     this.cache.clear()
+    this.stemCache.clear()
   }
 
   remove(id: string): void {
@@ -100,12 +113,14 @@ export class SourceLexicon {
     this.pairSourceTokens -= lengths[0]
     this.pairTargetTokens -= lengths[1]
     this.cache.clear()
+    this.stemCache.clear()
   }
 
   clear(): void {
     this.sources.clear()
     this.postings.clear()
     this.cache.clear()
+    this.stemCache.clear()
     this.paired.clear()
     this.pairSourceTokens = 0
     this.pairTargetTokens = 0
@@ -156,6 +171,35 @@ export class SourceLexicon {
     return top
   }
 
+  /**
+   * Target STEMS most associated with source word `s`: the same Dice, but a
+   * cell counts for a stem when any form of it appears, so the inflected
+   * forms of a morphology-rich target pool their evidence.
+   */
+  stemAssociations(s: string, excludeCellId?: string): ReadonlyArray<[string, number]> {
+    const posting = this.postings.get(s)
+    if (!posting || posting.size > MAX_SOURCE_DF) return []
+    const useCache = excludeCellId === undefined || !posting.has(excludeCellId)
+    const cached = useCache ? this.stemCache.get(s) : undefined
+    if (cached) return cached
+    const co = new Map<string, number>()
+    let dfS = 0
+    for (const id of posting) {
+      if (id === excludeCellId) continue
+      const target = this.pairs.target(id)
+      if (!target) continue
+      dfS += target.weight
+      const stems = new Set(target.tokens.map((t) => this.pairs.stemOf(t)))
+      for (const stem of stems) if (stem) co.set(stem, (co.get(stem) ?? 0) + target.weight)
+    }
+    const ranked: Array<[string, number]> = []
+    for (const [stem, c] of co) ranked.push([stem, (2 * c) / (dfS + this.pairs.stemDf(stem))])
+    ranked.sort((a, b) => b[1] - a[1])
+    const top = ranked.slice(0, TOP_TARGETS)
+    if (useCache) this.stemCache.set(s, top)
+    return top
+  }
+
   /** Dice of one source/target word pair (0 when unseen or too common). */
   dice(s: string, t: string, excludeCellId?: string): number {
     return this.associations(s, excludeCellId).find(([w]) => w === t)?.[1] ?? 0
@@ -175,13 +219,26 @@ export class SourceLexicon {
     const cursor = (opts.left.length + 0.5) / expected
     const used = new Set([...opts.left, ...right])
     const power = opts.power ?? 1
+    const stemWeight = opts.stemWeight ?? 0
     source.forEach((s, i) => {
       const assoc = this.associations(s, opts.excludeCellId)
-      if (assoc.length === 0) return
+      if (assoc.length === 0 && stemWeight <= 0) return
       const weight = this.idf(s, pairs) * Math.exp(-opts.lambda * Math.abs((i + 0.5) / source.length - cursor))
       for (const [t, d] of assoc) {
         const covered = used.has(t) ? COVERED_PENALTY : 1
         scores.set(t, (scores.get(t) ?? 0) + weight * d ** power * covered)
+      }
+      if (stemWeight <= 0) return
+      // Back-off: the stem's evidence goes to each of its common forms; the
+      // left context (BIA + Markov) then picks the inflection that fits.
+      for (const [stem, d] of this.stemAssociations(s, opts.excludeCellId)) {
+        const forms = Array.from(this.pairs.formsOf(stem) ?? [])
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, FORMS_PER_STEM)
+        for (const [t] of forms) {
+          const covered = used.has(t) ? COVERED_PENALTY : 1
+          scores.set(t, (scores.get(t) ?? 0) + stemWeight * weight * d ** power * covered)
+        }
       }
     })
     return scores

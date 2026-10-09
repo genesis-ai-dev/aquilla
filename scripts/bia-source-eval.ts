@@ -1,17 +1,21 @@
-// Offline eval: BIA next-word / infill WITH vs WITHOUT the source verse.
+// Offline eval on the TEST split: BIA, + per-distance chains, + source verse,
+// + stem back-off — low-resource targets first.
 //
 //   pnpm bia:eval-source [-- --positions 1500]
 //
-// Same harness and held-out split as scripts/bia-eval.ts (every 10th verse),
-// over vref-aligned parallel pairs (scripts/bia-parallel-pairs.ts), on the
-// whole Bible and on the first 2,000 verses. The mixing weights were tuned on
-// a dev split of the TRAINING verses (scripts/bia-source-tune.ts), never on
-// these test verses. Output: docs/forecast/bia-source-eval-results.{json,md}.
+// Every 10th verse of each vref-aligned parallel pair (scripts/bia-parallel-
+// pairs.ts) is held out, on the whole Bible (or NT) and on the first 2,000
+// verses. Every weight was chosen on dev splits carved from the TRAINING
+// verses of the low-resource pairs only (scripts/bia-source-tune.ts); the
+// Spanish→English row is a reference, never a tuning target.
+// Output: docs/forecast/bia-source-eval-results.{json,md}.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { resolve } from "node:path"
-import { NO_SOURCE, SOURCE_ONLY, WITH_SOURCE, runForecastEval, splitParallel, type EvalReport } from "../src/lib/forecast/bia-eval"
+import {
+  NO_SOURCE, SOURCE_ONLY, WITH_CHAINS, WITH_SOURCE, runForecastEval, splitParallel, type Accuracy, type EvalReport,
+} from "../src/lib/forecast/bia-eval"
 import { PARALLEL_PAIRS, SLICES } from "./bia-parallel-pairs"
 
 function arg(name: string): string | undefined {
@@ -21,9 +25,11 @@ function arg(name: string): string | undefined {
 
 const dir = arg("corpus-dir") ?? process.env.EBIBLE_CORPUS_DIR ?? resolve(homedir(), "Frontier/EBibleBenchmarks/corpus")
 const maxPositions = Number(arg("positions") ?? 1500)
+const STEM = "bia + source + stem"
 const pct = (x: number) => `${(x * 100).toFixed(1)}`
 
-const rows: Array<{ pair: string; slice: string; report: EvalReport }> = []
+interface Row { pair: string; lowResource: boolean; slice: string; report: EvalReport }
+const rows: Row[] = []
 for (const pair of PARALLEL_PAIRS) {
   const src = readFileSync(resolve(dir, pair.source), "utf8").split("\n")
   const tgt = readFileSync(resolve(dir, pair.target), "utf8").split("\n")
@@ -32,11 +38,17 @@ for (const pair of PARALLEL_PAIRS) {
     // The early-project slice is scored on held-out verses from the same span.
     const heldOut = limit === undefined ? test : test.slice(0, Math.ceil(limit / 9))
     const report = runForecastEval(train, heldOut, { maxPositions, methods: "source" })
-    rows.push({ pair: pair.label, slice, report })
-    console.log(`\n== ${pair.label} (${slice}): ${report.trainCells} train / ${report.testCells} test, ${report.msPerQuery.toFixed(2)} ms/query`)
+    // The stem back-off needs an index built with stems: a second pass.
+    const stem = runForecastEval(train, heldOut, {
+      maxPositions, methods: "variants", variants: { "+ source + stem": { sourceStemWeight: 1 } }, index: { stemGraphemes: 3 },
+    })
+    report.next[STEM] = stem.next["bia + source + stem"]
+    report.infill[STEM] = stem.infill["bia + source + stem"]
+    rows.push({ pair: pair.label, lowResource: pair.lowResource, slice, report })
+    console.log(`\n== ${pair.label} (${slice}): ${report.trainCells} train / ${report.testCells} test`)
     for (const task of ["next", "infill"] as const) {
       for (const [method, acc] of Object.entries(report[task])) {
-        console.log(`  ${task.padEnd(6)} ${method.padEnd(28)} top1 ${pct(acc.top1).padStart(5)}  top3 ${pct(acc.top3).padStart(5)}`)
+        console.log(`  ${task.padEnd(6)} ${method.padEnd(28)} top1 ${pct(acc.top1).padStart(5)}  top3 ${pct(acc.top3).padStart(5)}  ${acc.ms.toFixed(2)} ms`)
       }
     }
   }
@@ -45,17 +57,43 @@ for (const pair of PARALLEL_PAIRS) {
 const out = resolve(import.meta.dirname, "../docs/forecast")
 mkdirSync(out, { recursive: true })
 writeFileSync(resolve(out, "bia-source-eval-results.json"), `${JSON.stringify(rows, null, 2)}\n`)
-const cell = (r: EvalReport, task: "next" | "infill", m: string) => `${pct(r[task][m].top1)} / ${pct(r[task][m].top3)}`
+const cell = (a: Accuracy | undefined) => (a ? `${pct(a.top1)} / ${pct(a.top3)}` : "—")
+const table = (subset: Row[]) => [
+  "| pair | slice | task | bigram | BIA | + chains (no source) | + source (shipped) | + source + stem | source only |",
+  "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+  ...subset.flatMap(({ pair, slice, report }) => (["next", "infill"] as const).map((task) => {
+    const r = report[task]
+    // Chains are next-word only; infill shows "—".
+    const chains = task === "next" ? cell(r[WITH_CHAINS]) : "—"
+    return `| ${pair} | ${slice} | ${task} | ${cell(r["bigram-markov"])} | ${cell(r[NO_SOURCE])} | ${chains} | ${cell(r[WITH_SOURCE])} | ${cell(r[STEM])} | ${cell(r[`bia ${SOURCE_ONLY}`])} |`
+  })),
+]
+const speed = [
+  "| pair | slice | BIA | + chains (no source) | + source |",
+  "| --- | --- | ---: | ---: | ---: |",
+  ...rows.map(({ pair, slice, report }) =>
+    `| ${pair} | ${slice} | ${report.next[NO_SOURCE].ms.toFixed(2)} | ${report.next[WITH_CHAINS].ms.toFixed(2)} | ${report.next[WITH_SOURCE].ms.toFixed(2)} |`),
+]
 writeFileSync(resolve(out, "bia-source-eval-results.md"), [
-  "# BIA with vs without the source verse — offline eval",
+  "# Next-word suggestions — offline eval (test split)",
   "",
   `Generated by \`pnpm bia:eval-source\`. Every 10th verse held out; at most ${maxPositions} positions per task;`,
-  "top-1 / top-3 exact-token accuracy (%). Mixing weights tuned on a dev split of the training verses only.",
+  "top-1 / top-3 exact-word accuracy (%). All weights chosen on dev splits of the low-resource pairs' training verses.",
+  "\"+ chains\" restores the per-distance chains from Daniel's 2024 forecaster; the editor uses it for next-word",
+  "suggestions when a cell has no source signal, and \"+ source\" when it does. \"+ stem\" is the evaluated, NOT shipped,",
+  "grapheme-stem back-off.",
   "",
-  "| pair | slice | task | unigram | bigram | BIA, no source | BIA + source | source only |",
-  "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
-  ...rows.flatMap(({ pair, slice, report }) => (["next", "infill"] as const).map((task) =>
-    `| ${pair} | ${slice} | ${task} | ${cell(report, task, "unigram")} | ${cell(report, task, "bigram-markov")} | ${cell(report, task, NO_SOURCE)} | ${cell(report, task, WITH_SOURCE)} | ${cell(report, task, `bia ${SOURCE_ONLY}`)} |`)),
+  "## Low-resource targets",
+  "",
+  ...table(rows.filter((r) => r.lowResource)),
+  "",
+  "## Reference (higher-resource; not used for tuning)",
+  "",
+  ...table(rows.filter((r) => !r.lowResource)),
+  "",
+  "## Speed — next-word, ms per suggestion (single thread, this machine)",
+  "",
+  ...speed,
   "",
 ].join("\n"))
 console.log(`\nwrote ${out}/bia-source-eval-results.{json,md}`)

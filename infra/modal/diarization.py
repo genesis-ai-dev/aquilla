@@ -58,8 +58,8 @@ image = (
         # contemporaneous huggingface_hub that still accepts it (removed in 1.x).
         "huggingface_hub==0.23.4",
         "pyannote.audio==3.3.2",
-        "httpx",
-        "fastapi[standard]",  # required in-image for @modal.fastapi_endpoint
+        "httpx==0.27.2",
+        "fastapi[standard]==0.115.14",  # required in-image for @modal.fastapi_endpoint
     )
     .run_function(_bake_model, secrets=[HF_SECRET])
 )

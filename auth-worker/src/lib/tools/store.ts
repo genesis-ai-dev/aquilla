@@ -303,6 +303,43 @@ export async function archiveTool(db: AquillaDb, projectId: string, toolId: stri
 
 /** Whether `userId` has ever had a standing grant row for this tool (an
  *  empty row = they revoked everything, which first-party installs respect). */
+/**
+ * First-party upgrades: the scopes the CURRENT manifest declares that this
+ * user has never been offered — i.e. not declared by the version that was
+ * current when their grant row was last written. Those are granted the same
+ * way the first install granted (visible on the page, revocable). A scope the
+ * user saw and revoked stays revoked: it was declared before their last grant
+ * change, so it is not "unseen". Returns the scopes added.
+ */
+export async function grantUnseenFirstPartyScopes(
+  db: AquillaDb,
+  projectId: string,
+  toolId: string,
+  userId: number,
+  declared: readonly ToolScope[],
+): Promise<ToolScope[]> {
+  const row = await db
+    .prepare(
+      `SELECT g.scopes AS scopes,
+              (SELECT v.manifest FROM project_tool_versions v
+                WHERE v.tool_id = g.tool_id AND v.created_at <= g.updated_at
+                ORDER BY v.version DESC LIMIT 1) AS seen_manifest
+         FROM project_tool_grants g
+        WHERE g.tool_id = ? AND g.user_id = ?`,
+    )
+    .bind(toolId, userId)
+    .first<{ scopes: unknown; seen_manifest: unknown }>()
+  if (!row) return []
+  const seenManifest = (typeof row.seen_manifest === "string" ? JSON.parse(row.seen_manifest) : row.seen_manifest) as { scopes?: unknown } | null
+  const seen = new Set(toScopes(seenManifest?.scopes ?? []))
+  if (!seenManifest) return []
+  const unseen = declared.filter((s) => !seen.has(s))
+  if (unseen.length === 0) return []
+  const current = toScopes(row.scopes)
+  await setGrant(db, projectId, toolId, userId, [...new Set([...current, ...unseen])])
+  return unseen.filter((s) => !current.includes(s))
+}
+
 export async function hasGrantRow(db: AquillaDb, toolId: string, userId: number): Promise<boolean> {
   const row = await db
     .prepare(`SELECT 1 AS one FROM project_tool_grants WHERE tool_id = ? AND user_id = ?`)

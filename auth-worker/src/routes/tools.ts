@@ -33,6 +33,7 @@ import {
   createTool,
   getTool,
   hasGrantRow,
+  grantUnseenFirstPartyScopes,
   listTools,
   toolRow,
   listVersions,
@@ -156,6 +157,10 @@ tools.post("/:projectId/tools/first-party", authMiddleware, async (c) => {
   if (!(await hasGrantRow(c.env.AQUILLA_PG, id, userId))) {
     autoGranted = [...checked.manifest.scopes]
     await setGrant(c.env.AQUILLA_PG, projectId, id, userId, autoGranted)
+  } else if (row.firstParty === spec.key) {
+    // An upgrade that declares new scopes grants them like the first install
+    // did (never one this user saw and revoked).
+    autoGranted = await grantUnseenFirstPartyScopes(c.env.AQUILLA_PG, projectId, id, userId, checked.manifest.scopes)
   }
   const tool = await getTool(c.env.AQUILLA_PG, projectId, id, userId)
   return c.json({ tool, removed: false, created, autoGranted }, created ? 201 : 200)

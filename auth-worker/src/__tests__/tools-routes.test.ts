@@ -234,6 +234,28 @@ describe("first-party extensions", () => {
     expect((await ensure(owner, "nope")).status).toBe(404)
   })
 
+  it("grants scopes a first-party upgrade newly declares, but never one the user revoked", async () => {
+    await seedProject()
+    const owner = await jwtFor("owner")
+    const { tool } = (await (await ensure(owner)).json()) as Ensure
+    // Simulate the older shipped build: it did not declare read:terms or ai:draft.
+    const older = { ...DEFAULT_EDITOR_MANIFEST, scopes: DEFAULT_EDITOR_MANIFEST.scopes.filter((s) => s !== "read:terms" && s !== "ai:draft") }
+    await env.AQUILLA_PG.prepare("UPDATE project_tool_versions SET code_hash = ?, manifest = ?::text::jsonb, created_at = now() - interval '1 hour' WHERE tool_id = ?")
+      .bind("0".repeat(64), JSON.stringify(older), tool!.id).run()
+    // The user had those older scopes, and revoked write:audio (declared then) since.
+    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: older.scopes.filter((s) => s !== "write:audio") } })
+    const upgraded = (await (await ensure(owner)).json()) as Ensure
+    expect(upgraded.tool?.currentVersion).toBe(2)
+    expect(upgraded.autoGranted.sort()).toEqual(["ai:draft", "read:terms"])
+    expect(upgraded.tool?.grantedScopes).toEqual(expect.arrayContaining(["read:terms", "ai:draft"]))
+    expect(upgraded.tool?.grantedScopes).not.toContain("write:audio")
+    // Offered once: a later revoke of a newly granted scope sticks.
+    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: upgraded.tool!.grantedScopes.filter((s) => s !== "read:terms") } })
+    const again = (await (await ensure(owner)).json()) as Ensure
+    expect(again.autoGranted).toEqual([])
+    expect(again.tool?.grantedScopes).not.toContain("read:terms")
+  })
+
   it("upgrades a pristine install to the shipped code, never an edited one", async () => {
     await seedProject()
     const owner = await jwtFor("owner")

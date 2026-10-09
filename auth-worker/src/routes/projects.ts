@@ -89,7 +89,6 @@ import {
   MAX_INVITE_SCOPE_LANES,
   MAX_LANE_VALUE_LENGTH,
   parseScopeLanes,
-  resolveInviteLaneScopes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
 import {
@@ -97,7 +96,12 @@ import {
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
 import { loadLinkFileIds } from "../services/source-linking"
-import { applyDirectAddLaneGrants } from "../services/lane-grants"
+import {
+  applyDirectAddLaneGrants,
+  replaceMemberLaneScopes,
+  syncMemberLaneGrants,
+} from "../services/lane-grants"
+import { resolveExplicitLaneChoice } from "../services/lane-choice"
 import { createProjectShared } from "../../../db/shared/projects"
 import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
@@ -1519,6 +1523,13 @@ const roleLevelSchema = z
 const projectMemberSingle = z.object({
   username: z.string().min(1),
   role: roleLevelSchema,
+  /** AQU-1808: explicit "every current target lane". Omitted is not that choice. */
+  allCurrentLanes: z.literal(true).optional(),
+  /** AQU-1808: the lanes this person may use. Absent is not "every lane". */
+  scopeLanes: z
+    .array(z.string().max(MAX_LANE_VALUE_LENGTH))
+    .max(MAX_INVITE_SCOPE_LANES)
+    .optional(),
 })
 
 // AQU-736: the endpoint accepts EITHER the legacy single-user body
@@ -1539,6 +1550,9 @@ const PROJECT_GRANT_ERROR_STATUS: Record<string, 400 | 403 | 404> = {
   user_not_found: 404,
   self_grant: 400,
   target_outranks_caller: 403,
+  lane_choice_required: 400,
+  lane_choice_conflict: 400,
+  lane_unresolved: 400,
 }
 
 type ProjectGrantOutcome =
@@ -1558,7 +1572,7 @@ async function grantProjectMemberOne(
   projectId: string,
   callerRole: { level: number; name: string },
   callerUserId: number,
-  entry: { username: string; role: number },
+  entry: { username: string; role: number; allCurrentLanes?: boolean; scopeLanes?: string[] },
   actor: AuthUser,
 ): Promise<ProjectGrantOutcome> {
   const { username, role } = entry
@@ -1580,16 +1594,16 @@ async function grantProjectMemberOne(
     return { ok: false, username, code: "self_grant", message: "cannot grant role to self" }
   }
 
+  const existing = await env.AQUILLA_PG.prepare(
+    "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+  )
+    .bind(projectId, target.id)
+    .first<{ role_level: number }>()
   // AQU-285 (F-B6): target-level cap — you cannot add-over (change the role
   // of) a member whose current level is >= yours, unless you are owner (700).
   // Owners may modify any member. For a new member (no existing row), this
   // check is a no-op (existing.role_level will be 0).
   if (callerRole.level < ROLE.OWNER) {
-    const existing = await env.AQUILLA_PG.prepare(
-      "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
-    )
-      .bind(projectId, target.id)
-      .first<{ role_level: number }>()
     const targetCurrentLevel = existing ? Number(existing.role_level) : 0
     if (targetCurrentLevel >= callerRole.level) {
       return {
@@ -1599,6 +1613,18 @@ async function grantProjectMemberOne(
         message: `cannot modify a member whose current role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
       }
     }
+  }
+
+  // AQU-1808: a new member below project lead must say which lanes. A role
+  // change does not ask again — the lanes they already hold stay put.
+  const laneChoice = await resolveExplicitLaneChoice(env, [projectId], {
+    role,
+    allCurrentLanes: entry.allCurrentLanes,
+    scopeLanes: entry.scopeLanes,
+    requireChoice: !existing,
+  })
+  if (!laneChoice.ok) {
+    return { ok: false, username, code: laneChoice.code, message: laneChoice.error }
   }
 
   const roleBefore = await priorMembershipRole(env, actor, { scope: "project", projectId }, target.id)
@@ -1613,12 +1639,32 @@ async function grantProjectMemberOne(
     .bind(projectId, target.id, role, callerUserId)
     .run()
 
-  // AQU-1782: the membership row alone leaves a below-Maintainer member with
-  // no lane grants, so under the read wall they see no target lane, no target
-  // cells and 0% progress while the lead sees everything. Grants are written
-  // through the same planner invite acceptance uses, and a role change rewrites
-  // the level on the rows the member already has.
-  await applyDirectAddLaneGrants(env.AQUILLA_PG, projectId, target.id, role, callerUserId)
+  // AQU-1808: the choice made on this add is the whole truth about the
+  // person's lanes. Removing a member deletes only `project_members`, so the
+  // scope and grant rows of an earlier membership survive the removal. Before
+  // this they narrowed a re-add that chose "every current lane" (the planner
+  // only re-levels grant rows that already exist, and the stale scope row kept
+  // the client on that one lane), and they kept an earlier every-lane grant
+  // set under a re-add that named one lane. So a fresh membership starts from
+  // no lane rows, and a lane list given for an existing member replaces the
+  // lanes they held. A project lead is never lane-scoped (AD-12): a promotion
+  // drops the stale scope rows the client's lane list would narrow by.
+  //
+  // AQU-1782: a role change of an existing member that names no lanes keeps
+  // the lanes they hold and rewrites only the level on those rows.
+  const freshMembership = !existing
+  if (laneChoice.kind === "lanes") {
+    await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+    await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+  } else if (laneChoice.kind === "all" || freshMembership) {
+    await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+    await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+  } else {
+    if (role >= ROLE.PROJECT_LEAD) {
+      await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+    }
+    await applyDirectAddLaneGrants(env.AQUILLA_PG, projectId, target.id, role, callerUserId)
+  }
   await auditMembershipChange(env, actor, {
     action: roleBefore === null ? "project.member.grant" : "project.member.role",
     where: { scope: "project", projectId },
@@ -1895,14 +1941,15 @@ const createInviteSchema = z.object({
   /** Client-requested TTL in days. Null = no expiry. Omit = server default (30 days). */
   expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
   /**
-   * AQU-528: optional lane (target-language) scopes to auto-grant on join.
-   * Omitted/empty = unscoped invite (today's behavior). A lane value is a
-   * target-language code; '' is the default lane.
+   * AQU-528 / AQU-1808: lanes to auto-grant on join. Naming lanes limits the
+   * joiner to those. Omitting them is not "every lane" — send allCurrentLanes
+   * for that. A value is a lane id or a legacy tag that names exactly one lane.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
     .max(MAX_INVITE_SCOPE_LANES)
     .optional(),
+  allCurrentLanes: z.literal(true).optional(),
 })
 
 const acceptInviteSchema = z.object({
@@ -1917,7 +1964,7 @@ projects.post(
   async (c) => {
     const user = c.get("user")
     const projectId = c.req.param("projectId") as string
-    const { role, email, expires_in_days, scopeLanes } = c.req.valid("json")
+    const { role, email, expires_in_days, scopeLanes, allCurrentLanes } = c.req.valid("json")
 
     const resolved = await resolveProjectRole(c.env, user, projectId)
     if (!resolved) {
@@ -1951,23 +1998,29 @@ projects.post(
             Date.now() + (expires_in_days !== undefined ? expires_in_days : 30) * 24 * 60 * 60 * 1000
           ).toISOString()
 
-    // AQU-528: persist lane scopes so accept can auto-grant them. null when
-    // the invite is unscoped (omitted/empty scopeLanes).
     // AQU-1607: stored as lane ids. A legacy tag naming exactly one of this
     // project's lanes is converted; one naming two lanes, or none, is refused
     // here rather than minting a link that grants the wrong lane or no lane.
-    const laneScopes = await resolveInviteLaneScopes(c.env, [projectId], scopeLanes ?? [])
-    if (!laneScopes.ok) {
+    // AQU-1808: omitted lanes are refused when the project has current target
+    // lanes. allCurrentLanes stores no scopes, which accept treats as every lane.
+    const laneChoice = await resolveExplicitLaneChoice(c.env, [projectId], {
+      role: grantedRole,
+      allCurrentLanes,
+      scopeLanes,
+      requireChoice: true,
+    })
+    if (!laneChoice.ok) {
       return c.json(
         {
-          error: "scopeLanes must each name one lane of this project",
-          ...(laneScopes.ambiguous.length > 0 ? { ambiguous: laneScopes.ambiguous } : {}),
-          ...(laneScopes.unmatched.length > 0 ? { unmatched: laneScopes.unmatched } : {}),
+          error: laneChoice.error,
+          code: laneChoice.code,
+          ...(laneChoice.ambiguous ? { ambiguous: laneChoice.ambiguous } : {}),
+          ...(laneChoice.unmatched ? { unmatched: laneChoice.unmatched } : {}),
         },
         400,
       )
     }
-    const scopeLanesJson = serializeScopeLanes(laneScopes.laneIds)
+    const scopeLanesJson = serializeScopeLanes(laneChoice.kind === "lanes" ? laneChoice.laneIds : [])
 
     try {
       await c.env.AQUILLA_PG.prepare(

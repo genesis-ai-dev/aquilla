@@ -199,7 +199,16 @@ export function StaffLanePopover({
     const existing = projectMembers.find((m) => m.userId === userId)
     if (existing && existing.role.level >= targetRole) return
     if (!jwt) throw new Error("Sign in to manage membership.")
-    await addProjectMember(jwt, projectId, username, targetRole)
+    // A new member below project lead has to name this lane on the add.
+    // Sending it afterwards, only as a scope, used to grant every lane first.
+    // A lead stays unscoped: the role already sees every lane.
+    if (targetRole < ROLE.PROJECT_LEAD) {
+      await addProjectMember(jwt, projectId, username, targetRole, {
+        scopeLanes: [laneId || lane],
+      })
+    } else {
+      await addProjectMember(jwt, projectId, username, targetRole)
+    }
   }
 
   function mergeLaneScope(existing: MemberScope[]): MemberScope[] {

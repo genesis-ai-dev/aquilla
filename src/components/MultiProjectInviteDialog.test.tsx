@@ -9,6 +9,10 @@ import { toast } from "@/components/ui/toast"
 import type { RecipientValue } from "@/components/UsernameTypeahead"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
+vi.mock("@/hooks/useCurrentTargetLanes", () => ({
+  useCurrentTargetLanes: () => ({ lanes: [], ready: true }),
+}))
+
 vi.mock("@/lib/sync/invites", () => ({
   createServerInvite: vi.fn(async () => ({
     token: "tok",

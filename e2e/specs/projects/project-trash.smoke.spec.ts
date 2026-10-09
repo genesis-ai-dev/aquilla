@@ -36,7 +36,7 @@ test("Archive removes project from active projects list", async ({ alice }) => {
   const archiveItem = alice.getByRole("menuitem", { name: /^Archive$/ })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
-  const dialog = alice.getByRole("dialog")
+  const dialog = alice.getByRole("dialog", { name: "Archive project", exact: true })
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await dialog.getByRole("checkbox", { name: /I understand this project will be hidden/i }).check()
   await dialog.getByRole("button", { name: /^Archive$/ }).click()

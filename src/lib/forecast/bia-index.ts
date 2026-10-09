@@ -13,11 +13,10 @@
  *
  * Differences from the Python, all deliberate (see docs in bia-engine.ts):
  *   - A "sentence" is an Aquilla cell, not a regex split on `.`/`?` of one big
- *     text file; tokenization matches the shared Unicode tokenizer
- *     (`completion/tokenize.ts`), so any script works, including scripts that
- *     point vowels with combining marks. Words are keyed lower-case (as the
- *     Python lower-cased the corpus) but the most common surface spelling is
- *     kept for display, so a suggestion reads "Dios", not "dios".
+ *     text file; words come from forecast-tokenize.ts (NFC, Intl.Segmenter
+ *     word boundaries, so spaceless scripts and pointed vowels work). Words
+ *     are keyed case-folded (as the Python lower-cased the corpus) but the most
+ *     common surface spelling is kept for display ("Dios", not "dios").
  *   - Bigrams never cross a cell boundary (the Python chained the whole corpus).
  *   - Every cell carries a weight: validated cells count 1, unvalidated
  *     target cells count FALLBACK_WEIGHT. Counts are weight sums.
@@ -29,8 +28,7 @@
 
 import { SourceLexicon } from "./source-lexicon"
 
-/** Same token class as `completion/tokenize.ts`, without lower-casing. */
-const TOKEN_RE = /[\p{L}\p{N}\p{M}]+/gu
+import { segmentWords } from "./forecast-tokenize"
 
 /** A sentence-initial capital says little about a word's usual spelling. */
 const INITIAL_SURFACE_WEIGHT = 0.01
@@ -113,8 +111,9 @@ export class BiaIndex {
     for (const cell of cells) {
       this.lexicon.remove(cell.id)
       this.removeOne(cell.id)
-      const surface = Array.from(cell.text.matchAll(TOKEN_RE), (m) => m[0])
-      const tokens = surface.map((t) => t.toLowerCase())
+      const words = segmentWords(cell.text)
+      const surface = words.map((w) => w.surface)
+      const tokens = words.map((w) => w.key)
       if (tokens.length > 0) {
         const order = cell.order ?? this.nextOrder
         this.nextOrder = Math.max(this.nextOrder, order + 1)

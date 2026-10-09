@@ -30,8 +30,13 @@ function clientWith(texts: string[]): ForecastClient {
 
 const CORPUS = ["the lord is my shepherd", "the lord is my light", "the lord is good", "my shepherd leads me"]
 
-async function editorWithGhost(content: string, client: ForecastClient | null = clientWith(CORPUS)): Promise<Editor> {
+async function editorWithGhost(
+  content: string,
+  client: ForecastClient | null = clientWith(CORPUS),
+  dir: "ltr" | "rtl" = "ltr",
+): Promise<Editor> {
   editor = new Editor({
+    editorProps: { attributes: { dir } },
     extensions: [
       StarterKit,
       createGhostTextExtension({ getClient: () => client, getCellId: () => "active", debounceMs: 0, hasFocus: () => true }),
@@ -90,6 +95,23 @@ describe("ghost-text plugin", () => {
     expect(handleGhostKeyDown(ed.view, key("ArrowRight"))).toBe(true)
     expect(ed.getText()).toBe("the lord is my")
     expect(getGhostText(ed.state)?.text).toBe(" shepherd")
+  })
+
+  it("in right-to-left text, ← (forward) accepts one word and → does not", async () => {
+    const hebrew = clientWith(["בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם", "בָּרָא אֱלֹהִים אֵת הָאָרֶץ", "וַיֹּאמֶר אֱלֹהִים אֵת"])
+    const ed = await editorWithGhost("בָּרָא ", hebrew, "rtl")
+    expect(getGhostText(ed.state)?.text.startsWith("אֱלֹהִים")).toBe(true)
+    expect(handleGhostKeyDown(ed.view, key("ArrowRight"))).toBe(false)
+    expect(handleGhostKeyDown(ed.view, key("ArrowLeft"))).toBe(true)
+    expect(ed.getText()).toBe("בָּרָא אֱלֹהִים")
+  })
+
+  it("accepts one Thai word at a time although the suggestion has no spaces", async () => {
+    const thai = clientWith(["พระเจ้าทรงสร้างฟ้า", "พระเจ้าทรงสร้างแผ่นดิน", "พระเจ้าทรงสร้างฟ้า"])
+    const ed = await editorWithGhost("พระเจ้าทรง", thai)
+    expect(getGhostText(ed.state)?.text.startsWith("สร้าง")).toBe(true)
+    handleGhostKeyDown(ed.view, key("ArrowRight"))
+    expect(ed.getText()).toBe("พระเจ้าทรงสร้าง")
   })
 
   it("leaves Tab to cell navigation when there is no ghost", async () => {

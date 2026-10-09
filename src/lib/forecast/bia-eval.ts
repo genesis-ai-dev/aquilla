@@ -6,7 +6,7 @@
  * runs it over eBible corpora; `bia-eval.test.ts` runs it on a fixture.
  */
 
-import { tokenize } from "@/lib/completion/tokenize"
+import { fold, wordKeys } from "./forecast-tokenize"
 import { BiaEngine, FAITHFUL_OPTIONS, type SuggestOptions } from "./bia-engine"
 import { BiaIndex, type ForecastCell } from "./bia-index"
 
@@ -85,7 +85,7 @@ export function runForecastEval(train: readonly ForecastCell[], testItems: reado
   const unigram = index.vocabularyByFrequency().slice(0, 3).map(([w]) => w)
   const items = testItems
     .map((item) => (typeof item === "string" ? { text: item } : item))
-    .map((item) => ({ tokens: tokenize(item.text), source: item.source }))
+    .map((item) => ({ tokens: wordKeys(item.text), source: item.source }))
     .filter((item) => item.tokens.length > 1)
   const tests = items.map((item) => item.tokens)
   const max = opts.maxPositions ?? 2000
@@ -99,7 +99,7 @@ export function runForecastEval(train: readonly ForecastCell[], testItems: reado
     return (right.length === 0
       ? engine.suggestNext(`${left.join(" ")} `, { ...withSource, extend: false, limit: 3 })
       : engine.suggestInfill(`${left.join(" ")} `, ` ${right.join(" ")}`, { ...withSource, limit: 3 })
-    ).map((s) => s.word.toLowerCase())
+    ).map((s) => fold(s.word))
   }
   const biaMethods: Record<string, Predictor> =
     opts.methods === "variants"

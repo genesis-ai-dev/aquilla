@@ -20,7 +20,7 @@
  * word is probably translated already.
  */
 
-import { tokenize } from "@/lib/completion/tokenize"
+import { wordKeys } from "./forecast-tokenize"
 
 /** Source words in more cells than this carry no alignment signal worth the scan. */
 const MAX_SOURCE_DF = 4000
@@ -66,7 +66,7 @@ export class SourceLexicon {
   /** Record a cell's source text (call after its target is indexed or removed). */
   set(id: string, source: string | undefined): void {
     this.remove(id)
-    const tokens = source ? tokenize(source) : []
+    const tokens = source ? wordKeys(source) : []
     if (tokens.length === 0) return
     this.sources.set(id, tokens)
     const target = this.pairs.target(id)

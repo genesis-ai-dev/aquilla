@@ -5,6 +5,7 @@
  */
 
 import { BiaEngine, endsInsideWord, startsInsideWord, type Suggestion } from "./bia-engine"
+import { joiner } from "./forecast-tokenize"
 import type { ForecastCell } from "./bia-index"
 
 export interface FitResult {
@@ -61,14 +62,14 @@ export function suggestAtCaret(
   if (!left.trim() && !right.trim() && (source === undefined || source.length === 0)) return []
   const suggest = { excludeCellId: opts.excludeCellId, limit: opts.limit, source }
   const results = atEnd ? engine.suggestNext(left, suggest) : engine.suggestInfill(left, right, suggest)
-  const needsLeadingSpace = !inside && left.length > 0 && !/\s$/u.test(left)
-  const needsTrailingSpace = !atEnd && !/^\s/u.test(right)
   return results
     .filter((s) => s.insert.length > 0)
-    .map((s) => ({
-      ...s,
-      insert: `${needsLeadingSpace ? " " : ""}${s.insert}${needsTrailingSpace ? " " : ""}`,
-    }))
+    .map((s) => {
+      // Spaces only where the script separates words with them.
+      const lead = !inside && left.length > 0 && !/\s$/u.test(left) ? joiner(left, s.insert) : ""
+      const trail = !atEnd && !/^\s/u.test(right) ? joiner(s.insert, right) : ""
+      return { ...s, insert: `${lead}${s.insert}${trail}` }
+    })
 }
 
 /** The query's source verse: explicit text, else the edited cell's stored source. */

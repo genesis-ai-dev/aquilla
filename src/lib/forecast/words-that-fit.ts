@@ -2,14 +2,14 @@
 
 import type { Editor } from "@tiptap/core"
 
-const WHOLE_WORD = /^[\p{L}\p{N}\p{M}]+$/u
+import { isSingleWord } from "./forecast-tokenize"
 
 /** The selected text when it is exactly one word (no spaces or punctuation), else null. */
 export function selectedSingleWord(editor: Editor): { word: string; from: number; to: number } | null {
   const { from, to } = editor.state.selection
   if (from === to) return null
   const word = editor.state.doc.textBetween(from, to, " ", " ")
-  if (!WHOLE_WORD.test(word)) return null
+  if (!isSingleWord(word)) return null
   return { word, from, to }
 }
 

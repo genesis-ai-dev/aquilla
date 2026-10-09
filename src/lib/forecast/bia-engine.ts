@@ -30,8 +30,10 @@
  * occurrence; every candidate a sample produces scores IDF² (`combine_votes`).
  *
  * ## Deviations from the Python (intentional)
- *   - Cells are the sentences; Unicode tokenizer instead of `str.split()` /
- *     sklearn's ≥2-char token pattern, so one-character words (CJK) count.
+ *   - Cells are the sentences; a language-agnostic word segmenter
+ *     (forecast-tokenize.ts: NFC, Intl.Segmenter, locale-independent case
+ *     folding) instead of `str.split()` / sklearn's ≥2-char token pattern, so
+ *     one-character words (CJK) count and spaceless scripts split into words.
  *   - Search is a posting-list lookup. The Python's `search()` also applied
  *     `start < i < end` with `end = len(relevant) − 1` when no bound was
  *     given, which silently dropped the first sentence and every sentence
@@ -58,7 +60,7 @@
  *     (`can_be_next` on the left and the unused `can_preclude` on the right).
  */
 
-import { tokenize } from "@/lib/completion/tokenize"
+import { isSpaceless, isWordChar, joiner, segmentWords, wordKeys } from "./forecast-tokenize"
 import { BiaIndex } from "./bia-index"
 
 export type MarkovMode = "filter" | "weight" | "off"
@@ -154,16 +156,14 @@ export const THESAURUS_SAMPLES = 100
 const THESAURUS_PER_SAMPLE = 20
 const MULTI_WORD_TOP = 4
 
-const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u
-
 /** True when `left` ends inside a word (the caret follows a word character). */
 export function endsInsideWord(left: string): boolean {
-  return left.length > 0 && WORD_CHAR.test(left[left.length - 1])
+  return isWordChar(left.at(-1)) || left.endsWith("'")
 }
 
 /** True when `right` starts inside a word. */
 export function startsInsideWord(right: string): boolean {
-  return right.length > 0 && WORD_CHAR.test(right[0])
+  return isWordChar(right[0])
 }
 
 export type Ranked = Array<[string, number]>
@@ -303,23 +303,44 @@ export class BiaEngine {
 
   private sourceTokens(source: SuggestOptions["source"]): readonly string[] {
     if (source === undefined) return []
-    return typeof source === "string" ? tokenize(source) : source
+    return typeof source === "string" ? wordKeys(source) : source
+  }
+
+  /**
+   * Split the text before the caret into context keys and the partial word
+   * the caret is in (if any). In a script written without spaces, a caret
+   * right after a complete, known word is a word boundary, not a prefix.
+   */
+  private caret(left: string): { tokens: string[]; prefix: string; typed: string } {
+    const words = segmentWords(left)
+    const last = words.at(-1)
+    const tokens = words.map((w) => w.key)
+    if (!last || last.end !== left.normalize("NFC").length) return { tokens, prefix: "", typed: "" }
+    if (isSpaceless(last.surface.at(-1)) && this.index.has(last.key)) return { tokens, prefix: "", typed: "" }
+    tokens.pop()
+    return { tokens, prefix: last.key, typed: last.surface }
+  }
+
+  /** The part of `shown` still to type after the partial word `typed`. */
+  private remainder(shown: string, typed: string): string {
+    return typed && shown.length >= typed.length ? shown.slice(typed.length) : shown
   }
 
   /** Next word(s) after `left` (Python `get_possible_next` + 2-word extension). */
   suggestNext(left: string, opts: SuggestOptions = {}): Suggestion[] {
-    const inside = endsInsideWord(left)
-    const tokens = tokenize(left)
-    const prefix = inside ? (tokens.pop() ?? "") : ""
+    const { tokens, prefix, typed } = this.caret(left)
     const words = this.fill(tokens, [], prefix, opts)
     const extend = opts.extend ?? true
     const { index } = this
     return words.map(({ word, score, source }, rank) => {
       const shown = index.display(word)
-      let insert = shown.slice(prefix.length)
+      let insert = this.remainder(shown, typed)
       if (extend && rank < MULTI_WORD_TOP) {
         const [follow] = this.fill([...tokens, word], [], "", { ...opts, limit: 1 })
-        if (follow) insert += ` ${index.display(follow.word)}`
+        if (follow) {
+          const next = index.display(follow.word)
+          insert += joiner(shown, next) + next
+        }
       }
       return { word: shown, insert, score, source }
     })
@@ -327,13 +348,11 @@ export class BiaEngine {
 
   /** The word for a blank between `left` and `right` (Python `predict`). */
   suggestInfill(left: string, right: string, opts: SuggestOptions = {}): Suggestion[] {
-    const inside = endsInsideWord(left)
-    const leftTokens = tokenize(left)
-    const prefix = inside ? (leftTokens.pop() ?? "") : ""
-    const rightTokens = tokenize(right)
-    return this.fill(leftTokens, rightTokens, prefix, opts).map(({ word, score, source }) => {
+    const { tokens, prefix, typed } = this.caret(left)
+    const rightTokens = wordKeys(right)
+    return this.fill(tokens, rightTokens, prefix, opts).map(({ word, score, source }) => {
       const shown = this.index.display(word)
-      return { word: shown, insert: shown.slice(prefix.length), score, source }
+      return { word: shown, insert: this.remainder(shown, typed), score, source }
     })
   }
 
@@ -356,7 +375,7 @@ export class BiaEngine {
       sourceWeight?: number
     } = {},
   ): Array<{ word: string; score: number }> {
-    const target = tokenize(word)[0]
+    const target = wordKeys(word)[0]
     if (!target) return []
     const { index } = this
     const posting = index.postingsOf(target)
@@ -376,8 +395,8 @@ export class BiaEngine {
       if (cell && at !== undefined) samples.push({ tokens: cell.tokens, at })
     }
     if (opts.context) {
-      const left = tokenize(opts.context.left)
-      samples.push({ tokens: [...left, target, ...tokenize(opts.context.right)], at: left.length })
+      const left = wordKeys(opts.context.left)
+      samples.push({ tokens: [...left, target, ...wordKeys(opts.context.right)], at: left.length })
     }
 
     const faithful = opts.weighting === "idf2"

@@ -2,7 +2,7 @@
 //
 // The suggestion is a ProseMirror widget DECORATION at the caret — it is never
 // part of the document, so it can never reach getHTML()/getText(), a snapshot,
-// or a commit. Only an explicit accept (Tab = all, → at the end = one word)
+// or a commit. Only an explicit accept (Tab = all; → at the end = one word, ← in RTL text)
 // writes it, as an ordinary text insertion that then flows through the editor's
 // normal idle/blur commit path like typed text. Esc dismisses.
 //
@@ -14,6 +14,7 @@ import { Extension } from "@tiptap/core"
 import { Plugin, PluginKey, TextSelection, type EditorState } from "@tiptap/pm/state"
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view"
 import type { ForecastClient } from "@/lib/forecast/forecast-client"
+import { isSpaceless, segmentWords } from "@/lib/forecast/forecast-tokenize"
 
 export interface GhostText {
   pos: number
@@ -88,9 +89,18 @@ export function acceptGhostText(view: EditorView): boolean {
 export function acceptGhostWord(view: EditorView): boolean {
   const ghost = getGhostText(view.state)
   if (!ghost) return false
-  const word = /^\s*\S+/u.exec(ghost.text)?.[0] ?? ghost.text
+  // Up to the end of the first WORD (segmented, so it works without spaces).
+  const first = segmentWords(ghost.text)[0]
+  const word = first ? ghost.text.slice(0, first.end) : ghost.text
   insertGhost(view, ghost, word, ghost.text.slice(word.length))
   return true
+}
+
+function forwardArrow(view: EditorView): "ArrowRight" | "ArrowLeft" {
+  const dom = view.dom as HTMLElement
+  const direction = dom.closest("[dir]")?.getAttribute("dir")
+    ?? (typeof getComputedStyle === "function" ? getComputedStyle(dom).direction : "ltr")
+  return direction === "rtl" ? "ArrowLeft" : "ArrowRight"
 }
 
 /**
@@ -105,7 +115,9 @@ export function handleGhostKeyDown(view: EditorView, event: KeyboardEvent): bool
     event.preventDefault()
     return acceptGhostText(view)
   }
-  if (event.key === "ArrowRight" && view.endOfTextblock("right")) {
+  // "Accept one word" is the arrow that moves FORWARD in reading order: → in
+  // left-to-right text, ← in right-to-left (Hebrew, Arabic) text.
+  if (event.key === forwardArrow(view) && view.endOfTextblock("forward")) {
     event.preventDefault()
     return acceptGhostWord(view)
   }
@@ -149,7 +161,8 @@ export function createGhostTextExtension(options: GhostTextOptions) {
           // offer the first word; without one it answers nothing.
           if (!context) return
           const continuing = acceptedAt.get(view) === context.pos && !/\s$/u.test(context.left)
-          const lead = continuing ? " " : ""
+          // Scripts written without spaces continue with no space.
+          const lead = continuing && !isSpaceless(context.left.at(-1)) ? " " : ""
           void client
             .suggest(context.left + lead, context.right, { excludeCellId: options.getCellId(), limit: 1 })
             .then(([best]) => {

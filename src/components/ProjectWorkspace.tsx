@@ -161,6 +161,7 @@ import {
   editorConceptsForLane,
   workspaceTerminology,
   timelinePlayReady,
+  ruleFixPreflight,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -199,6 +200,7 @@ import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/com
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
+import type { FixPreview, ProposalKind } from "@/lib/rules/autofix"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
@@ -225,7 +227,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -9311,6 +9313,87 @@ export function ProjectWorkspace() {
     rebuildSearchIndex()
   }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
+  /**
+   * AQU-1805: commit a rule fix the user reviewed in the rule drawer.
+   *
+   * The drawer proposes (model call + review sheet); this owns the write, so a
+   * rule fix takes the same path a replace-all does — optimistic edit, chain
+   * head via `resolveTargetCommitParentId`, pending-commit bookkeeping, outbox
+   * flush, then revalidation so the drawer's "breaking this rule" count drops
+   * as cells stop breaking it.
+   *
+   * Emitted as `target.cell.commit[harmonize]` (`emitCellHarmonize`) rather
+   * than a plain commit: the fix is attributable to a rule, and the server
+   * enforces `harmonize_min_role` on it.
+   */
+  const handleApplyRuleFix = useCallback(async (
+    previews: readonly FixPreview[],
+    proposalKind: ProposalKind,
+    ruleId: string,
+  ) => {
+    if (!project?.id || isReadOnly) return
+    // Preflight every IDML cell before emitting anything, so one protected-run
+    // failure cannot leave the sweep half-applied (AQU-742: a fix that rewrites
+    // a protected run drops the anchors InDesign needs).
+    const prepared: Array<{ cell: CellData; value: string; valueHtml?: string }> = []
+    try {
+      for (const preview of previews) {
+        const cell = getActiveCell(preview.cellId)
+        if (!cell) continue
+        switch (ruleFixPreflight(hasIdmlMetadata(cell), preview)) {
+          case "refuse":
+            throw new Error(t("workspace.idml.replacementBlocked"))
+          case "protected":
+            prepared.push({
+              cell,
+              ...replaceProtectedIdmlText(cell, preview.find!, preview.replace!, preview.after),
+            })
+            break
+          default:
+            prepared.push({ cell, value: preview.after })
+        }
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : t("workspace.idml.replacementBlocked"))
+      return
+    }
+
+    const touched: string[] = []
+    for (const replacement of prepared) {
+      const { cell } = replacement
+      if (cell.fileId === activeFileId) {
+        applyOptimisticTargetEdit(cell.id, {
+          value: replacement.value,
+          ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
+        })
+      }
+      const parentId = resolveTargetCommitParentId(cell)
+      const eventId = await emitCellHarmonize({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        parentId,
+        sourceEventId: cell.sourceEventId ?? null,
+        targetLang: activeLane, // '' (default lane) is omitted on the wire
+        value: replacement.value,
+        ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
+        author: currentUsername,
+        ruleOrCheckId: ruleId,
+        proposalKind,
+      }, project.harmonize_min_role)
+      rememberPendingTargetCommit(cell.id, eventId, parentId)
+      touched.push(cell.id)
+    }
+    if (touched.length === 0) return
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    for (const id of touched) {
+      if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
+    }
+    rebuildSearchIndex()
+  }, [project?.id, project?.harmonize_min_role, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex, t])
+
   const openProjectSettings = useCallback(() => {
     if (!projectId) return
     navigate(
@@ -14220,11 +14303,23 @@ export function ProjectWorkspace() {
                 infractions={drawerInfractions}
                 cells={legacyCells}
                 onClose={() => setDrawerRuleId(null)}
-                onNavigateToCell={() => {}}
+                // AQU-1805: this was a no-op, so a flagged example was a dead
+                // row — the one thing the list exists to let you do.
+                onNavigateToCell={jumpToCellId}
                 project={project}
                 username={currentUsername}
                 refresh={refresh}
                 cellsByFile={drawerCellsByFile}
+                completionSettings={project?.completionSettings}
+                session={frontierSession}
+                // Absent while read-only or below the harmonize floor, which
+                // renders the fix affordances disabled with the reason.
+                onApplyFix={
+                  !isReadOnly && drawerRuleId && canHarmonize(project?.harmonize_min_role)
+                    ? (previews, proposalKind) =>
+                        handleApplyRuleFix(previews, proposalKind, drawerRuleId)
+                    : undefined
+                }
               />
             )}
             {commentsCell && (

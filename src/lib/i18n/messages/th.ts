@@ -5097,8 +5097,6 @@ export const th: Catalog = {
   "rules.surface.autofixEditor.flagsPlaceholder": "แฟล็ก (เช่น gi)",
   "rules.surface.autofixEditor.saveButton": "บันทึกการแก้ไขอัตโนมัติ",
   "rules.drawer.closeAriaLabel": "ปิดรายละเอียดกฎ",
-  "rules.drawer.autofixUnavailable": "การแก้ไขอัตโนมัติใช้ไม่ได้ในเวอร์ชันนี้",
-  "rules.drawer.autofixUnavailableAriaLabel": "การแก้ไขอัตโนมัติใช้ไม่ได้",
   "rules.drawer.amendRuleButton": "แก้ไขกฎ",
   "rules.drawer.savedAutofix": "การแก้ไขอัตโนมัติที่บันทึกไว้: /{pattern}/{flags} → {replacement}",
   "rules.drawer.noSavedFix": "ยังไม่มีการแก้ไขที่บันทึกไว้",

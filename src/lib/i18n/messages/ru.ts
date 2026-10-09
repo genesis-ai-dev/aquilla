@@ -5212,8 +5212,6 @@ export const ru: Catalog = {
   "rules.surface.autofixEditor.flagsPlaceholder": "Флаги (например, gi)",
   "rules.surface.autofixEditor.saveButton": "Сохранить автоисправление",
   "rules.drawer.closeAriaLabel": "Закрыть сведения о правиле",
-  "rules.drawer.autofixUnavailable": "Автоисправление недоступно в этой сборке",
-  "rules.drawer.autofixUnavailableAriaLabel": "Автоисправление недоступно",
   "rules.drawer.amendRuleButton": "Изменить правило",
   "rules.drawer.savedAutofix": "Сохранённое автоисправление: /{pattern}/{flags} → {replacement}",
   "rules.drawer.noSavedFix": "Сохранённого исправления пока нет",

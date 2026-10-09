@@ -448,3 +448,27 @@ export function editorConceptsForLane(
 export function timelinePlayReady(audioHasLoaded: boolean): boolean {
   return audioHasLoaded
 }
+
+/**
+ * AQU-1805: how a reviewed rule fix may be committed to one cell.
+ *
+ * A rule fix rewrites target text, which on an IDML cell means rewriting
+ * protected runs. AQU-742 is what happens when that is done carelessly: the
+ * anchors InDesign needs are dropped and the file stops round-tripping. So
+ * only a fix carrying a literal find/replace pair may be re-applied inside
+ * protected HTML (`replaceProtectedIdmlText` needs that pair); a regex sweep
+ * has no such pair and would be committed as flattened text.
+ *
+ *  - `plain`     — commit `preview.after` as-is.
+ *  - `protected` — re-apply the literal pair inside the protected HTML.
+ *  - `refuse`    — cannot be applied safely; the whole sweep is abandoned so
+ *                  one bad cell cannot leave it half-written.
+ */
+export function ruleFixPreflight(
+  isIdmlCell: boolean,
+  preview: { find?: string; replace?: string },
+): "plain" | "protected" | "refuse" {
+  if (!isIdmlCell) return "plain"
+  if (preview.find === undefined || preview.replace === undefined) return "refuse"
+  return "protected"
+}

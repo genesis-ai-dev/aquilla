@@ -1262,6 +1262,15 @@ export interface CellHarmonizeInput {
   parentId: string | null
   /** AD-9 staleness pin. */
   sourceEventId?: string | null
+  /**
+   * AQU-1805: the target lane this sweep addresses — same contract as
+   * `CellCommitInput.targetLang`. A rule fix is proposed against the lane the
+   * reader is looking at, so it must commit to that lane's own row; omitting
+   * it landed every fix on the default lane.
+   */
+  targetLang?: string
+  /** AQU-1805: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   value: string
   valueHtml?: string
   author: string
@@ -1328,6 +1337,7 @@ export async function emitCellHarmonize(
       value: input.value,
       ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
       ...(input.sourceEventId !== undefined ? { sourceEventId: input.sourceEventId } : {}),
+      ...targetLaneFields(input),
       harmonize_origin: {
         rule_or_check_id: input.ruleOrCheckId,
         proposal_kind: input.proposalKind,

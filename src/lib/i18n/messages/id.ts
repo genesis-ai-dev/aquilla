@@ -5172,8 +5172,6 @@ export const id: Catalog = {
   "rules.surface.autofixEditor.flagsPlaceholder": "Flag (mis. gi)",
   "rules.surface.autofixEditor.saveButton": "Simpan perbaikan otomatis",
   "rules.drawer.closeAriaLabel": "Tutup detail aturan",
-  "rules.drawer.autofixUnavailable": "Perbaikan otomatis tidak tersedia pada build ini",
-  "rules.drawer.autofixUnavailableAriaLabel": "Perbaikan otomatis tidak tersedia",
   "rules.drawer.amendRuleButton": "Ubah aturan",
   "rules.drawer.savedAutofix": "Perbaikan otomatis tersimpan: /{pattern}/{flags} → {replacement}",
   "rules.drawer.noSavedFix": "Belum ada perbaikan tersimpan",

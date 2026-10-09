@@ -5112,8 +5112,6 @@ export const zh_Hans: Catalog = {
   "rules.surface.autofixEditor.flagsPlaceholder": "旗标（例如 gi）",
   "rules.surface.autofixEditor.saveButton": "保存自动修正",
   "rules.drawer.closeAriaLabel": "关闭规则详细数据",
-  "rules.drawer.autofixUnavailable": "此版本无法使用自动修正",
-  "rules.drawer.autofixUnavailableAriaLabel": "无法使用自动修正",
   "rules.drawer.amendRuleButton": "修改规则",
   "rules.drawer.savedAutofix": "已保存的自动修正：/{pattern}/{flags} → {replacement}",
   "rules.drawer.noSavedFix": "尚未保存任何修正方式",

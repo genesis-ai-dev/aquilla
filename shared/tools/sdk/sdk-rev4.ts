@@ -278,6 +278,8 @@ export const SDK_REV4 = String.raw`
     src.classList.add("editing");
     src.focus();
     caretAt(src, "end");
+    // The menu closing can take focus back: put it in the editor again.
+    later(function () { if (S.srcEditing === id && doc.activeElement !== src) { src.focus(); caretAt(src, "end"); } }, 0);
     function done(save) {
       src.removeEventListener("keydown", keys); src.removeEventListener("blur", blur);
       stopSourceEdit(id, save);
@@ -286,6 +288,12 @@ export const SDK_REV4 = String.raw`
       e.stopPropagation();
       if (e.key === "Escape") { e.preventDefault(); done(false); }
       else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); done(true); }
+      // Inside the source, Home/End/PageUp/PageDown move the caret, never the list.
+      else if ((e.key === "End" || e.key === "Home") && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        var hs = doc.getSelection();
+        if (hs && hs.modify) hs.modify(e.shiftKey ? "extend" : "move", e.key === "End" ? "forward" : "backward", "lineboundary");
+      } else if (e.key === "PageDown" || e.key === "PageUp") e.preventDefault();
     }
     function blur() { done(true); }
     src.addEventListener("keydown", keys);

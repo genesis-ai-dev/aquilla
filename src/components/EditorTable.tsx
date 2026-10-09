@@ -49,7 +49,9 @@ import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { formatCellIssueLine, summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { CellIssueLines } from "@/components/cell/CellIssueLines"
 import { isPartnerScriptureCell } from "@/lib/partners/registry"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
@@ -6736,12 +6738,22 @@ function EditorRow({
   const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
-  // The cell number tints by worst severity. That's the whole signal — the
-  // concrete issue list lives in the expansion's Issues tab, not in a hover
-  // popover here. (Replaced the old severity stripe / warning triangle / dot;
-  // the cast label moved to the target column header lane so it isn't squished
-  // into this 44px gutter.)
+  // The cell number tints by worst severity. Hover names every active check
+  // and why it fired (AQU-757); the Issues tab is where you waive one.
+  // (Replaced the old severity stripe / warning triangle / dot; the cast label
+  // moved to the target column header lane so it isn't squished into this
+  // 44px gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
+  const issueLines = useMemo(
+    () => summarizeCellIssues(cellInfractions, ruleMap, t),
+    [cellInfractions, ruleMap, t],
+  )
+  const issueHint = issueLines.length === 0 && cellNeedsAttention
+    ? t("editor.issues.notYetValidated")
+    : undefined
+  const issueSummary = issueLines.length > 0
+    ? issueLines.map(formatCellIssueLine).join(". ")
+    : issueHint
   const numberLabel = cellNumberLabel({
     lineNumbersEnabled,
     cellType: cell.type,
@@ -6784,22 +6796,32 @@ function EditorRow({
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
   const gutterLanguageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
+  const lineAria = t("editor.row.lineAria", { number: numberLabel ?? "" })
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
     // both set on the source well below) and center it, so the number keeps
     // riding that line as the reader changes font size. A fixed height only
-    // happens to line up at one size.
-    <span
-      className="flex items-center justify-center leading-none"
-      style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
-      aria-label={t("editor.row.lineAria", { number: numberLabel })}
+    // happens to line up at one size. The tooltip is only there when the
+    // tint means something — a clean line stays a plain number.
+    <AppTooltip
+      content={issueLines.length > 0 ? <CellIssueLines lines={issueLines} /> : issueHint}
+      side="right"
+      className="max-w-xs"
     >
-      <CellNumberPill
-        number={numberLabel}
-        plain
-        tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
-      />
-    </span>
+      <span
+        className="flex items-center justify-center leading-none"
+        style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+        aria-label={issueSummary ? `${lineAria}. ${issueSummary}` : lineAria}
+        role={issueSummary ? "img" : undefined}
+        data-testid={issueSummary ? "cell-issue-flag" : undefined}
+      >
+        <CellNumberPill
+          number={numberLabel}
+          plain
+          tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
+        />
+      </span>
+    </AppTooltip>
   )
 
   // ── Hover / focus state for the floating action rail ─────────────────────
@@ -7379,6 +7401,8 @@ function EditorRow({
             point={healthRibbonPoint}
             hasMajorIssue={hasMajorInfraction}
             hasIssue={hasAnyIssue}
+            issues={issueLines}
+            issueHint={issueHint}
             className="top-0 bottom-0 md:hidden"
             testId="health-ribbon-mobile"
           />
@@ -7862,6 +7886,8 @@ function EditorRow({
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
               hasIssue={hasAnyIssue}
+              issues={issueLines}
+              issueHint={issueHint}
               className="hidden md:block"
             />
           ) : undefined}

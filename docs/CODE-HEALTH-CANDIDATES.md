@@ -1149,37 +1149,56 @@ after this run, for whoever picks the theme up next:
   comments (checked line by line; ~35 of them). Do not re-derive that list — the pattern
   is noisy and the real set is the two `useProjectSettings.ts` lines above.
 
-## 51 unused `eslint-disable` directives repo-wide — a whole candidate theme
+## Unused `eslint-disable` directives — DANGEROUS theme; read the 2026-10-09 entry first
+
+> **⚠ This theme is not behaviour-preserving by default.** Deleting an `eslint-disable` for a
+> `react-hooks/*` rule can un-skip the enclosing function for the **React Compiler** and change
+> the production bundle — and `pnpm test` and `pnpm test:e2e:smoke` both run with the compiler
+> OFF, so both stay green while the shipped app changes. The 2026-10-09 entry at the end of
+> this file has the mechanism, the hash table, and the required proof (a compiler-on
+> `vite build` hash per arm, NOT a green suite). Do not take a `react-hooks/*` directive
+> without it.
 
 - **Found**: 2026-10-05 run, while diffing the touched files' lint output against baseline.
-- **Friction**: `pnpm lint` reports 51 `Unused eslint-disable directive` warnings. They are
-  pure noise in a 1096-problem report, and each one is a comment claiming a rule fires where
-  it does not. 29 are `@typescript-eslint/no-explicit-any` in **test** files, where
-  `eslint.config.js:163` turns that rule off for `**/*.test.{ts,tsx}` — i.e. the suppression
-  was copied into a file where it was never needed. Those are all in frozen test files, so
-  the actionable set is the 8 non-test, non-`dist` files (17 directives):
-  `src/lib/perf-log.ts` (10 `no-console`), `src/components/EditorTable.tsx:354`
-  (`no-console`), `src/components/CommentsPage.tsx` (`react/no-danger`),
-  `src/components/MarketingLoginRoute.tsx` + `src/hooks/useHealth.ts:364` +
-  `src/components/AudioRecorder/RecordingVideoSurface.tsx:158`
-  (`react-hooks/exhaustive-deps`), `src/hooks/useFocusLock.ts`
-  (`react-hooks/set-state-in-effect`), `src/lib/parsers/ebible.ts`
-  (`no-constant-condition`).
-- **Why deferred**: it is a different theme from this run's, and it has a question in front
-  of it that a cleanup pass should not answer alone. A directive for a rule that is *off* is
-  dead text, but the two shapes behind "unused" are not the same: the `no-console` ones say
-  the rule does not reach `src/lib/*` at all (so `console.log` in shipped code is
-  unpoliced), and the `react-hooks/*` ones say the React Compiler's lint moved and these
-  deps lists now pass on their own. On the first shape, `no-console` is **not configured
-  anywhere** in `eslint.config.js` and is not part of `js.configs.recommended`, so every
-  `// eslint-disable-next-line no-console` in the repo is dead text and `console.*` in
-  shipped code is unpoliced. Its *real* fix is enabling the rule — a CI behaviour change,
-  explicitly out of scope here — and deleting the comments first would erase the only
-  breadcrumb pointing at it.
-- **Proof needed**: comment-only deletions, so `pnpm lint` error list byte-identical and
-  warning count down by exactly the number removed, plus `pnpm build`/`pnpm test`
-  green-to-green. Worth checking `eslint.config.js`'s `files` globs for `no-console` first
-  and saying in the PR body which of the two shapes each deletion is.
+  **Partly done 2026-10-09** (see that run's entry): 3 of the 5 live-rule directives were
+  deleted with a byte-identical production bundle; **2 were rejected** because they changed it
+  (`RecordingVideoSurface.tsx:251`, `MarketingLoginRoute.tsx:51` — each held the only
+  suppression in its component). What remains is those 2 plus the `no-console` family.
+- **Friction** (current numbers, re-measured 2026-10-09 at `origin/dev` `ec9b6b13`): `pnpm
+  lint` reports **48** `Unused eslint-disable directive` warnings, of which **32 are in test
+  files** (29 `@typescript-eslint/no-explicit-any` — `eslint.config.js:163` turns that rule
+  off for `**/*.test.{ts,tsx}`, so each is a suppression copied into a file that never needed
+  it — plus 1 `no-non-null-assertion` and 2 `no-console`). Those are frozen. Of the 16
+  outside test files, 5 were taken on 2026-10-09; the actionable remainder is **11
+  directives in 2 files**, all `no-console`: `src/lib/perf-log.ts` (10) and
+  `src/components/EditorTable.tsx:488`.
+- **Why the remainder is deferred, and why that is not just budget**: there were always two
+  different shapes behind the single word "unused", and only one of them is a cleanup.
+  - *Shape two — a live rule that stopped firing.* `react-hooks/exhaustive-deps` (78 live
+    warnings), `react-hooks/set-state-in-effect` (295) and `no-constant-condition` are all
+    configured and reporting elsewhere in the repo, so a directive for them that suppresses
+    nothing is a comment that lies about the file AND a hole in the rule's coverage.
+    Deleting it restores policing. **This shape is done** — 2026-10-09 took all five.
+  - *Shape one — a rule that is not configured at all.* `no-console` is **not** in
+    `eslint.config.js` (single root config, re-confirmed 2026-10-09: `grep -rn no-console`
+    over `eslint.config.*` / `.eslintrc*` is empty) and is not in
+    `js.configs.recommended`, so every one of the repo's 13 `no-console` directives is dead
+    text and `console.*` in shipped code is **unpoliced**. Deleting the comments is not the
+    fix and actively costs something: `src/lib/perf-log.ts` is the repo's console-logging
+    module, so the day `no-console` is enabled all 10 of its directives come straight back.
+    Churn with negative expected value.
+- **The real fix for the `no-console` half**: enable `no-console` (warn, with
+  `src/lib/perf-log.ts` and the worker packages' deliberate logging exempted), which is a
+  CI-behaviour change and so out of this routine's scope by construction. **Do not delete the
+  11 `no-console` directives in a code-health run**; they are the markers for that ticket's
+  diff, and whoever enables the rule wants them exactly where they are. (These 11 are at least
+  Compiler-safe: `no-console` is not a `react-hooks` rule, so they do not gate compilation.)
+- **The 2 rejected `react-hooks` directives** are a *product* decision, not a cleanup: the
+  suppression both lies about the linter and silently opts the component out of compilation,
+  so deleting it and verifying the component behaves when memoized are one job.
+- **Proof needed** (if a future run does take them anyway, after the rule lands): comment-only
+  deletions, so `pnpm lint`'s *error* list byte-identical and the warning count down by
+  exactly the number removed, plus `pnpm build`/`pnpm test` green-to-green.
 
 ### Container-setup delta 2026-10-05: the Chromium shim needs TWO inner layouts
 
@@ -1389,3 +1408,232 @@ substitution, since the shim runs a 141.x build that is not the pinned one) and 
 test-side bug a human can fix in one line. **`agent/agent-connection.smoke.spec.ts:43`
 (AQU-1529) now passes** — the one that entry flagged as most worth a human's eyes. So the
 expected smoke baseline in this container is now 92/99.
+
+## 2026-10-09 — THE BIG ONE: deleting an unused `react-hooks` eslint-disable can change the shipped bundle
+
+**Read this before ever picking up the "unused `eslint-disable` directives" theme again.** It
+started as a routine dead-text run and turned into the discovery that **this theme is not
+behaviour-preserving by default, and neither `pnpm test` nor `pnpm test:e2e:smoke` can tell
+you.** Both run with the React Compiler **off**; the shipped app runs with it **on**.
+
+### The mechanism
+
+`vite.config.ts:95` enables `reactCompilerPreset()` for every build **except** `--mode test`
+without `E2E_REACT_COMPILER=1` — and nothing in `scripts/e2e-up.ts` ever sets that, so the
+e2e bundle (`vite build --mode test`, `e2e-up.ts:700`) has the compiler off too. Vitest has it
+off as well (CLAUDE.md's React-Compiler gotcha). The React Compiler **treats an
+`eslint-disable` comment for a rule on its suppression list as a signal to skip compiling the
+enclosing function** — that is the whole point of the feature: do not auto-memoize code whose
+author knowingly wrote it against the hook rules. Delete the suppression and the compiler
+starts memoizing that function. That is a runtime behaviour change in production, emitted by
+a build no green test exercises.
+
+### The measurements (deterministic, hash-level, not argued)
+
+`npx vite build --outDir <tmp>` twice on identical source gives the identical hash, so the
+production build is deterministic and hashes are a valid oracle. Reference hashes, `sha256` of
+all emitted JS concatenated in sorted path order:
+
+| Source | prod bundle (compiler ON) | verdict |
+| --- | --- | --- |
+| `origin/dev` `ec9b6b13` | `54143c72…` | reference |
+| all five directives deleted | `25a836d9…` | **differs — behaviour change** |
+| only `ebible.ts` (`no-constant-condition`) | `54143c72…` | same |
+| only `RecordingVideoSurface.tsx` (`exhaustive-deps`) | `c472777b…` | **differs** |
+| only `MarketingLoginRoute.tsx` (`exhaustive-deps`) | `88709399…` | **differs** |
+| only `useHealth.ts:395` (`exhaustive-deps`) | `54143c72…` | same |
+| only `useFocusLock.ts` (`set-state-in-effect` pair) | `54143c72…` | same |
+| **the three shipped here** | `54143c72…` | **same — identical to dev** |
+
+And in test mode (`--mode test`, compiler off) *every* arm hashes `2b9122cd…`, including the
+rejected five-deletion set. **That is why the gates are blind**: the artifact the smoke suite
+loads is byte-identical whether or not you break production.
+
+### Why two differed and two did not — the rule to carry forward
+
+It is not "`exhaustive-deps` is dangerous, the rest are fine". It is **whether the function
+still carries a suppression after your edit**:
+
+- `RecordingVideoSurface.tsx:251` and `MarketingLoginRoute.tsx:51` each held the **only**
+  suppression in their component, so deleting it un-skipped the component. Both differ.
+- `useHealth.ts:395` is one of **two** `exhaustive-deps` suppressions inside `useHealth`; the
+  other (`:268`) was out of scope and stayed, so the function is still skipped either way.
+  Identical bundle — safe *because of the sibling directive*, not because `useMemo` is safe.
+  **If a later run deletes `:268` as well, that file moves into the dangerous column.**
+- `useFocusLock.ts`'s pair was `react-hooks/set-state-in-effect`, a Compiler-era rule that is
+  **not** on the suppression list, so it never gated compilation. Identical bundle.
+- `ebible.ts`'s was `no-constant-condition`, not a `react-hooks` rule at all, in a non-React
+  module. Identical bundle.
+
+### So: the required proof for this theme is a bundle hash, not a green suite
+
+Anyone resuming this theme must, per directive deleted, build `origin/dev` and build their
+branch **with the compiler on** (plain `npx vite build`, not `--mode test`) and show the
+emitted JS hashes equal. A green `pnpm test` plus a green smoke run proves nothing here — this
+run had both while holding a diff that changed production. Cheapest safe filter: a directive
+is only a candidate if its rule is **not** `react-hooks/*`, **or** the enclosing function keeps
+another `react-hooks/*` suppression afterwards.
+
+**Done this run** (3 directives, 4 lines, 3 files, production bundle byte-identical to `dev`):
+
+- `src/hooks/useFocusLock.ts:189,197` — the `eslint-disable`/`eslint-enable` **pair** around
+  the auto-release effect, `react-hooks/set-state-in-effect`. The comment above explaining
+  that `setIsHeld` reflects WS state stays — it documents the design, not the suppression.
+- `src/hooks/useHealth.ts:395` — `react-hooks/exhaustive-deps` on the `raw` `useMemo`'s deps.
+  `:268` deliberately untouched (and now load-bearing — see above).
+- `src/lib/parsers/ebible.ts:303` — `no-constant-condition` on a `while (true)`, which
+  ESLint's default `checkLoops: "allExceptWhileTrue"` never reported. Dead since written.
+
+**Rejected and left on `dev`** (they are real dead text, but deleting them is a product change
+a human must choose): `src/components/AudioRecorder/RecordingVideoSurface.tsx:251` and
+`src/components/MarketingLoginRoute.tsx:51`. Both would hand their component to the Compiler
+for the first time. The honest framing for whoever picks these up: the suppression is lying
+about the linter *and* silently opting the component out of compilation, so the two jobs
+(delete the comment, verify the component is correct when memoized) have to happen together.
+`RecordingVideoSurface` is the recording lead-in/transport — the narrow `[armNonce]` deps are
+load-bearing by its own comment — so it is the riskier of the two.
+
+### The e2e detour, and what it cost
+
+The smoke shard went **88 passed / 11 failed** against the ledger's documented 92/99, with
+three spec families not in the documented red set, so the reds were A/B'd. That chase is worth
+recording because the conclusion was the opposite of what the sequence suggested:
+
+- Full 99-spec run, five-deletion source: `collab/commit-chain-linear:321`,
+  `collab/concurrent-edit-throttled:88`, `import-and-edit:216` red on top of the documented set.
+- Same 6 files, `dev` source: those three green.
+- Same 6 files, five-deletion source: `commit-chain-linear` red again — but at **`:283`**.
+- Those 2 collab files alone, `dev` source: **11/11 green**.
+- Those 2 collab files alone, five-deletion source: red at **`:321` and `:373`**.
+
+Three reds out of three with the diff, zero out of two without — which reads like a smoking
+gun and **was not one**. `collab/commit-chain-linear` fails at a *different line each time*,
+and the test-mode bundle is byte-identical (`2b9122cd…`) in both arms, so the two runs loaded
+literally the same bytes. The failures are container flake in the WS/cross-tab propagation
+specs, full stop. **The lesson for the next run: hash the artifact before A/B-ing a flaky
+suite.** One `vite build` per arm (~2 min) settled in minutes what five smoke runs (~45 min)
+had only muddied, and it answered the production question the smoke suite cannot reach at all.
+The 5 stable reds — `ai/completion:69`, `import-and-edit:177`/`:333`,
+`import-media-captions:132`, `project-trash:18` — reproduce identically on untouched `dev` and
+are this container's expected smoke baseline, now **94/99** on the 6-file subset rather than
+the 92/99 the 2026-10-07 entry recorded.
+
+### Baseline: `dev` is red in two places, both pre-existing, both out of scope
+
+Clean tree at `origin/dev` `ec9b6b13`. `pnpm build` green; the other two gates were **already
+failing before any edit**, so this run's bar was "no worse", not "green":
+
+- **`pnpm lint` — exit 1, 2 errors / 994 warnings.** Both errors are the same
+  `no-useless-escape` on `\;` inside a character class:
+  `sync-worker/src/events/content-disposition.ts:8` and
+  `sync-worker/src/__tests__/content-disposition.test.ts:9`. `.github/workflows/ci.yml:80`
+  runs `pnpm lint`, so this is a red CI gate on trunk. **Not fixable by this routine**: one of
+  the two sites is a test file, so the half this routine is allowed to touch would leave lint
+  red anyway. Worth a human's attention for a second reason — the module doc-comment claims
+  "control characters, quotes, backslashes and `;` are neutralised", but the character class
+  `[\u0000-\u001f\u007f"\;]` contains no backslash. Verified:
+  `attachmentDisposition("evil\\")` returns
+  `attachment; filename="evil\"; filename*=UTF-8''evil%5C` — the trailing backslash escapes
+  the closing quote, so a conforming parser never terminates the quoted string. From the
+  `cab0ecce` pen-test hardening commit. A behaviour fix, so explicitly not this routine's.
+- **`pnpm test` — exit 1, 2 files / 4 tests.** Deterministic, not full-suite flakes:
+  - `src/partner-integrations/biblica/__tests__/idml.biblica-scripture.test.ts` (3 tests) —
+    all three die in the same helper with `Missing imported cell for "In the beginning God
+    created the heavens and the earth."` — i.e. the import no longer produces a cell for the
+    plain verse text. Already red for the 2026-10-07 run at `363c92f1` (entry above), so this
+    is at least the third run to report them. **Likely cause, stated as the inference it is**
+    (not bisected): `55eaa9bf` "Biblica importer exporter fixes with Bible Swap" (2026-10-06,
+    Martin, an ancestor of `363c92f1`) says in its own message "Verse text stays out of those
+    imports", touched `idml.ts` and four other specs in `biblica/__tests__/`, and did not
+    touch this one. If that holds it is a stale test against an intentional behaviour change —
+    AGENTS.md rule 5 unmet on trunk, fixable in one commit by whoever knows which side is
+    right. One for Martin / Ryder; a code-health run may not touch the test to find out.
+  - `src/lib/i18n/namespaces/no-duplicates.test.ts` (1 test) — `"Draft"` now collides across
+    `editor.batchFile.confirmDraft` and `autopilot.graph.node.draft` with neither excused.
+    Same family as the 2026-09-21 entry above: the catalog's duplicate guard is red on trunk,
+    which **freezes `src/lib/i18n/namespaces/*` for code-health runs** and still blocks the
+    queued `terminology.*` sweep.
+
+### One more full-suite-only flake for the #410 family: `src/context/OrgContext.test.tsx`
+
+New sighting worth adding to the `ArchivedProjects`/`TeamsList` cluster (issue
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410)). `OrgContext.test.tsx > resolves
+the guest org named by the path without making it a membership` failed in **one** full
+`pnpm test` run and is provably not a diff effect:
+
+- It passes **30/30 in isolation** (`pnpm test src/context/OrgContext.test.tsx`, 7.5s).
+- The full suite was then **resampled with the same diff** and came back byte-identical to the
+  baseline — `2 failed | 1731 passed | 2 skipped (1735)` files, `4 failed | 19648 passed |
+  23 skipped (19675)` tests, same four titles. One red, one green, same source: a flake by
+  direct measurement rather than by argument.
+- The earlier full-suite run in this same session, holding a **superset** of the final diff
+  (five deletions rather than three), had it green with exactly the baseline 4 failures.
+- The final diff touches `useFocusLock.ts`, `useHealth.ts` and `ebible.ts`; the test is about
+  org resolution from a path.
+- Both the production and test-mode bundles are byte-identical to `dev`, so there is no
+  compiler-level route either.
+
+Same signature as the rest of the family: full-suite-only, order/isolation sensitive, invisible
+when the file runs alone. Worth noting that this run saw **two different** files from this
+family across three full-suite runs, which supports the "test-isolation under vitest sharding"
+root cause over a per-file bug.
+
+Also reconfirmed a third time, and the "Gate-comparison trap" note above is right — with a
+**second phantom source to add to it**. The final lint read 994 → 998 warnings with a
+byte-identical error list, and all 7 extra warnings are in gitignored output that only exists
+because the run built and ran things:
+
+- 2 in `packages/idml-roundtrip/dist/{engine,legacy}.js` — the known nested-`dist` gap.
+- **5 in `sync-worker/.wrangler/tmp/dev-*/index.js`** — wrangler's build temp, one directory
+  per `wrangler dev` boot, so **every e2e shard you run adds more**. They lint as
+  `Unused eslint-disable directive` with `ruleId: undefined`, which is a useful tell. `rm -rf
+  sync-worker/.wrangler/tmp` (and the same under `auth-worker/`, `agent-worker/`) before the
+  final lint, or the count drifts upward with every smoke attempt. `.wrangler` is gitignored
+  (`sync-worker/.gitignore:2`), so this never shows in `git status` — it only ever shows as
+  mystery lint warnings.
+
+**Build first, then baseline lint, and clear `.wrangler/tmp`** — or just compare error lists
+rather than totals, which is the rule that actually survives.
+
+No Linear issue was filed for any of this: this session had no Linear tooling available (no
+`mcp__linear__*` tools), so per the routine's fallback it is recorded here and in the PR body
+for Ryder instead of silently dropped. The React-Compiler-suppression finding is the one worth
+a ticket.
+
+### Container setup 2026-10-09: a cleaner `onnxruntime-node` workaround, and a new Postgres blocker
+
+The 2026-10-02/10-07 recipe (delete `onnxruntime-node` from `pnpm-workspace.yaml`'s
+`onlyBuiltDependencies`, install, restore the file) still works, but it edits a frozen path and
+relies on remembering to restore it. This run used a variant that never touches the repo:
+
+```
+pnpm install --ignore-scripts          # 4.6s, exit 0, links node_modules/.bin
+pnpm rebuild esbuild workerd protobufjs msw
+```
+
+`--ignore-scripts` skips the postinstall that `ECONNRESET`s on `api.nuget.org`, and the
+targeted `rebuild` restores the four postinstalls that matter. Prefer this.
+
+**New blocker, whose cure was already in this file but easy to miss:** the first smoke attempt
+died at `[boot 2/8]` with `psql: connection to server on socket
+"/var/run/postgresql/.s.PGSQL.5432" failed` → `aquilla_e2e drop/recreate failed (psql exit 2)
+— refusing to run against a stale schema.` A fresh container has `psql` on `PATH` but **no
+running cluster**, so `e2e-up.ts`'s Docker→local-psql fallback has nothing to fall back to:
+
+```
+pg_ctlcluster 16 main start
+su postgres -c "psql -c \"CREATE ROLE aquilla LOGIN SUPERUSER PASSWORD 'aquilla'\""
+export E2E_PG_ADMIN_URL=postgresql://aquilla:aquilla@localhost:5432/postgres
+```
+
+Everything else held: the rev-1243 Chromium double symlink (2026-10-05 recipe, exact),
+`npm ci --legacy-peer-deps` in each of `auth-worker/`, `sync-worker/`, `agent-worker/` (all
+three lockfiles verified untouched afterwards), one shard not three, and killing stray
+`wrangler dev` parents before each run.
+
+**And a new self-inflicted trap worth one line:** `pkill -9 -f workerd` **kills its own shell**,
+because `pkill -f` matches the full command line and the shell's own `-c` string contains the
+pattern. It presents as a run that produces no output and leaves the previous log in place —
+which looks exactly like the command silently failing. Use `kill -9` on PIDs collected via
+`ps -eo pid,args | grep -E "[w]orkerd serve"` (bracket the first letter), never a bare
+`pkill -f`.

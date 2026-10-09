@@ -113,8 +113,8 @@ test("a tool bulk-harmonizes with attribution, and revert-since-T restores every
   await harmonize.click()
 
   // write:target was left out of the standing grant → the host asks.
-  await expect(tools.permissionPrompt()).toContainText(`${TOOL} wants to edit translations.`)
-  await tools.answerPrompt("Always allow")
+  await expect(tools.permissionPrompt()).toContainText(`Allow ${TOOL} to edit translations?`)
+  await tools.answerPrompt("Always")
 
   await expect
     .poll(async () => {
@@ -133,8 +133,9 @@ test("a tool bulk-harmonizes with attribution, and revert-since-T restores every
   await commitTargets(jwt, seeded, [{ cellId: human.cellId, parentId: human.eventId, value: "Vinieron a adorar a Jesús, el Cristo." }])
 
   await tools.open(seeded.projectId)
-  const card = tools.installedTool(TOOL)
-  await expect(card.getByTestId("tool-grant")).toContainText(["read files and cells", "read the termbase", "edit translations"])
+  const permissions = await tools.openPermissions(TOOL)
+  await expect(permissions.getByTestId("tool-grant")).toContainText(["Can read files and cells", "Can read the termbase", "Can edit translations"])
+  await alice.keyboard.press("Escape")
   const activity = await tools.openActivity(TOOL)
   await expect(activity.getByTestId("tool-activity-row")).toHaveCount(3)
   await expect(activity.getByTestId("tool-activity-row").first()).toContainText("Verified extension write (v1)")

@@ -74,11 +74,11 @@ test("a custom editor extension replaces the editor, writes with attribution, an
   // Translate MAT 1:1 → save & next (first write asks), then validate MAT 1:2.
   await box.fill("Libro de la genealogía de Jesucristo.")
   await box.press("Control+Enter")
-  await tools.answerPrompt("Always allow")
+  await tools.answerPrompt("Always")
   await expect(frame.locator(".ref")).toContainText("MAT 1:2")
   await box.fill("Abraham engendró a Isaac.")
   await frame.getByRole("button", { name: "Validate" }).click()
-  await tools.answerPrompt("Always allow")
+  await tools.answerPrompt("Always")
   await expect(frame.getByText("Validated", { exact: true }).first()).toBeVisible()
 
   await expect.poll(async () => (await target(jwt, seeded, "MAT 1:1"))?.value).toBe("Libro de la genealogía de Jesucristo.")

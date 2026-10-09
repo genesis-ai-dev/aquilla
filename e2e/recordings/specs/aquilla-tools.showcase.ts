@@ -81,7 +81,7 @@ async function driveHeatMap(page: Page, frame: FrameLocator, tools: ToolsPage): 
   await harmonize.click()
   await expect(tools.permissionPrompt()).toBeVisible()
   await page.waitForTimeout(1200)
-  await tools.answerPrompt("Always allow")
+  await tools.answerPrompt("Always")
 }
 
 test("Aquilla Tools — build, permit, harmonize, attribute, revert", async ({ page }, testInfo) => {

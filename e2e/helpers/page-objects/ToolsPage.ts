@@ -22,16 +22,12 @@ export class ToolsPage {
     expect((await listed).ok()).toBe(true)
   }
 
-  /** Install a starter; leaves the read scopes checked and write scopes off
-   *  (the install dialog's defaults), so writes prompt on first use. */
+  /** Install a starter in one click (reads granted, writes ask on first use). */
   async installStarter(name: string, opts: { landsIn?: "page" | "editor" } = {}): Promise<void> {
-    await this.page.getByRole("button", { name: `Install: ${name}` }).click()
-    const dialog = this.page.getByRole("dialog", { name: `Install ${name}?` })
-    await expect(dialog).toBeVisible()
     const installed = this.page.waitForResponse(
       (r) => r.request().method() === "POST" && /\/tools$/.test(new URL(r.url()).pathname),
     )
-    await dialog.getByRole("button", { name: "Install", exact: true }).click()
+    await this.page.getByRole("button", { name: `Install: ${name}` }).click()
     expect((await installed).status()).toBe(201)
     // Editor extensions land in the editor (its switcher); others on their page.
     await this.page.waitForURL(opts.landsIn === "editor" ? /\/editor/ : /\/extensions\/[0-9a-f-]{36}$/)
@@ -86,7 +82,7 @@ export class ToolsPage {
     return this.page.getByRole("alertdialog")
   }
 
-  async answerPrompt(answer: "Allow once" | "Always allow" | "Deny"): Promise<void> {
+  async answerPrompt(answer: "Allow" | "Always" | "Deny"): Promise<void> {
     await this.permissionPrompt().getByRole("button", { name: answer }).click()
     await expect(this.permissionPrompt()).toBeHidden()
   }
@@ -95,10 +91,21 @@ export class ToolsPage {
     return this.page.locator(`[data-testid="installed-tool"][data-tool-name="${name}"]`)
   }
 
+  /** An installed extension's "…" menu item. */
+  async openToolMenu(name: string, item: string): Promise<void> {
+    await this.installedTool(name).getByTestId("tool-menu").click()
+    await this.page.getByRole("menuitem", { name: item, exact: true }).click()
+  }
+
   async openActivity(name: string): Promise<Locator> {
-    const card = this.installedTool(name)
-    await card.getByRole("button", { name: "Activity" }).click()
-    return card.getByRole("region", { name: "Activity" })
+    await this.openToolMenu(name, "Activity")
+    return this.page.getByRole("dialog").getByRole("region", { name: "Activity" })
+  }
+
+  /** The permissions dialog: one row per declared scope, granted ones marked. */
+  async openPermissions(name: string): Promise<Locator> {
+    await this.openToolMenu(name, "Permissions")
+    return this.page.getByRole("dialog")
   }
 
   async revertSince(activity: Locator): Promise<void> {

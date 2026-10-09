@@ -1,56 +1,65 @@
 /**
- * /project/:id/tools — Aquilla Tools (prototype).
+ * /project/:id/extensions — Smart Extensions.
  *
- * Build a tool from a prompt, install a reviewed starter, manage each tool's
- * standing grant, see what it changed and revert it.
+ * One prompt box to build a tool; starters one click away; installed
+ * extensions as quiet rows with everything secondary (permissions, activity
+ * and revert, copy, code review, remove) behind a "…" menu.
  */
 
 import { useCallback, useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { ArrowLeft, Blocks, History, Pin, PinOff, Play, Trash2, X } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { ArrowLeft, ArrowUpRight, Blocks, CircleHelp, LayoutGrid, PanelLeft, PenLine, Plus, ShieldCheck, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { BuildToolCard, type BuiltTool } from "@/components/tools/BuildToolCard"
-import { InstallToolDialog } from "@/components/tools/InstallToolDialog"
-import { ToolActivityPanel } from "@/components/tools/ToolActivityPanel"
-import { useScopeLabel } from "@/components/tools/scope-label"
+import { ActivityDialog, CopyDialog, PermissionsDialog, ReviewCodeDialog, useScopeSentence } from "@/components/tools/ExtensionDialogs"
 import { useToolsMount } from "@/components/tools/ToolsMountContext"
-import { CopyExtension, ReviewCopiedExtension } from "@/components/tools/ShareExtension"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProject } from "@/hooks/useProject"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { revokeScope } from "@/lib/tools/permissions"
+import { grantableAtInstall } from "@/lib/tools/permissions"
 import { STARTER_EXTENSIONS } from "@/lib/tools/starters"
-import {
-  installTool,
-  listTools,
-  removeTool,
-  setToolGrant,
-  type SaveToolInput,
-  type ToolSummary,
-} from "@/lib/tools/tools-api"
-import type { ToolManifest, ToolScope } from "../../../shared/tools/manifest"
+import { installTool, listTools, removeTool, setToolGrant, type SaveToolInput, type ToolSummary } from "@/lib/tools/tools-api"
+import { cn } from "@/lib/utils"
+import type { ToolManifest, ToolMount, ToolScope } from "../../../shared/tools/manifest"
 
 interface Candidate {
   input: Omit<SaveToolInput, "grant">
   manifest: ToolManifest
 }
 
-const STARTERS = STARTER_EXTENSIONS
+type Sheet = { kind: "permissions" | "activity" | "copy" | "review"; toolId: string } | null
+
+/** The one icon that says where an extension lives. */
+function ExtIcon({ mounts, className }: { mounts: readonly ToolMount[]; className?: string }) {
+  return (
+    <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg border bg-muted/40 text-muted-foreground", className)}>
+      {mounts.includes("editor") ? (
+        <PenLine className="size-4" aria-hidden />
+      ) : mounts.includes("panel") || mounts.includes("inline") ? (
+        <PanelLeft className="size-4" aria-hidden />
+      ) : (
+        <LayoutGrid className="size-4" aria-hidden />
+      )}
+    </span>
+  )
+}
 
 export function ToolsPage() {
   const t = useT()
   const navigate = useNavigate()
-  const scopeLabel = useScopeLabel()
+  const sentence = useScopeSentence()
   const { id: projectId = "" } = useParams<{ id: string }>()
   const { session } = useFrontierSession()
   const { project, roleLevel } = useProject(projectId)
   const [tools, setTools] = useState<ToolSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [candidate, setCandidate] = useState<Candidate | null>(null)
-  const [installing, setInstalling] = useState(false)
-  const [activityFor, setActivityFor] = useState<string | null>(null)
+  const [installing, setInstalling] = useState<string | null>(null)
+  const [sheet, setSheet] = useState<Sheet>(null)
   const jwt = session?.jwt ?? null
   const mounts = useToolsMount()
 
@@ -63,30 +72,30 @@ export function ToolsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mounts.refresh is stable per project
   }, [jwt, projectId])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
-  const install = async (grant: ToolScope[]) => {
-    if (!candidate || !jwt) return
-    setInstalling(true)
+  const where = (m: ToolMount): string =>
+    m === "editor" ? t("extensions.where.editor") : m === "panel" ? t("extensions.where.panel") : m === "inline" ? t("extensions.where.inline") : t("extensions.where.page")
+
+  /** One-click install: reads are granted now, writes ask the first time. */
+  const install = async (c: Candidate) => {
+    if (!jwt) return
+    setInstalling(c.manifest.name)
     try {
-      const tool = await installTool(jwt, projectId, { ...candidate.input, grant })
+      const grant = grantableAtInstall(c.manifest.scopes, roleLevel ?? null).grantable.filter((s) => s.startsWith("read:"))
+      const tool = await installTool(jwt, projectId, { ...c.input, grant })
       setCandidate(null)
       await refresh()
-      // Editor extensions surface in the editor's switcher; everything else
-      // opens on its own page first.
-      navigate(
-        tool.manifest.mounts.includes("editor")
-          ? `/project/${projectId}/editor`
-          : `/project/${projectId}/extensions/${tool.id}`,
-      )
+      navigate(tool.manifest.mounts.includes("editor") ? `/project/${projectId}/editor` : `/project/${projectId}/extensions/${tool.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setInstalling(false)
+      setInstalling(null)
     }
   }
 
@@ -103,9 +112,9 @@ export function ToolsPage() {
     })
   }
 
-  const revoke = async (tool: ToolSummary, scope: ToolScope) => {
+  const setGrant = async (tool: ToolSummary, scopes: ToolScope[]) => {
     if (!jwt) return
-    await setToolGrant(jwt, projectId, tool.id, revokeScope(tool.grantedScopes, scope))
+    await setToolGrant(jwt, projectId, tool.id, scopes)
     await refresh()
   }
 
@@ -116,136 +125,168 @@ export function ToolsPage() {
   }
 
   if (!session) return <Spinner className="m-8" />
+  const sheetTool = sheet ? tools?.find((x) => x.id === sheet.toolId) ?? null : null
+
+  const menuFor = (tool: ToolSummary): OverflowMenuItem[] => [
+    { id: "permissions", label: t("extensions.menu.permissions"), onClick: () => setSheet({ kind: "permissions", toolId: tool.id }), testId: "tool-menu-permissions" },
+    { id: "activity", label: t("extensions.activity.heading"), onClick: () => setSheet({ kind: "activity", toolId: tool.id }), testId: "tool-menu-activity" },
+    ...(tool.manifest.mounts.includes("panel") && mounts
+      ? [{ id: "pin", label: mounts.pinned.includes(tool.id) ? t("extensions.unpin") : t("extensions.pin"), onClick: () => mounts.togglePin(tool.id) }]
+      : []),
+    { id: "copy", label: t("extensions.copy.pick"), onClick: () => setSheet({ kind: "copy", toolId: tool.id }) },
+    ...(tool.upstreamToolId ? [{ id: "review", label: t("extensions.review.button"), onClick: () => setSheet({ kind: "review", toolId: tool.id }) }] : []),
+    { id: "sep", type: "separator" as const },
+    { id: "remove", label: t("extensions.remove"), destructive: true, onClick: () => void remove(tool), testId: "tool-menu-remove" },
+  ]
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 p-6">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" render={<Link to={`/project/${projectId}/editor`} />}>
-          <ArrowLeft className="size-4" aria-hidden />
-          {t("extensions.backToEditor")}
-        </Button>
-      </div>
-      <header>
-        <h1 className="flex items-center gap-2 text-xl font-semibold">
-          <Blocks className="size-5" aria-hidden />
-          {t("extensions.title")}
-          {project && <span className="text-muted-foreground">· {project.name}</span>}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("extensions.subtitle")}</p>
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-6 sm:px-6 sm:py-10">
+      <header className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon-sm" aria-label={t("extensions.backToEditor")} render={<Link to={`/project/${projectId}/editor`} />}>
+            <ArrowLeft className="size-4" aria-hidden />
+          </Button>
+          <h1 className="flex min-w-0 items-baseline gap-2 text-lg font-semibold tracking-tight">
+            {t("extensions.title")}
+            {project && <span className="truncate text-sm font-normal text-muted-foreground">{project.name}</span>}
+          </h1>
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button variant="ghost" size="sm" className="ms-auto gap-1.5 text-muted-foreground">
+                  <CircleHelp className="size-3.5" aria-hidden />
+                  <span className="hidden sm:inline">{t("extensions.how.title")}</span>
+                </Button>
+              }
+            />
+            <PopoverContent align="end" className="w-80 p-4 text-sm">
+              <ul className="space-y-2 text-muted-foreground">
+                <li>{t("extensions.how.sandbox")}</li>
+                <li>{t("extensions.how.permissions")}</li>
+                <li>{t("extensions.how.revert")}</li>
+              </ul>
+            </PopoverContent>
+          </Popover>
+        </div>
+        <p className="ps-9 text-sm text-muted-foreground">{t("extensions.subtitle")}</p>
       </header>
 
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {error && (
+        <p role="alert" className="flex items-center gap-2 rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <span className="min-w-0 flex-1">{error}</span>
+          <Button size="icon-xs" variant="ghost" aria-label={t("common.dismiss")} onClick={() => setError(null)}>
+            <X className="size-3.5" />
+          </Button>
+        </p>
+      )}
 
-      {jwt && <BuildToolCard projectId={projectId} jwt={jwt} onBuilt={onBuilt} />}
+      <div className="flex flex-col gap-3">
+        {jwt && <BuildToolCard projectId={projectId} jwt={jwt} onBuilt={onBuilt} />}
 
-      <section aria-label={t("extensions.starters.heading")}>
-        <h2 className="mb-2 text-sm font-semibold">{t("extensions.starters.heading")}</h2>
-        {STARTERS.map((s) => (
-          <div key={s.manifest.name} className="flex items-center gap-3 rounded-lg border bg-card p-3">
+        {candidate && (
+          <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center" data-testid="built-candidate">
+            <ExtIcon mounts={candidate.manifest.mounts} />
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 font-medium">
-                {s.manifest.name}
-                <Badge variant="secondary">{t("extensions.starters.badge")}</Badge>
-              </div>
-              <p className="text-sm text-muted-foreground">{s.manifest.description}</p>
+              <p className="font-medium">{t("extensions.ready.title", { name: candidate.manifest.name })}</p>
+              <p className="line-clamp-2 text-sm text-muted-foreground">{candidate.manifest.description}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {candidate.manifest.scopes.map(sentence).join(" · ")}
+              </p>
             </div>
-            <Button
-              aria-label={`${t("extensions.install")}: ${s.manifest.name}`}
-              onClick={() => setCandidate({ manifest: s.manifest, input: { source: s.source, manifest: s.manifest, origin: "starter" } })}
-            >
-              {t("extensions.install")}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setCandidate(null)} disabled={installing !== null}>
+                {t("extensions.ready.discard")}
+              </Button>
+              <Button size="sm" onClick={() => void install(candidate)} disabled={installing !== null}>
+                {installing === candidate.manifest.name && <Spinner className="size-3.5" />}
+                {t("extensions.install")}
+              </Button>
+            </div>
           </div>
-        ))}
-      </section>
+        )}
+
+        <section aria-label={t("extensions.starters.heading")} className="mt-1">
+          <h2 className="mb-2 text-xs font-medium text-muted-foreground">{t("extensions.starters.heading")}</h2>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {STARTER_EXTENSIONS.map((s) => {
+              const busy = installing === s.manifest.name
+              return (
+                <button
+                  key={s.manifest.name}
+                  type="button"
+                  aria-label={`${t("extensions.install")}: ${s.manifest.name}`}
+                  disabled={installing !== null}
+                  onClick={() => void install({ manifest: s.manifest, input: { source: s.source, manifest: s.manifest, origin: "starter" } })}
+                  className="group flex w-full min-w-0 items-center gap-3 rounded-xl border bg-card p-3 text-start transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none disabled:opacity-60"
+                >
+                  <ExtIcon mounts={s.manifest.mounts} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{s.manifest.name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{s.manifest.description}</span>
+                  </span>
+                  {busy ? <Spinner className="size-4" /> : <Plus className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      </div>
 
       <section aria-label={t("extensions.installed.heading")}>
-        <h2 className="mb-2 text-sm font-semibold">{t("extensions.installed.heading")}</h2>
+        <h2 className="mb-2 text-xs font-medium text-muted-foreground">{t("extensions.installed.heading")}</h2>
         {tools === null ? (
           <Spinner />
         ) : tools.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("extensions.installed.empty")}</p>
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            <Blocks className="size-5" aria-hidden />
+            {t("extensions.installed.empty")}
+          </div>
         ) : (
-          <ul className="space-y-3">
+          <ul className="divide-y rounded-xl border bg-card">
             {tools.map((tool) => (
-              <li key={tool.id} className="rounded-lg border bg-card p-3" data-testid="installed-tool" data-tool-name={tool.name}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{tool.name}</span>
-                  <Badge variant="outline">{t("extensions.version", { version: tool.currentVersion })}</Badge>
-                  <Badge variant="outline" className="font-mono">{t("extensions.codeHash", { hash: tool.codeHash.slice(0, 8) })}</Badge>
-                  {tool.firstParty && (
-                    <Badge variant="outline" data-testid="first-party-badge">
-                      {t("extensions.firstParty.badge")}
-                    </Badge>
-                  )}
-                  {jwt && <ReviewCopiedExtension projectId={projectId} tool={tool} jwt={jwt} />}
-                  <div className="ml-auto flex gap-2">
-                    <Button size="sm" render={<Link to={`/project/${projectId}/extensions/${tool.id}`} />}>
-                      <Play className="size-3.5" aria-hidden />
-                      {t("extensions.open")}
-                    </Button>
-                    <Button size="sm" variant="outline" aria-pressed={activityFor === tool.id} onClick={() => setActivityFor(activityFor === tool.id ? null : tool.id)}>
-                      <History className="size-3.5" aria-hidden />
-                      {t("extensions.activity.heading")}
-                    </Button>
-                    {tool.manifest.mounts.includes("panel") && mounts && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-pressed={mounts.pinned.includes(tool.id)}
-                        aria-label={`${mounts.pinned.includes(tool.id) ? t("extensions.unpin") : t("extensions.pin")}: ${tool.name}`}
-                        onClick={() => mounts.togglePin(tool.id)}
-                      >
-                        {mounts.pinned.includes(tool.id) ? <PinOff className="size-3.5" aria-hidden /> : <Pin className="size-3.5" aria-hidden />}
-                      </Button>
+              <li key={tool.id} className="flex items-center gap-3 px-3 py-2.5" data-testid="installed-tool" data-tool-name={tool.name}>
+                <ExtIcon mounts={tool.manifest.mounts} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <Link to={`/project/${projectId}/extensions/${tool.id}`} className="truncate text-sm font-medium hover:underline">
+                      {tool.name}
+                    </Link>
+                    {tool.firstParty && (
+                      <AppTooltip content={t("extensions.firstParty.badge")}>
+                        <span data-testid="first-party-badge" aria-label={t("extensions.firstParty.badge")} className="inline-flex">
+                          <ShieldCheck className="size-3.5 text-emerald-600" aria-hidden />
+                        </span>
+                      </AppTooltip>
                     )}
-                    <Button size="sm" variant="ghost" aria-label={`${t("extensions.remove")}: ${tool.name}`} onClick={() => void remove(tool)}>
-                      <Trash2 className="size-3.5" aria-hidden />
-                    </Button>
+                    {tool.upstreamToolId && (
+                      <span className="rounded bg-amber-500/10 px-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">{t("extensions.review.badgeShort")}</span>
+                    )}
                   </div>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {tool.manifest.mounts.filter((m) => m !== "page" || tool.manifest.mounts.length === 1).map(where).join(" · ")}
+                    <span className="hidden sm:inline"> · {t("extensions.version", { version: tool.currentVersion })}</span>
+                  </p>
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">{tool.description}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {t("extensions.mounts.label")}:{" "}
-                  {tool.manifest.mounts
-                    .map((m) => (m === "page" ? t("extensions.mounts.page") : m === "panel" ? t("extensions.mounts.panel") : m === "inline" ? t("extensions.mounts.inline") : t("extensions.mounts.editor")))
-                    .join(" · ")}
-                </p>
-                {jwt && (
-                  <div className="mt-1">
-                    <CopyExtension projectId={projectId} tool={tool} jwt={jwt} />
-                  </div>
-                )}
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-muted-foreground">{t("extensions.grants.label")}:</span>
-                  {tool.grantedScopes.length === 0 && <span className="text-muted-foreground">{t("extensions.grants.none")}</span>}
-                  {tool.grantedScopes.map((scope) => (
-                    <Badge key={scope} variant="secondary" className="gap-1" data-testid="tool-grant">
-                      {scopeLabel(scope)}
-                      <button type="button" aria-label={t("extensions.grants.revoke", { scope: scopeLabel(scope) })} onClick={() => void revoke(tool, scope)}>
-                        <X className="size-3" aria-hidden />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-                {activityFor === tool.id && jwt && session && (
-                  <ToolActivityPanel projectId={projectId} tool={tool} jwt={jwt} author={session.username} />
-                )}
+                <AppTooltip content={t("extensions.open")}>
+                  <Button size="icon-sm" variant="ghost" aria-label={`${t("extensions.open")}: ${tool.name}`} render={<Link to={`/project/${projectId}/extensions/${tool.id}`} />}>
+                    <ArrowUpRight className="size-4" aria-hidden />
+                  </Button>
+                </AppTooltip>
+                <OverflowMenu items={menuFor(tool)} ariaLabel={t("extensions.menu.label", { name: tool.name })} triggerSize="icon-sm" testId="tool-menu" />
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      {candidate && (
-        <InstallToolDialog
-          manifest={candidate.manifest}
-          roleLevel={roleLevel ?? null}
-          busy={installing}
-          onInstall={(grant) => void install(grant)}
-          onCancel={() => setCandidate(null)}
-        />
+      {sheet && sheetTool && jwt && sheet.kind === "permissions" && (
+        <PermissionsDialog tool={sheetTool} roleLevel={roleLevel ?? null} onChange={(scopes) => setGrant(sheetTool, scopes)} onClose={() => setSheet(null)} />
       )}
+      {sheet && sheetTool && jwt && sheet.kind === "activity" && (
+        <ActivityDialog projectId={projectId} tool={sheetTool} jwt={jwt} author={session.username} onClose={() => setSheet(null)} />
+      )}
+      {sheet && sheetTool && jwt && sheet.kind === "copy" && <CopyDialog projectId={projectId} tool={sheetTool} jwt={jwt} onClose={() => setSheet(null)} />}
+      {sheet && sheetTool && jwt && sheet.kind === "review" && <ReviewCodeDialog projectId={projectId} tool={sheetTool} jwt={jwt} onClose={() => setSheet(null)} />}
     </div>
   )
 }

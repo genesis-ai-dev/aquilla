@@ -66,9 +66,9 @@ test("Smart Extensions — the builder makes a custom editor", async ({ page }, 
   await cell.press("Control+Enter")
   await expect(tools.permissionPrompt()).toBeVisible()
   await page.waitForTimeout(800)
-  await tools.answerPrompt("Always allow")
+  await tools.answerPrompt("Always")
   await frame.getByRole("button", { name: "Validate MAT 1:1" }).click()
-  await tools.answerPrompt("Always allow")
+  await tools.answerPrompt("Always")
   await page.waitForTimeout(2500)
 
   const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)

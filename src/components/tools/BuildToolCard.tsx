@@ -1,15 +1,16 @@
 /**
- * "Build me a tool that…" — runs the builder loop (model → lint → sandboxed
- * smoke render → repair ≤2×) with a progress card, then hands the vetted
- * candidate to the install dialog.
+ * The one prompt box: describe a tool, press Build. The builder loop (model →
+ * lint → sandboxed smoke render → repair ≤2×) shows as a single calm card —
+ * one step label and a quiet progress bar — and a failure as one short line
+ * with "Try again" (the builder's own message sits behind "Details").
  */
 
 import { useState } from "react"
-import { CheckCircle2, Hammer, XCircle } from "lucide-react"
+import { ArrowUp, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Textarea } from "@/components/ui/textarea"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { cn } from "@/lib/utils"
 import { runBuildFlow, type BuildFlowResult, type BuildPhase } from "@/lib/tools/build-flow"
 import { runToolSmoke } from "@/lib/tools/smoke"
 import { buildToolAttempt } from "@/lib/tools/tools-api"
@@ -17,6 +18,25 @@ import { buildToolAttempt } from "@/lib/tools/tools-api"
 export interface BuiltTool {
   request: string
   result: BuildFlowResult
+}
+
+/** Rough share of the loop each phase stands for (it is one model call plus
+ *  quick gates, so "writing" dominates). */
+function progressOf(phase: BuildPhase | null): number {
+  if (!phase) return 4
+  switch (phase.kind) {
+    case "generating":
+      return phase.attempt === 0 ? 30 : 70
+    case "linting":
+      return phase.attempt === 0 ? 72 : 88
+    case "smoke":
+      return phase.attempt === 0 ? 82 : 94
+    case "repairing":
+      return 60
+    case "done":
+    case "failed":
+      return 100
+  }
 }
 
 export function BuildToolCard({
@@ -30,37 +50,41 @@ export function BuildToolCard({
 }) {
   const t = useT()
   const [request, setRequest] = useState("")
-  const [phases, setPhases] = useState<BuildPhase[]>([])
+  const [phase, setPhase] = useState<BuildPhase | null>(null)
   const [running, setRunning] = useState(false)
-  const [last, setLast] = useState<BuildFlowResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+  const [showDetails, setShowDetails] = useState(false)
 
   const build = async () => {
     const text = request.trim()
-    if (!text) return
+    if (!text || running) return
     setRunning(true)
-    setPhases([])
-    setLast(null)
-    setError(null)
+    setPhase(null)
+    setFailure(null)
+    setShowDetails(false)
     try {
       const result = await runBuildFlow(text, {
         attempt: (body) => buildToolAttempt(jwt, projectId, body),
         smoke: (source, manifest) => runToolSmoke(source, manifest),
-        onPhase: (phase) => setPhases((prev) => [...prev, phase]),
+        onPhase: setPhase,
       })
-      setLast(result)
-      if (result.ok) onBuilt({ request: text, result })
+      if (result.ok) {
+        onBuilt({ request: text, result })
+        setRequest("")
+        setPhase(null)
+      } else setFailure(result.failures[result.failures.length - 1] ?? "")
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setFailure(err instanceof Error ? err.message : String(err))
     } finally {
       setRunning(false)
     }
   }
 
-  const phaseText = (p: BuildPhase): string => {
-    switch (p.kind) {
+  const step = (p: BuildPhase | null): string => {
+    switch (p?.kind) {
+      case undefined:
       case "generating":
-        return t("extensions.build.phaseGenerating", { attempt: p.attempt + 1 })
+        return t("extensions.build.phaseGenerating", { attempt: (p?.attempt ?? 0) + 1 })
       case "linting":
         return t("extensions.build.phaseLinting")
       case "smoke":
@@ -75,50 +99,68 @@ export function BuildToolCard({
   }
 
   return (
-    <section aria-label={t("extensions.build.heading")} className="rounded-lg border bg-card p-4">
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-        <Hammer className="size-4" aria-hidden />
-        {t("extensions.build.heading")}
-      </h2>
-      <Textarea
-        aria-label={t("extensions.build.heading")}
-        placeholder={t("extensions.build.placeholder")}
-        value={request}
-        onChange={(e) => setRequest(e.target.value)}
-        rows={3}
-        disabled={running}
-      />
-      <div className="mt-2 flex items-center gap-3">
-        <Button onClick={() => void build()} disabled={running || request.trim().length === 0}>
-          {running && <Spinner className="size-3.5" />}
-          {t("extensions.build.submit")}
-        </Button>
-        {last && <span className="text-xs text-muted-foreground">{t("extensions.build.cost", { cost: last.cost.toFixed(2) })}</span>}
+    <section aria-label={t("extensions.build.heading")} className="flex flex-col gap-2">
+      <div
+        className={cn(
+          "relative rounded-xl border bg-card shadow-xs transition-[box-shadow,border-color]",
+          "focus-within:border-ring/60 focus-within:ring-3 focus-within:ring-ring/15",
+        )}
+      >
+        <textarea
+          aria-label={t("extensions.build.heading")}
+          placeholder={t("extensions.build.placeholder")}
+          value={request}
+          onChange={(e) => setRequest(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault()
+              void build()
+            }
+          }}
+          rows={3}
+          disabled={running}
+          className="block w-full resize-none rounded-xl bg-transparent px-4 pt-3.5 pb-12 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/70 disabled:opacity-60"
+        />
+        <div className="absolute end-2.5 bottom-2.5 flex items-center gap-2">
+          <kbd className="hidden rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline">⌘↵</kbd>
+          <Button size="sm" onClick={() => void build()} disabled={running || request.trim().length === 0} className="gap-1.5 rounded-lg">
+            {running ? <Spinner className="size-3.5" /> : <ArrowUp className="size-3.5" aria-hidden />}
+            {t("extensions.build.submit")}
+          </Button>
+        </div>
       </div>
-      {phases.length > 0 && (
-        <ol className="mt-3 space-y-1 text-sm" aria-live="polite" data-testid="tool-build-progress">
-          {phases.map((p, i) => (
-            <li key={i} className="flex items-start gap-2">
-              {p.kind === "done" ? (
-                <CheckCircle2 className="mt-0.5 size-4 text-emerald-600" aria-hidden />
-              ) : p.kind === "failed" ? (
-                <XCircle className="mt-0.5 size-4 text-destructive" aria-hidden />
-              ) : i === phases.length - 1 && running ? (
-                <Spinner className="mt-0.5 size-4" />
-              ) : (
-                <CheckCircle2 className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
-              )}
-              <span>{phaseText(p)}</span>
-            </li>
-          ))}
-        </ol>
+
+      {running && (
+        <div className="rounded-xl border bg-card px-4 py-3" aria-live="polite" data-testid="tool-build-progress">
+          <div className="flex items-center gap-2 text-sm">
+            <Spinner className="size-3.5 text-muted-foreground" />
+            <span>{step(phase)}</span>
+          </div>
+          <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressOf(phase)}>
+            <div className="h-full rounded-full bg-primary transition-[width] duration-700 ease-out" style={{ width: `${progressOf(phase)}%` }} />
+          </div>
+        </div>
       )}
-      {last && !last.ok && (
-        <pre className="mt-2 max-h-40 overflow-auto rounded bg-muted p-2 text-xs whitespace-pre-wrap">
-          {last.failures[last.failures.length - 1]}
-        </pre>
+
+      {failure !== null && !running && (
+        <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+          <div className="flex items-center gap-3">
+            <span className="min-w-0 flex-1 text-destructive">{t("extensions.build.failed")}</span>
+            {failure && (
+              <Button size="xs" variant="ghost" onClick={() => setShowDetails((v) => !v)} aria-expanded={showDetails} className="text-muted-foreground">
+                <ChevronRight className={cn("size-3 transition-transform", showDetails && "rotate-90")} aria-hidden />
+                {t("extensions.build.details")}
+              </Button>
+            )}
+            <Button size="xs" variant="outline" onClick={() => void build()}>
+              {t("extensions.build.tryAgain")}
+            </Button>
+          </div>
+          {showDetails && failure && (
+            <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-2 text-xs whitespace-pre-wrap text-muted-foreground">{failure}</pre>
+          )}
+        </div>
       )}
-      {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
     </section>
   )
 }

@@ -67,7 +67,7 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
   A tool never supplies a parent id: the host chains on the live head.
 - **Permissions.** Scopes `read:cells`, `read:terms`, `write:target`, `write:validation`,
   `ai:generate`. Install approves a standing grant (reads pre-checked, writes ask on first use);
-  an ungranted call pauses on "<Extension> wants to <scope>. Allow once / Always allow / Deny".
+  an ungranted call pauses on "Allow <Extension> to <scope>? Deny / Allow / Always".
   Grants never exceed the user's role (client mirror of the role policy); the server's
   `authorize()` still checks every event. Revoke on the management page.
 - **Attribution & revert.** Writes carry `payload.tool_origin = {origin:"tool", toolId, version,

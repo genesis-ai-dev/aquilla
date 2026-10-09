@@ -981,9 +981,9 @@ export const projectSettings = defineNamespace({
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.additionalLanesLabel": "Additional target lanes",
+    "projectSettings.languages.additionalLanesLabel": "Target lanes",
     "projectSettings.languages.additionalLanesDescription":
-      "Extra target-language lanes for this project — e.g. dialect variants or " +
+      "Target-language lanes for this project — e.g. dialect variants or " +
       "parallel drafts of the same source.",
     "projectSettings.languages.laneNameLabel": "Lane name",
     "projectSettings.languages.laneNamePlaceholder": "Name this lane",
@@ -1013,7 +1013,7 @@ export const projectSettings = defineNamespace({
       "it — the lane switcher will number them.",
     "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
     "projectSettings.languages.nameTooLongError": "That name is too long.",
-    "projectSettings.languages.noAdditionalLanes": "No additional lanes yet.",
+    "projectSettings.languages.noAdditionalLanes": "No target lanes yet.",
     "projectSettings.languages.archiveConfirm":
       "Archive \"{lane}\"? It's hidden from the lane switcher by default but kept — " +
       "its cell data is preserved and you can restore it anytime.",

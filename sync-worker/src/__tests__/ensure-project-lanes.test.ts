@@ -10,7 +10,11 @@
 // is edited, which is AQU-1585.
 
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { createProjectShared, updateProjectSettingsShared } from "../../../db/shared/projects"
+import {
+  createProjectShared,
+  patchProjectSettingsShared,
+  updateProjectSettingsShared,
+} from "../../../db/shared/projects"
 import {
   createTargetLane,
   ensureProjectLanes,
@@ -735,6 +739,106 @@ describe("AQU-1585 editing a lane language", () => {
   })
 })
 
+// AQU-1810: regression of AQU-1585. On a project that still stores a
+// settings target language, the default lane IS that language — by its
+// `legacy_tag ''` identity, not by its label. Rename the default lane and the
+// AQU-1585 name match misses, so every settings save used to mint an empty
+// lane tagged with the stored language. A lane archive is a settings save, so
+// archiving one lane could make another appear.
+describe("AQU-1810 settings saves on a mismatched default lane", () => {
+  const PORTUGUESE_SETTINGS = { sourceLanguage: "English", targetLanguage: "Portuguese" }
+
+  /**
+   * The shape the bug needs, as the live dev example `c86c1a2f` carries it:
+   * settings target language Portuguese, a `legacy_tag ''` default lane
+   * renamed to something else, and a second active lane so one can be
+   * archived.
+   */
+  async function mismatchedProject(defaultLaneName: string) {
+    await ensureProjectLanes(t.db, PROJECT, {
+      settings: PORTUGUESE_SETTINGS,
+      // Old events name the bridge, which is how a `''` lane exists at all.
+      dataTargetTags: [""],
+    })
+    await insertTargetLane(t.db, PROJECT, {
+      id: "aa11bb22",
+      language: "German",
+      name: null,
+      langCode: null,
+      legacyTag: "German",
+    })
+    const bridge = (await listProjectLanes(t.db, PROJECT)).find((lane) => lane.legacyTag === "")!
+    const renamed = await renameTargetLane(t.db, PROJECT, bridge.id, defaultLaneName)
+    expect(renamed.status).toBe("ok")
+    return { bridgeId: bridge.id, germanId: "aa11bb22" }
+  }
+
+  /** The in-app settings write: the blob still holds the stored language. */
+  function saveSettings(settings: Record<string, unknown>, version: number) {
+    return updateProjectSettingsShared(t.db, {
+      projectId: PROJECT,
+      settings,
+      ifMatchVersion: version,
+      updatedBy: 1,
+    })
+  }
+
+  it("adds no lane when the default lane's name differs from the stored language", async () => {
+    await mismatchedProject("es")
+    const before = await lanes(t)
+    const saved = await saveSettings(PORTUGUESE_SETTINGS, 0)
+    expect(saved.status).toBe("ok")
+    expect(await lanes(t)).toEqual(before)
+    expect((await lanes(t)).some((row) => row.legacy_tag === "Portuguese")).toBe(false)
+  })
+
+  it("adds no lane when an unrelated setting is saved", async () => {
+    await mismatchedProject("Brazilian Portuguese")
+    const before = await lanes(t)
+    const saved = await saveSettings({ ...PORTUGUESE_SETTINGS, validationThreshold: 2 }, 0)
+    expect(saved.status).toBe("ok")
+    expect(await lanes(t)).toEqual(before)
+  })
+
+  it("archives a lane without making another one appear, and records the archive", async () => {
+    const { germanId } = await mismatchedProject("es")
+    const before = await lanes(t)
+    // What the archive route does: flip the lane row, then mirror the tag into
+    // settings.archivedLanes — and that mirror is the settings save that used
+    // to mint the lane.
+    expect((await setTargetLaneArchived(t.db, PROJECT, germanId, true)).status).toBe("ok")
+    const mirrored = await patchProjectSettingsShared(t.db, {
+      projectId: PROJECT,
+      ops: [{ key: "archivedLanes", value: ["German"] }],
+      ifMatchVersion: 0,
+      updatedBy: 1,
+    })
+    expect(mirrored.status).toBe("ok")
+    const after = await listProjectLanes(t.db, PROJECT)
+    expect(after.filter((lane) => lane.role === "target")).toHaveLength(2)
+    expect(after.find((lane) => lane.id === germanId)?.archivedAt).toBeTruthy()
+    expect(after.some((lane) => lane.legacyTag === "Portuguese")).toBe(false)
+    expect((await lanes(t)).map((row) => row.legacy_tag)).toEqual(before.map((row) => row.legacy_tag))
+  })
+
+  it("negative case: a default lane still named its stored language is untouched too", async () => {
+    const { germanId } = await mismatchedProject("Portuguese")
+    const before = await lanes(t)
+    expect((await saveSettings(PORTUGUESE_SETTINGS, 0)).status).toBe("ok")
+    expect(await lanes(t)).toEqual(before)
+    expect((await setTargetLaneArchived(t.db, PROJECT, germanId, true)).status).toBe("ok")
+    expect((await lanes(t)).map((row) => row.legacy_tag)).toEqual(before.map((row) => row.legacy_tag))
+  })
+
+  it("still registers a genuinely new lane the blob names", async () => {
+    await mismatchedProject("es")
+    const saved = await saveSettings({ ...PORTUGUESE_SETTINGS, targetLanes: ["Yoruba"] }, 0)
+    expect(saved.status).toBe("ok")
+    const tags = (await lanes(t)).filter((row) => row.role === "target").map((row) => row.legacy_tag)
+    expect(tags.sort()).toEqual(["", "German", "Yoruba"])
+  })
+})
+
 describe("isDefaultLaneUnderAnotherName", () => {
   const source = { role: "source", name: "English", legacyTag: null }
   const spanish = { role: "target", name: "Spanish", legacyTag: "" }
@@ -761,6 +865,27 @@ describe("isDefaultLaneUnderAnotherName", () => {
         { role: "target", name: "French", legacyTag: "" },
       ]),
     ).toBe(false)
+  })
+
+  // AQU-1810: the stored `targetLanguage` the entry was planned from names the
+  // default lane whatever that lane is now called.
+  it("recognises the stored target language, whatever the default lane is named", () => {
+    // The lane's own stored language identifies it whether or not the caller
+    // passes the setting; the rename only hid it from the display-name match.
+    const renamed = { role: "target", language: "Portuguese", name: "es", legacyTag: "" }
+    expect(isDefaultLaneUnderAnotherName("Portuguese", [source, renamed])).toBe(true)
+    expect(isDefaultLaneUnderAnotherName("Portuguese", [source, renamed], "Portuguese")).toBe(true)
+    // A row that predates AQU-1592 stores no language, so only the setting the
+    // entry was planned from says that this is the default lane.
+    const noLanguage = { role: "target", language: null, name: "es", legacyTag: "" }
+    expect(isDefaultLaneUnderAnotherName("Portuguese", [source, noLanguage])).toBe(false)
+    expect(isDefaultLaneUnderAnotherName("Portuguese", [source, noLanguage], "Portuguese")).toBe(true)
+    // A lane genuinely beside the default one is still its own lane.
+    expect(isDefaultLaneUnderAnotherName("German", [source, renamed], "Portuguese")).toBe(false)
+    // AQU-1532 holds: a regional lane beside the primary keeps its own tag.
+    expect(isDefaultLaneUnderAnotherName("pt-BR", [source, renamed], "Portuguese")).toBe(false)
+    // Still nothing to say without a default lane row.
+    expect(isDefaultLaneUnderAnotherName("Portuguese", [source], "Portuguese")).toBe(false)
   })
 
   it("says nothing when there is no named default lane, or for the lanes it never drops", () => {

@@ -5,8 +5,10 @@ import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole, resolveProjectRoles } from "
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 import {
+  inAudioCountedFileSetSql,
   inCountedFileSql,
   inCountedFileSetSql,
+  uncountedAudioFilesCteSql,
   uncountedFilesCteSql,
   countedFileSql,
   notHiddenFileSql,
@@ -1261,7 +1263,7 @@ export interface PortfolioLane {
   role?: "source" | "target"
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 /** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
@@ -1285,6 +1287,8 @@ interface PortfolioDbRow {
   filled_cells: number
   ai_drafted_cells: number
   last_edit_at: number | null
+  /** AQU-1566: what audio coverage divides by (a dubbing file's cue sheet, else the file). */
+  audio_total_cells: number
   audio_cells: number
   validated_audio_cells: number
   recorded_ms: number
@@ -1326,6 +1330,8 @@ function mapPortfolioRow(
     filledCells: visibleText ? visibleText.filledCells : r.filled_cells,
     aiDraftedCells: visibleText ? visibleText.aiDraftedCells : r.ai_drafted_cells,
     lastEditAt: laterEdit(visibleText ? visibleText.lastEditAt : r.last_edit_at, sourceActivityAt),
+    // Lane-independent like the audio counts, so the read wall leaves it alone.
+    audioTotalCells: Number(r.audio_total_cells) || 0,
     audioCells: r.audio_cells,
     validatedAudioCells: r.validated_audio_cells,
     recordedMs: r.recorded_ms,
@@ -1652,7 +1658,8 @@ const PORTFOLIO_CELL_COLUMNS = `
             ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
             ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
             ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
-            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,`
+            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,
+            ${lessStructural('COALESCE(SUM(COALESCE(cue.cell_count, f.cell_count)), 0)', 'COALESCE(SUM(COALESCE(cue.structural_cell_count, f.structural_cell_count)), 0)')} AS audio_total_cells,`
 
 /**
  * Shared join tail — the org default now has to reach the rollups too.
@@ -1668,6 +1675,7 @@ const PORTFOLIO_CELL_COLUMNS = `
  */
 const PORTFOLIO_JOINS = `
        LEFT JOIN files f ON f.project_id = p.id AND ${countedFileSql('f')}
+       LEFT JOIN cue ON cue.project_id = f.project_id AND cue.anchor_file_id = f.id
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN org_settings os ON os.org_id = p.org_id
        LEFT JOIN au ON au.project_id = p.id
@@ -1683,11 +1691,11 @@ const PORTFOLIO_UNIT_COLUMNS = `
  * Audio coverage and validation, with structural cells dropped where a project
  * excludes them.
  *
- * `audioPct` divides audio cells by the TEXT total while `audioValidatedPct`
- * divides by the audio total, so leaving audio alone while the text denominator
- * shrank would let a scripture project whose headings were voiced read over
- * 100% covered. Bulk synthesis has no type filter, so those takes genuinely
- * exist.
+ * Both audio fractions divide by `audio_total_cells` (AQU-1566: each file's
+ * cue sheet, else the file), which drops structural cells the same way the
+ * text total does, so leaving audio alone while that denominator shrank would
+ * let a scripture project whose headings were voiced read over 100% covered.
+ * Bulk synthesis has no type filter, so those takes genuinely exist.
  *
  * `recorded_ms` never takes the exclusion: it measures work that was actually
  * done rather than progress against a denominator — the same reasoning that
@@ -1714,9 +1722,11 @@ const PORTFOLIO_UNIT_COLUMNS = `
  *     projects up front, as an array the executor has in hand before it
  *     touches `cells`: empty array, no read; otherwise an index lookup per
  *     excluding project.
- *   * The counted-files rule is applied against `uncounted_files`, one small
- *     set built once for the page's projects, never as a probe per audio row
- *     (see `inCountedFileSetSql`). That probe ran ~140k times here.
+ *   * The counted-files rule is applied against `uncounted_audio_files`, one
+ *     small set built once for the page's projects, never as a probe per audio
+ *     row (see `inCountedFileSetSql`). That probe ran ~140k times here. It is
+ *     the AUDIO form of the set (AQU-1566), which keeps a dubbing project's
+ *     cue sheet: both of its readers here describe recordings.
  *
  * Measured on the dev database for an 8-org, 433-project caller, same rows
  * either way: 6-9s warm and 74s cold before, 0.7s after.
@@ -1746,12 +1756,15 @@ const portfolioCtes = (orgPredicate: string) => `
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.${orgPredicate}
-     ), ${uncountedFilesCteSql('SELECT project_id FROM policy')},
+     ), ${uncountedAudioFilesCteSql('SELECT project_id FROM policy')},
      structural_cells AS (
        -- AQU-1626: scoped to counted files, because this set is a SUBTRACTOR
-       -- and has to describe the same files the totals above now do. A heading
-       -- inside a hidden or deleted file is no longer in the numerator, so
+       -- and has to describe the same files the totals it is taken off do. A
+       -- heading inside a deleted file is no longer in the numerator, so
        -- subtracting it would push a project's count below its real one.
+       -- AQU-1566: its only reader is au_cells below, so it takes the AUDIO
+       -- form of the rule, the one au_cells uses: a dubbing project's cue
+       -- sheet stays in, as it does there.
        --
        -- The project filter is an ARRAY on purpose, not a join to policy: see
        -- the note above portfolioCtes. Do not turn it back into a join.
@@ -1760,7 +1773,7 @@ const portfolioCtes = (orgPredicate: string) => `
         WHERE c.project_id = ANY(ARRAY(
                 SELECT pol.project_id FROM policy pol WHERE pol.excluded))
           AND c.side = 'source' AND c.type IN ('heading', 'paratext')
-          AND ${inCountedFileSetSql('c')}
+          AND ${inAudioCountedFileSetSql('c')}
      ), au_cells AS MATERIALIZED (
        -- AQU-490, level one: one row per CELL, carrying the minimum vote count
        -- across its selected dub takes. Two tracks sound together, so a cell is
@@ -1791,11 +1804,14 @@ const portfolioCtes = (orgPredicate: string) => `
           AND sc.file_id = a.file_id
           AND sc.cell_id = a.cell_id
         WHERE a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
-          -- AQU-1626: takes recorded against a cue sheet or a deleted file are
-          -- not coverage of the work. The recorded-milliseconds sum takes the
-          -- same filter: a tombstoned file's hours are not hours the project
-          -- has banked.
-          AND ${inCountedFileSetSql('a')}
+          -- AQU-1626: takes recorded against a deleted file are not coverage
+          -- of the work. The recorded-milliseconds sum takes the same filter:
+          -- a tombstoned file's hours are not hours the project has banked.
+          -- AQU-1566: the AUDIO form of the rule, which keeps the cue sheet. A
+          -- dubbing project records every take against its hidden audio-cues
+          -- sibling (AQU-1278), so the text rule here read every dubbed
+          -- episode as 0% recorded while its plan board showed the takes.
+          AND ${inAudioCountedFileSetSql('a')}
           AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
         GROUP BY a.project_id, a.file_id, a.cell_id
      ), au AS MATERIALIZED (
@@ -1812,6 +1828,24 @@ const portfolioCtes = (orgPredicate: string) => `
          FROM au_cells c
          JOIN policy pol ON pol.project_id = c.project_id
         GROUP BY c.project_id
+     ), cue AS MATERIALIZED (
+       -- AQU-1566: each counted file's cue sheet, for the AUDIO denominator.
+       -- A dubbing project records against its hidden audio-cues sibling, not
+       -- its subtitles, and the two do not share a cell count (646 subtitle
+       -- rows against 548 cues on The Chosen's first episode). The text total
+       -- above no longer carries the sheet, so dividing the sheet's takes by
+       -- it read a part-recorded episode as 100% recorded. This is the plan
+       -- board's own rule (readPlanUnitsSql): measure the recording against
+       -- the newest live sheet where there is one, else against the file
+       -- itself. DISTINCT ON keeps the join 1:1 with its file, so the SUMs
+       -- beside it do not fan out. Scoped through policy, which is already
+       -- bounded to the org set, so it needs no binds of its own.
+       SELECT DISTINCT ON (s.project_id, s.anchor_file_id)
+              s.project_id, s.anchor_file_id, s.cell_count, s.structural_cell_count
+         FROM files s
+         JOIN policy pol ON pol.project_id = s.project_id
+        WHERE s.role = 'audio-cues' AND s.deleted_at IS NULL AND s.anchor_file_id IS NOT NULL
+        ORDER BY s.project_id, s.anchor_file_id, s.id DESC
      ), pu AS MATERIALIZED (
        ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
      )`
@@ -1912,8 +1946,9 @@ async function aiDraftedByLane(
 /**
  * Per-project text the caller may see. Null when the wall is off, the caller
  * is a platform admin, or every project on the page is already unrestricted
- * (org Maintainer+, creator, or a resolved role at Maintainer+). A missing map
- * entry means that project stays on the SQL totals.
+ * (org role at project lead or above, creator, or a resolved project role at
+ * project lead or above — AQU-1795). A missing map entry means that project
+ * stays on the SQL totals.
  */
 async function visiblePortfolioText(
   env: Env,

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 
 // No session → useFileAudioAttachments bails before any network read and
@@ -29,6 +29,9 @@ vi.mock("@/lib/audio/play-queue", async (importActual) => {
 // speed test can put the bar in the film-driven state without a video element.
 const videoController = vi.hoisted(() => ({ setRate: vi.fn(), setVolume: vi.fn() }))
 const transportSource = vi.hoisted(() => ({ value: "queue" as "queue" | "video" }))
+// AQU-1565 follow-up: what the bar asked the transport, so a test can see the
+// playback source it read from the store.
+const transportArgs = vi.hoisted(() => ({ last: null as null | { playbackSource?: string } }))
 vi.mock("@/lib/timeline/video-controller", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/timeline/video-controller")>()
   return { ...actual, useVideoController: () => videoController }
@@ -37,10 +40,13 @@ vi.mock("@/hooks/useTransportForFile", async (importActual) => {
   const actual = await importActual<typeof import("@/hooks/useTransportForFile")>()
   return {
     ...actual,
-    useTransportForFile: (args: Parameters<typeof actual.useTransportForFile>[0]) => ({
-      ...actual.useTransportForFile(args),
-      source: transportSource.value,
-    }),
+    useTransportForFile: (args: Parameters<typeof actual.useTransportForFile>[0]) => {
+      transportArgs.last = args
+      return {
+        ...actual.useTransportForFile(args),
+        source: transportSource.value,
+      }
+    },
   }
 })
 
@@ -62,6 +68,7 @@ import { startQueue, setQueueRate } from "@/lib/audio/play-queue"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { __resetPlaybackSourceForTests, setPlaybackSource } from "@/lib/audio/playback-source"
 
 function cell(over: Partial<CellData> = {}): CellData {
   return {
@@ -248,5 +255,40 @@ describe("VoicePlaybackBar — playback speed", () => {
     pickSpeed("0.75x")
     expect(setQueueRate).toHaveBeenCalledWith(0.75)
     expect(videoController.setRate).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1565 follow-up. WHY: on a YouTube file with an uploaded recording the bar
+// must drive the same engine the pane is sounding, which is the video's own
+// sound until the person picks the recording. The bar reads that choice from
+// the shared store, per file.
+describe("VoicePlaybackBar — the chosen sound", () => {
+  const YT = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+  const media = cell({
+    id: "m1", medium: "media", type: "media", original: "episode.wav",
+    selectedAudioId: "f1-clip", attachments: { "f1-clip": { url: "frontier-audio://f1-clip.wav", type: "audio" } },
+  })
+
+  it("asks for the video's own sound by default, and the recording once picked", () => {
+    __resetPlaybackSourceForTests()
+    localStorage.removeItem("aquilla:playbackSource:f1")
+    const { rerender } = render(
+      <VoicePlaybackBar cells={[media]} projectId="p" session={null} settings={undefined} coreMediaUrl={YT} videoPaneOnScreen />,
+    )
+    expect(transportArgs.last?.playbackSource).toBe("video")
+    act(() => setPlaybackSource("f1", "recording"))
+    rerender(
+      <VoicePlaybackBar cells={[media]} projectId="p" session={null} settings={undefined} coreMediaUrl={YT} videoPaneOnScreen />,
+    )
+    expect(transportArgs.last?.playbackSource).toBe("recording")
+    localStorage.removeItem("aquilla:playbackSource:f1")
+    __resetPlaybackSourceForTests()
+  })
+
+  it("asks for the recording on a streamed film, as it always did", () => {
+    render(
+      <VoicePlaybackBar cells={[media]} projectId="p" session={null} settings={undefined} coreMediaUrl="https://cdn/ep.m3u8" videoPaneOnScreen />,
+    )
+    expect(transportArgs.last?.playbackSource).toBe("recording")
   })
 })

@@ -38,16 +38,18 @@ async function openEditor() {
 describe("MemberLaneScopeEditor — the project's languages as checkboxes", () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it("lists the main language by name, and saves it as the default lane ('')", async () => {
+  it("lists the default lane and registry lanes when the project has no lane rows, and ignores settings languages", async () => {
     vi.mocked(fetchMemberScopeView).mockResolvedValue({ scopes: [], laneNames: {} })
     vi.mocked(fetchProjectSettings).mockResolvedValue(settings("German", ["Spanish"]))
     const onSaved = await openEditor()
-    expect(screen.getByLabelText("Lane German")).not.toBeChecked()
+    // AQU-1595: targetLanguage is not a lane. The default option keeps value ""
+    // and the fallback label; a registry tag is still offered.
+    expect(screen.queryByLabelText("Lane German")).toBeNull()
+    expect(screen.getByLabelText("Lane Main language")).not.toBeChecked()
     expect(screen.getByLabelText("Lane Spanish")).not.toBeChecked()
     expect(screen.queryByPlaceholderText("Lane code (e.g. es)")).toBeNull()
 
-    // Label-wrapped: a click on the text reaches the control.
-    fireEvent.click(screen.getByText("German"))
+    fireEvent.click(screen.getByText("Main language"))
     fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
     expect(vi.mocked(putMemberScopes).mock.calls[0][3]).toEqual([{ kind: "lane", value: "" }])

@@ -91,6 +91,31 @@ describe("GET /api/v1/projects/:projectId/members/:author/activity", () => {
     ])
   })
 
+  it("AQU-1566: leaves cues retimed on the timeline out of the files rollup", async () => {
+    // Retiming a caption-track chip or an audio cue edits a cell of a hidden
+    // timeline file; the panel lists files the member worked on.
+    const { db } = await makeTestDb({
+      files: [
+        FILE_ROW,
+        { id: "f-track", project_id: "proj-a", name: "Episode captions", event_id: "genesis-track", role: "timeline-content", anchor_file_id: "file-x" },
+        { id: "f-cues", project_id: "proj-a", name: "Episode audio cues", event_id: "genesis-cues", role: "audio-cues", anchor_file_id: "file-x" },
+      ],
+      cells: [
+        { ...CELL_ROW_BASE, cell_id: "c1", last_editor: "alice", word_count: 2 },
+        { ...CELL_ROW_BASE, file_id: "f-track", side: "source", cell_id: "t1", last_editor: "alice", word_count: 7 },
+        { ...CELL_ROW_BASE, file_id: "f-cues", side: "source", cell_id: "q1", last_editor: "alice", word_count: 9 },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", role: 600 })
+    const res = (await handleMemberActivityReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/members/alice/activity",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { fileRollup: Array<{ fileId: string; cellsTouched: number }> }
+    expect(body.fileRollup).toEqual([expect.objectContaining({ fileId: "file-x", cellsTouched: 1 })])
+  })
+
   it("returns 403 when the caller's role is below the org's memberProgressViewMinRole floor", async () => {
     const { db } = await makeTestDb({
       organizations: [{ id: 1, name: "Org A" }],

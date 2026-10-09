@@ -91,6 +91,16 @@ describe("summarizePortfolioProjects", () => {
     }
   })
 
+  // AQU-1566: a dubbing project records against its cue sheet, so the All Orgs
+  // total divides its takes by the sheet's cell count, the same as OrgHome.
+  it("measures a dubbing project's audio against its cue sheet", () => {
+    const dubbed = project({ totalCells: 646, filledCells: 0, audioTotalCells: 548, audioCells: 274 })
+    expect(audioPct(dubbed)).toBe(0.5)
+    expect(summarizePortfolioProjects([dubbed], NOW).avgAudioPct).toBe(0.5)
+    // An older server sends no audio total: the text total, as before.
+    expect(audioPct(project({ totalCells: 100, filledCells: 0, audioCells: 25 }))).toBe(0.25)
+  })
+
   it("returns zeros for an empty portfolio", () => {
     expect(summarizePortfolioProjects([], NOW)).toEqual({
       projectCount: 0,

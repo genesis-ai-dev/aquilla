@@ -132,9 +132,8 @@ export function projectSettingTextDirection(
 
 /**
  * The direction one side of a project runs in, all the way down: the explicit
- * setting, else the language it is in, else 'ltr'. `languageOverride` names the
- * language of ONE file (a per-import `targetLanguage`), which takes precedence
- * over the project's when the setting is absent.
+ * setting, else `languageOverride` (the language the caller already resolved),
+ * else 'ltr'. Settings language keys are not that language.
  */
 export function resolveProjectTextDirection(
   settings: TextDirectionSettings | null | undefined,
@@ -143,9 +142,9 @@ export function resolveProjectTextDirection(
 ): TextDirection {
   const explicit = projectSettingTextDirection(settings, side)
   if (explicit) return explicit
-  // The language is the lane's. With no lane row in hand, the source side and
-  // the former default lane still resolve through laneLanguage's migration
-  // fallback; this function does not read the settings keys itself.
+  // The language is the lane's, or `languageOverride` when the caller already
+  // resolved one. Settings language keys are not read (AQU-1595). With no
+  // override and no lane name, tag, or code, the direction is ltr.
   const language = languageOverride
     ?? laneLanguage(
       { role: side },

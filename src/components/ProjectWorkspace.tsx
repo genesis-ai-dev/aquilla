@@ -16,7 +16,7 @@ import {
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
-import { deriveLinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
+import { captionsBecomeRows, deriveLinkedVideoEmptyState, mediaEmptyGates } from "@/lib/editor/linked-video-empty-state"
 import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
@@ -126,8 +126,10 @@ import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import {
+  focusedCommentFromSearchParams,
   openCommentsCellFromSearchParams,
   resolveDeepLinkLaneSelection,
+  searchWithoutCommentDeepLink,
 } from "./project-workspace-lane-deeplink"
 import {
   restoreMayPark, stepPendingScroll,
@@ -136,7 +138,10 @@ import {
 import { laneTargetLanguages, resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { useTimelineTextCells } from "@/hooks/useTimelineTextCells"
-import { importTimelineTextTrack } from "@/lib/import/timeline-text"
+import {
+  createCaptionRowsImporter, createTrackRowsPromoter, importTimelineTextTrack,
+  isRowsAlreadyThereRefusal,
+} from "@/lib/import/timeline-text"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
 import {
@@ -161,6 +166,7 @@ import {
   editorConceptsForLane,
   workspaceTerminology,
   timelinePlayReady,
+  ruleFixPreflight,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -182,6 +188,8 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
+import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
+import { youTubeVideoId } from "@/lib/video/youtube"
 import { cellIdAtSec, heldCellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
 import {
@@ -199,7 +207,9 @@ import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/com
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
+import type { FixPreview, ProposalKind } from "@/lib/rules/autofix"
 import { CommentsDrawer } from "./CommentsDrawer"
+import { NotificationsInbox } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
@@ -225,7 +235,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -360,6 +370,9 @@ import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
+import { captionTrackDestinations } from "@/lib/import/caption-destinations"
+import { UseTrackAsRowsDialog } from "./timeline/UseTrackAsRowsDialog"
+import type { MediaTextSource } from "@/lib/import/media-cues"
 import { AlignTimelineScriptDialog } from "./import/AlignTimelineScriptDialog"
 import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
@@ -406,7 +419,6 @@ import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
-import { draftTargets } from "@/lib/completion/draft-targets"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import { Button } from "@/components/ui/button"
 import {
@@ -483,6 +495,14 @@ import {
   workspaceBatchValidateOptions,
   type BatchValidateSummary,
 } from "@/lib/review/batch-validate-summary"
+import {
+  canIncludeUntouchedAiDrafts,
+  classifyBatchDraft,
+  selectBatchDraft,
+  type DraftRunChoices,
+  type ValidateRunChoices,
+} from "@/lib/review/batch-file-options"
+import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -1208,6 +1228,21 @@ export function ProjectWorkspace() {
     setAttachmentsDrawerOpen(false)
     setCommentsCellId(cellId)
   }, [searchParams])
+  // Closing the panel must drop `comments` and `commentId`. Leaving them makes
+  // the same notification a no-op: navigate() to the identical URL never
+  // changes searchParams, so the effect above does not open the drawer again.
+  // Read location through a ref so this stays one identity. The editor row
+  // callbacks below are memoized, and a new function on every address change
+  // would rerender every visible row.
+  const locationRef = useRef(location)
+  locationRef.current = location
+  const closeCommentsPanel = useCallback(() => {
+    setCommentsCellId(null)
+    const current = locationRef.current
+    const nextSearch = searchWithoutCommentDeepLink(current.search)
+    if (nextSearch === current.search) return
+    navigate(`${current.pathname}${nextSearch}${current.hash}`, { replace: true })
+  }, [navigate])
   // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
   // LLM). Findings are session-local: held here, never persisted or synced.
   const [checkOpen, setCheckOpen] = useState(false)
@@ -1689,6 +1724,14 @@ export function ProjectWorkspace() {
     [mayParkCellsInProject, hiddenCellCount, showHiddenCellsPref],
   )
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
+  const mentionCellText = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const cell of cellSummaries) {
+      const text = cell.original.trim() || cell.translated.trim()
+      if (text) map.set(cell.id, text)
+    }
+    return map
+  }, [cellSummaries])
   // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
   // cell page reaching the store — but a file that legitimately has no cells,
   // a load that failed, and the no-file-open case must all release the gate
@@ -2446,6 +2489,12 @@ export function ProjectWorkspace() {
   // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
   // which imports to exactly the same timed cues as the other two.
   const isSubtitleFile = isSubtitleImportFile(activeFile)
+  // AQU-1565 follow-up: a file linked to a YouTube video is timed to that
+  // video, so it defaults to Original timing and the Media view shows the
+  // video. The legacy project-level Free timing no longer reaches it; a Free
+  // timing chosen on the file itself (through the video-stays-hidden warning)
+  // still stands, so the timing control stays on these files.
+  const timedToLinkedVideo = youTubeVideoId(activeFile?.coreMediaUrl ?? "") != null
   // AQU-1704: which subtitle imports have only ONE timing mode available, and
   // so get no picker. Not "is a subtitle import" — that hid the control from
   // audio-only dubbing projects, whose source is an SRT with no video and for
@@ -3341,11 +3390,16 @@ export function ProjectWorkspace() {
       // AQU-1704: skipped for a subtitle import, because linking footage there
       // resolves the mode to Original timing on its own (isVideoTimedSubtitleFile)
       // — there is nothing to decline, and prompting would promise a Free-timing
-      // state the resolver will not hand back.
+      // state the resolver will not hand back. Otherwise resolved against the
+      // NEW link (AQU-1565 follow-up): a YouTube link drops the legacy
+      // project-level Free timing, so only a file that chose Free timing itself
+      // still gets the switch-back warning.
       if (
         url &&
         !isSubtitleImportFile(activeFile) &&
-        resolveFileTimingMode(activeFile, project ?? undefined) === "audioFirst"
+        resolveFileTimingMode(activeFile, project ?? undefined, {
+          timedToLinkedVideo: youTubeVideoId(url) != null,
+        }) === "audioFirst"
       ) {
         setPendingVideoUrl(url)
         return
@@ -3426,7 +3480,7 @@ export function ProjectWorkspace() {
     siblingFileId: editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
     getToken: getTokenForFile,
   })
-  const timelineTextRefreshRef = useRef<(fileId: string) => void>(() => {})
+  const timelineTextRefreshRef = useRef<(fileId?: string) => void>(() => {})
   // Matt's QA (2026-08-21): unlocking the timings must free the AUDIO VTT's
   // chips too, not only the subtitle rows — Sam's original ruling on the lock.
   // Same event the re-import reconcile emits (`cell.retime` against the hidden
@@ -3613,6 +3667,18 @@ export function ProjectWorkspace() {
   const [cueLinksPending, setCueLinksPending] = useState(false)
   const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
   const [captionDialogFileId, setCaptionDialogFileId] = useState<string | null>(null)
+  /** AQU-1566: whether that dialog adds the captions as the file's rows. Fixed
+   *  when it opens, so the rows that a successful save brings in cannot flip
+   *  the dialog to track mode under the person's cursor. */
+  const [captionDialogRows, setCaptionDialogRows] = useState(false)
+  const captionRowsImportersRef = useRef(
+    new WeakMap<MediaTextSource, ReturnType<typeof createCaptionRowsImporter>>())
+  /** AQU-1566: the caption track awaiting "Use as this file's rows"
+   *  confirmation, with the one promoter (ids minted once) that confirmation
+   *  writes through, so a retry after a lost response is a no-op. */
+  const [pendingTrackRows, setPendingTrackRows] = useState<{
+    fileId: string; trackName: string; promote: () => Promise<void>
+  } | null>(null)
   const [alignmentDialogFileId, setAlignmentDialogFileId] = useState<string | null>(null)
   /** AQU-1139: the file the Extract-subtitles dialog was opened FOR, not a bare
    *  boolean — a confirmation has to be about the file the report was read
@@ -3641,6 +3707,7 @@ export function ProjectWorkspace() {
     closeCueLinkDrawer()
     setCharacterCheckOpen(false)
     setCaptionDialogFileId(null)
+    setPendingTrackRows(null)
   }, [activeFileId, closeCueLinkDrawer])
   /** ONE DRAWER AT A TIME. They share a single 80-wide slot, and one of them is
    *  a mode — three at once would be a mess nobody asked for. */
@@ -5023,6 +5090,8 @@ export function ProjectWorkspace() {
     isError: commentsIsError,
     isLoadingRest: commentsIsLoadingRest,
     addComment: addCommentEvent,
+    editComment,
+    deleteComment,
     resolveThread: resolveCommentThread,
     refresh: refreshComments,
   } = useComments({
@@ -6762,7 +6831,7 @@ export function ProjectWorkspace() {
     if (!activeFileId || checkRunning) return
     // One aside panel at a time (matches the existing drawer pattern).
     setDrawerRuleId(null)
-    setCommentsCellId(null)
+    closeCommentsPanel()
     setHistoryCellId(null)
     setAttachmentsDrawerOpen(false)
     setCheckOpen(true)
@@ -6785,7 +6854,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -7810,24 +7879,24 @@ export function ProjectWorkspace() {
   // rows are React.memo'd, so a new function identity here would fail the
   // shallow-compare for every visible row on every ProjectWorkspace render.
   const handleInfractionClick = useCallback((ruleId: string) => {
-    setCommentsCellId(null); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
+    closeCommentsPanel(); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
     setDrawerRuleId(ruleId)
-  }, [])
+  }, [closeCommentsPanel])
   const handleOpenComments = useCallback((cellId: string) => {
     setDrawerRuleId(null); setHistoryCellId(null); setAttachmentsDrawerOpen(false)
     setCommentsCellId(cellId)
   }, [])
   const handleOpenHistory = useCallback((cellId: string) => {
-    setDrawerRuleId(null); setCommentsCellId(null); setAttachmentsDrawerOpen(false)
+    setDrawerRuleId(null); closeCommentsPanel(); setAttachmentsDrawerOpen(false)
     setHistoryCellId(cellId)
-  }, [])
+  }, [closeCommentsPanel])
   // AQU-777: one aside panel at a time, same as the three above.
   const handleOpenAttachment = useCallback((_cellId: string, attachmentId: string) => {
-    setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(null)
+    setDrawerRuleId(null); closeCommentsPanel(); setHistoryCellId(null)
     setCheckOpen(false)
     setAttachmentDrawerFocusId(attachmentId)
     setAttachmentsDrawerOpen(true)
-  }, [])
+  }, [closeCommentsPanel])
   // AQU-777: an attach just landed — show the link before the outbox flush
   // does, then reconcile against the server on the next refresh.
   const handleAttachmentAdded = useCallback((record: CellAttachmentRecord) => {
@@ -9313,6 +9382,87 @@ export function ProjectWorkspace() {
     rebuildSearchIndex()
   }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
+  /**
+   * AQU-1805: commit a rule fix the user reviewed in the rule drawer.
+   *
+   * The drawer proposes (model call + review sheet); this owns the write, so a
+   * rule fix takes the same path a replace-all does — optimistic edit, chain
+   * head via `resolveTargetCommitParentId`, pending-commit bookkeeping, outbox
+   * flush, then revalidation so the drawer's "breaking this rule" count drops
+   * as cells stop breaking it.
+   *
+   * Emitted as `target.cell.commit[harmonize]` (`emitCellHarmonize`) rather
+   * than a plain commit: the fix is attributable to a rule, and the server
+   * enforces `harmonize_min_role` on it.
+   */
+  const handleApplyRuleFix = useCallback(async (
+    previews: readonly FixPreview[],
+    proposalKind: ProposalKind,
+    ruleId: string,
+  ) => {
+    if (!project?.id || isReadOnly) return
+    // Preflight every IDML cell before emitting anything, so one protected-run
+    // failure cannot leave the sweep half-applied (AQU-742: a fix that rewrites
+    // a protected run drops the anchors InDesign needs).
+    const prepared: Array<{ cell: CellData; value: string; valueHtml?: string }> = []
+    try {
+      for (const preview of previews) {
+        const cell = getActiveCell(preview.cellId)
+        if (!cell) continue
+        switch (ruleFixPreflight(hasIdmlMetadata(cell), preview)) {
+          case "refuse":
+            throw new Error(t("workspace.idml.replacementBlocked"))
+          case "protected":
+            prepared.push({
+              cell,
+              ...replaceProtectedIdmlText(cell, preview.find!, preview.replace!, preview.after),
+            })
+            break
+          default:
+            prepared.push({ cell, value: preview.after })
+        }
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : t("workspace.idml.replacementBlocked"))
+      return
+    }
+
+    const touched: string[] = []
+    for (const replacement of prepared) {
+      const { cell } = replacement
+      if (cell.fileId === activeFileId) {
+        applyOptimisticTargetEdit(cell.id, {
+          value: replacement.value,
+          ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
+        })
+      }
+      const parentId = resolveTargetCommitParentId(cell)
+      const eventId = await emitCellHarmonize({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        parentId,
+        sourceEventId: cell.sourceEventId ?? null,
+        targetLang: activeLane, // '' (default lane) is omitted on the wire
+        value: replacement.value,
+        ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
+        author: currentUsername,
+        ruleOrCheckId: ruleId,
+        proposalKind,
+      }, project.harmonize_min_role)
+      rememberPendingTargetCommit(cell.id, eventId, parentId)
+      touched.push(cell.id)
+    }
+    if (touched.length === 0) return
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    for (const id of touched) {
+      if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
+    }
+    rebuildSearchIndex()
+  }, [project?.id, project?.harmonize_min_role, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex, t])
+
   const openProjectSettings = useCallback(() => {
     if (!projectId) return
     navigate(
@@ -9569,16 +9719,21 @@ export function ProjectWorkspace() {
    * number the run will deliver. Lazy on purpose — it walks every cell, and the
    * dialog it feeds is opened far less often than this context is rebuilt.
    */
-  const batchValidateSummary = useCallback(() => summarizeBatchValidate(
+  const batchValidateSummary = useCallback((choices?: ValidateRunChoices) => summarizeBatchValidate(
     project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
     // AQU-1571: the project's text rules, pinned by a unit test of the builder.
-    workspaceBatchValidateOptions({
-      project,
-      activeFileId,
-      username: currentUsername,
-      myScopes,
-      activeLane,
-    }),
+    // AQU-983: the file modal passes which groups this run includes. A call
+    // with no choices keeps the selection-toolbar defaults (include both).
+    {
+      ...workspaceBatchValidateOptions({
+        project,
+        activeFileId,
+        username: currentUsername,
+        myScopes,
+        activeLane,
+      }),
+      ...choices,
+    },
   ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
 
   const actionCtx = useMemo(() => ({
@@ -9670,25 +9825,44 @@ export function ProjectWorkspace() {
     [t, formatLocaleList],
   )
 
+  // AQU-983: the file modal writes these, then the menu action runs. Defaults
+  // match the old one-shot actions: next package of empty cells, and no
+  // untouched AI drafts in a file-wide validation.
+  const batchValidateChoicesRef = useRef<ValidateRunChoices>({
+    includeReadyCells: true,
+    includeUntouchedAiDrafts: false,
+  })
+  const draftChoicesRef = useRef<DraftRunChoices>({
+    includeEmpty: true,
+    refreshAiDrafts: false,
+    scope: "next",
+    batchSize: 10,
+  })
+
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
-    // AQU-1424: `draftTargets` is the shared rule for "what is left to draft" —
-    // untranslated AND not parked. Both paths go through it so they cannot drift
-    // apart, and the one that would cost money is covered: without the hidden
-    // clause, Draft-all spends AI credits on text nobody will read or export.
+    // AQU-1424 / AQU-983: both draft menu items run whatever the modal ticked.
+    // Empty cells stay the default; refreshing an AI draft is opt-in, and a
+    // hidden cell never enters the list (`classifyBatchDraft`).
     runCompletions: () => {
       if (!activeFileId || !project) return
-      const untranslated = draftTargets(getActiveCells())
-      if (untranslated.length === 0) return
-      // AQU-586: honor the project's configured completion batch size (default 10).
-      completeBatch(untranslated.slice(0, completionBatchSizeFor(project)))
+      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const chosen = selectBatchDraft(classifyBatchDraft(cells), {
+        ...draftChoicesRef.current,
+        batchSize: completionBatchSizeFor(project),
+      })
+      if (chosen.length === 0) return
+      completeBatch(chosen)
     },
     runCompleteAll: () => {
-      if (!activeFileId) return
-      const untranslated = draftTargets(getActiveCells())
-      if (untranslated.length === 0) return
-      // No slice — draft every untranslated cell; useCompletion chunks internally.
-      completeBatch(untranslated)
+      if (!activeFileId || !project) return
+      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const chosen = selectBatchDraft(classifyBatchDraft(cells), {
+        ...draftChoicesRef.current,
+        batchSize: completionBatchSizeFor(project),
+      })
+      if (chosen.length === 0) return
+      completeBatch(chosen)
     },
     runExport: openExportFlow,
     // FRO-288: wire batch-validate through the real validation event path.
@@ -9713,7 +9887,7 @@ export function ProjectWorkspace() {
       // AQU-1507: the run and the confirmation dialog now call the SAME thunk,
       // so the number the dialog promised is by construction the number this
       // loop validates — the divergence was the rest of the reported bug.
-      const summary = batchValidateSummary()
+      const summary = batchValidateSummary(batchValidateChoicesRef.current)
       const projectId = project?.id
       if (summary.validatable.length === 0 || !projectId) {
         reportBatchValidate(summary, "workspace-action")
@@ -9926,8 +10100,22 @@ export function ProjectWorkspace() {
   // actions with `requiresConfirmation` route through the ConfirmActionDialog
   // (rendered below) instead of running immediately.
   const [pendingActionConfirm, setPendingActionConfirm] = useState<WorkspaceAction | null>(null)
+  const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
+    // AQU-983: drafting and text validation open the file modal. The plain
+    // confirm dialog stays for the actions that only need a yes.
+    if (action.opensFileModal === "validate") {
+      setBatchFileModal({ kind: "validate" })
+      return
+    }
+    if (action.opensFileModal === "draft-next" || action.opensFileModal === "draft-all") {
+      setBatchFileModal({
+        kind: "draft",
+        scope: action.opensFileModal === "draft-next" ? "next" : "all",
+      })
+      return
+    }
     if (action.requiresConfirmation) {
       setPendingActionConfirm(action)
     } else {
@@ -10556,7 +10744,7 @@ export function ProjectWorkspace() {
   // file-level (files.meta via file.timing.set); a file with no mode of its
   // own inherits the legacy project-level value (so projects that chose Free
   // timing in Project Settings keep it), else Original timing.
-  const timingMode = resolveFileTimingMode(activeFile, project ?? undefined)
+  const timingMode = resolveFileTimingMode(activeFile, project ?? undefined, { timedToLinkedVideo })
   // AQU-646 stage 2: which rows a file derives is a question about the file,
   // and this is the only place that can answer it — tracks.ts is deliberately
   // import-free, so what it knows about a file arrives as this flat context
@@ -10574,8 +10762,12 @@ export function ProjectWorkspace() {
       // a sibling still loading: the row exists, drawn empty, rather than
       // appearing a moment after the timeline settles.
       hasAudioCues: audioCues !== null,
+      // AQU-1566 (Sam, Oct 5): a subtitle file linked to a video keeps its
+      // Source audio row for the video's own sound. Not in Free timing, where
+      // the video is hidden and silent.
+      hasLinkedVideoSound: Boolean(activeFile?.coreMediaUrl) && timingMode !== "audioFirst",
     }),
-    [isSubtitleFile, audioMergedCells, audioCues],
+    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, timingMode],
   )
   // Stage 1 wired the real merge before anything wrote to it; stage 3 is the
   // first emitter. This is the SETTLED list — what the server says, with no
@@ -10590,11 +10782,15 @@ export function ProjectWorkspace() {
   // count — which is why the empty table kept insisting a captioned linked
   // video had no media at all. Derived tracks (the file's own cells) carry no
   // contentFileId and are deliberately not listed here.
-  const attachedCaptionTrackNames = useMemo(
+  //
+  // AQU-1566: only a SOURCE caption track can become the file's rows (the
+  // server copies one source caption file); a target-text track is named and
+  // never offered.
+  const attachedCaptionTracks = useMemo(
     () => serverTimelineTracks
       .filter(track => Boolean(track.contentFileId)
         && (track.kind === "source-subtitles" || track.kind === "target-subtitles"))
-      .map(track => track.name),
+      .map(track => ({ id: track.id, name: track.name, canBecomeRows: track.kind === "source-subtitles" })),
     [serverTimelineTracks],
   )
   const linkedVideoEmptyState = useMemo(
@@ -10602,10 +10798,58 @@ export function ProjectWorkspace() {
       orderedBy: activeFile ? fileOrderedBy(activeFile) : undefined,
       cellCount: cellSummaries.length,
       coreMediaUrl: activeFile?.coreMediaUrl,
-      captionTrackNames: attachedCaptionTrackNames,
+      captionTracks: attachedCaptionTracks,
     }),
-    [activeFile, cellSummaries.length, attachedCaptionTrackNames],
+    [activeFile, cellSummaries.length, attachedCaptionTracks],
   )
+  // AQU-1566 (Sam's option b): on that file the first captions become its OWN
+  // rows, the same as captions added at import time. Decided only once the
+  // rows have loaded cleanly; until then a caption file goes to a track, as
+  // on any other file. Maintainer-only, and NOT behind the track-editing
+  // switch (Sam's ruling), so the Text view's empty state, the timeline's
+  // Attach captions and a caption track's menu all read this one answer.
+  const captionRowsMode = captionsBecomeRows(linkedVideoEmptyState, {
+    loading: cellsLoading, failed: Boolean(cellsError),
+  })
+  const openCaptionDialog = useCallback((fileId: string) => {
+    setCaptionDialogRows(captionRowsMode)
+    setCaptionDialogFileId(fileId)
+  }, [captionRowsMode])
+  const handleAttachCaptionsAsRows = useCallback(() => {
+    if (activeFileId) openCaptionDialog(activeFileId)
+  }, [activeFileId, openCaptionDialog])
+  /** After the file's rows change shape: the file itself (it is a subtitle
+   *  file now), its rows, and the timeline's caption tracks. */
+  const refreshAfterCaptionRows = useCallback(async () => {
+    await refresh()
+    revalidateCells()
+    timelineTextRefreshRef.current?.()
+  }, [refresh, revalidateCells])
+  const requestUseTrackAsRows = useCallback((trackId: string) => {
+    const track = serverTimelineTracks.find(candidate => candidate.id === trackId)
+    if (!project?.id || !activeFileId || !track?.contentFileId) return
+    const promote = createTrackRowsPromoter({
+      projectId: project.id, fileId: activeFileId, trackId, contentFileId: track.contentFileId,
+      getToken: getTokenForFile,
+    })
+    setPendingTrackRows({
+      fileId: activeFileId,
+      trackName: track.name,
+      promote: async () => {
+        try {
+          await promote()
+        } catch (cause) {
+          // Someone else gave the file rows meanwhile: show them, and say so.
+          if (isRowsAlreadyThereRefusal(cause)) {
+            void refreshAfterCaptionRows()
+            throw new Error(t("importExport.captionTrack.rowsExist"), { cause })
+          }
+          throw new Error(t("editor.timeline.useAsRowsFailed"), { cause })
+        }
+        await refreshAfterCaptionRows()
+      },
+    })
+  }, [serverTimelineTracks, project?.id, activeFileId, getTokenForFile, refreshAfterCaptionRows, t])
   // The Media view renders the same table under the timeline, where "open the
   // Media view" would be a button to where you already are.
   const handleOpenMediaView = useCallback(() => switchLens("audio"), [switchLens])
@@ -10720,6 +10964,23 @@ export function ProjectWorkspace() {
   // clearance alone. That split is why the editor takes `onRenameTrack` as its
   // own prop instead of folding it into `trackEditing`.
   const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
+  /**
+   * AQU-1565 / AQU-1566: who is offered captions as rows, the timeline's
+   * Attach captions, and the upload of the original recording. One pure
+   * helper (linked-video-empty-state.ts says why each floor is what it is), so
+   * a test pins the gates rather than the props a test happens to pass.
+   *
+   * The upload is NOT the Add-line gate (`canEditLines`), although the plan
+   * named it: that tier is OFF until a project opts in, so it would have taken
+   * the upload away from every maintainer on every project that never touched
+   * the setting. The upload is an import of the file's own media, like
+   * diarization and the audio-cue re-import the tier deliberately does not
+   * govern. It needs Project Lead on EVERY empty media file, not only a
+   * linked video's, because the clip is stored as the file's source audio.
+   */
+  const { offerCaptionRows, canImportCaptions, canUploadSourceMedia } = mediaEmptyGates({
+    roleLevel: project?.syncRole?.level, captionRowsMode, canEditTracks,
+  })
   const alignmentClipUrl = useMemo(() => {
     const urls = new Set(audioMergedCells.flatMap(cell => {
       const clip = sourceClipAudioForCell(cell)
@@ -10817,6 +11078,33 @@ export function ProjectWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
   }, [activeFileId, timelineStacked, mediaSections.collapsed])
 
+  const anyCellClockIsFileTime = useMemo(
+    () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
+    [audioMergedCells],
+  )
+  // AQU-1565 follow-up: a recording no longer takes the transport off a
+  // YouTube picture by merely existing. The person picks it in the video's
+  // sound menu; until then the video plays with its own sound. Read through the
+  // same store as the pane and the playback bar, so all three agree.
+  const playbackSource = usePlaybackSource(activeFileId, activeFile?.coreMediaUrl)
+  // Sam, Oct 5: the same choice on the timeline's Source audio lane. Offered
+  // exactly when the video pane offers it: a YouTube video with an uploaded
+  // recording. The pane does the stopping (`switchPlaybackSource`).
+  const recordingCellForSound = useMemo(
+    () => audioMergedCells.find((c) => queueClockIsFileTime(c)),
+    [audioMergedCells],
+  )
+  const timelineSoundSource = useMemo(
+    () =>
+      activeFileId && recordingCellForSound && youTubeVideoId(activeFile?.coreMediaUrl ?? "") != null
+        ? {
+            value: playbackSource,
+            recordingName: recordingCellForSound.original.trim() || null,
+            onChange: (next: PlaybackSource) => switchPlaybackSource(activeFileId, playbackSource, next),
+          }
+        : undefined,
+    [activeFileId, activeFile?.coreMediaUrl, recordingCellForSound, playbackSource],
+  )
   /**
    * Does the PICTURE own this file's transport?
    *
@@ -10834,10 +11122,10 @@ export function ProjectWorkspace() {
     () =>
       videoOwnsFile(
         activeFile?.coreMediaUrl,
-        audioMergedCells.some((c) => queueClockIsFileTime(c)),
+        recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
         showVideoPane,
       ),
-    [activeFile?.coreMediaUrl, audioMergedCells, showVideoPane],
+    [activeFile?.coreMediaUrl, anyCellClockIsFileTime, playbackSource, showVideoPane],
   )
 
   // AQU-646 round 5: DUBS OVER THE PICTURE.
@@ -10898,9 +11186,11 @@ export function ProjectWorkspace() {
       ),
     [dubDriverCells],
   )
+  // The RAW recording test, not the chosen source: with the pane off screen a
+  // real recording is still the right thing to play (see useTransportForFile).
   const virtualIsTransport = virtualOwnsFile(
     videoIsTransport,
-    audioMergedCells.some((c) => queueClockIsFileTime(c)),
+    anyCellClockIsFileTime,
     timelineDurationSec,
     // AQU-1704: the same answer the playback bar gets through `freeTiming`.
     timingMode === "audioFirst",
@@ -13091,6 +13381,15 @@ export function ProjectWorkspace() {
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
             editorHref={workspaceBreadcrumb.editorHref}
           >
+            {project && (
+              <NotificationsInbox
+                projectId={project.id}
+                readerUsername={currentUsername}
+                comments={allProjectComments}
+                files={project.files.map((file) => ({ id: file.id, name: file.name }))}
+                cellTextById={mentionCellText}
+              />
+            )}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
                 when project_settings has no dcsUpstream cursor. */}
@@ -13250,7 +13549,7 @@ export function ProjectWorkspace() {
                           setActiveFileId(first.fileId)
                         }
                         setDrawerRuleId(null)
-                        setCommentsCellId(null)
+                        closeCommentsPanel()
                         setHistoryCellId(first.cellId)
                       }
                       clearStaleSiblings()
@@ -13585,6 +13884,7 @@ export function ProjectWorkspace() {
                     onCueActivated={handleCueActivated}
                     activateRequest={timelineActivateRequest}
                     coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                    soundSource={timelineSoundSource}
                     // AQU-646 stage 6B: the trim handles are withheld when the
                     // thing playing would ignore a dub's trims — and the
                     // virtual transport honours them, exactly as the film does.
@@ -13623,8 +13923,16 @@ export function ProjectWorkspace() {
                     onRequestImportAudioVtt={() => setImportAudioVttOpen(true)}
                     canImportAudioVtt={canManageSources}
                     onRequestImportCaptions={canManageSources && activeFile
-                      ? () => setCaptionDialogFileId(activeFile.id) : undefined}
-                    canImportCaptions={canEditTracks}
+                      ? () => openCaptionDialog(activeFile.id) : undefined}
+                    // AQU-1566: on a linked video with no rows the captions
+                    // become its rows, which needs no track-editing switch.
+                    canImportCaptions={canImportCaptions}
+                    // Sam's D3: that same file, once its rows have loaded and
+                    // there are none — the Source text lane says so with Attach
+                    // captions inline, and the Source audio placeholder says it
+                    // is the video's own sound.
+                    linkedVideoEmpty={captionRowsMode
+                      ? { captionTrackCount: attachedCaptionTracks.length } : null}
                     onRequestAlignScript={canManageSources && activeFile && alignmentClipUrl
                       ? () => setAlignmentDialogFileId(activeFile.id) : undefined}
                     canAlignScript={canEditTracks}
@@ -13735,6 +14043,9 @@ export function ProjectWorkspace() {
                     // Colour rides the same clearance alone (Sam, 2026-09-26):
                     // how a track looks, not what the timeline holds.
                     onSetTrackColor={canReorderTracks ? handleSetTrackColor : undefined}
+                    // AQU-1566: a caption track already on an empty linked
+                    // video becomes its rows. Maintainer, no switch.
+                    onPromoteTrackToRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
                     trackEditing={
                       canEditTracks
                         ? {
@@ -13853,6 +14164,9 @@ export function ProjectWorkspace() {
                       onVideoPlaying={setVideoClockPlaying}
                       onVideoDuration={setVideoDurationSec}
                       onChangeVideo={() => setLinkVideoOpen(true)}
+                      // Sam, Oct 5: a click on a YouTube picture is the
+                      // transport's Play/Pause, never YouTube's own.
+                      onPictureClick={handleTimelineTogglePlay}
                       sourceDirectionMode={fileMeta.sourceDirectionMode}
                       targetDirectionMode={fileMeta.targetDirectionMode}
                       sourceTextDirection={fileMeta.sourceTextDirection}
@@ -14007,10 +14321,20 @@ export function ProjectWorkspace() {
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
             onAskAiFromSelection={handleAskAiFromSelection}
-            onAttachMediaFile={handleAttachMediaFile}
-            onAttachMediaUrl={handleAttachMediaUrl}
+            // AQU-1565 follow-up: the clip becomes the file's SOURCE audio,
+            // which the server takes only from Project Lead up. Withheld below
+            // that, so nobody is offered an upload that is certain to fail.
+            onAttachMediaFile={canUploadSourceMedia ? handleAttachMediaFile : undefined}
+            onAttachMediaUrl={canUploadSourceMedia ? handleAttachMediaUrl : undefined}
             linkedVideoEmptyState={linkedVideoEmptyState}
+            // Sam's D3: under the Media view's timeline the empty state is one
+            // line; the prompt itself is on the timeline's Source text lane.
+            linkedVideoEmptyPlacement={lens === "audio" ? "media" : "text"}
             onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
+            // AQU-1566: Attach captions in place, and Use (track) as this
+            // file's rows, for maintainers on an empty linked video only.
+            onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
+            onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
             onCellCommitted={handleCellCommitted}
             onValidated={handleCellValidated}
             repetitionCounts={repetitionCounts}
@@ -14223,11 +14547,23 @@ export function ProjectWorkspace() {
                 infractions={drawerInfractions}
                 cells={legacyCells}
                 onClose={() => setDrawerRuleId(null)}
-                onNavigateToCell={() => {}}
+                // AQU-1805: this was a no-op, so a flagged example was a dead
+                // row — the one thing the list exists to let you do.
+                onNavigateToCell={jumpToCellId}
                 project={project}
                 username={currentUsername}
                 refresh={refresh}
                 cellsByFile={drawerCellsByFile}
+                completionSettings={project?.completionSettings}
+                session={frontierSession}
+                // Absent while read-only or below the harmonize floor, which
+                // renders the fix affordances disabled with the reason.
+                onApplyFix={
+                  !isReadOnly && drawerRuleId && canHarmonize(project?.harmonize_min_role)
+                    ? (previews, proposalKind) =>
+                        handleApplyRuleFix(previews, proposalKind, drawerRuleId)
+                    : undefined
+                }
               />
             )}
             {commentsCell && (
@@ -14236,12 +14572,16 @@ export function ProjectWorkspace() {
                 liveComments={allProjectComments.filter(
                   (c) => c.cellId === commentsCell.id && c.deletedAt === null
                 )}
-                onClose={() => setCommentsCellId(null)}
+                onClose={closeCommentsPanel}
                 onNewThread={(text) => addThread(commentsCell.id, text)}
                 onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
                 onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
                 onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+                onEdit={(commentId, body) => { void editComment(commentId, body) }}
+                onDelete={(commentId) => { void deleteComment(commentId) }}
                 currentUsername={currentUsername}
+                mentionRoster={projectMembers}
+                focusCommentId={focusedCommentFromSearchParams(searchParams)}
                 isError={commentsIsError}
                 isLoadingRest={commentsIsLoadingRest}
                 onRetry={() => { void refreshComments() }}
@@ -14747,6 +15087,40 @@ export function ProjectWorkspace() {
       />
       {/* AQU-661: confirmation for workspace actions folded from the removed
           primary-action dropdown into the ⋯ overflow menu. */}
+      {batchFileModal && project && (
+        <BatchFileModal
+          open
+          onOpenChange={(open) => { if (!open) setBatchFileModal(null) }}
+          request={batchFileModal}
+          batchSize={completionBatchSizeFor(project)}
+          canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
+          validateCandidates={activeFileId
+            ? cellSummaries.filter((cell) => cell.fileId === activeFileId)
+            : []}
+          validateOptions={workspaceBatchValidateOptions({
+            project,
+            activeFileId,
+            username: currentUsername,
+            myScopes,
+            activeLane,
+          })}
+          draftCells={batchFileModal.kind === "draft" && activeFileId
+            ? getActiveCells().filter((cell) => cell.fileId === activeFileId)
+            : []}
+          onConfirmValidate={(choices) => {
+            batchValidateChoicesRef.current = choices
+            workspaceActions.find((action) => action.id === "batch-validate")
+              ?.run(actionCtx, actionArgs)
+            setBatchFileModal(null)
+          }}
+          onConfirmDraft={(choices) => {
+            draftChoicesRef.current = choices
+            const id = choices.scope === "next" ? "run-completions" : "complete-all"
+            workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
+            setBatchFileModal(null)
+          }}
+        />
+      )}
       {pendingActionConfirm?.requiresConfirmation && (
         <ConfirmActionDialog
           open={true}
@@ -14903,26 +15277,72 @@ export function ProjectWorkspace() {
         }}
       />
       {captionDialogFileId && activeFile?.id === captionDialogFileId && project && (
-        <ImportTimelineTextDialog key={captionDialogFileId}
-          projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
-          tracks={serverTimelineTracks.filter(track =>
-            track.kind === "source-subtitles" || track.kind === "target-subtitles",
-          ).map(track => ({ id: track.id, name: track.name, contentFileId: track.contentFileId,
-            segmentCount: track.contentFileId
-              ? timelineText.isLoading || timelineText.errors[track.contentFileId]
-                ? null : timelineText.cellsByFile[track.contentFileId]?.length ?? null
-              : cellsLoading ? null : cellSummaries.length,
-          }))}
-          onCancel={() => setCaptionDialogFileId(null)}
-          onConfirm={async input => {
-            if (!canEditTracks) throw new Error(t("importExport.captionTrack.enableTracks"))
-            await importTimelineTextTrack({
-              ...input, projectId: project.id, anchorFileId: captionDialogFileId,
-              durationMs: captionMediaDurationMs, getToken: getTokenForFile,
-            })
-            await refresh()
-          }}
-        />
+        captionDialogRows ? (
+          // AQU-1566 (Sam's option b): the captions become this linked video's
+          // own rows. One staged file and one receipt per reviewed preview,
+          // so pressing again after a failure never writes twice.
+          <ImportTimelineTextDialog key={`${captionDialogFileId}:rows`} mode="rows"
+            projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            onCancel={() => setCaptionDialogFileId(null)}
+            onConfirm={async input => {
+              if (!canManageSources) throw new Error(t("importExport.captionTrack.saveFailed"))
+              // Keyed on the reviewed captions themselves: pressing again
+              // with the same review reuses the staged file and receipt, while
+              // an edit after a failure is new content and a new import.
+              const importers = captionRowsImportersRef.current
+              // The signal goes with each press, not with the cached importer,
+              // so Cancel during a retry stops the retry.
+              const importer = importers.get(input.source) ?? createCaptionRowsImporter({
+                projectId: project.id, fileId: captionDialogFileId, source: input.source,
+                getToken: getTokenForFile,
+              })
+              importers.set(input.source, importer)
+              try {
+                await importer({ signal: input.signal })
+              } catch (cause) {
+                if (isRowsAlreadyThereRefusal(cause)) {
+                  void refreshAfterCaptionRows()
+                  throw new Error(t("importExport.captionTrack.rowsExist"), { cause })
+                }
+                // Any other refusal reads as an HTTP status and a server
+                // sentence; say it plainly, as Use as rows does, and keep the
+                // raw reason for whoever debugs it.
+                console.warn("[caption-rows] adding captions as rows failed:", cause)
+                throw new Error(t("importExport.captionTrack.rowsFailed"), { cause })
+              }
+              await refreshAfterCaptionRows()
+            }}
+          />
+        ) : (
+          <ImportTimelineTextDialog key={captionDialogFileId}
+            projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            // AQU-1566: once the file has rows, its own Source text and Target
+            // text rows are not something a caption file may replace.
+            tracks={captionTrackDestinations(serverTimelineTracks.filter(track =>
+              track.kind === "source-subtitles" || track.kind === "target-subtitles",
+            ), cellSummaries.length > 0).map(track => ({
+              id: track.id, name: track.name, contentFileId: track.contentFileId,
+              segmentCount: track.contentFileId
+                ? timelineText.isLoading || timelineText.errors[track.contentFileId]
+                  ? null : timelineText.cellsByFile[track.contentFileId]?.length ?? null
+                : cellsLoading ? null : cellSummaries.length,
+            }))}
+            onCancel={() => setCaptionDialogFileId(null)}
+            onConfirm={async input => {
+              if (!canEditTracks) throw new Error(t("importExport.captionTrack.enableTracks"))
+              await importTimelineTextTrack({
+                ...input, projectId: project.id, anchorFileId: captionDialogFileId,
+                durationMs: captionMediaDurationMs, getToken: getTokenForFile,
+              })
+              await refresh()
+            }}
+          />
+        )
+      )}
+      {pendingTrackRows && pendingTrackRows.fileId === activeFileId && (
+        <UseTrackAsRowsDialog trackName={pendingTrackRows.trackName}
+          onConfirm={pendingTrackRows.promote}
+          onCancel={() => setPendingTrackRows(null)} />
       )}
       {alignmentDialogFileId && activeFile?.id === alignmentDialogFileId
         && project && alignmentClipUrl && (

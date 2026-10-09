@@ -126,13 +126,13 @@ export class Workspace {
     captions: FilePayload,
   ): Promise<void> {
     await this.chooseImportFiles([media, captions])
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   async previewEmbeddedMedia(media: FilePayload): Promise<void> {
     await this.chooseImportFiles(media)
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
@@ -160,7 +160,7 @@ export class Workspace {
     await this.page.getByTestId("tl-sources-menu").click()
     await this.page.getByRole("menuitem", { name: /Attach captions/i }).click()
     await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
-    await expect(this.page.getByLabel("Segment 1 wording", { exact: true }))
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
       .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
@@ -168,6 +168,21 @@ export class Workspace {
     await this.page.getByRole("button", {
       name: overwrite ? "Overwrite caption track" : "Add caption track", exact: true,
     }).click()
+    await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  /** AQU-1566: on a linked video with no rows, the empty table's "Attach
+   * captions" adds the reviewed captions as the file's own rows. */
+  async attachCaptionsAsRows(captions: FilePayload): Promise<void> {
+    const empty = this.page.getByTestId("linked-video-empty")
+    await empty.getByRole("button", { name: "Attach captions", exact: true })
+      .click({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await this.page.getByLabel("Caption file", { exact: true }).setInputFiles(captions)
+    await expect(this.page.getByRole("button", { name: "Edit caption 1", exact: true }))
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // Rows mode asks for no destination track or track name.
+    await expect(this.page.getByLabel("Destination track", { exact: true })).toHaveCount(0)
+    await this.page.getByRole("button", { name: "Add captions as rows", exact: true }).click()
     await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
@@ -575,6 +590,13 @@ export class Workspace {
     // Media view selects Voices; ensure Files without toggling an open panel.
     if (await files.getAttribute("aria-pressed") !== "true") await files.click()
     await expect(files).toHaveAttribute("aria-pressed", "true")
+  }
+
+  async openTextView(): Promise<void> {
+    const tab = this.page.getByRole("tab", { name: "Text", exact: true })
+    await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await tab.click()
+    await expect(tab).toHaveAttribute("aria-selected", "true")
   }
 
   async openMediaView(): Promise<void> {

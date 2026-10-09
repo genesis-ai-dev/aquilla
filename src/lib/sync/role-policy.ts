@@ -202,6 +202,21 @@ export function canPerform(kind: string, roleLevel: number | null | undefined): 
 }
 
 /**
+ * AQU-1565 follow-up: marking a clip as the file's SOURCE audio (the shared
+ * programme recording every media row plays) is setting up the file, not
+ * recording a line, so it sits with the source-side import writes at Project
+ * Lead rather than with an ordinary take's CONTRIBUTOR floor. A payload
+ * condition the per-kind table above cannot express, so it has its own
+ * check. Mirrored server-side in sync-worker/src/events/authorize.ts.
+ */
+export const SOURCE_AUDIO_ATTACH_FLOOR: number = ROLE.PROJECT_LEAD
+
+/** Same fail-open contract as `canPerform`: an unknown role is let through. */
+export function canAttachSourceAudio(roleLevel: number | null | undefined): boolean {
+  return roleLevel == null || roleLevel >= SOURCE_AUDIO_ATTACH_FLOOR
+}
+
+/**
  * AQU-1000 — CLIENT MIRROR of the server's foreign-comment floors.
  *
  * `REQUIRED_ROLE` above is only half the comment policy. Every comment

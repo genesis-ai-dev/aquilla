@@ -1,5 +1,26 @@
 import { describe, it, expect } from "vitest"
-import { secToPx, pxToSec, clampRange, isVisible, chipRadiusPx } from "./scale"
+import { secToPx, pxToSec, clampRange, isVisible, chipRadiusPx, clampScrollLeft } from "./scale"
+
+describe("clampScrollLeft", () => {
+  it("is 0 whatever is asked for when the timeline is shorter than the view", () => {
+    // Walk r3: a ~2 s Free timing timeline in a 900 px view, after three zoom-ins.
+    for (const asked of [139, 319, 554]) expect(clampScrollLeft(asked, 900, 900)).toBe(0)
+  })
+
+  it("stops at the last offset a long timeline can scroll to", () => {
+    expect(clampScrollLeft(9_500, 10_000, 1_000)).toBe(9_000)
+    expect(clampScrollLeft(4_000, 10_000, 1_000)).toBe(4_000)
+  })
+
+  it("never goes below 0, and treats a non-number as 0", () => {
+    expect(clampScrollLeft(-40, 10_000, 1_000)).toBe(0)
+    expect(clampScrollLeft(Number.NaN, 10_000, 1_000)).toBe(0)
+  })
+
+  it("keeps the requested offset while the column is unmeasured", () => {
+    expect(clampScrollLeft(554, 0, 0)).toBe(554)
+  })
+})
 
 describe("scale", () => {
   it("converts seconds<->px round-trip", () => {

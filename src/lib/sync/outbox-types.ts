@@ -361,6 +361,8 @@ export interface OutboxEventPayloads {
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
+    /** AQU-1565 follow-up: "source" marks the shared programme audio; absent is a dub. */
+    role?: "dub" | "source"
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line

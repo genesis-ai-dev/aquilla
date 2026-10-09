@@ -372,9 +372,11 @@ UI chrome that used to be one smoke file per click is covered under
   `auth-worker/src/__tests__/member-scopes-lane-grants.test.ts`. No smoke: the gap is a
   two-table DISAGREEMENT, so a walk only shows it with the read wall on (`LANE_READ_WALL`,
   unset locally and in e2e) AND grants that have drifted. Since AQU-1781 (a new lane is
-  granted to members who read every lane) and AQU-1782 (direct add writes grants) the app's
-  own flows no longer produce that drift — it lives in data written before them — so a walk
-  has to delete a grant row by hand first. The inspector-shows-the-gap → regrant →
+  granted to members who read every lane), AQU-1782 (direct add writes grants) and AQU-1801
+  (the three team writes do too — team add, team→project attach, team→project role change,
+  pinned in `auth-worker/src/__tests__/team-lane-grants.test.ts`) the app's own flows no
+  longer produce that drift — it lives in data written before them — so a walk has to delete
+  a grant row by hand first. The inspector-shows-the-gap → regrant →
   contributor-reloads walk is on this issue's QA checklist rather than written blind.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).

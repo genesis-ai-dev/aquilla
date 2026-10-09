@@ -60,6 +60,7 @@ import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../ser
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
+import { applyTeamMemberLaneGrants, applyTeamProjectLaneGrants } from "../services/lane-grants"
 
 const orgs = new Hono<AuthHonoEnv>()
 
@@ -750,6 +751,11 @@ async function grantGroupMemberOne(
   if (result === "not-org-member") {
     return { ok: false, username, code: "not_org_member", message: "user is not a member of this org" }
   }
+  // AQU-1801: the group_members row opens every project the team is attached
+  // to, but under the lane read wall a below-Maintainer member reads a target
+  // lane only through a grant row — so without this they reach each project
+  // and see no target lane at all, with every indicator still green.
+  await applyTeamMemberLaneGrants(env.AQUILLA_PG, groupId, target.id, addedBy)
   await auditMembershipChange(env, actor, {
     action: "team.member.add",
     where: { scope: "team", orgId, groupId },
@@ -1453,6 +1459,10 @@ orgs.post("/:orgId/groups/:groupId/projects", zValidator("json", attachBody), as
   const result = await attachGroupProject(c.env, orgId, groupId, projectId, roleLevel, user.id)
   if (result === "no-project") return c.json({ error: "project not found" }, 404)
   if (result === "cross-org") return c.json({ error: "project is not in this org" }, 409)
+  // AQU-1801: every member of the team reaches this project now, so each one
+  // below Maintainer needs grants on its target lanes (same reason as the
+  // team-member add above).
+  await applyTeamProjectLaneGrants(c.env.AQUILLA_PG, groupId, projectId, user.id)
   await auditMembershipChange(c.env, user, {
     action: "team.project.attach",
     where: { scope: "team", orgId, groupId },
@@ -1476,6 +1486,10 @@ orgs.patch("/:orgId/groups/:groupId/projects/:projectId", zValidator("json", rol
   if (!isCanonicalRoleLevel(roleLevel) || roleLevel > callerRole) return c.json({ error: "invalid or too-high role level" }, 403)
   const ok = await updateGroupProjectRole(c.env, groupId, projectId, roleLevel)
   if (!ok) return c.json({ error: "attachment not found" }, 404)
+  // AQU-1801: the attachment's new role has to reach the grant rows too, or a
+  // demotion leaves the team still editing and a promotion still read-only.
+  // Only the level moves — the lanes a member already reads are unchanged.
+  await applyTeamProjectLaneGrants(c.env.AQUILLA_PG, groupId, projectId, user.id)
   await auditMembershipChange(c.env, user, {
     action: "team.project.role",
     where: { scope: "team", orgId, groupId },

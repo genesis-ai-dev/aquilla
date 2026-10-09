@@ -8,13 +8,14 @@ import { CommentsPage } from "./CommentsPage"
 
 const mockComments = vi.fn<() => CommentRecord[]>(() => [])
 const mockRefresh = vi.fn()
+const mockResolveThread = vi.fn()
 
 vi.mock("@/hooks/useComments", () => ({
   useComments: () => ({
     comments: mockComments(),
     isLoading: false,
     isError: false,
-    resolveThread: vi.fn(),
+    resolveThread: mockResolveThread,
     editComment: vi.fn(async () => {}),
     deleteComment: vi.fn(async () => {}),
     refresh: mockRefresh,
@@ -52,6 +53,14 @@ vi.mock("@/hooks/useUserSearch", () => ({
 
 vi.mock("@/lib/sync/cqrs-bridge", () => ({
   buildFileScopedTokenFetcher: () => async () => "file-tok",
+}))
+
+const { fetchCellsByIds } = vi.hoisted(() => ({
+  fetchCellsByIds: vi.fn(async () => [] as Array<Record<string, unknown>>),
+}))
+
+vi.mock("@/lib/sync/cells-read", () => ({
+  fetchCellsByIds,
 }))
 
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
@@ -226,6 +235,37 @@ describe("CommentsPage chrome", () => {
     expect(screen.getByTestId("comments-count-badge")).toHaveTextContent("1")
   })
 
+  it("labels a thread with the book, chapter, and verse", async () => {
+    fetchCellsByIds.mockResolvedValueOnce([
+      {
+        cellId: "cell-heading",
+        side: "source",
+        canonicalRef: null,
+        value: "The Creation",
+        valueHtml: null,
+        metadata: { aquillaImport: { milestone: { label: "Genesis 1" } } },
+      },
+      {
+        cellId: "cell-verse",
+        side: "source",
+        canonicalRef: "GEN 1:2",
+        value: "Now the earth was formless",
+        valueHtml: null,
+      },
+    ])
+    mockComments.mockReturnValue([
+      makeComment({ commentId: "heading", cellId: "cell-heading", cellRef: null, body: "on the heading" }),
+      makeComment({ commentId: "verse", cellId: "cell-verse", cellRef: null, body: "on the verse" }),
+    ])
+    renderPage()
+
+    expect(await screen.findByText("Genesis 1")).toBeInTheDocument()
+    expect(screen.getByText("Genesis 1:2")).toBeInTheDocument()
+    expect(screen.queryByText("The Creation")).not.toBeInTheDocument()
+    expect(screen.queryByText("Now the earth was formless")).not.toBeInTheDocument()
+    expect(screen.queryByText(/cell-heading/)).not.toBeInTheDocument()
+  })
+
   it("shows No comments without Clear filters when only resolved threads exist", () => {
     mockComments.mockReturnValue([makeComment({ resolved: true })])
     renderPage()
@@ -270,7 +310,10 @@ describe("CommentsPage — jump to a comment", () => {
     mockComments.mockReturnValue([makeComment()])
     renderWithEditorRoute()
 
-    fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
+    expect(screen.queryByRole("button", { name: /Open file/i })).not.toBeInTheDocument()
+    const comment = screen.getByRole("button", { name: /unique-search-token/i })
+    expect(comment.closest(".rounded-lg")).toHaveClass("bg-card")
+    fireEvent.click(screen.getByText("Alice"))
 
     expect(jumpedTo()).toBe(
       "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=c1",
@@ -287,11 +330,19 @@ describe("CommentsPage — jump to a comment", () => {
     // reviewer revisiting old notes does.
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
     fireEvent.click(screen.getByRole("switch", { name: "Show resolved" }))
-
-    fireEvent.click(screen.getByRole("button", { name: /Open file/i }))
+    fireEvent.click(screen.getByRole("button", { name: /resolved comment from/i }))
 
     expect(jumpedTo()).toContain("comments=1")
     expect(jumpedTo()).toContain("commentId=c1")
+  })
+
+  it("does not offer a comment actions menu or a right-click menu", () => {
+    mockComments.mockReturnValue([makeComment()])
+    renderWithEditorRoute()
+
+    expect(screen.queryByRole("button", { name: "Comment actions" })).not.toBeInTheDocument()
+    fireEvent.contextMenu(screen.getByText("unique-search-token"))
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument()
   })
 
   it("scrolls to the reply that was clicked, not the top of the thread", () => {
@@ -307,7 +358,7 @@ describe("CommentsPage — jump to a comment", () => {
     ])
     renderWithEditorRoute()
 
-    fireEvent.click(screen.getByRole("button", { name: /the answer further down/i }))
+    fireEvent.click(screen.getByText("Bob"))
 
     expect(jumpedTo()).toBe(
       "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=reply-9",

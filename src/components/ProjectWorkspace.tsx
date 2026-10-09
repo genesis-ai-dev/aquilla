@@ -13652,7 +13652,7 @@ export function ProjectWorkspace() {
           // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("workspace.loadingComments")} />}>
-              <CommentsPageContent project={project} mentionRoster={projectMembers} />
+              <CommentsPageContent project={project} />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (

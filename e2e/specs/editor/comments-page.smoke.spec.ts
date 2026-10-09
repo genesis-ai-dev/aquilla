@@ -178,17 +178,19 @@ test("comments page empty state, filters, search, and resolved surface session",
       await expect(summary).toBeVisible({ timeout: 1_000 })
     }).toPass({ timeout: 15_000 })
 
-    if (!(await alice.getByText(commentText).isVisible())) {
-      await summary.click()
-    }
-    await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
-
-    await alice.getByRole("button", { name: /^Filters$/i }).click()
+    const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
+    await filtersBtn.click()
     await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
     await showResolvedSwitch.click()
     await expect(summary).not.toBeVisible({ timeout: 5_000 })
 
     await showResolvedSwitch.click()
     await expect(summary).toBeVisible({ timeout: 5_000 })
+    await filtersBtn.click()
+    await expect(showResolvedSwitch).not.toBeVisible({ timeout: 5_000 })
+
+    await summary.click()
+    await alice.waitForURL(/\/editor\/file\/[^/?]+[^#]*comments=1/, { timeout: 10_000 })
+    await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
   })
 })

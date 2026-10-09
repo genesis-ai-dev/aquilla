@@ -15,7 +15,7 @@
  *   absent    — no role context exists to explain, so nothing is shown
  */
 import { beforeEach, describe, it, expect, vi } from "vitest"
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { COMMENT_HIGHLIGHT_MS, CommentThread } from "./CommentThread"
 import type { CommentThread as ThreadData } from "@/lib/parsers/types"
@@ -42,6 +42,11 @@ function makeThread(status: "open" | "resolved" = "open"): ThreadData {
 }
 
 const noop = () => {}
+
+/** The highlighted row is the comment body, inside the list item. */
+function messageRow(text: string) {
+  return screen.getByText(text).closest("[data-comment-id]")
+}
 
 async function openActions() {
   const user = userEvent.setup()
@@ -210,7 +215,7 @@ describe("CommentThread — resolve controls reflect real authority (AQU-1000)",
     await user.clear(field)
     await user.type(field, "updated")
     await user.click(screen.getByRole("button", { name: "Save" }))
-    expect(onEdit).toHaveBeenCalledWith("updated")
+    expect(onEdit).toHaveBeenCalledWith("thread-1", "updated")
   })
 
   it("deletes the opening comment from the bottom of the menu", async () => {
@@ -221,11 +226,88 @@ describe("CommentThread — resolve controls reflect real authority (AQU-1000)",
     expect(items[items.length - 1]).toHaveAccessibleName("Delete")
     await user.click(screen.getByRole("menuitem", { name: "Delete" }))
     await user.click(screen.getByRole("button", { name: "Delete" }))
-    expect(onDelete).toHaveBeenCalledOnce()
+    expect(onDelete).toHaveBeenCalledWith("thread-1")
+  })
+
+  it("gives every comment its own menu, and a right-click opens the same actions", async () => {
+    const thread = makeThread()
+    thread.messages.push({
+      id: "reply-1",
+      author: "Bob",
+      authorType: "user",
+      text: "please look",
+      timestamp: new Date("2026-01-02T00:00:00Z").toISOString(),
+    })
+    const onEdit = vi.fn()
+    renderThread({ thread, canEdit: true, onEdit, projectId: "proj-1", fileId: "file-1", cellId: "cell-1" })
+    const actions = screen.getAllByRole("button", { name: "Comment actions" })
+    expect(actions).toHaveLength(2)
+    expect(actions[0].className).toContain("group-hover/comment:opacity-100")
+    expect(actions[0].closest(".group\\/comment")).toBeTruthy()
+
+    fireEvent.contextMenu(screen.getByText("please look"))
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("menuitem", { name: "Edit" }))
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    expect(onEdit).toHaveBeenCalledWith("reply-1", "please look")
   })
 })
 
 describe("CommentThread — resolved threads collapse", () => {
+  it("opens and recolors the resolved thread a link names", () => {
+    const thread = makeThread("resolved")
+    thread.messages.push({
+      id: "reply-1",
+      author: "Alice",
+      authorType: "user",
+      text: "second note",
+      timestamp: new Date("2026-01-02T00:00:00Z").toISOString(),
+    })
+    renderThread({ thread, highlightCommentId: "reply-1" })
+    expect(screen.getByText("second note")).toBeInTheDocument()
+    const reply = messageRow("second note")
+    const opening = messageRow("Is this rendering right?")
+    expect(reply?.className).toContain("ring-1")
+    expect(opening?.className).not.toContain("ring-1")
+    expect(reply?.closest(".rounded-lg")?.className).not.toContain("border-primary")
+    expect(screen.queryByRole("button", { name: /resolved comment from/i })).not.toBeInTheDocument()
+  })
+
+  it("opens a resolved thread when the link arrives after it has collapsed", () => {
+    const thread = makeThread("resolved")
+    const { rerender } = renderThread({ thread })
+    expect(screen.queryByText("Is this rendering right?")).not.toBeInTheDocument()
+    rerender(
+      <CommentThread
+        thread={thread}
+        currentTranslated="Bonjour"
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+        highlightCommentId="thread-1"
+      />,
+    )
+    expect(screen.getByText("Is this rendering right?")).toBeInTheDocument()
+    expect(messageRow("Is this rendering right?")?.className).toContain("ring-1")
+  })
+
+  it("reopens a resolved thread from a right-click on the summary", async () => {
+    const onReopen = vi.fn()
+    renderThread({ thread: makeThread("resolved"), onReopen })
+    fireEvent.contextMenu(screen.getByRole("button", { name: "1 resolved comment from Alice" }))
+    await userEvent.setup().click(screen.getByRole("menuitem", { name: "Reopen thread" }))
+    expect(onReopen).toHaveBeenCalledOnce()
+  })
+
+  it("deletes a resolved thread from a right-click on the summary", async () => {
+    const onDelete = vi.fn()
+    renderThread({ thread: makeThread("resolved"), canDelete: true, onDelete })
+    fireEvent.contextMenu(screen.getByRole("button", { name: "1 resolved comment from Alice" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }))
+    await userEvent.setup().click(screen.getByRole("button", { name: "Delete" }))
+    expect(onDelete).toHaveBeenCalledWith("thread-1")
+  })
+
   it("hides the messages until the summary is opened, then folds them again", async () => {
     const user = userEvent.setup()
     const thread = makeThread("resolved")
@@ -275,49 +357,19 @@ describe("CommentThread — author mark and focused reply", () => {
       timestamp: new Date("2026-01-02T00:00:00Z").toISOString(),
     })
     renderThread({ thread, highlightCommentId: "reply-1" })
-    const reply = screen.getByText("please look").closest("li")
+    const reply = messageRow("please look")
     expect(reply).toHaveAttribute("data-focused", "true")
-    expect(reply?.closest(".rounded-lg")?.className).toContain("border-primary")
-    expect(reply?.className).not.toContain("ring-1")
+    expect(reply?.className).toContain("ring-1")
+    expect(messageRow("Is this rendering right?")?.className).not.toContain("ring-1")
+    expect(reply?.closest(".rounded-lg")?.className).not.toContain("border-primary")
     expect(reply?.className).not.toContain("bg-muted")
     expect(reply?.className).not.toContain("bg-primary")
     expect(scroll.mock.instances).toContain(reply)
     scroll.mockRestore()
   })
 
-  it("drops the highlight after 8 seconds and leaves the reply in place", () => {
-    vi.useFakeTimers()
-    try {
-      const thread = makeThread()
-      thread.messages.push({
-        id: "reply-1",
-        author: "Bob",
-        authorType: "user",
-        text: "please look",
-        timestamp: new Date("2026-01-02T00:00:00Z").toISOString(),
-      })
-      renderThread({ thread, highlightCommentId: "reply-1" })
-      const reply = screen.getByText("please look").closest("li")
-      expect(reply).toHaveAttribute("data-focused", "true")
-
-      act(() => {
-        vi.advanceTimersByTime(COMMENT_HIGHLIGHT_MS - 1)
-      })
-      expect(reply).toHaveAttribute("data-focused", "true")
-
-      act(() => {
-        vi.advanceTimersByTime(1)
-      })
-      expect(reply).not.toHaveAttribute("data-focused")
-      expect(reply?.closest(".rounded-lg")?.className).not.toContain("border-primary")
-      expect(screen.getByText("please look")).toBeInTheDocument()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("highlights only the thread that holds the linked comment", () => {
-    const elsewhere = makeThread()
+  it("recolors only the thread that holds the linked comment", () => {
+    const elsewhere = makeThread("resolved")
     elsewhere.id = "thread-2"
     elsewhere.messages = [
       {
@@ -336,7 +388,7 @@ describe("CommentThread — author mark and focused reply", () => {
           onReply={noop}
           onResolve={noop}
           onReopen={noop}
-          highlightCommentId="thread-1"
+          highlightCommentId="reply-1"
         />
         <CommentThread
           thread={elsewhere}
@@ -344,13 +396,57 @@ describe("CommentThread — author mark and focused reply", () => {
           onReply={noop}
           onResolve={noop}
           onReopen={noop}
-          highlightCommentId="thread-1"
+          highlightCommentId="reply-1"
         />
       </>,
     )
     const named = screen.getByText("Is this rendering right?").closest(".rounded-lg")
-    const other = screen.getByText("somewhere else").closest(".rounded-lg")
-    expect(named?.className).toContain("border-primary")
+    const other = screen.getByRole("button", { name: "1 resolved comment from Alice" }).closest(".rounded-lg")
+    expect(named?.className).not.toContain("border-primary")
     expect(other?.className).not.toContain("border-primary")
+    expect(screen.queryByText("somewhere else")).not.toBeInTheDocument()
+  })
+
+  it("drops the highlight after 8 seconds and leaves the reply in place", () => {
+    vi.useFakeTimers()
+    try {
+      const thread = makeThread()
+      thread.messages.push({
+        id: "reply-1",
+        author: "Bob",
+        authorType: "user",
+        text: "please look",
+        timestamp: new Date("2026-01-02T00:00:00Z").toISOString(),
+      })
+      renderThread({ thread, highlightCommentId: "reply-1" })
+      const reply = messageRow("please look")
+      expect(reply).toHaveAttribute("data-focused", "true")
+
+      act(() => {
+        vi.advanceTimersByTime(COMMENT_HIGHLIGHT_MS - 1)
+      })
+      expect(reply).toHaveAttribute("data-focused", "true")
+
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(reply).not.toHaveAttribute("data-focused")
+      expect(reply?.className).not.toContain("ring-1")
+      expect(screen.getByText("please look")).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("keeps the reply divider a single line while the comment menu is open", async () => {
+    renderThread()
+    const list = document.querySelector("ul.divide-y")
+    expect(list).toBeTruthy()
+    await openActions()
+    // Focus guards render beside the menu trigger. They have to stay inside
+    // the comment's list item, or divide-y paints a second line on the reply border.
+    expect([...list!.children].map((child) => child.tagName)).toEqual(["LI"])
+    expect(list!.querySelector(":scope > [data-base-ui-focus-guard]")).toBeNull()
+    expect(messageRow("Is this rendering right?")?.tagName).toBe("DIV")
   })
 })

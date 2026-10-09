@@ -5,12 +5,11 @@
 //
 // AQU-185: filter/sort/show-resolved/navigate/@mention/FTS
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
-  MessageCircle, MessageCircleCheck, ChevronsUpDown, ChevronsDownUp,
-  AlertCircle, Search, Settings2, ArrowUpRight,
-  MoreHorizontal, Pencil, Trash2, RefreshCw, Check, Undo2,
+  MessageCircle, MessageCircleCheck,
+  AlertCircle, Search, Settings2, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -18,20 +17,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
-import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import { cn } from "@/lib/utils"
-import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { UserChip } from "@/components/UserChip"
 import { useComments } from "@/hooks/useComments"
 import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
@@ -40,17 +31,7 @@ import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderCommentHtml, stripAgentCommentMarker } from "@/lib/comments/comment-helpers"
-import {
-  canMutateComment,
-  commentFloorsFrom,
-  DEFAULT_COMMENT_FLOORS,
-  type CommentFloors,
-} from "@/lib/sync/role-policy"
-import { denialMessage } from "@/lib/permissions/denial"
-import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import DOMPurify from "dompurify"
-import { MentionTextarea } from "@/components/MentionTextarea"
-import type { MentionCandidate } from "@/lib/comments/mention-suggest"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   Popover,
@@ -58,14 +39,6 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -89,6 +62,7 @@ import {
   headerBadgeCount,
   resolveFileName,
 } from "./comments-page-filters"
+import { cellPlaceKey, formatScriptureRef, useCommentCellPlaces } from "./comments-cell-preview"
 
 function sortItems(t: TFunction): { value: SortOrder; label: string }[] {
   return [
@@ -99,21 +73,30 @@ function sortItems(t: TFunction): { value: SortOrder; label: string }[] {
 }
 
 function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>, t: TFunction): string {
-  if (comment.scopeKind === "cell") {
-    const { name } = resolveFileName(comment.fileId, fileMap, t)
-    // AQU-599: prefer the human-readable cell reference (e.g. "GEN 1:1") the
-    // server resolves from the source cell, so the panel shows the cell number
-    // instead of the opaque cellId. Fall back to the raw id only when no
-    // canonical ref is available (non-scripture / deleted cell / older worker).
-    const cellLabel =
-      comment.cellRef?.trim() || t("common.cellLabel", { id: comment.cellId ?? "?" })
-    return t("comments.scope.cell", { cell: cellLabel, file: name })
-  }
   if (comment.scopeKind === "file") {
     const { name } = resolveFileName(comment.fileId, fileMap, t)
     return t("comments.scope.file", { file: name })
   }
   return t("common.project")
+}
+
+function CellPlace({
+  root,
+  place,
+  fileMap,
+  t,
+}: {
+  root: CommentRecord
+  place?: string
+  fileMap: Map<string, string>
+  t: TFunction
+}) {
+  if (root.scopeKind === "cell") {
+    const label = place || formatScriptureRef(root.cellRef)
+    if (label) return <span className="min-w-0 flex-1 truncate">{label}</span>
+    return <span className="min-w-0 flex-1 truncate">{resolveFileName(root.fileId, fileMap, t).name}</span>
+  }
+  return <span className="min-w-0 flex-1 truncate">{scopeLabel(root, fileMap, t)}</span>
 }
 
 function safeCommentHtml(text: string): string {
@@ -123,104 +106,87 @@ function safeCommentHtml(text: string): string {
   })
 }
 
+function PageCommentRow({
+  comment,
+  isRoot,
+  fileMissing,
+  place,
+  fileMap,
+  root,
+  onNavigate,
+}: {
+  comment: CommentRecord
+  isRoot: boolean
+  fileMissing: boolean
+  place?: string
+  fileMap: Map<string, string>
+  root: CommentRecord
+  onNavigate?: (comment: CommentRecord) => void
+}) {
+  const { t } = useI18n()
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate?.(comment)}
+      disabled={!onNavigate}
+      className="block w-full p-2 text-start outline-none hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default"
+    >
+      {isRoot && (
+        <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <CellPlace root={root} place={place} fileMap={fileMap} t={t} />
+          {fileMissing && (
+            <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
+              {t("comments.file.deletedBadge")}
+            </Badge>
+          )}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 text-xs">
+        <UserChip
+          username={comment.authorLabel ?? comment.authorId}
+          size="xs"
+          nameClassName="text-xs"
+        />
+        <span className="text-muted-foreground">
+          <DateTooltip
+            value={comment.createdAt}
+            label=""
+            variant="ago"
+            side="top"
+            editedAt={comment.deletedAt ? null : comment.updatedAt}
+            editedNotice={t("comments.bubble.edited")}
+          />
+        </span>
+      </div>
+      {comment.deletedAt != null ? (
+        <p className="mt-1 ps-7 text-sm text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
+      ) : (
+        <div
+          data-ph-mask=""
+          className="mt-1 ps-7 text-sm select-text"
+          dangerouslySetInnerHTML={{ __html: safeCommentHtml(comment.body) }}
+        />
+      )}
+    </button>
+  )
+}
+
+
 // ── Thread (top-level + replies) ─────────────────────────────────────────
 
 interface ThreadProps {
   root: CommentRecord
   replies: CommentRecord[]
-  currentUsername?: string
-  /**
-   * AQU-1000: the reader's project role, or null for a local / git-imported
-   * project with no sync role. Drives the per-thread resolve gate below.
-   */
-  roleLevel?: number | null
-  /**
-   * AQU-1002: the org's configurable comment floors, read off the project
-   * record. Omitted ⇒ the stock defaults, i.e. pre-AQU-1002 behaviour.
-   */
-  floors?: CommentFloors
   fileMap: Map<string, string>
-  onResolve: (commentId: string, resolved: boolean) => void
-  onEdit: (commentId: string, body: string) => Promise<void>
-  onDelete: (commentId: string) => Promise<void>
+  /** Book, chapter, and verse for this thread's cell, when the read has landed. */
+  place?: string
   onNavigate?: (root: CommentRecord) => void
-  mentionRoster?: readonly MentionCandidate[]
 }
 
 function CommentThreadCard({
-  root, replies, currentUsername, roleLevel = null, floors = DEFAULT_COMMENT_FLOORS,
-  fileMap, onResolve, onEdit, onDelete, onNavigate, mentionRoster = [],
+  root, replies, fileMap, place, onNavigate,
 }: ThreadProps) {
   const { t, locale } = useI18n()
-  // AQU-1000: this page offered Resolve / Reopen to every reader, including
-  // roles the server refuses. `useComments.resolveThread` flips `resolved`
-  // optimistically, so the refusal showed up as a thread that closed and then
-  // sprang back open. Decide before offering, and explain a refusal.
-  const isOwnThread = !!currentUsername && root.authorId === currentUsername
-  const canResolve = canMutateComment("comment.resolve", roleLevel, isOwnThread, floors)
-  const resolveDenialReason = canResolve
-    ? null
-    : canMutateComment("comment.resolve", roleLevel, true, floors)
-      // Role clears the self floor but not the foreign one. AQU-1002: name the
-      // org's configured floor, so the sentence matches the real refusal.
-      ? t("comments.resolve.foreignDenied", {
-          minRole: resolveRoleName(t, floors.resolveMinRole, { plural: true }),
-        })
-      : denialMessage(t, ROLE.COMMENTER, roleLevel)
-  const [expanded, setExpanded] = useState(!root.resolved)
-  const wasResolved = useRef(root.resolved)
-  useEffect(() => {
-    const becameResolved = !wasResolved.current && root.resolved
-    wasResolved.current = root.resolved
-    if (becameResolved) setExpanded(false)
-  }, [root.resolved])
-  // Inline edit state
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editBody, setEditBody] = useState("")
-  const [isSavingEdit, setIsSavingEdit] = useState(false)
-
-  // Delete confirm state
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [isDeletingConfirm, setIsDeletingConfirm] = useState(false)
-
-  function startEdit(commentId: string, currentBody: string) {
-    setEditingId(commentId)
-    setEditBody(currentBody)
-  }
-
-  async function saveEdit() {
-    if (!editingId || !editBody.trim()) return
-    setIsSavingEdit(true)
-    try {
-      await onEdit(editingId, editBody.trim())
-    } finally {
-      setIsSavingEdit(false)
-      setEditingId(null)
-      setEditBody("")
-    }
-  }
-
-  function cancelEdit() {
-    setEditingId(null)
-    setEditBody("")
-  }
-
-  function requestDelete(commentId: string) {
-    setDeletingId(commentId)
-    setIsDeletingConfirm(true)
-  }
-
-  async function confirmDelete() {
-    if (!deletingId) return
-    await onDelete(deletingId)
-    setDeletingId(null)
-    setIsDeletingConfirm(false)
-  }
-
-  function cancelDelete() {
-    setDeletingId(null)
-    setIsDeletingConfirm(false)
-  }
 
   const messages = [root, ...replies]
   const authors = new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(
@@ -231,216 +197,42 @@ function CommentThreadCard({
     authors,
   })
   const fileMissing = !!root.fileId && !resolveFileName(root.fileId, fileMap, t).exists
-  const canOpenFile = !!onNavigate && root.scopeKind === "cell" && !!root.fileId && !!root.cellId
-
-  function openFileButton() {
-    if (!canOpenFile || !onNavigate) return null
-    if (fileMissing) {
-      return (
-        <AppTooltip content={t("comments.fileDeletedTooltip")}>
-          <Button type="button" variant="ghost" size="xs" className="cursor-not-allowed opacity-50" disabled>
-            <ArrowUpRight data-icon="inline-start" />
-            {t("comments.openFile")}
-          </Button>
-        </AppTooltip>
-      )
-    }
-    return (
-      <AppTooltip content={t("comments.goToCell")}>
-        <Button type="button" variant="ghost" size="xs" onClick={() => onNavigate(root)}>
-          <ArrowUpRight data-icon="inline-start" />
-          {t("comments.openFile")}
-        </Button>
-      </AppTooltip>
-    )
-  }
 
   const threadBody = (
     <>
       <ul className="divide-y">
-        {messages.map((comment, index) => {
-          const isOwn = !!currentUsername && comment.authorId === currentUsername
-          const canMutate = isOwn && comment.deletedAt == null
-          const editing = editingId === comment.commentId
-          return (
-            <li key={comment.commentId} className="p-2">
-              {index === 0 && (
-                <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <span className="min-w-0 flex-1 truncate">{scopeLabel(root, fileMap, t)}</span>
-                  {fileMissing && (
-                    <Badge variant="outline" className="h-4 px-1 text-[10px] text-muted-foreground">
-                      {t("comments.file.deletedBadge")}
-                    </Badge>
-                  )}
-                  {openFileButton()}
-                </div>
-              )}
-              <div className="flex items-center gap-1.5 text-xs">
-                <UsernameWithAvatar
-                  username={comment.authorLabel ?? comment.authorId}
-                  size="xs"
-                  nameClassName="text-xs"
-                />
-                <span className="text-muted-foreground">
-                  <DateTooltip
-                    value={comment.createdAt}
-                    label=""
-                    variant="ago"
-                    side="top"
-                    editedAt={comment.deletedAt ? null : comment.updatedAt}
-                    editedNotice={t("comments.bubble.edited")}
-                  />
-                </span>
-                {(index === 0 || canMutate) && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          className="ms-auto"
-                          aria-label={t("comments.thread.actionsAria")}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="end" className="min-w-44">
-                      {canMutate && (
-                        <DropdownMenuItem onClick={() => startEdit(comment.commentId, comment.body)}>
-                          <Pencil />
-                          {t("common.edit")}
-                        </DropdownMenuItem>
-                      )}
-                      {index === 0 && (
-                        <AppTooltip content={!canResolve ? (resolveDenialReason ?? "") : ""}>
-                          <DropdownMenuItem
-                            data-testid="thread-resolve"
-                            aria-disabled={!canResolve || undefined}
-                            className={cn(!canResolve && "cursor-not-allowed opacity-50")}
-                            onClick={() => {
-                              if (!canResolve) return
-                              onResolve(root.commentId, !root.resolved)
-                            }}
-                          >
-                            {root.resolved ? <Undo2 /> : <Check />}
-                            {root.resolved ? t("comments.thread.reopen") : t("comments.thread.resolve")}
-                          </DropdownMenuItem>
-                        </AppTooltip>
-                      )}
-                      {canMutate && (
-                        <DropdownMenuItem onClick={() => requestDelete(comment.commentId)}>
-                          <Trash2 />
-                          {t("common.delete")}
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-              </div>
-              {editing ? (
-                <div className="mt-1 ps-7">
-                  <MentionTextarea
-                    value={editBody}
-                    onChange={setEditBody}
-                    candidates={mentionRoster}
-                    currentUsername={currentUsername}
-                    placeholder={t("comments.composer.editPlaceholder")}
-                    autoHeight
-                    caretAtEnd
-                    className="min-h-5 border-0 bg-transparent p-0 text-sm shadow-none rounded-none focus-visible:border-transparent focus-visible:ring-0 data-[empty=true]:before:start-0 data-[empty=true]:before:top-0"
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        cancelEdit()
-                        return
-                      }
-                      if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || e.nativeEvent.isComposing) return
-                      e.preventDefault()
-                      void saveEdit()
-                    }}
-                  />
-                  <div className="mt-1.5 flex justify-end gap-1.5">
-                    <Button type="button" size="xs" variant="ghost" onClick={cancelEdit} disabled={isSavingEdit}>
-                      {t("common.cancel")}
-                    </Button>
-                    <Button type="button" size="xs" onClick={() => { void saveEdit() }} disabled={isSavingEdit || !editBody.trim()}>
-                      {isSavingEdit ? <Spinner className="size-3" /> : t("common.save")}
-                    </Button>
-                  </div>
-                </div>
-              ) : comment.deletedAt != null ? (
-                <p className="mt-1 ps-7 text-sm text-muted-foreground">{t("comments.bubble.deletedBody")}</p>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onNavigate?.(comment)}
-                  disabled={!onNavigate}
-                  className="mt-1 block w-full ps-7 text-start text-sm disabled:cursor-default"
-                >
-                  <div data-ph-mask="" dangerouslySetInnerHTML={{ __html: safeCommentHtml(comment.body) }} />
-                </button>
-              )}
-            </li>
-          )
-        })}
+        {messages.map((comment, index) => (
+          <li key={comment.commentId}>
+            <PageCommentRow
+              comment={comment}
+              isRoot={index === 0}
+              fileMissing={fileMissing}
+              place={place}
+              fileMap={fileMap}
+              root={root}
+              onNavigate={onNavigate}
+            />
+          </li>
+        ))}
       </ul>
     </>
   )
 
   const shell = root.resolved ? (
-    <CollapsiblePrimitive.Root
-      data-slot="collapsible"
-      open={expanded}
-      onOpenChange={setExpanded}
-      className="mb-3 rounded-lg border text-sm"
+    <button
+      type="button"
+      onClick={() => onNavigate?.(root)}
+      disabled={!onNavigate}
+      className="flex w-full items-center gap-2 rounded-lg border bg-card p-2 text-start text-sm outline-none hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default"
     >
-      {expanded ? (
-        <>
-          <CollapsiblePrimitive.Trigger
-            data-slot="collapsible-trigger"
-            className="flex w-full items-center gap-2 border-b p-2 text-start text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-          >
-            <span className="min-w-0 flex-1">{t("comments.thread.collapse")}</span>
-            <ChevronsDownUp className="size-4 shrink-0" aria-hidden />
-          </CollapsiblePrimitive.Trigger>
-          <CollapsiblePrimitive.Panel data-slot="collapsible-content">{threadBody}</CollapsiblePrimitive.Panel>
-        </>
-      ) : (
-        <div className="flex items-center gap-2 p-2">
-          <CollapsiblePrimitive.Trigger
-            data-slot="collapsible-trigger"
-            className="flex min-w-0 flex-1 items-center gap-2 text-start outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-          >
-            <MessageCircleCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">{resolvedSummary}</span>
-            <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          </CollapsiblePrimitive.Trigger>
-          {openFileButton()}
-        </div>
-      )}
-    </CollapsiblePrimitive.Root>
+      <MessageCircleCheck className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{resolvedSummary}</span>
+    </button>
   ) : (
-    <div className="mb-3 rounded-lg border text-sm">{threadBody}</div>
+    <div className="rounded-lg border bg-card text-sm">{threadBody}</div>
   )
 
-  return (
-    <>
-      <Dialog open={isDeletingConfirm} onOpenChange={(v) => { if (!v) cancelDelete() }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("comments.deleteDialog.title")}</DialogTitle>
-            <DialogDescription>{t("comments.deleteDialog.description")}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={cancelDelete}>{t("common.cancel")}</Button>
-            <Button variant="destructive" onClick={() => { void confirmDelete() }}>{t("common.delete")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      {shell}
-    </>
-  )
+  return shell
 }
 
 // ── Filter/sort controls ──────────────────────────────────────────────────
@@ -679,11 +471,9 @@ interface CommentsPageProps {
   /** Reuse the workspace's already-resolved project for file labels instead
    * of starting a second project query when this pane opens. */
   project?: ProjectRecord | null
-  /** Project members offered by the @mention picker. Empty until the roster arrives. */
-  mentionRoster?: readonly MentionCandidate[]
 }
 
-export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: CommentsPageProps = {}) {
+export function CommentsPage({ project: workspaceProject }: CommentsPageProps = {}) {
   const t = useT()
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -706,7 +496,7 @@ export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: 
     )
   }, [projectId, session?.jwt])
 
-  const { comments, isLoading, isError, resolveThread, editComment, deleteComment, refresh } = useComments({
+  const { comments, isLoading, isError, refresh } = useComments({
     projectId: projectId ?? null,
     getToken,
     author: session?.username ?? 'unknown',
@@ -742,6 +532,8 @@ export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: 
     }
     return map
   }, [project?.files])
+
+  const places = useCommentCellPlaces(projectId, getToken, comments)
 
   // Derive unique file/author options for filter controls
   const { fileOptions, authorOptions } = useMemo(() => {
@@ -859,21 +651,19 @@ export function CommentsPage({ project: workspaceProject, mentionRoster = [] }: 
       )}
 
       {displayedRoots.length > 0 && (
-        <div>
+        <div className="space-y-2">
           {displayedRoots.map((root) => (
             <CommentThreadCard
               key={root.commentId}
               root={root}
               replies={repliesByParent.get(root.commentId) ?? []}
-              currentUsername={session?.username}
-              roleLevel={project?.syncRole?.level ?? null}
-              floors={commentFloorsFrom(project)}
               fileMap={fileMap}
-              onResolve={resolveThread}
-              onEdit={editComment}
-              onDelete={deleteComment}
+              place={
+                root.fileId && root.cellId
+                  ? places.get(cellPlaceKey(root.fileId, root.cellId))
+                  : undefined
+              }
               onNavigate={handleNavigate}
-              mentionRoster={mentionRoster}
             />
           ))}
         </div>

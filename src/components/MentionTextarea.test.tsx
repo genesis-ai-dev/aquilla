@@ -89,6 +89,23 @@ describe("MentionTextarea", () => {
     expect(field).toHaveTextContent("Check @bob")
   })
 
+  it("draws an empty suggestion list at the same text size as menus", async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <span id="label">Comment</span>
+        <Harness />
+      </>,
+    )
+    await user.type(screen.getByRole("textbox", { name: "Comment" }), "@zzz")
+    const list = screen.getByRole("listbox")
+    expect(list.className).toContain("text-sm")
+    expect(list.className).not.toContain("text-[11px]")
+    const empty = screen.getByText("No users found.")
+    expect(empty.className).toContain("text-sm")
+    expect(empty.className).not.toContain("text-[11px]")
+  })
+
   it("closes the list on Escape without inserting", async () => {
     const user = userEvent.setup()
     render(<Harness />)

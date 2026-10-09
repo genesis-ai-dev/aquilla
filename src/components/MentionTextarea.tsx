@@ -236,16 +236,16 @@ export function MentionTextarea({
             bottom: listBox.bottom,
             zIndex: 60,
           }}
-          className="max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md"
+          className="max-h-48 overflow-y-auto rounded-lg bg-popover p-1 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10"
         >
           {suggestions.length === 0 ? (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">
+            <p className="px-1.5 py-1 text-sm text-muted-foreground">
               {candidates.length === 0
                 ? t("comments.mention.noMembers")
                 : t("comments.mention.noResults")}
             </p>
           ) : (
-            <ul className="py-0.5">
+            <ul>
               {suggestions.map((member, index) => (
                 <li key={member.username} role="presentation">
                   <button
@@ -254,8 +254,8 @@ export function MentionTextarea({
                     role="option"
                     aria-selected={index === activeIndex}
                     className={cn(
-                      "flex w-full items-center gap-2 px-2.5 py-1.5 text-start text-sm",
-                      index === activeIndex ? "bg-accent text-accent-foreground" : "hover:bg-muted",
+                      "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-start text-sm",
+                      index === activeIndex ? "bg-accent/40 text-accent-foreground" : "hover:bg-accent/40",
                     )}
                     onMouseDown={(event) => event.preventDefault()}
                     onMouseEnter={() => setHighlight(index)}

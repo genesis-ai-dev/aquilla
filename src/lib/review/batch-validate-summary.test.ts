@@ -280,8 +280,34 @@ describe("summarizeBatchValidate — machine provenance is not an eligibility ru
     expect(summary.outcome).toBe("validated")
   })
 
-  it("no skip bucket reports a refusal to review in bulk", () => {
-    expect(BATCH_VALIDATE_SKIP_REASONS).not.toContain("aiDraft")
+  it("does not bucket a machine draft unless the file-wide run opts out", () => {
+    expect(summarizeBatchValidate([cell({ aiDrafted: true })], base).skips.aiDraft).toBe(0)
+    const optedOut = summarizeBatchValidate(
+      [cell({ id: "a", aiDrafted: true })],
+      { ...base, includeUntouchedAiDrafts: false },
+    )
+    expect(optedOut.validatable).toEqual([])
+    expect(optedOut.skips.aiDraft).toBe(1)
+    expect(optedOut.outcome).toBe("nothing-eligible")
+  })
+
+  it("keeps an AI draft someone else already checked when untouched drafts are left out", () => {
+    const summary = summarizeBatchValidate(
+      [cell({ id: "second", aiDrafted: true, activeValidators: ["joy"] })],
+      { ...base, includeUntouchedAiDrafts: false },
+    )
+    expect(summary.validatable.map((c) => c.id)).toEqual(["second"])
+    expect(summary.skips.aiDraft).toBe(0)
+  })
+
+  it("names the AI drafts a file-wide run left for individual review", () => {
+    const summary = summarizeBatchValidate(
+      [cell({ aiDrafted: true }), cell({ id: "human" })],
+      { ...base, includeUntouchedAiDrafts: false },
+    )
+    expect(summary.validatable.map((c) => c.id)).toEqual(["human"])
+    const toast = batchValidateToast(summary, t, joinList)
+    expect(toast.description).toContain("editor.batchValidate.skip.aiDraft")
   })
 
   // Restoring the old exclusion must fail a test, not slip through green.
@@ -333,7 +359,7 @@ describe("summarizeBatchValidate — the caller's own latest change", () => {
     expect(batchValidateSkipReason(cell({ lastEditor: ME }), ME, scopes, "", self)).toBe("ownEdit")
   })
 
-  it("keeps the books balanced with all five reasons in play", () => {
+  it("keeps the books balanced with every skip reason in play", () => {
     const scopes: MemberScope[] = [{ kind: "file", value: "file-1" }]
     const candidates = [
       cell({ id: "ok" }),
@@ -345,10 +371,10 @@ describe("summarizeBatchValidate — the caller's own latest change", () => {
     ]
     const summary = summarizeBatchValidate(candidates, { ...off, myScopes: scopes })
     expect(summary.skips).toEqual({
-      needsTranslation: 1, alreadyMine: 1, ownEdit: 1, outOfScope: 1, notCommitted: 1,
+      needsTranslation: 1, aiDraft: 0, alreadyMine: 1, ownEdit: 1, outOfScope: 1, notCommitted: 1, notChosen: 0,
     })
     const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + summary.skips[r], 0)
-    expect(BATCH_VALIDATE_SKIP_REASONS).toHaveLength(5)
+    expect(BATCH_VALIDATE_SKIP_REASONS).toHaveLength(7)
     expect(bucketed).toBe(summary.skippedTotal)
     expect(summary.validatable.map((c) => c.id)).toEqual(["ok"])
     expect(summary.validatable.length + bucketed).toBe(candidates.length)
@@ -356,7 +382,7 @@ describe("summarizeBatchValidate — the caller's own latest change", () => {
 
   it("reads its clause after already-mine and before out-of-scope", () => {
     expect(BATCH_VALIDATE_SKIP_REASONS).toEqual([
-      "needsTranslation", "alreadyMine", "ownEdit", "outOfScope", "notCommitted",
+      "needsTranslation", "aiDraft", "alreadyMine", "ownEdit", "outOfScope", "notCommitted", "notChosen",
     ])
     const scopes: MemberScope[] = [{ kind: "file", value: "file-1" }]
     const summary = summarizeBatchValidate(

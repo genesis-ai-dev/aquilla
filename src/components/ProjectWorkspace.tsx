@@ -408,7 +408,6 @@ import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
-import { draftTargets } from "@/lib/completion/draft-targets"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import { Button } from "@/components/ui/button"
 import {
@@ -485,6 +484,14 @@ import {
   workspaceBatchValidateOptions,
   type BatchValidateSummary,
 } from "@/lib/review/batch-validate-summary"
+import {
+  canIncludeUntouchedAiDrafts,
+  classifyBatchDraft,
+  selectBatchDraft,
+  type DraftRunChoices,
+  type ValidateRunChoices,
+} from "@/lib/review/batch-file-options"
+import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -9650,16 +9657,21 @@ export function ProjectWorkspace() {
    * number the run will deliver. Lazy on purpose — it walks every cell, and the
    * dialog it feeds is opened far less often than this context is rebuilt.
    */
-  const batchValidateSummary = useCallback(() => summarizeBatchValidate(
+  const batchValidateSummary = useCallback((choices?: ValidateRunChoices) => summarizeBatchValidate(
     project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
     // AQU-1571: the project's text rules, pinned by a unit test of the builder.
-    workspaceBatchValidateOptions({
-      project,
-      activeFileId,
-      username: currentUsername,
-      myScopes,
-      activeLane,
-    }),
+    // AQU-983: the file modal passes which groups this run includes. A call
+    // with no choices keeps the selection-toolbar defaults (include both).
+    {
+      ...workspaceBatchValidateOptions({
+        project,
+        activeFileId,
+        username: currentUsername,
+        myScopes,
+        activeLane,
+      }),
+      ...choices,
+    },
   ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
 
   const actionCtx = useMemo(() => ({
@@ -9751,25 +9763,44 @@ export function ProjectWorkspace() {
     [t, formatLocaleList],
   )
 
+  // AQU-983: the file modal writes these, then the menu action runs. Defaults
+  // match the old one-shot actions: next package of empty cells, and no
+  // untouched AI drafts in a file-wide validation.
+  const batchValidateChoicesRef = useRef<ValidateRunChoices>({
+    includeReadyCells: true,
+    includeUntouchedAiDrafts: false,
+  })
+  const draftChoicesRef = useRef<DraftRunChoices>({
+    includeEmpty: true,
+    refreshAiDrafts: false,
+    scope: "next",
+    batchSize: 10,
+  })
+
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
-    // AQU-1424: `draftTargets` is the shared rule for "what is left to draft" —
-    // untranslated AND not parked. Both paths go through it so they cannot drift
-    // apart, and the one that would cost money is covered: without the hidden
-    // clause, Draft-all spends AI credits on text nobody will read or export.
+    // AQU-1424 / AQU-983: both draft menu items run whatever the modal ticked.
+    // Empty cells stay the default; refreshing an AI draft is opt-in, and a
+    // hidden cell never enters the list (`classifyBatchDraft`).
     runCompletions: () => {
       if (!activeFileId || !project) return
-      const untranslated = draftTargets(getActiveCells())
-      if (untranslated.length === 0) return
-      // AQU-586: honor the project's configured completion batch size (default 10).
-      completeBatch(untranslated.slice(0, completionBatchSizeFor(project)))
+      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const chosen = selectBatchDraft(classifyBatchDraft(cells), {
+        ...draftChoicesRef.current,
+        batchSize: completionBatchSizeFor(project),
+      })
+      if (chosen.length === 0) return
+      completeBatch(chosen)
     },
     runCompleteAll: () => {
-      if (!activeFileId) return
-      const untranslated = draftTargets(getActiveCells())
-      if (untranslated.length === 0) return
-      // No slice — draft every untranslated cell; useCompletion chunks internally.
-      completeBatch(untranslated)
+      if (!activeFileId || !project) return
+      const cells = getActiveCells().filter((cell) => cell.fileId === activeFileId)
+      const chosen = selectBatchDraft(classifyBatchDraft(cells), {
+        ...draftChoicesRef.current,
+        batchSize: completionBatchSizeFor(project),
+      })
+      if (chosen.length === 0) return
+      completeBatch(chosen)
     },
     runExport: openExportFlow,
     // FRO-288: wire batch-validate through the real validation event path.
@@ -9794,7 +9825,7 @@ export function ProjectWorkspace() {
       // AQU-1507: the run and the confirmation dialog now call the SAME thunk,
       // so the number the dialog promised is by construction the number this
       // loop validates — the divergence was the rest of the reported bug.
-      const summary = batchValidateSummary()
+      const summary = batchValidateSummary(batchValidateChoicesRef.current)
       const projectId = project?.id
       if (summary.validatable.length === 0 || !projectId) {
         reportBatchValidate(summary, "workspace-action")
@@ -10007,8 +10038,22 @@ export function ProjectWorkspace() {
   // actions with `requiresConfirmation` route through the ConfirmActionDialog
   // (rendered below) instead of running immediately.
   const [pendingActionConfirm, setPendingActionConfirm] = useState<WorkspaceAction | null>(null)
+  const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
+    // AQU-983: drafting and text validation open the file modal. The plain
+    // confirm dialog stays for the actions that only need a yes.
+    if (action.opensFileModal === "validate") {
+      setBatchFileModal({ kind: "validate" })
+      return
+    }
+    if (action.opensFileModal === "draft-next" || action.opensFileModal === "draft-all") {
+      setBatchFileModal({
+        kind: "draft",
+        scope: action.opensFileModal === "draft-next" ? "next" : "all",
+      })
+      return
+    }
     if (action.requiresConfirmation) {
       setPendingActionConfirm(action)
     } else {
@@ -14839,6 +14884,40 @@ export function ProjectWorkspace() {
       />
       {/* AQU-661: confirmation for workspace actions folded from the removed
           primary-action dropdown into the ⋯ overflow menu. */}
+      {batchFileModal && project && (
+        <BatchFileModal
+          open
+          onOpenChange={(open) => { if (!open) setBatchFileModal(null) }}
+          request={batchFileModal}
+          batchSize={completionBatchSizeFor(project)}
+          canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
+          validateCandidates={activeFileId
+            ? cellSummaries.filter((cell) => cell.fileId === activeFileId)
+            : []}
+          validateOptions={workspaceBatchValidateOptions({
+            project,
+            activeFileId,
+            username: currentUsername,
+            myScopes,
+            activeLane,
+          })}
+          draftCells={batchFileModal.kind === "draft" && activeFileId
+            ? getActiveCells().filter((cell) => cell.fileId === activeFileId)
+            : []}
+          onConfirmValidate={(choices) => {
+            batchValidateChoicesRef.current = choices
+            workspaceActions.find((action) => action.id === "batch-validate")
+              ?.run(actionCtx, actionArgs)
+            setBatchFileModal(null)
+          }}
+          onConfirmDraft={(choices) => {
+            draftChoicesRef.current = choices
+            const id = choices.scope === "next" ? "run-completions" : "complete-all"
+            workspaceActions.find((action) => action.id === id)?.run(actionCtx, actionArgs)
+            setBatchFileModal(null)
+          }}
+        />
+      )}
       {pendingActionConfirm?.requiresConfirmation && (
         <ConfirmActionDialog
           open={true}

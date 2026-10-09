@@ -17,16 +17,22 @@
  * reads "12 cells currently unvalidated" and then validates zero. That gap is
  * a gap to *report*, which is what this module makes possible.
  *
- * AQU-1703: "untouched AI draft" is no longer one of those reasons. It was the
- * dominant one, it was derived from whether a human had retyped the line, and
- * reporting it as "reviewed one at a time" turned a reviewer's bulk sign-off of
- * a colleague's work into a refusal. See `review-eligibility.ts`.
+ * AQU-1703: an explicit selection does not drop untouched AI drafts. The
+ * selection toolbar calls this with the defaults below, so a reviewer who
+ * picked a colleague's lines is not told to review them one at a time.
+ *
+ * AQU-983: a file-wide run may pass `includeUntouchedAiDrafts: false`. Those
+ * lines then land in `aiDraft` and the modal says so, instead of the click
+ * appearing to do nothing. A cell someone else has already validated is not
+ * untouched, so a second pass includes it either way. `notChosen` is the
+ * same kind of account for the "ready for your check" box left unticked.
  *
  * So the eligibility split and the reason each cell was skipped are computed
  * once, here, as plain data: both surfaces render the same words and emit the
  * same telemetry, and the guard branches are unit-testable without React.
  */
 import { isBulkValidatableByMe, type BulkValidatePolicy } from "@/lib/review/bulk-validation"
+import { isUntouchedAiDraft } from "@/lib/review/batch-file-options"
 import { isOwnTextEdit, textValidationScope } from "@/lib/review/text-validation-policy"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 import { canPerform } from "@/lib/sync/role-policy"
@@ -53,17 +59,21 @@ export interface BatchValidateCandidate {
  */
 export type BatchValidateSkipReason =
   | "needsTranslation"
+  | "aiDraft"
   | "alreadyMine"
   | "ownEdit"
   | "outOfScope"
   | "notCommitted"
+  | "notChosen"
 
 export const BATCH_VALIDATE_SKIP_REASONS: readonly BatchValidateSkipReason[] = [
   "needsTranslation",
+  "aiDraft",
   "alreadyMine",
   "ownEdit",
   "outOfScope",
   "notCommitted",
+  "notChosen",
 ]
 
 export type BatchValidateSkips = Record<BatchValidateSkipReason, number>
@@ -106,7 +116,15 @@ export interface BatchValidateSummary {
 export type BatchValidateNoPermissionReason = "role" | "allowlist"
 
 function emptySkips(): BatchValidateSkips {
-  return { needsTranslation: 0, alreadyMine: 0, ownEdit: 0, outOfScope: 0, notCommitted: 0 }
+  return {
+    needsTranslation: 0,
+    aiDraft: 0,
+    alreadyMine: 0,
+    ownEdit: 0,
+    outOfScope: 0,
+    notCommitted: 0,
+    notChosen: 0,
+  }
 }
 
 /**
@@ -157,6 +175,16 @@ export interface SummarizeOptions {
    * refuse its vote.
    */
   allowSelfValidation?: boolean
+  /**
+   * AQU-983: file-wide batch validate leaves untouched AI drafts out unless
+   * the modal opts in. Absent means include them — the selection toolbar.
+   */
+  includeUntouchedAiDrafts?: boolean
+  /**
+   * AQU-983: the "ready for your check" box. Absent means include them.
+   * Unticked cells are `notChosen`, not a refusal.
+   */
+  includeReadyCells?: boolean
 }
 
 export function summarizeBatchValidate(
@@ -166,6 +194,8 @@ export function summarizeBatchValidate(
   const {
     username, myScopes, activeLane, cap, canValidate = true, hasTarget = true, allowSelfValidation,
     noPermissionReason = "role",
+    includeUntouchedAiDrafts = true,
+    includeReadyCells = true,
   } = options
   const skips = emptySkips()
 
@@ -179,8 +209,20 @@ export function summarizeBatchValidate(
   const eligible: BatchValidateCandidate[] = []
   for (const cell of candidates) {
     const reason = batchValidateSkipReason(cell, username, myScopes, activeLane, { allowSelfValidation })
-    if (reason === null) eligible.push(cell)
-    else skips[reason]++
+    if (reason !== null) {
+      skips[reason]++
+      continue
+    }
+    const untouched = isUntouchedAiDraft(cell)
+    if (untouched && !includeUntouchedAiDrafts) {
+      skips.aiDraft++
+      continue
+    }
+    if (!untouched && !includeReadyCells) {
+      skips.notChosen++
+      continue
+    }
+    eligible.push(cell)
   }
 
   const capped = typeof cap === "number" && cap > 0 ? eligible.slice(0, cap) : eligible
@@ -255,6 +297,8 @@ export function batchValidateTelemetry(
     skipped_own_edit: summary.skips.ownEdit,
     skipped_out_of_scope: summary.skips.outOfScope,
     skipped_not_committed: summary.skips.notCommitted,
+    skipped_ai_draft: summary.skips.aiDraft,
+    skipped_not_chosen: summary.skips.notChosen,
   }
 }
 
@@ -289,10 +333,12 @@ type JoinList = (items: readonly string[]) => string
 
 const SKIP_MESSAGE_KEY: Record<BatchValidateSkipReason, MessageKey> = {
   needsTranslation: "editor.batchValidate.skip.needsTranslation",
+  aiDraft: "editor.batchValidate.skip.aiDraft",
   alreadyMine: "editor.batchValidate.skip.alreadyMine",
   ownEdit: "editor.batchValidate.skip.ownEdit",
   outOfScope: "editor.batchValidate.skip.outOfScope",
   notCommitted: "editor.batchValidate.skip.notCommitted",
+  notChosen: "editor.batchValidate.skip.notChosen",
 }
 
 /**

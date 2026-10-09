@@ -79,6 +79,28 @@ describe("GET /api/v2/orgs/:orgId/deleted-files", () => {
     expect(body.files.map((f) => f.fileId)).toEqual(["f-del-a"])
   })
 
+  it("AQU-1566: never lists a replaced cue sheet or caption track", async () => {
+    await seedOrgWithDeletedFiles()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES
+        ('e4', 1, 'pa', 'file.create', 'wendi', '{}', 3000, 3000, 3),
+        ('e5', 1, 'pa', 'file.create', 'wendi', '{}', 4000, 4000, 4)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, role, anchor_file_id, event_id, cell_count, deleted_at) VALUES
+        ('f-cue', 'pa', 'GEN audio', 'audio-cues', 'f-live', 'e4', 40, 1700000200000),
+        ('f-track', 'pa', 'Captions', 'timeline-content', 'f-live', 'e5', 500, 1700000300000)`,
+    ).run()
+    const res = await app.request(
+      "/api/v2/orgs/1/deleted-files",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { files: Array<{ fileId: string }> }
+    expect(body.files.map((f) => f.fileId)).toEqual(["f-del-b", "f-del-a"])
+  })
+
   it("403s a non-member", async () => {
     await seedOrgWithDeletedFiles()
     const denied = await app.request(

@@ -89,6 +89,7 @@ describe("deriveDefaultTracks", () => {
       { ...MEDIA, hasAudioCues: true },
       SUBTITLE_IMPORT,
       { ...SUBTITLE_IMPORT, hasAudioCues: true },
+      { ...SUBTITLE_IMPORT, hasLinkedVideoSound: true },
       { isSubtitleImport: true, hasMediaCells: true, hasAudioCues: true },
     ]
     for (const context of contexts) {
@@ -111,6 +112,15 @@ describe("deriveDefaultTracks", () => {
 })
 
 describe("deriveDefaultTracks — the derivation context", () => {
+  // Sam, Oct 5 (AQU-1566): a subtitle file linked to a video keeps its Source
+  // audio row for the video's own sound, cues or not.
+  it("keeps a linked video's Source audio row on a subtitle file with no cues", () => {
+    expect(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasLinkedVideoSound: true }).map((t) => t.id)).toEqual([
+      "source-subtitles", "target-subtitles", "source-audio", "target-audio",
+    ])
+    expect(deriveDefaultTracks(SUBTITLE_IMPORT).map((t) => t.id)).not.toContain("source-audio")
+  })
+
   it("gives a media file the stage-1 shape, labels included", () => {
     // The whole point of the context: every dubbing project that exists must
     // see nothing at all change after stage 2.

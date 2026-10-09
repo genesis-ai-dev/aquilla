@@ -76,6 +76,24 @@ export function laneRowLabel(lane: LaneLanguageRow): string | null {
   return notALaneId(laneDisplayName(lane), lane.id)
 }
 
+/**
+ * The label a scope checkbox shows for one lane row.
+ *
+ * Name, else the language the row records (including a code on an
+ * un-backfilled row), else a tag that is not an opaque lane id, else
+ * `fallback`. An 8-hex id is never shown: that is the event key, not a
+ * language anyone can read.
+ */
+export function laneOptionLabel(lane: LaneLanguageRow, fallback: string): string {
+  const label = laneRowLabel(lane)
+  if (label) return label
+  const language = laneRowLanguage(lane)
+  if (language) return language
+  const tag = (lane.legacyTag ?? "").trim()
+  if (tag && !isLaneId(tag)) return tag
+  return fallback
+}
+
 /** The row carrying `tag`, matched on `legacy_tag` ('' is the default lane). */
 function rowForTag(
   tag: string,

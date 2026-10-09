@@ -1,3 +1,4 @@
+mod app_update;
 mod auth;
 mod connectivity;
 mod fs_bridge;
@@ -59,6 +60,7 @@ pub fn run() {
             });
             app.manage(llm_config);
             app.manage(shutdown_guard::ShutdownGuardState::new());
+            app.manage(app_update::AppUpdateState::default());
 
             Ok(())
         })
@@ -86,6 +88,8 @@ pub fn run() {
                     llm_proxy::get_llm_config,
                     shutdown_guard::confirm_offline_shutdown,
                     shutdown_guard::restart_app,
+                    app_update::download_app_update,
+                    app_update::install_app_update,
                 ]
             }
             #[cfg(not(feature = "e2e-webdriver"))]
@@ -110,6 +114,8 @@ pub fn run() {
                     llm_proxy::get_llm_config,
                     shutdown_guard::confirm_offline_shutdown,
                     shutdown_guard::restart_app,
+                    app_update::download_app_update,
+                    app_update::install_app_update,
                 ]
             }
         })

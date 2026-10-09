@@ -105,11 +105,19 @@ const getPortfolio = vi.fn((_jwt: string, _orgId: number): Promise<PortfolioProj
 vi.mock("@/lib/frontier/portfolio", () => ({
   getPortfolio: (jwt: string, orgId: number) => getPortfolio(jwt, orgId),
   // Real implementations — tests must not override these with wrong stubs
-  audioPct: (p: { audioCells: number; totalCells: number }) => (p.totalCells > 0 ? p.audioCells / p.totalCells : 0),
-  // AQU-1093: denominator is totalCells, so the tile agrees with the plan
+  // AQU-1566: audio is measured against the server's audio total (a dubbing
+  // file's cue sheet), falling back to totalCells for an older server.
+  audioDenominator: (p: { audioTotalCells?: number; totalCells: number }) => p.audioTotalCells ?? p.totalCells,
+  audioPct: (p: { audioCells: number; audioTotalCells?: number; totalCells: number }) => {
+    const total = p.audioTotalCells ?? p.totalCells
+    return total > 0 ? p.audioCells / total : 0
+  },
+  // AQU-1093: denominator is the whole file, so the tile agrees with the plan
   // board's bars. The of-recorded ratio moved to the tooltip.
-  audioValidatedPct: (p: { validatedAudioCells: number; totalCells: number }) =>
-    (p.totalCells > 0 ? Math.min(1, p.validatedAudioCells / p.totalCells) : 0),
+  audioValidatedPct: (p: { validatedAudioCells: number; audioTotalCells?: number; totalCells: number }) => {
+    const total = p.audioTotalCells ?? p.totalCells
+    return total > 0 ? Math.min(1, p.validatedAudioCells / total) : 0
+  },
   audioValidatedOfRecordedPct: (p: { validatedAudioCells: number; audioCells: number }) =>
     (p.audioCells > 0 ? Math.min(1, p.validatedAudioCells / p.audioCells) : 0),
   translatedPct: (p: { filledCells: number; totalCells: number }) => (p.totalCells > 0 ? p.filledCells / p.totalCells : 0),
@@ -133,8 +141,18 @@ vi.mock("@/lib/frontier/portfolio", () => ({
 // Stub both to capture the lane they were handed (defaultLane / lane) without
 // pulling their whole fetch surface into this suite.
 vi.mock("@/components/AssignModal", () => ({
-  AssignModal: ({ open, defaultLane }: { open: boolean; defaultLane?: string }) =>
-    open ? <div data-testid="assign-modal-mock" data-lane={defaultLane ?? ""} /> : null,
+  AssignModal: ({ open, defaultLane, projectFiles }: {
+    open: boolean
+    defaultLane?: string
+    projectFiles?: Array<{ id: string }>
+  }) =>
+    open ? (
+      <div
+        data-testid="assign-modal-mock"
+        data-lane={defaultLane ?? ""}
+        data-files={(projectFiles ?? []).map((f) => f.id).join(",")}
+      />
+    ) : null,
 }))
 vi.mock("@/components/StaffLanePopover", () => ({
   StaffLanePopover: ({ lane, laneLabel }: { lane: string; laneLabel: string }) => (
@@ -1994,6 +2012,25 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     // Back to All restores the cross-lane figures.
     fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("AQU-1566: hidden timeline files are neither counted nor offered for assignment", async () => {
+    // A linked video with an attached caption track and a dubbing cue sheet:
+    // one document, two timeline files the editor never lists.
+    useLaneProject([
+      { id: "f-video", name: "Episode", type: "video", createdAt: "x", cellCount: 0 },
+      { id: "f-track", name: "Episode captions", type: "vtt", role: "timeline-content", createdAt: "x", cellCount: 500 },
+      { id: "f-cues", name: "Episode audio cues", type: "vtt", role: "audio-cues", createdAt: "x", cellCount: 40 },
+    ] as ProjectRecord["files"])
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    expect(screen.getByText("1 file")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
+    fireEvent.click(screen.getByRole("menuitem", { name: /assign/i }))
+    const modal = await screen.findByTestId("assign-modal-mock")
+    expect(modal.getAttribute("data-files")).toBe("f-video")
   })
 
   it("lane row ⋯ menu has Assign and Staff, not Open", async () => {

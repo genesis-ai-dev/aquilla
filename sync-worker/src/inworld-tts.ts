@@ -46,6 +46,50 @@ export function isAbortTimeout(err: unknown): boolean {
   const name = (err as { name?: unknown }).name
   return name === "TimeoutError" || name === "AbortError"
 }
+
+/** Statuses worth another attempt. A 4xx (other than 429) will not change if we call again. */
+const INWORLD_RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
+
+/**
+ * Waits before retry `index` (0-based). First wait is 1–2s so a burst does not
+ * line up, then 4s, then 8s. `null` means the retries are used up.
+ */
+export function inworldBackoffDelayMs(index: number, random: () => number = Math.random): number | null {
+  if (index === 0) return 1000 + Math.floor(random() * 1001)
+  if (index === 1) return 4000
+  if (index === 2) return 8000
+  return null
+}
+
+type InworldSleep = (ms: number) => Promise<void>
+
+const defaultInworldSleep: InworldSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+let inworldSleep: InworldSleep = defaultInworldSleep
+
+/** @internal Tests skip the real waits. */
+export function __setInworldBackoffSleepForTests(sleep: InworldSleep | null): void {
+  inworldSleep = sleep ?? defaultInworldSleep
+}
+
+/** One Inworld call, then up to three retries on a transient failure. A timeout is not retried. */
+export async function fetchInworld(url: string, init: RequestInit): Promise<Response> {
+  let index = 0
+  for (;;) {
+    try {
+      const res = await fetch(url, init)
+      const delay = INWORLD_RETRYABLE_STATUS.has(res.status) ? inworldBackoffDelayMs(index) : null
+      if (delay === null) return res
+      await res.arrayBuffer().catch(() => undefined)
+      await inworldSleep(delay)
+    } catch (err) {
+      if (isAbortTimeout(err)) throw err
+      const delay = inworldBackoffDelayMs(index)
+      if (delay === null) throw err
+      await inworldSleep(delay)
+    }
+    index += 1
+  }
+}
 /** BSB Revelation 1:17–18 — default spoken script for Voice Design previews. */
 export const INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT =
   "Do not be afraid. I am the First and the Last, the Living One. I was dead, and behold, now I am alive forever and ever! And I hold the keys of Death and of Hades."
@@ -266,7 +310,7 @@ export async function cloneInworldVoice(
 
   let res: Response
   try {
-    res = await fetch(`${inworldApiBase(config)}/voices/v1/voices:clone`, {
+    res = await fetchInworld(`${inworldApiBase(config)}/voices/v1/voices:clone`, {
       method: "POST",
       headers: {
         Authorization: inworldAuthHeader(config.apiKey),
@@ -329,7 +373,7 @@ export async function designInworldVoice(
 
   let res: Response
   try {
-    res = await fetch(`${inworldApiBase(config)}/voices/v1/voices:design`, {
+    res = await fetchInworld(`${inworldApiBase(config)}/voices/v1/voices:design`, {
       method: "POST",
       headers: {
         Authorization: inworldAuthHeader(config.apiKey),
@@ -374,7 +418,7 @@ export async function publishInworldVoice(
 
   let res: Response
   try {
-    res = await fetch(
+    res = await fetchInworld(
       `${inworldApiBase(config)}/voices/v1/voices/${encodeInworldVoiceId(voiceId)}:publish`,
       {
         method: "POST",
@@ -452,7 +496,7 @@ export async function synthesizeInworldSpeech(
 
   let res: Response
   try {
-    res = await fetch(`${inworldApiBase(config)}/tts/v1/voice`, {
+    res = await fetchInworld(`${inworldApiBase(config)}/tts/v1/voice`, {
       method: "POST",
       headers: {
         Authorization: inworldAuthHeader(config.apiKey),
@@ -514,7 +558,7 @@ export async function listInworldVoices(
 
     let res: Response
     try {
-      res = await fetch(`${inworldApiBase(config)}/voices/v1/voices?${params.toString()}`, {
+      res = await fetchInworld(`${inworldApiBase(config)}/voices/v1/voices?${params.toString()}`, {
         method: "GET",
         headers: { Authorization: inworldAuthHeader(config.apiKey) },
       })

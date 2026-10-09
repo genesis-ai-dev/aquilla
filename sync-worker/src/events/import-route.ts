@@ -44,6 +44,7 @@ import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES, MAX_CELL_TEXT_BYTES } from '../../../shared/import-contract'
 import { publishImportedTrack, type ImportedTrackPublication } from './import-track-publication'
+import { promoteCaptionsToRows, type CaptionRowsPromotion } from './import-caption-promotion'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
@@ -179,6 +180,11 @@ interface ImportAudioAttachment {
   trimEndMs?: number
   timings?: Array<{ word: string; t0: number; t1: number; start: number; end: number }>
   transcription?: string
+  /** AQU-1565 follow-up: `'source'` for the shared programme audio a media
+   *  import attaches to every row. Absent is also `'source'` (AQU-1594). The route is
+   *  already Project Lead+ (source import), the same floor authorize.ts sets
+   *  for a `role: 'source'` attach from the outbox. */
+  role?: 'dub' | 'source'
 }
 
 interface ImportBody {
@@ -209,6 +215,8 @@ interface ImportBody {
   attachments?: ImportAudioAttachment[]
   /** Attach a staged hidden caption file to this parent media timeline. */
   trackPublication?: ImportedTrackPublication
+  /** AQU-1566: copy a caption content file into this linked video's rows. */
+  captionPromotion?: CaptionRowsPromotion
   /** Linked picture, committed with the staged file reveal. */
   video?: { id: string; coreMediaUrl: string }
 }
@@ -275,7 +283,7 @@ export async function handleBulkImportRequest(
       && video.coreMediaUrl.startsWith('frontier-audio://')
       && (body.attachments ?? []).some(attachment => attachment?.url === video.coreMediaUrl)
     if (!body.complete || body.file || body.cells.length !== 0
-      || body.targets?.length || 'trackPublication' in body
+      || body.targets?.length || 'trackPublication' in body || 'captionPromotion' in body
       || typeof body.publishEventId !== 'string' || !body.publishEventId
       || body.publishEventId.length > 255
       || typeof video.id !== 'string' || !video.id || video.id.length > 255
@@ -383,6 +391,38 @@ export async function handleBulkImportRequest(
       : `user:${auth.claims.userId}`
   const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
 
+  if (body.captionPromotion !== undefined) {
+    // Its own receipt (the parent's re-genesis id) replaces publishEventId:
+    // nothing is revealed, the parent is already live.
+    if (!body.complete || body.file || body.cells.length || body.targets?.length
+      || body.attachments?.length || 'publishEventId' in body || 'trackPublication' in body
+      || body.rawSource !== undefined || body.stageEventId !== undefined) {
+      return withCors(new Response('caption rows promotion requires an empty completion request', {
+        status: 400,
+      }), request)
+    }
+    try {
+      const result = await promoteCaptionsToRows(db, {
+        projectId: body.projectId, fileId: body.fileId, author,
+        role: auth.claims.role, clientTs, promotion: body.captionPromotion,
+      })
+      if (!result.ok) return withCors(new Response(result.reason, { status: result.status }), request)
+      if (env.ProjectSync) {
+        const notify = notifyProjectDoFileProgressChanged(
+          env, body.projectId, body.fileId, true,
+        ).catch(err => console.warn('[import] caption promotion notify failed:', err))
+        if (ctx) ctx.waitUntil(notify)
+        else await notify
+      }
+      return withCors(Response.json({ accepted: result.cellCount, fileId: body.fileId }), request)
+    } catch (err) {
+      console.error('[import] caption rows promotion failed:', err)
+      return withCors(Response.json({ error: 'Caption rows promotion failed' }, {
+        status: 500,
+      }), request)
+    }
+  }
+
   if (body.trackPublication !== undefined) {
     if (!body.complete || body.file || body.cells.length || body.targets?.length
       || body.attachments?.length || !body.publishEventId) {
@@ -453,6 +493,7 @@ export async function handleBulkImportRequest(
           || !validImportTimings(attachment.timings)
           || (attachment.transcription !== undefined &&
             (typeof attachment.transcription !== 'string' || attachment.slot !== 'recording'))
+          || (attachment.role !== undefined && attachment.role !== 'dub' && attachment.role !== 'source')
           || (
             attachment.trimStartMs !== undefined
             && attachment.trimEndMs !== undefined
@@ -476,8 +517,8 @@ export async function handleBulkImportRequest(
             slot: attachment.slot,
             // The shared programme clip. It performs the source, so it belongs
             // to the source lane — not to a '' target lane the project may
-            // not have (AQU-1594).
-            role: 'source',
+            // not have (AQU-1594). An explicit role on the attachment wins.
+            role: attachment.role ?? 'source',
             ...(attachment.mimeType !== undefined ? { mimeType: attachment.mimeType } : {}),
             ...(attachment.voiceId !== undefined ? { voiceId: attachment.voiceId } : {}),
             ...(attachment.referenceAudioId !== undefined ? { referenceAudioId: attachment.referenceAudioId } : {}),

@@ -22,6 +22,7 @@ import {
   type PortfolioProject,
 } from "@/lib/frontier/portfolio"
 import { displayLanes } from "@/components/org/project-lanes"
+import { isHiddenTimelineFile } from "@/lib/parsers/types"
 
 export interface EgressFileRow {
   fileId: string
@@ -169,6 +170,11 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
         })
         const lanes = pf ? displayLanes(pf) : [FALLBACK_DEFAULT_LANE]
         for (const f of p.files ?? []) {
+          // AQU-1566: a cue sheet or a caption track's content is timeline data,
+          // not a file of the project. The files listing the export checks the
+          // selection against no longer returns them, so offering one here
+          // would only report it as missing.
+          if (isHiddenTimelineFile({ role: f.role ?? undefined })) continue
           rows.push({
             fileId: f.id,
             fileName: f.name,

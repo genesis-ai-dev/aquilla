@@ -49,7 +49,9 @@ import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { formatCellIssueLine, summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { CellIssueLines } from "@/components/cell/CellIssueLines"
 import { isPartnerScriptureCell } from "@/lib/partners/registry"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
@@ -821,9 +823,20 @@ interface EditorTableProps {
    *  direct-media-URL field that cannot take a watch page.
    *  See `deriveLinkedVideoEmptyState`. */
   linkedVideoEmptyState?: LinkedVideoEmptyState | null
+  /** Sam's D3 (2026-10-05): "media" when this table is the Media view's Text
+   *  pane, where that empty state shrinks to one line pointing at the
+   *  timeline's Source text lane. "text" (the default) everywhere else. */
+  linkedVideoEmptyPlacement?: "text" | "media"
   /** Switch this file to the Media view from that empty state. Absent when the
    *  table is already rendering under the timeline. */
   onOpenMediaView?: () => void
+  /** AQU-1566: on that empty state, attach a caption file that becomes this
+   *  file's rows. The workspace passes it only to maintainers, and only once
+   *  the rows have loaded and there are none. */
+  onAttachCaptions?: () => void
+  /** AQU-1566: on that empty state, turn a caption track already on the
+   *  timeline into this file's rows (the workspace confirms first). Same gate. */
+  onUseCaptionTrackAsRows?: (trackId: string) => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -1079,7 +1092,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   audioTrackColor, onSetAudioTrackColor,
-  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, onOpenMediaView,
+  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
+  onAttachCaptions, onUseCaptionTrackAsRows,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -2915,6 +2929,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
   }
 
+  const hideColumnHeaders = displayCellIds.length === 0 && isTimeOrdered && Boolean(linkedVideoEmptyState)
+
   // Smart edits (flag `smartEdits`): one passage request around the active
   // cell; rows read their own suggestions through SmartEditsProvider.
   const smartEditsContext = useSmartEditsPassage({
@@ -2968,7 +2984,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         {renderChapterNavigation()}
-        <div className={cn(
+        {/* Sam's D1 (2026-10-05): an empty linked video has no rows for the
+            column headings to describe — select-all, #, Source, Target — so
+            the bar goes until it has some, in the Text view and the Media
+            view's Text pane alike. */}
+        {!hideColumnHeaders && (
+        <div data-testid="table-column-headers" className={cn(
             "grid grid-cols-2 gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground",
             castGutter
               ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
@@ -3124,6 +3145,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
         </div>
+        )}
       </div>
 
       {displayCellIds.length > 0 ? (
@@ -3174,9 +3196,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex-1">
             <TimelineLinkedVideoEmpty
               isYouTube={linkedVideoEmptyState.isYouTube}
-              captionTrackNames={linkedVideoEmptyState.captionTrackNames}
+              captionTracks={linkedVideoEmptyState.captionTracks}
+              placement={linkedVideoEmptyPlacement}
               onAttachFile={canEdit ? onAttachMediaFile : undefined}
               onOpenMediaView={onOpenMediaView}
+              onAttachCaptions={canEdit ? onAttachCaptions : undefined}
+              onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
             />
           </div>
         ) : canEdit && onAttachMediaFile && onAttachMediaUrl ? (
@@ -3190,7 +3215,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               className="h-full py-10"
               icon={Music}
               title={t("editor.empty.noMediaSegments")}
-              description={t("editor.empty.mediaLayerHint")}
+              // AQU-1565 follow-up: this branch is reached only by someone
+              // with no upload (below Project Lead, or read-only), and a file
+              // with no rows has nothing to record a take on, so "import or
+              // record" would send them nowhere.
+              description={t("editor.empty.mediaLayerWaiting")}
             />
           </div>
         )
@@ -6736,12 +6765,22 @@ function EditorRow({
   const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
-  // The cell number tints by worst severity. That's the whole signal — the
-  // concrete issue list lives in the expansion's Issues tab, not in a hover
-  // popover here. (Replaced the old severity stripe / warning triangle / dot;
-  // the cast label moved to the target column header lane so it isn't squished
-  // into this 44px gutter.)
+  // The cell number tints by worst severity. Hover names every active check
+  // and why it fired (AQU-757); the Issues tab is where you waive one.
+  // (Replaced the old severity stripe / warning triangle / dot; the cast label
+  // moved to the target column header lane so it isn't squished into this
+  // 44px gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
+  const issueLines = useMemo(
+    () => summarizeCellIssues(cellInfractions, ruleMap, t),
+    [cellInfractions, ruleMap, t],
+  )
+  const issueHint = issueLines.length === 0 && cellNeedsAttention
+    ? t("editor.issues.notYetValidated")
+    : undefined
+  const issueSummary = issueLines.length > 0
+    ? issueLines.map(formatCellIssueLine).join(". ")
+    : issueHint
   const numberLabel = cellNumberLabel({
     lineNumbersEnabled,
     cellType: cell.type,
@@ -6784,22 +6823,32 @@ function EditorRow({
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
   const gutterLanguageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
+  const lineAria = t("editor.row.lineAria", { number: numberLabel ?? "" })
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
     // both set on the source well below) and center it, so the number keeps
     // riding that line as the reader changes font size. A fixed height only
-    // happens to line up at one size.
-    <span
-      className="flex items-center justify-center leading-none"
-      style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
-      aria-label={t("editor.row.lineAria", { number: numberLabel })}
+    // happens to line up at one size. The tooltip is only there when the
+    // tint means something — a clean line stays a plain number.
+    <AppTooltip
+      content={issueLines.length > 0 ? <CellIssueLines lines={issueLines} /> : issueHint}
+      side="right"
+      className="max-w-xs"
     >
-      <CellNumberPill
-        number={numberLabel}
-        plain
-        tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
-      />
-    </span>
+      <span
+        className="flex items-center justify-center leading-none"
+        style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+        aria-label={issueSummary ? `${lineAria}. ${issueSummary}` : lineAria}
+        role={issueSummary ? "img" : undefined}
+        data-testid={issueSummary ? "cell-issue-flag" : undefined}
+      >
+        <CellNumberPill
+          number={numberLabel}
+          plain
+          tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
+        />
+      </span>
+    </AppTooltip>
   )
 
   // ── Hover / focus state for the floating action rail ─────────────────────
@@ -7379,6 +7428,8 @@ function EditorRow({
             point={healthRibbonPoint}
             hasMajorIssue={hasMajorInfraction}
             hasIssue={hasAnyIssue}
+            issues={issueLines}
+            issueHint={issueHint}
             className="top-0 bottom-0 md:hidden"
             testId="health-ribbon-mobile"
           />
@@ -7862,6 +7913,8 @@ function EditorRow({
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
               hasIssue={hasAnyIssue}
+              issues={issueLines}
+              issueHint={issueHint}
               className="hidden md:block"
             />
           ) : undefined}

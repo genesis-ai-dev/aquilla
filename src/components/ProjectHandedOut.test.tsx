@@ -44,7 +44,11 @@ describe("ProjectHandedOut", () => {
     render(<ProjectHandedOut projectId="p" jwt="j" author="carol" />)
     expect(await screen.findByText("Handed out by you")).toBeTruthy()
     expect(screen.getByText("Genesis 1")).toBeTruthy()
-    expect(screen.getByText("To bob")).toBeTruthy()
+    // "To {username}" wraps a UserChip, so the words are not one text node.
+    // The chip also paints initials, which sit between "To" and the name.
+    const assignee = screen.getByText("bob").closest("p")
+    expect(assignee).toHaveTextContent(/^To\s/)
+    expect(assignee).toHaveTextContent("bob")
     expect(screen.getByText("Spanish")).toBeTruthy()
   })
 

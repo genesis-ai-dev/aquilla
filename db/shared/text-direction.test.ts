@@ -80,12 +80,14 @@ describe('resolveProjectTextDirection — setting, then language', () => {
   })
 
   it('falls through to the language when the setting is absent or "auto"', () => {
-    expect(resolveProjectTextDirection({ targetLanguage: 'Arabic' }, 'target')).toBe('rtl')
-    expect(resolveProjectTextDirection({ targetLanguage: 'ar' }, 'target')).toBe('rtl')
-    expect(
-      resolveProjectTextDirection({ targetLanguage: 'Arabic', targetTextDirection: 'auto' }, 'target'),
-    ).toBe('rtl')
-    expect(resolveProjectTextDirection({ sourceLanguage: 'en', targetLanguage: 'Arabic' }, 'source')).toBe('ltr')
+    // The language is the override the caller resolved from the lane, not a
+    // settings key (AQU-1595).
+    expect(resolveProjectTextDirection({}, 'target', 'Arabic')).toBe('rtl')
+    expect(resolveProjectTextDirection({}, 'target', 'ar')).toBe('rtl')
+    expect(resolveProjectTextDirection({ targetTextDirection: 'auto' }, 'target', 'Arabic')).toBe('rtl')
+    expect(resolveProjectTextDirection({}, 'source', 'en')).toBe('ltr')
+    expect(resolveProjectTextDirection({ targetLanguage: 'Arabic' }, 'target')).toBe('ltr')
+    expect(resolveProjectTextDirection({ sourceLanguage: 'ar' }, 'source')).toBe('ltr')
   })
 
   it('lets a per-file language override the project language for that file', () => {

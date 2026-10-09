@@ -87,6 +87,10 @@ export const audio = defineNamespace({
     "audio.newVoice.errorDesignPreviewRequired":
       "Generate previews and pick one before creating this voice.",
     "audio.newVoice.errorDesignNoProject": "Open a project file before designing a voice.",
+    "audio.newVoice.errorProviderFailed":
+      "The voice provider couldn't create this voice. Try again later, or close this and choose a built-in voice.",
+    "audio.newVoice.errorSignInRequired":
+      "Your sign-in didn't reach the voice service. Sign in again, then click Generate previews.",
     "audio.newVoice.inworldLanguageLabel": "Language",
     "audio.newVoice.inworldLanguagePlaceholder": "Choose a language",
     "audio.newVoice.inworldLanguageHint":
@@ -920,6 +924,18 @@ export const audio = defineNamespace({
         description:
           "Inline error when Generate previews is clicked without a project and " +
           "file context (needed to mint a sync token for the worker).",
+      },
+      "audio.newVoice.errorProviderFailed": {
+        description:
+          "Inline error on Voice Design after the voice provider still fails once " +
+          "the worker has retried. Tells the user to try again later, or close " +
+          "the dialog and pick a built-in voice.",
+      },
+      "audio.newVoice.errorSignInRequired": {
+        description:
+          "Inline error on Voice Design when the saved sign-in cannot mint a " +
+          "sync token (missing session, or a 401 such as an invalid token). " +
+          "Tells the user to sign in again, then click Generate previews.",
       },
       "audio.newVoice.inworldLanguageLabel": {
         description:

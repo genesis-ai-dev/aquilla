@@ -127,6 +127,38 @@ describe("chat /api/v1/chat/completions — request ceilings (AQU-1870)", () => 
     expect(upstream.mock.calls.filter(([url]) => String(url).includes("/chat/completions"))).toHaveLength(0)
   })
 
+  it("rejects an over-sized body on its declared length, before parsing it", async () => {
+    const upstream = mockUpstream()
+    await seedUser(1877, "bodyflood")
+    const jwt = await jwtFor("bodyflood")
+    // A declared length no valid request could have. The body itself stays
+    // small: the point is that the pre-check never reads or parses it.
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { ...authHeader(jwt), "Content-Length": String(3 * 1024 * 1024) },
+        body: JSON.stringify({ model: ALLOWED_MODEL, messages: [{ role: "user", content: "hi" }] }),
+      },
+      testEnv(),
+    )
+
+    expect(res.status).toBe(413)
+    expect(((await res.json()) as { error: string }).error).toBe("prompt_too_large")
+    expect(upstream.mock.calls.filter(([url]) => String(url).includes("/chat/completions"))).toHaveLength(0)
+  })
+
+  it("rejects an over-long role, which the prompt-chars sum does not cover", async () => {
+    const upstream = mockUpstream()
+    const res = await send(
+      { messages: [{ role: "u".repeat(33), content: "hi" }] },
+      { id: 1878, name: "roleflood" },
+    )
+
+    expect(res.status).toBe(400)
+    expect(upstream.mock.calls.filter(([url]) => String(url).includes("/chat/completions"))).toHaveLength(0)
+  })
+
   it("rejects a message array over the sanity ceiling", async () => {
     const upstream = mockUpstream()
     const res = await send(

@@ -77,6 +77,13 @@ const CHAT_MAX_PER_USER_PER_WINDOW = 300
 //     path stays tighter at METERED_MAX_OUTPUT_TOKENS.
 const CHAT_MAX_PROMPT_CHARS = 200_000
 const CHAT_MAX_OUTPUT_TOKENS = 16_384
+// The prompt ceiling is counted after zod has already parsed the body, so it
+// cannot stop a body far larger than any valid request from being parsed in
+// the first place. This is the declared-length pre-check that can — same
+// shape as import-sandbox.ts. Deliberately loose: 200k chars of 4-byte UTF-8
+// plus JSON escaping still fits well inside it, so nothing the prompt ceiling
+// would have admitted is refused here.
+const CHAT_MAX_BODY_BYTES = 2 * 1024 * 1024
 
 /** Summed message content for a chat request — what the prompt ceiling bounds. */
 function promptChars(messages: { content: string }[]): number {
@@ -94,7 +101,9 @@ function resolveOpenRouterUrl(env: Env): string {
 }
 
 const messageSchema = z.object({
-  role: z.string(),
+  // AQU-1870: role is forwarded verbatim and is not part of the prompt-chars
+  // sum, so it carries its own ceiling. Every real role is one short word.
+  role: z.string().min(1).max(32),
   content: z.string(),
 })
 
@@ -205,9 +214,31 @@ function buildOpenRouterBody(request: ChatRequest, model: string, env: Env): str
   })
 }
 
+/** AQU-1870: refuse an over-sized body on its declared length, before the
+ *  JSON is parsed. Runs after authMiddleware so an anonymous caller is still
+ *  turned away by 401 first. A body with no Content-Length is left to the
+ *  prompt-chars ceiling below. */
+async function rejectOversizedBody(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  next: () => Promise<void>,
+): Promise<Response | void> {
+  const declared = Number(c.req.header("Content-Length"))
+  if (Number.isFinite(declared) && declared > CHAT_MAX_BODY_BYTES) {
+    return c.json(
+      {
+        error: "prompt_too_large",
+        message: `Chat request body is ${declared} bytes; the limit is ${CHAT_MAX_BODY_BYTES}.`,
+      },
+      413,
+    )
+  }
+  await next()
+}
+
 chat.post(
   "/completions",
   authMiddleware,
+  rejectOversizedBody,
   zValidator("json", chatCompletionRequestSchema),
   async (c) => {
     if (!c.env.OPENROUTER_API_KEY) {

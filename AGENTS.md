@@ -12,28 +12,49 @@ QA tests the published preview; its green check proves compilation only.
 
 ### What actually gates a pull request (AQU-1350)
 
-Do not read a green PR as "CI ran". Only two things run automatically on a PR:
+An agent may merge its own pull request into `dev` when, at the current head
+sha, the walk is **PASS**, the review agent has no proven unresolved finding,
+and required checks are green. `ci.yml` is that check: lint (including
+`i18n:check` and the secret scan), unit tests, worker tests, and
+`pnpm neon:check`. The base is `dev`, the label is not `on hold`, and the
+pull request is not stacked on an open parent. GitHub Actions does not click
+merge, and auto-merge cannot read `on hold` or a stacked parent, so the agent
+merges. A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
+again. `scripts/release-plan.mjs` reads the same comment later and holds a cut
+unless the walk is `PASS` or `none`.
 
 | Surface | Trigger | What it proves |
 | --- | --- | --- |
-| `Workers Builds: aquilla-web-preview` | every PR | compilation and the preview deploy, nothing else |
-| `Jev smart testing` (comment, marker `<!-- aquilla-smart-tests -->`) | every PR, from the external Hetzner runner | advisory journey coverage; posts no check |
-| `.github/workflows/ci.yml` | **`workflow_dispatch` only — intentionally dormant** | lint, typecheck, unit, worker, build, migrations |
+| `Workers Builds: aquilla-web-preview` | every PR | compilation and the preview deploy. Still a required check. It does not run unit tests, lint, or the secret scan. |
+| `.github/workflows/ci.yml` | every pull request to `dev`, and `workflow_dispatch` | lint, `i18n:check`, the secret scan, unit tests, worker tests, and `pnpm neon:check`. Required on `dev` once a run there is green. Typecheck, the Vite build, Tauri, and the IDML browser suite stay on `workflow_dispatch`. |
+| Grok walk | comment on the PR, not a check | `PASS` at the head sha. `FLAKY` and `BLOCKED` are a checker bug; walk again. |
+| Smart Jev (`<!-- aquilla-smart-tests -->`) | one Hetzner run of the release branch's current HEAD, after any pile-on | a `FAIL` means that HEAD does not deploy. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. It does not run on pull requests. |
+| Adversarial Jev | 09:00 UTC nightly against deployed `dev`, plus `workflow_dispatch` | files Linear tickets. It does not affect the cut or the deploy, and it does not run on pull requests. |
 | `.github/workflows/e2e-hetzner.yml` | **`workflow_dispatch` only** | smoke/smart e2e on the self-hosted box |
 
-`ci.yml` is deliberately trigger-less (AQU-564: Workers Builds owns automatic PR
-compilation), so its jobs are **not** a merge gate and its last automatic run is
-historical. The local pre-push hook plus `pnpm lint` / `npx tsc -b --noEmit` /
-`pnpm test` are what actually cover lint, types, and units — run them yourself.
+Branch protection requires the `ci.yml` jobs that always report a status
+(`lint`, `unit`, `schema-migrations`, `auth-worker-tests`, `sync-worker-tests`,
+`agent-worker-tests`) and the Cloudflare preview. Admins are exempt
+(`enforce_admins` is false). The gate only works if that account does not merge
+around a red check.
 
-`Jev smart testing` is advisory and posts no required check, so a dead harness
-cannot fail a PR. When its comment says **HARNESS UNAVAILABLE**, the run says
-nothing about your changes — it is a runner problem, not a finding against the
-PR, and it means that PR merged with zero journey coverage.
+The nightly Neon refresh is still broken: `NEON_API_KEY` has been missing since
+early September, and the green run beside the failure is the other cron skipping.
+This gate does not apply migrations, and it does not repair that job.
+
+`HARNESS UNAVAILABLE` on a release HEAD is a runner problem. It does not hold
+the deploy, and it is not a product finding.
 
 ## Testing — non-negotiable
 
-Keep test coverage synchronized with behavior without running the entire suite after every coding step:
+Keep test coverage synchronized with behavior without running the entire suite after every coding step.
+
+`pnpm test` is a merge check. Write the smallest test that locks the behavior:
+
+- Extend the test file that already covers the path. Add a new file only when nothing covers that path.
+- One new test for the bug or the contract. A checker with many inputs is one table-driven test, not one `it` per input.
+- A test that only locks a sentence of copy, a class name, or the string just typed does not get added.
+- The pull request that changes the behavior updates the old test in the same pull request.
 
 1. **During implementation, run the directly affected tests.** Run the nearest unit/integration/worker tests and the specific smoke spec(s) covering the changed journey. Use `npx tsx scripts/e2e-up.ts -- <spec>` for targeted smoke coverage. Do not rerun the complete smoke suite after every prompt or incremental edit.
 2. **Use the proportional E2E gates.** During implementation, run the directly affected specs. The pre-push hook runs `pnpm scan:secrets`, then `pnpm test:e2e:affected`, which derives a small browser suite from the commits being pushed. The complete `npm run test:e2e:smoke` suite remains the merge/deploy/release gate; do not substitute the affected suite at that boundary.

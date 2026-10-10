@@ -1,11 +1,25 @@
 name: CI
 
-# AQU-564: Cloudflare Workers Builds owns automatic pull-request compilation and
-# route-free versions. This workflow is retained only as an explicit fallback;
-# it has no pull-request or push trigger and therefore consumes no hosted runner
-# minutes during ordinary repository activity.
+# Pull requests into dev run the test gate: lint, i18n:check, the secret scan,
+# unit tests, worker tests, and pnpm neon:check. Cloudflare Workers Builds
+# already compiles the preview (AQU-564), so a pull request does not repeat
+# typecheck, the Vite build, Tauri, or the IDML browser suite. Those stay on
+# workflow_dispatch.
+#
+# Branch protection on dev requires the jobs that always report a status on a
+# pull request: lint, unit, schema-migrations, auth-worker-tests,
+# sync-worker-tests, agent-worker-tests. A path-filtered worker job reports
+# success when that worker did not change. A skipped required check would
+# block the pull request. The Cloudflare preview stays a separate required
+# check. enforce_admins is false, so an admin can still merge around a red run.
+#
+# This workflow does not apply migrations. The nightly Neon refresh is still
+# broken — NEON_API_KEY has been missing since early September — and repairing
+# that job is separate.
 
 on:
+  pull_request:
+    branches: [dev]
   workflow_dispatch:
 
 concurrency:
@@ -17,6 +31,7 @@ permissions:
 
 jobs:
   target:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       wrangler_environment: ${{ steps.resolve.outputs.wrangler_environment }}
@@ -32,9 +47,11 @@ jobs:
         name: Resolve authorized deployment target
         run: bash scripts/resolve-deployment-target.sh
 
-  # Worker suites are not required branch-protection contexts, so they may be
-  # skipped when irrelevant. Detection fails open for an unreadable diff and
-  # for every shared input that can affect more than one Worker.
+  # Path filters decide which worker suites execute. The jobs themselves always
+  # report a status: an unchanged worker is a successful no-op, because a
+  # skipped required check blocks branch protection. Detection fails open for
+  # an unreadable diff and for every shared input that can affect more than
+  # one Worker.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -78,11 +95,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      # Broad validation remains available through this manual workflow.
       - run: pnpm run i18n:check
       - run: pnpm run scan:secrets
 
   typecheck:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -107,10 +124,14 @@ jobs:
       - run: pnpm test
       # Run worker coverage explicitly; pushes use affected browser tests.
       - run: pnpm test:worker
+      # IDML is a dispatch-only browser suite. A pull request does not run it.
       - uses: ./.github/actions/playwright-chromium
-      - run: pnpm test:idml
+        if: github.event_name == 'workflow_dispatch'
+      - if: github.event_name == 'workflow_dispatch'
+        run: pnpm test:idml
 
   tauri-unit:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -129,6 +150,7 @@ jobs:
   # once with the resolved target, verifies that target, and publishes the
   # exact dist/ directory consumed by deploy.
   build:
+    if: github.event_name == 'workflow_dispatch'
     needs: target
     runs-on: ubuntu-latest
     env:
@@ -172,73 +194,116 @@ jobs:
 
   auth-worker-tests:
     needs: changes
-    if: needs.changes.outputs.auth == 'true'
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Fail when worker scope did not resolve
+        if: needs.changes.result != 'success'
+        run: exit 1
+      - name: Report success when auth-worker did not change
+        if: needs.changes.result == 'success' && needs.changes.outputs.auth != 'true'
+        run: echo "auth-worker did not change. Reporting success so a path-filter skip cannot block branch protection."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.changes.outputs.auth == 'true'
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: needs.changes.outputs.auth == 'true'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.changes.outputs.auth == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
             auth-worker/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm install --frozen-lockfile
+            sync-worker/pnpm-lock.yaml
+      - if: needs.changes.outputs.auth == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: needs.changes.outputs.auth == 'true'
+        run: pnpm install --frozen-lockfile
         working-directory: auth-worker
-      - run: pnpm run type-check
+      # auth-worker typecheck imports sync-worker source, which imports
+      # partyserver. That package is installed with sync-worker.
+      - if: needs.changes.outputs.auth == 'true'
+        run: pnpm install --frozen-lockfile
+        working-directory: sync-worker
+      - if: needs.changes.outputs.auth == 'true'
+        run: pnpm run type-check
         working-directory: auth-worker
-      - run: pnpm test
+      - if: needs.changes.outputs.auth == 'true'
+        run: pnpm test
         working-directory: auth-worker
 
   sync-worker-tests:
     needs: changes
-    if: needs.changes.outputs.sync == 'true'
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Fail when worker scope did not resolve
+        if: needs.changes.result != 'success'
+        run: exit 1
+      - name: Report success when sync-worker did not change
+        if: needs.changes.result == 'success' && needs.changes.outputs.sync != 'true'
+        run: echo "sync-worker did not change. Reporting success so a path-filter skip cannot block branch protection."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.changes.outputs.sync == 'true'
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: needs.changes.outputs.sync == 'true'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.changes.outputs.sync == 'true'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
             sync-worker/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm install --frozen-lockfile
+      - if: needs.changes.outputs.sync == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: needs.changes.outputs.sync == 'true'
+        run: pnpm install --frozen-lockfile
         working-directory: sync-worker
-      - run: pnpm run type-check
+      - if: needs.changes.outputs.sync == 'true'
+        run: pnpm run type-check
         working-directory: sync-worker
-      - run: pnpm test
+      - if: needs.changes.outputs.sync == 'true'
+        run: pnpm test
         working-directory: sync-worker
 
   agent-worker-tests:
     needs: changes
-    if: needs.changes.outputs.agent == 'true'
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Fail when worker scope did not resolve
+        if: needs.changes.result != 'success'
+        run: exit 1
+      - name: Report success when agent-worker did not change
+        if: needs.changes.result == 'success' && needs.changes.outputs.agent != 'true'
+        run: echo "agent-worker did not change. Reporting success so a path-filter skip cannot block branch protection."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.changes.outputs.agent == 'true'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.changes.outputs.agent == 'true'
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: agent-worker/package-lock.json
-      - run: npm ci
+      - if: needs.changes.outputs.agent == 'true'
+        run: npm ci
         working-directory: agent-worker
-      - run: npm run type-check
+      - if: needs.changes.outputs.agent == 'true'
+        run: npm run type-check
         working-directory: agent-worker
-      - run: npm test
+      - if: needs.changes.outputs.agent == 'true'
+        run: npm test
         working-directory: agent-worker
-      - run: docker build --tag aquilla-agent-sandbox:ci .
+      - if: needs.changes.outputs.agent == 'true'
+        run: docker build --tag aquilla-agent-sandbox:ci .
         working-directory: agent-worker
 
   # NOTE: there is intentionally no `preview` job here. PR previews are owned
   # by Cloudflare Workers Builds (scripts/cloudflare-pr-preview.mjs), not this
   # workflow — see the AQU-564 note at the top of this file. A prior `preview`
-  # job gated on `github.event_name == 'pull_request'` could never actually
-  # run (this workflow has no `pull_request` trigger) but still carried
+  # job gated on `github.event_name == 'pull_request'` carried
   # `deployments: write` / `pull-requests: write` and CLOUDFLARE_API_TOKEN
   # access. It was removed as dead weight so a future trigger change can't
   # silently resurrect an unaudited privileged job. [Pen test] Infra security

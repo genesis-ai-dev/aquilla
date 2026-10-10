@@ -147,7 +147,7 @@ describe("MemberLaneScopeEditor — lane rows and lane ids", () => {
       settings: { targetLanguage: "Spanish", targetLanes: ["a3f09c1e"] },
       lanes: [
         { id: "ln-main", role: "target", name: "Spanish", langCode: "es", legacyTag: "", position: 1, archivedAt: null },
-        { id: "a3f09c1e", role: "target", name: "", langCode: "es-MX", legacyTag: "a3f09c1e", position: 2, archivedAt: null },
+        { id: "a3f09c1e", role: "target", name: "", language: "es-MX", langCode: "es-MX", legacyTag: "a3f09c1e", position: 2, archivedAt: null },
       ],
     } as never)
     await openEditor()

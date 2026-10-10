@@ -14,33 +14,51 @@ deploy commands, calver tags).
 ## The line
 
 ```
-PR ──walk + review──▶ dev ──bot cuts──▶ release/YYYY/MM/DD-NN ──a person deploys──▶ prod + tag YYYY.MM.DD.NN
+PR ──walk PASS + review + green checks──▶ dev ──bot cuts──▶ release/YYYY/MM/DD-NN ──smart Jev──▶ a person deploys──▶ tag YYYY.MM.DD.NN
 ```
+
+Adversarial Jev attacks deployed `dev` once a day and files Linear tickets. It
+is not a stage on this line.
 
 | Stage | Who acts | Gate |
 | --- | --- | --- |
-| PR → `dev` | Agents (merge themselves) | Evidence below. No required human reviewer. |
+| PR → `dev` | The agent who opened it | Walk **PASS** at the head sha, no proven unresolved finding, required checks green. |
 | `dev` → release branch | Deploy bot | `node scripts/release-plan.mjs` says `cut: true`. |
-| Release → prod | Kieran or Matthew | Always a person — see "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). `hold` sets how much they check first (§3). |
+| Release HEAD → deploy | A person, after smart Jev | A smart-Jev `FAIL` holds that HEAD. `PASS`, inconclusive, and harness unavailable do not. |
+| Release → prod | Kieran or Matthew | Always a person. The tag is `YYYY.MM.DD.NN`. See "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
 
 ## 1. Pull request: verify once
 
-An agent may merge its own PR into `dev` when all of these hold at the PR's
-**current head sha**:
+An agent may merge its own pull request into `dev` when all of these hold at
+the pull request's **current head sha**:
 
 - The bot walk comment ([PR-BOT.md](PR-BOT.md)) is **PASS** for that sha.
 - The review agent has no unresolved finding it could prove (a failing test, a
   reproduced bug). Unproven suspicions do not block.
-- Required status checks are green.
+- Required checks are green. Those checks are the `ci.yml` jobs: lint
+  (including `i18n:check` and the secret scan), unit tests, worker tests, and
+  `pnpm neon:check`.
+
+Leave it open when the label is `on hold`, the base is not `dev`, or it is
+stacked on an open parent. A base that is another open pull request's head is
+stacked. GitHub Actions does not click merge. Auto-merge cannot read `on hold`
+or a stacked parent, so the agent merges.
 
 Evidence is pinned to the sha. A push after the walk makes the evidence stale;
-walk again before merging.
+walk again before merging. A push after `ci.yml` makes that run stale too; wait
+for the new run.
 
-**Inconclusive is a checker bug, not QA work.** A FLAKY or BLOCKED walk means
+**Inconclusive is a checker bug, not QA work.** A `FLAKY` or `BLOCKED` walk means
 the bot could not prove the effect. Fix the journey's outcome check (read the
 API or the DOM state directly) so the next walk is conclusive. Do not hand the
-item to a human to "just look at it". Every inconclusive result that reaches
-QA is re-checking we chose not to automate.
+item to a human to "just look at it", and do not merge it.
+
+`scripts/release-plan.mjs` reads the same walk comment later and holds a cut
+unless the walk is `PASS` or `none`.
+
+Branch protection on `dev` requires those `ci.yml` jobs. The Cloudflare preview
+can stay required. Admins are exempt today (`enforce_admins` is false). The
+trial only works if that account does not merge around a red check.
 
 ## 2. Cutting a release: one in flight, no ceiling
 
@@ -91,6 +109,18 @@ The plan's rules:
 - **Sync and auth are noted, not held.** A PR touching `sync-worker/src/`,
   `src/lib/sync/`, `db/shim/`, or `auth-worker/src/` ships in the ordinary
   slice; its area is listed in `areas` so a person can see it.
+- **Smart Jev runs the current release HEAD, after any pile-on, before a
+  person deploys.** The HEAD Jev tests is not always the sha the plan cut.
+  When the slice is held, a person checks that pull request and ready pull
+  requests are added onto the branch. Jev runs after that pile-on. Only a result for the branch's current HEAD counts. A `FAIL` means that HEAD does not deploy: push a new commit, and Jev runs again. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. The Hetzner service starts from a push
+  to `refs/heads/release/YYYY/MM/DD-NN`. See
+  [smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
+- **Adversarial Jev does not affect the cut or the deploy.** Once a day, at
+  09:00 UTC, it attacks deployed `dev` and files Linear tickets. It does not
+  run on pull requests, on a release preview, or on production. A release
+  preview writes to the shared dev database, and a preview sync worker cannot
+  call a preview auth worker. Smart Jev is the release run because the
+  Hetzner stack boots app, auth, and sync with a fresh database.
 
 ### Release notes template
 
@@ -113,14 +143,26 @@ against the PR, before it merges. Anything other than PASS or `none` goes in
 "Needs a human". Docs-only or test-only PRs may be `none` without needing a
 human.
 
-## 3. QA at a held release: check the gaps, then ship
+## 3. Smart Jev, then a person deploys
 
-Every slice waits for a person to run the deploy command; `hold` only
-changes how much QA does first. An ordinary slice (`hold: false`) needs no
-extra check beyond the stop button below — the PASS evidence chain from PR
-review already covers it, so whoever deploys can run it once the branch's
-preview looks right. A held slice (`hold: true`) waits for QA to open the
-release branch's preview and check **only**:
+Every slice waits for smart Jev on the branch's **current HEAD**, then for a
+person to run the deploy command. `hold` changes what happens before that run.
+
+A held slice (`hold: true`) is cut as that pull request alone. A person checks
+it, then ready pull requests are added onto the branch. That pile-on moves
+HEAD. Jev's result for the cut sha does not count. Jev runs the new HEAD.
+
+An ordinary slice (`hold: false`) is already the HEAD people would deploy.
+The push that cuts it starts Jev. There is no pile-on.
+
+Read the commit comment on that HEAD (`<!-- aquilla-smart-tests -->`):
+
+- **FAIL** — a journey verdict of `FAIL (model-free check)` or `PRODUCT FAILURE`.
+  That HEAD does not deploy. A new commit starts Jev again.
+- **PASS**, **INCONCLUSIVE**, and **HARNESS UNAVAILABLE** do not hold the
+  deploy. A person deploys, then the tag is applied to production.
+
+A held slice, before the pile-on, is also where a person checks **only**:
 
 1. Rows listed under "Needs a human".
 2. For a migration or deploy-infra hold: that the change is safe for the
@@ -131,7 +173,8 @@ release branch's preview and check **only**:
 QA does **not** re-walk PASS rows. If QA finds itself repeating a check, that
 check belongs in a journey; file it so the bot does it next time.
 
-Deploy from a clean checkout of the release branch, checked out by name (not
+Do not deploy a HEAD whose smart-Jev comment is **FAIL**. Deploy from a clean
+checkout of the release branch, checked out by name (not
 a detached HEAD — the branch guard and the tag script both need it), with
 `pnpm run deploy:aquilla`. It refuses to publish if prod has pending
 migrations, and it tags the verified deploy `YYYY.MM.DD.NN`. That tag ends

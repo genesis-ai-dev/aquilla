@@ -13,6 +13,7 @@
 
 const BROWSER_PATH_PREFIXES = [
   "/events",
+  "/checking",
   "/cells/",
   "/cell-validators",
   "/import",

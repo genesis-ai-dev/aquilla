@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 import { ExperimentalFlagsSection } from "./ExperimentalFlagsSection"
-import { createProject, _resetDbForTesting } from "@/lib/store/project-index"
-import { FLAGS, isAutopilotVisible } from "@/lib/features/flags"
+import { createProject, getProject, _resetDbForTesting } from "@/lib/store/project-index"
+import { FLAGS, isAutopilotVisible, isFlagEnabled } from "@/lib/features/flags"
 import { ROLE } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
+
+vi.mock("@/components/checking/CheckingLinkCreator", () => ({ CheckingLinkCreator: () => <div>Checking link creator</div> }))
 
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
@@ -28,6 +30,21 @@ beforeEach(async () => {
   for (const db of dbs) {
     if (db.name) indexedDB.deleteDatabase(db.name)
   }
+})
+
+describe("ExperimentalFlagsSection — community checking (AQU-1249)", () => {
+  it("keeps checking WIP off until explicitly enabled and persists the flag", async () => {
+    await createProject(makeProject())
+    render(<ExperimentalFlagsSection projectId="p1" />)
+    const toggle = await screen.findByRole("switch", { name: "Community checking (WIP)" })
+    expect(toggle).not.toBeChecked()
+    expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(await screen.findByText("Checking link creator")).toBeVisible()
+    await waitFor(async () => expect(isFlagEnabled((await getProject("p1"))!, "communityChecking")).toBe(true))
+    fireEvent.click(toggle)
+    await waitFor(() => expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument())
+  })
 })
 
 describe("ExperimentalFlagsSection — Autopilot opt-in (AQU-1246)", () => {

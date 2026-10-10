@@ -94,6 +94,9 @@ const UNCOVERED: Record<string, string> = {
   knowledge_docs: "never granted to app_runtime",
   lanes: "never granted to app_runtime",
   project_access_links: "never granted to app_runtime — rows are credentials",
+  // AQU-1249: anonymous guests redeem a link by its token with no user in
+  // context, so 0034's per-user policy shape cannot apply (as mcp_oauth_codes).
+  checking_links: "never granted to app_runtime — rows are credentials, redeemed by token with no user context (0153)",
   project_brief_history: "never granted to app_runtime",
   project_brief_proposals: "never granted to app_runtime",
   project_briefs: "never granted to app_runtime",

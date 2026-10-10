@@ -490,3 +490,4 @@ is missing, add it — then delete any leftover smoke, do not park it as non-smo
 Parallel Bibles missing-reference empty state is covered in RTL:
 `src/components/ParallelBiblesSidebar.test.tsx` (absent/book-only references,
 version picker access, and recovery when a valid reference appears).
+AQU-1249: `e2e/specs/collab/cross-user-comment.smoke.spec.ts` also covers a named anonymous guest joining a PIN checking link and saving feedback visible to the project owner. Default-off experimental discovery and hierarchical selection are covered in RTL (`ExperimentalFlagsSection.test.tsx`, `CheckingScopePicker.test.tsx`).

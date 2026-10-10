@@ -7,6 +7,10 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
+    source: /^(?:src\/(?:components|lib)\/checking\/|sync-worker\/src\/checking\/|db\/postgres\/migrations\/0153_community_checking)/,
+    sentinels: ["e2e/specs/collab/cross-user-comment.smoke.spec.ts"],
+  },
+  {
     // AQU-1479: captions, media bytes, and staged attachments publish together.
     source: /^(?:src\/lib\/import(?:\.ts|\/)|src\/lib\/parsers\/embedded-subtitles|src\/lib\/audio\/(?:align-source-script|script-alignment|source-alignment)|src\/components\/(?:ImportDialog|import\/|timeline\/TimelineEditor)|src\/hooks\/useTimelineTextCells|src\/lib\/sync\/bulk-import|sync-worker\/src\/audio\.ts|sync-worker\/src\/events\/import-(?:route|track-publication|caption-promotion)|shared\/timeline-import)/i,
     sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],

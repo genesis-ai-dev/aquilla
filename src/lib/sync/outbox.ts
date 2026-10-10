@@ -282,17 +282,18 @@ async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boole
   return true
 }
 
-export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
+export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwnerScope): Promise<void> {
   // Tauri desktop offline routing (Phase 4): eligible kinds on a
   // ready-for-offline project bypass IndexedDB entirely — LiveStore's
   // event_queue (+ its own sync adapter) fully replaces the IDB outbox for
   // these. `isTauriRuntime()` is a zero-cost check on the web, so this branch
   // adds no overhead to the browser SPA's write path.
-  if (isTauriRuntime() && (await routeToOfflineQueueIfEligible(event))) return
+  // A scoped (guest) write never takes the signed-in desktop's offline queue.
+  if (!scope && isTauriRuntime() && (await routeToOfflineQueueIfEligible(event))) return
 
   // Capture before IndexedDB opens. A transition that lands during that await
   // must not reclassify an edit initiated by the previous account.
-  const ownerKey = activeOwnerKey
+  const ownerKey = ownerForScope(scope)
   const rec: OutboxRecord = {
     id: event.id,
     enqueuedAt: Date.now(),

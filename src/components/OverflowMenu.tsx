@@ -1,22 +1,31 @@
-import { useId, useState, type ComponentType, type ReactNode, type Ref } from "react"
+import { Fragment, useId, useState, type ComponentType, type ReactNode, type Ref } from "react"
 import type { VariantProps } from "class-variance-authority"
 import { Info, MoreHorizontal } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { toSections } from "./overflow-menu-sections"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
 export interface OverflowMenuItem {
   id: string
-  type?: "item" | "checkbox" | "separator"
+  /**
+   * `label` names the items that follow it instead of being one of them
+   * (AQU-358). Everything from a `label` up to the next one renders as its own
+   * group with that heading, so a menu that merged several smaller menus can
+   * say what each part of it is for rather than leaving a reader to infer it
+   * from anonymous separator lines.
+   */
+  type?: "item" | "checkbox" | "separator" | "label"
   label?: string
   icon?: ComponentType<{ className?: string }>
   /** Optional trailing badge (e.g. check-file finding count). */
@@ -160,40 +169,48 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
   // badge squeezed its row's label onto two lines (Sam, Oct 5, the timeline's
   // Sources menu). Capped so a long label still wraps inside the window.
   const hasBadge = items.some((item) => item.badge)
+  const row = (item: OverflowMenuItem) =>
+    item.type === "separator" ? (
+      <DropdownMenuSeparator key={item.id} />
+    ) : item.type === "checkbox" ? (
+      <DropdownMenuCheckboxItem
+        key={item.id}
+        checked={item.checked}
+        disabled={item.disabled}
+        data-testid={item.testId}
+        aria-describedby={describedBy(item)}
+        onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
+      >
+        {body(item)}
+      </DropdownMenuCheckboxItem>
+    ) : (
+      <DropdownMenuItem
+        key={item.id}
+        disabled={item.disabled}
+        variant={item.destructive ? "destructive" : "default"}
+        data-testid={item.testId}
+        aria-describedby={describedBy(item)}
+        onClick={item.onClick}
+      >
+        {body(item)}
+      </DropdownMenuItem>
+    )
   return (
     <DropdownMenuContent align="end" className={cn(
       hasDescription ? "min-w-56" : "min-w-48",
       hasBadge && "w-max max-w-[min(24rem,calc(100vw-2rem))]",
     )}>
-      <DropdownMenuGroup>
-        {items.map((item) =>
-          item.type === "separator" ? (
-            <DropdownMenuSeparator key={item.id} />
-          ) : item.type === "checkbox" ? (
-            <DropdownMenuCheckboxItem
-              key={item.id}
-              checked={item.checked}
-              disabled={item.disabled}
-              data-testid={item.testId}
-              aria-describedby={describedBy(item)}
-              onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
-            >
-              {body(item)}
-            </DropdownMenuCheckboxItem>
-          ) : (
-            <DropdownMenuItem
-              key={item.id}
-              disabled={item.disabled}
-              variant={item.destructive ? "destructive" : "default"}
-              data-testid={item.testId}
-              aria-describedby={describedBy(item)}
-              onClick={item.onClick}
-            >
-              {body(item)}
-            </DropdownMenuItem>
-          ),
-        )}
-      </DropdownMenuGroup>
+      {toSections(items).map((section) => (
+        <Fragment key={section.id}>
+          {section.dividerAbove && <DropdownMenuSeparator />}
+          <DropdownMenuGroup>
+            {section.heading !== undefined && (
+              <DropdownMenuLabel>{section.heading}</DropdownMenuLabel>
+            )}
+            {section.items.map(row)}
+          </DropdownMenuGroup>
+        </Fragment>
+      ))}
     </DropdownMenuContent>
   )
 }

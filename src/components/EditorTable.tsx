@@ -23,7 +23,9 @@ import {
   VolumeX,
   Eye,
   EyeOff,
+  Blocks,
 } from "lucide-react"
+import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -202,7 +204,6 @@ import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { namedCellRef } from "@/lib/cell-named-ref"
 import { isStructuralCell } from "@/lib/cells/structural"
-import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
   importDisplayLabel,
@@ -257,6 +258,7 @@ import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { hasMeaningfulRichText } from "@/lib/richtext/editor-content"
 import {
@@ -2390,27 +2392,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (!onVisibleFootnotesChange || displayCellIds.length === 0) return []
 
     const indexes = viewableIndexes.length > 0 ? viewableIndexes : [firstVisibleIndex]
-    return readAtVersion(cellStoreVersion, () => indexes
-      .map((index) => {
-        const cellId = displayCellIds[index]
-        const cell = cellId ? cellStore.getCellView(cellId) : null
-        if (!cell) return null
-        const offsets = cellStore.getFootnoteOffsets(cell.id)
-        const footnotes = cellStore.getCellFootnotes(cell.id)
-        if (!footnotes.hasFootnotes) return null
-        return {
-          cellId: cell.id,
-          cellLabel: cell.cellLabel || String(index + 1),
-          cellRef: humanFootnoteCellRef(cell),
-          rowIndex: index,
-          sourceFootnotes: footnotes.sourceFootnotes,
-          targetFootnotes: footnotes.targetFootnotes,
-          activeFootnoteIndex: hoveredFootnote?.cellId === cell.id ? hoveredFootnote.index : null,
-          isDocx: (cell.fileId ?? "").endsWith(".docx"),
-          numberOffset: offsets.target,
-        }
-      })
-      .filter((entry): entry is VisibleFootnoteEntry => entry !== null))
+    const ids = indexes.map((index) => displayCellIds[index]).filter((id): id is string => !!id)
+    const rowOf = new Map(indexes.map((index) => [displayCellIds[index], index]))
+    return readAtVersion(cellStoreVersion, () => visibleFootnoteEntriesFor(cellStore, ids, (id) => rowOf.get(id) ?? 0, hoveredFootnote))
   }, [cellStore, cellStoreVersion, displayCellIds, firstVisibleIndex, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
 
   useEffect(() => {
@@ -4540,11 +4524,6 @@ export function SourceWithTermLookup({
 // raw-text offsets into each segment via clipRangesToSegment.
 
 
-function humanFootnoteCellRef(cell: CellData): string {
-  const value = (cell.group || cell.context || "").trim()
-  if (!value || looksLikeUuid(value)) return ""
-  return value
-}
 
 function footnoteMarkerOptions(
   targetText: string,
@@ -5255,6 +5234,8 @@ function EditorRow({
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
   const t = useT()
+  // Aquilla Tools (prototype): inline tool mounts under this cell.
+  const hasInlineTools = useHasInlineTools()
   const healthCalculationsEnabled = useHealthCalculationsEnabled()
   // AQU-1259: the reviewer's opt-in scanning view. AQU-599's inset ring and
   // speech-bubble badge below already say "this row has an open comment" once
@@ -8868,6 +8849,12 @@ function EditorRow({
                   },
                 ]
               : []),
+            ...(hasInlineTools ? [{
+              value: "tools",
+              icon: <Blocks className="h-3 w-3" />,
+              label: t("extensions.inline.tab"),
+              renderContent: () => <InlineToolsTab fileId={cell.fileId} cellId={cell.id} />,
+            }] : []),
           ]}
         />
       </div>

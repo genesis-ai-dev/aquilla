@@ -48,6 +48,7 @@ import { segmentation } from "../namespaces/segmentation"
 import { smartEdits } from "../namespaces/smartEdits"
 import { harmonizer } from "../namespaces/harmonizer"
 import { bibleData } from "../namespaces/bibleData"
+import { extensions } from "../namespaces/extensions"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -80,6 +81,7 @@ export const en = {
   ...smartEdits.keys,
   ...harmonizer.keys,
   ...bibleData.keys,
+  ...extensions.keys,
 } as const
 
 export type MessageKey = keyof typeof en

@@ -140,6 +140,10 @@ interface Props {
    * (logo, nav history, beta badge) vertically so the rail can stay narrow
    * instead of being stretched by the horizontal logo row. */
   railCollapsed?: boolean
+  /** Bump to open the dock from code (e.g. "open this extension in the side
+   *  panel"): below lg the dock lives in a sheet, so a tab change alone shows
+   *  nothing. */
+  dockOpenRequest?: number
 }
 
 export function AppShell({
@@ -157,6 +161,7 @@ export function AppShell({
   aside,
   asideEdge,
   railCollapsed,
+  dockOpenRequest = 0,
 }: Props) {
   const dockContent = leftDock ?? sidebar
   const useDockResize = Boolean(leftDock)
@@ -192,6 +197,9 @@ export function AppShell({
   const mobileNav = Boolean(dockContent) && !lgUp
   const chromeCollapsed = Boolean(railCollapsed) && !mobileNav
   const [navOpen, setNavOpen] = useState(false)
+  useEffect(() => {
+    if (dockOpenRequest > 0 && mobileNav) setNavOpen(true)
+  }, [dockOpenRequest, mobileNav])
   const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
 

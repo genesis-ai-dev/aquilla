@@ -2,6 +2,7 @@ import { test as base, expect, type Browser, type Page } from "@playwright/test"
 import { resetBackend } from "./seed"
 import { ensureAuthState, injectSession, type PersistedSession } from "./auth"
 import { getMyOrg } from "./frontier-api"
+import { editorOptInScript, editorUnderTest } from "./editor-mode"
 
 export interface AuthedPage extends Page {
   username: "alice" | "bob" | "carol"
@@ -31,6 +32,10 @@ export async function openAuthedPage(
   opts: { baseURL?: string; pinOrgId?: number } = {},
 ): Promise<Page> {
   const ctx = await browser.newContext()
+  // AQU-1793: E2E_EDITOR=extension runs the journeys against the first-party
+  // extension editor (editor-mode.ts). Only when asked: the default leaves
+  // the build's choice alone, so specs that opt in themselves still work.
+  if (editorUnderTest() === "extension") await ctx.addInitScript(editorOptInScript())
   // alice is a platform admin in the e2e stack (PLATFORM_ADMINS:alice in
   // scripts/e2e-up.ts). GET /api/v2/orgs without query params is memberships
   // only — the switcher loads the rest of the tenancy a page at a time. Seed

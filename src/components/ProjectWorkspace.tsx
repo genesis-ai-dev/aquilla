@@ -181,6 +181,16 @@ import type { ExampleOrigin } from "./ExamplePanel"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
+import { ToolsDockPanel } from "./tools/ToolMounts"
+import { ExtensionEditorSurface, useExtensionEditorChoice } from "./tools/ExtensionEditor"
+import { Spinner } from "@/components/ui/spinner"
+import type { ToolHostServices } from "@/lib/tools/live-data"
+import type { ToolOrigin } from "../../shared/tools/manifest"
+import { useExtensionEditorServices } from "./tools/useExtensionEditorServices"
+import { ExtensionsBar } from "./tools/ExtensionsBar"
+import { useToolsMount } from "./tools/ToolsMountContext"
+import { STANDARD_EDITOR } from "@/lib/tools/editor-choice"
+import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
@@ -309,14 +319,15 @@ import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3 } from "lucide-react"
+import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -506,6 +517,8 @@ import {
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import posthog from "@/lib/posthog"
+import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
+import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
 import {
@@ -1408,6 +1421,16 @@ export function ProjectWorkspace() {
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
+  // Smart Extensions: an installed `editor` extension may replace the
+  // standard editor for this file (choice remembered per user/project/file).
+  const extensionEditorChoice = useExtensionEditorChoice(currentUsername, projectId ?? "", activeFileId ?? null)
+  const extensionPanelRequestSeq = useToolsMount()?.panelRequestSeq ?? 0
+  // A pinned extension or palette entry asked for the side panel: show it.
+  // An explicit request: open the dock even when it is collapsed (and, below
+  // lg, open the dock's sheet — see AppShell dockOpenRequest).
+  useEffect(() => {
+    if (extensionPanelRequestSeq > 0) showDockTabProgrammatically("tools")
+  }, [extensionPanelRequestSeq, showDockTabProgrammatically])
   // Keep the ref in sync so effects declared earlier in the component can
   // access the resolved username without a hoisting issue.
   currentUsernameRef.current = currentUsername
@@ -7489,6 +7512,8 @@ export function ProjectWorkspace() {
               }
               if (!msg.cell || msg.project !== pid) return
               if (msg.file) invalidateCellHistory(pid, msg.file, msg.cell)
+              // Smart Extensions: live-refresh mounted extensions (incl. editor mounts).
+              publishProjectApplied({ project: pid, ...(msg.file ? { file: msg.file } : {}), cell: msg.cell })
               const ownWrite = isOwnWriteEcho(msg, currentUsername)
               // Validation state has two projections: `cells.validated` drives
               // progress, while `cell_validators` identifies who approved the
@@ -9509,6 +9534,9 @@ export function ProjectWorkspace() {
         onClick: () => openOverlay("terminology") },
       { id: "memory", labelKey: "terminology.livingMemory.title" as const, icon: LIVING_MEMORY_ICON, pinned: true,
         onClick: () => openOverlay("memory") },
+      // Smart Extensions (prototype): sandboxed, agent-built project extensions.
+      { id: "tools", labelKey: "extensions.title" as const, icon: Blocks, pinned: true,
+        onClick: () => { if (projectId) navigate(`/project/${projectId}/extensions`) } },
       // Project settings is a header cog beside Import. Audio/Media lens lives
       // in the header EditorModeToggle. Sharing lives in Settings → Members.
       // FRO-272: trash opens a dialog (project_lead+). Pinned in the same
@@ -9520,7 +9548,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [commentCounts, openCommentCount, currentRoleLevel, openOverlay])
+  }, [commentCounts, openCommentCount, currentRoleLevel, openOverlay, projectId, navigate])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -12360,6 +12388,9 @@ export function ProjectWorkspace() {
   const handleAgentTargetCommit = useCallback(async (
     cellId: string,
     snapshot: { value: string; valueHtml: string },
+    // Smart Extensions: an editor extension commits through this same path,
+    // attributed to itself (events.provenance, revert).
+    toolOrigin?: ToolOrigin,
   ): Promise<{ autoValidated: boolean }> => {
     if (!project?.id || isReadOnly) throw new Error("This project is read-only.")
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
@@ -12388,6 +12419,7 @@ export function ProjectWorkspace() {
         valueHtml: snapshot.valueHtml,
         author: currentUsername,
         targetLang: activeLane,
+        ...(toolOrigin ? { toolOrigin } : {}),
       })
     } catch (error) {
       applyOptimisticTargetEditWithCapture(cell.id, {
@@ -12419,7 +12451,8 @@ export function ProjectWorkspace() {
           targetLang: activeLane,
           // AQU-1572: the vote your own edit casts for itself, not a review.
           auto: true,
-          surface: "agent-pane",
+          surface: toolOrigin ? "cell" : "agent-pane",
+          ...(toolOrigin ? { toolOrigin } : {}),
         })
         // Only a validation that actually landed owes the repetitions anything.
         autoValidated = true
@@ -12442,7 +12475,7 @@ export function ProjectWorkspace() {
     resolveTargetCommitParentId,
   ])
 
-  const handleAgentValidationChange = useCallback(async (cellId: string, validated: boolean) => {
+  const handleAgentValidationChange = useCallback(async (cellId: string, validated: boolean, toolOrigin?: ToolOrigin) => {
     const action = validated ? "cell.validate" : "cell.unvalidate"
     if (!project?.id || !canPerform(action, project.syncRole?.level ?? null)) return false
     const cell = getActiveCell(cellId)
@@ -12462,8 +12495,10 @@ export function ProjectWorkspace() {
         author: currentUsername,
         targetLang: activeLane,
         // AQU-1572: a person clicking the agent pane's control; the agent
-        // proposed nothing here, so the source stays "ui".
-        surface: "agent-pane",
+        // proposed nothing here, so the source stays "ui". An editor
+        // extension's validate is a person clicking a cell's control.
+        surface: toolOrigin ? "cell" : "agent-pane",
+        ...(toolOrigin ? { toolOrigin } : {}),
       })
       await handleCellCommitted(cell.id)
       return true
@@ -12479,6 +12514,214 @@ export function ProjectWorkspace() {
   // for the ~5s periodic flusher before syncing — the confirmed state lags for
   // seconds. Flush + revalidate immediately, mirroring handleCellCommitted and
   // the "validate all" workspace action.
+  // Smart Extensions (apiRev 3): "Voice" for one cell, as the rail's voice
+  // button does it — the cell's cast voice, durably attached to the line.
+  const handleGenerateCellVoice = useCallback(async (cellId: string): Promise<boolean> => {
+    const cell = getActiveCell(cellId)
+    const text = (cell?.translated ?? "").trim()
+    if (!cell || !text || !project?.id || !frontierSession) return false
+    const voice = resolveCastVoice(tts.settings, cell.id)
+    await generateAndAttachCellVoice({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      text,
+      projectTtsSettings: tts.settings,
+      cellVoiceId: voice.id,
+      geminiContext: {
+        sourceLanguage: activeSourceLanguage || undefined,
+        targetLanguage: activeTargetLanguage || undefined,
+        original: cell.original,
+        context: cell.context,
+        cellLabel: cell.cellLabel,
+      },
+      session: frontierSession,
+      username: currentUsername,
+      ...(activeLane ? { targetLang: activeLane } : {}),
+      surface: "cell",
+    })
+    await handleCellCommitted(cell.id)
+    return true
+  }, [getActiveCell, project?.id, frontierSession, tts.settings, activeSourceLanguage, activeTargetLanguage, currentUsername, activeLane, handleCellCommitted])
+
+  // Smart Extensions (apiRev 2 + 3): what an `editor` extension mounted for
+  // the active file reaches through the bridge — the same live focus locks,
+  // comment feed and panels, and (apiRev 3) the whole editor pipeline: the
+  // shared cell store, commit/validate/repetition path, AI drafting,
+  // back-translation, rules/health signals, presence drafts, the recorder and
+  // the bulk selection bar. Memoized so the frame only hears about real changes.
+  const extensionEditorActive = Boolean(
+    activeFileId && !extensionEditorChoice.pending && extensionEditorChoice.selected !== STANDARD_EDITOR,
+  )
+  // Footnote tray (apiRev 4): the extension editor reports its visible rows
+  // (editor.visible); the host feeds the same tray the built-in table does.
+  const extensionVisibleIds = useEditorViewportVisibleCellIds(extensionEditorActive && footnoteViewMode === "tray")
+  useEffect(() => {
+    if (!extensionEditorActive || footnoteViewMode !== "tray") return
+    const order = new Map(readAtVersion(cellStoreVersion, () => cellStore.getCellIds()).map((id, i) => [id, i]))
+    handleVisibleFootnotesChange(readAtVersion(cellStoreVersion, () =>
+      visibleFootnoteEntriesFor(cellStore, extensionVisibleIds, (id) => order.get(id) ?? 0)))
+  }, [extensionEditorActive, footnoteViewMode, extensionVisibleIds, cellStore, cellStoreVersion, handleVisibleFootnotesChange])
+  const projectRoleLevel = project?.syncRole?.level ?? null
+  const extensionEditorConfig = useMemo(() => (activeFile && project ? {
+    fileName: activeFile.name,
+    sourceLabel: activeSourceLanguage || t("editor.column.source"),
+    targetLabel: laneLabels[activeLane] || activeTargetLanguage || t("editor.column.target"),
+    lanes: availableLanes.map((tag) => ({
+      tag,
+      label: laneLabels[tag] || (tag || activeTargetLanguage || t("editor.column.target")),
+      code: laneCodes[tag] ?? null,
+    })),
+    activeLane,
+    validationRequirement: validationCount,
+    canManageLanes: canSwitchLanes(projectRoleLevel),
+    canEdit: !isReadOnly && canPerform("target.cell.commit", projectRoleLevel),
+    canValidate: canPerform("cell.validate", projectRoleLevel),
+    autoValidatesOwnEdits: shouldAutoValidateHumanEdit({
+      value: "x",
+      canValidate: canPerform("cell.validate", projectRoleLevel),
+      allowSelfValidation: project.allowSelfValidation,
+      roleLevel: projectRoleLevel,
+      scopeCanValidate: textValidationScope(project, { roleLevel: projectRoleLevel, username: currentUsername }).canValidate,
+    }),
+    sourceFontSize: fontSizes.source,
+    targetFontSize: fontSizes.target,
+    sourceDirection: fileMeta.sourceTextDirection === "rtl" ? "rtl" as const : "ltr" as const,
+    targetDirection: fileMeta.targetTextDirection === "rtl" ? "rtl" as const : "ltr" as const,
+    lineNumbers: fileMeta.lineNumbersEnabled,
+    cellLabels: cellLabelsEnabled,
+    ai: { configured: sparkleReady, available: isCompletionAvailable },
+    backtranslation: { configured: isBacktranslationConfigured },
+    health: healthCalculationsEnabled,
+    footnotes: footnoteViewMode,
+    lens: lens === "audio" ? "audio" as const : "text" as const,
+    lenses: ["text" as const, "audio" as const, "agent" as const],
+    panels: ["history" as const, "comments" as const, "attachments" as const, "rule" as const, "term" as const, "recorder" as const],
+  } : null), [activeFile, project, activeSourceLanguage, laneLabels, activeLane, activeTargetLanguage, availableLanes, laneCodes,
+    validationCount, isReadOnly, projectRoleLevel, currentUsername, fontSizes.source, fontSizes.target, fileMeta.sourceTextDirection,
+    fileMeta.targetTextDirection, fileMeta.lineNumbersEnabled, cellLabelsEnabled, sparkleReady, isCompletionAvailable,
+    isBacktranslationConfigured, healthCalculationsEnabled, footnoteViewMode, lens, t])
+  const extensionVoiceFor = useCallback((cellId: string) => {
+    const voice = resolveCastVoice(tts.settings, cellId)
+    return voice ? { name: voice.name, explicit: Boolean(assignedCastVoiceId(tts.settings, cellId)) } : null
+  }, [tts.settings])
+  // apiRev 4: the last built-in surfaces for an extension editor (audio
+  // validation, the Audio lens's take, source editing, AI surfaces beside a
+  // cell, the source selection toolbar), over the same handlers.
+  const extensionEditorRev4 = useExtensionEditorRev4({
+    enabled: extensionEditorActive,
+    project: project ?? null,
+    fileId: activeFileId ?? null,
+    lane: activeLane,
+    store: cellStore,
+    storeVersion: cellStoreVersion,
+    username: currentUsername,
+    isTimeOrdered: activeFileTimeOrdered,
+    jwt: frontierSession?.jwt ?? null,
+    getSyncToken: (_pid, fid) => getTokenForFile(fid),
+    concepts: laneEditorConcepts,
+    termMatching: project?.termMatching,
+    addConceptBlockedReason,
+    canApproveConcept,
+    onAddConcept: handleAddConceptFromSelection,
+    onViewConcept: handleOpenTerminologyConcept,
+    onSetUpAffixes: () =>
+      navigate(`/project/${projectId}/settings?q=terminology`, { state: { backgroundLocation: location, projectSettingsModalDepth: 1 } }),
+    onAskAi: handleAskAiFromSelection,
+    fileName: activeFile?.name ?? "",
+    examples,
+    exampleOrigin: (fid) => exampleOriginFor(fid) ?? null,
+    commitTarget: handleAgentTargetCommit,
+    sourceLineEditing,
+    onInsertCellBeside: handleInsertCellBeside,
+    onAddLineAt: handleAddLineAt,
+    onRemoveCell: handleRemoveCell,
+    onSetCellHidden: handleSetCellHiddenStable,
+    onRetimeCell: handleRetimeSubtitle,
+    timingLocked,
+    canUnlockTiming,
+    onCellCommitted: (cellId) => { void handleCellCommitted(cellId) },
+    myScopes,
+    linkedTakesByCell,
+    ttsSettings: tts.settings,
+    onAssignCastVoice: handleAssignCastVoice,
+    onClearCastVoice: handleClearCastVoice,
+    onCloneVoice: (cellId) => {
+      setMakeCharacterSeedCellId(cellId)
+      setMakeCharacterOpen(true)
+    },
+  })
+  const extensionEditorPipeline = useExtensionEditorServices({
+    enabled: extensionEditorActive,
+    fileId: activeFileId ?? null,
+    store: cellStore,
+    storeLoading: cellsLoading,
+    config: extensionEditorConfig,
+    staleCellIds,
+    upstreamStaleCellIds,
+    assignmentsByCellId,
+    repetitionCounts,
+    infractions,
+    rules,
+    healthMap: healthCalculationsEnabled ? effectiveHealthMap : undefined,
+    healthEnabled: healthCalculationsEnabled,
+    examples,
+    storeVersion: cellStoreVersion,
+    voiceFor: extensionVoiceFor,
+    completing,
+    previews,
+    errors,
+    backtranslating,
+    backtranslationErrors,
+    backtranslationCache,
+    cellsWithRemoteChange,
+    presenceStore,
+    concepts: laneEditorConcepts,
+    termMatching: project?.termMatching,
+    commitTarget: handleAgentTargetCommit,
+    rev4: extensionEditorRev4.services,
+    rev4Versions: extensionEditorRev4.versions,
+    setValidation: handleAgentValidationChange,
+    onCellValidated: handleCellValidated,
+    completeSingle: handleCompleteSingle,
+    completeBatch,
+    completeParagraph: handleCompleteParagraph,
+    openAiSetup: handleAiSetupNeeded,
+    runBacktranslation,
+    saveBacktranslation,
+    openHistory: handleOpenHistory,
+    openAttachment: handleOpenAttachment,
+    openRule: handleInfractionClick,
+    openTerm: handleOpenTerminologyConcept,
+    openRecording: handleOpenRecording,
+    generateAudio: handleGenerateCellVoice,
+    targetPresenceSelection: handleTargetPresenceSelection,
+    viewCell: handleViewCell,
+    visibleCells: handleVisibleCellIdsChange,
+    setSelection: (ids) => setSelection(ids, ids[0] ?? null),
+    setLane: setActiveLane,
+    openSettings: (section) =>
+      navigate(`/project/${projectId}/settings?q=${encodeURIComponent(section === "lanes" ? "target lanes" : section === "terminology" ? "terminology" : "target language")}`, {
+        state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+      }),
+    setLens: (next) => {
+      if (next === "agent") openAgentTab("editor")
+      else {
+        switchLens(next)
+        if (next === "audio") selectDockTab("voices")
+      }
+    },
+  })
+  const extensionEditorServices = useMemo<ToolHostServices>(() => ({
+    fileId: activeFileId ?? undefined,
+    lockHolders: cellLockHolders,
+    claimCell: handleClaimCell,
+    releaseCell: handleReleaseCell,
+    commentCounts: liveCellOpenCommentCount,
+    openComments: handleOpenComments,
+    ...(extensionEditorPipeline ? { editor: extensionEditorPipeline } : {}),
+  }), [activeFileId, cellLockHolders, handleClaimCell, handleReleaseCell, liveCellOpenCommentCount, handleOpenComments, extensionEditorPipeline])
+
   const handleBulkValidationCommitted = useCallback(async () => {
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
@@ -12744,6 +12987,7 @@ export function ProjectWorkspace() {
   if (status === "loading") {
     return (
       <AppShell
+        dockOpenRequest={extensionPanelRequestSeq}
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
         leftDock={
@@ -13166,6 +13410,7 @@ export function ProjectWorkspace() {
       <ScrollToGroupHandler cellStore={cellStore} storeVersion={cellStoreVersion} editorRef={editorRef} />
       {/* The agent inherits the workspace's live file/cell location below. */}
       <AppShell
+        dockOpenRequest={extensionPanelRequestSeq}
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
         logoAccessory={
@@ -13201,6 +13446,7 @@ export function ProjectWorkspace() {
               // the per-line voice controls show alongside the panel.
               if (t === "voices" && lens !== "audio") switchLens("audio")
             }}
+            toolsPanel={<ToolsDockPanel file={activeFile ? { fileId: activeFile.id, name: activeFile.name } : undefined} />}
             voicesPanel={
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
@@ -13770,9 +14016,17 @@ export function ProjectWorkspace() {
               onVisibleCellIdsChange: handleVisibleCellIdsChange,
             }}
           />
+        ) : activeFileId && activeFile && extensionEditorChoice.pending ? (
+          // Smart Extensions: the default editor may be the first-party
+          // extension — wait for the project's extensions rather than flash
+          // the built-in editor first.
+          <div className="flex h-full w-full items-center justify-center" data-testid="editor-choice-pending">
+            <Spinner />
+          </div>
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
           <div className="relative flex h-full w-full flex-col">
+            <ExtensionsBar choice={extensionEditorChoice} />
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (
               <div className="absolute inset-0 z-20 bg-background">
@@ -14235,6 +14489,24 @@ export function ProjectWorkspace() {
                   its own "Video" header at the same height. */}
               {timelineStacked ? <div ref={uiSlotRef("media-chip-strip")} className="shrink-0 empty:hidden" /> : null}
               <div className="min-h-0 min-w-0 flex-1">
+              {extensionEditorActive && activeFileId && activeFile ? (
+                // Smart Extensions: the editor extension takes EditorTable's
+                // place INSIDE the same layout — the media lens's timeline and
+                // video, the footnote tray, the search overlay and the load
+                // strip stay the host's own, around it.
+                <>
+                <ExtensionEditorSurface
+                  choice={extensionEditorChoice}
+                  file={{ fileId: activeFileId, name: activeFile.name }}
+                  bar={null}
+                  handleRef={editorRef}
+                  services={extensionEditorServices}
+                  revealCellId={searchParams.get("cellId")}
+                  {...(!timelineStacked && fileChapterToolbar ? { toolbarTrailing: fileChapterToolbar } : {})}
+                />
+                {extensionEditorRev4.overlay}
+                </>
+              ) : (
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
@@ -14375,6 +14647,7 @@ export function ProjectWorkspace() {
             // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
+              )}
               </div>
               <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
               </div>

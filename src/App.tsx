@@ -67,11 +67,23 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 import { ProjectWorkspaceRoute } from "@/components/ProjectWorkspaceRoute"
+import { ToolsMountProvider } from "@/components/tools/ToolsMountContext"
 import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
-  import("@/components/ProjectWorkspace").then((m) => ({ default: m.ProjectWorkspace })),
+  import("@/components/ProjectWorkspace").then((m) => ({
+    // Smart Extensions (prototype): the project's installed extensions feed
+    // the panel, inline and editor mounts inside the workspace. One stable
+    // component type, so surface hops keep the instance (AQU-1496).
+    default: function ProjectWorkspaceWithExtensions() {
+      return (
+        <ToolsMountProvider>
+          <m.ProjectWorkspace />
+        </ToolsMountProvider>
+      )
+    },
+  })),
 )
 const OrgDataEgress = lazy(() =>
   import("@/pages/OrgDataEgress").then((m) => ({ default: m.OrgDataEgress })),
@@ -158,6 +170,12 @@ const ApproveChangeset = lazy(() =>
 // reviewing external-agent work stops meaning one approval URL per changeset.
 const ProjectApprovals = lazy(() =>
   import("@/pages/ProjectApprovals/ProjectApprovals").then((m) => ({ default: m.ProjectApprovals })),
+)
+const ToolsPage = lazy(() =>
+  import("@/pages/Tools/ToolsPage").then((m) => ({ default: m.ToolsPage })),
+)
+const ToolRunPage = lazy(() =>
+  import("@/pages/Tools/ToolRunPage").then((m) => ({ default: m.ToolRunPage })),
 )
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
@@ -262,6 +280,12 @@ function RedirectToProjectMemory({ section }: { section?: string }) {
   const { id } = useParams<{ id: string }>()
   const { search } = useLocation()
   return <Navigate to={`${projectMemoryPath(id!, section)}${search}`} replace />
+}
+
+/** Smart Extensions were "Tools" in the first prototype: keep old links working. */
+function RedirectToExtensions() {
+  const { id, toolId } = useParams<{ id: string; toolId?: string }>()
+  return <Navigate to={`/project/${id}/extensions${toolId ? `/${toolId}` : ""}`} replace />
 }
 
 function LazyRoute({ children, fallback = <RouteLoadingFallback /> }: { children: ReactNode; fallback?: ReactNode }) {
@@ -450,6 +474,10 @@ function AppRoutes() {
         <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         {/* AQU-841 — in-app approvals queue for agent-staged changesets. */}
         <Route path="/project/:id/approvals" element={<LazyRoute><ProjectApprovals /></LazyRoute>} />
+        <Route path="/project/:id/extensions" element={<LazyRoute><ToolsMountProvider><ToolsPage /></ToolsMountProvider></LazyRoute>} />
+        <Route path="/project/:id/extensions/:toolId" element={<LazyRoute><ToolRunPage /></LazyRoute>} />
+        <Route path="/project/:id/tools" element={<RedirectToExtensions />} />
+        <Route path="/project/:id/tools/:toolId" element={<RedirectToExtensions />} />
         <Route path="/project/:id/agent" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/voice" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspaceRoute><ProjectWorkspace /></ProjectWorkspaceRoute>} />

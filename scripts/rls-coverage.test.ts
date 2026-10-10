@@ -103,6 +103,9 @@ const UNCOVERED: Record<string, string> = {
   seq_allocations: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",
+  project_tools: "never granted to app_runtime (tools prototype)",
+  project_tool_versions: "never granted to app_runtime (tools prototype)",
+  project_tool_grants: "never granted to app_runtime (tools prototype)",
 }
 
 describe("RLS coverage over project-scoped tables", () => {

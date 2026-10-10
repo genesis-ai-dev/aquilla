@@ -519,6 +519,12 @@ async function main(): Promise<void> {
     // strips the `/chat` prefix the same way production `api.*.aquilla.app/chat` does.
     VITE_CHAT_BASE: `http://127.0.0.1:${IDENTITY_PORT}/chat`,
     VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
+    // Smart Extensions: the first-party "Aquilla Editor" extension is the
+    // product's default editor, but the editor smoke journeys were written for
+    // (and keep guarding) the built-in editor, which stays one switch away.
+    // Specs that exercise the extension editor opt in per page with
+    // localStorage aquilla.extensions.defaultEditor = "on".
+    VITE_EXTENSION_DEFAULT_EDITOR: "off",
     // Pin Google Drive import to unconfigured regardless of the developer's
     // .env.local — import-dialog.smoke.spec asserts the not-configured notice,
     // and real creds leaking into the e2e build would flip that panel state.

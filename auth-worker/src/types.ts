@@ -175,6 +175,13 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Aquilla Tools builder (prototype). A dedicated OpenRouter key/base for
+   *  build_tool calls, so builder spend is separable from chat/agent spend.
+   *  When the key is unset the builder falls back to OPENROUTER_API_KEY /
+   *  OPENROUTER_BASE_URL. TOOLS_BUILDER_MODEL overrides the builder model. */
+  TOOLS_BUILDER_API_KEY?: string
+  TOOLS_BUILDER_BASE_URL?: string
+  TOOLS_BUILDER_MODEL?: string
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string

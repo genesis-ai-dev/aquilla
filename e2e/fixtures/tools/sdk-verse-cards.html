@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<body>
+<script>
+// Verse cards, on the Aquilla SDK: one card per verse with the source, the
+// app's own translation editor and its validate button.
+aq.mount(aq.ui.Page({
+  title: "Verse cards",
+  subtitle: "One verse per card",
+  children: [aq.CellList({
+    filter: (c) => !aq.cell.isStructural(c.cellId),
+    row: (id) => aq.h("div", { style: { padding: "6px 0" } }, [
+      aq.ui.Card({ title: aq.cell.ref(id), actions: [aq.ValidateButton(id)], children: [aq.SourceText(id), aq.TargetEditor(id), aq.CellNotes(id)] }),
+    ]),
+  })],
+}));
+</script>
+</body>
+</html>

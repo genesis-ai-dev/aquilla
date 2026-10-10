@@ -271,6 +271,8 @@ export interface EventPayloads {
   'source.cell.commit': {
     value?: string
     valueHtml?: string
+    /** Aquilla Tools: an extension's source edit (verified server-side). */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
     /** AQU-847 / AQU-646: corrected source text for a MEDIA section. An
      *  imported media cell's `value` is the import filename, so the user's
      *  edit lands here — the field `effectiveSourceText` (and therefore export
@@ -390,6 +392,14 @@ export interface EventPayloads {
      * uses this field to enforce harmonize_min_role and to trigger the AD-14
      * endorsement-revocation cascade. Only set by the harmonize sweep path.
      */
+    /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
+    /** Aquilla Tools: set on the compensating events "revert since T" emits. */
+    revert_of_tool?: { toolId: string; sinceMs: number }
     harmonize_origin?: {
       /** Stable id of the built-in check or custom rule that drove the sweep. */
       rule_or_check_id: string
@@ -418,6 +428,12 @@ export interface EventPayloads {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
     /**
+     * Aquilla Tools (prototype): the tool that made this write. Caller-declared;
+     * the sync-worker verifies it against project_tool_versions and stamps the
+     * trusted envelope into events.provenance (events/tool-provenance.ts).
+     */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
+    /**
      * AQU-538: target-language lane of the validated commit. Absent/'' =
      * default lane — same convention as target.cell.commit. A user's standing
      * validation is per-lane: validating the same cell in two lanes yields two
@@ -430,6 +446,8 @@ export interface EventPayloads {
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
     editEventId: string
+    /** Aquilla Tools: the tool that withdrew this validation (provenance, apiRev 2). */
+    tool_origin?: { origin: 'tool'; toolId: string; version: number; codeHash: string }
     /**
      * When a maintainer is removing another user's validation, set this to
      * the username of the validator whose row should be deleted. If omitted

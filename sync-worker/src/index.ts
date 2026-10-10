@@ -96,6 +96,7 @@ export { ProjectSync } from "./project-do"
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
 import { setAccessGrantsMode } from "../../db/shared/project-roles"
+import { trackBackgroundWork } from "./lib/background-work"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { redactLogPath } from "../../shared/log-path-redaction"
@@ -325,6 +326,15 @@ const worker = {
       AQUILLA_PG: pgShim as unknown as AquillaDb,
       LFS_SRC: rawLfsSrc ? asReadonlyR2(rawLfsSrc) : undefined,
     }
+    // AQU-1835: routes hand post-response work to ctx.waitUntil (comment
+    // notification emails, linked-project notify, import notifies) and keep
+    // querying on the connection above. Hand them a context that RECORDS those
+    // registrations, so the `finally` below can release the connection once
+    // they have settled instead of the moment the Response returns — which
+    // used to make those queries race `end()` and lose silently.
+    // See lib/background-work.ts.
+    const background = trackBackgroundWork(ctx)
+    const routeCtx = background.ctx
     try {
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
@@ -456,9 +466,9 @@ const worker = {
     if (branchingPassagesResponse) return withCors(branchingPassagesResponse, request)
     const branchingSearchResponse = await handleBranchingSearchRequest(request, env)
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
-    const bulkImportResponse = await handleBulkImportRequest(request, env, ctx)
+    const bulkImportResponse = await handleBulkImportRequest(request, env, routeCtx)
     if (bulkImportResponse) return bulkImportResponse
-    const importReconcileResponse = await handleImportReconcileRequest(request, env, ctx)
+    const importReconcileResponse = await handleImportReconcileRequest(request, env, routeCtx)
     if (importReconcileResponse) return importReconcileResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
@@ -471,7 +481,7 @@ const worker = {
     // AQU-1005/AQU-1007: identification fence over the whole /migrate/*
     // surface — blocks header-less runners (503 + source log) and gives every
     // allowed run an audit trail. See lib/migrate-fence.ts.
-    const migrateFence = migrateFenceResponse(request, env, ctx)
+    const migrateFence = migrateFenceResponse(request, env, routeCtx)
     if (migrateFence) return migrateFence
     const migrateIngestResponse = await handleMigrateIngestRequest(request, env)
     if (migrateIngestResponse) return migrateIngestResponse
@@ -509,25 +519,25 @@ const worker = {
     if (originalDownloadResponse) return originalDownloadResponse
     const originalsBundleResponse = await handleOriginalsBundleRequest(request, env)
     if (originalsBundleResponse) return originalsBundleResponse
-    const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
+    const eventsWriteResponse = await handleEventsWriteRequest(request, env, routeCtx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 
     // AQU-533: Agent API changeset engine (external command layer).
-    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
+    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, routeCtx)
     if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
 
     // AQU-926: session-token changeset routes (/api/v1/changesets/*) — the
     // in-app agent harness + review card drive the same engine with the
     // browser's sync token. Disjoint from /api/v1/external/* and
     // /api/v1/projects/* so ordering here is not load-bearing.
-    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, ctx)
+    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, routeCtx)
     if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
     // The OAuth discovery document it points 401s at (RFC 9728) sits beside it.
     const mcpResourceMetadata = handleMcpProtectedResourceRequest(request, env, mountPrefix)
     if (mcpResourceMetadata) return withCors(mcpResourceMetadata, request)
-    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx, mountPrefix)
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, routeCtx, mountPrefix)
     if (externalMcpResponse) return withCors(externalMcpResponse, request)
 
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
@@ -564,7 +574,7 @@ const worker = {
 
     return new Response("not found", { status: 404 })
     } finally {
-      ctx.waitUntil(pgShim.close())
+      ctx.waitUntil(background.closeWhenSettled(pgShim))
     }
   },
 }

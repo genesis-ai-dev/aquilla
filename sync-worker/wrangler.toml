@@ -229,6 +229,41 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 name = "EMAIL"
 
 # ---------------------------------------------------------------------------
+# Side-effect queue (AQU-1824) — one queue for the fan-out work this worker
+# fires in response to a user action. Comment / @mention mail is on it today;
+# Monday nudges, org-settings fan-out and link-notify follow.
+#
+# Provision ONCE PER ENVIRONMENT before deploying a build that declares the
+# binding (a deploy naming a queue that does not exist fails):
+#   wrangler queues create aquilla-side-effects
+#   wrangler queues create aquilla-side-effects-dlq
+#
+# `max_retries` + `dead_letter_queue` are the whole point: a message whose
+# side effect keeps failing stops retrying and lands in the DLQ, where it is
+# visible and replayable, instead of vanishing into a console.warn. Inspect
+# with `wrangler queues consumer ...` / the Queues dashboard; replay by
+# sending the messages back onto aquilla-side-effects.
+#
+# The DLQ has no consumer on purpose — it is a holding pen a human looks at.
+# Deliveries are made exactly-once by the side_effect_deliveries ledger
+# (db/postgres/migrations/0158_…sql), not by queue semantics, so a replay
+# cannot re-send mail that already went out.
+# ---------------------------------------------------------------------------
+
+[[env.production.queues.producers]]
+queue = "aquilla-side-effects"
+binding = "SIDE_EFFECTS"
+
+[[env.production.queues.consumers]]
+queue = "aquilla-side-effects"
+# Small batches: each message is one email, and a batch holds a Postgres
+# connection for its lifetime.
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "aquilla-side-effects-dlq"
+
+# ---------------------------------------------------------------------------
 # Development environment — for the dev branch, deployed to api.dev.aquilla.app
 # Physically separate R2, DO namespace. Auth model unchanged: same SYNC_SECRET_KEY
 # as prod. A logged-in user can use the dev frontend and their writes land in
@@ -308,6 +343,41 @@ id = "53581197ff7a4202a5ed0ef08537d4a6"
 
 [[env.development.send_email]]
 name = "EMAIL"
+
+# ---------------------------------------------------------------------------
+# Side-effect queue (AQU-1824) — one queue for the fan-out work this worker
+# fires in response to a user action. Comment / @mention mail is on it today;
+# Monday nudges, org-settings fan-out and link-notify follow.
+#
+# Provision ONCE PER ENVIRONMENT before deploying a build that declares the
+# binding (a deploy naming a queue that does not exist fails):
+#   wrangler queues create aquilla-side-effects-dev
+#   wrangler queues create aquilla-side-effects-dev-dlq
+#
+# `max_retries` + `dead_letter_queue` are the whole point: a message whose
+# side effect keeps failing stops retrying and lands in the DLQ, where it is
+# visible and replayable, instead of vanishing into a console.warn. Inspect
+# with `wrangler queues consumer ...` / the Queues dashboard; replay by
+# sending the messages back onto aquilla-side-effects-dev.
+#
+# The DLQ has no consumer on purpose — it is a holding pen a human looks at.
+# Deliveries are made exactly-once by the side_effect_deliveries ledger
+# (db/postgres/migrations/0158_…sql), not by queue semantics, so a replay
+# cannot re-send mail that already went out.
+# ---------------------------------------------------------------------------
+
+[[env.development.queues.producers]]
+queue = "aquilla-side-effects-dev"
+binding = "SIDE_EFFECTS"
+
+[[env.development.queues.consumers]]
+queue = "aquilla-side-effects-dev"
+# Small batches: each message is one email, and a batch holds a Postgres
+# connection for its lifetime.
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "aquilla-side-effects-dev-dlq"
 [env.e2e]
 name = "aquilla-sync-worker-e2e"
 

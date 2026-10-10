@@ -99,6 +99,7 @@ import { setAccessGrantsMode } from "../../db/shared/project-roles"
 import { trackBackgroundWork } from "./lib/background-work"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { handleSideEffectBatch } from "./side-effects/queue"
 import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
@@ -198,6 +199,12 @@ declare global {
       EMAIL?: import("./notification-email").EmailService
       /** Optional — From address for transactional email. Defaults to noreply@support.aquilla.app. */
       EMAIL_FROM?: string
+      /** AQU-1824 — producer binding for the side-effect queue (comment mail
+       *  today; Monday nudges, org-settings fan-out and link-notify next).
+       *  Declared only in deployed env blocks (wrangler.toml), where the
+       *  consumer config also carries max_retries + a dead-letter queue.
+       *  Absent locally/e2e, where side effects run inline as before. */
+      SIDE_EFFECTS?: Queue<import("./side-effects/types").SideEffectMessage>
       /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
       BASE_URL?: string
       /** PostHog project token (phc_…) — when set, 4xx/5xx responses are
@@ -631,5 +638,36 @@ export default {
       ctx.waitUntil(shipErrorResponse(env, "aquilla-sync-worker", request, response))
     }
     return response
+  },
+
+  // Side-effect queue consumer (AQU-1824). Comment / @mention mail is resolved
+  // and sent here rather than in the request that created the comment, so a
+  // provider blip is retried instead of lost and a wide fan-out is not bounded
+  // by one invocation's subrequest budget.
+  //
+  // Postgres is set up exactly as `fetch` does it — a per-invocation shim over
+  // HYPERDRIVE, closed when the batch is done. The handler throws on a missing
+  // binding rather than acking: a config error must leave the messages on the
+  // queue, not silently consume them.
+  async queue(
+    batch: MessageBatch<import("./side-effects/types").SideEffectMessage>,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    if (!env.HYPERDRIVE) {
+      throw new Error(
+        "HYPERDRIVE not bound — the side-effect queue consumer needs Postgres",
+      )
+    }
+    const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
+    setAccessGrantsMode(pgShim as unknown as AquillaDb, env.ACCESS_GRANTS_RESOLVER)
+    try {
+      await handleSideEffectBatch(batch, {
+        ...env,
+        AQUILLA_PG: pgShim as unknown as AquillaDb,
+      })
+    } finally {
+      ctx.waitUntil(pgShim.close())
+    }
   },
 }

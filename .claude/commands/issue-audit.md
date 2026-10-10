@@ -74,7 +74,13 @@ For each issue, test membership in `prod-tickets.txt` and `dev-tickets.txt`, the
    (`git log --grep 'Revert' --grep AQU-### --all-match`); a reverted feature is correctly not done.
 4. **Expected in flight** — `Fixed` / `Ready for QA` not on `dev` yet, or `Awaiting
    Deployment` on `dev` but not in prod. Normal. Count only.
-5. **Untracked commits** — everything in `untracked.tsv`. These break the release→ticket
+5. **Stale `Dispatched`** — status `Dispatched`, Linear `updatedAt` older than **3 days**, and no
+   branch/PR commit in the last 3 days (`get_issue` → `gitBranchName`, attachments). `Dispatched` means a
+   live agent owns the issue; a stale one is stranded work. List each with its age, last
+   comment, whether code exists (category 3 test), and the suggested outcome per `/swarm` Step 0.5
+   (advance status / revert to `Todo` / `Blocked` / `Triage`). Count only commit **subjects** and merge-commit
+   branch names as evidence of shipping; a ticket mentioned only in another commit's body is not shipped.
+6. **Untracked commits** — everything in `untracked.tsv`. These break the release→ticket
    mapping. `chore`/`docs`/`build`/dependency bumps are usually fine ticketless; call those
    out separately from `feat`/`fix`/`refactor`/`security` commits that *should* have a ticket.
 
@@ -86,7 +92,8 @@ Output a concise report:
 - A one-line headline (e.g. "7 issues drifted, 12 untracked commits (3 fix/feat)").
 - A table per category 1–3 with `AQU-###`, status, the matching commit `%h %s`, and the
   suggested action.
-- Category 5 split into "should have had a ticket" vs "fine without".
+- A table for category 5 (stale `Dispatched`): `AQU-###`, days idle, evidence, suggested outcome.
+- Category 6 split into "should have had a ticket" vs "fine without".
 - End with the **explicit next actions** and who owns them (status advances are dev-lead /
   release-deployer calls; you do not move issues unless the user asks).
 

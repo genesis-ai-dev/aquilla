@@ -46,6 +46,32 @@ const GUARDED_FILES = [
 const MAPPERS = ["toUserFacingError", "categorizeAiError"]
 
 /**
+ * Is the match at `index` inside a comment rather than code?
+ *
+ * Checked per match instead of stripping comments from the whole file: a naive
+ * strip mangles `"https://…"` inside a string literal, which could just as
+ * easily invent a match as hide one. This only ever SKIPS, so it cannot do
+ * that. It earns its place — the fix in this very ticket added a header comment
+ * to ai-error.ts containing the words `body: raw`, which the counter below
+ * dutifully counted as an eighth passthrough.
+ */
+/** Every match of `pattern` in `source` that is code, not commentary. */
+function codeMatches(source: string, pattern: RegExp): string[] {
+  return [...source.matchAll(pattern)]
+    .filter((m) => !inComment(source, m.index ?? 0))
+    .map((m) => m[0])
+}
+
+function inComment(source: string, index: number): boolean {
+  const lineStart = source.lastIndexOf("\n", index) + 1
+  const before = source.slice(lineStart, index)
+  if (before.includes("//")) return true
+  const trimmed = before.trimStart()
+  // Continuation or opening line of a block comment.
+  return trimmed.startsWith("*") || trimmed.startsWith("/*")
+}
+
+/**
  * Every `… instanceof Error ? ….message : String(…)` in `source`, with the
  * ~40 characters in front of it — enough to see which call it sits inside.
  */
@@ -55,6 +81,7 @@ function unmappedRawThrows(source: string): string[] {
   const offenders: string[] = []
   for (const match of source.matchAll(RAW_THROW)) {
     const start = match.index ?? 0
+    if (inComment(source, start)) continue
     const prefix = source.slice(Math.max(0, start - 40), start)
     // The mapper call has to be the thing it is nested in, and nothing may have
     // closed in between — `categorizeAiError(x).body` leaves "categorizeAiError("
@@ -103,8 +130,9 @@ describe("AQU-510: categorizeAiError bodies are localized", () => {
   const AI_ERROR = path.join(REPO_ROOT, "src/lib/audio/ai-error.ts")
 
   it("has no English body literal left in the classifier", () => {
-    // Anything matching `body: "…"` is a string the catalogue never sees.
-    expect(fs.readFileSync(AI_ERROR, "utf8")).not.toMatch(/body:\s*"/)
+    // Anything matching `body: "…"` in CODE is a string the catalogue never sees.
+    const source = fs.readFileSync(AI_ERROR, "utf8")
+    expect(codeMatches(source, /body:\s*"/g)).toEqual([])
   })
 
   it("documents the two deliberate exclusions, so neither grows silently", () => {
@@ -113,8 +141,7 @@ describe("AQU-510: categorizeAiError bodies are localized", () => {
     // (1) `body: raw` — the raw text is a message WE wrote and threw elsewhere
     // in the app, already plain language. Localizing it means localizing each
     // throw site, which is not this ticket. Count it so a new one is noticed.
-    const rawPassthroughs = source.match(/body:\s*raw\b/g) ?? []
-    expect(rawPassthroughs).toHaveLength(7)
+    expect(codeMatches(source, /body:\s*raw\b/g)).toHaveLength(7)
 
     // (2) The four engine-body constants are LOAD-BEARING MATCH KEYS:
     // tts-engine-error.ts throws them, and the classifier branches on English

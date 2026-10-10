@@ -68,9 +68,14 @@ async function main() {
 
   if (apply) {
     console.log(`\n✓ Upserted to Neon — ${gs.orgIdByUuid.size} orgs, ${gs.teamIdByUuid.size} teams resolved.`)
+    // AQU-1800: team membership without a lane grant reaches the team's
+    // projects and shows source text only, so the grant count is part of the
+    // run's report, not an implementation detail.
+    console.log(`  lane-access rows written: ${gs.laneGrants ?? 0}`)
     console.log("  (re-run to confirm convergence — idempotent.)")
   } else {
-    console.log("\n[dry-run] no writes. Re-run with --apply to upsert to Neon.")
+    console.log(`\n[dry-run] lane-access rows an apply would add: ${gs.laneGrants ?? 0}`)
+    console.log("[dry-run] no writes. Re-run with --apply to upsert to Neon.")
   }
 }
 

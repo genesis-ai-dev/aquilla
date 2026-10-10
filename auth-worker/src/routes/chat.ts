@@ -57,6 +57,32 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 // per-credential throttles (db/shared/rate-limit.ts).
 const CHAT_MAX_PER_USER_PER_WINDOW = 300
 
+// AQU-1870: the volumetric cap above bounds how *often* a user can call this
+// proxy; it says nothing about how expensive one call is. The request schema
+// accepted message content of any length and an optional client-chosen
+// `max_tokens` (the SPA's own default is DEFAULT_COMPLETION_MAX_TOKENS =
+// 16,384, and a project admin can type any number into the advanced-LLM
+// field), and only the metered path clamped output. So one signed-in user
+// could aim a 200k-token prompt at an allowlisted frontier model on the
+// shared OPENROUTER_API_KEY. These are the two missing ceilings, applied on
+// every path before any provider call:
+//
+//   - CHAT_MAX_PROMPT_CHARS bounds the summed message content. 200k chars is
+//     ~100k tokens at the rate card's 2-chars-per-token estimate
+//     (lib/billing/rate-card.ts) and ~35k words — orders of magnitude above
+//     any real suggest or batch-translate prompt, which is system + user
+//     built from one cell plus its few-shot examples.
+//   - CHAT_MAX_OUTPUT_TOKENS is the legacy path's output ceiling, set to the
+//     SPA's shipped default so no normal suggestion is clipped. The metered
+//     path stays tighter at METERED_MAX_OUTPUT_TOKENS.
+const CHAT_MAX_PROMPT_CHARS = 200_000
+const CHAT_MAX_OUTPUT_TOKENS = 16_384
+
+/** Summed message content for a chat request — what the prompt ceiling bounds. */
+function promptChars(messages: { content: string }[]): number {
+  return messages.reduce((n, m) => n + m.content.length, 0)
+}
+
 /** Mirrors the agent route so local/dev/test can use the same scripted or
  * self-hosted OpenAI-compatible upstream as every other AI surface. The dev
  * stack points this override at scripts/mock-openrouter.ts; production keeps
@@ -74,10 +100,13 @@ const messageSchema = z.object({
 
 const chatCompletionRequestSchema = z.object({
   model: z.string(),
-  messages: z.array(messageSchema),
+  // Every caller in this repo sends system + user; 64 is a sanity ceiling
+  // (AQU-1870) so a client cannot flood the proxy with array elements.
+  messages: z.array(messageSchema).min(1).max(64),
   temperature: z.number().optional().default(0.7),
   stream: z.boolean().optional().default(false),
-  max_tokens: z.number().optional(),
+  // A positive integer or absent (AQU-1870); clamped server-side below.
+  max_tokens: z.number().int().positive().optional(),
   response_format: z.record(z.string(), z.unknown()).optional(),
   // AQU-414 follow-up: chat invoked from a project-editing context carries the
   // project id so its credit spend counts against that project's org (same
@@ -186,6 +215,25 @@ chat.post(
     }
 
     const request = c.req.valid("json")
+
+    // AQU-1870: bound the request before it costs anything — no DB round trip,
+    // no provider call. Rejected outright when the prompt is over the ceiling;
+    // a client-supplied output budget is clamped rather than rejected so a
+    // too-generous project setting degrades instead of failing.
+    const requestPromptChars = promptChars(request.messages)
+    if (requestPromptChars > CHAT_MAX_PROMPT_CHARS) {
+      return c.json(
+        {
+          error: "prompt_too_large",
+          message: `Chat prompt is ${requestPromptChars} characters; the limit is ${CHAT_MAX_PROMPT_CHARS}. Shorten the text or reduce the context size.`,
+        },
+        413,
+      )
+    }
+    if (request.max_tokens !== undefined) {
+      request.max_tokens = Math.min(request.max_tokens, CHAT_MAX_OUTPUT_TOKENS)
+    }
+
     const settings = await getPlatformSettingsCached(c.env)
     let model = resolveModel(c.env, request.model, settings)
 
@@ -265,7 +313,7 @@ chat.post(
       request.max_tokens = Math.min(request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS, METERED_MAX_OUTPUT_TOKENS)
       try {
         const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId!,
-          model, promptChars: request.messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: request.max_tokens })
+          model, promptChars: requestPromptChars, maxOutputTokens: request.max_tokens })
         if (!created) return c.json({ error: 'usage_request_already_admitted' }, 409)
       } catch (error) {
         if (error instanceof Error && error.message === 'Weekly AI allowance exhausted') {

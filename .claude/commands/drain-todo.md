@@ -76,8 +76,11 @@ was bypassed.
 
 ## Step 6 — Branch and PR (one issue = one branch = one PR)
 
-- Run `git fetch origin`, then cut a fresh branch from the latest `origin/dev`:
-  `agent/AQU-###-<short-slug>`. Never branch from another agent branch. The `agent-integration-*` scheme
+- Run `git fetch origin`, then cut a fresh branch from the latest `origin/dev`, named with the
+  `gitBranchName` that Linear returns from `get_issue` (for example `aqu-341-file-name-truncation`).
+  Do not invent a different name: the `prepare-commit-msg` hook adds the `AQU-###` reference only on
+  `aqu-` branches, and Linear links the branch to the issue by this name. Never branch from another
+  agent branch. The `agent-integration-*` scheme
   is retired: do not create, reuse or extend those branches, and leave any open ones to the dev team.
   Never force-push, rewrite history, or push directly to `main` or `dev`.
 - Open exactly one PR into `dev`, titled `AQU-### — <issue title>`. If a PR already exists, push to its

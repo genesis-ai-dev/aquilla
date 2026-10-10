@@ -121,6 +121,15 @@ If the issue is in `Backlog` or `Todo`:
    non-`aqu-` branch, add it by hand (the hook will warn).
 5. Move the issue to **`Fixed`** and post a Linear comment summarizing the fix +
    how it was verified.
+6. **If you cannot finish or verify, never leave the issue in `Dispatched`.** `Dispatched` means a
+   live agent is working *right now*; a stalled issue there is stranded (nothing picks it up).
+   Before you stop, post a handoff comment (what you tried, what you ruled out, the blocker,
+   concrete next steps, the branch name) and set the status:
+   - work remains and nothing external blocks it → **`Todo`** (resumable; push the branch first if it has commits);
+   - an environment or access blocker (no Docker, no prod DB, missing credentials) → **`Blocked`**, quoting the blocker;
+   - the ticket looks mistaken, already satisfied, or needs a human decision → **`Triage`**, with a one-line reason.
+   Never mark it `Fixed` without the verification gate. `/swarm` Step 0.5 sweeps any `Dispatched`
+   issue untouched for 3 days, but do not rely on it.
 
 ## Step 2.5 — Sync the spec (source of truth) — REQUIRED before leaving Fixed
 

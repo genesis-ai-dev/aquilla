@@ -282,6 +282,10 @@ export const audio = defineNamespace({
     }),
     "audio.tts.siblingFailedDetail":
       "The clip you played was saved. Delete it and press the button again to retry the rest.",
+    "audio.tts.serverOnlyNeedsGenerate":
+      "Generate audio on this line first to hear {engine} TTS.",
+    "audio.tts.playbackFailed": "That voice clip couldn't be played.",
+    "audio.tts.failedTooltip": "Couldn't generate a voice — {reason}",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
     "audio.recordingModal.ttsSharedNotice": plural({
       one: "{count} heard line performs this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
@@ -1836,6 +1840,40 @@ export const audio = defineNamespace({
           "Toast body for the above: reassures that the clip they heard is " +
           "safe, and names the only recovery path — the button becomes a replay " +
           "button once the first clip lands, so retrying means removing it.",
+      },
+      "audio.tts.serverOnlyNeedsGenerate": {
+        description:
+          "AQU-510: shown on the line's voice button when the project's voice " +
+          "engine runs only on the server, so there is nothing to synthesize in " +
+          "the browser for a preview. Guides the user to generate the audio " +
+          "first rather than reporting the internal server-only guard. States " +
+          "what to do, not what went wrong.",
+        placeholders: {
+          engine: "Short name of the configured voice engine, e.g. 'Inworld'. A product name — leave it untranslated.",
+        },
+      },
+      "audio.tts.playbackFailed": {
+        description:
+          "AQU-510: shown on the line's voice button when a clip that was " +
+          "generated successfully then fails to load in the browser's audio " +
+          "player (a dead blob URL or an unsupported codec). About playback, " +
+          "not about generation — the clip itself may be fine. Deliberately " +
+          "separate from audio.error.queueLoadFailed, which is the same class " +
+          "of failure on a different surface: that one is the multi-cell " +
+          "playback queue, rendered in the VoicePlaybackBar in place of the " +
+          "voice name, where this one is one line's own button. Keep the two " +
+          "wordings distinct — merging them would re-point a string translators " +
+          "were given a specific surface for.",
+      },
+      "audio.tts.failedTooltip": {
+        description:
+          "AQU-510: tooltip and accessible name of the line's voice button once " +
+          "generation has failed, so a translator who cannot read English still " +
+          "learns what the red button means. The reason is already a localized " +
+          "sentence; this key only frames it. Keep it short — it is a tooltip.",
+        placeholders: {
+          reason: "An already-localized one-sentence reason, produced by the app's error categoriser. Insert exactly as given; do not add punctuation before it.",
+        },
       },
       "audio.recordingModal.ttsSharedNotice": {
         description:

@@ -15,6 +15,7 @@ import { z } from "zod"
 import type { AuthUser, Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
@@ -587,6 +588,13 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   const guard = await runAiGuard(agentModel, user.id, c.env.AQUILLA_PG, c.env)
   if (!guard.ok) {
     return c.json(guard.body, guard.status)
+  }
+
+  // Platform daily spend ceiling (AQU-1869). Before the SSE stream opens, for
+  // the same reason the agent credit guard is: this is the dangerous rail.
+  const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "agent")
+  if (!spendCeiling.ok) {
+    return c.json(spendCeiling.body, spendCeiling.status)
   }
 
   // Credit guard: resolve org from project, pre-check agent sub-cap.

@@ -21,6 +21,7 @@
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
 import { audioObjectKey, isPathSafeId, safeAudioContentType } from "./audio"
 import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
+import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
 
 export interface DiarizationEnv {
   SNAPSHOTS: R2Bucket
@@ -34,6 +35,10 @@ export interface DiarizationEnv {
   /** Public base URL of THIS worker (incl. /sync prefix in prod) so Modal can
    *  reach the audio + callback routes. */
   DIARIZATION_PUBLIC_BASE?: string
+  /** Platform-wide daily AI spend ceiling in USD (AQU-1869). */
+  AI_DAILY_SPEND_CEILING_USD?: string
+  /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
+  ENVIRONMENT?: string
 }
 
 interface JobRow {
@@ -99,6 +104,12 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
   // reviewer token can poll status but must not be able to trigger billed work.
   const auth = await requireFileToken(request, env, projectId, fileId, { minRole: WRITE_ROLE_LEVEL })
   if (!auth.ok) return auth.response
+
+  // Platform daily spend ceiling (AQU-1869). Only `start` is gated: status,
+  // audio and callback finish jobs that already cost money, and refusing them
+  // would burn the GPU time without keeping the result.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "diarization")
+  if (!spendCeiling.ok) return json(spendCeiling.body, spendCeiling.status)
 
   const jobId = crypto.randomUUID()
   const fetchToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "")

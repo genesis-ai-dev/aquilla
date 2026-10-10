@@ -21,6 +21,7 @@
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
+import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
 
 export interface VoiceConvertEnv {
   SNAPSHOTS: R2Bucket
@@ -30,6 +31,12 @@ export interface VoiceConvertEnv {
   SEED_VC_URL?: string
   /** Shared secret matching the Modal `seed-vc-auth` secret's SEED_VC_TOKEN. */
   SEED_VC_TOKEN?: string
+  /** Postgres (Neon) handle — needed only by the platform spend ceiling. */
+  AQUILLA_PG?: AquillaDb
+  /** Platform-wide daily AI spend ceiling in USD (AQU-1869). */
+  AI_DAILY_SPEND_CEILING_USD?: string
+  /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
+  ENVIRONMENT?: string
 }
 
 const VOICE_CONVERT_PATH = "/api/v1/voice/convert"
@@ -178,6 +185,14 @@ export async function handleVoiceConvertRequest(
   // token can't trigger billed work.
   if (verified.claims.role < WRITE_ROLE_LEVEL) {
     return new Response("insufficient role", { status: 403 })
+  }
+
+  // Platform daily spend ceiling (AQU-1869). Checked before the R2 reads and
+  // the Modal call: a conversion starts an L40S GPU container, and the point
+  // of the ceiling is that nothing paid starts once the floor is hit.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "voice-convert")
+  if (!spendCeiling.ok) {
+    return Response.json(spendCeiling.body, { status: spendCeiling.status })
   }
 
   // Resolve the source bytes: inline upload, or an existing R2 recording.

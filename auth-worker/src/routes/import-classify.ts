@@ -14,6 +14,7 @@ import { admitChatUsage, providerRejectedPreModel, releaseChatUsage, settleChatU
 import { weeklyUsageActive } from "../lib/billing/usage-mode"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
@@ -134,6 +135,11 @@ imports.post(
     const model = settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
     const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
     if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
+
+    // Platform daily spend ceiling (AQU-1869) — outside the weekly/legacy
+    // split below, so a metered request is bounded by it too.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "import-classify")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     const project = await c.env.AQUILLA_PG.prepare(
       "SELECT org_id FROM projects WHERE id = ?",

@@ -6,6 +6,7 @@
 
 import { describe, it, expect } from "vitest"
 import { categorizeAiError } from "./ai-error"
+import { errorFromHostedTts, errorFromVoiceConvert } from "./tts-engine-error"
 
 const OPENROUTER_413 =
   'Completion failed: 413 {"error":{"message":"request too large for model `meta-llama/llama-3.3-70b-instruct`, max 131072 tokens","code":413},"user_id":"user_2abc"}'
@@ -69,6 +70,32 @@ describe("categorizeAiError — AI request failures (AQU-891)", () => {
   it("still reports the platform daily-quota case ahead of the generic 429 branch", () => {
     const result = categorizeAiError("Daily AI limit reached — resets at midnight UTC")
     expect(result.category).toBe("daily-quota-exceeded")
+  })
+
+  // AQU-1869: the platform spend ceiling. Its server message also says "resets
+  // at midnight UTC", so without its own earlier branch it would wear the
+  // personal-quota copy and tell the user they had used up their own limit.
+  it("separates the platform spend ceiling from the user's own daily quota", () => {
+    // The real producer's output, not a hand-written string: the ceiling's 503
+    // body reaches the user only through these formatters, and a fixture that
+    // skipped them would not prove the composition.
+    const ceilingBody = JSON.stringify({
+      error: "ai_spend_ceiling_reached",
+      message:
+        "AI is temporarily unavailable: the platform's daily AI spend ceiling has been reached. It resets at midnight UTC.",
+    })
+    for (const err of [errorFromHostedTts(503, ceilingBody), errorFromVoiceConvert(503, ceilingBody)]) {
+      const result = categorizeAiError(err.message)
+      expect(result.category).toBe("ai-spend-ceiling")
+      expect(result.title).toMatch(/unavailable/i)
+      // It must not read as the user's own allowance, it must not be mistaken
+      // for an unconfigured voice engine, and it must not dump the machine
+      // payload the way `unknown` would.
+      expect(result.body).not.toMatch(/daily AI limit reached/i)
+      expect(result.body).not.toMatch(/isn't configured|not set up/i)
+      expect(result.body).not.toContain("{")
+      expect(result.body).toMatch(/midnight UTC/)
+    }
   })
 })
 

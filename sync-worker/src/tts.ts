@@ -32,6 +32,7 @@ import {
   type InworldTtsConfig,
 } from "./inworld-tts"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/shared/rate-limit"
+import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
 
 // [Pen test] API security & data exposure (2026-09-03): runTtsGuard's daily
 // seconds cap is log-only unless TTS_BUDGET_ENFORCE is set, which it isn't in
@@ -86,6 +87,10 @@ export interface TtsEnv {
   TTS_USER_DAILY_SECONDS_LIMIT?: string
   /** "true" → enforce the cap with 429; anything else → log-only. */
   TTS_BUDGET_ENFORCE?: string
+  /** Platform-wide daily AI spend ceiling in USD (AQU-1869). */
+  AI_DAILY_SPEND_CEILING_USD?: string
+  /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
+  ENVIRONMENT?: string
   /** Postgres (Neon) handle — required for metering. */
   AQUILLA_PG?: AquillaDb
   /**
@@ -239,6 +244,14 @@ export async function handleTtsRequest(
   const guard = await runTtsGuard(db, userId, env)
   if (!guard.ok) {
     return Response.json(guard.body, { status: guard.status })
+  }
+
+  // Platform daily spend ceiling (AQU-1869) — unlike runTtsGuard above this
+  // is never log-only, and it counts dollars across every paid surface rather
+  // than this user's audio seconds, so it holds even for a first-time caller.
+  const spendCeiling = await checkAiSpendCeiling(db, env, "tts")
+  if (!spendCeiling.ok) {
+    return Response.json(spendCeiling.body, { status: spendCeiling.status })
   }
 
   let inworldVoiceId = voiceId?.trim() || undefined

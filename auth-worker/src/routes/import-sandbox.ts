@@ -13,6 +13,7 @@ import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
@@ -307,6 +308,10 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     || DEFAULT_LLM_MODEL_ID
   const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
   if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
+
+  // Platform daily spend ceiling (AQU-1869).
+  const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "import-sandbox")
+  if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
   const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
     .bind(projectId).first<{ org_id: number | null }>()
   const orgId = project?.org_id ?? 0

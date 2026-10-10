@@ -22,6 +22,7 @@ import type { Env, Variables, AuthUser } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
@@ -223,6 +224,14 @@ chat.post(
     ])
     if (!guard.ok) {
       return c.json(guard.body, guard.status)
+    }
+
+    // Platform daily spend ceiling (AQU-1869) — checked on BOTH the legacy and
+    // the metered path, before the org guards below, because it protects the
+    // shared OpenRouter key rather than any one org's allowance.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "chat")
+    if (!spendCeiling.ok) {
+      return c.json(spendCeiling.body, spendCeiling.status)
     }
 
     // Credit guard + attribution (AQU-414 follow-up): chat invoked from a

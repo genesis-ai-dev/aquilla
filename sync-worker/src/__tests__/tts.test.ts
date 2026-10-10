@@ -9,12 +9,13 @@
 //   - An Inworld failure must NOT record any seconds; recording on failure
 //     would wrongly drain the user's budget for audio they never received.
 
-import { describe, it, expect, afterEach } from "vitest"
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { sign } from "hono/jwt"
 import { audioObjectKey } from "../audio"
 import { handleTtsRequest } from "../tts"
 import { __setInworldBackoffSleepForTests, bytesToBase64, INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT } from "../inworld-tts"
 import type { SyncTokenClaims } from "../auth"
+import { __resetAiSpendCeilingStateForTests } from "../../../db/shared/ai-spend-ceiling"
 
 const SECRET = "tts-tests-secret"
 const INWORLD_API_KEY = "dGVzdDprZXk=" // base64("test:key")
@@ -104,7 +105,7 @@ interface UsageRow {
   audio_seconds: number
 }
 
-function makeStubDb(projectOrgId: number | null = 5) {
+function makeStubDb(projectOrgId: number | null = 5, platformSpendCents = 0) {
   const usageRows: UsageRow[] = []
   // [Pen test] API security & data exposure (2026-09-03): backs the new
   // per-user throttle in tts.ts — countRecentRateLimitEvents/recordRateLimitEvent
@@ -124,6 +125,10 @@ function makeStubDb(projectOrgId: number | null = 5) {
           async first<T = unknown>(): Promise<T | null> {
             if (sql.includes("FROM projects")) {
               return (projectOrgId != null ? { org_id: projectOrgId } : null) as unknown as T
+            }
+            // AQU-1869: the platform spend ceiling's single combined read.
+            if (sql.includes("org_credit_usage_daily")) {
+              return { spend_cents: platformSpendCents, platform_settings: null } as unknown as T
             }
             if (sql.includes("SUM(audio_seconds)")) {
               const [userId, dateUtc] = boundArgs as [number, string]
@@ -206,6 +211,8 @@ type StubEnv = {
   TTS_USER_DAILY_SECONDS_LIMIT?: string
   TTS_BUDGET_ENFORCE?: string
   AQUILLA_PG?: AquillaDb
+  AI_DAILY_SPEND_CEILING_USD?: string
+  ENVIRONMENT?: string
 }
 
 function makeEnv(
@@ -218,6 +225,9 @@ function makeEnv(
     INWORLD_API_KEY,
     INWORLD_API_BASE,
     AQUILLA_PG: dbStub,
+    // The spend ceiling caches its read for 15 s in-isolate; "test" bypasses
+    // that so one test's verdict cannot decide the next one's.
+    ENVIRONMENT: "test",
     ...overrides,
   }
 }
@@ -243,6 +253,10 @@ async function makeToken(
 const originalFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = originalFetch
+})
+
+beforeEach(() => {
+  __resetAiSpendCeilingStateForTests()
 })
 
 interface InworldCallRecord {
@@ -317,6 +331,33 @@ function ttsReq(
 function call(env: StubEnv, req: Request) {
   return handleTtsRequest(req, env as unknown as Parameters<typeof handleTtsRequest>[1])
 }
+
+// AQU-1869. TTS is the sync-worker side of the platform spend ceiling, and the
+// one whose own budget guard (seconds, log-only) can never stop a first-time
+// caller — so without this gate a fresh account could narrate all day on the
+// shared Inworld key after the platform had already blown its dollar floor.
+describe("POST /api/v1/voice/tts — platform spend ceiling", () => {
+  it("503s and never calls Inworld once the platform ceiling is reached", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const { db } = makeStubDb(5, 1500) // $15 spent today
+    const env = makeEnv(db, { AI_DAILY_SPEND_CEILING_USD: "10" })
+    const calls = stubInworld({ wav: makeWav(1) })
+    const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, await makeToken())))!
+    expect(res.status).toBe(503)
+    expect(await res.json()).toMatchObject({ error: "ai_spend_ceiling_reached" })
+    expect(calls).toHaveLength(0)
+    vi.restoreAllMocks()
+  })
+
+  it("synthesizes as usual while platform spend is below the ceiling", async () => {
+    const { db } = makeStubDb(5, 200) // $2 spent today
+    const env = makeEnv(db, { AI_DAILY_SPEND_CEILING_USD: "10" })
+    const calls = stubInworld({ wav: makeWav(1) })
+    const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, await makeToken())))!
+    expect(res.status).toBe(200)
+    expect(calls).toHaveLength(1)
+  })
+})
 
 describe("POST /api/v1/voice/tts", () => {
   it("returns null for unrelated paths", async () => {

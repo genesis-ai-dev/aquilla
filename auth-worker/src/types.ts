@@ -273,6 +273,12 @@ export interface Env {
   //   Default (unset / "false"): LOG-ONLY mode — over-budget requests are logged
   //   but allowed through. Flip to "true" after sizing thresholds.
   AI_BUDGET_ENFORCE?: string
+  // AI_DAILY_SPEND_CEILING_USD: platform-wide daily spend ceiling in US dollars,
+  //   checked before every paid AI call (db/shared/ai-spend-ceiling.ts, AQU-1869).
+  //   Unlike the controls above this is NOT behind an enforce flag — it is the
+  //   floor that keeps the shared vendor keys solvent. Unset → $500/day. "0"
+  //   blocks all paid AI; "off"/"none"/"unlimited" switches the ceiling off.
+  AI_DAILY_SPEND_CEILING_USD?: string
 
   // ── Bible Aquifer reference data (bibletranslation.org) ──────────────────
   // Server-side proxy + agent integration of our scholarly reference API,

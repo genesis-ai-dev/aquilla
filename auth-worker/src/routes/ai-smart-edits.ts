@@ -53,6 +53,7 @@ import { loadObservations, loadScoreInputs, passagePhraseKeys } from "../lib/sma
 import { buildLlmMessages, LLM_MAX_TOKENS, parseLlmEdits } from "../../../src/lib/smart-edits/llm"
 import { tokenize } from "../../../src/lib/smart-edits/tokens"
 import { runAiGuard } from "../lib/ai-budget"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
@@ -302,6 +303,11 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
   const model = settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
   const aiGuard = await runAiGuard(model, user.id, db, c.env)
   if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
+
+  // Platform daily spend ceiling (AQU-1869) — outside the weekly/legacy split
+  // below, so a metered request is bounded by it too.
+  const spendCeiling = await checkAiSpendCeiling(db, c.env, "smart-edits")
+  if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
   const project = await db.prepare("SELECT org_id FROM projects WHERE id = ?").bind(input.projectId).first<{ org_id: number | null }>()
   const orgId = project?.org_id ?? 0

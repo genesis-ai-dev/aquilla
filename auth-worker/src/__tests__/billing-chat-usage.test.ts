@@ -202,9 +202,13 @@ it('enforce mode meters a live provider URL and retires the legacy ledgers for t
 // ceiling first.
 it('clamps a client-chosen max_tokens to the metered output ceiling', async () => {
   const f = await setup()
-  const fetch = upstream(JSON.stringify({ choices: [{ message: { content: 'Hi' } }], usage: { cost: 0.0001 } }))
+  // Declared params (unlike the shared `upstream` helper's bare thunk) so the
+  // forwarded RequestInit is readable off the mock without an unsound cast.
+  const body = JSON.stringify({ choices: [{ message: { content: 'Hi' } }], usage: { cost: 0.0001 } })
+  const fetch = withRateCard(vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+    new Response(body, { headers: { 'Content-Type': 'application/json' } })))
   vi.stubGlobal('fetch', fetch)
   expect((await f.send({ max_tokens: 100_000 })).status).toBe(200)
-  const sent = JSON.parse(String((fetch.mock.calls[0][1] as RequestInit).body)) as { max_tokens: number }
+  const sent = JSON.parse(String(fetch.mock.calls[0][1]?.body)) as { max_tokens: number }
   expect(sent.max_tokens).toBe(METERED_MAX_OUTPUT_TOKENS)
 })

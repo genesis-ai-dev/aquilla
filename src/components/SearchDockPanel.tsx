@@ -41,6 +41,7 @@ import {
   type AquiferPageResponse,
 } from "@/lib/aquifer/client"
 import { passagePathFromRef } from "@/lib/aquifer/passage-resources"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 export type SearchDockMode = "search" | "replace" | "bible"
 
@@ -384,7 +385,9 @@ function BibleResourcesPanel({
         setResults(res.results)
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return
-        setError(err instanceof Error ? err.message : String(err))
+        // AQU-510: an Aquifer fetch failure reads in the active language. No
+        // `context` noun — it would be interpolated untranslated.
+        setError(toUserFacingError(err).message)
         setResults([])
       } finally {
         if (abortRef.current === controller) setSearching(false)
@@ -403,7 +406,9 @@ function BibleResourcesPanel({
         const res = await aquiferReadPage(jwt, projectId, path, { maxChars: 15000 })
         setPage(res)
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        // AQU-510: an Aquifer fetch failure reads in the active language. No
+        // `context` noun — it would be interpolated untranslated.
+        setError(toUserFacingError(err).message)
       } finally {
         setPageLoading(false)
       }

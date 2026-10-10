@@ -10,13 +10,27 @@
 // disclosure — a raw provider payload (an OpenRouter 413 JSON blob, say) is
 // never the primary message.
 //
-// `title` is translated via `t()` from src/lib/i18n/standalone.ts (this
-// module has no React tree to call the useT() hook from, and each `title` is
-// a fresh value computed per call, not frozen module-scope data — see that
-// module's header). The `m.includes(...)` pattern matching below stays keyed
-// against ENGLISH substrings deliberately: `rawMessage` is diagnostic text
-// produced elsewhere in the app and by upstream providers, most of which is
-// never itself translated, so the matches must not be run through `t()`.
+// `title` AND `body` are translated via `t()` from src/lib/i18n/standalone.ts
+// (this module has no React tree to call the useT() hook from, and each value
+// is computed per call, not frozen module-scope data — see that module's
+// header). AQU-510: the bodies were English literals until then, which meant a
+// translated heading sat above an untranslated instruction — and the body is
+// the half that says what to do.
+//
+// Three things here are English ON PURPOSE:
+//   1. The `m.includes(...)` pattern matching below. `rawMessage` is diagnostic
+//      text produced elsewhere in the app and by upstream providers, most of it
+//      never translated, so the matches must not be run through `t()`.
+//   2. `body: raw` — the raw text in those branches is a sentence we wrote and
+//      threw ourselves. Localizing it means localizing each throw site.
+//   3. The four `*_BODY` constants imported below. They are match keys as well
+//      as copy: tts-engine-error.ts THROWS them, and the branches above select
+//      on English substrings of them ("this line uses inworld", "this clone
+//      voice needs seed-vc"). Translating them would break the matching that
+//      picks their own branch, so the throw sites and the matcher must change
+//      together.
+// `src/lib/errors/localized-error-text.test.ts` pins 2 and 3 so they cannot
+// quietly widen.
 
 import { t } from "@/lib/i18n/standalone"
 import {
@@ -115,7 +129,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "daily-quota-exceeded",
       title: t("audio.aiError.dailyLimitTitle"),
-      body: "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
+      body: t("audio.aiError.dailyLimitBody"),
       raw,
     }
   }
@@ -144,7 +158,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "request-too-large",
       title: t("audio.aiError.tooLargeTitle"),
-      body: "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
+      body: t("audio.aiError.tooLargeBody"),
       raw,
     }
   }
@@ -227,7 +241,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "missing-gemini-key",
       title: t("audio.aiError.geminiKeyRequiredTitle"),
-      body: "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local MMS engine.",
+      body: t("audio.aiError.geminiKeyRequiredBody"),
       raw,
     }
   }
@@ -235,7 +249,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "gemini-failed",
       title: t("audio.aiError.geminiFailedTitle"),
-      body: "Gemini couldn't generate this line. Check the API key, or switch this voice to Inworld TTS.",
+      body: t("audio.aiError.geminiFailedBody"),
       raw,
     }
   }
@@ -257,7 +271,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "translation-not-configured",
       title: t("audio.aiError.translationNotConfiguredTitle"),
-      body: "Set up a completion provider for this project before generating voice on untranslated cells.",
+      body: t("audio.aiError.translationNotConfiguredBody"),
       raw,
     }
   }
@@ -283,7 +297,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       title: t("audio.aiError.ttsNotConfiguredTitle"),
       // Worded to follow its own title rather than repeat it — the recorder
       // renders the two as one sentence.
-      body: "Switch this project to a local MMS voice, which runs in the browser, or ask an administrator to configure the server voice service.",
+      body: t("audio.aiError.ttsNotConfiguredBody"),
       raw,
     }
   }
@@ -300,7 +314,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "network",
       title: t("audio.aiError.networkTitle"),
-      body: "Check your connection and try again. Local voices keep working offline once their model is downloaded.",
+      body: t("audio.aiError.networkBody"),
       raw,
     }
   }
@@ -317,7 +331,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "audio-format-unsupported",
       title: t("audio.aiError.audioFormatUnsupportedTitle"),
-      body: "Try uploading a .wav, .mp3, or .ogg file.",
+      body: t("audio.aiError.audioFormatUnsupportedBody"),
       raw,
     }
   }
@@ -325,7 +339,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "timed-out",
       title: t("audio.aiError.timedOutTitle"),
-      body: "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
+      body: t("audio.aiError.timedOutBody"),
       raw,
     }
   }
@@ -334,7 +348,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "rate-limited",
       title: t("audio.aiError.rateLimitedTitle"),
-      body: "The AI provider is rate-limiting requests. Wait a moment and try again.",
+      body: t("audio.aiError.rateLimitedBody"),
       raw,
     }
   }
@@ -342,7 +356,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "provider-unavailable",
       title: t("audio.aiError.providerUnavailableTitle"),
-      body: "The AI provider returned a server error. This is usually temporary — try again in a moment.",
+      body: t("audio.aiError.providerUnavailableBody"),
       raw,
     }
   }
@@ -350,7 +364,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "provider-rejected",
       title: t("audio.aiError.providerRejectedTitle"),
-      body: "The request didn't reach a model. Open the technical detail below and copy it to support if this keeps happening.",
+      body: t("audio.aiError.providerRejectedBody"),
       raw,
     }
   }
@@ -362,7 +376,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "unknown",
       title: t("audio.aiError.unknownTitle"),
-      body: "The AI request didn't finish. Open the technical detail below and copy it to support if this keeps happening.",
+      body: t("audio.aiError.unknownBody"),
       raw,
     }
   }

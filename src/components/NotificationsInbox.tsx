@@ -66,10 +66,10 @@ type PendingDelete =
  * In-app inbox for comment @mentions (AQU-761). Derived from comments already
  * loaded for the open project — there is no notification table. Read and
  * dismissed state live on this device. Dismissing a row hides it here; the
- * comment stays. Rows show the cell as the title, an unread dot inline with
- * that title, "{author} mentioned you" under it, the comment beneath that, and
- * the time on the right. Opening the inbox does not highlight a row; keyboard
- * navigation does.
+ * comment stays. The row title is "{author} mentioned you", with the comment
+ * beneath it and the time on the right. A verse, cell, or file name sits under
+ * the title when the mention has one. Opening the inbox does not highlight a
+ * row; keyboard navigation does.
  */
 export function NotificationsInbox({
   projectId,
@@ -535,9 +535,9 @@ function NotificationList({
                   virtualItem.index === activeIndex ||
                   (activeIndex < 0 && virtualItem.index === 0)
                 }
-                title={place || notice.authorLabel}
+                title={t("comments.inbox.mentionedYou", { author: notice.authorLabel })}
+                place={place}
                 timeLabel={formatRelativeTime(notice.createdAt, t)}
-                mentionLabel={t("comments.inbox.mentionedYou", { author: notice.authorLabel })}
                 message={notice.excerpt}
                 markReadLabel={markReadLabel}
                 markUnreadLabel={markUnreadLabel}
@@ -564,8 +564,8 @@ function NotificationRow({
   active,
   tabbable,
   title,
+  place,
   timeLabel,
-  mentionLabel,
   message,
   markReadLabel,
   markUnreadLabel,
@@ -583,8 +583,9 @@ function NotificationRow({
   active: boolean
   tabbable: boolean
   title: string
+  /** Verse, cell text, or file. Absent for a project-wide mention. */
+  place: string | null
   timeLabel: string
-  mentionLabel: string
   message: string
   markReadLabel: string
   markUnreadLabel: string
@@ -633,9 +634,11 @@ function NotificationRow({
               {timeLabel}
             </span>
           </span>
-          <span className="mt-0.5 block truncate text-xs text-foreground/80" data-ph-mask>
-            {mentionLabel}
-          </span>
+          {place ? (
+            <span className="mt-0.5 block truncate text-xs text-foreground/80" data-ph-mask>
+              {place}
+            </span>
+          ) : null}
           {message ? (
             <span className="mt-0.5 block truncate text-xs text-muted-foreground" data-ph-mask>
               {message}
@@ -681,7 +684,8 @@ function placeLabel(
     const fileName = notice.fileId ? files.find((file) => file.id === notice.fileId)?.name : undefined
     return fileName ? t("comments.scope.file", { file: fileName }) : null
   }
-  return t("common.project")
+  // A project-wide mention has no place to name. The title is who mentioned you.
+  return null
 }
 
 function formatRelativeTime(timestamp: number, t: TFunction): string {

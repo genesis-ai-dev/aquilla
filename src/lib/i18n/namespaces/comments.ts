@@ -543,9 +543,9 @@ export const comments = defineNamespace({
       },
       "comments.inbox.mentionedYou": {
         description:
-          "Line under a notification's place title. Names the person who @mentioned " +
-          "the reader. The comment text is a separate line beneath this one, not part " +
-          "of the sentence. Example: \"Keean mentioned you\".",
+          "Title of a notification row. Names the person who @mentioned the reader. " +
+          "The comment text is a separate line beneath this one, not part of the " +
+          "sentence. Example: \"Keean mentioned you\".",
         placeholders: {
           author: "Display name of the person who wrote the mention.",
         },

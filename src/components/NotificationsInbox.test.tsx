@@ -81,7 +81,7 @@ describe("NotificationsInbox", () => {
     expect(screen.queryByText(/commented/)).not.toBeInTheDocument()
     expect(screen.getByText("GEN 1:1")).toBeInTheDocument()
     const dot = screen.getByTestId("notification-unread-dot")
-    expect(dot.parentElement).toHaveTextContent("GEN 1:1")
+    expect(dot.parentElement).toHaveTextContent("Bob mentioned you")
     expect(dot.parentElement).not.toHaveTextContent("commented")
     expect(screen.queryByText(/Cell /)).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /Bob/ }))
@@ -89,6 +89,27 @@ describe("NotificationsInbox", () => {
       "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=c1",
     )
     expect(screen.queryByTestId("notifications-unread-count")).not.toBeInTheDocument()
+  })
+
+  it("titles a project mention with who mentioned you", async () => {
+    const user = userEvent.setup()
+    renderInbox([
+      comment({
+        scopeKind: "project",
+        fileId: null,
+        cellId: null,
+        cellRef: null,
+        body: "@[alice] hello from the inbox check",
+      }),
+    ])
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const title = screen.getByText("Bob mentioned you")
+    const message = screen.getByText("@alice hello from the inbox check")
+    expect(title.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(title.className).toContain("font-medium")
+    expect(screen.queryByText("Project")).not.toBeInTheDocument()
+    const dot = screen.getByTestId("notification-unread-dot")
+    expect(dot.parentElement).toHaveTextContent("Bob mentioned you")
   })
 
   it("shows the cell's text when it has no verse or chapter ref", async () => {

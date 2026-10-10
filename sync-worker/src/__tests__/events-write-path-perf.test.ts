@@ -30,6 +30,7 @@ import { ROLE } from '../events/role-policy'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
+import { resetFileCounterRecomputeCoalescerForTests } from '../events/counter-recompute-coalescer'
 
 const SECRET = 'test-secret'
 const PROJECT = 'proj-a'
@@ -155,6 +156,8 @@ let t: TestDb | undefined
 afterEach(async () => {
   await t?.close()
   t = undefined
+  // AQU-1826: the recompute coalescer keeps isolate-scoped per-file state.
+  resetFileCounterRecomputeCoalescerForTests()
 })
 
 describe('POST /events — chunk commit is pipelined', () => {
@@ -258,6 +261,83 @@ describe('POST /events — counter recompute runs after the write transaction', 
       expect(files.map((f) => [f.id, f.cell_count])).toEqual([[FILE, r.accepted.length]])
     } finally {
       error.mockRestore()
+    }
+  }, 120_000)
+
+  it('AQU-1826: coalesces CONCURRENT requests on one file instead of one full-file pass each', async () => {
+    // Per-request coalescing (AQU-1261) stops at the request boundary, so ten
+    // editors each saving one cell in the same file scanned it ten times and
+    // queued behind each other on the same projection rows. The pass is now
+    // coalesced per FILE across requests: a burst costs at most two passes.
+    //
+    // Deterministic, with no reliance on machine speed: the first pass is HELD
+    // until every later request's write transaction has been observed to
+    // commit, at which point each of those requests is one microtask chain away
+    // from the coalescer. A single macrotask yield drains those chains before
+    // the held pass is released.
+    const td = (t = await makeTestDb({ files: [{ id: FILE, project_id: PROJECT, name: 'x' }] }))
+
+    const LATER = 8
+    let recomputePasses = 0
+    let writeTxnsDone = 0
+    let releaseFirstPass: () => void = () => {}
+    const firstPassHeld = new Promise<void>((r) => { releaseFirstPass = r })
+    let firstPassStarted: () => void = () => {}
+    const sawFirstPass = new Promise<void>((r) => { firstPassStarted = r })
+    let laterWritesDone: () => void = () => {}
+    const sawLaterWrites = new Promise<void>((r) => { laterWritesDone = r })
+
+    const run = async (stmts: AquillaStatement[]) => {
+      const sql = stmts.map(sqlOf)
+      if (sql.some(isCountersRecompute)) {
+        recomputePasses += 1
+        if (recomputePasses === 1) {
+          firstPassStarted()
+          await firstPassHeld
+        }
+      }
+      const res = await td.db.batchPipelined!(stmts)
+      if (isWriteTxn(sql)) {
+        writeTxnsDone += 1
+        if (writeTxnsDone === LATER + 1) laterWritesDone()
+      }
+      return res
+    }
+    const db: AquillaDb = {
+      prepare: (q) => td.db.prepare(q),
+      exec: (q) => td.db.exec(q),
+      close: () => td.db.close(),
+      batch: run,
+      batchPipelined: run,
+    }
+
+    const inflight = [post(db, [commit('evt-a0', null, 'a0', 'cell-a0')])]
+    await sawFirstPass
+    for (let i = 1; i <= LATER; i += 1) {
+      inflight.push(post(db, [commit(`evt-a${i}`, null, `a${i}`, `cell-a${i}`)]))
+    }
+    await sawLaterWrites
+    await new Promise<void>((r) => { setTimeout(r, 0) })
+    releaseFirstPass()
+
+    const results = await Promise.all(inflight)
+    for (const r of results) expect(r.rejected).toEqual([])
+
+    // The held pass, plus the one that drains everything merged behind it.
+    // Emphatically not one per request, which is the shape being removed.
+    expect(recomputePasses).toBeLessThanOrEqual(3)
+    expect(recomputePasses).toBeLessThan(LATER + 1)
+
+    // And every request is still answered by a pass that started after its own
+    // commit, so the counters are exact once the last response is built — no
+    // request was served from a read that predates it.
+    const files = await td.rows<{ id: string; cell_count: number; filled_count: number }>('files')
+    expect(files.map((f) => [f.id, f.cell_count, f.filled_count])).toEqual([[FILE, LATER + 1, LATER + 1]])
+    const progress = await td.rows<{ scope: string; total_count: number; filled_count: number }>(
+      'file_section_progress',
+    )
+    for (const row of progress.filter((p) => p.scope === 'file' && p.total_count > 0)) {
+      expect(row.filled_count).toBe(0) // target-only cells: no source rows exist
     }
   }, 120_000)
 

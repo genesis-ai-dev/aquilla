@@ -312,8 +312,12 @@ export function shouldEmailRecipient(
   return preference === 'all'
 }
 
-/** One resolved recipient: where to mail them, and how much they want. */
+/** One resolved recipient: who they are, where to mail them, and how much
+ *  they want. `userId` is `users.id` stringified — it is the recipient half of
+ *  the side-effect queue's `(commentId, recipientUserId)` idempotency key
+ *  (AQU-1824), so it has to survive resolution, not just the email address. */
 export interface RecipientProfile {
+  userId: string
   email: string
   preference: CommentEmailPreference
 }
@@ -332,14 +336,18 @@ export async function resolveRecipientProfiles(
   const placeholders = usernames.map(() => '?').join(', ')
   const rows = await db
     .prepare(
-      `SELECT username, email, preferences FROM users WHERE username IN (${placeholders})`,
+      `SELECT id, username, email, preferences FROM users WHERE username IN (${placeholders})`,
     )
     .bind(...usernames)
-    .all<{ username: string; email: string; preferences: string | null }>()
+    .all<{ id: string | number; username: string; email: string; preferences: string | null }>()
 
   const result = new Map<string, RecipientProfile>()
   for (const row of rows.results) {
     result.set(row.username, {
+      // `users.id` is BIGINT; the driver may hand it back as a number or a
+      // string depending on width. Normalise so an idempotency key built from
+      // it is byte-identical across retries.
+      userId: String(row.id),
       email: row.email,
       preference: parseCommentEmailPreference(row.preferences),
     })
@@ -427,6 +435,30 @@ export async function getThreadParticipants(
 }
 
 /**
+ * Body of one live comment, or null when it is missing or soft-deleted.
+ *
+ * Used for two things: the thread subject (below) and, since AQU-1824, loading
+ * a comment's own body in the queue consumer instead of carrying it through the
+ * queue — a body may be up to 50,000 characters, which does not reliably fit a
+ * queue message.
+ */
+export async function getCommentBody(
+  db: AquillaDb,
+  projectId: string,
+  commentId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT body FROM comments
+       WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL
+       LIMIT 1`,
+    )
+    .bind(projectId, commentId)
+    .first<{ body: string }>()
+  return row?.body ?? null
+}
+
+/**
  * Body of a thread's ROOT comment, used to build the stable thread subject
  * (AQU-1193). Returns null when the root is missing or deleted — the caller
  * then falls back to the new comment's own body, so a deleted root never costs
@@ -437,15 +469,7 @@ export async function getThreadRootBody(
   projectId: string,
   rootCommentId: string,
 ): Promise<string | null> {
-  const row = await db
-    .prepare(
-      `SELECT body FROM comments
-       WHERE project_id = ? AND comment_id = ? AND deleted_at IS NULL
-       LIMIT 1`,
-    )
-    .bind(projectId, rootCommentId)
-    .first<{ body: string }>()
-  return row?.body ?? null
+  return getCommentBody(db, projectId, rootCommentId)
 }
 
 /**
@@ -497,67 +521,238 @@ export async function sendCommentNotifications(
   opts: CommentNotificationOpts,
 ): Promise<void> {
   try {
-    const {
-      env, db, baseUrl, projectId, author, body, parentCommentId,
-    } = opts
+    const plan = await resolveCommentNotificationPlan(opts)
+    if (!plan) return
 
-    const rawMentionedUsernames = extractMentions(body)
-    const [mentionedUsernames, threadParticipants] = await Promise.all([
-      filterUsernamesWithProjectAccess(db, projectId, rawMentionedUsernames),
-      getThreadParticipants(db, projectId, parentCommentId),
-    ])
-    const recipientUsernames = deriveRecipientUsernames({
-      author,
-      mentionedUsernames,
-      threadParticipantUsernames: threadParticipants,
-    })
-
-    if (recipientUsernames.length === 0) return
-
-    // The thread's identity. A reply's root is its parent; a new top-level
-    // comment IS its own root, so it seeds the subject its replies will reuse.
-    const isReply = parentCommentId !== null
-    const rootCommentId = parentCommentId ?? opts.commentId ?? null
-
-    const [profiles, projectName, rootBody] = await Promise.all([
-      resolveRecipientProfiles(db, recipientUsernames),
-      getProjectName(db, projectId),
-      isReply && rootCommentId
-        ? getThreadRootBody(db, projectId, rootCommentId)
-        : Promise.resolve(null),
-    ])
-
-    const commentsUrl = `${baseUrl}/project/${projectId}/comments`
-    const excerpt = mentionDisplayText(body).slice(0, 200)
-    const authorDisplay = author
-    const threadTopic = threadTopicFromBody(rootBody ?? body)
-
-    const sends: Promise<void>[] = []
-    for (const username of recipientUsernames) {
-      const profile = profiles.get(username)
-      if (!profile) continue
-      const isMentioned = mentionedUsernames.includes(username)
-      const kind: 'mention' | 'reply' = isMentioned ? 'mention' : 'reply'
-      // Mention-only by default — a thread participant who was not named
-      // gets nothing unless they opted into `all` (AQU-1193).
-      if (!shouldEmailRecipient(kind, profile.preference)) continue
-      sends.push(
-        sendNotificationEmail(env, profile.email, {
-          authorDisplayName: authorDisplay,
-          kind,
-          projectName: projectName ?? projectId,
-          excerpt,
-          commentsUrl,
-          threadTopic,
-          isReply,
-        }).catch((err) => {
-          console.warn(`[comment-notifications] failed to send to ${username}:`, err)
-        }),
-      )
-    }
+    const sends = plan.recipients.map((recipient) =>
+      sendNotificationEmail(opts.env, recipient.email, {
+        authorDisplayName: plan.authorDisplayName,
+        kind: recipient.kind,
+        projectName: plan.projectName,
+        excerpt: plan.excerpt,
+        commentsUrl: plan.commentsUrl,
+        threadTopic: plan.threadTopic,
+        isReply: plan.isReply,
+      }).catch((err) => {
+        console.warn(
+          `[comment-notifications] failed to send to ${recipient.username}:`,
+          err,
+        )
+      }),
+    )
     await Promise.all(sends)
   } catch (err) {
     // Top-level catch: notification failure must never propagate.
     console.warn('[comment-notifications] orchestration error:', err)
+  }
+}
+
+// ── Resolution (shared with the side-effect queue) ────────────────────────
+
+/** One recipient of a comment notification, fully resolved. */
+export interface ResolvedRecipient {
+  username: string
+  /** `users.id` stringified — see RecipientProfile.userId. */
+  userId: string
+  email: string
+  kind: 'mention' | 'reply'
+}
+
+/**
+ * Everything needed to render and address a comment's notifications, with no
+ * further database access.
+ *
+ * Split out of `sendCommentNotifications` for AQU-1824: the side-effect queue's
+ * fan-out consumer resolves this once and then enqueues one leaf message per
+ * recipient, while the inline path (no queue binding — local dev and e2e) keeps
+ * sending straight from it. One resolver, so the two paths cannot drift on who
+ * gets mail.
+ */
+export interface CommentNotificationPlan {
+  /**
+   * Recipients in a DETERMINISTIC order: mentions first (alphabetical by
+   * username), then thread-reply recipients (alphabetical).
+   *
+   * The order is part of the contract, not a tidiness nicety. The recipient cap
+   * is applied by slicing this list, so a stable order means a retry of the
+   * same comment caps the same people — and putting mentions first means the
+   * cap can only ever drop "someone replied on a thread you are in" mail, never
+   * "you were named".
+   */
+  recipients: ResolvedRecipient[]
+  authorDisplayName: string
+  projectName: string
+  commentsUrl: string
+  excerpt: string
+  threadTopic: string
+  isReply: boolean
+  /** Root comment id of the thread, when the caller supplied enough to know it. */
+  threadRootId: string | null
+}
+
+/**
+ * Resolve who gets mail for one `comment.create`, and with what copy.
+ *
+ * Returns null when nobody is eligible — no mentions with project access, no
+ * thread participants, or everyone opted out (AQU-1193 makes mention-only the
+ * default, so a thread participant who was not named gets nothing unless they
+ * chose `all`).
+ */
+export async function resolveCommentNotificationPlan(opts: {
+  db: AquillaDb
+  baseUrl: string
+  projectId: string
+  author: string
+  body: string
+  parentCommentId: string | null
+  commentId?: string
+}): Promise<CommentNotificationPlan | null> {
+  const { db, baseUrl, projectId, author, body, parentCommentId } = opts
+
+  const rawMentionedUsernames = extractMentions(body)
+  const [mentionedUsernames, threadParticipants] = await Promise.all([
+    filterUsernamesWithProjectAccess(db, projectId, rawMentionedUsernames),
+    getThreadParticipants(db, projectId, parentCommentId),
+  ])
+  const recipientUsernames = deriveRecipientUsernames({
+    author,
+    mentionedUsernames,
+    threadParticipantUsernames: threadParticipants,
+  })
+
+  if (recipientUsernames.length === 0) return null
+
+  // The thread's identity. A reply's root is its parent; a new top-level
+  // comment IS its own root, so it seeds the subject its replies will reuse.
+  const isReply = parentCommentId !== null
+  const rootCommentId = parentCommentId ?? opts.commentId ?? null
+
+  const [profiles, projectName, rootBody] = await Promise.all([
+    resolveRecipientProfiles(db, recipientUsernames),
+    getProjectName(db, projectId),
+    isReply && rootCommentId
+      ? getThreadRootBody(db, projectId, rootCommentId)
+      : Promise.resolve(null),
+  ])
+
+  const mentionedSet = new Set(mentionedUsernames)
+  const mentions: ResolvedRecipient[] = []
+  const replies: ResolvedRecipient[] = []
+  for (const username of recipientUsernames) {
+    const profile = profiles.get(username)
+    if (!profile) continue
+    const kind: 'mention' | 'reply' = mentionedSet.has(username) ? 'mention' : 'reply'
+    // Mention-only by default — a thread participant who was not named gets
+    // nothing unless they opted into `all` (AQU-1193).
+    if (!shouldEmailRecipient(kind, profile.preference)) continue
+    const resolved: ResolvedRecipient = {
+      username,
+      userId: profile.userId,
+      email: profile.email,
+      kind,
+    }
+    ;(kind === 'mention' ? mentions : replies).push(resolved)
+  }
+
+  const byUsername = (a: ResolvedRecipient, b: ResolvedRecipient) =>
+    a.username < b.username ? -1 : a.username > b.username ? 1 : 0
+  const recipients = [...mentions.sort(byUsername), ...replies.sort(byUsername)]
+  if (recipients.length === 0) return null
+
+  return {
+    recipients,
+    authorDisplayName: author,
+    projectName: projectName ?? projectId,
+    commentsUrl: `${baseUrl}/project/${projectId}/comments`,
+    excerpt: mentionDisplayText(body).slice(0, 200),
+    threadTopic: threadTopicFromBody(rootBody ?? body),
+    isReply,
+    threadRootId: rootCommentId,
+  }
+}
+
+// ── Thread digest (AQU-1824 recipient cap) ───────────────────────────────
+
+/**
+ * Mail for a recipient past the per-comment recipient cap.
+ *
+ * It names no single comment on purpose: the digest exists precisely because
+ * this thread is generating more notifications than one message each, and it is
+ * coalesced per (thread, recipient, UTC day) by the delivery ledger. So it says
+ * "this thread is active, here it is" and lets the app show the detail.
+ */
+export interface ThreadDigestPayload {
+  projectName: string
+  commentsUrl: string
+  threadTopic: string
+}
+
+function buildDigestHtml(p: ThreadDigestPayload): string {
+  const projectName = escapeHtml(p.projectName)
+  const threadTopic = escapeHtml(p.threadTopic)
+  return `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <p>There is new comment activity on a thread you are part of in <strong>${projectName}</strong>:</p>
+          <blockquote style="border-left: 3px solid #e5e7eb; padding-left: 12px; color: #374151; margin: 12px 0;">
+            ${threadTopic}
+          </blockquote>
+          <p style="margin: 20px 0; text-align: center;">
+            <a href="${p.commentsUrl}"
+               style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px;">
+              View thread
+            </a>
+          </p>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            This thread has more participants than we send individual notifications for,
+            so you are getting one summary instead of a message per comment.
+            Change or turn off comment email under Preferences &rarr; Notifications.
+          </p>
+        </div>
+      </body>
+    </html>
+  `.trim()
+}
+
+/** Subject for a digest. Shares the thread's subject shape so mail clients
+ *  still collapse it into the same conversation as the per-comment mail. */
+export function digestSubject(payload: ThreadDigestPayload): string {
+  return threadSubject({
+    authorDisplayName: '',
+    kind: 'reply',
+    projectName: payload.projectName,
+    excerpt: '',
+    commentsUrl: payload.commentsUrl,
+    threadTopic: payload.threadTopic,
+    isReply: true,
+  })
+}
+
+/** Send one thread digest. No-ops without the EMAIL binding, and throws on a
+ *  provider error so the queue consumer can retry — same contract as
+ *  `sendNotificationEmail`. */
+export async function sendThreadDigestEmail(
+  env: NotificationEnv,
+  toEmail: string,
+  payload: ThreadDigestPayload,
+): Promise<void> {
+  if (!env.EMAIL) return
+  const from = env.EMAIL_FROM ?? 'noreply@support.aquilla.app'
+  const text =
+    `There is new comment activity on a thread you are part of in ${payload.projectName}.\n\n` +
+    `${payload.threadTopic}\n\nView: ${payload.commentsUrl}`
+  try {
+    await env.EMAIL.send({
+      from,
+      to: [toEmail],
+      subject: digestSubject(payload),
+      html: buildDigestHtml(payload),
+      text,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Failed to send digest email: ${message}`, { cause: err })
   }
 }

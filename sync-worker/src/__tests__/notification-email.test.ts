@@ -4,7 +4,7 @@
 // 1. extractMentions inline copy — mirrors comment-helpers tests to catch drift.
 // 2. deriveRecipientUsernames — correct union of mentions + participants, minus author.
 // 3. sendCommentNotifications — provider missing → no-op; send failure never throws.
-// 4. resolveRecipientProfiles — queries users table by username (email + preference).
+// 4. resolveRecipientProfiles — queries users table by username (id + email + preference).
 // 5. getThreadParticipants — returns existing thread authors for a reply.
 // 6. AQU-1193 — mention-only default, per-user preference, thread-stable subject.
 
@@ -577,8 +577,16 @@ describe('resolveRecipientProfiles', () => {
       .run()
 
     const profiles = await resolveRecipientProfiles(db, ['bob', 'carol', 'nobody'])
-    expect(profiles.get('bob')).toEqual({ email: 'bob@example.com', preference: 'all' })
+    // AQU-1824: userId rides along — it is the recipient half of the
+    // side-effect queue's (commentId, recipientUserId) idempotency key, so
+    // resolution has to carry it, not just the address.
+    expect(profiles.get('bob')).toEqual({
+      userId: '1',
+      email: 'bob@example.com',
+      preference: 'all',
+    })
     expect(profiles.get('carol')).toEqual({
+      userId: '2',
       email: 'carol@example.com',
       preference: 'mentions',
     })

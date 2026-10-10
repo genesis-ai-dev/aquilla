@@ -391,6 +391,32 @@ CREATE TABLE auth_rate_limit_events (
 );
 CREATE INDEX idx_auth_rate_limit_lookup ON auth_rate_limit_events(kind, identifier, created_at);
 
+-- AQU-1843: the shared volumetric limiter (db/shared/rate-limit.ts) used by the
+-- chat proxy, the AI/Jev routes, TTS and the external Agent API. One row per
+-- (kind, identifier, window) rather than one row per request: the check is a
+-- single `ON CONFLICT DO UPDATE ... RETURNING hits` upsert, which takes a row
+-- lock and so hands each concurrent caller a distinct ordinal — the
+-- count-then-insert it replaced let a parallel burst all read the same
+-- pre-burst count and pass. `window_start` is the epoch-aligned start of a
+-- fixed window (15 minutes for every current caller), computed by Postgres so
+-- auth-worker and sync-worker bucket on one clock. Finished windows are
+-- deleted by the auth-worker 5-minute cron (pruneRateLimitCounters), not
+-- opportunistically off a request.
+--
+-- No app_runtime grant and no RLS policy, matching auth_rate_limit_events
+-- above: this is a non-project-scoped infrastructure table with no tenant
+-- column for a policy to key on.
+CREATE TABLE rate_limit_counters (
+    kind         TEXT NOT NULL,
+    identifier   TEXT NOT NULL,
+    window_start TIMESTAMPTZ NOT NULL,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (kind, identifier, window_start)
+);
+-- Supports the prune sweep only; the hot path is a primary-key lookup.
+CREATE INDEX idx_rate_limit_counters_window ON rate_limit_counters(window_start);
+
 -- [Pen test] Auth & session mgmt (2026-08-03): denylist backing server-side
 -- logout (POST /api/v2/auth/logout, utils/token-revocation.ts). Keyed by the
 -- JWT `jti` claim (added to every newly minted access token). expires_at

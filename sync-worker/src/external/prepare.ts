@@ -70,7 +70,7 @@ import { loadProjectSettings } from '../../../db/shared/projects'
 import { laneContextFrom, laneIdRequiredMessage, resolveTargetLaneId } from './external-lane'
 import { languagesEqual } from '../../../src/lib/language-normalize'
 import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 import { resolveAssignmentAuthority } from '../events/assignment-authority'
 
@@ -84,7 +84,7 @@ export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
 // route, including this one, was unlimited. A leaked or malicious PAT could
 // stage unbounded changesets. Wide enough that a real agent loop staging a
 // plan every few seconds never trips it.
-const PREPARE_MAX_PER_CREDENTIAL = 300
+const PREPARE_MAX_PER_USER = 300
 
 /**
  * CreateOrg throttle (AQU-1221): at most 5 org-creation changesets staged per
@@ -93,14 +93,14 @@ const PREPARE_MAX_PER_CREDENTIAL = 300
  * whole new TENANT, so a runaway loop is not merely noisy — it litters the
  * user's org switcher and the platform-admin views with junk tenants that a
  * human then has to clean up. Deliberately far tighter than the generic
- * PREPARE_MAX_PER_CREDENTIAL: a legitimate partner-onboarding agent creates one
+ * PREPARE_MAX_PER_USER: a legitimate partner-onboarding agent creates one
  * org and moves on, so five in a quarter-hour is already generous.
  *
  * Counted at PREPARE. Every CreateOrg is forced to ask-mode, so a human
  * approval already gates each commit; throttling the staging step is what stops
  * an agent from flooding that human's approval queue in the first place.
  */
-export const CREATE_ORG_MAX_PER_CREDENTIAL = 5
+export const CREATE_ORG_MAX_PER_USER = 5
 
 /** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request):
  *  resolves the credential, parses the body, and hands off to the shared core
@@ -116,12 +116,18 @@ export async function handlePrepare(
   const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
-  const identifier = `credential:${cred.credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_prepare', identifier)
-  if (recent >= PREPARE_MAX_PER_CREDENTIAL) {
+  // AQU-1843: atomic, keyed on the credential's owner, and FAIL CLOSED —
+  // staging a changeset runs the planning engines and writes a row, so a
+  // limiter outage must not uncap it.
+  const prepareLimit = await enforceRateLimit(db, {
+    kind: 'external_prepare',
+    identifier: userRateLimitIdentifier(cred.userId),
+    limit: PREPARE_MAX_PER_USER,
+    failMode: 'closed',
+  })
+  if (!prepareLimit.allowed) {
     return errorResponse('rate_limited', 'changeset staging rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, 'external_prepare', identifier)
 
   let body: unknown
   try {
@@ -1210,16 +1216,22 @@ async function prepareCreateOrg(
     return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
   }
 
-  // Per-credential creation throttle (see CREATE_ORG_MAX_PER_CREDENTIAL).
-  const identifier = `credential:${cred.credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_create_org', identifier)
-  if (recent >= CREATE_ORG_MAX_PER_CREDENTIAL) {
+  // Per-user creation throttle (see CREATE_ORG_MAX_PER_USER). AQU-1843: atomic,
+  // keyed on the owner — minting more PATs used to multiply this cap, which is
+  // exactly the abuse the cap exists to stop — and FAIL CLOSED, because this
+  // one mints tenants.
+  const createOrgLimit = await enforceRateLimit(db, {
+    kind: 'external_create_org',
+    identifier: userRateLimitIdentifier(cred.userId),
+    limit: CREATE_ORG_MAX_PER_USER,
+    failMode: 'closed',
+  })
+  if (!createOrgLimit.allowed) {
     return errorResponse(
       'rate_limited',
-      `organization creation rate limit exceeded (max ${CREATE_ORG_MAX_PER_CREDENTIAL} per 15 minutes per credential), slow down`,
+      `organization creation rate limit exceeded (max ${CREATE_ORG_MAX_PER_USER} per 15 minutes per user), slow down`,
     )
   }
-  await recordRateLimitEvent(db, 'external_create_org', identifier)
 
   // Ask-mode is FORCED, as for CreateProject: an agent must never mint a tenant
   // unattended, whatever mode its credential holds. `autonomyMode` is ignored.

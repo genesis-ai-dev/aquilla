@@ -121,6 +121,8 @@ import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
+import { pruneAuthRateLimitEvents } from "./utils/rate-limit"
+import { pruneRateLimitCounters } from "../../db/shared/rate-limit"
 import { pruneExpiredTraces } from "./lib/contextual/traces"
 import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
 import { runReactSweep } from "./lib/react-loop"
@@ -560,6 +562,12 @@ const scheduled = async (
     // revoked_tokens hygiene lives here now, off the request path (it used to
     // be a random 2%-of-logouts DELETE). Non-throwing.
     await pruneExpiredRevokedTokens(runEnv.AQUILLA_PG)
+    // AQU-1843: rate-limit hygiene for both backing tables, off the request
+    // path for the same reason as revoked_tokens above. The counters table is
+    // written by auth-worker AND sync-worker, but they share one database, so
+    // this one cron covers both. Non-throwing.
+    await pruneRateLimitCounters(runEnv.AQUILLA_PG)
+    await pruneAuthRateLimitEvents(runEnv.AQUILLA_PG)
     // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
     await pruneExpiredTraces(runEnv.AQUILLA_PG)
     // Contextual autopilot: restart runs whose driver died and wake runs that

@@ -33,6 +33,7 @@ import { handleExportSourceRequest } from '../events/export-route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { ensureProjectLanes } from '../../../db/shared/lanes'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
+import { bumpRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
 
@@ -248,11 +249,8 @@ describe('artifacts — upload + retrieval', () => {
     const uploadRes = (await handleExternalArtifactsRequest(uploadReq(token, 'a.txt', bytes), env))!
     const { artifactId } = (await uploadRes.json()) as { artifactId: string }
 
-    await tdb.pg.query(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'external_artifact_content', $1, 1 FROM generate_series(1, 120)`,
-      [`credential:${CRED_LEAD}`],
-    )
+    // AQU-1843: the artifact budgets belong to the credential's OWNER now.
+    await bumpRateLimit(tdb.db, 'external_artifact_content', userRateLimitIdentifier(1), 120)
     const res = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}/content`), env))!
     expect(res.status).toBe(429)
     const body = (await res.json()) as { error: { code: string } }
@@ -265,11 +263,7 @@ describe('artifacts — upload + retrieval', () => {
     const uploadRes = (await handleExternalArtifactsRequest(uploadReq(token, 'a.txt', bytes), env))!
     const { artifactId } = (await uploadRes.json()) as { artifactId: string }
 
-    await tdb.pg.query(
-      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-       SELECT 'external_artifact_meta', $1, 1 FROM generate_series(1, 300)`,
-      [`credential:${CRED_LEAD}`],
-    )
+    await bumpRateLimit(tdb.db, 'external_artifact_meta', userRateLimitIdentifier(1), 300)
     const metaRes = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}`), env))!
     expect(metaRes.status).toBe(429)
     const inspectRes = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}/inspect`), env))!

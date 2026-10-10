@@ -14,7 +14,7 @@
 // revocation, and intersects OAuth organization grants with current membership.
 
 import type { AquillaDb } from "../shim/postgres"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "./rate-limit"
+import { bumpRateLimit, ipRateLimitIdentifier, peekRateLimit } from "./rate-limit"
 
 /** Fixed tag prefixing every Aquilla API token. */
 export const API_TOKEN_TAG = "aqk_"
@@ -178,18 +178,25 @@ export async function validateApiCredential(
 ): Promise<ApiCredentialContext | null> {
   if (!token || !token.startsWith(API_TOKEN_TAG)) return null
 
-  const throttleKey = ipIdentifier ? `ip:${ipIdentifier.trim().toLowerCase()}` : null
+  const throttleKey = ipIdentifier ? ipRateLimitIdentifier(ipIdentifier) : null
   if (throttleKey) {
-    const recentFailures = await countRecentRateLimitEvents(
-      db,
-      INVALID_CREDENTIAL_RATE_LIMIT_KIND,
-      throttleKey,
-    )
-    if (recentFailures >= MAX_INVALID_ATTEMPTS_PER_IP) return null
+    // AQU-1843: peek + bump rather than the shared enforceRateLimit, because
+    // this counter is FAILURES ONLY — a caller presenting the same valid token
+    // all day must never be counted, let alone throttled. The peek is now a
+    // primary-key lookup on rate_limit_counters instead of a COUNT(*) over an
+    // event log, so the per-call cost on this hot path drops accordingly.
+    //
+    // Fail OPEN (a null peek means the lookup itself failed, and is not
+    // treated as "over limit"): this throttle exists to bound DB load from
+    // repeated invalid attempts, not to stand between an attacker and a
+    // 256-bit token, so a limiter hiccup must not reject every valid
+    // credential the Agent API is handed.
+    const recentFailures = await peekRateLimit(db, INVALID_CREDENTIAL_RATE_LIMIT_KIND, throttleKey)
+    if (recentFailures !== null && recentFailures >= MAX_INVALID_ATTEMPTS_PER_IP) return null
   }
 
   const fail = async (): Promise<null> => {
-    if (throttleKey) await recordRateLimitEvent(db, INVALID_CREDENTIAL_RATE_LIMIT_KIND, throttleKey)
+    if (throttleKey) await bumpRateLimit(db, INVALID_CREDENTIAL_RATE_LIMIT_KIND, throttleKey)
     return null
   }
 

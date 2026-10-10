@@ -26,7 +26,7 @@ import { externalError } from "./errors"
 import { AUTH_HINT } from "./discovery-route"
 import { validateApiCredentialRequest, type ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 export interface ExternalReadsEnv {
   AQUILLA_PG?: AquillaDb
@@ -178,11 +178,12 @@ export async function mintInternalToken(
 
 // Search is the cheapest external call to spam (no write, no changeset) and
 // the most abuse-prone (FTS over the whole project on every request), so it's
-// the first external route throttled. Scoped per credential, not per IP — PAT
-// callers are already authenticated and IP-scoping a bot-run agent buys
-// nothing. Wide enough that a legitimate agent looping searches every few
-// seconds never trips it; tight enough to blunt a leaked-PAT query flood.
-export const SEARCH_MAX_PER_CREDENTIAL = 300
+// the first external route throttled. Scoped per USER, not per IP — PAT callers
+// are already authenticated and IP-scoping a bot-run agent buys nothing — and
+// not per credential either (AQU-1843: that let one person mint N tokens for N
+// times the budget). Wide enough that a legitimate agent looping searches every
+// few seconds never trips it; tight enough to blunt a leaked-PAT query flood.
+export const SEARCH_MAX_PER_USER = 300
 
 // [Pen test] API security & data exposure (2026-08-27): /me, /projects,
 // /files, /files/:fileId/cells, and /cells/:cellId/history had NO throttle —
@@ -190,20 +191,36 @@ export const SEARCH_MAX_PER_CREDENTIAL = 300
 // "enforced on /search, changeset prepare, changeset commit, and artifact
 // upload" only, i.e. every other external route was explicitly excluded. A
 // leaked or malicious PAT could scrape a project's entire file/cell/history
-// graph without limit. Same cap and per-credential scoping as search — these
-// are comparably cheap, paginated reads.
-export const READ_MAX_PER_CREDENTIAL = 300
+// graph without limit. Same cap and per-user scoping as search — these are
+// comparably cheap, paginated reads.
+export const READ_MAX_PER_USER = 300
 
-/** Shared throttle for the plain read routes. Returns a 429 Response if the
- *  credential is over budget (and records nothing further), else records this
- *  call and returns null. */
-export async function checkReadRateLimit(db: AquillaDb, credentialId: string): Promise<Response | null> {
-  const identifier = `credential:${credentialId}`
-  const recent = await countRecentRateLimitEvents(db, "external_read", identifier)
-  if (recent >= READ_MAX_PER_CREDENTIAL) {
+/**
+ * Shared throttle for the plain read routes. Returns a 429 Response if the
+ * caller is over budget, else consumes one unit and returns null.
+ *
+ * AQU-1843: keyed on the credential's OWNER, not the credential. These caps
+ * were per-credential, so minting a second PAT bought a second budget — the
+ * limit was effectively "300 per 15 minutes times however many tokens you care
+ * to create". The cap now follows the human, and extra tokens share it.
+ *
+ * Fails OPEN: these are free paginated reads, so blocking them when the
+ * limiter itself is unavailable would turn a cost control into an outage. The
+ * routes that spend money fail closed instead (see db/shared/rate-limit.ts).
+ */
+export async function checkReadRateLimit(
+  db: AquillaDb,
+  credential: Pick<ApiCredentialContext, "userId">,
+): Promise<Response | null> {
+  const decision = await enforceRateLimit(db, {
+    kind: "external_read",
+    identifier: userRateLimitIdentifier(credential.userId),
+    limit: READ_MAX_PER_USER,
+    failMode: "open",
+  })
+  if (!decision.allowed) {
     return externalError("rate_limited", "read rate limit exceeded, slow down", 429)
   }
-  await recordRateLimitEvent(db, "external_read", identifier)
   return null
 }
 
@@ -215,16 +232,21 @@ export async function checkReadRateLimit(db: AquillaDb, credentialId: string): P
  */
 export async function checkSearchRateLimit(
   db: AquillaDb,
-  credentialId: string,
+  credential: Pick<ApiCredentialContext, "userId">,
   cost = 1,
 ): Promise<Response | null> {
-  const identifier = `credential:${credentialId}`
-  const recent = await countRecentRateLimitEvents(db, "external_search", identifier)
-  if (recent >= SEARCH_MAX_PER_CREDENTIAL) {
+  // AQU-1843: one statement charges all `cost` units at once (it was a loop of
+  // one INSERT per unit), keyed on the owner rather than the credential, and
+  // fails open for the same reason the read cap does.
+  const decision = await enforceRateLimit(db, {
+    kind: "external_search",
+    identifier: userRateLimitIdentifier(credential.userId),
+    limit: SEARCH_MAX_PER_USER,
+    failMode: "open",
+    cost,
+  })
+  if (!decision.allowed) {
     return externalError("rate_limited", "search rate limit exceeded, slow down", 429)
-  }
-  for (let i = 0; i < cost; i++) {
-    await recordRateLimitEvent(db, "external_search", identifier)
   }
   return null
 }

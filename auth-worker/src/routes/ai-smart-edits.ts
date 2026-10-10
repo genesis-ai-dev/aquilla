@@ -32,7 +32,7 @@ import type { Env, Variables } from "../types"
 import { ROLE } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { callJev } from "../lib/jev/client"
 import { JEV_MODEL } from "../../../src/lib/completion/seam-request"
 import {
@@ -144,10 +144,15 @@ aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema),
   }
 
   const db = c.env.AQUILLA_PG
-  const identifier = `user:${user.id}`
-  const recent = await countRecentRateLimitEvents(db, "ai_smart_edits", identifier)
-  if (recent >= SUGGEST_MAX_PER_USER_PER_WINDOW) return c.json({ suggestions: [], rateLimited: true })
-  await recordRateLimitEvent(db, "ai_smart_edits", identifier)
+  // AQU-1843: atomic, and FAIL CLOSED — the window bounds Jev spend here and
+  // tier-0-only suggestions are the documented degradation (see the header).
+  const suggestLimit = await enforceRateLimit(db, {
+    kind: "ai_smart_edits",
+    identifier: userRateLimitIdentifier(user.id),
+    limit: SUGGEST_MAX_PER_USER_PER_WINDOW,
+    failMode: "closed",
+  })
+  if (!suggestLimit.allowed) return c.json({ suggestions: [], rateLimited: true })
 
   // Fold in edits made since the last request (bounded), then keep going in
   // the background if a backlog remains. A failed pass never blocks reading.

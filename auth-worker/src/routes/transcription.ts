@@ -14,10 +14,16 @@ import {
 } from "../lib/billing/transcription-usage"
 import { resolveProjectRole } from "../services/project-permissions"
 import {
-  countRecentRateLimitEvents, recordRateLimitEvent,
+  enforceRateLimit, userRateLimitIdentifier,
 } from "../../../db/shared/rate-limit"
 
 const transcription = new Hono<{ Bindings: Env; Variables: Variables }>()
+
+/** Transcription calls allowed per user per shared limiter window. Named (it
+ *  was a bare `60` inline) so the cap reads the same way as every sibling
+ *  route's — see db/shared/rate-limit.ts. */
+const TRANSCRIPTION_MAX_PER_USER_PER_WINDOW = 60
+
 const requestSchema = z.object({
   projectId: z.string().min(1).max(200),
   input_audio: z.object({
@@ -64,12 +70,19 @@ transcription.post("/transcriptions", authMiddleware,
       const check = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
       if (!check.ok) return c.json({ error: "credit_cap_exceeded" }, 429)
     }
-    const identifier = `user:${user.id}`
-    const recent = await countRecentRateLimitEvents(
-      c.env.AQUILLA_PG, "audio_transcriptions", identifier,
-    )
-    if (recent >= 60) return c.json({ error: "rate_limited" }, 429)
-    await recordRateLimitEvent(c.env.AQUILLA_PG, "audio_transcriptions", identifier)
+    // AQU-1843: atomic, and FAIL CLOSED — transcription bills a vendor per
+    // call, so a limiter outage must not uncap it.
+    const transcribeLimit = await enforceRateLimit(c.env.AQUILLA_PG, {
+      kind: "audio_transcriptions",
+      identifier: userRateLimitIdentifier(user.id),
+      limit: TRANSCRIPTION_MAX_PER_USER_PER_WINDOW,
+      failMode: "closed",
+    })
+    if (!transcribeLimit.allowed) {
+      return c.json({ error: "rate_limited" }, 429, {
+        "Retry-After": String(transcribeLimit.retryAfterSeconds),
+      })
+    }
     let bound: number
     try { bound = await transcriptionCostBound(c.env, seconds) }
     catch { return c.json({ error: "Transcription price unavailable" }, 503) }

@@ -30,25 +30,30 @@ import { ROLE } from '../events/role-policy'
 import type { ExternalEnv, StoredChangeset } from './types'
 import { credentialAllowsOrganization, validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 // [Pen test] API security & data exposure (2026-08-27): fetching and
 // discarding a changeset had no throttle — only prepare and commit did.
 // Narrower blast radius than the other read gaps (scoped to changesets the
 // same credential created), but closing it completes the lifecycle: every
 // external mutation/lookup on a changeset now shares one throttle regime.
-const CHANGESET_LIFECYCLE_MAX_PER_CREDENTIAL = 300
+const CHANGESET_LIFECYCLE_MAX_PER_USER = 300
 
+/** AQU-1843: atomic and keyed on the credential's owner. Fails OPEN — these are
+ *  the GET/discard lookups, scoped to changesets the caller already created. */
 async function checkChangesetLifecycleRateLimit(
   db: AquillaDb,
-  credentialId: string,
+  userId: string,
 ): Promise<Response | null> {
-  const identifier = `credential:${credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_changeset_lifecycle', identifier)
-  if (recent >= CHANGESET_LIFECYCLE_MAX_PER_CREDENTIAL) {
+  const decision = await enforceRateLimit(db, {
+    kind: 'external_changeset_lifecycle',
+    identifier: userRateLimitIdentifier(userId),
+    limit: CHANGESET_LIFECYCLE_MAX_PER_USER,
+    failMode: 'open',
+  })
+  if (!decision.allowed) {
     return errorResponse('rate_limited', 'changeset lifecycle rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, 'external_changeset_lifecycle', identifier)
   return null
 }
 
@@ -65,7 +70,7 @@ async function handleGet(
   const db = env.AQUILLA_PG
   const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
-  const limited = await checkChangesetLifecycleRateLimit(db, cred.credentialId)
+  const limited = await checkChangesetLifecycleRateLimit(db, cred.userId)
   if (limited) return limited
 
   const cs = await loadChangeset(db, projectId, id)
@@ -103,7 +108,7 @@ async function authorizeChangesetRead(
   if (!cred) {
     return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
   }
-  const limited = await checkChangesetLifecycleRateLimit(db, cred.credentialId)
+  const limited = await checkChangesetLifecycleRateLimit(db, cred.userId)
   if (limited) return limited
   try {
     await assertCredentialScope(db, cred, projectId)
@@ -214,7 +219,7 @@ async function handleDiscard(
   const db = env.AQUILLA_PG
   const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
-  const limited = await checkChangesetLifecycleRateLimit(db, cred.credentialId)
+  const limited = await checkChangesetLifecycleRateLimit(db, cred.userId)
   if (limited) return limited
 
   const cs = await loadChangeset(db, projectId, id)

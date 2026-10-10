@@ -116,7 +116,7 @@ async function handleExternalComments(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
   const db = env.AQUILLA_PG as AquillaDb
-  const limited = await checkReadRateLimit(db, authed.ctx.credential.credentialId)
+  const limited = await checkReadRateLimit(db, authed.ctx.credential)
   if (limited) return limited
 
   const url = new URL(request.url)

@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import app from "../index"
 import { authHeader, jwtFor, seedUser } from "./helpers/db"
 import { resolvePassageTagUrl } from "../routes/ai-passage-tags"
+import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import {
   nodeQuestionId,
   participantQuestionId,
@@ -308,13 +309,9 @@ describe("POST /api/v1/ai/passage-tags/classify", () => {
   it("answers heuristic tags, not a 429, once the per-user cap is spent", async () => {
     const jwt = await seedMember()
     const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(jevAnswers())
-    // The cap is 120 windows per sliding window; fill the ledger directly rather
-    // than making 120 requests.
-    for (let i = 0; i < 120; i += 1) {
-      await env.AQUILLA_PG.prepare(
-        "INSERT INTO auth_rate_limit_events (kind, identifier, success) VALUES (?, ?, ?)",
-      ).bind("ai_passage_tags", "user:1", 1).run()
-    }
+    // The cap is 120 per window; spend it directly rather than making 120
+    // requests. AQU-1843: one counter row, charged all at once.
+    await bumpRateLimit(env.AQUILLA_PG, "ai_passage_tags", userRateLimitIdentifier(1), 120)
 
     const res = await app.request(URL, {
       method: "POST", headers: authHeader(jwt), body: body(),

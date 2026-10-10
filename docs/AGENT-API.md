@@ -36,7 +36,11 @@ and target-format writers beyond the imported original are still open. Full deta
 in `docs/swarm/AGENT-API-TRACES.md`. Rate limiting is now complete: `/search` (2026-07-30 pen
 test), changeset prepare/commit, and artifact upload (2026-08-20 pen test), plus `/me`,
 `/projects`, project/file/cell GETs, artifact meta/content/inspect, and changeset GET/discard
-(2026-08-27 pen test) are all throttled per credential.
+(2026-08-27 pen test) are all throttled. AQU-1843 made every one of those checks a
+single atomic counter upsert keyed on the credential's **owner** rather than the
+credential — minting a second PAT no longer buys a second budget — and made the
+money-spending and write routes fail *closed* when the limiter itself is unavailable,
+while the free paginated reads keep failing open.
 
 ---
 
@@ -772,7 +776,7 @@ never seen.
 
 - **`GET /api/v1/external/projects/:projectId/settings`** — `{ projectId, settings,
   version, updatedAt }` (`read-routes.ts`). Same credential/scope/role gate and
-  per-credential throttle as every other project read (VIEWER floor; wrong-project PAT
+  per-user throttle as every other project read (VIEWER floor; wrong-project PAT
   gets `scope_denied`). A project with no `project_settings` row reads as `{}` at
   version 0 — patch against 0 to create it. `updated_by` is deliberately NOT echoed:
   this is an agent-facing surface and that id names a human.

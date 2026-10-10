@@ -90,7 +90,7 @@ import {
 } from '../../../db/shared/projects'
 import { stampStoredLaneId } from './external-lane'
 import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 /** Provenance channel for a PAT commit request. MCP-originated commits arrive
  *  via a synthetic in-process Request carrying `x-aquilla-channel: mcp`
@@ -115,7 +115,7 @@ export interface CommitCaller {
 // prepare — a leaked/malicious PAT could otherwise commit changesets
 // (real writes) without bound. Kept generous per credential/15min so a
 // legitimate agent applying a plan every few seconds never trips it.
-const COMMIT_MAX_PER_CREDENTIAL = 300
+const COMMIT_MAX_PER_USER = 300
 
 /** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request). */
 export async function handleCommit(
@@ -131,12 +131,18 @@ export async function handleCommit(
   const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
-  const identifier = `credential:${cred.credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_commit', identifier)
-  if (recent >= COMMIT_MAX_PER_CREDENTIAL) {
+  // AQU-1843: atomic, keyed on the credential's owner (a second PAT must not
+  // buy a second budget), and FAIL CLOSED — applying a changeset writes to the
+  // event log, so a limiter outage must not leave that uncapped.
+  const commitLimit = await enforceRateLimit(db, {
+    kind: 'external_commit',
+    identifier: userRateLimitIdentifier(cred.userId),
+    limit: COMMIT_MAX_PER_USER,
+    failMode: 'closed',
+  })
+  if (!commitLimit.allowed) {
     return errorResponse('rate_limited', 'changeset commit rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, 'external_commit', identifier)
 
   return commitChangesetCore(
     request,

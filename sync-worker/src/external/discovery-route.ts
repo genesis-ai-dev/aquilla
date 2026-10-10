@@ -246,7 +246,7 @@ function apiMap(): Record<string, unknown> {
         plan_stale: '409 — state drifted since prepare; re-prepare a fresh changeset. details.status distinguishes "stale" (the plan no longer describes reality) from "superseded" (its end-state already exists — a human did the work; nothing to re-prepare).',
         conflict: '409 — CreateProject id claimed by someone else; pick another id and re-prepare.',
         confirmation_required: '428 — ask-mode commit needs a human approval at the approvalUrl first.',
-        rate_limited: '429 — too many requests from this credential in the trailing 15 minutes (enforced per credential on every external route; back off and retry later). CreateOrg has its own, much tighter cap: 5 staged org creations per credential per 15 minutes.',
+        rate_limited: '429 — too many requests from this account in the current 15-minute window (enforced per USER on every external route, so minting extra credentials does not raise the cap; back off and retry after the window rolls over). CreateOrg has its own, much tighter cap: 5 staged org creations per user per 15 minutes.',
         job_failed: '500 — server-side failure; safe to retry once.',
       },
     },

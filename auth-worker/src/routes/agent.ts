@@ -48,7 +48,7 @@ import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent
 import { callerMayReadLane } from "../../../db/shared/lane-visibility"
 import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
@@ -568,16 +568,21 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
 
   // Volumetric floor: unlike the guards below, this actually blocks (see
   // comment at AGENT_RUN_MAX_PER_USER_PER_WINDOW).
-  const rateLimitIdentifier = `user:${user.id}`
-  const recentAgentRuns = await countRecentRateLimitEvents(
-    c.env.AQUILLA_PG,
-    "agent_run",
-    rateLimitIdentifier,
-  )
-  if (recentAgentRuns >= AGENT_RUN_MAX_PER_USER_PER_WINDOW) {
-    return c.json({ error: "rate_limited", message: "Too many agent runs, slow down." }, 429)
+  // AQU-1843: atomic, and FAIL CLOSED — an agent run spends on the shared LLM
+  // key, so a limiter outage must not uncap it.
+  const runLimit = await enforceRateLimit(c.env.AQUILLA_PG, {
+    kind: "agent_run",
+    identifier: userRateLimitIdentifier(user.id),
+    limit: AGENT_RUN_MAX_PER_USER_PER_WINDOW,
+    failMode: "closed",
+  })
+  if (!runLimit.allowed) {
+    return c.json(
+      { error: "rate_limited", message: "Too many agent runs, slow down." },
+      429,
+      { "Retry-After": String(runLimit.retryAfterSeconds) },
+    )
   }
-  await recordRateLimitEvent(c.env.AQUILLA_PG, "agent_run", rateLimitIdentifier)
 
   // Resolve the agent model from the global store (env/default fallback).
   const platformSettings = await getPlatformSettingsCached(c.env)

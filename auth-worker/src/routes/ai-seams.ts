@@ -30,7 +30,7 @@ import type { Env, Variables } from "../types"
 import { ROLE } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import {
   combineSeam,
   DEFAULT_SEAM_THRESHOLDS,
@@ -125,16 +125,21 @@ aiSeams.post(
       style: cell.style ?? null,
     }))
 
-    const identifier = `user:${user.id}`
-    const recent = await countRecentRateLimitEvents(c.env.AQUILLA_PG, "ai_seams", identifier)
-    if (recent >= SEAMS_MAX_PER_USER_PER_WINDOW) {
-      // Rate-limited is still a 200 of heuristic seams rather than a 429: the
-      // caller is a background job whose only sensible response to an error is
-      // to use the heuristic anyway. Failing it loudly would turn a cost
-      // control into an outage of a feature that has a working fallback.
+    // AQU-1843: atomic, and FAIL CLOSED — the window is what bounds Jev spend
+    // on this route, so a limiter outage degrades to the heuristic rather than
+    // uncapping the model. "Closed" costs nothing here precisely because the
+    // fallback is good: rate-limited is still a 200 of heuristic seams rather
+    // than a 429, since the caller is a background job whose only sensible
+    // response to an error is to use the heuristic anyway.
+    const seamsLimit = await enforceRateLimit(c.env.AQUILLA_PG, {
+      kind: "ai_seams",
+      identifier: userRateLimitIdentifier(user.id),
+      limit: SEAMS_MAX_PER_USER_PER_WINDOW,
+      failMode: "closed",
+    })
+    if (!seamsLimit.allowed) {
       return c.json({ seams: heuristicWindow(cells), model: null, rateLimited: true })
     }
-    await recordRateLimitEvent(c.env.AQUILLA_PG, "ai_seams", identifier)
 
     if (!c.env.OPENROUTER_API_KEY) {
       return c.json({ seams: heuristicWindow(cells), model: null })

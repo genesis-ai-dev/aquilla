@@ -30,7 +30,7 @@ import { handleExternalDiscoveryRequest } from '../external/discovery-route'
 import { MCP_EXPORT_MAX_BYTES } from '../external/mcp-handlers'
 import { MCP_TOOLS } from '../external/mcp-tools'
 import { mintApiToken } from '../../../db/shared/api-credentials'
-import { recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { bumpRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
 const PROJECT = 'proj-export'
@@ -322,14 +322,12 @@ describe('GET .../files/:fileId/export (REST)', () => {
 
     // Spending the whole plain-read budget must not touch export: an export
     // streams a whole file out of R2 and gets the tighter heavy-egress cap.
-    for (let i = 0; i < 300; i++) {
-      await recordRateLimitEvent(tdb.db, 'external_read', `credential:${CRED_MAINTAINER}`)
-    }
+    // AQU-1843: the counters are keyed on the credential's OWNER now, so the
+    // budget being spent here is user 1's, not this one credential's.
+    await bumpRateLimit(tdb.db, 'external_read', userRateLimitIdentifier(1), 300)
     expect((await handleExternalExportRequest(exportReq(token), makeEnv()))!.status).toBe(200)
 
-    for (let i = 0; i < 120; i++) {
-      await recordRateLimitEvent(tdb.db, 'external_export', `credential:${CRED_MAINTAINER}`)
-    }
+    await bumpRateLimit(tdb.db, 'external_export', userRateLimitIdentifier(1), 120)
     const limited = (await handleExternalExportRequest(exportReq(token), makeEnv()))!
     expect(limited.status).toBe(429)
     expect((await errorBody(limited)).code).toBe('rate_limited')

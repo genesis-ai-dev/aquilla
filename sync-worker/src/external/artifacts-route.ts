@@ -29,7 +29,7 @@ import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
 import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
-import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+import { enforceRateLimit, userRateLimitIdentifier } from '../../../db/shared/rate-limit'
 
 /** Max artifact size — 25 MB. Published in get_capabilities (operational
  *  contract §4); surfaced in the oversize error so an agent can self-correct. */
@@ -168,7 +168,7 @@ export async function loadArtifact(
 // MAX_ARTIFACT_BYTES = 25 MB each) had no per-credential throttle, unlike
 // /search — a leaked/malicious PAT could hammer R2 storage and DB inserts.
 // Capped well below what a legitimate import batch needs.
-const UPLOAD_MAX_PER_CREDENTIAL = 120
+const UPLOAD_MAX_PER_USER = 120
 
 async function handleUpload(
   request: Request,
@@ -180,12 +180,18 @@ async function handleUpload(
   if (!authed.ok) return authed.response
   const db = env.AQUILLA_PG as AquillaDb
 
-  const identifier = `credential:${authed.cred.credentialId}`
-  const recent = await countRecentRateLimitEvents(db, 'external_artifact_upload', identifier)
-  if (recent >= UPLOAD_MAX_PER_CREDENTIAL) {
+  // AQU-1843: atomic, keyed on the credential's owner (a second PAT must not
+  // buy a second upload budget), and FAIL CLOSED — an upload moves up to
+  // MAX_ARTIFACT_BYTES into R2, so a limiter outage must not uncap it.
+  const uploadLimit = await enforceRateLimit(db, {
+    kind: 'external_artifact_upload',
+    identifier: userRateLimitIdentifier(authed.cred.userId),
+    limit: UPLOAD_MAX_PER_USER,
+    failMode: 'closed',
+  })
+  if (!uploadLimit.allowed) {
     return errorResponse('rate_limited', 'artifact upload rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, 'external_artifact_upload', identifier)
 
   const name = request.headers.get('x-artifact-name')
   if (!name || name.trim() === '') {
@@ -304,20 +310,26 @@ async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
 // [Pen test] API security & data exposure (2026-08-27): metadata/inspect had
 // no throttle at all — only upload did. Cheap DB/64KB-sniff reads, so this
 // mirrors search's cap rather than upload's tighter one.
-const ARTIFACT_META_MAX_PER_CREDENTIAL = 300
+const ARTIFACT_META_MAX_PER_USER = 300
 
+/** AQU-1843: keyed on the owner, not the credential, and fails OPEN — these are
+ *  the cheap metadata/sniff reads, so a limiter outage must not take them down
+ *  with it. Upload (above) fails closed. */
 async function checkArtifactRateLimit(
   db: AquillaDb,
   kind: string,
-  credentialId: string,
+  userId: string,
   max: number,
 ): Promise<Response | null> {
-  const identifier = `credential:${credentialId}`
-  const recent = await countRecentRateLimitEvents(db, kind, identifier)
-  if (recent >= max) {
+  const decision = await enforceRateLimit(db, {
+    kind,
+    identifier: userRateLimitIdentifier(userId),
+    limit: max,
+    failMode: 'open',
+  })
+  if (!decision.allowed) {
     return errorResponse('rate_limited', 'artifact read rate limit exceeded, slow down')
   }
-  await recordRateLimitEvent(db, kind, identifier)
   return null
 }
 
@@ -333,8 +345,8 @@ async function handleGetMeta(
   const limited = await checkArtifactRateLimit(
     db,
     'external_artifact_meta',
-    authed.cred.credentialId,
-    ARTIFACT_META_MAX_PER_CREDENTIAL,
+    authed.cred.userId,
+    ARTIFACT_META_MAX_PER_USER,
   )
   if (limited) return limited
   const row = await loadArtifact(db, projectId, artifactId)
@@ -379,7 +391,7 @@ function safeContentTypeFor(stored: string | null): string {
 // MAX_ARTIFACT_BYTES (25 MB) per call and had no throttle — a leaked PAT could
 // repeat-download to run up R2 egress costs. Mirrors upload's cap: same order
 // of bytes moved, just in the opposite direction.
-const ARTIFACT_CONTENT_MAX_PER_CREDENTIAL = 120
+const ARTIFACT_CONTENT_MAX_PER_USER = 120
 
 async function handleGetContent(
   request: Request,
@@ -394,8 +406,8 @@ async function handleGetContent(
   const limited = await checkArtifactRateLimit(
     db,
     'external_artifact_content',
-    authed.cred.credentialId,
-    ARTIFACT_CONTENT_MAX_PER_CREDENTIAL,
+    authed.cred.userId,
+    ARTIFACT_CONTENT_MAX_PER_USER,
   )
   if (limited) return limited
   const row = await loadArtifact(db, projectId, artifactId)
@@ -577,8 +589,8 @@ async function handleInspect(
   const limited = await checkArtifactRateLimit(
     db,
     'external_artifact_meta',
-    authed.cred.credentialId,
-    ARTIFACT_META_MAX_PER_CREDENTIAL,
+    authed.cred.userId,
+    ARTIFACT_META_MAX_PER_USER,
   )
   if (limited) return limited
   const row = await loadArtifact(db, projectId, artifactId)

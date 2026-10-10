@@ -31,7 +31,7 @@ import type { Env, Variables } from "../types"
 import { ROLE } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import {
   DEFAULT_TAG_THRESHOLDS,
   MAX_PARTICIPANT_CANDIDATES,
@@ -166,17 +166,19 @@ aiPassageTags.post(
 
     const nodes = toRequests(input)
 
-    const identifier = `user:${user.id}`
-    const recent = await countRecentRateLimitEvents(c.env.AQUILLA_PG, "ai_passage_tags", identifier)
-    if (recent >= TAGS_MAX_PER_USER_PER_WINDOW) {
-      // Rate-limited is still a 200 of heuristic tags rather than a 429, for the
-      // same reason the seam route answers that way: the caller is a background
-      // job whose only sensible response to an error is to use the heuristic
-      // anyway, and failing it loudly would turn a cost control into an outage
-      // of a feature that has a working fallback.
+    // AQU-1843: atomic, and FAIL CLOSED for the reason ai-seams.ts gives — the
+    // window bounds Jev spend here, and the heuristic fallback makes "closed"
+    // free. Rate-limited is still a 200 of heuristic tags rather than a 429,
+    // since the caller is a background job that would use the heuristic anyway.
+    const tagsLimit = await enforceRateLimit(c.env.AQUILLA_PG, {
+      kind: "ai_passage_tags",
+      identifier: userRateLimitIdentifier(user.id),
+      limit: TAGS_MAX_PER_USER_PER_WINDOW,
+      failMode: "closed",
+    })
+    if (!tagsLimit.allowed) {
       return c.json({ tags: heuristicWindow(nodes), model: null, rateLimited: true })
     }
-    await recordRateLimitEvent(c.env.AQUILLA_PG, "ai_passage_tags", identifier)
 
     if (!c.env.OPENROUTER_API_KEY) {
       return c.json({ tags: heuristicWindow(nodes), model: null })

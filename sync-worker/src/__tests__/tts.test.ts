@@ -106,11 +106,13 @@ interface UsageRow {
 
 function makeStubDb(projectOrgId: number | null = 5) {
   const usageRows: UsageRow[] = []
-  // [Pen test] API security & data exposure (2026-09-03): backs the new
-  // per-user throttle in tts.ts — countRecentRateLimitEvents/recordRateLimitEvent
-  // (db/shared/rate-limit.ts) against the same auth_rate_limit_events table
-  // the external Agent API and auth-worker already use.
-  const rateLimitEvents: { kind: string; identifier: string }[] = []
+  // [Pen test] API security & data exposure (2026-09-03): backs the per-user
+  // throttle in tts.ts. AQU-1843: that throttle is now one atomic
+  // `enforceRateLimit` upsert into rate_limit_counters (db/shared/rate-limit.ts)
+  // rather than a COUNT over auth_rate_limit_events plus an INSERT, so the stub
+  // keeps a counter per (kind, identifier) and returns the post-increment value
+  // the way `RETURNING hits` does.
+  const rateLimitHits = new Map<string, number>()
 
   return {
     db: {
@@ -132,19 +134,22 @@ function makeStubDb(projectOrgId: number | null = 5) {
                 .reduce((s, r) => s + r.audio_seconds, 0)
               return { total_seconds: total } as unknown as T
             }
-            if (sql.includes("FROM auth_rate_limit_events")) {
+            if (sql.includes("INTO rate_limit_counters")) {
               const [kind, identifier] = boundArgs as [string, string]
-              const n = rateLimitEvents.filter(
-                (e) => e.kind === kind && e.identifier === identifier,
-              ).length
-              return { n } as unknown as T
+              const cost = Number(boundArgs[4] ?? 1)
+              const key = `${kind}\u0000${identifier}`
+              const hits = (rateLimitHits.get(key) ?? 0) + cost
+              rateLimitHits.set(key, hits)
+              return { hits } as unknown as T
             }
             return null
           },
           async run() {
-            if (sql.includes("INSERT INTO auth_rate_limit_events")) {
+            if (sql.includes("INTO rate_limit_counters")) {
               const [kind, identifier] = boundArgs as [string, string]
-              rateLimitEvents.push({ kind, identifier })
+              const cost = Number(boundArgs[4] ?? 1)
+              const key = `${kind}\u0000${identifier}`
+              rateLimitHits.set(key, (rateLimitHits.get(key) ?? 0) + cost)
             }
             if (sql.includes("INSERT INTO tts_usage_daily")) {
               const [userId, orgId, dateUtc, audioSeconds] = boundArgs as [
@@ -189,7 +194,10 @@ function makeStubDb(projectOrgId: number | null = 5) {
       async close() {},
     } as unknown as AquillaDb,
     usageRows,
-    rateLimitEvents,
+    /** Pre-spend a (kind, identifier) bucket, the way a flooding caller would. */
+    spendRateLimit(kind: string, identifier: string, hits: number) {
+      rateLimitHits.set(`${kind}\u0000${identifier}`, hits)
+    },
   }
 }
 
@@ -459,10 +467,8 @@ describe("POST /api/v1/voice/tts", () => {
   // only thing actually blocking a flood against the hosted Inworld endpoint.
   describe("rate limiting", () => {
     it("429s a user that has flooded the window, without calling Inworld", async () => {
-      const { db, rateLimitEvents } = makeStubDb()
-      for (let i = 0; i < 200; i++) {
-        rateLimitEvents.push({ kind: "tts_synthesize", identifier: "user:1" })
-      }
+      const { db, spendRateLimit } = makeStubDb()
+      spendRateLimit("tts_synthesize", "user:1", 200)
       const calls = stubInworld({ wav: makeWav(1) })
       const token = await makeToken({ userId: 1 })
 
@@ -475,10 +481,8 @@ describe("POST /api/v1/voice/tts", () => {
     })
 
     it("does not throttle a fresh user, even when another user has flooded the window", async () => {
-      const { db, rateLimitEvents } = makeStubDb()
-      for (let i = 0; i < 200; i++) {
-        rateLimitEvents.push({ kind: "tts_synthesize", identifier: "user:999" })
-      }
+      const { db, spendRateLimit } = makeStubDb()
+      spendRateLimit("tts_synthesize", "user:999", 200)
       stubInworld({ wav: makeWav(1) })
       const token = await makeToken({ userId: 1 })
 

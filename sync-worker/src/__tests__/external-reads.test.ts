@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalReadRequest } from "../external/read-routes"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const SECRET = "test-secret"
 const CRED_1 = "00000000-0000-0000-0000-000000000001"
@@ -257,11 +258,8 @@ describe("external read surface", () => {
 
     it("throttles a credential that floods /search", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      await testDb.pg.query(
-        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-         SELECT 'external_search', $1, 1 FROM generate_series(1, 300)`,
-        [`credential:${CRED_1}`],
-      )
+      // AQU-1843: the budget belongs to the credential's OWNER now.
+      await bumpRateLimit(testDb.db, "external_search", userRateLimitIdentifier(2), 300)
       const res = await handleExternalReadRequest(
         req("/api/v1/external/projects/proj-a/search?q=beginning", token),
         env(testDb),
@@ -271,19 +269,39 @@ describe("external read surface", () => {
       expect(body.error.code).toBe("rate_limited")
     })
 
-    it("does not throttle a fresh credential", async () => {
-      const other = "00000000-0000-0000-0000-000000000002"
+    it("does not throttle one user because another flooded /search", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      await testDb.pg.query(
-        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-         SELECT 'external_search', $1, 1 FROM generate_series(1, 300)`,
-        [`credential:${other}`],
-      )
+      await bumpRateLimit(testDb.db, "external_search", userRateLimitIdentifier(1), 300)
       const res = await handleExternalReadRequest(
         req("/api/v1/external/projects/proj-a/search?q=beginning", token),
         env(testDb),
       )
       expect(res!.status).toBe(200)
+    })
+
+    // AQU-1843 regression guard: these caps were per CREDENTIAL, so minting a
+    // second PAT bought a second budget — "300 per 15 minutes" was really
+    // "300 times however many tokens you care to create". The cap follows the
+    // user; a second credential of the same user finds the budget already spent.
+    it("does not give a user a second search budget for a second credential", async () => {
+      const first = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      const second = await seedCredential(testDb, {
+        id: "00000000-0000-0000-0000-000000000002",
+        userId: 2,
+        projectId: "proj-a",
+      })
+      await bumpRateLimit(testDb.db, "external_search", userRateLimitIdentifier(2), 300)
+      const onFirst = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/search?q=beginning", first),
+        env(testDb),
+      )
+      expect(onFirst!.status).toBe(429)
+      const onSecond = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/search?q=beginning", second),
+        env(testDb),
+      )
+      expect(onSecond!.status).toBe(429)
+      expect((await onSecond!.json() as { error: { code: string } }).error.code).toBe("rate_limited")
     })
   })
 
@@ -371,11 +389,7 @@ describe("external read surface", () => {
   describe("read rate limiting", () => {
     it("throttles a credential that floods /me", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      await testDb.pg.query(
-        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
-        [`credential:${CRED_1}`],
-      )
+      await bumpRateLimit(testDb.db, "external_read", userRateLimitIdentifier(2), 300)
       const res = await handleExternalReadRequest(req("/api/v1/external/me", token), env(testDb))
       expect(res!.status).toBe(429)
       const body = (await res!.json()) as { error: { code: string } }
@@ -384,22 +398,14 @@ describe("external read surface", () => {
 
     it("throttles a credential that floods /projects", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      await testDb.pg.query(
-        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
-        [`credential:${CRED_1}`],
-      )
+      await bumpRateLimit(testDb.db, "external_read", userRateLimitIdentifier(2), 300)
       const res = await handleExternalReadRequest(req("/api/v1/external/projects", token), env(testDb))
       expect(res!.status).toBe(429)
     })
 
     it("throttles a credential that floods /files", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      await testDb.pg.query(
-        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
-        [`credential:${CRED_1}`],
-      )
+      await bumpRateLimit(testDb.db, "external_read", userRateLimitIdentifier(2), 300)
       const res = await handleExternalReadRequest(
         req("/api/v1/external/projects/proj-a/files", token),
         env(testDb),
@@ -409,11 +415,7 @@ describe("external read surface", () => {
 
     it("throttles a credential that floods /files/:fileId/cells", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      await testDb.pg.query(
-        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
-        [`credential:${CRED_1}`],
-      )
+      await bumpRateLimit(testDb.db, "external_read", userRateLimitIdentifier(2), 300)
       const res = await handleExternalReadRequest(
         req("/api/v1/external/projects/proj-a/files/file-x/cells?lane=deflane1", token),
         env(testDb),
@@ -423,11 +425,7 @@ describe("external read surface", () => {
 
     it("throttles a credential that floods /cells/:cellId/history", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      await testDb.pg.query(
-        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
-         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
-        [`credential:${CRED_1}`],
-      )
+      await bumpRateLimit(testDb.db, "external_read", userRateLimitIdentifier(2), 300)
       const res = await handleExternalReadRequest(
         req("/api/v1/external/projects/proj-a/cells/cell-1/history", token),
         env(testDb),

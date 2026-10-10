@@ -7,7 +7,7 @@
 import { env } from "cloudflare:test"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { decide, JEV_PROJECT_CAP_PER_WINDOW, type JevAnswer } from "../lib/jev/decide"
-import { recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { bumpRateLimit, projectRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
 const QUESTIONS = {
   substantive: { type: "noul" as const, instructions: { question: "Is it substantive?" } },
@@ -98,9 +98,12 @@ describe("decide()", () => {
   it("stops calling Jev for a project past its cap", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch")
     const req = input()
-    for (let i = 0; i < JEV_PROJECT_CAP_PER_WINDOW; i++) {
-      await recordRateLimitEvent(env.AQUILLA_PG, "jev_decisions", `project:${req.projectId}`)
-    }
+    await bumpRateLimit(
+      env.AQUILLA_PG,
+      "jev_decisions",
+      projectRateLimitIdentifier(req.projectId),
+      JEV_PROJECT_CAP_PER_WINDOW,
+    )
     const out = await decide(testEnv(), req)
     expect(out).toMatchObject({ decidedBy: "heuristic", reason: "capped" })
     expect(fetchSpy).not.toHaveBeenCalled()

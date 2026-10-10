@@ -194,7 +194,7 @@ export function AddProjectMemberDialog({
                   ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
                   : undefined
               }
-              emptySuggestionsHint="All org members are already on this project."
+              emptySuggestionsHint={t("org.membersPage.allOrgMembersAdded")}
               onAddStart={() => setAddForbidden(false)}
               onBatchErrorMessage={(e) => {
                 const uf = toUserFacingError(e, "project")

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type Ref } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Bell, MailBadge, MailCheck, MailX, MoreHorizontal } from "lucide-react"
 import { useNavigate } from "react-router-dom"
@@ -40,8 +40,22 @@ import {
 import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
-/** Rough row height. Rows truncate to two lines, so a fixed estimate is enough. */
-const NOTICE_ROW_PX = 48
+/**
+ * Rough row height. Each row is the place, "{author} mentioned you", and the
+ * comment, so a fixed estimate is enough.
+ */
+const NOTICE_ROW_PX = 72
+
+/** The fields both a React key event and a window KeyboardEvent provide. */
+type InboxKeyEvent = {
+  key: string
+  altKey: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  shiftKey: boolean
+  preventDefault: () => void
+  stopPropagation: () => void
+}
 
 type PendingDelete =
   | { kind: "one"; commentId: string }
@@ -52,8 +66,11 @@ type PendingDelete =
  * In-app inbox for comment @mentions (AQU-761). Derived from comments already
  * loaded for the open project — there is no notification table. Read and
  * dismissed state live on this device. Dismissing a row hides it here; the
- * comment stays. Rows show the cell as the title, an unread dot inline with
- * that title, "{author} commented: {excerpt}" under it, and the time on the right.
+ * comment stays. The row title is "{author} mentioned you in {file}" when the
+ * mention is on a file, and "{author} mentioned you" when it is not. The
+ * comment sits beneath that, and the time on the right. A verse or cell text
+ * sits under the title when the mention has one. Opening the inbox does not
+ * highlight a row; keyboard navigation does.
  */
 export function NotificationsInbox({
   projectId,
@@ -78,7 +95,10 @@ export function NotificationsInbox({
   // The confirm dialog is portaled outside the popover. Hold the inbox open
   // across that outside press, then release on the next turn.
   const holdOpen = useRef(false)
-  const firstNoticeRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  // The list publishes this. A window listener reads it while the inbox is
+  // open, so arrows work even when focus never entered the popover.
+  const listKeyDownRef = useRef<(event: InboxKeyEvent) => void>(() => {})
   const readIds = useMentionReadIds(projectId, readerUsername)
   const dismissedIds = useMentionDismissedIds(projectId, readerUsername)
   const notices = useMemo(
@@ -158,6 +178,19 @@ export function NotificationsInbox({
     dismissMentions(projectId, readerUsername, ids)
   }
 
+  // Capture phase, so an editor row does not take the arrow first. Menus are
+  // portaled outside the popover and keep their own keys.
+  useEffect(() => {
+    if (!open || pendingDelete) return
+    function onKey(event: globalThis.KeyboardEvent) {
+      const target = event.target
+      if (target instanceof Element && target.closest("[role='menu']")) return
+      listKeyDownRef.current(event)
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [open, pendingDelete])
+
   const deleteCopy =
     pendingDelete?.kind === "all"
       ? { title: t("comments.inbox.deleteAllTitle"), description: t("comments.inbox.deleteAllDescription") }
@@ -203,7 +236,7 @@ export function NotificationsInbox({
           align="end"
           side="bottom"
           sideOffset={6}
-          initialFocus={shown.length > 0 ? firstNoticeRef : undefined}
+          initialFocus={shown.length > 0 ? listRef : undefined}
           className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-hidden pt-2 pr-0 pb-0 pl-2"
         >
           <header className="flex shrink-0 items-center justify-between gap-2 pr-2">
@@ -286,7 +319,8 @@ export function NotificationsInbox({
               readIds={readIds}
               files={files}
               cellTextById={cellTextById}
-              firstNoticeRef={firstNoticeRef}
+              listRef={listRef}
+              keyDownRef={listKeyDownRef}
               markReadLabel={t("comments.inbox.markRead")}
               markUnreadLabel={t("comments.inbox.markUnread")}
               deleteLabel={t("comments.inbox.delete")}
@@ -328,7 +362,8 @@ function NotificationList({
   readIds,
   files,
   cellTextById,
-  firstNoticeRef,
+  listRef,
+  keyDownRef,
   markReadLabel,
   markUnreadLabel,
   deleteLabel,
@@ -343,7 +378,8 @@ function NotificationList({
   readIds: ReadonlySet<string>
   files: readonly { id: string; name: string }[]
   cellTextById: ReadonlyMap<string, string> | undefined
-  firstNoticeRef: Ref<HTMLButtonElement>
+  listRef: RefObject<HTMLDivElement | null>
+  keyDownRef: RefObject<(event: InboxKeyEvent) => void>
   markReadLabel: string
   markUnreadLabel: string
   deleteLabel: string
@@ -353,12 +389,12 @@ function NotificationList({
   onMarkUnread: (commentId: string) => void
   onDelete: (commentId: string) => void
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null)
   const pendingFocus = useRef<number | null>(null)
-  const [activeIndex, setActiveIndex] = useState(0)
+  // No row is highlighted until the reader moves with the keyboard or focuses one.
+  const [activeIndex, setActiveIndex] = useState(-1)
   const virtualizer = useVirtualizer({
     count: notices.length,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => listRef.current,
     getItemKey: (index) => notices[index]?.commentId ?? index,
     estimateSize: () => NOTICE_ROW_PX,
     overscan: 8,
@@ -375,53 +411,77 @@ function NotificationList({
 
   const handleScrollRef = useCallback(
     (element: HTMLDivElement | null) => {
-      scrollRef.current = element
+      listRef.current = element
       if (element) virtualizer.measure()
     },
-    [virtualizer],
+    [listRef, virtualizer],
   )
 
   const focusRow = useCallback((index: number) => {
-    scrollRef.current
+    // preventScroll: the browser otherwise centers an absolutely positioned
+    // virtual row, which jumps the list by a whole screen.
+    listRef.current
       ?.querySelector<HTMLButtonElement>(`[data-notice-index="${index}"]`)
-      ?.focus()
-  }, [])
+      ?.focus({ preventScroll: true })
+  }, [listRef])
 
   useEffect(() => {
     const index = pendingFocus.current
     if (index == null) return
-    const button = scrollRef.current?.querySelector<HTMLButtonElement>(
+    const button = listRef.current?.querySelector<HTMLButtonElement>(
       `[data-notice-index="${index}"]`,
     )
     if (!button) return
-    button.focus()
+    button.focus({ preventScroll: true })
     pendingFocus.current = null
   })
+
+  function rowIsInView(index: number): boolean {
+    const scroller = listRef.current
+    const node = scroller?.querySelector(`[data-notice-index="${index}"]`)
+    if (!scroller || !(node instanceof HTMLElement)) return false
+    const port = scroller.getBoundingClientRect()
+    const row = node.getBoundingClientRect()
+    if (port.height <= 0 || row.height <= 0) return false
+    return row.top >= port.top - 1 && row.bottom <= port.bottom + 1
+  }
 
   function focusIndex(index: number) {
     const count = notices.length
     const next = ((index % count) + count) % count
     setActiveIndex(next)
     pendingFocus.current = next
-    const isStart = next === 0
-    const isEnd = next === count - 1
-    // In-window rows are already painted. Scroll when the destination is an
-    // edge the current window does not contain, the same rule as the chapter
-    // picker: the virtualizer follows the highlight, it does not own the keys.
-    const visible = scrollRef.current?.querySelector(`[data-notice-index="${next}"]`)
-    if (!visible || isStart || isEnd) {
-      virtualizer.scrollToIndex(next, { align: isEnd ? "end" : "start" })
+    // Overscan mounts rows that are still outside the scrollport. Follow the
+    // highlight whenever the destination is not actually on screen.
+    if (!rowIsInView(next)) {
+      const isEnd = next === count - 1
+      virtualizer.scrollToIndex(next, {
+        align: next === 0 ? "start" : isEnd ? "end" : "auto",
+      })
     }
     focusRow(next)
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  function onKeyDown(event: InboxKeyEvent) {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     if (notices.length === 0) return
     const range = virtualizer.range
     const page = Math.max(1, range ? range.endIndex - range.startIndex : 1)
-    let next: number | null = null
-    if (event.key === "ArrowDown") next = activeIndex + 1
+    let next: number
+    // Nothing is highlighted yet. The first key starts at an end of the list
+    // instead of treating "no selection" as the first row.
+    if (activeIndex < 0) {
+      if (
+        event.key === "ArrowDown" ||
+        event.key === "Home" ||
+        event.key === "PageDown" ||
+        event.key === "PageUp"
+      ) {
+        next = 0
+      } else if (event.key === "ArrowUp" || event.key === "End") {
+        next = notices.length - 1
+      } else return
+    } else if (event.key === "ArrowDown") next = activeIndex + 1
     else if (event.key === "ArrowUp") next = activeIndex - 1
     else if (event.key === "Home") next = 0
     else if (event.key === "End") next = notices.length - 1
@@ -429,21 +489,33 @@ function NotificationList({
     else if (event.key === "PageUp") next = Math.max(0, activeIndex - page)
     else return
     event.preventDefault()
+    event.stopPropagation()
     focusIndex(next)
   }
+
+  // Assign in the layout effect, not during render. StrictMode replays the
+  // effect as setup → cleanup → setup, and a cleanup that only clears the
+  // ref would leave arrow keys on a no-op until some later render (a click)
+  // published the handler again.
+  useLayoutEffect(() => {
+    keyDownRef.current = onKeyDown
+    return () => {
+      keyDownRef.current = () => {}
+    }
+  })
 
   return (
     <div
       ref={handleScrollRef}
       aria-label={label}
-      onKeyDown={onKeyDown}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pr-2 pb-2"
+      tabIndex={-1}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pr-2 pb-2 outline-hidden"
     >
       <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const notice = notices[virtualItem.index]
           if (!notice) return null
-          const place = placeLabel(notice, files, cellTextById, t)
+          const place = placeLabel(notice, cellTextById)
           return (
             <div
               key={virtualItem.key}
@@ -460,13 +532,14 @@ function NotificationList({
                 index={virtualItem.index}
                 setSize={notices.length}
                 active={virtualItem.index === activeIndex}
-                buttonRef={virtualItem.index === 0 ? firstNoticeRef : undefined}
-                title={place || notice.authorLabel}
+                tabbable={
+                  virtualItem.index === activeIndex ||
+                  (activeIndex < 0 && virtualItem.index === 0)
+                }
+                title={mentionTitle(notice, files, t)}
+                place={place}
                 timeLabel={formatRelativeTime(notice.createdAt, t)}
-                subtitle={t("comments.inbox.commented", {
-                  author: notice.authorLabel,
-                  excerpt: notice.excerpt,
-                })}
+                message={notice.excerpt}
                 markReadLabel={markReadLabel}
                 markUnreadLabel={markUnreadLabel}
                 deleteLabel={deleteLabel}
@@ -490,10 +563,11 @@ function NotificationRow({
   index,
   setSize,
   active,
-  buttonRef,
+  tabbable,
   title,
+  place,
   timeLabel,
-  subtitle,
+  message,
   markReadLabel,
   markUnreadLabel,
   deleteLabel,
@@ -508,10 +582,12 @@ function NotificationRow({
   index: number
   setSize: number
   active: boolean
-  buttonRef?: Ref<HTMLButtonElement>
+  tabbable: boolean
   title: string
+  /** Verse, cell text, or file. Absent for a project-wide mention. */
+  place: string | null
   timeLabel: string
-  subtitle: string
+  message: string
   markReadLabel: string
   markUnreadLabel: string
   deleteLabel: string
@@ -527,8 +603,7 @@ function NotificationRow({
         render={
           <button
             type="button"
-            ref={buttonRef}
-            tabIndex={active ? 0 : -1}
+            tabIndex={tabbable ? 0 : -1}
             data-notice-index={index}
             aria-setsize={setSize}
             aria-posinset={index + 1}
@@ -560,9 +635,16 @@ function NotificationRow({
               {timeLabel}
             </span>
           </span>
-          <span className="mt-0.5 block truncate text-xs text-muted-foreground" data-ph-mask>
-            {subtitle}
-          </span>
+          {place ? (
+            <span className="mt-0.5 block truncate text-xs text-foreground/80" data-ph-mask>
+              {place}
+            </span>
+          ) : null}
+          {message ? (
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground" data-ph-mask>
+              {message}
+            </span>
+          ) : null}
         </span>
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-44">
@@ -587,23 +669,37 @@ function NotificationRow({
   )
 }
 
-function placeLabel(
+/** Project comments are stamped with this file id; it is not a file name. */
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
+function fileNameOf(
   notice: MentionNotice,
   files: readonly { id: string; name: string }[],
-  cellTextById: ReadonlyMap<string, string> | undefined,
-  t: TFunction,
 ): string | null {
-  if (notice.scopeKind === "cell") {
-    // A verse or chapter address names the cell. Otherwise show its text.
-    if (notice.cellRef) return notice.cellRef
-    const live = notice.cellId ? cellTextById?.get(notice.cellId) : undefined
-    return cellTextSnippet(live) ?? notice.cellText
-  }
-  if (notice.scopeKind === "file") {
-    const fileName = notice.fileId ? files.find((file) => file.id === notice.fileId)?.name : undefined
-    return fileName ? t("comments.scope.file", { file: fileName }) : null
-  }
-  return t("common.project")
+  if (!notice.fileId || notice.fileId === PROJECT_SENTINEL_FILE_ID) return null
+  const name = files.find((file) => file.id === notice.fileId)?.name.trim()
+  return name || null
+}
+
+function mentionTitle(
+  notice: MentionNotice,
+  files: readonly { id: string; name: string }[],
+  t: TFunction,
+): string {
+  const file = fileNameOf(notice, files)
+  if (!file) return t("comments.inbox.mentionedYou", { author: notice.authorLabel })
+  return t("comments.inbox.mentionedYouInFile", { author: notice.authorLabel, file })
+}
+
+function placeLabel(
+  notice: MentionNotice,
+  cellTextById: ReadonlyMap<string, string> | undefined,
+): string | null {
+  if (notice.scopeKind !== "cell") return null
+  // The file name is already in the title. A verse or the cell text names where.
+  if (notice.cellRef) return notice.cellRef
+  const live = notice.cellId ? cellTextById?.get(notice.cellId) : undefined
+  return cellTextSnippet(live) ?? notice.cellText
 }
 
 function formatRelativeTime(timestamp: number, t: TFunction): string {

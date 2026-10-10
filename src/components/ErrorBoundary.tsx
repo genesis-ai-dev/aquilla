@@ -95,14 +95,29 @@ function ErrorFallback({
   onReload,
   isChunkError,
   compact,
+  boundary,
 }: {
   onReload: () => void
   isChunkError?: boolean
   compact?: boolean
+  /** Which boundary is showing, mirrored into `data-boundary` — see the
+   * data-slot note below. */
+  boundary: string
 }) {
   const t = useT()
   return (
-    <div className={cn("flex items-center justify-center p-8", compact ? "h-full" : "min-h-screen")}>
+    // AQU-642: `data-slot` + `data-boundary` are the only machine-readable
+    // signal that a render throw replaced a surface with this screen. The e2e
+    // Workspace page object races them against the first cell row, so an
+    // editor that crashed at mount fails immediately and names the boundary
+    // instead of burning the readiness budget on a `[data-cell-id]` locator
+    // that can never appear. Keep them in sync with
+    // e2e/helpers/page-objects/Workspace.ts.
+    <div
+      data-slot="error-boundary-fallback"
+      data-boundary={boundary}
+      className={cn("flex items-center justify-center p-8", compact ? "h-full" : "min-h-screen")}
+    >
       <div className="flex max-w-sm flex-col items-center gap-2 text-center">
         <div className="text-muted-foreground">
           <AlertTriangle className="h-10 w-10" aria-hidden />
@@ -200,6 +215,7 @@ export class ErrorBoundary extends Component<Props, State> {
           onReload={this.handleReload}
           isChunkError={this.state.isChunkError}
           compact={this.props.compact}
+          boundary={this.props.label ?? "root"}
         />
       )
     }

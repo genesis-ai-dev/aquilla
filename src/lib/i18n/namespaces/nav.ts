@@ -210,6 +210,15 @@ export const nav = defineNamespace({
     "nav.workspaceActions.deleteFile.confirmLabel": "Move to Recently deleted",
 
     // -- ProjectWorkspace: fileMenuItems (chapter-row "File options" ⋯ menu) --
+    // AQU-358: headings naming each run of items in the chapter-row ⋯ menu.
+    // The menu absorbed what used to be a labelled chevron dropdown sitting
+    // beside it, so the groups say what they hold instead of being divided by
+    // anonymous lines.
+    "nav.fileMenu.section.editorTools": "Editor tools",
+    "nav.fileMenu.section.runs": "Run on this file",
+    "nav.fileMenu.section.view": "View & navigate",
+    "nav.fileMenu.section.file": "This file",
+
     "nav.fileMenu.diarizing": "Diarizing…",
     "nav.fileMenu.applying": "Applying…",
     "nav.fileMenu.diarizeFailed": "Diarize failed",
@@ -929,6 +938,34 @@ export const nav = defineNamespace({
       },
 
       // -- ProjectWorkspace: fileMenuItems (chapter-row 'File options' ⋯ menu) --
+      "nav.fileMenu.section.editorTools": {
+        description:
+          "Heading over the first group of the chapter-row 'File options' ⋯ menu: " +
+          "the whole-view editor passes ('Draft as you read', 'Check file'). Not " +
+          "clickable — it names the items under it.",
+        maxLength: 20,
+      },
+      "nav.fileMenu.section.runs": {
+        description:
+          "Heading over the ⋯ menu group that runs a bulk job across the open " +
+          "file (AI drafting, batch validation, transcription, synthesis, " +
+          "diarization). Not clickable — it names the items under it.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.section.view": {
+        description:
+          "Heading over the ⋯ menu group that changes what the editor shows or " +
+          "jumps within the file ('View settings', 'Next unfinished'). Not " +
+          "clickable — it names the items under it.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.section.file": {
+        description:
+          "Heading over the ⋯ menu group that acts on the file itself (rename, " +
+          "move, assign, segment, analyze, export, delete). Not clickable — it " +
+          "names the items under it.",
+        maxLength: 20,
+      },
       "nav.fileMenu.diarizing": {
         description:
           "Transient state of the 'Diarize' action-menu item while speaker " +

@@ -12570,8 +12570,42 @@ export function ProjectWorkspace() {
         onClick: () => handleWorkspaceAction(a),
       }))
 
-    const items: OverflowMenuItem[] = [...actionItems]
-    if (actionItems.length > 0) items.push({ id: "sep-actions", type: "separator" })
+    // AQU-358: this one menu absorbed what used to be a chevron dropdown and a
+    // ⋯ sitting side by side, so each run of items carries a heading saying
+    // what it is for. The headings also decide where an item belongs: the
+    // diarize/adopt-voice pair are bulk passes over the file's audio, so they
+    // sit with the other runs rather than next to View settings, and the
+    // file-name suggestions sit with Rename, which is what they change.
+    const items: OverflowMenuItem[] = []
+    const fileRuns: OverflowMenuItem[] = [...actionItems]
+
+    if (lens === "audio" && canDiarize) {
+      fileRuns.push({
+        id: "diarize",
+        label: diarizeLabel,
+        icon: Users,
+        disabled: diarizeBusy,
+        onClick: handleDiarize,
+      })
+      fileRuns.push({
+        id: "adopt-speaker-voice",
+        label: adoptingSpeaker
+          ? t("nav.fileMenu.extractingVoice")
+          : t("nav.fileMenu.useFileSpeakerAsVoice"),
+        icon: Mic,
+        disabled: adoptingSpeaker || diarizeBusy,
+        onClick: () => void handleAdoptSpeakerVoice(),
+      })
+    }
+
+    if (fileRuns.length > 0) {
+      items.push({ id: "sep-actions-heading", type: "separator" })
+      items.push({ id: "runs-section", type: "label", label: t("nav.fileMenu.section.runs") })
+      items.push(...fileRuns)
+    }
+
+    items.push({ id: "sep-view-heading", type: "separator" })
+    items.push({ id: "view-section", type: "label", label: t("nav.fileMenu.section.view") })
     items.push(
       {
         id: "view-settings",
@@ -12591,42 +12625,16 @@ export function ProjectWorkspace() {
       },
     )
 
-    if (lens === "audio" && canDiarize) {
-      items.push({
-        id: "diarize",
-        label: diarizeLabel,
-        icon: Users,
-        disabled: diarizeBusy,
-        onClick: handleDiarize,
-      })
-      items.push({
-        id: "adopt-speaker-voice",
-        label: adoptingSpeaker
-          ? t("nav.fileMenu.extractingVoice")
-          : t("nav.fileMenu.useFileSpeakerAsVoice"),
-        icon: Mic,
-        disabled: adoptingSpeaker || diarizeBusy,
-        onClick: () => void handleAdoptSpeakerVoice(),
-      })
-    }
-
-    const contextual: OverflowMenuItem[] = [
-      ...(suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)
-        ? [{
-            id: "redetect-suggestions",
-            label: t("nav.fileMenu.showFileNameSuggestions", { count: suggestions.length }),
-            icon: Sparkles,
-            onClick: handleReinviteSuggestions,
-          }]
-        : []),
-    ]
-
-    if (contextual.length > 0) {
-      items.push({ id: "sep-contextual", type: "separator" })
-      items.push(...contextual)
-    }
-
     items.push({ id: "sep-file-actions", type: "separator" })
+    items.push({ id: "file-section", type: "label", label: t("nav.fileMenu.section.file") })
+    if (suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)) {
+      items.push({
+        id: "redetect-suggestions",
+        label: t("nav.fileMenu.showFileNameSuggestions", { count: suggestions.length }),
+        icon: Sparkles,
+        onClick: handleReinviteSuggestions,
+      })
+    }
     items.push(
       {
         id: "file-rename",

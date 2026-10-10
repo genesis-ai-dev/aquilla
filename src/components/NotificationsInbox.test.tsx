@@ -33,7 +33,10 @@ function LocationProbe() {
   return <div data-testid="location">{location.pathname}{location.search}</div>
 }
 
-function renderInbox(comments: CommentRecord[], { strict = false }: { strict?: boolean } = {}) {
+function renderInbox(
+  comments: CommentRecord[],
+  { strict = false, files = [] }: { strict?: boolean; files?: { id: string; name: string }[] } = {},
+) {
   const tree = (
     <>
     <Toaster />
@@ -47,6 +50,7 @@ function renderInbox(comments: CommentRecord[], { strict = false }: { strict?: b
                 projectId="proj-1"
                 readerUsername="alice"
                 comments={comments}
+                files={files}
               />
               <LocationProbe />
             </>
@@ -89,6 +93,30 @@ describe("NotificationsInbox", () => {
       "/project/proj-1/editor/file/file-1?cellId=cell-1&comments=1&commentId=c1",
     )
     expect(screen.queryByTestId("notifications-unread-count")).not.toBeInTheDocument()
+  })
+
+  it("names the file in the title when the mention is on a file", async () => {
+    const user = userEvent.setup()
+    renderInbox(
+      [
+        comment({ body: "@[alice] hello" }),
+        comment({
+          commentId: "file-note",
+          scopeKind: "file",
+          cellId: null,
+          cellRef: null,
+          body: "@[alice] on the file",
+        }),
+      ],
+      { files: [{ id: "file-1", name: "Genesis.usfm" }] },
+    )
+    await user.click(screen.getByTestId("notifications-inbox-trigger"))
+    const titles = screen.getAllByText("Bob mentioned you in Genesis.usfm")
+    expect(titles).toHaveLength(2)
+    expect(titles[0].compareDocumentPosition(screen.getByText("GEN 1:1")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText("@alice on the file")).toBeInTheDocument()
+    expect(screen.queryByText("File Genesis.usfm")).not.toBeInTheDocument()
+    expect(screen.queryByText("Bob mentioned you")).not.toBeInTheDocument()
   })
 
   it("titles a project mention with who mentioned you", async () => {

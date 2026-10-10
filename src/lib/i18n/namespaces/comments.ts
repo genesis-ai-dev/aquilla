@@ -104,6 +104,7 @@ export const comments = defineNamespace({
     "comments.inbox.markRead": "Mark as read",
     "comments.inbox.markUnread": "Mark unread",
     "comments.inbox.mentionedYou": "{author} mentioned you",
+    "comments.inbox.mentionedYouInFile": "{author} mentioned you in {file}",
     "comments.inbox.unreadsOnly": "Show unreads only",
     "comments.inbox.actionsAria": "Notification actions",
     "comments.inbox.delete": "Delete notification",
@@ -543,11 +544,21 @@ export const comments = defineNamespace({
       },
       "comments.inbox.mentionedYou": {
         description:
-          "Title of a notification row. Names the person who @mentioned the reader. " +
-          "The comment text is a separate line beneath this one, not part of the " +
-          "sentence. Example: \"Keean mentioned you\".",
+          "Title of a notification row when the mention is not on a file. Names the " +
+          "person who @mentioned the reader. The comment text is a separate line " +
+          "beneath this one. Example: \"Keean mentioned you\".",
         placeholders: {
           author: "Display name of the person who wrote the mention.",
+        },
+      },
+      "comments.inbox.mentionedYouInFile": {
+        description:
+          "Title of a notification row when the mention is on a file. Names who " +
+          "@mentioned the reader and which file. The comment text is a separate line " +
+          "beneath this one. Example: \"Keean mentioned you in Genesis.usfm\".",
+        placeholders: {
+          author: "Display name of the person who wrote the mention.",
+          file: "Display name of the file the mention is in.",
         },
       },
       "comments.inbox.unreadsOnly": {

@@ -66,10 +66,11 @@ type PendingDelete =
  * In-app inbox for comment @mentions (AQU-761). Derived from comments already
  * loaded for the open project — there is no notification table. Read and
  * dismissed state live on this device. Dismissing a row hides it here; the
- * comment stays. The row title is "{author} mentioned you", with the comment
- * beneath it and the time on the right. A verse, cell, or file name sits under
- * the title when the mention has one. Opening the inbox does not highlight a
- * row; keyboard navigation does.
+ * comment stays. The row title is "{author} mentioned you in {file}" when the
+ * mention is on a file, and "{author} mentioned you" when it is not. The
+ * comment sits beneath that, and the time on the right. A verse or cell text
+ * sits under the title when the mention has one. Opening the inbox does not
+ * highlight a row; keyboard navigation does.
  */
 export function NotificationsInbox({
   projectId,
@@ -514,7 +515,7 @@ function NotificationList({
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const notice = notices[virtualItem.index]
           if (!notice) return null
-          const place = placeLabel(notice, files, cellTextById, t)
+          const place = placeLabel(notice, cellTextById)
           return (
             <div
               key={virtualItem.key}
@@ -535,7 +536,7 @@ function NotificationList({
                   virtualItem.index === activeIndex ||
                   (activeIndex < 0 && virtualItem.index === 0)
                 }
-                title={t("comments.inbox.mentionedYou", { author: notice.authorLabel })}
+                title={mentionTitle(notice, files, t)}
                 place={place}
                 timeLabel={formatRelativeTime(notice.createdAt, t)}
                 message={notice.excerpt}
@@ -668,24 +669,37 @@ function NotificationRow({
   )
 }
 
-function placeLabel(
+/** Project comments are stamped with this file id; it is not a file name. */
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
+function fileNameOf(
   notice: MentionNotice,
   files: readonly { id: string; name: string }[],
-  cellTextById: ReadonlyMap<string, string> | undefined,
-  t: TFunction,
 ): string | null {
-  if (notice.scopeKind === "cell") {
-    // A verse or chapter address names the cell. Otherwise show its text.
-    if (notice.cellRef) return notice.cellRef
-    const live = notice.cellId ? cellTextById?.get(notice.cellId) : undefined
-    return cellTextSnippet(live) ?? notice.cellText
-  }
-  if (notice.scopeKind === "file") {
-    const fileName = notice.fileId ? files.find((file) => file.id === notice.fileId)?.name : undefined
-    return fileName ? t("comments.scope.file", { file: fileName }) : null
-  }
-  // A project-wide mention has no place to name. The title is who mentioned you.
-  return null
+  if (!notice.fileId || notice.fileId === PROJECT_SENTINEL_FILE_ID) return null
+  const name = files.find((file) => file.id === notice.fileId)?.name.trim()
+  return name || null
+}
+
+function mentionTitle(
+  notice: MentionNotice,
+  files: readonly { id: string; name: string }[],
+  t: TFunction,
+): string {
+  const file = fileNameOf(notice, files)
+  if (!file) return t("comments.inbox.mentionedYou", { author: notice.authorLabel })
+  return t("comments.inbox.mentionedYouInFile", { author: notice.authorLabel, file })
+}
+
+function placeLabel(
+  notice: MentionNotice,
+  cellTextById: ReadonlyMap<string, string> | undefined,
+): string | null {
+  if (notice.scopeKind !== "cell") return null
+  // The file name is already in the title. A verse or the cell text names where.
+  if (notice.cellRef) return notice.cellRef
+  const live = notice.cellId ? cellTextById?.get(notice.cellId) : undefined
+  return cellTextSnippet(live) ?? notice.cellText
 }
 
 function formatRelativeTime(timestamp: number, t: TFunction): string {

@@ -9,6 +9,7 @@ import { schema } from "./schema"
 import { isTauriRuntime } from "./is-tauri"
 import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
 import { checkClientSessionHead } from "./head-check"
+import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
 
 // Names the OPFS dir; changing it strands every device's data (pinned by eventlog-compat.test.ts).
 export const STORE_ID = "aquilla-offline"
@@ -45,11 +46,16 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
 let storePromise: Promise<Store<typeof schema>> | undefined
 
 /** Boots (once) and returns the offline store. Memoized — repeat calls return the same promise/instance. */
-export function getOfflineStore(createAdapter: CreateOfflineAdapter = defaultCreateAdapter): Promise<Store<typeof schema>> {
+export function getOfflineStore(
+  createAdapter: CreateOfflineAdapter = defaultCreateAdapter,
+  generationMarker: GenerationMarker = opfsGenerationMarker,
+): Promise<Store<typeof schema>> {
   if (!isTauriRuntime()) {
     return Promise.reject(new Error("getOfflineStore() is only available in the Tauri desktop app"))
   }
-  storePromise ??= Promise.resolve(createAdapter())
+  // Claim before boot: a newer build that crashes mid-boot may already have written.
+  storePromise ??= claimOfflineGeneration(generationMarker)
+    .then(() => createAdapter())
     .then((adapter) => createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }))
     .then(async (store) => {
       // A stale client session must not take writes; hold the store back

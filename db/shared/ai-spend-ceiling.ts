@@ -206,8 +206,9 @@ export type AiSpendCeilingOutcome =
     }
 
 /**
- * Check the ceiling before a paid provider call. `surface` names the caller in
- * the alert line ("chat", "agent", "tts", …).
+ * Check the ceiling before a paid provider call. `surface` names the caller
+ * ("chat", "agent", "tts", …) and is reported in the alert and error lines, so
+ * a log says which path first hit the floor.
  *
  * Alerting: exactly one line per UTC day per isolate, emitted the first time
  * the ceiling is seen as reached — not one per blocked request, which would
@@ -239,7 +240,8 @@ export async function checkAiSpendCeiling(
   if (alertedDay !== snapshot.day) {
     alertedDay = snapshot.day
     console.error(
-      `[ai-spend-ceiling] ALERT platform daily AI spend ceiling reached on ${snapshot.day}: ` +
+      `[ai-spend-ceiling] ALERT platform daily AI spend ceiling reached on ${snapshot.day} ` +
+        `(first refused surface: ${surface}): ` +
         `$${(snapshot.spendCents / 100).toFixed(2)} of $${snapshot.ceilingUsd} — paid AI calls are now refused ` +
         `until the next UTC day. Raise AI_DAILY_SPEND_CEILING_USD (or platform_settings.aiDailySpendCeilingUsd) to restore service.`,
     )

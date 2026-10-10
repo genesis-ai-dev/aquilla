@@ -102,6 +102,10 @@ export const env = {
   AI_ALLOWED_MODELS: undefined as string | undefined,
   AI_USER_DAILY_REQUEST_LIMIT: undefined as string | undefined,
   AI_GLOBAL_DAILY_REQUEST_LIMIT: undefined as string | undefined,
+  // Platform AI spend ceiling (AQU-1869). Undefined → the module's $500/day
+  // default, which an empty ledger never reaches, so existing suites are
+  // unaffected. The spend-ceiling suite overrides it per test.
+  AI_DAILY_SPEND_CEILING_USD: undefined as string | undefined,
   AGENT_MODEL_DEFAULT: undefined as string | undefined,
   // Site-admin identity by email: "root" (root@example.com) is the test admin.
   ADMIN_EMAILS: "root@example.com" as string | undefined,

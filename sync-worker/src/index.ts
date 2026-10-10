@@ -214,6 +214,14 @@ declare global {
        * Tune once actual GPU billing is available.
        */
       TTS_COST_PER_AUDIO_SEC_CENTS?: string
+      /**
+       * Platform-wide daily AI spend ceiling in US dollars, checked before
+       * every paid AI call in this worker too — TTS, voice-convert,
+       * diarization (db/shared/ai-spend-ceiling.ts, AQU-1869). Unset →
+       * $500/day; "0" blocks all paid AI; "off" switches the ceiling off.
+       * Keep this value identical to auth-worker's.
+       */
+      AI_DAILY_SPEND_CEILING_USD?: string
     }
   }
 }

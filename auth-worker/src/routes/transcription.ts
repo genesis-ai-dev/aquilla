@@ -5,6 +5,7 @@ import { z } from "zod"
 import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { creditGuard, recordCredit } from "../lib/credits"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { weeklyUsageActive } from "../lib/billing/usage-mode"
 import { reserveWorkspaceUsage } from "../lib/billing/workspace-usage"
 import { settleChatUsage, holdChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
@@ -60,6 +61,10 @@ transcription.post("/transcriptions", authMiddleware,
       return c.json({ error: "usage_rehearsal_unavailable" }, 503)
     }
     if (weekly === "on" && orgId <= 0) return c.json({ error: "forbidden" }, 403)
+    // Platform daily spend ceiling (AQU-1869) — applies to the metered path
+    // too, so it sits outside the `weekly === "off"` branch below.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "transcription")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
     if (weekly === "off") {
       const check = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
       if (!check.ok) return c.json({ error: "credit_cap_exceeded" }, 429)

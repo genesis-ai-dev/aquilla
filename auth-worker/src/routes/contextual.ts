@@ -29,6 +29,7 @@ import { ROLE, type Env } from "../types"
 import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
 import { isAutopilotReleased } from "../lib/contextual/release-gate"
 import { runAiGuard } from "../lib/ai-budget"
+import { AI_SPEND_CEILING_ERROR, checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
@@ -411,6 +412,20 @@ async function selfTickLoop(
       onTrace: (t) => traces.add(t),
     })
     for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
+      // Platform daily spend ceiling (AQU-1869), re-checked at every wave
+      // edge. Checking only at start would let a run already in flight keep
+      // spending for the rest of the day after the floor trips, and one wave
+      // is several model calls. Park rather than fail: the work is still
+      // queued, and Continue (or the sweeper) resumes it once the ceiling
+      // resets at the next UTC day or an operator raises it.
+      const spendCeiling = await checkAiSpendCeiling(db, env, "autopilot-tick")
+      if (!spendCeiling.ok) {
+        const paused = await parkRun(db, runId, "awaiting_input")
+        if (paused.status === "ok") {
+          await publishRunStateOutsideTick(env, db, projectId, paused.run)
+        }
+        return
+      }
       const weight = Math.max(1, Math.min(
         resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY),
         concurrency ?? MAX_WAVE_CONCURRENCY,
@@ -662,6 +677,10 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
   if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  // Platform daily spend ceiling (AQU-1869). An autonomous reaction has no
+  // user to tell, so it simply declines to start and says why.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-reaction")
+  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
 
   const created = await createRun(env.AQUILLA_PG, {
     projectId: input.projectId,
@@ -723,6 +742,10 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
   if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  // Platform daily spend ceiling (AQU-1869) — waking a parked run resumes
+  // paid work, so it is gated exactly like starting one.
+  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-wake")
+  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
 
   // An EXHAUSTED parked run (every span settled) has nothing left to drive —
   // waking it would consume the steering and re-park untouched. Retire it and
@@ -884,6 +907,11 @@ contextual.post(
     const models = resolveContextualModels(c.env, settings)
     const guard = await runAiGuard(models.mid, user.id, c.env.AQUILLA_PG, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
+
+    // Platform daily spend ceiling (AQU-1869). Autopilot is the heaviest paid
+    // surface per start, so it is refused before a run row exists.
+    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "autopilot-start")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     let orgId = 0
     try {
@@ -2045,6 +2073,10 @@ contextual.post(
     // will actually call, not the one the drafting pipeline uses.
     const guard = await runAiGuard(models.fast, user.id, db, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
+
+    // Platform daily spend ceiling (AQU-1869).
+    const spendCeiling = await checkAiSpendCeiling(db, c.env, "autopilot-note")
+    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
 
     let orgId = 0
     try {

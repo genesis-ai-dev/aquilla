@@ -23,9 +23,35 @@ import {
   sandboxExec,
   sandboxFetchArtifact,
   sandboxReadFile,
+  sandboxTenant,
 } from "../lib/agent/sandbox-client"
 import { MAX_SANDBOX_PROGRAM_CHARS } from "../../../shared/import-contract"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+
+/**
+ * AQU-1848: the sandbox pool refused us because it is saturated, not broken.
+ *
+ * Thrown so every sandbox call in the handler below can be guarded the same
+ * way and still run the shared `finally` cleanup, and caught at the bottom to
+ * answer 503 + Retry-After instead of the generic 502 "parser failed". The
+ * distinction matters to the person: one says "try again in a moment", the
+ * other says "this file cannot be imported".
+ */
+class SandboxBusyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "SandboxBusyError"
+  }
+}
+
+/**
+ * Fail fast on a saturated pool. `busy` is set by the sandbox client when the
+ * agent-worker answers `pool_busy`; retrying the model against a full pool
+ * would just burn credits and the user's time.
+ */
+function throwIfBusy(outcome: { available: false; reason: string; busy?: boolean }): void {
+  if (outcome.busy) throw new SandboxBusyError(outcome.reason)
+}
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -318,13 +344,22 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
   if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
   const sessionId = `import-${crypto.randomUUID()}`
+  // AQU-1848: the pool counts concurrency per user, so one project lead cannot
+  // hold every container with back-to-back imports.
+  const tenant = sandboxTenant(user.id)
   const key = r2Key(c.env, projectId, sessionId)
   try {
     await c.env.SNAPSHOTS.put(key, bytes, { httpMetadata: { contentType: mime } })
-    const loaded = await sandboxFetchArtifact(c.env, sessionId, { key, path: "/workspace/input" }, signal)
-    if (!loaded.available) throw new Error(loaded.reason)
-    const inspected = await sandboxExec(c.env, sessionId, { language: "python", code: IMPORT_INSPECT_PROGRAM, timeoutMs: 60_000 }, signal)
-    if (!inspected.available) throw new Error(inspected.reason)
+    const loaded = await sandboxFetchArtifact(c.env, sessionId, { key, path: "/workspace/input" }, signal, tenant)
+    if (!loaded.available) {
+      throwIfBusy(loaded)
+      throw new Error(loaded.reason)
+    }
+    const inspected = await sandboxExec(c.env, sessionId, { language: "python", code: IMPORT_INSPECT_PROGRAM, timeoutMs: 60_000 }, signal, tenant)
+    if (!inspected.available) {
+      throwIfBusy(inspected)
+      throw new Error(inspected.reason)
+    }
     if (!inspected.data.ok || !inspected.data.stdout.trim()) {
       throw new Error(inspected.data.stderr || "Sandbox could not inspect the file")
     }
@@ -382,8 +417,9 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
         language: "python",
         code: `${cleanup}${proposal.code}`,
         timeoutMs: 120_000,
-      }, signal)
+      }, signal, tenant)
       if (!executed.available) {
+        throwIfBusy(executed)
         previousError = executed.reason.slice(0, 1000)
         continue
       }
@@ -395,7 +431,8 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
         language: "python",
         code: "from pathlib import Path\nprint(Path('/workspace/result.json').stat().st_size)",
         timeoutMs: 10_000,
-      }, signal)
+      }, signal, tenant)
+      if (!measured.available) throwIfBusy(measured)
       const resultBytes = measured.available && measured.data.ok
         ? Number(measured.data.stdout.trim())
         : Number.NaN
@@ -409,8 +446,9 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
         previousError = `Parser output exceeded ${MAX_RESULT_BYTES} bytes`
         continue
       }
-      const result = await sandboxReadFile(c.env, sessionId, "/workspace/result.json", MAX_RESULT_BYTES, signal)
+      const result = await sandboxReadFile(c.env, sessionId, "/workspace/result.json", MAX_RESULT_BYTES, signal, tenant)
       if (!result.available) {
+        throwIfBusy(result)
         previousError = result.reason.slice(0, 1000)
         continue
       }
@@ -448,6 +486,15 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     }
     throw new Error(previousError || "The sandbox parser could not produce a valid import")
   } catch (error) {
+    if (error instanceof SandboxBusyError) {
+      // Transient saturation, not a bad file. Say so, and say when to retry —
+      // this is the "waiting for a sandbox" state the user sees.
+      console.warn("Sandbox import deferred — pool saturated:", error.message)
+      return c.json({
+        error: "sandbox_busy",
+        message: error.message,
+      }, 503, { "Retry-After": "15" })
+    }
     console.error("Sandbox import parsing failed:", error)
     return c.json({
       error: "import_parser_failed",

@@ -22,6 +22,7 @@ import {
   notifyProjectDoMemberRoleChanged,
 } from "./member-role-changed"
 import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
+import { handleMondayLinkChangedRequest } from "./monday-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
@@ -366,6 +367,9 @@ const worker = {
     if (memberRoleChangedResponse) return memberRoleChangedResponse
     const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
     if (projectSettingsChangedResponse) return projectSettingsChangedResponse
+    // AQU-1828: drop the DO's cached "project has no Monday link" answer.
+    const mondayLinkChangedResponse = await handleMondayLinkChangedRequest(request, env)
+    if (mondayLinkChangedResponse) return mondayLinkChangedResponse
     const contextualActivityResponse = await handleContextualActivityRequest(request, env)
     if (contextualActivityResponse) return contextualActivityResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)

@@ -11,6 +11,9 @@ export const MONDAY_API_VERSION = "2026-07"
 /** Max seconds we will actually sleep on a 429 before giving up. */
 const MAX_RETRY_SLEEP_SECONDS = 60
 
+/** How many column values one items_page_by_column_values query carries (AQU-1828). */
+const COLUMN_VALUE_LOOKUP_BATCH = 100
+
 export class MondayApiError extends Error {
   readonly status: number
   constructor(message: string, status: number) {
@@ -231,41 +234,72 @@ export async function fetchBoardItemsSample(
   }))
 }
 
-/** Find an item whose text column equals `value` (idempotent re-linking). */
-export async function findItemByColumnValue(
+/**
+ * Find the items whose text column equals one of `values` (idempotent
+ * re-linking). AQU-1828: resolves MANY values in one request —
+ * `items_page_by_column_values` takes a list for a column, so a 66-file first
+ * push costs one query instead of the 66 the per-value helper this replaced
+ * cost. Returns value → item id for the values that matched; values with no
+ * item are simply absent.
+ */
+export async function findItemsByColumnValues(
   accessToken: string,
   boardId: string,
   columnId: string,
-  value: string,
-): Promise<string | null> {
-  const data = await mondayGraphQL<{
-    items_page_by_column_values: { items: Array<{ id: string | number }> } | null
-  }>(
-    accessToken,
-    `query { items_page_by_column_values(board_id: ${gqlString(boardId)}, limit: 1, columns: [{column_id: ${gqlString(columnId)}, column_values: [${gqlString(value)}]}]) { items { id } } }`,
-  )
-  const id = data.items_page_by_column_values?.items?.[0]?.id
-  return id != null ? String(id) : null
+  values: string[],
+): Promise<Map<string, string>> {
+  const found = new Map<string, string>()
+  for (const batch of chunk([...new Set(values)], COLUMN_VALUE_LOOKUP_BATCH)) {
+    const data = await mondayGraphQL<{
+      items_page_by_column_values: {
+        items: Array<{
+          id: string | number
+          column_values: Array<{ id: string; text: string | null }>
+        }>
+      } | null
+    }>(
+      accessToken,
+      `query { items_page_by_column_values(board_id: ${gqlString(boardId)}, limit: ${batch.length}, columns: [{column_id: ${gqlString(columnId)}, column_values: [${batch.map(gqlString).join(", ")}]}]) { items { id column_values(ids: [${gqlString(columnId)}]) { id text } } } }`,
+    )
+    for (const item of data.items_page_by_column_values?.items ?? []) {
+      const text = item.column_values?.find((c) => c.id === columnId)?.text
+      if (text == null || text === "") continue
+      if (!found.has(text)) found.set(text, String(item.id))
+    }
+  }
+  return found
 }
 
-/** Case-insensitive name match against the first items page (v1 approximation). */
-export async function findItemByName(
+/**
+ * Case-insensitive name matching against the first items page (v1
+ * approximation). AQU-1828: one request, indexed by normalized name, so N
+ * entities share it — the per-entity helper this replaced fetched this same
+ * 500-item page once per entity.
+ */
+export async function fetchBoardItemNameIndex(
   accessToken: string,
   boardId: string,
-  name: string,
-): Promise<string | null> {
+  limit = 500,
+): Promise<Map<string, string>> {
   const data = await mondayGraphQL<{
     boards: Array<{
       items_page: { items: Array<{ id: string | number; name: string }> }
     }> | null
   }>(
     accessToken,
-    `query { boards(ids: ${gqlString(boardId)}) { items_page(limit: 500) { items { id name } } } }`,
+    `query { boards(ids: ${gqlString(boardId)}) { items_page(limit: ${limit}) { items { id name } } } }`,
   )
-  const items = data.boards?.[0]?.items_page?.items ?? []
-  const needle = name.trim().toLowerCase()
-  const hit = items.find((i) => i.name.trim().toLowerCase() === needle)
-  return hit ? String(hit.id) : null
+  const index = new Map<string, string>()
+  for (const item of data.boards?.[0]?.items_page?.items ?? []) {
+    const key = normalizeItemName(item.name)
+    if (!index.has(key)) index.set(key, String(item.id))
+  }
+  return index
+}
+
+/** The key `fetchBoardItemNameIndex` indexes on — match callers must use it too. */
+export function normalizeItemName(name: string): string {
+  return name.trim().toLowerCase()
 }
 
 // ── Webhooks ───────────────────────────────────────────────────────────────

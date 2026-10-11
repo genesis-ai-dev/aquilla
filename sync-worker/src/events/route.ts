@@ -912,7 +912,7 @@ export async function handleEventsWriteRequest(
     projectId: string,
   ): Promise<Record<string, unknown> | null> => {
     try {
-      return await requestCache.projectSettings(projectId)
+      return await requestCache.writePathSettings(projectId)
     } catch {
       // Settings load failure is non-fatal — callers fall back to their
       // defaults rather than blocking the batch.

@@ -160,7 +160,7 @@ export async function resolveAllowTrackEditing(
   // `authorize` and 500s the whole batch, which can wedge a durable outbox on
   // one poisoned event. An unreachable settings row reads as OFF.
   try {
-    const parsed = await cache.projectSettings(projectId)
+    const parsed = await cache.writePathSettings(projectId)
     return parsed?.allowTrackEditing === true
   } catch {
     return false

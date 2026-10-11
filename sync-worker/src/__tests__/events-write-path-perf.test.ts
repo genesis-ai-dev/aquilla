@@ -30,6 +30,7 @@ import { ROLE } from '../events/role-policy'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
+import { projectSettingsRow } from './helpers/project-settings-db'
 
 const SECRET = 'test-secret'
 const PROJECT = 'proj-a'
@@ -298,7 +299,7 @@ describe('authorize() — settings reads are memoized per request', () => {
                 // `timingLocked: false` so the retime below PASSES the lock and
                 // the read is still made — a locked project would refuse it and
                 // the memoization would go untested.
-                if (sql.includes('FROM project_settings')) { reads.project_settings++; return { settings: JSON.stringify({ timingLocked: false }) } }
+                if (sql.includes('FROM project_settings')) { reads.project_settings++; return projectSettingsRow(sql, JSON.stringify({ timingLocked: false })) }
                 return null
               },
               async all() { return { results: [] } },

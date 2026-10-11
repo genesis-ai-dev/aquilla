@@ -318,7 +318,31 @@ CREATE TABLE project_settings (
       GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
     -- One boolean per Bible data enrichment; readers validate it
     -- (db/shared/bible-enrichments.ts readBibleEnrichments).
-    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED,
+    -- 0159 (AQU-1840): the `wp_` block is the EVENTS WRITE PATH's projection of
+    -- this blob. Every lane write used to authorize through a
+    -- `SELECT settings` + JSON.parse of the whole multi-MB column, once per
+    -- request; a validate, a retime, a track patch and a harmonize each read
+    -- their own key out of the same load. These columns carry exactly the keys
+    -- POST /events reads, so no write-path statement names `settings` at all.
+    -- JSONB, not `->>` TEXT like the columns above, because the write path's
+    -- guards are typed (`typeof === 'number'`, `=== true`, `!== false`,
+    -- `Array.isArray`) and `->>` cannot tell a JSON number from the string
+    -- "3", or JSON false from the string "false" — reading them as TEXT would
+    -- quietly unlock a locked timeline. `->` keeps the value's JSON type, so
+    -- the driver hands back the same JS value `JSON.parse(settings)` did.
+    -- Reader: sync-worker/src/events/request-cache.ts (one statement, one row).
+    wp_archived_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'archivedLanes') STORED,
+    wp_timing_locked JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'timingLocked') STORED,
+    wp_allow_track_editing JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowTrackEditing') STORED,
+    wp_validation_count JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationCount') STORED,
+    wp_validation_role_floor JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationRoleFloor') STORED,
+    wp_validation_named_users JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsers') STORED,
+    wp_allow_self_validation JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidation') STORED,
+    wp_validation_role_floor_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationRoleFloorAudio') STORED,
+    wp_validation_named_users_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsersAudio') STORED,
+    wp_allow_self_validation_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidationAudio') STORED,
+    wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 

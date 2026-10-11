@@ -21,6 +21,7 @@ import { authorize } from "../events/authorize"
 import { makeTestToken } from "./helpers/auth"
 import { ROLE } from "../events/role-policy"
 import type { RawEvent } from "../events/types"
+import { projectSettingsRow } from "./helpers/project-settings-db"
 
 const SECRET = "test-secret-value-for-cell-editing"
 
@@ -36,7 +37,7 @@ function makeDb(options: { tier?: Tier | null; userInserted?: boolean }): Aquill
           return {
             async first() {
               if (sql.includes("FROM project_settings")) {
-                return { settings: JSON.stringify(tier ? { cellEditingFloor: tier } : {}) }
+                return projectSettingsRow(sql, JSON.stringify(tier ? { cellEditingFloor: tier } : {}))
               }
               if (sql.includes("FROM cells")) {
                 return userInserted

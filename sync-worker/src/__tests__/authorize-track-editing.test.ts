@@ -19,6 +19,7 @@ import { authorize } from '../events/authorize'
 import { makeTestToken } from './helpers/auth'
 import { ROLE } from '../events/role-policy'
 import type { RawEvent } from '../events/types'
+import { projectSettingsRow } from './helpers/project-settings-db'
 
 const SECRET = 'test-secret-value-for-track-editing'
 
@@ -31,7 +32,7 @@ function makeDb(options: { allowed?: boolean } = {}): AquillaDb {
           return {
             async first() {
               if (sql.includes('FROM project_settings')) {
-                return { settings: JSON.stringify(allowed ? { allowTrackEditing: true } : {}) }
+                return projectSettingsRow(sql, JSON.stringify(allowed ? { allowTrackEditing: true } : {}))
               }
               return null
             },

@@ -5,12 +5,15 @@
 // that has to be switched on protects nothing until somebody switches it on.
 import { describe, it, expect } from "vitest"
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from "../events/timing-authority"
+import { projectSettingsRow, type SettingsDbMode } from "./helpers/project-settings-db"
 
 function makeDb(options: {
   settings?: string | null
   metadata?: unknown
+  /** AQU-1840: 'blob-only' models a database without the 0159 projection. */
+  mode?: SettingsDbMode
 }): AquillaDb {
-  const { settings = null, metadata = null } = options
+  const { settings = null, metadata = null, mode = "projected" } = options
   return {
     prepare(sql: string) {
       return {
@@ -18,7 +21,7 @@ function makeDb(options: {
           return {
             async first() {
               if (sql.includes("FROM project_settings")) {
-                return settings != null ? { settings } : null
+                return projectSettingsRow(sql, settings, mode)
               }
               if (sql.includes("FROM cells")) {
                 return metadata != null ? { metadata } : null

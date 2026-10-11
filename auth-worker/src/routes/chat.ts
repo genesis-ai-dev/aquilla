@@ -1,4 +1,4 @@
-import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { admitChatUsage, METERED_MAX_OUTPUT_TOKENS, meterChatStream, observeChatStreamCost, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
 import { weeklyUsageActive } from '../lib/billing/usage-mode'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
@@ -27,7 +27,7 @@ import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platfor
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
-import { openRouterExtras } from "../lib/llm-vendor"
+import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
@@ -177,14 +177,24 @@ async function resolveChatOrgId(
  * user's. The request-scoped shim closes as soon as the Response returns, so
  * this opens its own connection (same as contextual's selfTickLoop). Ledger
  * writes were already best-effort; a failure here is logged, never surfaced.
+ *
+ * `waitFor` defers the work until something the write depends on has happened —
+ * for a streamed reply, the stream ending so its real cost is known (AQU-1871).
+ * The connection is opened only once that resolves, so a long reply does not
+ * hold Postgres open for its whole duration. A rejected `waitFor` still runs
+ * the work: bookkeeping degrades to what it knows rather than vanishing.
  */
 function afterResponse(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   work: (db: AquillaDb) => Promise<void>,
+  waitFor?: Promise<unknown>,
 ): void {
-  const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
-  const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
-  detach(c, work(db).finally(() => shim?.close()))
+  detach(c, (async () => {
+    if (waitFor) await waitFor.catch(() => undefined)
+    const shim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
+    const db = (shim as unknown as AquillaDb | null) ?? c.env.AQUILLA_PG
+    try { await work(db) } finally { shim?.close() }
+  })())
 }
 
 /** Keep a best-effort task alive past the response; failures are logged only. */
@@ -210,6 +220,11 @@ function buildOpenRouterBody(request: ChatRequest, model: string, env: Env): str
     stream: request.stream,
     max_tokens: request.max_tokens,
     ...openRouterExtras(env.OPENROUTER_BASE_URL),
+    // AQU-1871: a streamed reply's cost is only in the stream if we asked for
+    // it. OpenRouter answers `usage.include` above; every other
+    // OpenAI-compatible upstream needs stream_options.include_usage, or the
+    // ledger would see no cost at all for a streamed call.
+    ...(request.stream ? streamUsageOptions(env.OPENROUTER_BASE_URL) : {}),
     ...(request.response_format && { response_format: request.response_format }),
   })
 }
@@ -323,8 +338,12 @@ chat.post(
     }
     // Legacy credit/word guards are retired once the weekly ledger meters this call.
     if (!usage) {
+      // AQU-1871: org 0 is the no-org fallback every project-less chat lands
+      // in, so guarding it as one org let any user's spend consume the cap
+      // that was supposed to bound each of them. With no real org to bill, the
+      // cap is the caller's own.
       const [chatCreditCheck, chatWordCheck] = await Promise.all([
-        creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm"),
+        creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm", orgId === 0 ? user.id : undefined),
         wordGuard(c.env.AQUILLA_PG, orgId),
       ])
       if (!chatCreditCheck.ok) {
@@ -405,25 +424,37 @@ chat.post(
       }
 
       if (request.stream) {
-        // Streaming: pass body through unchanged. We can't inspect the usage
-        // object from a streaming response without buffering it (defeats the
-        // point). Record a flat 1¢ fallback estimate so the ledger always has
-        // a row — this is the cheap/low-priority rail. Written after the
-        // Response so the first token isn't held behind them (AQU-617).
+        // Streaming: the bytes pass through unchanged, but the frames are
+        // scanned on the way past so the ledger gets the provider's real cost
+        // instead of the flat 1¢ it used to record — a 16k-output reply on a
+        // frontier model is ~25¢, so org caps and the usage dashboard
+        // under-reported by 10–25× and would not have tripped once
+        // enforcement was turned on (AQU-1871). Written after the Response,
+        // and only once the stream has ended, so neither the first token nor
+        // the last is held behind a ledger write (AQU-617).
+        const observed = !usage && upstream.body ? observeChatStreamCost(upstream.body) : undefined
         afterResponse(c, async (db) => {
           await logAb(db)
           if (!usage) {
-            await recordCredit(db, orgId, user.id, "llm", 1, 1)
+            // An unresolved cost is recorded as zero cost and one unit: the
+            // request still shows up, and no invented charge enters the
+            // ledger (db/shared/billing-cost.ts's rule).
+            if (observed?.costCents === undefined) {
+              console.warn("[chat] streamed reply reported no usable cost", { orgId, userId: user.id, model })
+            }
+            await recordCredit(db, orgId, user.id, "llm", observed?.costCents ?? 0, 1)
             await recordWords(db, orgId, user.id, "llm", chatWords)
           }
-        })
+        }, observed?.ended)
         const streamHeaders = new Headers({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         })
         if (ab) setAbHeaders(streamHeaders, ab)
-        const body = usage && upstream.body ? meterChatStream(upstream.body, c.env, usage) : upstream.body
+        const body = usage && upstream.body
+          ? meterChatStream(upstream.body, c.env, usage)
+          : (observed?.body ?? upstream.body)
         return new Response(body, { status: 200, headers: streamHeaders })
       }
 

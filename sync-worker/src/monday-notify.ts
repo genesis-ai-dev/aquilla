@@ -6,6 +6,11 @@
 
 import type { ProjectDoServerMessage } from './project-do-handlers'
 import { serviceBearerMatches } from './lib/service-auth'
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  VENDOR_TIMEOUT_MS,
+} from '../../shared/vendor-timeouts'
 
 export interface MondayNotifyEnv {
   /** Base URL of the identity worker (e.g. https://api.aquilla.app/identity). */
@@ -58,12 +63,19 @@ export async function notifyMondayProgress(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ projectId }),
+      // AQU-1849: this fires from the DO's broadcast choke point, i.e. on the
+      // live edit path, so a hung identity must not hold the invocation open.
+      // Giving up is free here — identity's cron flush reconciles a missed
+      // nudge — but the `null` it returns is NOT cached as "not linked", so a
+      // timeout never silently stops Monday sync for the project.
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.mondayPushNudge),
     })
     if (!response.ok) return null
     const body = await response.json() as { linked?: unknown }
     return typeof body.linked === 'boolean' ? body.linked : null
-  } catch {
+  } catch (err) {
     /* best-effort by design */
+    if (isAbortTimeout(err)) logVendorTimeout('mondayPushNudge', err)
     return null
   }
 }

@@ -37,6 +37,11 @@ import {
   recordAbOutcome,
   setAbHeaders,
 } from "../lib/model-ab"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -373,6 +378,23 @@ chat.post(
         return c.json({ error: 'usage_accounting_unavailable' }, 503)
       }
     }
+    // AQU-1849: the proxy's one upstream call, bounded two different ways.
+    //
+    //   * `stream: false` — nothing arrives until the whole completion is
+    //     done, so the deadline is TOTAL: it stays armed across the `.json()`
+    //     read and is disarmed by the `finally` when the handler returns.
+    //   * `stream: true` — a long generation is not a hang, so the deadline is
+    //     FIRST BYTE only: `await fetch` resolves when the headers arrive and
+    //     the handler returns right after wiring the stream up, which disarms
+    //     it. The body streams on unbounded afterwards.
+    //
+    // The deadline is linked to the client's signal (metered requests already
+    // forwarded it) so a user who navigates away still cancels upstream — and
+    // `timedOut()` keeps that case out of the vendor-timeout logs.
+    const deadline = vendorDeadline(
+      request.stream ? "openRouterStreamFirstByte" : "openRouterNonStreaming",
+      usage ? c.req.raw.signal : null,
+    )
     try {
       const startedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
@@ -382,7 +404,7 @@ chat.post(
           "Content-Type": "application/json",
         },
         body: buildOpenRouterBody(request, model, c.env),
-        ...(usage ? { signal: c.req.raw.signal } : {}),
+        signal: deadline.signal,
       })
       const latencyMs = Date.now() - startedAt
 
@@ -485,8 +507,18 @@ chat.post(
       }
       return c.json(data)
     } catch (error) {
+      // AQU-1849: a blown deadline is the upstream's fault, not ours — 504 so
+      // the client can say "the model did not respond" and offer a retry,
+      // instead of the blanket 500 that used to swallow it.
+      if (deadline.timedOut()) {
+        const vendor = request.stream ? "openRouterStreamFirstByte" : "openRouterNonStreaming"
+        logVendorTimeout(vendor, error)
+        return c.json({ error: "openrouter_timeout", message: vendorTimeoutMessage(vendor) }, 504)
+      }
       console.error("Error in chat completion:", error)
       return c.json({ error: "internal_error", message: "Chat completion failed" }, 500)
+    } finally {
+      deadline.clear()
     }
   },
 )

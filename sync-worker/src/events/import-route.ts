@@ -25,7 +25,7 @@
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
 // role-policy.ts). Author is bound to the token, never the request body.
 
-import { verifyTokenForDoc } from '../auth'
+import { verifyDocScope, verifySyncToken } from '../auth'
 import { youTubeVideoId } from '../../../src/lib/video/youtube'
 import { ROLE } from './role-policy'
 import { withCors } from '../cors'
@@ -42,7 +42,12 @@ import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
-import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES, MAX_CELL_TEXT_BYTES } from '../../../shared/import-contract'
+import {
+  MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
+  MAX_CELL_TEXT_BYTES,
+  MAX_IMPORT_REQUEST_BODY_BYTES,
+} from '../../../shared/import-contract'
+import { readTextBodyWithLimit } from '../../../shared/http-body-limit'
 import { publishImportedTrack, type ImportedTrackPublication } from './import-track-publication'
 import { promoteCaptionsToRows, type CaptionRowsPromotion } from './import-caption-promotion'
 
@@ -260,9 +265,36 @@ export async function handleBulkImportRequest(
   }
   const db = env.AQUILLA_PG
 
+  // AQU-1858: authenticate and size-gate BEFORE the body is materialized.
+  // Parsing first let an unauthenticated caller spend the isolate's shared
+  // ~128 MB of memory on a body this route was always going to refuse, taking
+  // every other request on that isolate down with it. Only the (project,
+  // file) scope check needs the parsed body; it runs below, on these claims.
+  const authHeader = request.headers.get('Authorization') ?? ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const auth = await verifySyncToken(token, env.SYNC_SECRET_KEY)
+  if (!auth.ok) {
+    return withCors(new Response(auth.reason, { status: auth.status }), request)
+  }
+  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+    return withCors(new Response('role too low for source import', { status: 403 }), request)
+  }
+
+  const read = await readTextBodyWithLimit(
+    request.headers,
+    request.body,
+    MAX_IMPORT_REQUEST_BODY_BYTES,
+  )
+  if (!read.ok) {
+    return withCors(
+      Response.json({ error: read.error, maxBytes: read.maxBytes }, { status: read.status }),
+      request,
+    )
+  }
+
   let body: unknown
   try {
-    body = await request.json()
+    body = JSON.parse(read.text)
   } catch {
     return withCors(new Response('invalid JSON body', { status: 400 }), request)
   }
@@ -271,6 +303,15 @@ export async function handleBulkImportRequest(
       new Response('body must be { projectId, fileId, cells[] }', { status: 400 }),
       request,
     )
+  }
+
+  // Auth, second half: the token must be scoped to the (project, file) the
+  // body names. Signature, audience and the PROJECT_LEAD+ role floor
+  // (source.* is importer/lead-only per role-policy.ts) were checked above,
+  // before the body was read.
+  const scope = verifyDocScope(auth.claims, { projectId: body.projectId, fileId: body.fileId })
+  if (!scope.ok) {
+    return withCors(new Response(scope.reason, { status: scope.status }), request)
   }
   if (body.video !== undefined) {
     const video = body.video
@@ -367,22 +408,6 @@ export async function handleBulkImportRequest(
         request,
       )
     }
-  }
-
-  // Auth: token must be scoped to this (project, file) and hold a source-write
-  // role. Source-side writes are PROJECT_LEAD+ (importer authority).
-  const authHeader = request.headers.get('Authorization') ?? ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const auth = await verifyTokenForDoc(
-    token,
-    { projectId: body.projectId, fileId: body.fileId },
-    env.SYNC_SECRET_KEY,
-  )
-  if (!auth.ok) {
-    return withCors(new Response(auth.reason, { status: auth.status }), request)
-  }
-  if (auth.claims.role < ROLE.PROJECT_LEAD) {
-    return withCors(new Response('role too low for source import', { status: 403 }), request)
   }
 
   const author =

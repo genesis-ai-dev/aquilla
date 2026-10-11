@@ -1625,6 +1625,14 @@ export const editor = defineNamespace({
     "editor.validation.validatedBy": "Text validated by",
     "editor.readOnly.reviewerNoTextValidation":
       "Viewing as reviewer. You can comment, but this project does not let you validate text.",
+
+    // — Archived lane (AQU-1463): the lane you are in has been frozen ———————
+    "editor.laneArchived.title": "{lane} has been archived",
+    "editor.laneArchived.body":
+      "A project manager archived {lane}, so it is now read-only. You can still " +
+      "read, search, export and comment on it, and your other languages are " +
+      "unaffected.",
+    "editor.laneArchived.acknowledge": "Got it",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
     "editor.validation.history": "History",
@@ -6075,6 +6083,32 @@ export const editor = defineNamespace({
           "project's minimum role to validate or its list of named validators " +
           "leaves them out, so they cannot validate text here either. Replaces " +
           "the usual 'Viewing as reviewer, you can validate and comment' banner.",
+      },
+      "editor.laneArchived.title": {
+        description:
+          "Title of the modal that interrupts a member the moment the language " +
+          "they are translating in is archived by a project manager. Names the " +
+          "language, because the member may have several open in other tabs.",
+        placeholders: {
+          lane: "The archived language's own label, e.g. 'Spanish'. Content — do not translate.",
+        },
+      },
+      "editor.laneArchived.body": {
+        description:
+          "Body of that same modal. It has to carry three facts: a person did " +
+          "this deliberately, the language is now read-only rather than gone, " +
+          "and the member's other languages still work. Keep all three — the " +
+          "member's first fear is that they have lost their work.",
+        placeholders: {
+          lane: "The archived language's own label, e.g. 'Spanish'. Content — do not translate.",
+        },
+      },
+      "editor.laneArchived.acknowledge": {
+        description:
+          "The only button on that modal, and the only way to close it: Esc and " +
+          "a click outside deliberately do nothing. An acknowledgement, not an " +
+          "action — nothing is undone or confirmed by pressing it.",
+        maxLength: 20,
       },
       "editor.validation.ariaValidatedByOthers": {
         description:

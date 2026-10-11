@@ -9,6 +9,17 @@ export const HOSTED_TTS_NOT_CONFIGURED_BODY =
 export const HOSTED_TTS_FAILED_BODY =
   "Inworld TTS couldn't generate this line. This is not a Gemini key problem."
 
+/**
+ * AQU-1872: the sync-worker refuses synthesis with `429 credit_cap_exceeded`
+ * once the org has spent its credit allowance. Without this branch that body
+ * fell through to HOSTED_TTS_FAILED_BODY, which told the user the opposite of
+ * the truth — "Inworld TTS couldn't generate this line" reads as a vendor
+ * fault when in fact nothing was ever sent to the vendor, and the one person
+ * who can clear it (an org admin, raising the cap) was never named.
+ */
+export const HOSTED_TTS_CREDIT_CAP_BODY =
+  "This organization has used its AI credit allowance, so no audio was generated. This is not a Gemini key problem and the voice engine is fine — ask an org admin to raise the cap, or wait for the allowance to reset."
+
 export const SEED_VC_NOT_CONFIGURED_BODY =
   "This clone voice needs Seed-VC after Gemini or a local engine. Voice conversion isn't wired on this server. An Inworld clone wouldn't need this step."
 
@@ -50,6 +61,12 @@ export function errorFromHostedTts(status: number, body: string): Error {
   const detail = body.trim() || `HTTP ${status}`
   if (status === 503 && /tts not configured/i.test(detail)) {
     return new Error(HOSTED_TTS_NOT_CONFIGURED_BODY)
+  }
+  // AQU-1872: an org out of credit is refused before the vendor is called, so
+  // it must not be reported as a vendor failure. The gutter tooltip shows
+  // `err.message` raw, so this message has to stand on its own.
+  if (status === 429 && /credit_cap_exceeded/i.test(detail)) {
+    return new Error(HOSTED_TTS_CREDIT_CAP_BODY)
   }
   return new Error(`Inworld TTS failed (${status}): ${detail}`)
 }

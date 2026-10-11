@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  HOSTED_TTS_CREDIT_CAP_BODY,
   HOSTED_TTS_NOT_CONFIGURED_BODY,
   SEED_VC_NOT_CONFIGURED_BODY,
   errorFromHostedTts,
@@ -18,6 +19,37 @@ describe("errorFromHostedTts", () => {
     const err = errorFromHostedTts(502, "upstream timeout")
     expect(err.message).toMatch(/^Inworld TTS failed \(502\)/)
     expect(err.message).toContain("upstream timeout")
+  })
+
+  // AQU-1872: the worker refuses an out-of-credit org BEFORE calling the
+  // vendor, so reporting it as a vendor failure tells the user the opposite of
+  // the truth and hides the only person who can clear it.
+  it("does not blame the engine when the org is out of credit", () => {
+    const body = JSON.stringify({
+      error: "credit_cap_exceeded",
+      message: "This organization has used its daily credit allowance.",
+      reason: "daily",
+    })
+    const message = errorFromHostedTts(429, body).message
+    expect(message).toBe(HOSTED_TTS_CREDIT_CAP_BODY)
+    // The three things the user needs: no audio, not the engine, who can fix it.
+    expect(message).toMatch(/no audio was generated/i)
+    expect(message).toMatch(/not a gemini key problem/i)
+    expect(message).toMatch(/org admin/i)
+    // And never the raw JSON the server sent.
+    expect(message).not.toContain("credit_cap_exceeded")
+    expect(message).not.toMatch(/^Inworld TTS failed/)
+  })
+
+  it("leaves other 429s on the generic path", () => {
+    // WHY: the per-user seconds cap and the flood throttle are different
+    // refusals with their own wording; this branch must not swallow them.
+    expect(errorFromHostedTts(429, '{"error":"rate_limited"}').message).toMatch(
+      /^Inworld TTS failed \(429\)/,
+    )
+    expect(
+      errorFromHostedTts(429, '{"error":"tts_daily_limit_exceeded"}').message,
+    ).toMatch(/^Inworld TTS failed \(429\)/)
   })
 })
 

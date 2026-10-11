@@ -619,6 +619,7 @@ export const audio = defineNamespace({
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
     "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
+    "audio.aiError.creditCapTitle": "AI credit allowance used up",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
     "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
@@ -2923,6 +2924,14 @@ export const audio = defineNamespace({
         description:
           "Popover heading when Inworld TTS was configured but the synthesize " +
           "call itself failed (upstream vendor error).",
+      },
+      "audio.aiError.creditCapTitle": {
+        description:
+          "Popover heading when the sync-worker refused synthesis with 429 " +
+          "credit_cap_exceeded because the org has spent its credit allowance " +
+          "(AQU-1872). Distinct from inworldFailedTitle — the vendor was never " +
+          "called, so this must not be worded as an engine or Gemini-key fault; " +
+          "the body names the org admin who can raise the cap.",
       },
       "audio.aiError.seedVcNotConfiguredTitle": {
         description:

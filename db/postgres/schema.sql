@@ -403,6 +403,12 @@ CREATE INDEX idx_auth_rate_limit_lookup ON auth_rate_limit_events(kind, identifi
 -- deleted by the auth-worker 5-minute cron (pruneRateLimitCounters), not
 -- opportunistically off a request.
 --
+-- If this table is absent, every throttle is off in that environment: the
+-- limiter treats SQLSTATE 42P01 as "not installed" and allows the call through
+-- even on the fail-closed paid routes, because refusing them would be a total
+-- outage rather than a safeguard. Apply migration 0158 before deploying the
+-- code that reads it.
+--
 -- No app_runtime grant and no RLS policy, matching auth_rate_limit_events
 -- above: this is a non-project-scoped infrastructure table with no tenant
 -- column for a policy to key on.

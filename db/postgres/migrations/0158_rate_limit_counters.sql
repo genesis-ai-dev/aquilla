@@ -33,6 +33,16 @@
 -- is that its rows are now pruned on the same cron instead of by a random
 -- 2%-of-calls DELETE.
 --
+-- DEPLOY ORDER: apply this BEFORE the code that reads it reaches an
+-- environment. Until it is applied, every throttle in that environment is OFF:
+-- enforceRateLimit treats SQLSTATE 42P01 as "limiter not installed" and allows
+-- the call through (logging an error) even on the fail-closed paid routes,
+-- deliberately — refusing them would take chat, agent runs, transcription and
+-- TTS down entirely rather than protect anything. So a late migration costs
+-- uncapped spend for that window, which is the pre-AQU-1843 status quo, not an
+-- outage. The PR bot walk caught exactly this on a preview whose development
+-- storage did not have the table.
+--
 -- Apply by hand against Neon (same convention as prior migrations here):
 --   set -a; . ./.env; set +a
 --   npx tsx scripts/pg.ts db/postgres/migrations/0158_rate_limit_counters.sql

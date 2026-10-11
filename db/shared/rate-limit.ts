@@ -58,6 +58,10 @@ export interface RateLimitDecision {
   retryAfterSeconds: number
   /** True when the limiter backend errored and `failMode` decided the answer. */
   degraded: boolean
+  /** True when the counters table is absent (migration 0158 not applied here),
+   *  which is allowed through regardless of `failMode` — see
+   *  `isLimiterUninstalled`. */
+  uninstalled?: boolean
 }
 
 export interface RateLimitRequest {
@@ -91,6 +95,35 @@ export function ipRateLimitIdentifier(ip: string): string {
   return `ip:${ip.trim().toLowerCase()}`
 }
 
+/**
+ * Postgres `undefined_table` (SQLSTATE 42P01) — the counters table does not
+ * exist, i.e. migration 0158 has not been applied to this environment yet.
+ *
+ * This is a provisioning state, not a backend outage, and it is the one error
+ * `failMode: "closed"` must NOT honour. The reasoning (AQU-1843, found by the
+ * PR bot walk on the preview, where 0158 was unapplied): before this module was
+ * rewritten the limiter failed open on every error, so an unapplied migration
+ * was harmless. Fail-closed turns that same condition into a total outage of
+ * chat, agent runs, transcription and TTS — every paid route refuses its FIRST
+ * call, for everyone, until a person runs the migration. Trading "spend is
+ * briefly uncapped" for "the product's paid features are entirely down" is the
+ * wrong trade, and it is a regression this module would be introducing.
+ *
+ * Carving it out cannot be abused: no caller and no input can provoke 42P01 —
+ * only a missing table does — and it restores exactly the pre-existing
+ * behaviour rather than inventing a weaker one. Every other error (connection
+ * refused, timeout, a Postgres hiccup) is what AC 2 is about and still fails
+ * closed. The log is an error, not a warning, because the fix is a human
+ * action.
+ */
+function isLimiterUninstalled(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  if (code === "42P01") return true
+  // PGlite and some wrappers surface the condition in the message instead.
+  const message = err instanceof Error ? err.message : String(err ?? "")
+  return /relation "?rate_limit_counters"? does not exist|undefined_table/i.test(message)
+}
+
 /** Seconds left in the fixed window the next check will land in. Derived from
  *  the local clock rather than read back from Postgres: the value only feeds
  *  `Retry-After`, and a second of NTP skew does not matter there. */
@@ -99,11 +132,25 @@ function retryAfterSeconds(windowSeconds: number): number {
   return Math.max(1, windowSeconds - elapsed)
 }
 
-/** The atomic check-and-increment. `window_start` is computed by Postgres so
- *  every worker buckets on the same clock. */
+/** The epoch-aligned start of the current fixed window, computed by Postgres so
+ *  auth-worker and sync-worker bucket on one clock.
+ *
+ *  The `::double precision` casts are load-bearing, not decoration. Production
+ *  reaches Postgres through postgres.js `.unsafe(sql, params)` (db/shim/postgres.ts),
+ *  which sends these parameters untyped and leaves the server to infer them;
+ *  the test suite reaches it through PGlite, which infers more freely. Without
+ *  the casts the division, the multiplication and `to_timestamp`'s overload are
+ *  all resolved from inference, so the statement could pass every test here and
+ *  still throw on the real driver — and a limiter whose statement always throws
+ *  looks exactly like one whose table is missing (see the catch below). Pinning
+ *  the types removes that whole class of difference between test and production. */
+const WINDOW_START_SQL =
+  "to_timestamp(floor(extract(epoch FROM now()) / ?::double precision) * ?::double precision)"
+
+/** The atomic check-and-increment. */
 const UPSERT_SQL = `
   INSERT INTO rate_limit_counters (kind, identifier, window_start, hits)
-  VALUES (?, ?, to_timestamp(floor(extract(epoch FROM now()) / ?) * ?), ?)
+  VALUES (?, ?, ${WINDOW_START_SQL}, ?)
   ON CONFLICT (kind, identifier, window_start)
   DO UPDATE SET hits = rate_limit_counters.hits + EXCLUDED.hits, updated_at = now()
   RETURNING hits`
@@ -136,13 +183,25 @@ export async function enforceRateLimit(
       degraded: false,
     }
   } catch (err) {
-    console.warn(`[rate-limit] ${req.kind} failed, failing ${req.failMode}:`, err)
+    // See isLimiterUninstalled: a missing table means the limiter was never
+    // installed here, so refusing paid traffic would take the product down
+    // rather than protect it. Everything else honours failMode.
+    const uninstalled = isLimiterUninstalled(err)
+    if (uninstalled) {
+      console.error(
+        `[rate-limit] rate_limit_counters is missing — every throttle is OFF in this environment. ` +
+          `Apply db/postgres/migrations/0158_rate_limit_counters.sql. Allowing ${req.kind} through.`,
+      )
+    } else {
+      console.warn(`[rate-limit] ${req.kind} failed, failing ${req.failMode}:`, err)
+    }
     return {
-      allowed: req.failMode === "open",
+      allowed: uninstalled || req.failMode === "open",
       hits: 0,
       limit: req.limit,
       retryAfterSeconds: retryAfterSeconds(windowSeconds),
       degraded: true,
+      uninstalled,
     }
   }
 }
@@ -166,7 +225,7 @@ export async function peekRateLimit(
       .prepare(
         `SELECT hits FROM rate_limit_counters
          WHERE kind = ? AND identifier = ?
-           AND window_start = to_timestamp(floor(extract(epoch FROM now()) / ?) * ?)`,
+           AND window_start = ${WINDOW_START_SQL}`,
       )
       .bind(kind, identifier, windowSeconds, windowSeconds)
       .first<{ hits: number }>()

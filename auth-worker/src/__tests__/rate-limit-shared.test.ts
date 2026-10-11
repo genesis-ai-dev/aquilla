@@ -122,6 +122,54 @@ describe("enforceRateLimit", () => {
     expect(decision).toMatchObject({ allowed: false, degraded: true })
   })
 
+  // AQU-1843 follow-up (found by the PR bot walk on a preview where migration
+  // 0158 was unapplied): with the table absent, EVERY fail-closed route refused
+  // its first call — chat, agent runs, transcription and TTS all down for
+  // everyone until a person ran the migration. Before this module was rewritten
+  // the same condition was harmless, because the old limiter always failed open.
+  // A missing table is a provisioning state, not an outage to protect against,
+  // so it is allowed through regardless of failMode.
+  it("lets a PAID route through when the counters table does not exist", async () => {
+    const missingTable = {
+      prepare() {
+        return {
+          bind() {
+            return this
+          },
+          async first(): Promise<never> {
+            throw Object.assign(
+              new Error('relation "rate_limit_counters" does not exist'),
+              { code: "42P01" },
+            )
+          },
+          async run(): Promise<never> {
+            throw Object.assign(new Error("undefined_table"), { code: "42P01" })
+          },
+        }
+      },
+    } as unknown as AquillaDb
+
+    const decision = await enforceRateLimit(missingTable, {
+      kind: "chat_completions",
+      identifier: USER,
+      limit: 300,
+      failMode: "closed",
+    })
+    expect(decision).toMatchObject({ allowed: true, degraded: true, uninstalled: true })
+  })
+
+  it("still fails a paid route closed when the backend errors for any other reason", async () => {
+    // The carve-out above must not widen into "any error allows spending".
+    const decision = await enforceRateLimit(brokenDb, {
+      kind: "chat_completions",
+      identifier: USER,
+      limit: 300,
+      failMode: "closed",
+    })
+    expect(decision).toMatchObject({ allowed: false, degraded: true })
+    expect(decision.uninstalled).toBe(false)
+  })
+
   it("keeps a free read working when the limiter backend is unavailable", async () => {
     const decision = await enforceRateLimit(brokenDb, {
       kind: "external_read",

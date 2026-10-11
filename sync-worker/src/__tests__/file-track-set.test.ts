@@ -12,6 +12,7 @@ import { dispatchEvent } from '../events/dispatch'
 import { authorize, type AuthorizedEvent } from '../events/authorize'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
+import { projectSettingsRow } from './helpers/project-settings-db'
 
 const SECRET = 'test-secret'
 
@@ -49,7 +50,7 @@ async function authorizeTrackSetRaw(payload: unknown, role: number) {
     prepare(sql: string) {
       return { bind() { return { async first() {
         return sql.includes('project_settings')
-          ? { settings: JSON.stringify({ allowTrackEditing: true }) }
+          ? projectSettingsRow(sql, JSON.stringify({ allowTrackEditing: true }))
           : { id: 'owned-content' }
       } } } }
     },

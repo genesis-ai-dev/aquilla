@@ -80,14 +80,22 @@ export interface ChainClaimRow {
  * seq-order fallback. Nothing prunes `chain_claims` today, so this only guards
  * a log that arrived without its claims (an event-level migration, a project
  * copy) — exactly the case that must keep the old behaviour.
+ *
+ * AQU-1827: pass `null` when the caller has ALREADY established that every
+ * row's winner is in the log. The full-project rebuild does, with an EXISTS
+ * against `events` in the same SELECT, because materialising a Set of every
+ * event id defeats the point of streaming the log in pages (a million-event
+ * project's ids alone are tens of megabytes in the isolate). Callers replaying
+ * a bounded slice of a log — the mirror fold, which cuts at `untilSeq` — still
+ * pass the slice's ids, and a claim above the cut is dropped as before.
  */
 export function buildClaimWinners(
   rows: readonly ChainClaimRow[],
-  presentEventIds: ReadonlySet<string>,
+  presentEventIds: ReadonlySet<string> | null,
 ): Map<string, string> {
   const winners = new Map<string, string>()
   for (const r of rows) {
-    if (!presentEventIds.has(r.event_id)) continue
+    if (presentEventIds !== null && !presentEventIds.has(r.event_id)) continue
     winners.set(`${r.file_id}\0${r.cell_id}\0${r.parent_key}`, r.event_id)
   }
   return winners

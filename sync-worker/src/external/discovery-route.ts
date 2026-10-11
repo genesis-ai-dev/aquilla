@@ -14,6 +14,7 @@
 // so it is deliberately unauthenticated.
 
 import { matchUiOnly, uiOnlyHint, uiOnlySection } from './ui-only'
+import { PLAN_IMPORT_MAX_CELLS, SET_TRANSLATION_MAX_COMMANDS } from './commands'
 import { AGENT_SKILLS } from '../../../db/shared/agent-skills'
 
 const EXTERNAL_ROOT = '/api/v1/external'
@@ -164,7 +165,11 @@ function apiMap(): Record<string, unknown> {
       ],
       limits: {
         maxArtifactBytes: 25 * 1024 * 1024,
-        planImportMaxCells: 5000,
+        planImportMaxCells: PLAN_IMPORT_MAX_CELLS,
+        // AQU-1852: the SetTranslation batch ceiling, named here so a caller
+        // sizing a whole-book batch learns it from discovery rather than from a
+        // validation_failed. Above it, prepare refuses; split the work.
+        setTranslationMaxCommands: SET_TRANSLATION_MAX_COMMANDS,
       },
       serverParseableFormats: ['csv', 'docx', 'json', 'md', 'obs', 'po', 'properties', 'sbv', 'srt', 'tsv', 'txt', 'usfm', 'vtt'],
       unsupportedFormats:

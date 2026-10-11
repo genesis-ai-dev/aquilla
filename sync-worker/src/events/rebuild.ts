@@ -6,10 +6,13 @@
 // every event in `server_seq` order, applying the head compare-and-swap rule
 // (AQU-1154, invariant I1): walking the log in seq order, a chain-arbitrated
 // event applies iff its parent_id IS the cell's head (per side/lane) at that
-// point, or the row does not exist yet. That is exactly what the live path's
-// gated cells write enforces inside its transaction (commit order == seq
-// order under the per-project seq lock), so a rebuild reproduces the live
-// projection. chain_claims itself is NOT rewritten by rebuild.
+// point, or the row does not exist yet.
+//
+// AQU-1844: a sibling race is decided by the live `chain_claims` row, not by
+// seq order — since AQU-1005 the lower-seq sibling can be the one that
+// committed second, and live kept the other. The project's claims are read
+// alongside the log and handed to the replay. chain_claims itself is NOT
+// rewritten by rebuild: it IS the live record this replay defers to.
 //
 // ── Non-atomic failure mode ────────────────────────────────────────────
 // As before — DELETE + replay is not wrapped in a transaction. Re-running
@@ -20,7 +23,11 @@ import {
   projectFileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { ChainHeadReplay } from './chain-head-replay'
+import {
+  buildClaimWinners,
+  ChainHeadReplay,
+  type ChainClaimRow,
+} from './chain-head-replay'
 import { loadTargetLanes } from './lane-read-wall'
 import type { EventKind } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
@@ -110,7 +117,22 @@ export async function handleRebuildProjectionRequest(
   //    event's lane by `laneId` first and falls back to the `targetLang` tag.
   //    Pre-1612 events carry only the tag and key exactly as they always did,
   //    so a full replay still reproduces the live projection byte for byte.
-  const replay = new ChainHeadReplay(await loadTargetLanes(db, projectId))
+  //
+  //    AQU-1844: the project's chain_claims go in too, so a sibling race
+  //    replays to the event that actually won it live rather than to whichever
+  //    sibling holds the lower seq. Claims naming an event absent from the log
+  //    are dropped by buildClaimWinners (see there).
+  const { results: claimRows } = await db
+    .prepare(
+      `SELECT file_id, cell_id, parent_key, event_id
+       FROM chain_claims WHERE project_id = ?`,
+    )
+    .bind(projectId)
+    .all<ChainClaimRow>()
+  const replay = new ChainHeadReplay(
+    await loadTargetLanes(db, projectId),
+    buildClaimWinners(claimRows ?? [], new Set(eventRows.map((r) => r.id))),
+  )
 
   const stmts: AquillaStatement[] = []
   let eventsRead = 0

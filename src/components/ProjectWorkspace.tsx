@@ -35,6 +35,15 @@ import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
+import {
+  acknowledgeLaneArchive,
+  laneArchiveToAnnounce,
+  laneArchiveWatchInit,
+  laneLockFor,
+  observeLaneArchive,
+  type LaneArchiveWatch,
+} from "@/lib/lanes/lane-lock"
+import { LaneArchivedDialog } from "./LaneArchivedDialog"
 // AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
 // link and the first-position fallback that replaces the old `''` one.
 import {
@@ -2307,6 +2316,35 @@ export function ProjectWorkspace() {
     if (laneRows.length === 0) return project?.archivedLanes
     return laneRows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? "")
   }, [laneRows, project?.archivedLanes])
+  // AQU-1463: the lane the editor is pointed at, frozen. Derived rather than
+  // stored, so the PM's archive reaches this member the moment the
+  // `project.settings.updated` frame re-reads the lane rows — no reload, no
+  // polling. Null means the active lane is open for business.
+  const activeLaneLock = useMemo(
+    () =>
+      laneLockFor({
+        activeLane,
+        archivedLanes: archivedLaneTags,
+        // Named the way the switcher names it, so the modal and banner call the
+        // lane what the member just saw it called.
+        label: laneLabels[activeLane] || (activeLane === "" ? activeTargetLanguage || "Target" : activeLane),
+      }),
+    [activeLane, archivedLaneTags, laneLabels, activeTargetLanguage],
+  )
+  // AQU-1463: the must-dismiss modal is for the member who was WORKING in the
+  // lane, not for anyone who opens an archived one. The watch is what tells
+  // those apart; see src/lib/lanes/lane-lock.ts.
+  const [laneArchiveWatch, setLaneArchiveWatch] = useState<LaneArchiveWatch>(laneArchiveWatchInit)
+  useEffect(() => {
+    setLaneArchiveWatch((watch) =>
+      observeLaneArchive(watch, { activeLane, locked: activeLaneLock !== null }),
+    )
+  }, [activeLane, activeLaneLock])
+  const laneArchiveAnnouncement = laneArchiveToAnnounce(laneArchiveWatch, activeLaneLock)
+  const acknowledgeLaneArchived = useCallback(() => {
+    if (!activeLaneLock) return
+    setLaneArchiveWatch((watch) => acknowledgeLaneArchive(watch, activeLaneLock.tag))
+  }, [activeLaneLock])
   // AQU-1613: the lane in first position — where the editor lands when nothing
   // else names a lane. It replaces the hardcoded `''` fallback: that one was
   // the former default lane, which AQU-1600 makes archivable, so falling back
@@ -5314,6 +5352,11 @@ export function ProjectWorkspace() {
     // (applyOptimisticTargetEdit) of a write the server will refuse, matching
     // the same mirror-check used by handleEditorCommit/commitTrayFootnoteText.
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
+    // AQU-1463: and not into an archived lane, which is frozen for every role.
+    // `activeLaneLock` rather than `laneWriteFrozen` because that one is
+    // declared further down and a deps array is evaluated at render — the same
+    // temporal-dead-zone trap the note over handleToggleCueLink describes.
+    if (activeLaneLock !== null) return
     // TOCTOU guard: `cell` is the row snapshot captured when the sparkle was
     // clicked. A rapid second draft can arrive after the FIRST draft's
     // projection confirmed (which clears its pending-head entry) but before
@@ -5500,6 +5543,12 @@ export function ProjectWorkspace() {
   ): Promise<CommitCompletedCellsResult> => {
     if (!project?.id || !canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       const error = new Error("You do not have permission to commit target cells")
+      return drafts.map(() => ({ status: "rejected", reason: error }))
+    }
+    // AQU-1463: a batch into a frozen lane is refused whole rather than
+    // per-draft — every draft in it names the same archived lane.
+    if (activeLaneLock !== null) {
+      const error = new Error(`${activeLaneLock.label} is archived and is read-only.`)
       return drafts.map(() => ({ status: "rejected", reason: error }))
     }
     if (drafts.length === 0) return []
@@ -8389,6 +8438,18 @@ export function ProjectWorkspace() {
 
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
+  /**
+   * AQU-1463: target-side writes are off right now — either the whole project
+   * is read-only (git/local permissions) or the lane the editor is pointed at
+   * has been archived.
+   *
+   * Every `isReadOnly` gate below guards a write into the ACTIVE lane, so one
+   * derived flag covers them all and re-evaluates on a lane switch: the member
+   * moves to an active lane and the editor is fully live again. The one place
+   * that keeps asking `isReadOnly` on its own is the "imported from git"
+   * banner, which would otherwise blame git for a lane a PM archived.
+   */
+  const laneWriteFrozen = isReadOnly || activeLaneLock !== null
 
   /**
    * AQU-646: give a cell a TARGET ROW when it gains a recording, so that a line
@@ -8411,7 +8472,7 @@ export function ProjectWorkspace() {
    * empty commit on a cell that has text would erase it.
    */
   const ensureTargetRowForTake = useCallback(async (cellId: string) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     const cell = getActiveCell(cellId)
     if (!cell) return
@@ -8436,7 +8497,7 @@ export function ProjectWorkspace() {
   }, [
     project?.id,
     project?.syncRole?.level,
-    isReadOnly,
+    laneWriteFrozen,
     getActiveCell,
     getPendingTargetEventId,
     activeLane,
@@ -8466,7 +8527,7 @@ export function ProjectWorkspace() {
    * theirs and the recording was never what made it count.
    */
   const resetTargetRowAfterLastTake = useCallback(async (cellId: string) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     const cell = getActiveCell(cellId)
     if (!cell || cell.translated?.trim()) return
@@ -8492,7 +8553,7 @@ export function ProjectWorkspace() {
   }, [
     project?.id,
     project?.syncRole?.level,
-    isReadOnly,
+    laneWriteFrozen,
     getActiveCell,
     activeLane,
     resolveTargetCommitParentId,
@@ -8505,7 +8566,7 @@ export function ProjectWorkspace() {
 
   const translateAsReadAvailable = translateAsReadEnabled
     && lens === "text"
-    && !isReadOnly
+    && !laneWriteFrozen
     && isConfigured
     && isCompletionAvailable
     && Boolean(activeFileId)
@@ -8647,7 +8708,7 @@ export function ProjectWorkspace() {
     activeLane,
     isCompletionAvailable,
     isConfigured,
-    isReadOnly,
+    laneWriteFrozen,
     lens,
     project?.id,
     translateAsReadEnabled,
@@ -8658,7 +8719,7 @@ export function ProjectWorkspace() {
   ])
 
   const commitTrayFootnoteText = useCallback(async (cellId: string, updatedText: string) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     const cell = getActiveCell(cellId)
     if (!cell) return
@@ -8684,7 +8745,7 @@ export function ProjectWorkspace() {
   }, [
     project?.id,
     project?.syncRole?.level,
-    isReadOnly,
+    laneWriteFrozen,
     getActiveCell,
     applyOptimisticTargetEditWithCapture,
     activeLane,
@@ -9325,7 +9386,7 @@ export function ProjectWorkspace() {
   // target-commit path — optimistic patch first for visible rows (write-clock
   // keeps own writes authoritative), then one outbox flush for the batch.
   const handleReplaceAll = useCallback(async (payload: ReplaceAllPayload) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     const prepared: Array<{
       cell: CellData
       value: string
@@ -9388,7 +9449,7 @@ export function ProjectWorkspace() {
       if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
     }
     rebuildSearchIndex()
-  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
+  }, [project?.id, laneWriteFrozen, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   /**
    * AQU-1805: commit a rule fix the user reviewed in the rule drawer.
@@ -9408,7 +9469,7 @@ export function ProjectWorkspace() {
     proposalKind: ProposalKind,
     ruleId: string,
   ) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     // Preflight every IDML cell before emitting anything, so one protected-run
     // failure cannot leave the sweep half-applied (AQU-742: a fix that rewrites
     // a protected run drops the anchors InDesign needs).
@@ -9469,7 +9530,7 @@ export function ProjectWorkspace() {
       if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
     }
     rebuildSearchIndex()
-  }, [project?.id, project?.harmonize_min_role, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex, t])
+  }, [project?.id, project?.harmonize_min_role, laneWriteFrozen, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex, t])
 
   const openProjectSettings = useCallback(() => {
     if (!projectId) return
@@ -9933,6 +9994,8 @@ export function ProjectWorkspace() {
     runBatchValidateAudio: () => {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.audio.validate", project.syncRole?.level ?? null)) return
+      // AQU-1463: audio validation names the lane it was recorded in.
+      if (laneWriteFrozen) return
       const scope = audioValidationScope(project, {
         roleLevel: project.syncRole?.level ?? null,
         username: currentUsername,
@@ -10872,7 +10935,7 @@ export function ProjectWorkspace() {
   const handleRetimeTextTrack = useCallback(async (
     contentFileId: string, cellId: string, startSec: number, endSec: number,
   ) => {
-    if (!project?.id || isReadOnly || timingLocked
+    if (!project?.id || laneWriteFrozen || timingLocked
       || !timelineText.cellsByFile[contentFileId]?.some(cell => cell.id === cellId)) return
     timelineText.patchTiming(contentFileId, cellId, startSec, endSec)
     try {
@@ -10895,7 +10958,7 @@ export function ProjectWorkspace() {
     } finally {
       timelineText.refresh(contentFileId)
     }
-  }, [project?.id, isReadOnly, timingLocked, currentUsername, getTokenForProjectFile,
+  }, [project?.id, laneWriteFrozen, timingLocked, currentUsername, getTokenForProjectFile,
     timelineText.cellsByFile, timelineText.patchTiming, timelineText.refresh])
   /**
    * A drag the server has not confirmed yet, as `trackId → new order`.
@@ -12241,7 +12304,7 @@ export function ProjectWorkspace() {
    */
   const handleCellValidated = useCallback(async (cellId: string) => {
     if (!autoPropagateRepetitions) return
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
 
     const planned = planRepetitionPropagation({
@@ -12341,7 +12404,7 @@ export function ProjectWorkspace() {
     checkLockHolder,
     currentUsername,
     handleCellCommitted,
-    isReadOnly,
+    laneWriteFrozen,
     myScopes,
     project,
     rememberPendingTargetCommit,
@@ -12361,7 +12424,7 @@ export function ProjectWorkspace() {
     cellId: string,
     snapshot: { value: string; valueHtml: string },
   ): Promise<{ autoValidated: boolean }> => {
-    if (!project?.id || isReadOnly) throw new Error("This project is read-only.")
+    if (!project?.id || laneWriteFrozen) throw new Error("This project is read-only.")
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       throw new Error("Your project role cannot edit translations.")
     }
@@ -12401,7 +12464,7 @@ export function ProjectWorkspace() {
     let autoValidated = false
     if (shouldAutoValidateHumanEdit({
       value: snapshot.value,
-      canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
+      canValidate: !laneWriteFrozen && canPerform("cell.validate", project.syncRole?.level ?? null),
       allowSelfValidation: project.allowSelfValidation,
       roleLevel: project.syncRole?.level ?? null,
       scopeCanValidate: textValidationScope(project, {
@@ -12436,7 +12499,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getActiveCell,
     handleCellCommitted,
-    isReadOnly,
+    laneWriteFrozen,
     project,
     rememberPendingTargetCommit,
     resolveTargetCommitParentId,
@@ -13141,7 +13204,7 @@ export function ProjectWorkspace() {
       )}
       translateAsReadEnabled={translateAsReadEnabled}
       translateAsReadDisabled={!translateAsReadEnabled && (
-        lens !== "text" || isReadOnly || !isConfigured || !isCompletionAvailable
+        lens !== "text" || laneWriteFrozen || !isConfigured || !isCompletionAvailable
       )}
       translateAsReadActive={translateAsReadActiveCellId !== null}
       onTranslateAsReadChange={setTranslateAsReadEnabled}
@@ -13367,7 +13430,7 @@ export function ProjectWorkspace() {
                 onSearchPassages={runSearchPassages}
                 onClearResults={clearSearchResults}
                 onSelect={handleSearchSelect}
-                isReadOnly={isReadOnly}
+                isReadOnly={laneWriteFrozen}
                 onAfterReplace={rebuildSearchIndex}
                 onReplaceAll={handleReplaceAll}
                 onOpenFullPanel={() => {
@@ -13753,7 +13816,7 @@ export function ProjectWorkspace() {
             }
             workspace={{
               ...agentWorkbenchWorkspace,
-              editable: !isReadOnly,
+              editable: !laneWriteFrozen,
               onCommitTarget: handleAgentTargetCommit,
               isAnonymous: !frontierSession,
               isCompletionConfigured: sparkleReady,
@@ -13766,7 +13829,8 @@ export function ProjectWorkspace() {
               onOpenHistory: handleOpenHistory,
               currentUsername,
               validationRequirement: readValidationCount(project),
-              canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
+              // AQU-1463: an archived lane takes no validations from anyone.
+              canValidate: !laneWriteFrozen && canPerform("cell.validate", project.syncRole?.level ?? null),
               onValidationChange: handleAgentValidationChange,
               onCellValidated: handleCellValidated,
               cellLockHolders,
@@ -13905,7 +13969,7 @@ export function ProjectWorkspace() {
                     // thing playing would ignore a dub's trims — and the
                     // virtual transport honours them, exactly as the film does.
                     virtualIsTransport={virtualIsTransport}
-                    editable={!isReadOnly}
+                    editable={!laneWriteFrozen}
                     fileId={activeFile.id}
                     onRetimeSubtitle={handleRetimeSubtitle}
                     // AQU-646: a maintainer sees the handles too only once the
@@ -14033,7 +14097,7 @@ export function ProjectWorkspace() {
                     // AQU-928: transcription emits contributor-level events, so
                     // a viewer/reviewer must not be offered the row at all —
                     // the same gate `legacyMeasure` uses below.
-                    onTranscribeSections={isReadOnly ? undefined : handleTranscribeSections}
+                    onTranscribeSections={laneWriteFrozen ? undefined : handleTranscribeSections}
                     // The SAME function the run reads, so what the button
                     // enables and what the run touches can never disagree.
                     takeCellsFor={takeCellsFor}
@@ -14044,7 +14108,7 @@ export function ProjectWorkspace() {
                       // or reviewer must not even be offered it — the emit
                       // would reject per take and the run would report a
                       // success that saved nothing.
-                      legacyMeasureCount > 0 && !isReadOnly
+                      legacyMeasureCount > 0 && !laneWriteFrozen
                         ? { count: legacyMeasureCount, onMeasure: handleMeasureLegacy }
                         : undefined
                     }
@@ -14256,6 +14320,9 @@ export function ProjectWorkspace() {
             lanes={availableLanes}
             scopedLanes={scopedLanes}
             archivedLanes={archivedLaneTags}
+            // AQU-1463: non-null turns the table read-only and banners which
+            // lane was archived, whatever the reader's role.
+            archivedLaneLabel={activeLaneLock?.label ?? null}
             onLaneChange={setActiveLane}
             defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
             laneLabels={laneLabels}
@@ -14405,7 +14472,7 @@ export function ProjectWorkspace() {
             {footnoteViewMode === "tray" && (
               <FootnotesTray
                 entries={visibleFootnotes}
-                editable={!isReadOnly}
+                editable={!laneWriteFrozen}
                 onSave={handleTrayFootnoteSave}
                 onDelete={handleTrayFootnoteDelete}
                 onClose={() => setFootnoteViewMode("off")}
@@ -14575,7 +14642,7 @@ export function ProjectWorkspace() {
                 // Absent while read-only or below the harmonize floor, which
                 // renders the fix affordances disabled with the reason.
                 onApplyFix={
-                  !isReadOnly && drawerRuleId && canHarmonize(project?.harmonize_min_role)
+                  !laneWriteFrozen && drawerRuleId && canHarmonize(project?.harmonize_min_role)
                     ? (previews, proposalKind) =>
                         handleApplyRuleFix(previews, proposalKind, drawerRuleId)
                     : undefined
@@ -14953,9 +15020,15 @@ export function ProjectWorkspace() {
             openFile: workspaceTabs.openFile,
             retryActiveFile: retryCells,
             applyOptimisticTargetEdits,
-            disabledReason: canImportTranslation
-              ? null
-              : denialMessage(t, ROLE.CONTRIBUTOR, project.syncRole?.level ?? null),
+            // AQU-1463: the translation import fills the lane the editor is in,
+            // so a frozen lane disables it and says which lane is the problem —
+            // the role denial would be a lie here, and the member can fix this
+            // one by switching lanes.
+            disabledReason: activeLaneLock
+              ? t("importExport.intent.translation.laneArchived", { lane: activeLaneLock.label })
+              : canImportTranslation
+                ? null
+                : denialMessage(t, ROLE.CONTRIBUTOR, project.syncRole?.level ?? null),
             languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
             // One entry per lane, so the check can tell a file in this lane's
             // language (offer the translation import) from one in another
@@ -15054,6 +15127,16 @@ export function ProjectWorkspace() {
           outstandingInfractionCount={activeFileInfractionCount}
         />
       </Suspense>
+      {/* AQU-1463: the archive interrupts the member who was working in the
+          lane. Rendered at workspace level, beside the other modals, so it
+          survives a lens or file change while it is up. */}
+      {laneArchiveAnnouncement && (
+        <LaneArchivedDialog
+          laneLabel={laneArchiveAnnouncement.label}
+          open
+          onAcknowledge={acknowledgeLaneArchived}
+        />
+      )}
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -15073,7 +15156,7 @@ export function ProjectWorkspace() {
         onClearResults={clearSearchResults}
         onSelect={handleSearchSelect}
         username={currentUsername}
-        isReadOnly={isReadOnly}
+        isReadOnly={laneWriteFrozen}
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
       />

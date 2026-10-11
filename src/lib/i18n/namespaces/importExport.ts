@@ -1386,6 +1386,7 @@ export const importExport = defineNamespace({
     "importExport.translationCheck.otherLane": "It says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
     "importExport.translationCheck.otherLaneBody": "{fileName} says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
     "importExport.intent.translation.noFilesLead": "A project lead needs to add a source text first. A translation goes into a file that's already here.",
+    "importExport.intent.translation.laneArchived": "{lane} has been archived and is read-only. Switch to another language to import a translation.",
     "importExport.translationCheck.manyTitle": "Some of these look like translations",
     "importExport.translationCheck.manyBody": plural({
       one: "{count} of these files may be a translation of a file already in this project: {files}. To bring in a translation, choose \"A translation\" and add one file at a time.",
@@ -4291,6 +4292,13 @@ export const importExport = defineNamespace({
       "importExport.intent.translation.noFilesLead": {
         description:
           "Shown to a Contributor (who can import translations but not new source text) when the project has no files yet: as the tooltip of the disabled Import button and of the disabled 'A translation' card. Two short sentences.",
+      },
+      "importExport.intent.translation.laneArchived": {
+        description:
+          "Tooltip of the disabled 'A translation' card when the language open in the editor has been archived (AQU-1463). A translation import fills the open language, so this one is not a destination any more. The second sentence is the way out, and is the reason this is not phrased as a refusal: the member switches language and the import works again.",
+        placeholders: {
+          lane: "The archived language's own label, e.g. 'Spanish'. Content — do not translate.",
+        },
       },
       "importExport.translationCheck.manyTitle": {
         description:

@@ -304,6 +304,31 @@ describe("parseProjectWsMessage", () => {
     }))).toBeNull()
   })
 
+  it("parses presence.tier1, a batch of coarse rows (AQU-1825)", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1",
+      users: [
+        { connId: "tab-a", userId: "alice", currentFileId: "file-1", focusedCell: "c1", ts: 10 },
+        { userId: "bob", ts: 11 },
+      ],
+    }))).toEqual({
+      t: "presence.tier1",
+      users: [
+        { connId: "tab-a", userId: "alice", currentFileId: "file-1", focusedCell: "c1", ts: 10 },
+        // No connId on the wire → keyed by userId, as the roster frame does.
+        { connId: "bob", userId: "bob", ts: 11 },
+      ],
+    })
+    // Strict field validation — one bad row marks the whole frame malformed.
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.tier1", users: {} }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1", users: [{ userId: "alice" }],
+    }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.tier1", users: [{ userId: "alice", ts: 1 }, { ts: 2 }],
+    }))).toBeNull()
+  })
+
   it("parses presence.diff / presence.left / presence.draft", () => {
     expect(parseProjectWsMessage(JSON.stringify({
       t: "presence.diff",

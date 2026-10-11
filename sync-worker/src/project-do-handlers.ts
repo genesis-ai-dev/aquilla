@@ -116,6 +116,31 @@ export interface ServerPresenceDraft {
   draftText: string
   ts: number
 }
+/**
+ * AQU-1825 tier 1: the coarse, project-wide half of presence — who is
+ * connected and which file each socket has open. One batched frame per tick
+ * (PRESENCE_TIER1_TICK_MS), carrying only the connections whose coarse state
+ * actually changed.
+ *
+ * `focusedCell` rides along because it is lock-bearing and changes at most
+ * once per cell the user takes the lease on — the same rate as the
+ * `lock.claimed` frame that already goes project-wide — so the roster can
+ * still say "editing" for someone in another file. What does NOT ride along
+ * is everything that moves at typing speed: `viewingCell`, the cursor
+ * `selection`, and live draft text. Those are tier 2, delivered only to the
+ * sockets in the same file (see presenceFrameAudience).
+ */
+export interface PresenceTier1Row {
+  connId: string
+  userId: string
+  currentFileId?: string
+  focusedCell?: string
+  ts: number
+}
+export interface ServerPresenceTier1 {
+  t: "presence.tier1"
+  users: PresenceTier1Row[]
+}
 export interface ServerLockClaimed {
   t: "lock.claimed"
   cellId: string
@@ -216,6 +241,7 @@ export type ProjectDoServerMessage =
   | ServerPresenceDiff
   | ServerPresenceLeft
   | ServerPresenceDraft
+  | ServerPresenceTier1
   | ServerLockClaimed
   | ServerLockReleased
   | ServerProjectArchived
@@ -527,9 +553,85 @@ export function stripPresenceDraft(user: PresenceState): PresenceState {
   return { ...user, selection }
 }
 
-/** Full roster frame with every draft stripped (connect snapshot). */
-export function presenceSnapshot(presence: ReadonlyMap<string, PresenceState>): ServerPresence {
-  return { t: "presence", users: Array.from(presence.values(), stripPresenceDraft) }
+/**
+ * AQU-1825: copy of a presence row with the tier-2 detail removed — the
+ * cursor `selection` and the non-lock-bearing `viewingCell`. What is left is
+ * the coarse "who, and in which file" state that every member of the project
+ * may see.
+ */
+export function stripPresenceDetail(user: PresenceState): PresenceState {
+  if (user.selection === undefined && user.viewingCell === undefined) return user
+  const { selection: _sel, viewingCell: _viewing, ...coarse } = user
+  return coarse
+}
+
+/**
+ * AQU-1825: the connect snapshot as seen by a socket sitting in `viewerFileId`
+ * — full rows for the peers in that same file, coarse (tier-1) rows for
+ * everyone else. A socket connects before it has published a file, so at
+ * handshake every peer who IS in a file reads as coarse; the DO backfills the
+ * detail for one file's peers when the socket announces that it opened it.
+ */
+export function presenceSnapshotFor(
+  presence: ReadonlyMap<string, PresenceState>,
+  viewerFileId: string | undefined,
+): ServerPresence {
+  return {
+    t: "presence",
+    users: Array.from(presence.values(), (user) =>
+      // Dropping the whole `selection` takes the draft text with it, so the
+      // coarse branch needs no separate draft strip.
+      user.currentFileId === viewerFileId ? stripPresenceDraft(user) : stripPresenceDetail(user),
+    ),
+  }
+}
+
+/** AQU-1825: the tier-1 (coarse) projection of a presence row. */
+export function presenceTier1Row(user: PresenceState): PresenceTier1Row {
+  return {
+    connId: user.connId,
+    userId: user.userId,
+    ...(user.currentFileId !== undefined ? { currentFileId: user.currentFileId } : {}),
+    ...(user.focusedCell !== undefined ? { focusedCell: user.focusedCell } : {}),
+    ts: user.ts,
+  }
+}
+
+/**
+ * Coarse equality, deliberately ignoring `ts`: a cursor move restamps the
+ * presence row without changing anything tier 1 reports, and must not cost
+ * the project a frame.
+ */
+export function sameTier1Row(a: PresenceTier1Row | undefined, b: PresenceTier1Row | undefined): boolean {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return (
+    a.connId === b.connId &&
+    a.userId === b.userId &&
+    a.currentFileId === b.currentFileId &&
+    a.focusedCell === b.focusedCell
+  )
+}
+
+/**
+ * AQU-1825: who a server frame is for.
+ *
+ * `all` is the project: content events, locks, settings, `presence.left`, and
+ * the batched tier-1 roster frame. `file` is the tier-2 audience — the sockets
+ * whose own `currentFileId` matches, which is where a cursor or a live draft
+ * means anything. A frame about a socket that has no file open scopes to the
+ * sockets that likewise have none (clients predating `currentFileId` all sit
+ * in that one bucket, so they keep today's behaviour).
+ */
+export function presenceFrameAudience(
+  msg: ProjectDoServerMessage,
+  presence: ReadonlyMap<string, PresenceState>,
+): { scope: "all" } | { scope: "file"; fileId: string | undefined } {
+  if (msg.t === "presence.diff") return { scope: "file", fileId: msg.user.currentFileId }
+  if (msg.t === "presence.draft") {
+    return { scope: "file", fileId: presence.get(msg.connId)?.currentFileId }
+  }
+  return { scope: "all" }
 }
 
 function presenceDiff(user: PresenceState): ServerPresenceDiff {
@@ -789,6 +891,71 @@ export class PresenceDraftThrottle {
       }
     }, this.windowMs)
     this.windows.set(connId, { timer, pending: null })
+  }
+}
+
+/**
+ * AQU-1825: the tier-1 tick. Project-wide presence is coarse enough that one
+ * frame every quarter second is indistinguishable from live (the ticket's bar
+ * is "within about one second"), and it turns a workshop's O(room²) stream of
+ * per-keystroke frames into a bounded trickle.
+ */
+export const PRESENCE_TIER1_TICK_MS = 250
+
+/**
+ * Batches coarse presence changes into one `presence.tier1` frame per tick.
+ *
+ * Latest-wins per connection, and a push whose coarse row matches what that
+ * connection last had sent is dropped outright — so a client publishing
+ * presence every ~650 ms while typing, and a cursor moving every ~120 ms,
+ * produce no project-wide frames at all between file switches. In-memory only
+ * (timers die with the DO instance, like the rest of its state).
+ */
+export class PresenceTier1Batcher {
+  private readonly pending = new Map<string, PresenceTier1Row>()
+  private readonly lastSent = new Map<string, PresenceTier1Row>()
+  private timer: ReturnType<typeof setTimeout> | null = null
+
+  constructor(
+    private readonly send: (frame: ServerPresenceTier1) => void,
+    private readonly windowMs: number = PRESENCE_TIER1_TICK_MS,
+  ) {}
+
+  /** Queue a row; no-op when nothing tier 1 reports has changed. */
+  push(row: PresenceTier1Row): void {
+    if (sameTier1Row(this.pending.get(row.connId) ?? this.lastSent.get(row.connId), row)) return
+    this.pending.set(row.connId, row)
+    if (this.timer === null) this.timer = setTimeout(() => this.flush(), this.windowMs)
+  }
+
+  /** Drop a connection's queued row and its sent-state (disconnect). */
+  clear(connId: string): void {
+    this.pending.delete(connId)
+    this.lastSent.delete(connId)
+    if (this.pending.size === 0) this.cancelTimer()
+  }
+
+  /** Send whatever is queued now and close the window. */
+  flush(): void {
+    this.cancelTimer()
+    if (this.pending.size === 0) return
+    const users = Array.from(this.pending.values())
+    this.pending.clear()
+    for (const row of users) this.lastSent.set(row.connId, row)
+    this.send({ t: "presence.tier1", users })
+  }
+
+  /** Drop every timer and all state (last socket closed / DO shutting down). */
+  dispose(): void {
+    this.cancelTimer()
+    this.pending.clear()
+    this.lastSent.clear()
+  }
+
+  private cancelTimer(): void {
+    if (this.timer === null) return
+    clearTimeout(this.timer)
+    this.timer = null
   }
 }
 

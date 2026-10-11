@@ -471,4 +471,117 @@ describe("ProjectPresenceStore", () => {
       expect(store.getPeers()).toEqual([])
     })
   })
+
+  // AQU-1825: project-wide presence is coarse — who is online and which file
+  // they have open. Cursor, selected row and live draft are tier 2 and reach
+  // only the sockets sharing that file, so a tier-1 frame MERGES.
+  describe("tier-1 presence (AQU-1825)", () => {
+    const sameFilePeer = {
+      connId: "alice-1",
+      userId: "alice",
+      currentFileId: "file-1",
+      focusedCell: "cell-1",
+      viewingCell: "cell-1",
+      selection: { side: "target" as const, anchor: 2, head: 5 },
+      ts: 1,
+    }
+
+    it("adds a peer we have never seen, carrying only their file", () => {
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("my-tab")
+      const roster = vi.fn()
+      store.subscribeRoster(roster)
+      store.applyPresenceTier1([
+        { connId: "bob-1", userId: "bob", currentFileId: "file-2", ts: 7 },
+      ])
+      expect(store.getPeers()).toMatchObject([
+        { peerId: "bob", username: "bob", currentFileId: "file-2", isEditing: false },
+      ])
+      expect(roster).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps the cursor detail of a peer who stayed in our file", () => {
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("my-tab")
+      store.applyPresenceDiff(sameFilePeer)
+      store.applyPresenceDraft("alice-1", "cell-1", "typing…", 2)
+      // Her lease moved to cell-2; the tier-1 frame says so without saying
+      // anything about her cursor.
+      store.applyPresenceTier1([
+        { connId: "alice-1", userId: "alice", currentFileId: "file-1", focusedCell: "cell-2", ts: 3 },
+      ])
+      const [onCell2] = store.getCellPresence("cell-2")
+      expect(onCell2?.focusedCell).toBe("cell-2")
+      expect(onCell2?.viewingCell).toBe("cell-1")
+      expect(onCell2?.selection).toMatchObject({ anchor: 2, head: 5 })
+    })
+
+    it("a cleared focusedCell in a tier-1 row releases the cell", () => {
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("my-tab")
+      store.applyPresenceDiff(sameFilePeer)
+      expect(store.getCellPresence("cell-1")[0]?.focusedCell).toBe("cell-1")
+      store.applyPresenceTier1([
+        { connId: "alice-1", userId: "alice", currentFileId: "file-1", ts: 4 },
+      ])
+      expect(store.getCellPresence("cell-1")[0]?.focusedCell).toBeUndefined()
+    })
+
+    it("drops the cursor and draft of a peer who left for another file", () => {
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("my-tab")
+      store.applyPresenceDiff(sameFilePeer)
+      store.applyPresenceDraft("alice-1", "cell-1", "typing…", 2)
+      expect(store.getCellPresence("cell-1")[0]?.selection?.draftText).toBe("typing…")
+
+      store.applyPresenceTier1([
+        { connId: "alice-1", userId: "alice", currentFileId: "file-2", ts: 5 },
+      ])
+      // No ghost caret left behind in the file she walked out of…
+      expect(store.getCellPresence("cell-1")).toHaveLength(0)
+      // …and she is still on the roster, in her new file.
+      expect(store.getPeers()).toMatchObject([
+        { peerId: "alice", currentFileId: "file-2", focusedCell: undefined, viewingCell: undefined },
+      ])
+    })
+
+    it("ignores a row whose coarse state did not change, so a cursor move is free", () => {
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("my-tab")
+      store.applyPresenceDiff(sameFilePeer)
+      const roster = vi.fn()
+      const cell = vi.fn()
+      store.subscribeRoster(roster)
+      store.subscribeCell("cell-1", cell)
+      store.applyPresenceTier1([
+        { connId: "alice-1", userId: "alice", currentFileId: "file-1", focusedCell: "cell-1", ts: 99 },
+      ])
+      expect(roster).not.toHaveBeenCalled()
+      expect(cell).not.toHaveBeenCalled()
+      expect(store.getCellPresence("cell-1")[0]?.selection).toMatchObject({ anchor: 2, head: 5 })
+    })
+
+    it("notifies the roster once for a batch of several peers", () => {
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("my-tab")
+      const roster = vi.fn()
+      store.subscribeRoster(roster)
+      store.applyPresenceTier1([
+        { connId: "a-1", userId: "a", currentFileId: "file-1", ts: 1 },
+        { connId: "b-1", userId: "b", currentFileId: "file-2", ts: 1 },
+        { connId: "c-1", userId: "c", currentFileId: "file-3", ts: 1 },
+      ])
+      expect(roster).toHaveBeenCalledTimes(1)
+      expect(store.getPeers().map((p) => p.peerId)).toEqual(["a", "b", "c"])
+    })
+
+    it("never surfaces our own row, even if the server batched it to us", () => {
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("my-tab")
+      store.applyPresenceTier1([
+        { connId: "my-tab", userId: "me", currentFileId: "file-1", ts: 1 },
+      ])
+      expect(store.getPeers()).toHaveLength(0)
+    })
+  })
 })

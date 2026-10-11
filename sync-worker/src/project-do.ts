@@ -28,8 +28,11 @@ import {
   applyPresenceUpdate,
   parseProjectDoClientMessage,
   PresenceDraftThrottle,
+  presenceFrameAudience,
   presenceFrameOwnerConnId,
-  presenceSnapshot,
+  presenceSnapshotFor,
+  presenceTier1Row,
+  PresenceTier1Batcher,
   PROJECT_DO_DEFAULT_LEASE_MS,
   resolveConnId,
   selectStaleConnections,
@@ -40,6 +43,7 @@ import {
   type LockState,
   type PresenceState,
   type ProjectDoServerMessage,
+  type ServerPresenceTier1,
 } from "./project-do-handlers"
 import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
@@ -175,6 +179,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private sweepTimer: ReturnType<typeof setInterval> | null = null
   /** Per-user rate limit for `presence.draft` frames (in-memory, like all DO state). */
   private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcast(frame))
+  /** AQU-1825: coarse project-wide presence, batched to one frame per tick. */
+  private tier1 = new PresenceTier1Batcher((frame) => this.sendTier1(frame))
   /**
    * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
@@ -444,7 +450,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
     this.startLeaseSweep()
     // Snapshot of current roster (drafts stripped) so the new client sees
     // existing peers; everyone else learns about the newcomer via a diff.
-    this.sendTo(server, presenceSnapshot(this.presence))
+    // AQU-1825: a socket has not announced a file yet, so peers already in one
+    // arrive coarse; backfillFileDetail fills in the tier-2 detail for the file
+    // this client then opens.
+    this.sendTo(server, presenceSnapshotFor(this.presence, undefined))
     this.broadcast({ t: "presence.diff", user: stripPresenceDraft(joined) })
 
     server.addEventListener("message", (ev) => {
@@ -480,17 +489,62 @@ export class ProjectSync extends DurableObject<DOEnv> {
   }
 
   /**
-   * AQU-1162: broadcast, but never echo a presence frame back to the socket it
-   * describes. A typing client publishes presence roughly every 650ms and
-   * moves the cursor every ~120ms; each echo costs that same client a socket
-   * frame, a parse, a presence-store apply and a `ProjectWorkspace` shell pass
-   * — for a row every consumer then filters out as its own (`isSelfRow` in the
+   * Send one frame to its audience, never echoing a presence frame back to the
+   * socket it describes.
+   *
+   * AQU-1162: a typing client publishes presence roughly every 650ms and moves
+   * the cursor every ~120ms; each echo costs that same client a socket frame,
+   * a parse, a presence-store apply and a `ProjectWorkspace` shell pass — for
+   * a row every consumer then filters out as its own (`isSelfRow` in the
    * presence store, the `currentUsername` check in `applyPresenceFrame`).
-   * Non-presence frames (locks, content, project events) are unaffected: the
-   * originator does act on those.
+   *
+   * AQU-1825: and presence is tiered. A `presence.diff` carries tier-2 detail
+   * (cursor selection, the viewed row) that only matters to the people looking
+   * at the same file, so it goes to that file's sockets; its coarse half goes
+   * to the whole project through the batcher, at one frame per tick. Same for
+   * `presence.draft`. Everything else (locks, content, settings,
+   * `presence.left`) is project-wide and immediate as before.
    */
   private broadcast(msg: ProjectDoServerMessage): void {
-    this.broadcastToAll(msg, presenceFrameOwnerConnId(msg))
+    if (msg.t === "presence.diff") this.tier1.push(presenceTier1Row(msg.user))
+    const audience = presenceFrameAudience(msg, this.presence)
+    if (audience.scope === "all") {
+      this.broadcastToAll(msg, presenceFrameOwnerConnId(msg))
+      return
+    }
+    this.broadcastToFile(msg, audience.fileId, presenceFrameOwnerConnId(msg))
+  }
+
+  /** Send to the sockets whose own open file is `fileId` (undefined = no file). */
+  private broadcastToFile(
+    msg: ProjectDoServerMessage,
+    fileId: string | undefined,
+    exceptConnId?: string,
+  ): void {
+    const payload = JSON.stringify(msg)
+    for (const [ws, conn] of this.connections) {
+      if (exceptConnId !== undefined && conn.connId === exceptConnId) continue
+      if (this.presence.get(conn.connId)?.currentFileId !== fileId) continue
+      try {
+        ws.send(payload)
+      } catch {
+        /* swallow */
+      }
+    }
+  }
+
+  /**
+   * AQU-1825: deliver a batched tier-1 frame, dropping each receiver's own row
+   * (the AQU-1162 no-self-echo rule, applied per row because one frame covers
+   * several connections). A socket whose own row is the only one in the batch
+   * gets nothing.
+   */
+  private sendTier1(frame: ServerPresenceTier1): void {
+    for (const [ws, conn] of this.connections) {
+      const users = frame.users.filter((row) => row.connId !== conn.connId)
+      if (users.length === 0) continue
+      this.sendTo(ws, { t: "presence.tier1", users })
+    }
   }
 
   // ── Inbound handling ───────────────────────────────────────────────────
@@ -535,12 +589,15 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return
     }
     if (msg.t === "presence.update") {
+      const fileBefore = this.presence.get(conn.connId)?.currentFileId
       const result = applyPresenceUpdate(this.presence, conn, msg, now)
       this.presence = result.presence
       for (const m of result.emit) {
         if (m.t === "presence.draft") this.draftThrottle.push(m)
         else this.broadcast(m)
       }
+      const fileAfter = this.presence.get(conn.connId)?.currentFileId
+      if (fileAfter !== fileBefore) this.backfillFileDetail(conn, fileAfter)
       return
     }
     if (msg.t === "outbox.event") {
@@ -557,6 +614,25 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // (useOutboxFlusher) on the same JWT. Logging only here so the path is
     // observable in worker logs.
     console.log(`[ProjectSync] outbox.event passthrough (no-op)`, event.id)
+  }
+
+  /**
+   * AQU-1825: this socket just opened `fileId`, so hand it the tier-2 detail
+   * for the peers already sitting there.
+   *
+   * Tier-2 frames are only sent to the sockets in the subject's file, which
+   * means a peer who went quiet before we arrived would otherwise never
+   * resolve past the coarse row the roster frame gave us — no caret, no "X is
+   * editing" badge on their cell until they happened to move. Bounded by the
+   * number of people in one file, and sent only on an actual file change.
+   */
+  private backfillFileDetail(conn: ConnectionState, fileId: string | undefined): void {
+    for (const user of this.presence.values()) {
+      if (user.connId === conn.connId) continue
+      if (user.currentFileId !== fileId) continue
+      if (user.viewingCell === undefined && user.selection === undefined) continue
+      this.sendTo(conn.ws, { t: "presence.diff", user: stripPresenceDraft(user) })
+    }
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
@@ -579,8 +655,12 @@ export class ProjectSync extends DurableObject<DOEnv> {
     this.locks = result.locks
     this.presence = result.presence
     this.draftThrottle.clear(conn.connId)
+    this.tier1.clear(conn.connId)
     for (const m of result.emit) this.broadcast(m)
-    if (this.connections.size === 0) this.stopLeaseSweep()
+    if (this.connections.size === 0) {
+      this.stopLeaseSweep()
+      this.tier1.dispose()
+    }
   }
 
   private startLeaseSweep(): void {
@@ -616,7 +696,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (result.emit.length === 0) return
     this.presence = result.presence
     for (const m of result.emit) {
-      if (m.t === "presence.left") this.draftThrottle.clear(m.connId)
+      if (m.t === "presence.left") {
+        this.draftThrottle.clear(m.connId)
+        this.tier1.clear(m.connId)
+      }
       this.broadcastToAll(m)
     }
   }

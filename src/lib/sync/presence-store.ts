@@ -29,6 +29,21 @@ export interface PresenceUserSnapshot {
   ts: number
 }
 
+/**
+ * AQU-1825 tier 1: the coarse half of a presence row, as the batched
+ * `presence.tier1` frame carries it — who is connected, which file they have
+ * open, and the cell they hold the edit lease on. Everything that moves at
+ * typing speed (the cursor `selection`, `viewingCell`, live draft text) is
+ * tier 2 and arrives only while that peer shares our file.
+ */
+export interface PresenceTier1Row {
+  connId: string
+  userId: string
+  currentFileId?: string
+  focusedCell?: string
+  ts: number
+}
+
 export interface ProjectPresencePeer {
   /**
    * Identity of this row. **Cell** rows are per connection, so this is the
@@ -301,6 +316,62 @@ export class ProjectPresenceStore {
     }
     if (sameUser(old, user) && !draftChanged) return
     for (const cellId of affectedCellIds(old, user)) this.updateCellSnapshot(cellId)
+  }
+
+  /**
+   * AQU-1825 `presence.tier1`: a batch of coarse rows. Applied as a MERGE, not
+   * a replace — a tier-1 row says nothing about the cursor, so it must not
+   * erase the tier-2 detail we hold for a peer in our own file.
+   *
+   * The one exception is a peer whose `currentFileId` changed: their cursor,
+   * selection and live draft belonged to the file they just left, and we will
+   * receive no further tier-2 frames about them, so that detail is dropped
+   * here rather than left to linger as a ghost caret.
+   */
+  applyPresenceTier1(rows: readonly PresenceTier1Row[]): void {
+    const affected = new Set<string>()
+    let rosterChanged = false
+
+    for (const row of rows) {
+      const old = this.users.get(row.connId)
+      const coarse: PresenceUserSnapshot = {
+        connId: row.connId,
+        userId: row.userId,
+        ...(row.currentFileId !== undefined ? { currentFileId: row.currentFileId } : {}),
+        ...(row.focusedCell !== undefined ? { focusedCell: row.focusedCell } : {}),
+        ts: row.ts,
+      }
+      if (!old) {
+        this.users.set(row.connId, coarse)
+        rosterChanged = true
+        for (const cellId of affectedCellIds(undefined, coarse)) affected.add(cellId)
+        continue
+      }
+      const movedFile = old.currentFileId !== coarse.currentFileId
+      // Same file and same lease: nothing tier 1 reports has changed, so the
+      // row stands as it is (keeping the newer tier-2 detail untouched).
+      if (!movedFile && old.focusedCell === coarse.focusedCell) continue
+      // Coarse fields are authoritative (a cleared `focusedCell` means the
+      // lease was released); the tier-2 detail we already hold is re-attached
+      // only while the peer stays in the file we are watching.
+      const next: PresenceUserSnapshot = movedFile
+        ? coarse
+        : {
+            ...coarse,
+            ...(old.viewingCell !== undefined ? { viewingCell: old.viewingCell } : {}),
+            ...(old.selection !== undefined ? { selection: old.selection } : {}),
+          }
+      if (movedFile) this.drafts.delete(row.connId)
+      this.users.set(row.connId, next)
+      if (!sameRosterUser(old, next)) rosterChanged = true
+      for (const cellId of affectedCellIds(old, next)) affected.add(cellId)
+    }
+
+    if (rosterChanged) {
+      this.rosterSnapshot = this.computePeers()
+      this.emitRoster()
+    }
+    for (const cellId of affected) this.updateCellSnapshot(cellId)
   }
 
   /** `presence.left`: one socket closed (`connId`; legacy workers send the userId). */

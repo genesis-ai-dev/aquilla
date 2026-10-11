@@ -5,6 +5,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
 import { childArgs, type NeonTargetCommand } from "./neon-target-args"
+import { decideApplyGuard, MIGRATION_COMMANDS, NO_SNAPSHOT_FLAG, SNAPSHOT_FLAG } from "./neon-apply-guard"
 
 type RemoteTarget = "production" | "dev"
 type Target = RemoteTarget | "local"
@@ -41,6 +42,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 
 function usage(): never {
   console.error("usage: tsx scripts/neon-target.ts <production|dev|local> <status|apply|baseline|prepare-comments-key|backfill-progress|backfill-activity|backfill-lanes|backfill-lane-batch|verify-lanes>")
+  console.error(`       production apply requires ${SNAPSHOT_FLAG} (take a Neon snapshot branch first) or ${NO_SNAPSHOT_FLAG}`)
   process.exit(1)
 }
 
@@ -181,9 +183,13 @@ async function runCapture(command: string, args: string[]): Promise<string> {
   })
 }
 
+function targetBranch(target: RemoteTarget): string {
+  return firstEnv(envCandidates(target, "BRANCH")) ?? TARGET_BRANCH_DEFAULTS[target]
+}
+
 async function branchPgEnv(target: RemoteTarget): Promise<NodeJS.ProcessEnv> {
   const projectId = requiredEnv("NEON_PROJECT_ID", DEFAULT_PROJECT_ID)
-  const branch = firstEnv(envCandidates(target, "BRANCH")) ?? TARGET_BRANCH_DEFAULTS[target]
+  const branch = targetBranch(target)
   const database = firstEnv(envCandidates(target, "DATABASE")) ?? DEFAULTS.DB!
   const role = firstEnv(envCandidates(target, "ROLE")) ?? DEFAULTS.ROLE!
   const connectionString = await runCapture("npx", neonArgs([
@@ -232,16 +238,48 @@ async function run(command: string, args: string[], env: NodeJS.ProcessEnv): Pro
   })
 }
 
+/**
+ * AQU-1877: a production migration apply is gated on a snapshot. The decision
+ * is pure (`neon-apply-guard.ts`); this runs it, and takes the Neon branch
+ * when the operator asked for one.
+ */
+async function guardMigrationApply(target: Target, command: Command, flags: string[]): Promise<void> {
+  if (!(MIGRATION_COMMANDS as readonly string[]).includes(command)) return
+  const decision = decideApplyGuard({
+    target,
+    command,
+    flags,
+    projectId: requiredEnv("NEON_PROJECT_ID", DEFAULT_PROJECT_ID),
+    parentBranch: target === "local" ? "local" : targetBranch(target),
+    cliVersion: requiredEnv("NEON_CLI_VERSION", DEFAULT_NEON_CLI_VERSION),
+    now: new Date(),
+  })
+  if (decision.kind === "refuse") {
+    console.error(decision.message)
+    process.exit(1)
+  }
+  if (decision.note) console.log(decision.note)
+  if (decision.kind === "snapshot") {
+    console.log(await runCapture("npx", neonArgs(decision.args)))
+    console.log(`✓ snapshot branch '${decision.branchName}' created — restore from it if the apply goes wrong`)
+  }
+}
+
 async function main() {
   loadDotEnv()
   const target = parseTarget(process.argv[2])
   const command = parseCommand(process.argv[3])
-  const env = await resolvePgEnv(target)
 
   // Everything after the command reaches a backfill or verify script as its
   // own flags (`--missing-books`, `--apply`, `--require-complete`). See
   // `neon-target-args.ts` for why dropping those flags ever ran the wrong job.
+  // A migration command takes no passthrough flags, so its own are read here
+  // (the snapshot gate) and validated rather than silently dropped.
   const passthrough = process.argv.slice(4)
+  await guardMigrationApply(target, command, passthrough)
+  const env = await resolvePgEnv(target)
+  // The decision above is this run's; neon-migrate.ts must not ask again.
+  env.AQUILLA_MIGRATION_SNAPSHOT_DECISION = `${target}:${command}`
   const args = childArgs(command, passthrough)
   console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${target === "local" ? "local Postgres" : env.NEON_PG_HOST}`)
   process.exit(await run("tsx", args, env))

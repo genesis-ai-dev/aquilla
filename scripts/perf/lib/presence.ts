@@ -66,8 +66,22 @@ function sleep(ms: number): Promise<void> {
  */
 export async function runPresenceLoad(options: PresenceLoadOptions): Promise<PresenceLoadResult> {
   const log = options.log ?? (() => {})
+  // Global WebSocket landed in Node 22. On Node 20 the first `new WebSocket`
+  // threw a bare "WebSocket is not defined" from inside the open loop, which
+  // says nothing about what to do (AQU-1868 bot walk).
+  if (typeof globalThis.WebSocket !== "function") {
+    throw new Error(
+      `this Node (${process.version}) has no global WebSocket — run the presence load on `
+        + "Node 22+, or on Node 20 with `node --experimental-websocket`",
+    )
+  }
   const token = await mintSyncToken(options.target, options.jwt, options.projectId, options.fileId)
   const states: SocketState[] = []
+  // Flipped before the deliberate shutdown below: every socket fires `close`
+  // then, and counting those made `closedEarly` equal the socket count on a
+  // perfectly healthy run (AQU-1868 bot walk saw "closed early 50" on 50/50).
+  // Only a close while this is false means the DO dropped someone.
+  let shuttingDown = false
   const rtts: number[] = []
   const errors: string[] = []
   const closeCodes: Record<string, number> = {}
@@ -115,7 +129,7 @@ export async function runPresenceLoad(options: PresenceLoadOptions): Promise<Pre
       ws.addEventListener("close", (event: CloseEvent) => {
         const key = String(event.code)
         closeCodes[key] = (closeCodes[key] ?? 0) + 1
-        state.closedEarly = true
+        if (!shuttingDown) state.closedEarly = true
         if (!settled) {
           settled = true
           resolve(state)
@@ -175,6 +189,7 @@ export async function runPresenceLoad(options: PresenceLoadOptions): Promise<Pre
   clearInterval(updater)
   const durationMs = Date.now() - measuredFrom
 
+  shuttingDown = true
   for (const state of states) {
     try {
       state.ws.close(1000, "perf run complete")

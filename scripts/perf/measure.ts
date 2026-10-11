@@ -25,13 +25,14 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { v7 as uuidv7 } from "uuid"
 import {
-  DEFAULT_TARGET,
   devLogin,
   mintSyncToken,
+  namedTarget,
   postEvents,
   readCellsPage,
   readFiles,
   readProgress,
+  resolveTarget,
   type PerfTarget,
 } from "./lib/client"
 import { DEFAULT_HANDLE_PATH, readHandle, type BigBibleHandle } from "./lib/fixture-handle"
@@ -60,7 +61,8 @@ const CELLS_PAGE_SIZE = 500
 
 interface MeasureOptions {
   handle: string
-  target: PerfTarget
+  /** Only what the caller named (flag or env). Unset keys fall back to the handle. */
+  target: Partial<PerfTarget>
   appBase: string | null
   editorReady: string
   rulesReady: string
@@ -123,10 +125,11 @@ function parseMeasureOptions(argv: string[]): MeasureOptions {
 
   return {
     handle: values.handle ?? DEFAULT_HANDLE_PATH,
-    target: {
-      authBase: values["auth-base"] ?? DEFAULT_TARGET.authBase,
-      syncBase: values["sync-base"] ?? DEFAULT_TARGET.syncBase,
-    },
+    // Left UNSET when neither a flag nor the env var named a host, so the
+    // seeded handle's own target wins over this file's localhost default. A
+    // handle seeded against another stack measured localhost before (AQU-1868
+    // bot walk) because the default was filled in here first.
+    target: namedTarget(values["auth-base"], values["sync-base"]),
     appBase: values["app-base"] ?? "http://127.0.0.1:5173",
     editorReady: values["editor-ready"] ?? "[data-cell-id]",
     rulesReady: values["rules-ready"] ?? "main",
@@ -214,15 +217,12 @@ async function buildCommitAnchors(
 async function main(): Promise<void> {
   const options = parseMeasureOptions(process.argv.slice(2))
   const handle = readHandle(options.handle)
-  const target: PerfTarget = {
-    authBase: options.target.authBase || handle.target.authBase,
-    syncBase: options.target.syncBase || handle.target.syncBase,
-  }
+  const target = resolveTarget(options.target, handle.target)
   const budgets = parseBudgetFile(JSON.parse(readFileSync(options.budgetsPath, "utf8")))
   const session = await devLogin(target)
 
   // The biggest file is the interesting one: whatever is file-proportional
-  // shows up there first (PSA, ~2.5k cells in the default fixture).
+  // shows up there first (PSA, 3,901 cells in the default fixture).
   const measuredFile = [...handle.files].sort((a, b) => b.cells - a.cells)[0]
   if (!measuredFile) throw new Error("fixture handle lists no files")
   const token = await mintSyncToken(target, session.jwt, handle.projectId, measuredFile.id)

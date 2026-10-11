@@ -22,6 +22,42 @@ export const DEFAULT_TARGET: PerfTarget = {
   syncBase: process.env.PERF_SYNC_BASE ?? "http://127.0.0.1:8789",
 }
 
+/**
+ * The hosts the CALLER named — a flag, else the matching env var. A host the
+ * caller did not name is absent rather than defaulted, which is what lets
+ * {@link resolveTarget} fall back to the fixture handle.
+ */
+export function namedTarget(authFlag?: string, syncFlag?: string): Partial<PerfTarget> {
+  const named: Partial<PerfTarget> = {}
+  const authBase = authFlag ?? process.env.PERF_AUTH_BASE
+  const syncBase = syncFlag ?? process.env.PERF_SYNC_BASE
+  if (authBase) named.authBase = authBase
+  if (syncBase) named.syncBase = syncBase
+  return named
+}
+
+/**
+ * Which stack to measure, in precedence order: what the caller named (a flag
+ * or env var), then the target the fixture handle was seeded against, then the
+ * local dev stack.
+ *
+ * The middle step is the one that matters and the one that was missing: a
+ * handle seeded against another stack used to be measured against localhost,
+ * because the caller-named layer had already been filled in with the default
+ * (AQU-1868 bot walk). A perf report of the wrong stack still looks like a
+ * perf report, so this resolves in one place and is tested.
+ */
+export function resolveTarget(
+  named: Partial<PerfTarget>,
+  handle: Partial<PerfTarget> | undefined,
+  defaults: PerfTarget = DEFAULT_TARGET,
+): PerfTarget {
+  return {
+    authBase: named.authBase ?? handle?.authBase ?? defaults.authBase,
+    syncBase: named.syncBase ?? handle?.syncBase ?? defaults.syncBase,
+  }
+}
+
 export class PerfHttpError extends Error {
   // Plain fields, not parameter properties: the scripts tsconfig runs with
   // `erasableSyntaxOnly`.

@@ -14,7 +14,7 @@ const baseReport = (overrides: Partial<PerfReport> = {}): PerfReport => ({
     cells: 31_102,
     measuredFileId: "f1",
     measuredFileName: "PSA.usfm",
-    measuredFileCells: 2_500,
+    measuredFileCells: 3_901,
   },
   operations: { "cells.read.full": summarize([100, 200, 300]) },
   metrics: { "cells.read.full.p95Ms": 300 },

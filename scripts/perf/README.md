@@ -36,7 +36,7 @@ pnpm perf:measure --handle .perf/smoke.json --only cells.read.page --allow-unmea
 | `files.read` | `GET /api/v1/projects/:id/files` | grows with the file count |
 | `progress.read` | `GET …/files/:id/progress` | the counters the dashboards poll |
 | `cells.read.page` | one `limit=500` page | the per-page cost |
-| `cells.read.full` | every page of the largest file | the editor's initial stream |
+| `cells.read.full` | every page of the largest file (PSA, 3,901 cells) | the editor's initial stream |
 | `events.commit` | single-cell `target.cell.commit`, N concurrent writers | the write path under contention |
 | `browser` | editor + `/project/:id/rules`, long tasks (>50ms) | jank, which latency alone hides |
 | `presence` | 50 WebSockets on the project DO | fan-out frame rate + ping RTT |
@@ -105,7 +105,10 @@ Vitest suite, so the arithmetic a budget verdict rests on is checked without a s
 
 - **Local dev stack is the supported target.** `--auth-base` / `--sync-base` / `--app-base`
   point it elsewhere, but the budgets are calibrated for the local stack, and the dev-stack
-  `/__dev__/login` bypass the harness signs in with only exists there.
+  `/__dev__/login` bypass the harness signs in with only exists there. Hosts resolve in one
+  order for every command: the flag, else `PERF_AUTH_BASE` / `PERF_SYNC_BASE`, else the
+  target the handle was seeded against, else the local stack — so a fixture seeded elsewhere
+  is measured there without passing the flags again.
 - **Readiness selectors for the browser screens are defaults, not truths**
   (`[data-cell-id]` for the editor, `main` for rules). When the UI moves, the probe fails
   with the page it got stuck on and you pass `--editor-ready` / `--rules-ready`. It never

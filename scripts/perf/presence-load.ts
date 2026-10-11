@@ -20,7 +20,7 @@
 import { parseArgs } from "node:util"
 import { writeFileSync, mkdirSync } from "node:fs"
 import path from "node:path"
-import { DEFAULT_TARGET, devLogin } from "./lib/client"
+import { devLogin, namedTarget, resolveTarget } from "./lib/client"
 import { DEFAULT_HANDLE_PATH, readHandle } from "./lib/fixture-handle"
 import { presenceMetrics, runPresenceLoad } from "./lib/presence"
 import { round } from "./lib/stats"
@@ -46,10 +46,10 @@ async function main(): Promise<void> {
     raw === undefined ? fallback : Number(raw)
 
   const handle = readHandle(values.handle ?? DEFAULT_HANDLE_PATH)
-  const target = {
-    authBase: values["auth-base"] ?? handle.target.authBase ?? DEFAULT_TARGET.authBase,
-    syncBase: values["sync-base"] ?? handle.target.syncBase ?? DEFAULT_TARGET.syncBase,
-  }
+  const target = resolveTarget(
+    namedTarget(values["auth-base"], values["sync-base"]),
+    handle.target,
+  )
   const file = values.file
     ? handle.files.find((candidate) => candidate.id === values.file || candidate.name === values.file)
     : [...handle.files].sort((a, b) => b.cells - a.cells)[0]

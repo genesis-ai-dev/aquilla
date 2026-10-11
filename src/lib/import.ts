@@ -23,7 +23,7 @@ import { proxyOrigin } from "./net/resource-proxy"
 import { t } from "./i18n/standalone"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
-import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
+import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
@@ -1817,7 +1817,9 @@ export function createMediaFileCommit(
   const prepare = async () => {
     if (ctx.mediaPictureUrl && !videoId) throw new Error("Enter a YouTube video link.")
     if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
-    if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
+    // AQU-1853: large media rides the multipart upload path, so the gate is
+    // the whole-object ceiling, not the single-request one.
+    if (file.size > MAX_AUDIO_OBJECT_BYTES) {
       throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
     }
     ctx.signal?.throwIfAborted()

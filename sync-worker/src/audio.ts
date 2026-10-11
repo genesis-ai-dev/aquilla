@@ -22,7 +22,9 @@
 // projects/{pid}/files/{fid}/, so wiping a file naturally wipes its audio.
 
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
-import { artifactBindingConflictColumn, laneIdResolveSql } from "./events/lane-id-sql"
+import { loadAudioArtifactConflict, writeAudioArtifactRows } from "./audio-artifact"
+import { safeAudioContentType } from "./audio-content-type"
+import { handleAudioMultipart, parseAudioMultipartPhase } from "./audio-multipart"
 import { adminBearerMatches } from "./lib/admin-secret"
 
 export interface AudioEnv {
@@ -33,6 +35,8 @@ export interface AudioEnv {
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
 }
+
+export { safeAudioContentType }
 
 export function r2KeyPrefix(env: Pick<AudioEnv, "R2_KEY_PREFIX">): string {
   const p = env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "") ?? ""
@@ -73,38 +77,6 @@ export function isPathSafeId(id: string): boolean {
 const AUDIO_PATH_RE = /^\/audio\/([^/]+)\/([^/]+)\/([^/]+)$/
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-// [Pen test] Input validation & injection (2026-08-26): this endpoint stored
-// whatever `Content-Type` the uploading client sent and served it back
-// verbatim with no `X-Content-Type-Options`, unlike the artifact/knowledge-base
-// content routes (see BROWSER_RENDERABLE_CONTENT_TYPES in
-// sync-worker/src/external/artifacts-route.ts and OPS-8). A CONTRIBUTOR-scoped
-// caller could PUT bytes declared `text/html` at an audioId of their choosing,
-// then hand the resulting first-party api.aquilla.app URL to anyone (the GET
-// route accepts the sync-token as `?t=`, so the link needs no victim session)
-// and have it render as active content. Mirror the same deny-list fix here.
-const BROWSER_RENDERABLE_CONTENT_TYPES = new Set([
-  "text/html",
-  "application/xhtml+xml",
-  "image/svg+xml",
-  "application/xml",
-  "text/xml",
-  "application/javascript",
-  "text/javascript",
-  "application/x-javascript",
-])
-
-/** Content-Type safe to store/echo back for an audio object. Falls back to a
- *  generic, non-executable type for anything on the deny-list above — audio
- *  playback (`<audio src>`) doesn't care about the exact declared subtype, so
- *  this costs no real functionality while closing the render-as-HTML vector. */
-export function safeAudioContentType(raw: string | null | undefined): string {
-  const normalized = (raw ?? "").split(";")[0].trim().toLowerCase()
-  if (!normalized || BROWSER_RENDERABLE_CONTENT_TYPES.has(normalized)) {
-    return "application/octet-stream"
-  }
-  return raw as string
-}
-
 /** Parsed single byte-range. `suffix` = last-N-bytes form (`bytes=-N`). */
 type ParsedRange = { offset: number; length?: number } | { suffix: number }
 
@@ -136,8 +108,11 @@ export const MAX_AUDIO_BYTES = 95 * 1024 * 1024
 
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, Range, X-Artifact-Id, X-Artifact-Name",
+  // POST carries the multipart create/complete phases (AQU-1853).
+  "Access-Control-Allow-Methods": "GET, PUT, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "Authorization, Content-Type, Range, X-Artifact-Id, X-Artifact-Name,"
+    + " X-Upload-Content-Type, X-Upload-Total-Bytes",
   "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
@@ -186,6 +161,21 @@ export async function handleAudioRequest(
     return withAudioCors(new Response("invalid audioId", { status: 400 }))
   }
   const key = audioObjectKey(env, projectId, fileId, audioId)
+
+  // AQU-1853: `?multipart=` selects the direct-to-R2 multipart upload phases
+  // (create / part / complete / abort). They do their own contributor-floor
+  // sync-token check, so they sit ahead of the single-shot branches below
+  // rather than threading through the admin-DELETE path.
+  const multipartRaw = url.searchParams.get("multipart")
+  if (multipartRaw !== null) {
+    const phase = parseAudioMultipartPhase(multipartRaw)
+    if (!phase) {
+      return withAudioCors(new Response("unknown multipart phase", { status: 400 }))
+    }
+    return withAudioCors(
+      await handleAudioMultipart({ request, env, url, projectId, fileId, audioId, key, phase }),
+    )
+  }
 
   if (request.method === "DELETE") {
     const auth = request.headers.get("Authorization") ?? ""
@@ -298,82 +288,40 @@ export async function handleAudioRequest(
     const sha256 = digest
       ? Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("")
       : null
-    const existing = artifactId
-      ? await env.AQUILLA_PG!.prepare(
-          `SELECT id::text AS id, project_id, file_id, audio_id, sha256
-             FROM artifacts WHERE id::text = ?`,
-        ).bind(artifactId).first<{
-          id: string
-          project_id: string
-          file_id: string | null
-          audio_id: string | null
-          sha256: string
-        }>()
-      : null
-    if (
-      existing
-      && (
-        existing.project_id !== projectId
-        || existing.file_id !== fileId
-        || existing.audio_id !== audioId
-        || existing.sha256 !== sha256
-      )
-    ) {
-      return withAudioCors(new Response("artifact id already belongs to different media", { status: 409 }))
+    // Identity check BEFORE the bytes land: a reused artifact id pointing at
+    // different media must not clobber the stored object.
+    let existing = null
+    if (artifactId) {
+      const checked = await loadAudioArtifactConflict(env.AQUILLA_PG!, {
+        artifactId, projectId, fileId, audioId, sha256,
+      })
+      if (checked.conflict) {
+        return withAudioCors(
+          new Response("artifact id already belongs to different media", { status: 409 }),
+        )
+      }
+      existing = checked.existing
     }
     await env.SNAPSHOTS.put(key, body, {
       httpMetadata: { contentType },
     })
     if (artifactId) {
-      const db = env.AQUILLA_PG!
-      const conflictColumn = await artifactBindingConflictColumn(db)
-      try {
-        await db.batch([
-          db.prepare(
-            `INSERT INTO artifacts (
-               id, project_id, uploaded_by_user_id, credential_id, name, content_type,
-               size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
-             ) VALUES (?::uuid, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'audio', ?, ?::text::jsonb)
-             ON CONFLICT (id) DO NOTHING`,
-          ).bind(
-            artifactId,
-            projectId,
-            String(verified.claims.userId),
-            artifactName ?? audioId,
-            contentType,
-            body.byteLength,
-            sha256!,
-            key,
-            fileId,
-            audioId,
-            JSON.stringify({ origin: "browser-media-import" }),
-          ),
-          db.prepare(
-            `INSERT INTO artifact_bindings (
-               id, project_id, artifact_id, file_id, binding_role,
-               member_path, profile_id, profile_version, fidelity, manifest, recipe, lane_id
-             ) VALUES (?::uuid, ?, ?::uuid, ?, 'source', '', 'builtin:media', '1',
-                       'preserved-only', '{}'::jsonb, NULL, ${laneIdResolveSql('source')})
-             ON CONFLICT (artifact_id, file_id, binding_role, ${conflictColumn}, member_path)
-             DO UPDATE SET
-               updated_at = now()`,
-            // AQU-1240 slice 8: source-side media binding -> the source lane.
-          ).bind(crypto.randomUUID(), projectId, artifactId, fileId, projectId),
-          // Imported media is also the original source. Reuse its R2 object
-          // rather than uploading another copy for Download original.
-          db.prepare(
-            `INSERT INTO file_source_blobs (
-               file_id, project_id, format, raw_source, r2_key, size_bytes, created_at
-             ) VALUES (?, ?, ?, NULL, ?, ?, (extract(epoch from now()) * 1000)::bigint)
-             ON CONFLICT (file_id) DO NOTHING`,
-          ).bind(fileId, projectId,
-            /\.([a-z0-9]+)$/i.exec(audioId)?.[1].toLowerCase() ?? "bin",
-            key, body.byteLength),
-        ])
-      } catch (error) {
-        if (!existing) await env.SNAPSHOTS.delete(key).catch(() => {})
-        console.error("[audio] artifact metadata write failed:", error)
-        return withAudioCors(new Response("audio artifact metadata write failed", { status: 500 }))
+      const written = await writeAudioArtifactRows({
+        env,
+        projectId,
+        fileId,
+        audioId,
+        key,
+        artifactId,
+        artifactName,
+        contentType,
+        sizeBytes: body.byteLength,
+        sha256: sha256!,
+        userId: String(verified.claims.userId),
+        existing,
+      })
+      if (!written.ok) {
+        return withAudioCors(new Response(written.message, { status: written.status }))
       }
     }
     return withAudioCors(

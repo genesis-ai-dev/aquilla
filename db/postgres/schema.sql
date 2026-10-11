@@ -322,6 +322,24 @@ CREATE TABLE project_settings (
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
+-- 0158 (AQU-1846): the react watcher's per-project bookmark and its
+-- round-robin stamp. Deliberately NOT in the settings blob: persisting the
+-- cursor there meant a read-modify-write of a multi-MB TEXT column every five
+-- minutes per swept project, racing any human settings edit. `cursor_ms` is
+-- epoch millis matching events.server_ts (NULL = never swept);
+-- `last_reaction_at` is fileId -> ISO timestamp, the per-file cooldown input;
+-- `last_swept_at` is when the cron last VISITED the project (NULL = never),
+-- which is the sweep's ordering key so no project starves behind the LIMIT.
+CREATE TABLE agent_react_state (
+    project_id       TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    cursor_ms        BIGINT,
+    last_reaction_at JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_swept_at    TIMESTAMPTZ,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX agent_react_state_last_swept
+  ON agent_react_state(last_swept_at ASC NULLS FIRST, project_id ASC);
+
 CREATE TABLE org_settings (
     org_id     BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
     settings   TEXT NOT NULL DEFAULT '{}',

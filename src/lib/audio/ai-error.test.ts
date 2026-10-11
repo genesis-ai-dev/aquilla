@@ -152,9 +152,11 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     expect(result.title).toBe("AI credit allowance used up")
     expect(result.body).toMatch(/no audio was generated/i)
     expect(result.body).toMatch(/org admin/i)
-    // Never a machine dump, and never advice to retry an engine that is fine.
+    // Never a machine dump, never advice to retry an engine that is fine, and
+    // no Gemini red herring — the cause is named outright here.
     expect(result.body).not.toContain("credit_cap_exceeded")
     expect(result.body).not.toMatch(/try again in a moment/i)
+    expect(result.body).not.toMatch(/gemini/i)
   })
 
   it("recognizes the authored credit-allowance body", () => {

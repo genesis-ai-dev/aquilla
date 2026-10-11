@@ -34,8 +34,11 @@ describe("errorFromHostedTts", () => {
     expect(message).toBe(HOSTED_TTS_CREDIT_CAP_BODY)
     // The three things the user needs: no audio, not the engine, who can fix it.
     expect(message).toMatch(/no audio was generated/i)
-    expect(message).toMatch(/not a gemini key problem/i)
+    expect(message).toMatch(/voice engine is fine/i)
     expect(message).toMatch(/org admin/i)
+    // And NOT a provider red herring: the cause is already named outright, so
+    // naming Gemini here would only plant the idea it is meant to rule out.
+    expect(message).not.toMatch(/gemini/i)
     // And never the raw JSON the server sent.
     expect(message).not.toContain("credit_cap_exceeded")
     expect(message).not.toMatch(/^Inworld TTS failed/)

@@ -16,9 +16,15 @@ export const HOSTED_TTS_FAILED_BODY =
  * the truth — "Inworld TTS couldn't generate this line" reads as a vendor
  * fault when in fact nothing was ever sent to the vendor, and the one person
  * who can clear it (an org admin, raising the cap) was never named.
+ *
+ * Unlike its siblings above, this body deliberately does NOT disclaim Gemini.
+ * That disclaimer earns its place when an ENGINE failed and the user might go
+ * hunting for a missing key; here the real cause is named outright, so naming
+ * Gemini only plants the idea it is meant to rule out. "The voice engine is
+ * fine" carries the useful half without mentioning a provider at all.
  */
 export const HOSTED_TTS_CREDIT_CAP_BODY =
-  "This organization has used its AI credit allowance, so no audio was generated. This is not a Gemini key problem and the voice engine is fine — ask an org admin to raise the cap, or wait for the allowance to reset."
+  "This organization has used its AI credit allowance, so no audio was generated. The voice engine is fine — ask an org admin to raise the cap, or wait for the allowance to reset."
 
 export const SEED_VC_NOT_CONFIGURED_BODY =
   "This clone voice needs Seed-VC after Gemini or a local engine. Voice conversion isn't wired on this server. An Inworld clone wouldn't need this step."

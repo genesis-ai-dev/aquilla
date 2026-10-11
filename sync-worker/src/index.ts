@@ -8,6 +8,7 @@
 // cutover is complete and D1 is no longer a datastore here.
 
 import { handleAdminRequest } from "./admin"
+import { handleDbTimeoutsRequest } from "./db-timeouts-route"
 import { handleAudioRequest } from "./audio"
 import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
@@ -362,6 +363,10 @@ const worker = {
     if (rebuildResponse) return rebuildResponse
     const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)
     if (rebuildFtsResponse) return rebuildFtsResponse
+    // Must precede handleAdminRequest: that handler owns the rest of /admin/*
+    // and 404s anything it does not recognise.
+    const dbTimeoutsResponse = await handleDbTimeoutsRequest(request, env)
+    if (dbTimeoutsResponse) return dbTimeoutsResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
     const audioResponse = await handleAudioRequest(request, env)

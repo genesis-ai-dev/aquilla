@@ -18,6 +18,7 @@ import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 import { notHiddenSql, visibleSourceSql } from "./hidden-cells-scope"
 import { inCountedFileSql } from "../../../db/shared/counted-files"
 import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
+import { withLongOperationTimeout } from "../../../db/shim/postgres"
 
 // ---------------------------------------------------------------------------
 // Branded type — the permission gate
@@ -546,25 +547,6 @@ const DEFAULT_MAX_ASKERS = 5000
 /** Cap on OR-terms per asker — mirrors the 40-term slice in querySourceNeighbors. */
 const MAX_QUERY_TERMS = 40
 
-/** Hard per-statement ceiling for neighbors retrieval (AQU-1005). The unscoped
- *  predecessor of this query ran for minutes on large projects and saturated
- *  the shared compute (client aborts at 15s don't cancel the server-side
- *  query); the ceiling turns any future regression into a fast, loud error
- *  instead of a silent convoy. */
-const NEIGHBOR_STATEMENT_TIMEOUT_MS = 20_000
-
-/** Run `fn` with a transaction-local statement_timeout when the executor
- *  supports transactions (the Postgres shim and PGlite both do); fall back to
- *  an unbounded plain run otherwise. The interpolated value is a module-local
- *  integer constant, never caller input. */
-async function withNeighborTimeout<T>(db: AquillaDb, fn: (h: AquillaDb) => Promise<T>): Promise<T> {
-  if (!db.transaction) return fn(db)
-  return db.transaction(async (tx) => {
-    await tx.prepare(`SET LOCAL statement_timeout = ${NEIGHBOR_STATEMENT_TIMEOUT_MS}`).run()
-    return fn(tx)
-  })
-}
-
 /**
  * Batched replacement for the per-cell `querySourceNeighbors` N+1 (AQU-641).
  *
@@ -640,21 +622,26 @@ export async function queryFileSourceNeighbors(
     "  LIMIT ?" +
     ") n ON q.terms IS NOT NULL"
 
-  const result = await withNeighborTimeout(db, (h) =>
-    h
-      .prepare(sql)
-      .bind(
-        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
-        verifiedProjectId,
-        fileId,
-        maxAskers,
-        ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
-        verifiedProjectId,
-        fileId,
-        topK,
-      )
-      .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>(),
-  )
+  // Per-statement ceiling (AQU-1005). The unscoped predecessor of this query
+  // ran for minutes on large projects and saturated the shared compute (a
+  // client abort at 15s does not cancel the server-side query); the ceiling
+  // turns any future regression into a fast, loud error instead of a silent
+  // convoy. Since AQU-1876 the value lives in the shim's
+  // LONG_OPERATION_TIMEOUTS registry, which is the one list of operations
+  // allowed to outrun DEFAULT_STATEMENT_TIMEOUT_MS.
+  const result = await withLongOperationTimeout(db, "confidence-neighbors")
+    .prepare(sql)
+    .bind(
+      ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+      verifiedProjectId,
+      fileId,
+      maxAskers,
+      ...targetLaneDualReadBinds(verifiedProjectId, targetLang),
+      verifiedProjectId,
+      fileId,
+      topK,
+    )
+    .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>()
 
   const byAsker = new Map<string, ValidatedNeighbor[]>()
   for (const row of result.results ?? []) {

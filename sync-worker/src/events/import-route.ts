@@ -41,6 +41,7 @@ import { dataTargetTagsFromEvents, ensureBlankTargetBridgeStmt, ensureProjectLan
 import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { withLongOperationTimeout } from '../../../db/shim/postgres'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import {
   MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
@@ -485,6 +486,14 @@ export async function handleBulkImportRequest(
   // safe after a dropped response or a partial import.
   if (body.complete && !body.file && body.cells.length === 0) {
     const finalizedAt = Date.now()
+    // AQU-1876: these are the import's only full-file scans (every per-file
+    // and per-section counter for a file that may hold ~31k cells), so the
+    // finalize batch runs under the registered `import-finalize` ceiling
+    // instead of the 15s default every worker connection carries. The
+    // per-chunk cell writes stay on the default — statement_timeout is per
+    // statement, and a chunk's statements are bounded by the client's chunk
+    // size. See LONG_OPERATION_TIMEOUTS in db/shim/postgres.ts.
+    const finalizeDb = withLongOperationTimeout(db, 'import-finalize')
     const finalizeStmts: AquillaStatement[] = [
       fileCountersRecomputeStmt(db, body.projectId, body.fileId, finalizedAt),
       ...fullProgressRecomputeStmts(db, body.projectId, body.fileId, finalizedAt),
@@ -629,7 +638,7 @@ export async function handleBulkImportRequest(
         })
         finalizeStmts.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
       }
-      await runImportBatch(db, finalizeStmts)
+      await runImportBatch(finalizeDb, finalizeStmts)
     } catch (err) {
       console.error("[import] finalization failed:", err)
       return withCors(

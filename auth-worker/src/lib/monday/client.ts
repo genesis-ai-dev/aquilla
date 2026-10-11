@@ -234,28 +234,13 @@ export async function fetchBoardItemsSample(
   }))
 }
 
-/** Find an item whose text column equals `value` (idempotent re-linking). */
-export async function findItemByColumnValue(
-  accessToken: string,
-  boardId: string,
-  columnId: string,
-  value: string,
-): Promise<string | null> {
-  const data = await mondayGraphQL<{
-    items_page_by_column_values: { items: Array<{ id: string | number }> } | null
-  }>(
-    accessToken,
-    `query { items_page_by_column_values(board_id: ${gqlString(boardId)}, limit: 1, columns: [{column_id: ${gqlString(columnId)}, column_values: [${gqlString(value)}]}]) { items { id } } }`,
-  )
-  const id = data.items_page_by_column_values?.items?.[0]?.id
-  return id != null ? String(id) : null
-}
-
 /**
- * AQU-1828: resolve MANY column values in one request. `items_page_by_column_values`
- * takes a list of values for a column, so a 66-file first push costs one query
- * instead of 66. Returns value → item id for the values that matched; values
- * with no item are simply absent.
+ * Find the items whose text column equals one of `values` (idempotent
+ * re-linking). AQU-1828: resolves MANY values in one request —
+ * `items_page_by_column_values` takes a list for a column, so a 66-file first
+ * push costs one query instead of the 66 the per-value helper this replaced
+ * cost. Returns value → item id for the values that matched; values with no
+ * item are simply absent.
  */
 export async function findItemsByColumnValues(
   accessToken: string,
@@ -286,8 +271,10 @@ export async function findItemsByColumnValues(
 }
 
 /**
- * AQU-1828: one items page, indexed by normalized name, so N entities share a
- * single request. findItemByName fetched this same page per entity.
+ * Case-insensitive name matching against the first items page (v1
+ * approximation). AQU-1828: one request, indexed by normalized name, so N
+ * entities share it — the per-entity helper this replaced fetched this same
+ * 500-item page once per entity.
  */
 export async function fetchBoardItemNameIndex(
   accessToken: string,
@@ -313,26 +300,6 @@ export async function fetchBoardItemNameIndex(
 /** The key `fetchBoardItemNameIndex` indexes on — match callers must use it too. */
 export function normalizeItemName(name: string): string {
   return name.trim().toLowerCase()
-}
-
-/** Case-insensitive name match against the first items page (v1 approximation). */
-export async function findItemByName(
-  accessToken: string,
-  boardId: string,
-  name: string,
-): Promise<string | null> {
-  const data = await mondayGraphQL<{
-    boards: Array<{
-      items_page: { items: Array<{ id: string | number; name: string }> }
-    }> | null
-  }>(
-    accessToken,
-    `query { boards(ids: ${gqlString(boardId)}) { items_page(limit: 500) { items { id name } } } }`,
-  )
-  const items = data.boards?.[0]?.items_page?.items ?? []
-  const needle = normalizeItemName(name)
-  const hit = items.find((i) => normalizeItemName(i.name) === needle)
-  return hit ? String(hit.id) : null
 }
 
 // ── Webhooks ───────────────────────────────────────────────────────────────

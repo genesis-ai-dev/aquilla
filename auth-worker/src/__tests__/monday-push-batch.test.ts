@@ -1,7 +1,7 @@
 // AQU-1828 — one Monday lookup for the whole push, not one per file.
 //
 // The regression this guards: upsertEntities resolved pre-existing items with a
-// findItemByName / findItemByColumnValue call PER ENTITY, so first-linking a
+// per-entity findItemByName / findItemByColumnValue call, so first-linking a
 // 66-book project spent 66 subrequests just matching items — a cron run over
 // ~20 such links blew the Workers subrequest ceiling before pushing anything.
 

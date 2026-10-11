@@ -236,6 +236,13 @@ export interface Env {
   /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
    *  run halts gracefully with a budget.exhausted frame at this ceiling. */
   AGENT_RUN_COST_CAP_CENTS?: string
+  /** Per-run Autopilot driver (src/contextual-run-do.ts) — AQU-1845. One
+   *  object per run; its alarm drives the run's waves and re-arms itself, so a
+   *  run outlives the request that started it instead of dying with that
+   *  request's `waitUntil` budget and waiting for the 5-minute cron. Optional:
+   *  where it is unbound (vitest route suites, an environment deployed before
+   *  the DO migration) routes/contextual.ts falls back to the in-request loop. */
+  CONTEXTUAL_RUN_DRIVER?: DurableObjectNamespace
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string

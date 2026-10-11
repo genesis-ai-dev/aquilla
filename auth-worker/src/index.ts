@@ -122,6 +122,7 @@ import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
 import { pruneExpiredTraces } from "./lib/contextual/traces"
+import { sweepContextualRunSteps } from "../../db/shared/contextual-run-steps"
 import { startReactionRun, sweepStrandedContextualRuns, wakeReactionRun } from "./routes/contextual"
 import { runReactSweep } from "./lib/react-loop"
 import {
@@ -562,6 +563,14 @@ const scheduled = async (
     await pruneExpiredRevokedTokens(runEnv.AQUILLA_PG)
     // Autopilot prompt/reply traces expire after 30 days. Non-throwing.
     await pruneExpiredTraces(runEnv.AQUILLA_PG)
+    // AQU-1845 — abandoned wave checkpoints. The driver clears its own after
+    // every completed wave, so rows reaching this age belong to a driver that
+    // died and never came back. Must never take the cron down with it.
+    try {
+      await sweepContextualRunSteps(runEnv.AQUILLA_PG)
+    } catch (err) {
+      console.warn("[contextual cron] checkpoint sweep failed (non-fatal):", err)
+    }
     // Contextual autopilot: restart runs whose driver died and wake runs that
     // parked with spans still queued, so long files finish unattended. Failing
     // here must never take the Monday flush down with it.
@@ -595,6 +604,11 @@ const scheduled = async (
     if (shim) ctx.waitUntil(sweepDone.then(() => shim!.close()))
   }
 }
+
+// AQU-1845 — the per-run Autopilot driver. A Durable Object class must be a
+// named export of the Worker's entrypoint module for the runtime to find it;
+// the binding and migration live in wrangler.toml.
+export { ContextualRunDriver } from "./contextual-run-do"
 
 // Keep `export default app` semantics (tests call app.request) while giving
 // the Workers runtime a `scheduled` handler on the same default export.

@@ -1996,6 +1996,33 @@ CREATE TABLE IF NOT EXISTS contextual_project_leases (
 CREATE INDEX IF NOT EXISTS contextual_project_leases_project_expiry
   ON contextual_project_leases(project_id, expires_at);
 
+-- AQU-1845 — per-LLM-call checkpoint for Autopilot waves (0158). The run
+-- cursor only advances past a COMPLETED wave, so a driver that dies mid-wave
+-- makes the replay re-issue every model call the dead attempt had already
+-- finished — calls whose output was discarded but already paid for. One row
+-- per call, written the moment it returns, read by the replay before it dials
+-- the provider.
+--
+-- Ephemeral coordination state, like contextual_project_leases above: the
+-- driver clears a run's rows after each completed wave (the cursor has moved,
+-- so nothing will replay those spans) and on settlement. `created_at` carries
+-- the retention sweep for rows whose driver never came back. `project_id` is
+-- there for the 0158 RLS policy, not for any read path — it keeps this table
+-- under the same app_contextual_project_scope() helper as its siblings.
+CREATE TABLE IF NOT EXISTS contextual_run_steps (
+  run_id     text NOT NULL,
+  project_id text NOT NULL,
+  step_key   text NOT NULL,
+  output     text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (run_id, step_key),
+  CHECK (octet_length(run_id) <= 512),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (octet_length(step_key) <= 512)
+);
+CREATE INDEX IF NOT EXISTS contextual_run_steps_created
+  ON contextual_run_steps(created_at);
+
 -- Stripe Field Plan billing + word-metered AI credits (0077_org_billing.sql).
 -- Additive: unpaid orgs have no row and are treated as plan=none.
 CREATE TABLE IF NOT EXISTS org_billing (

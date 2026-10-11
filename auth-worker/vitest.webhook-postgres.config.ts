@@ -6,6 +6,9 @@ export default defineConfig({
   resolve: { alias: {
     "cloudflare:test": path.resolve(__dirname,
       "src/__tests__/helpers/pg-test-env.ts"),
+    // AQU-1845: index.ts re-exports the ContextualRunDriver DO.
+    "cloudflare:workers": path.resolve(__dirname,
+      "src/__tests__/helpers/cloudflare-workers-stub.ts"),
   } },
   test: {
     environment: "node",

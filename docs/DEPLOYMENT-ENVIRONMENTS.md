@@ -280,6 +280,19 @@ generated for Workers that implement a Durable Object", which sync-worker does
 (`ProjectSync`). Proving it needs either Cloudflare support or a throwaway pair of
 Workers reproducing the hop outside this repo.
 
+**No Autopilot run driver on a preview (AQU-1845).** auth-worker declares the
+per-run `ContextualRunDriver` Durable Object in every real environment, but
+`scripts/cloudflare-stack-preview.mjs` deliberately omits it from the auth
+preview config — by the same Cloudflare limitation quoted above, a Worker that
+implements a Durable Object gets no preview URL, and `previewOrigin` treats a
+missing URL as fatal, so declaring it would risk the whole PR preview stack
+(the web preview is built from the auth preview's origin). With the binding
+absent, `routes/contextual.ts` falls back to the pre-AQU-1845 in-request
+`waitUntil` loop. So a preview can show that a run starts, drafts and stages
+reviewable work, but it CANNOT show that the run outlives the request that
+started it, or that an interrupted run resumes without re-paying for finished
+model calls. Walk those on development or production.
+
 **What to do instead.** Verify the two halves separately rather than end to end:
 
 1. Probe the auth preview directly to prove the route exists and is gated —

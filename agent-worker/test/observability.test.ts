@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest"
 import { createApp, SLOW_REQUEST_MS, slowThresholdFor } from "../src/app"
+import { alwaysAdmit, noSleep } from "./fake-pool"
 import { MAX_TIMEOUT_MS } from "../src/exec"
 import type { Env } from "../src/types"
 import type { SandboxLike, SandboxRunResult, SandboxReadResult, SandboxWriteResult } from "../src/sandbox"
@@ -40,13 +41,14 @@ function makeEnv(overrides?: Partial<Env>): Env {
   return {
     AGENT_SANDBOX_KEY: "test-key",
     Sandbox: {} as Env["Sandbox"],
+    SANDBOX_POOL: {} as Env["SANDBOX_POOL"],
     SNAPSHOTS: { get: async () => null } as unknown as Env["SNAPSHOTS"],
     ...overrides,
   }
 }
 
 function harness(sandbox: SandboxLike, env: Env = makeEnv()) {
-  const app = createApp({ resolveSandbox: () => sandbox })
+  const app = createApp({ resolveSandbox: () => sandbox, pool: alwaysAdmit(), sleep: noSleep })
   return (req: Request) => app.fetch(req, env)
 }
 
@@ -159,6 +161,8 @@ describe("slow-request logging", () => {
     clock = 1_000_000
     const app = createApp({
       resolveSandbox: () => new SlowSandbox(0),
+      pool: alwaysAdmit(),
+      sleep: noSleep,
     })
     const res = await app.fetch(
       new Request("http://x/sessions/s1/exec", { method: "POST", body: "{}" }),

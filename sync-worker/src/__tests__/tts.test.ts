@@ -44,6 +44,24 @@ function makeWav(durationSeconds: number, sampleRate = 24000): Uint8Array {
   return new Uint8Array(buf)
 }
 
+/**
+ * A WAV whose duration cannot be read: a bare RIFF/WAVE header with no `fmt `
+ * and no `data` chunk, so wavDurationSeconds() returns 0. Stands in for a
+ * provider response that carries neither word timestamps nor a parseable
+ * container (AQU-1872).
+ */
+function makeUnparseableWav(): Uint8Array {
+  const buf = new ArrayBuffer(12)
+  const view = new DataView(buf)
+  const write = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
+  }
+  write(0, "RIFF")
+  view.setUint32(4, 4, true)
+  write(8, "WAVE")
+  return new Uint8Array(buf)
+}
+
 // ── Stub R2 bucket (mirrors voice-convert.test.ts) ───────────────────────────
 
 interface StoredObject {
@@ -104,8 +122,23 @@ interface UsageRow {
   audio_seconds: number
 }
 
-function makeStubDb(projectOrgId: number | null = 5) {
+interface CreditRow {
+  org_id: number
+  user_id: number
+  date_utc: string
+  rail: string
+  raw_cost_cents: number
+  units: number
+}
+
+function makeStubDb(
+  projectOrgId: number | null = 5,
+  opts: { creditRows?: CreditRow[]; orgSettings?: string | null } = {},
+) {
   const usageRows: UsageRow[] = []
+  // AQU-1872: backs the org credit pre-check in tts.ts — resolveCreditConfig
+  // reads org_settings, readOrgSpend sums org_credit_usage_daily.
+  const creditRows: CreditRow[] = [...(opts.creditRows ?? [])]
   // [Pen test] API security & data exposure (2026-09-03): backs the new
   // per-user throttle in tts.ts — countRecentRateLimitEvents/recordRateLimitEvent
   // (db/shared/rate-limit.ts) against the same auth_rate_limit_events table
@@ -132,6 +165,9 @@ function makeStubDb(projectOrgId: number | null = 5) {
                 .reduce((s, r) => s + r.audio_seconds, 0)
               return { total_seconds: total } as unknown as T
             }
+            if (sql.includes("FROM org_settings")) {
+              return (opts.orgSettings ? { settings: opts.orgSettings } : null) as unknown as T
+            }
             if (sql.includes("FROM auth_rate_limit_events")) {
               const [kind, identifier] = boundArgs as [string, string]
               const n = rateLimitEvents.filter(
@@ -145,6 +181,36 @@ function makeStubDb(projectOrgId: number | null = 5) {
             if (sql.includes("INSERT INTO auth_rate_limit_events")) {
               const [kind, identifier] = boundArgs as [string, string]
               rateLimitEvents.push({ kind, identifier })
+            }
+            if (sql.includes("INSERT INTO org_credit_usage_daily")) {
+              const [orgId, userId, dateUtc, rail, rawCostCents, units] = boundArgs as [
+                number,
+                number,
+                string,
+                string,
+                number,
+                number,
+              ]
+              const existing = creditRows.find(
+                (r) =>
+                  r.org_id === orgId &&
+                  r.user_id === userId &&
+                  r.date_utc === dateUtc &&
+                  r.rail === rail,
+              )
+              if (existing) {
+                existing.raw_cost_cents += rawCostCents
+                existing.units += units
+              } else {
+                creditRows.push({
+                  org_id: orgId,
+                  user_id: userId,
+                  date_utc: dateUtc,
+                  rail,
+                  raw_cost_cents: rawCostCents,
+                  units,
+                })
+              }
             }
             if (sql.includes("INSERT INTO tts_usage_daily")) {
               const [userId, orgId, dateUtc, audioSeconds] = boundArgs as [
@@ -172,6 +238,18 @@ function makeStubDb(projectOrgId: number | null = 5) {
             return { results: [], success: true as const, meta: {} as never }
           },
           async all() {
+            if (sql.includes("FROM org_credit_usage_daily")) {
+              const [orgId, since] = boundArgs as [number, string]
+              const grouped = new Map<string, { date_utc: string; rail: string; raw_cost_cents: number }>()
+              for (const row of creditRows) {
+                if (row.org_id !== orgId || row.date_utc < since) continue
+                const key = `${row.date_utc}|${row.rail}`
+                const acc = grouped.get(key)
+                if (acc) acc.raw_cost_cents += row.raw_cost_cents
+                else grouped.set(key, { date_utc: row.date_utc, rail: row.rail, raw_cost_cents: row.raw_cost_cents })
+              }
+              return { results: [...grouped.values()], success: true as const, meta: {} as never }
+            }
             return { results: [], success: true as const, meta: {} as never }
           },
           async raw() {
@@ -190,6 +268,7 @@ function makeStubDb(projectOrgId: number | null = 5) {
     } as unknown as AquillaDb,
     usageRows,
     rateLimitEvents,
+    creditRows,
   }
 }
 
@@ -206,6 +285,11 @@ type StubEnv = {
   TTS_USER_DAILY_SECONDS_LIMIT?: string
   TTS_BUDGET_ENFORCE?: string
   AQUILLA_PG?: AquillaDb
+  CREDIT_DAILY_CAP?: string
+  CREDIT_WEEKLY_CAP?: string
+  CREDIT_ENFORCE?: string
+  TTS_COST_CENTS_PER_CALL?: string
+  TTS_COST_PER_AUDIO_SEC_CENTS?: string
 }
 
 function makeEnv(
@@ -529,6 +613,180 @@ describe("POST /api/v1/voice/tts", () => {
     await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "org test" }, token))
     const userRow = usageRows.find((r) => r.user_id === 1 && r.org_id !== 0)
     expect(userRow?.org_id).toBe(42)
+  })
+
+  // AQU-1872: a clip whose duration we cannot read used to be recorded as 0s —
+  // it counted toward no daily budget and no credit ledger, so a provider that
+  // stops sending timestamps made the whole hosted TTS path silently free.
+  describe("unknown clip duration (AQU-1872)", () => {
+    it("charges a text-length estimate instead of 0 seconds", async () => {
+      const { db, usageRows } = makeStubDb()
+      stubInworld({ wav: makeUnparseableWav() })
+      const token = await makeToken()
+      // 30 chars / 15 chars-per-second = 2s.
+      const text = "a".repeat(30)
+
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text }, token)))!
+
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { durationSeconds: number }
+      expect(body.durationSeconds).toBeCloseTo(2)
+      const userRow = usageRows.find((r) => r.user_id === 1 && r.org_id !== 0)
+      expect(userRow?.audio_seconds).toBeCloseTo(2)
+    })
+
+    it("never charges less than the one-second floor", async () => {
+      const { db, usageRows } = makeStubDb()
+      stubInworld({ wav: makeUnparseableWav() })
+      const token = await makeToken()
+
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token)))!
+
+      expect(res.status).toBe(200)
+      const userRow = usageRows.find((r) => r.user_id === 1 && r.org_id !== 0)
+      expect(userRow?.audio_seconds).toBeCloseTo(1)
+    })
+
+    it("also charges the estimate to the credit ledger, not a bare per-call cost", async () => {
+      const { db, creditRows } = makeStubDb(7)
+      stubInworld({ wav: makeUnparseableWav() })
+      const token = await makeToken()
+      const text = "b".repeat(30) // → 2s estimate
+
+      const res = (await call(
+        makeEnv(db, { TTS_COST_PER_AUDIO_SEC_CENTS: "1" }),
+        ttsReq({ projectId: "p1", fileId: "f1", text }, token),
+      ))!
+
+      expect(res.status).toBe(200)
+      const row = creditRows.find((r) => r.org_id === 7 && r.rail === "tts")
+      // 2¢ flat per call + 2s × 1¢ = 4¢, and 2 whole audio-seconds of units.
+      expect(row?.raw_cost_cents).toBeCloseTo(4)
+      expect(row?.units).toBe(2)
+    })
+
+    it("still measures a readable clip rather than estimating", async () => {
+      const { db, usageRows } = makeStubDb()
+      stubInworld({ wav: makeWav(3) })
+      const token = await makeToken()
+      // 150 chars would estimate 10s; the real 3s clip must win.
+      const text = "c".repeat(150)
+
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text }, token)))!
+
+      expect(res.status).toBe(200)
+      const userRow = usageRows.find((r) => r.user_id === 1 && r.org_id !== 0)
+      expect(userRow?.audio_seconds).toBeCloseTo(3)
+    })
+  })
+
+  // AQU-1872: the per-user window above is volumetric, not monetary — several
+  // users batch-narrating in one org each stay under it while the org's spend
+  // runs away. The pre-check must refuse BEFORE any paid Inworld call.
+  describe("org credit pre-check (AQU-1872)", () => {
+    const today = new Date().toISOString().slice(0, 10)
+    /** 300¢ raw × 4× markup = 1200 credits — past the 1000/day default cap. */
+    const exhausted = [
+      { org_id: 5, user_id: 1, date_utc: today, rail: "tts", raw_cost_cents: 300, units: 10 },
+    ]
+
+    it("429s an exhausted org without calling Inworld, when enforcing", async () => {
+      const { db, usageRows } = makeStubDb(5, { creditRows: exhausted })
+      const calls = stubInworld({ wav: makeWav(1) })
+      const token = await makeToken()
+
+      const res = (await call(
+        makeEnv(db, { CREDIT_ENFORCE: "true" }),
+        ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token),
+      ))!
+
+      expect(res.status).toBe(429)
+      const body = (await res.json()) as { error: string; message: string; reason: string }
+      expect(body.error).toBe("credit_cap_exceeded")
+      expect(body.reason).toBe("daily")
+      expect(body.message).toMatch(/credit allowance/i)
+      // Nothing paid for, nothing metered.
+      expect(calls).toHaveLength(0)
+      expect(usageRows).toHaveLength(0)
+    })
+
+    it("refuses before cloning a reference voice too", async () => {
+      const { db } = makeStubDb(5, { creditRows: exhausted })
+      const env = makeEnv(db, { CREDIT_ENFORCE: "true", SNAPSHOTS: makeStubBucket() })
+      env.SNAPSHOTS._seed("projects/p1/voices/ref.wav", makeWav(1), "audio/wav")
+      const calls = stubInworld({ wav: makeWav(1) })
+      const token = await makeToken()
+
+      const res = (await call(
+        env,
+        ttsReq({ projectId: "p1", fileId: "f1", text: "hi", referenceAudioId: "ref.wav" }, token),
+      ))!
+
+      expect(res.status).toBe(429)
+      expect(calls).toHaveLength(0)
+    })
+
+    it("lets an exhausted org through in log-only mode (enforcement off)", async () => {
+      const { db } = makeStubDb(5, { creditRows: exhausted })
+      stubInworld({ wav: makeWav(1) })
+      const token = await makeToken()
+
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token)))!
+
+      expect(res.status).toBe(200)
+    })
+
+    it("does not block an org with credit left, even when enforcing", async () => {
+      const { db } = makeStubDb(5, {
+        creditRows: [
+          { org_id: 5, user_id: 1, date_utc: today, rail: "tts", raw_cost_cents: 10, units: 1 },
+        ],
+      })
+      stubInworld({ wav: makeWav(1) })
+      const token = await makeToken()
+
+      const res = (await call(
+        makeEnv(db, { CREDIT_ENFORCE: "true" }),
+        ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token),
+      ))!
+
+      expect(res.status).toBe(200)
+    })
+
+    it("counts another org's spend separately", async () => {
+      const { db } = makeStubDb(5, {
+        creditRows: [
+          { org_id: 99, user_id: 1, date_utc: today, rail: "tts", raw_cost_cents: 9000, units: 10 },
+        ],
+      })
+      stubInworld({ wav: makeWav(1) })
+      const token = await makeToken()
+
+      const res = (await call(
+        makeEnv(db, { CREDIT_ENFORCE: "true" }),
+        ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token),
+      ))!
+
+      expect(res.status).toBe(200)
+    })
+
+    it("honors a per-org cap from org_settings.credits", async () => {
+      const { db } = makeStubDb(5, {
+        creditRows: [
+          { org_id: 5, user_id: 1, date_utc: today, rail: "tts", raw_cost_cents: 10, units: 1 },
+        ],
+        orgSettings: JSON.stringify({ credits: { dailyCap: 20, enforce: true } }),
+      })
+      const calls = stubInworld({ wav: makeWav(1) })
+      const token = await makeToken()
+
+      // 10¢ × 4 = 40 credits ≥ the org's own 20-credit cap, and the org turned
+      // enforcement on itself even though the platform env has not.
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token)))!
+
+      expect(res.status).toBe(429)
+      expect(calls).toHaveLength(0)
+    })
   })
 
   it("honors R2_KEY_PREFIX for the output audio write", async () => {

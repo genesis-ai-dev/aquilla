@@ -215,6 +215,16 @@ declare global {
        * Tune once actual GPU billing is available.
        */
       TTS_COST_PER_AUDIO_SEC_CENTS?: string
+      /**
+       * Org credit caps, shared with auth-worker's llm/agent rails (spec
+       * § Config). The TTS pre-check reads these and is log-only unless
+       * CREDIT_ENFORCE === "true" or the org sets `credits.enforce`.
+       */
+      CREDIT_MARKUP?: string
+      CREDIT_AGENT_MARKUP?: string
+      CREDIT_DAILY_CAP?: string
+      CREDIT_WEEKLY_CAP?: string
+      CREDIT_ENFORCE?: string
     }
   }
 }

@@ -240,10 +240,16 @@ export interface WsReconcilerOptions {
   baseUrl: string
   /** Override only for tests. */
   webSocketCtor?: typeof WebSocket
-  /** Min backoff between reconnects in ms. */
+  /**
+   * AQU-1838: width of the FIRST reconnect window in ms. The delay is a
+   * uniform draw from this window (full jitter), not the window itself, so
+   * this is the longest a first reconnect waits — not the shortest.
+   */
   minBackoffMs?: number
-  /** Max backoff between reconnects in ms. */
+  /** Cap the reconnect window grows to in ms. */
   maxBackoffMs?: number
+  /** Injectable [0,1) source so tests can pin the jitter draw. */
+  randomSource?(): number
   /** How often an open socket sends a heartbeat `ping`. 0 disables. */
   heartbeatIntervalMs?: number
   /** A socket that receives nothing within this long of a ping is dead. */
@@ -402,6 +408,17 @@ export function tabConnId(key: string): string {
 }
 
 /**
+ * AQU-1838: a first reconnect is drawn uniformly from [RECONNECT_FLOOR_MS,
+ * 5s]. A sync-worker deploy drops every socket in the fleet at once, and each
+ * reconnect costs a socket, possibly a sync-token mint, and the AQU-845 resync
+ * fan-out — so the arrival times have to be spread, not merely delayed. The
+ * floor keeps a draw near zero from reconnecting hard against a server that is
+ * still coming up.
+ */
+const DEFAULT_FIRST_RECONNECT_WINDOW_MS = 5_000
+const RECONNECT_FLOOR_MS = 250
+
+/**
  * Create the reconciler. Begins connecting on the next tick — call `close()`
  * to halt. Listeners can be registered before/after connect; messages
  * delivered before the first listener registration are dropped.
@@ -410,10 +427,19 @@ export function createWsReconciler(
   options: WsReconcilerOptions,
   handlers: WsReconcilerHandlers = {},
 ): WsReconciler {
-  // 1s floor + jitter: a sync-worker redeploy drops every socket at once, and
-  // a 250ms floor had the whole fleet reconnecting (and resyncing) in lockstep.
-  const minBackoff = options.minBackoffMs ?? 1_000
+  // AQU-1838 full jitter: the reconnect delay is a uniform draw from the whole
+  // window, and it is the WINDOW — not the delay — that doubles per failed
+  // attempt. A 1s floor with up to +25% jitter put every client a redeploy
+  // dropped back inside one 250ms band, so 1,000 sockets reconnected (and each
+  // minted a sync token and ran a resync fan-out) in lockstep. Drawing across
+  // the window spreads the same fleet over seconds.
+  const firstWindow = options.minBackoffMs ?? DEFAULT_FIRST_RECONNECT_WINDOW_MS
   const maxBackoff = options.maxBackoffMs ?? 30_000
+  const random = options.randomSource ?? Math.random
+  // The floor never exceeds half the window, so a caller that configures a
+  // deliberately short window (the offline adapter, tests) keeps both its
+  // cadence and its jitter instead of being clamped to the default floor.
+  const reconnectFloor = Math.min(RECONNECT_FLOOR_MS, Math.round(firstWindow / 2))
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 25_000
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 10_000
   const Ctor =
@@ -426,7 +452,7 @@ export function createWsReconciler(
   let socket: WebSocket | null = null
   let connId: string | null = null
   let closed = false
-  let backoffMs = minBackoff
+  let reconnectWindow = firstWindow
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   let heartbeatDeadline: ReturnType<typeof setTimeout> | null = null
@@ -458,7 +484,7 @@ export function createWsReconciler(
     socket = null
     safeEmit(() => handlers.onError?.(new Error("ws: heartbeat timeout")))
     safeEmit(() => handlers.onClose?.({ code: 4000, reason: "heartbeat timeout", wasClean: false } as CloseEvent))
-    backoffMs = minBackoff
+    reconnectWindow = firstWindow
     void connect()
   }
 
@@ -501,9 +527,12 @@ export function createWsReconciler(
   function scheduleReconnect(): void {
     if (closed) return
     if (reconnectTimer !== null) return
-    // Up to +25% jitter so clients dropped together don't retry together.
-    const delay = Math.round(backoffMs * (1 + Math.random() * 0.25))
-    backoffMs = Math.min(maxBackoff, Math.max(minBackoff, backoffMs * 2))
+    // Full jitter: an independent point in [floor, window] per client, so a
+    // fleet dropped at the same instant arrives spread over the window instead
+    // of all at its end. The window then doubles — the "scale up while the
+    // server is failing" half of the fix — capped at maxBackoff.
+    const delay = Math.max(reconnectFloor, Math.round(random() * reconnectWindow))
+    reconnectWindow = Math.min(maxBackoff, Math.max(firstWindow, reconnectWindow * 2))
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
       void connect()
@@ -554,7 +583,7 @@ export function createWsReconciler(
     connId = socketConnId
 
     ws.onopen = () => {
-      backoffMs = minBackoff
+      reconnectWindow = firstWindow
       lastReceivedAt = Date.now()
       startHeartbeat(ws)
       safeEmit(() => handlers.onOpen?.({ connId: socketConnId }))
@@ -633,7 +662,7 @@ export function createWsReconciler(
           /* swallow */
         }
       }
-      backoffMs = minBackoff
+      reconnectWindow = firstWindow
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null

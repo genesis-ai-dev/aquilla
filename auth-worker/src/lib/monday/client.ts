@@ -11,6 +11,9 @@ export const MONDAY_API_VERSION = "2026-07"
 /** Max seconds we will actually sleep on a 429 before giving up. */
 const MAX_RETRY_SLEEP_SECONDS = 60
 
+/** How many column values one items_page_by_column_values query carries (AQU-1828). */
+const COLUMN_VALUE_LOOKUP_BATCH = 100
+
 export class MondayApiError extends Error {
   readonly status: number
   constructor(message: string, status: number) {
@@ -248,6 +251,70 @@ export async function findItemByColumnValue(
   return id != null ? String(id) : null
 }
 
+/**
+ * AQU-1828: resolve MANY column values in one request. `items_page_by_column_values`
+ * takes a list of values for a column, so a 66-file first push costs one query
+ * instead of 66. Returns value → item id for the values that matched; values
+ * with no item are simply absent.
+ */
+export async function findItemsByColumnValues(
+  accessToken: string,
+  boardId: string,
+  columnId: string,
+  values: string[],
+): Promise<Map<string, string>> {
+  const found = new Map<string, string>()
+  for (const batch of chunk([...new Set(values)], COLUMN_VALUE_LOOKUP_BATCH)) {
+    const data = await mondayGraphQL<{
+      items_page_by_column_values: {
+        items: Array<{
+          id: string | number
+          column_values: Array<{ id: string; text: string | null }>
+        }>
+      } | null
+    }>(
+      accessToken,
+      `query { items_page_by_column_values(board_id: ${gqlString(boardId)}, limit: ${batch.length}, columns: [{column_id: ${gqlString(columnId)}, column_values: [${batch.map(gqlString).join(", ")}]}]) { items { id column_values(ids: [${gqlString(columnId)}]) { id text } } } }`,
+    )
+    for (const item of data.items_page_by_column_values?.items ?? []) {
+      const text = item.column_values?.find((c) => c.id === columnId)?.text
+      if (text == null || text === "") continue
+      if (!found.has(text)) found.set(text, String(item.id))
+    }
+  }
+  return found
+}
+
+/**
+ * AQU-1828: one items page, indexed by normalized name, so N entities share a
+ * single request. findItemByName fetched this same page per entity.
+ */
+export async function fetchBoardItemNameIndex(
+  accessToken: string,
+  boardId: string,
+  limit = 500,
+): Promise<Map<string, string>> {
+  const data = await mondayGraphQL<{
+    boards: Array<{
+      items_page: { items: Array<{ id: string | number; name: string }> }
+    }> | null
+  }>(
+    accessToken,
+    `query { boards(ids: ${gqlString(boardId)}) { items_page(limit: ${limit}) { items { id name } } } }`,
+  )
+  const index = new Map<string, string>()
+  for (const item of data.boards?.[0]?.items_page?.items ?? []) {
+    const key = normalizeItemName(item.name)
+    if (!index.has(key)) index.set(key, String(item.id))
+  }
+  return index
+}
+
+/** The key `fetchBoardItemNameIndex` indexes on — match callers must use it too. */
+export function normalizeItemName(name: string): string {
+  return name.trim().toLowerCase()
+}
+
 /** Case-insensitive name match against the first items page (v1 approximation). */
 export async function findItemByName(
   accessToken: string,
@@ -263,8 +330,8 @@ export async function findItemByName(
     `query { boards(ids: ${gqlString(boardId)}) { items_page(limit: 500) { items { id name } } } }`,
   )
   const items = data.boards?.[0]?.items_page?.items ?? []
-  const needle = name.trim().toLowerCase()
-  const hit = items.find((i) => i.name.trim().toLowerCase() === needle)
+  const needle = normalizeItemName(name)
+  const hit = items.find((i) => normalizeItemName(i.name) === needle)
   return hit ? String(hit.id) : null
 }
 

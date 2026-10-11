@@ -1729,6 +1729,8 @@ CREATE TABLE IF NOT EXISTS integration_links (
   last_pushed_at TIMESTAMPTZ,
   last_push_status TEXT,              -- 'ok' | 'error'
   last_push_error TEXT,
+  push_attempts INTEGER NOT NULL DEFAULT 0,  -- consecutive failed pushes (0159; AQU-1828)
+  next_retry_at TIMESTAMPTZ,          -- earliest the cron flush may retry; NULL = no backoff
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -168,6 +168,15 @@ interface DOEnv {
  *  dirty-flags on its side too; this only caps subrequest chatter. */
 const MONDAY_NOTIFY_THROTTLE_MS = 60_000
 
+/**
+ * AQU-1828: how long a "this project has no Monday link" answer from identity
+ * is trusted. Linking/unlinking invalidates it immediately through
+ * /__monday-link-changed, so this is only a backstop for a missed notify —
+ * long enough that an unlinked project costs ~one request per DO lifetime
+ * instead of one per 60s (at 1k active projects that was ~17 req/s of no-ops).
+ */
+const MONDAY_UNLINKED_TTL_MS = 30 * 60_000
+
 export class ProjectSync extends DurableObject<DOEnv> {
   private connections = new Map<WebSocket, ConnectionState>()
   private presence = new Map<string, PresenceState>()
@@ -198,6 +207,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
   /** Monday push nudge throttle (in-memory; eviction resets it, which is fine —
    *  identity's cron reconciliation covers gaps). */
   private lastMondayNotifyAt = 0
+  /** Epoch ms until which identity said this project has no Monday link. */
+  private mondayUnlinkedUntil = 0
 
   private async runLinkSync(projectId: string): Promise<MirrorSyncResult> {
     // Test seam takes priority; otherwise build a short-lived PG connection
@@ -280,11 +291,19 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // Monday integration nudge: content frames imply progress may have
       // changed. Throttled + best-effort; never blocks the broadcast reply.
       const mondayProject = mondayNotifyProject(frames)
-      if (mondayProject && Date.now() - this.lastMondayNotifyAt > MONDAY_NOTIFY_THROTTLE_MS) {
-        this.lastMondayNotifyAt = Date.now()
-        this.ctx.waitUntil(notifyMondayProgress(this.env, mondayProject))
-      }
+      if (mondayProject) this.maybeNotifyMonday(mondayProject)
       return Response.json({ ok: true, recipients: this.connections.size })
+    }
+
+    // AQU-1828: identity tells us the project's Monday link changed, so the
+    // cached "no link here" answer must go — the next edit nudges again.
+    if (request.method === "POST" && url.pathname === "/__monday-link-changed") {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      this.mondayUnlinkedUntil = 0
+      this.lastMondayNotifyAt = 0
+      return Response.json({ ok: true })
     }
 
     // AQU-346: membership-revocation hook. identity's member-removal routes
@@ -465,6 +484,25 @@ export class ProjectSync extends DurableObject<DOEnv> {
     } catch {
       /* swallow */
     }
+  }
+
+  /**
+   * AQU-1828: nudge identity's Monday push only when this project can plausibly
+   * have something to push. identity answers `linked: false` for a project with
+   * no enabled link; we cache that and go quiet until the link changes (or the
+   * backstop TTL lapses), instead of paying a round trip every 60s forever.
+   */
+  private maybeNotifyMonday(projectId: string): void {
+    const now = Date.now()
+    if (now < this.mondayUnlinkedUntil) return
+    if (now - this.lastMondayNotifyAt <= MONDAY_NOTIFY_THROTTLE_MS) return
+    this.lastMondayNotifyAt = now
+    this.ctx.waitUntil(
+      notifyMondayProgress(this.env, projectId).then((linked) => {
+        if (linked === false) this.mondayUnlinkedUntil = Date.now() + MONDAY_UNLINKED_TTL_MS
+        else if (linked === true) this.mondayUnlinkedUntil = 0
+      }),
+    )
   }
 
   private broadcastToAll(msg: ProjectDoServerMessage, exceptConnId?: string): void {

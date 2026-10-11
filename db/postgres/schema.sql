@@ -1115,6 +1115,9 @@ CREATE TABLE diarization_jobs (
     num_speakers INTEGER,
     turns_json   TEXT,
     error        TEXT,
+    -- AQU-1855: which user started the job, so a per-user concurrency cap has
+    -- something to count. NULL on rows that predate the column.
+    created_by   BIGINT,
     created_at   BIGINT NOT NULL,
     updated_at   BIGINT NOT NULL
 );
@@ -1206,6 +1209,8 @@ CREATE INDEX idx_checkpoints_project ON checkpoints(project_id, created_at);
 CREATE INDEX comments_project_scope ON comments(project_id, scope_kind, file_id, cell_id);
 CREATE INDEX comments_thread ON comments(project_id, parent_comment_id);
 CREATE INDEX idx_diarization_jobs_file ON diarization_jobs(project_id, file_id);
+-- AQU-1855: the stale-job sweep and the concurrency cap both read live jobs by age.
+CREATE INDEX idx_diarization_jobs_live ON diarization_jobs(status, updated_at);
 -- idx_events_author and idx_events_cell were dropped in migration 0081
 -- (AQU-1005): zero/near-zero reads on production, and every event INSERT paid
 -- their maintenance inside the seq-counter lock window.

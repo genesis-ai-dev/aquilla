@@ -1985,6 +1985,10 @@ CREATE INDEX IF NOT EXISTS contextual_run_traces_created
 CREATE TABLE IF NOT EXISTS contextual_project_leases (
   id text PRIMARY KEY,
   project_id text NOT NULL,
+  -- Billing workspace of project_id, denormalized so the org ceiling
+  -- (0158_contextual_lease_org_scope.sql; AQU-1847) can be summed without
+  -- joining projects inside the acquire statement. 0 = project with no org.
+  org_id bigint NOT NULL DEFAULT 0,
   run_id text NOT NULL UNIQUE,
   weight integer NOT NULL CHECK (weight BETWEEN 1 AND 1000),
   expires_at timestamptz NOT NULL,
@@ -1995,6 +1999,12 @@ CREATE TABLE IF NOT EXISTS contextual_project_leases (
 );
 CREATE INDEX IF NOT EXISTS contextual_project_leases_project_expiry
   ON contextual_project_leases(project_id, expires_at);
+CREATE INDEX IF NOT EXISTS contextual_project_leases_org_expiry
+  ON contextual_project_leases(org_id, expires_at);
+-- The platform-wide sum and the platform-wide expiry GC both scan on expiry
+-- alone, with no project or org to narrow them.
+CREATE INDEX IF NOT EXISTS contextual_project_leases_expiry
+  ON contextual_project_leases(expires_at);
 
 -- Stripe Field Plan billing + word-metered AI credits (0077_org_billing.sql).
 -- Additive: unpaid orgs have no row and are treated as plan=none.

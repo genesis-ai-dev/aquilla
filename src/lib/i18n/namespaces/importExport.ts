@@ -1078,10 +1078,12 @@ export const importExport = defineNamespace({
     "importExport.dcs.noResults": "No released resources match these filters.",
     "importExport.dcs.noResultsHint": "Try a broader language, owner, or subject.",
     "importExport.dcs.notAppliedError": plural({
-      one: "{count} change could not be applied — another edit moved that line " +
-        "first. Nothing else was affected; run it again to pick up the rest.",
-      other: "{count} changes could not be applied — other edits moved those lines " +
-        "first. Nothing else was affected; run it again to pick up the rest.",
+      one: "{count} change could not be applied. The rest of the import did land, " +
+        "but this project is still pinned to its previous version — running it " +
+        "again retries just that change.",
+      other: "{count} changes could not be applied. The rest of the import did " +
+        "land, but this project is still pinned to its previous version — running " +
+        "it again retries just those.",
     }),
     "importExport.dcs.notYetSupportedBadge": "Not yet supported",
     "importExport.dcs.ownerFilterLabel": "Owner",
@@ -2738,11 +2740,12 @@ export const importExport = defineNamespace({
       "importExport.dcs.notAppliedError": {
         description:
           "Reason text appended after 'Import failed:' or 'Re-sync failed:' when " +
-          "some of the lines being brought in from the upstream resource were " +
-          "refused because somebody else changed those same lines first. States " +
-          "how many were affected, reassures the reader the rest is untouched, and " +
-          "tells them to repeat the action. Begins lower-case only if the count " +
-          "word does; here it begins with the substituted number.",
+          "the server refused some of the lines being brought in from the upstream " +
+          "resource. States how many, makes clear the remainder DID save, says the " +
+          "project still points at its old upstream version, and says what " +
+          "repeating the action would do. It deliberately does not promise that " +
+          "repeating it will succeed, and does not claim nothing was written. " +
+          "Begins with the substituted number.",
         placeholders: {
           count: "How many changes were not applied. Do not translate the " +
             "substituted value.",

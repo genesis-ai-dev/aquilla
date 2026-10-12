@@ -316,6 +316,34 @@ flags rather than assumes.
    rotating is theirs to weigh, so this is a decision to put to each org rather
    than one to make for them.
 
+3. **Decide how a QA walker gets platform-admin identity on a preview.** A
+   consequence of AQU-1239 that surfaced when the QA walk tried to exercise
+   OPS-44's four paths on this PR's preview and could not: it signs in but gets
+   `403 platform admin required`, because the preview auth-worker is deployed
+   with **no `ADMIN_EMAILS`** (`scripts/cloudflare-stack-preview.mjs:56-63` sets
+   six vars, not that one), so after AQU-1239 the `platform_admins` table is the
+   only source of admin identity on a preview and no QA row exists on
+   development storage. **The admin paths are therefore not QA-walkable on any
+   preview** — worth knowing before the next pass plans to verify one there.
+
+   Of the two ways to close it, the bootstrap var is much the safer: adding
+   `ADMIN_EMAILS` to that block is per-preview, scoped to the preview worker,
+   versioned in the repo, and disappears with the deployment, whereas a
+   `platform_admins` row on shared development storage grants cross-tenant
+   admin over every project in dev, persists beyond any one preview, and is
+   invisible to config review — most of what this pass is about. Either way it
+   is a human's call, because previews read shared development Hyperdrive and
+   R2: real data for every project in dev. Not done here.
+
+   Worth recording that elevation itself is *not* the obstacle, and that a
+   preview is a faithful test of the gate rather than a bypass: previews set
+   `ADMIN_REQUIRE_ELEVATION: "true"` and deliberately do not set
+   `WRANGLER_LOCAL` (pinned by `cloudflare-stack-preview.test.ts:81`), yet
+   `POST /admin/elevation/request` still returns the code in its own response
+   body there, because previews bind no `EMAIL` service and run
+   `ENVIRONMENT: "development"` (`routes/admin.ts:163`). Identity is the only
+   missing piece.
+
 Also still outstanding from 09-25 and unchanged: the `desktop-release-signing`
 Environment needs required reviewers configured in repo settings to actually
 hold the Tauri signing job (OPS-40).

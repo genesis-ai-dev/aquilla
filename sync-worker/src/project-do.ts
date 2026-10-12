@@ -27,7 +27,8 @@ import {
   applyFocusRenew,
   applyPresenceUpdate,
   parseProjectDoClientMessage,
-  PresenceDraftThrottle,
+  PresenceFloodGuard,
+  PresenceTier2Batcher,
   presenceFrameOwnerConnId,
   presenceSnapshot,
   PROJECT_DO_DEFAULT_LEASE_MS,
@@ -37,6 +38,7 @@ import {
   sweepExpiredLeases,
   sweepOrphanedPresence,
   unpackBroadcastBody,
+  type ClientPresenceUpdate,
   type LockState,
   type PresenceState,
   type ProjectDoServerMessage,
@@ -95,6 +97,34 @@ export const PRESENCE_STALE_CLOSE_CODE = 4408
  * settles the pair after one round.
  */
 export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
+
+/**
+ * AQU-1831: the most live sockets one project DO will hold.
+ *
+ * A DO is a single thread, and every connection adds to the fan-out cost of
+ * every broadcast — so an unbounded room degrades for everyone in it rather
+ * than refusing the socket that tipped it over. 200 is well above the
+ * 50-connection live-coordination floor the perf budgets measure
+ * (`scripts/perf/budgets.json` → `presence.sockets.open`) and above any real
+ * workshop, so reaching it means either a runaway client or a project that
+ * needs its own answer, not a silent slowdown.
+ */
+export const PROJECT_DO_MAX_CONNECTIONS = 200
+
+/**
+ * AQU-1831: app-specific WS close code for "this project is already holding
+ * PROJECT_DO_MAX_CONNECTIONS sockets". The client treats it as a full room and
+ * waits out its longest backoff window instead of hammering the door.
+ */
+export const CONNECTION_LIMIT_CLOSE_CODE = 4429
+
+/**
+ * AQU-1831: app-specific WS close code for "this socket sent presence frames
+ * faster than PresenceFloodGuard allows". The client reconnects under normal
+ * backoff and republishes its presence on open, so the roster re-converges —
+ * see PresenceFloodGuard for why closing beats dropping frames.
+ */
+export const PRESENCE_FLOOD_CLOSE_CODE = 4430
 
 interface ConnectionState {
   ws: WebSocket
@@ -182,8 +212,15 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private presence = new Map<string, PresenceState>()
   private locks = new Map<string, LockState>()
   private sweepTimer: ReturnType<typeof setInterval> | null = null
-  /** Per-user rate limit for `presence.draft` frames (in-memory, like all DO state). */
-  private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcast(frame))
+  /**
+   * AQU-1831: per-connection coalescing tick for inbound `presence.update`
+   * frames (in-memory, like all DO state) — see PresenceTier2Batcher.
+   */
+  private presenceBatcher = new PresenceTier2Batcher((connId, msg) =>
+    this.applyBatchedPresence(connId, msg),
+  )
+  /** AQU-1831: per-connection inbound floodgate for presence frames. */
+  private presenceFloodGuard = new PresenceFloodGuard()
   /**
    * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
@@ -447,6 +484,16 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
     server.accept()
 
+    // AQU-1831: refuse the socket once the room is full. The close happens
+    // after accept() because the point is a legible close CODE — a bare HTTP
+    // error here reaches the reconciler as an indistinguishable failed
+    // connect. No connection or presence row is registered, so a turned-away
+    // client costs this DO nothing beyond the handshake.
+    if (this.connections.size >= PROJECT_DO_MAX_CONNECTIONS) {
+      server.close(CONNECTION_LIMIT_CLOSE_CODE, "project connection limit reached")
+      return new Response(null, { status: 101, webSocket: client })
+    }
+
     const conn: ConnectionState = {
       ws: server,
       connId,
@@ -573,18 +620,45 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return
     }
     if (msg.t === "presence.update") {
-      const result = applyPresenceUpdate(this.presence, conn, msg, now)
-      this.presence = result.presence
-      for (const m of result.emit) {
-        if (m.t === "presence.draft") this.draftThrottle.push(m)
-        else this.broadcast(m)
+      // AQU-1831: the floodgate first (cheapest refusal), then the coalescing
+      // tick. Between them one connection costs the DO at most one presence
+      // apply + fan-out per PRESENCE_TIER2_TICK_MS however fast it publishes.
+      if (!this.presenceFloodGuard.allow(conn.connId, now)) {
+        conn.ws.close(PRESENCE_FLOOD_CLOSE_CODE, "presence rate limit exceeded")
+        return
       }
+      this.presenceBatcher.push(conn.connId, msg)
       return
     }
     if (msg.t === "outbox.event") {
       void this.forwardOutboxEvent(msg.event)
       return
     }
+  }
+
+  /**
+   * AQU-1831: apply one (possibly coalesced) presence patch handed back by the
+   * tier-2 batcher.
+   *
+   * This runs up to PRESENCE_TIER2_TICK_MS after the frame arrived, so it
+   * re-resolves the connection rather than closing over it: a socket that shut
+   * down in the meantime had its pending patch cleared, and must not get a
+   * presence row back through a tick that was already in flight.
+   */
+  private applyBatchedPresence(connId: string, msg: ClientPresenceUpdate): void {
+    let conn: ConnectionState | undefined
+    for (const state of this.connections.values()) {
+      if (state.connId !== connId) continue
+      conn = state
+      break
+    }
+    // The batcher's own next tick closes a window with nothing pending, so
+    // there is nothing to clean up here — and clearing from inside its
+    // callback would only be re-armed by the tick that called us.
+    if (!conn) return
+    const result = applyPresenceUpdate(this.presence, conn, msg, Date.now())
+    this.presence = result.presence
+    for (const m of result.emit) this.broadcast(m)
   }
 
   private async forwardOutboxEvent(event: OutboxRawEvent): Promise<void> {
@@ -616,7 +690,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
     const result = applyDisconnect(this.locks, this.presence, conn, now, remaining)
     this.locks = result.locks
     this.presence = result.presence
-    this.draftThrottle.clear(conn.connId)
+    this.presenceBatcher.clear(conn.connId)
+    this.presenceFloodGuard.clear(conn.connId)
     for (const m of result.emit) this.broadcast(m)
     if (this.connections.size === 0) this.stopLeaseSweep()
   }
@@ -654,7 +729,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (result.emit.length === 0) return
     this.presence = result.presence
     for (const m of result.emit) {
-      if (m.t === "presence.left") this.draftThrottle.clear(m.connId)
+      if (m.t === "presence.left") {
+        this.presenceBatcher.clear(m.connId)
+        this.presenceFloodGuard.clear(m.connId)
+      }
       this.broadcastToAll(m)
     }
   }

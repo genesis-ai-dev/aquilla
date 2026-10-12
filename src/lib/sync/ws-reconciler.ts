@@ -365,6 +365,16 @@ export function newConnId(): string {
  */
 export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
 
+/**
+ * AQU-1831: the DO's close code for "this project is already holding its
+ * maximum number of sockets" (sync-worker `project-do.ts`
+ * PROJECT_DO_MAX_CONNECTIONS). The socket opens and closes immediately, which
+ * would otherwise reset the backoff window on every attempt and turn a full
+ * room into a reconnect loop — so this code sends the window straight to its
+ * ceiling instead.
+ */
+export const CONNECTION_LIMIT_CLOSE_CODE = 4429
+
 /** Forget a tab's stored presence key so the next connect mints a fresh one. */
 function rotateTabConnId(key: string): void {
   try {
@@ -623,6 +633,11 @@ export function createWsReconciler(
       if (closeEvent.code === CONNECTION_SUPERSEDED_CLOSE_CODE && options.connIdStorageKey) {
         rotateTabConnId(options.connIdStorageKey)
       }
+      // AQU-1831: a full room is not a transient failure of this socket — the
+      // DO accepted and immediately closed it, which already reset the window
+      // in onopen. Wait out the longest window rather than retrying in a
+      // second, which is all a turned-away client can usefully do.
+      if (closeEvent.code === CONNECTION_LIMIT_CLOSE_CODE) reconnectWindow = maxBackoff
       safeEmit(() => handlers.onClose?.(closeEvent))
       socket = null
       scheduleReconnect()

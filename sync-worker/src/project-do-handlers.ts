@@ -15,6 +15,20 @@ import type { CellRowOut } from "./events/cell-row-serialize"
 export const PROJECT_DO_DEFAULT_LEASE_MS = 30_000
 export const PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
+/**
+ * AQU-1831: the most draft text the DO will put on the wire in one
+ * `presence.draft` frame.
+ *
+ * A cell's draft may legitimately run to PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH
+ * (16 KB) — a study note, a book introduction — and the DO keeps all of it in
+ * the author's presence row. But a remote caret only needs enough text to
+ * render, and re-sending 16 KB to every peer on each keystroke is what the
+ * 2026-10-10 scaling audit measured at ~5 MB/s of egress per typist in a
+ * 50-person project. Longer drafts go out clipped, with a trailing ellipsis
+ * so the peer can see live text and tell that it is clipped.
+ */
+export const PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX = 2_048
+
 export interface PresenceState {
   /**
    * Stable id of the WebSocket connection this row belongs to. Presence is
@@ -105,8 +119,11 @@ export interface ServerPresenceLeft {
   connId: string
 }
 /**
- * Live draft text for a remote caret. The DO rate-limits this per user
- * (see PresenceDraftThrottle) — coalesce: latest wins.
+ * Live draft text for a remote caret. The DO rate-limits this per connection
+ * (see PresenceTier2Batcher) — coalesce: latest wins — and bounds the text
+ * itself (see PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX): a draft longer than the
+ * wire cap arrives clipped, so this is not necessarily the author's whole
+ * draft.
  */
 export interface ServerPresenceDraft {
   t: "presence.draft"
@@ -520,6 +537,22 @@ function samePresence(a: PresenceState | undefined, b: PresenceState | undefined
   )
 }
 
+/**
+ * AQU-1831: the wire form of a draft — itself when short enough, otherwise its
+ * first PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX characters with the last replaced
+ * by an ellipsis.
+ */
+export function boundPresenceDraftText(text: string): string {
+  if (text.length <= PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX) return text
+  let cut = text.slice(0, PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX - 1)
+  // Never cut a surrogate pair in half: a lone high surrogate is an unpaired
+  // code unit, which renders as a replacement character rather than the
+  // emoji/CJK glyph it came from.
+  const last = cut.charCodeAt(cut.length - 1)
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1)
+  return `${cut}\u2026`
+}
+
 /** Copy of a presence row with `selection.draftText` removed. */
 export function stripPresenceDraft(user: PresenceState): PresenceState {
   if (!user.selection || user.selection.draftText === undefined) return user
@@ -721,53 +754,92 @@ export function applyPresenceUpdate(
   nextPresence.set(connId, next)
   const emit: ProjectDoServerMessage[] = [presenceDiff(next)]
   const draftText = next.selection?.draftText
-  if (
-    draftText !== undefined &&
-    next.focusedCell &&
-    draftText !== before?.selection?.draftText
-  ) {
-    emit.push({
-      t: "presence.draft",
-      userId,
-      connId,
-      cellId: next.focusedCell,
-      draftText,
-      ts: now,
-    })
+  if (draftText !== undefined && next.focusedCell) {
+    // AQU-1831: compare what would actually go OUT, not what is stored.
+    // Editing past the wire cap produces byte-identical frames, and noticing
+    // that is the cheapest way to stop paying 2 KB per keystroke for a draft
+    // whose visible head never changes.
+    const wire = boundPresenceDraftText(draftText)
+    const beforeDraft = before?.selection?.draftText
+    const beforeWire = beforeDraft === undefined ? undefined : boundPresenceDraftText(beforeDraft)
+    if (wire !== beforeWire) {
+      emit.push({
+        t: "presence.draft",
+        userId,
+        connId,
+        cellId: next.focusedCell,
+        draftText: wire,
+        ts: now,
+      })
+    }
   }
   return { presence: nextPresence, emit }
 }
 
 /**
- * Per-connection trailing throttle for `presence.draft` frames: the first draft in
- * a window goes out immediately; anything else arriving inside the window is
- * held and only the LATEST one is flushed when the window ends. In-memory
- * only (timers die with the DO instance, like the rest of its state).
+ * AQU-1831: coalescing tick for inbound `presence.update` frames.
+ *
+ * Tier-2 presence — the caret, the viewed row, the live draft — changes at
+ * typing speed: the editor publishes a selection roughly every 120 ms and a
+ * draft on each idle debounce. Every frame costs the project DO a parse, a
+ * presence-map clone, a content compare and a fan-out to every socket, all on
+ * the DO's single thread — so one fast (or misbehaving) client could spend the
+ * whole project's latency budget.
+ *
+ * This bounds that work per CONNECTION. The first update in a window is
+ * applied and broadcast immediately, because a one-off — opening a file,
+ * clicking a row — must not feel laggy. Everything arriving inside the window
+ * is merged into one pending patch and applied once when the window ends, so a
+ * client sending 100 frames/s costs the DO 1000/`tickMs` applies per second —
+ * five at a 200 ms tick — rather than a hundred.
+ *
+ * Merging rather than dropping is what makes it safe: `presence.update` is a
+ * PATCH, not a full publish — each call site in the workspace sends only the
+ * keys it owns — so a discarded frame could strand a peer's row in the file
+ * they just left. Coalescing loses intermediate positions (which nobody can
+ * read at 120 ms anyway) and never loses the latest one.
+ *
+ * In-memory only, like the rest of the DO's state: the timers die with the
+ * instance, and the next client publish re-establishes the row.
  */
-export const PRESENCE_DRAFT_THROTTLE_MS = 150
+export const PRESENCE_TIER2_TICK_MS = 200
 
-export class PresenceDraftThrottle {
+/**
+ * Fold a later patch onto an earlier one. Later keys win; keys only the
+ * earlier patch carried survive — including ones explicitly set to `null`,
+ * which is how the client clears a field (the parser puts a key in the object
+ * only when the client sent it, so spreading preserves that distinction).
+ */
+export function mergePresenceUpdate(
+  base: ClientPresenceUpdate | null,
+  next: ClientPresenceUpdate,
+): ClientPresenceUpdate {
+  if (!base) return next
+  return { ...base, ...next, t: "presence.update" }
+}
+
+export class PresenceTier2Batcher {
   private readonly windows = new Map<
     string,
-    { timer: ReturnType<typeof setTimeout>; pending: ServerPresenceDraft | null }
+    { timer: ReturnType<typeof setTimeout>; pending: ClientPresenceUpdate | null }
   >()
 
   constructor(
-    private readonly send: (frame: ServerPresenceDraft) => void,
-    private readonly windowMs: number = PRESENCE_DRAFT_THROTTLE_MS,
+    private readonly apply: (connId: string, msg: ClientPresenceUpdate) => void,
+    private readonly tickMs: number = PRESENCE_TIER2_TICK_MS,
   ) {}
 
-  push(frame: ServerPresenceDraft): void {
-    const open = this.windows.get(frame.connId)
+  push(connId: string, msg: ClientPresenceUpdate): void {
+    const open = this.windows.get(connId)
     if (open) {
-      open.pending = frame
+      open.pending = mergePresenceUpdate(open.pending, msg)
       return
     }
-    this.send(frame)
-    this.arm(frame.connId)
+    this.apply(connId, msg)
+    this.arm(connId)
   }
 
-  /** Drop any held draft + timer for a connection (disconnect). */
+  /** Drop any held patch + timer for a connection (disconnect). */
   clear(connId: string): void {
     const open = this.windows.get(connId)
     if (!open) return
@@ -780,15 +852,68 @@ export class PresenceDraftThrottle {
       const open = this.windows.get(connId)
       if (!open) return
       if (open.pending) {
-        const frame = open.pending
+        const msg = open.pending
         open.pending = null
-        this.send(frame)
+        this.apply(connId, msg)
         this.arm(connId)
       } else {
         this.windows.delete(connId)
       }
-    }, this.windowMs)
+    }, this.tickMs)
     this.windows.set(connId, { timer, pending: null })
+  }
+}
+
+/**
+ * AQU-1831: per-connection token bucket over inbound presence frames.
+ *
+ * The tick batcher bounds the work one connection can cause, but not the
+ * frames it can send: a client looping `presence.update` as fast as the socket
+ * drains still makes the DO JSON.parse every one. The bucket is the outer
+ * floodgate — wide enough that no legitimate client reaches it (the
+ * workspace's publishers together top out near 10/s between caret, draft and
+ * viewed-row updates, and the batcher keeps a burst from costing anything),
+ * and decisive when one does: the socket is closed rather than quietly
+ * degraded, so the condition is visible instead of looking like lag.
+ *
+ * Closing is also the state-safe answer. Dropping frames could strand a row,
+ * because the frames are patches; a closed socket reconnects under
+ * ws-reconciler's backoff and republishes its whole presence on open, so the
+ * roster re-converges.
+ */
+export const PRESENCE_FLOOD_BURST = 40
+export const PRESENCE_FLOOD_REFILL_PER_SEC = 20
+
+export class PresenceFloodGuard {
+  private readonly buckets = new Map<string, { tokens: number; at: number }>()
+
+  constructor(
+    private readonly burst: number = PRESENCE_FLOOD_BURST,
+    private readonly refillPerSec: number = PRESENCE_FLOOD_REFILL_PER_SEC,
+  ) {}
+
+  /** True while the connection is within budget; false once it is flooding. */
+  allow(connId: string, now: number): boolean {
+    const bucket = this.buckets.get(connId)
+    if (!bucket) {
+      this.buckets.set(connId, { tokens: this.burst - 1, at: now })
+      return true
+    }
+    const tokens = Math.min(
+      this.burst,
+      bucket.tokens + (Math.max(0, now - bucket.at) / 1000) * this.refillPerSec,
+    )
+    bucket.at = now
+    if (tokens < 1) {
+      bucket.tokens = tokens
+      return false
+    }
+    bucket.tokens = tokens - 1
+    return true
+  }
+
+  clear(connId: string): void {
+    this.buckets.delete(connId)
   }
 }
 

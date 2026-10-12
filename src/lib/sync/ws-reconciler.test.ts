@@ -4,6 +4,7 @@ import {
   createLinkUpstreamChangedHandler,
   createReconnectResyncHandler,
   createScopedRefreshScheduler,
+  CONNECTION_LIMIT_CLOSE_CODE,
   CONNECTION_SUPERSEDED_CLOSE_CODE,
   createWsReconciler,
   fileInventoryChanged,
@@ -805,6 +806,34 @@ describe("createWsReconciler", () => {
     await Promise.resolve()
     expect(FakeWebSocket.instances).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(200)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    r.close()
+  })
+
+  it("AQU-1831: a 4429 \"room is full\" close waits out the longest window", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      // Top-of-window draw, so the delay IS the window and the jump is visible.
+      randomSource: () => 1,
+      maxBackoffMs: 30_000,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    // The DO accepts the socket and closes it at once, so onopen has already
+    // reset the window to its first value — a 5s draw if nothing intervenes.
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(CONNECTION_LIMIT_CLOSE_CODE, "project connection limit reached")
+    await vi.advanceTimersByTimeAsync(29_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1_000)
     await Promise.resolve()
     await Promise.resolve()
     expect(FakeWebSocket.instances).toHaveLength(2)

@@ -6,17 +6,25 @@ import {
   applyFocusRenew,
   applyPresenceUpdate,
   parseProjectDoClientMessage,
-  PresenceDraftThrottle,
+  boundPresenceDraftText,
+  mergePresenceUpdate,
+  PresenceFloodGuard,
+  PresenceTier2Batcher,
   presenceFrameOwnerConnId,
   presenceSnapshot,
-  PRESENCE_DRAFT_THROTTLE_MS,
+  PRESENCE_FLOOD_BURST,
+  PRESENCE_FLOOD_REFILL_PER_SEC,
   PRESENCE_HEARTBEAT_TTL_MS,
+  PRESENCE_TIER2_TICK_MS,
+  PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH,
+  PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX,
   resolveConnId,
   selectStaleConnections,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
   sweepOrphanedPresence,
   unpackBroadcastBody,
+  type ClientPresenceUpdate,
   type LockState,
   type PresenceState,
   type ProjectDoServerMessage,
@@ -426,53 +434,271 @@ describe("presenceSnapshot", () => {
   })
 })
 
-describe("PresenceDraftThrottle", () => {
+describe("PresenceTier2Batcher (AQU-1831 — batched per tick)", () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  const draft = (userId: string, draftText: string, ts: number): ServerPresenceDraft => ({
-    t: "presence.draft",
-    userId,
-    connId: userId,
-    cellId: "cell-1",
-    draftText,
-    ts,
+  const patch = (viewingCell: string): ClientPresenceUpdate => ({
+    t: "presence.update",
+    viewingCell,
   })
 
-  it("sends the first draft immediately and only the LATEST of those inside the window", () => {
-    const sent: ServerPresenceDraft[] = []
-    const throttle = new PresenceDraftThrottle((f) => sent.push(f))
-    throttle.push(draft("alice", "a", 1))
-    throttle.push(draft("alice", "ab", 2))
-    throttle.push(draft("alice", "abc", 3))
-    expect(sent.map((f) => f.draftText)).toEqual(["a"])
-    vi.advanceTimersByTime(PRESENCE_DRAFT_THROTTLE_MS - 1)
-    expect(sent).toHaveLength(1)
+  it("applies the first update immediately and only the LATEST of those inside the tick", () => {
+    const applied: Array<[string, ClientPresenceUpdate]> = []
+    const batcher = new PresenceTier2Batcher((connId, msg) => applied.push([connId, msg]))
+    batcher.push("alice", patch("c1"))
+    batcher.push("alice", patch("c2"))
+    batcher.push("alice", patch("c3"))
+    expect(applied.map(([, m]) => m.viewingCell)).toEqual(["c1"])
+    vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS - 1)
+    expect(applied).toHaveLength(1)
     vi.advanceTimersByTime(1)
-    // "ab" was superseded inside the window and never goes out.
-    expect(sent.map((f) => f.draftText)).toEqual(["a", "abc"])
-    // A quiet window afterwards closes the throttle; the next draft is immediate again.
-    vi.advanceTimersByTime(PRESENCE_DRAFT_THROTTLE_MS)
-    throttle.push(draft("alice", "abcd", 4))
-    expect(sent.map((f) => f.draftText)).toEqual(["a", "abc", "abcd"])
+    // "c2" was superseded inside the tick and is never applied.
+    expect(applied.map(([, m]) => m.viewingCell)).toEqual(["c1", "c3"])
+    // A quiet tick closes the window; the next update is immediate again.
+    vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS)
+    batcher.push("alice", patch("c4"))
+    expect(applied.map(([, m]) => m.viewingCell)).toEqual(["c1", "c3", "c4"])
   })
 
-  it("rate-limits per user, not globally", () => {
-    const sent: ServerPresenceDraft[] = []
-    const throttle = new PresenceDraftThrottle((f) => sent.push(f))
-    throttle.push(draft("alice", "a", 1))
-    throttle.push(draft("bob", "b", 1))
-    expect(sent.map((f) => f.userId)).toEqual(["alice", "bob"])
+  it("bounds a flooding connection to one apply per tick", () => {
+    let applies = 0
+    const batcher = new PresenceTier2Batcher(() => {
+      applies++
+    })
+    // 100 frames/s for a second: what the issue's "script a client sending
+    // presence at 100/s" check does.
+    for (let i = 0; i < 100; i++) {
+      batcher.push("alice", patch(`c${i}`))
+      vi.advanceTimersByTime(10)
+    }
+    expect(applies).toBeLessThanOrEqual(1 + Math.ceil(1_000 / PRESENCE_TIER2_TICK_MS))
   })
 
-  it("clear() drops the held draft on disconnect", () => {
-    const sent: ServerPresenceDraft[] = []
-    const throttle = new PresenceDraftThrottle((f) => sent.push(f))
-    throttle.push(draft("alice", "a", 1))
-    throttle.push(draft("alice", "ab", 2))
-    throttle.clear("alice")
-    vi.advanceTimersByTime(PRESENCE_DRAFT_THROTTLE_MS * 2)
-    expect(sent.map((f) => f.draftText)).toEqual(["a"])
+  it("coalesces by merging patches, so a key another frame never repeats survives", () => {
+    const applied: ClientPresenceUpdate[] = []
+    const batcher = new PresenceTier2Batcher((_connId, msg) => applied.push(msg))
+    batcher.push("alice", { t: "presence.update", currentFileId: "f1" })
+    // These three arrive inside the tick. Only `selection` repeats; dropping
+    // the frames outright would strand the peer in file f1 and in cell c1.
+    batcher.push("alice", { t: "presence.update", currentFileId: "f2" })
+    batcher.push("alice", { t: "presence.update", viewingCell: "c1" })
+    batcher.push("alice", { t: "presence.update", viewingCell: "c2" })
+    vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS)
+    expect(applied).toEqual([
+      { t: "presence.update", currentFileId: "f1" },
+      { t: "presence.update", currentFileId: "f2", viewingCell: "c2" },
+    ])
+  })
+
+  it("keeps a null (clear-this-field) patch through a merge", () => {
+    const applied: ClientPresenceUpdate[] = []
+    const batcher = new PresenceTier2Batcher((_connId, msg) => applied.push(msg))
+    batcher.push("alice", { t: "presence.update", viewingCell: "c1" })
+    batcher.push("alice", { t: "presence.update", focusedCell: null, selection: null })
+    batcher.push("alice", { t: "presence.update", currentFileId: "f9" })
+    vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS)
+    expect(applied[1]).toEqual({
+      t: "presence.update",
+      focusedCell: null,
+      selection: null,
+      currentFileId: "f9",
+    })
+  })
+
+  it("batches per connection, not globally", () => {
+    const applied: string[] = []
+    const batcher = new PresenceTier2Batcher((connId) => applied.push(connId))
+    batcher.push("alice", patch("c1"))
+    batcher.push("bob", patch("c1"))
+    expect(applied).toEqual(["alice", "bob"])
+  })
+
+  it("clear() drops the held patch on disconnect", () => {
+    const applied: ClientPresenceUpdate[] = []
+    const batcher = new PresenceTier2Batcher((_connId, msg) => applied.push(msg))
+    batcher.push("alice", patch("c1"))
+    batcher.push("alice", patch("c2"))
+    batcher.clear("alice")
+    vi.advanceTimersByTime(PRESENCE_TIER2_TICK_MS * 2)
+    expect(applied.map((m) => m.viewingCell)).toEqual(["c1"])
+  })
+})
+
+describe("mergePresenceUpdate (AQU-1831)", () => {
+  it("returns the later patch when there is nothing to fold onto", () => {
+    const next: ClientPresenceUpdate = { t: "presence.update", viewingCell: "c1" }
+    expect(mergePresenceUpdate(null, next)).toBe(next)
+  })
+
+  it("lets the later patch win per key and keeps the keys it omits", () => {
+    expect(
+      mergePresenceUpdate(
+        { t: "presence.update", currentFileId: "f1", viewingCell: "c1" },
+        { t: "presence.update", viewingCell: "c2" },
+      ),
+    ).toEqual({ t: "presence.update", currentFileId: "f1", viewingCell: "c2" })
+  })
+})
+
+describe("PresenceFloodGuard (AQU-1831 — inbound token bucket)", () => {
+  it("passes a burst, then refuses once the bucket is empty", () => {
+    const guard = new PresenceFloodGuard(5, 10)
+    for (let i = 0; i < 5; i++) expect(guard.allow("alice", 1_000)).toBe(true)
+    expect(guard.allow("alice", 1_000)).toBe(false)
+  })
+
+  it("refills over time at the configured rate", () => {
+    const guard = new PresenceFloodGuard(5, 10)
+    for (let i = 0; i < 5; i++) guard.allow("alice", 1_000)
+    expect(guard.allow("alice", 1_050)).toBe(false) // 0.5 tokens back
+    expect(guard.allow("alice", 1_100)).toBe(true) // 1 token back
+  })
+
+  it("never refills past the burst size", () => {
+    const guard = new PresenceFloodGuard(5, 10)
+    guard.allow("alice", 0)
+    // An hour idle, then a burst: 5 through, the 6th refused.
+    for (let i = 0; i < 5; i++) expect(guard.allow("alice", 3_600_000)).toBe(true)
+    expect(guard.allow("alice", 3_600_000)).toBe(false)
+  })
+
+  it("leaves a client publishing at the workspace's own rate alone", () => {
+    const guard = new PresenceFloodGuard()
+    // The editor's publishers together top out near 10/s (caret ~120ms is the
+    // fastest, and the tier-2 tick absorbs bursts above that).
+    let now = 0
+    for (let i = 0; i < 600; i++) {
+      expect(guard.allow("alice", now)).toBe(true)
+      now += 100
+    }
+  })
+
+  it("throttles a 100/s flooder down to the refill rate", () => {
+    const guard = new PresenceFloodGuard()
+    let allowed = 0
+    let now = 0
+    for (let i = 0; i < 1_000; i++) {
+      if (guard.allow("alice", now)) allowed++
+      now += 10
+    }
+    // ~10s of frames: at most the burst plus 10s of refill, not all 1,000.
+    const ceiling = PRESENCE_FLOOD_BURST + 10 * PRESENCE_FLOOD_REFILL_PER_SEC
+    expect(allowed).toBeLessThanOrEqual(ceiling)
+    expect(allowed).toBeGreaterThan(ceiling - PRESENCE_FLOOD_REFILL_PER_SEC)
+    // The point of the bucket: three quarters of the flood never landed.
+    expect(allowed).toBeLessThan(250)
+  })
+
+  it("budgets per connection, so one flooder does not throttle its peers", () => {
+    const guard = new PresenceFloodGuard(2, 1)
+    expect(guard.allow("alice", 0)).toBe(true)
+    expect(guard.allow("alice", 0)).toBe(true)
+    expect(guard.allow("alice", 0)).toBe(false)
+    expect(guard.allow("bob", 0)).toBe(true)
+  })
+
+  it("clear() forgets a connection's bucket on disconnect", () => {
+    const guard = new PresenceFloodGuard(1, 1)
+    expect(guard.allow("alice", 0)).toBe(true)
+    expect(guard.allow("alice", 0)).toBe(false)
+    guard.clear("alice")
+    expect(guard.allow("alice", 0)).toBe(true)
+  })
+})
+
+describe("boundPresenceDraftText (AQU-1831 — bounded draft payload)", () => {
+  it("passes a draft that already fits through untouched", () => {
+    const text = "x".repeat(PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX)
+    expect(boundPresenceDraftText(text)).toBe(text)
+  })
+
+  it("clips a longer draft to the cap, ellipsis included", () => {
+    const bounded = boundPresenceDraftText("x".repeat(PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH))
+    expect(bounded).toHaveLength(PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX)
+    expect(bounded.endsWith("\u2026")).toBe(true)
+    expect(bounded.slice(0, 10)).toBe("xxxxxxxxxx")
+  })
+
+  it("does not cut a surrogate pair in half", () => {
+    // An emoji straddling the cut: the pair is dropped whole rather than
+    // leaving a lone high surrogate behind.
+    const text = "x".repeat(PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX - 2) + "\u{1f600}" + "tail"
+    const bounded = boundPresenceDraftText(text)
+    expect(bounded).toHaveLength(PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX - 1)
+    expect(bounded.endsWith("\u2026")).toBe(true)
+    expect(Array.from(bounded).every((ch) => ch === "x" || ch === "\u2026")).toBe(true)
+  })
+})
+
+describe("applyPresenceUpdate draft frames (AQU-1831)", () => {
+  /** A presence row already holding the lease on cell-1. */
+  const holdingLease = (draftText?: string): Map<string, PresenceState> =>
+    new Map([
+      [
+        "alice",
+        {
+          connId: "alice",
+          userId: "alice",
+          focusedCell: "cell-1",
+          ts: 1,
+          selection: { side: "target" as const, anchor: 0, head: 0, ...(draftText !== undefined ? { draftText } : {}) },
+        },
+      ],
+    ])
+
+  const draftFrames = (emit: ProjectDoServerMessage[]): ServerPresenceDraft[] =>
+    emit.filter((m): m is ServerPresenceDraft => m.t === "presence.draft")
+
+  it("sends a short draft verbatim", () => {
+    const { emit } = applyPresenceUpdate(
+      holdingLease(),
+      who("alice"),
+      { t: "presence.update", selection: { side: "target", anchor: 1, head: 1, draftText: "hola" } },
+      2_000,
+    )
+    expect(draftFrames(emit).map((f) => f.draftText)).toEqual(["hola"])
+  })
+
+  it("never puts more than the wire cap on the socket, even for a 16 KB draft", () => {
+    const { emit, presence } = applyPresenceUpdate(
+      holdingLease(),
+      who("alice"),
+      {
+        t: "presence.update",
+        selection: {
+          side: "target",
+          anchor: 1,
+          head: 1,
+          draftText: "y".repeat(PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH),
+        },
+      },
+      2_000,
+    )
+    const frames = draftFrames(emit)
+    expect(frames).toHaveLength(1)
+    expect(frames[0].draftText).toHaveLength(PROJECT_DO_PRESENCE_DRAFT_WIRE_MAX)
+    // The author's own row keeps the whole draft — only the wire is bounded.
+    expect(presence.get("alice")?.selection?.draftText).toHaveLength(
+      PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH,
+    )
+  })
+
+  it("stops emitting once edits are past the cap and the visible head is unchanged", () => {
+    const head = "z".repeat(PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH - 1)
+    const { emit } = applyPresenceUpdate(
+      holdingLease(head),
+      who("alice"),
+      {
+        t: "presence.update",
+        selection: { side: "target", anchor: 1, head: 1, draftText: `${head}z` },
+      },
+      2_000,
+    )
+    // The row still changed (the caret moved), so a diff goes out — but the
+    // bounded draft is byte-identical, so no 2 KB draft frame rides along.
+    expect(emit.some((m) => m.t === "presence.diff")).toBe(true)
+    expect(draftFrames(emit)).toEqual([])
   })
 })
 
@@ -733,15 +959,17 @@ describe("per-connection presence for one user", () => {
     expect(r.emit.filter((m) => m.t === "presence.diff")).toHaveLength(2)
   })
 
-  it("presence.draft carries connId and is throttled per connection", () => {
-    const sent: ServerPresenceDraft[] = []
-    const throttle = new PresenceDraftThrottle((f) => sent.push(f))
+  it("presence.draft carries connId, so two tabs are two separate drafts", () => {
     const a = applyFocusClaim(emptyLocks(), emptyPresence(), tabA, { t: "focus.claim", cellId: "c" }, 1)
     const b = applyFocusClaim(a.locks, a.presence, tabB, { t: "focus.claim", cellId: "c" }, 2)
     const ua = applyPresenceUpdate(b.presence, tabA, { t: "presence.update", selection: { side: "target", anchor: 0, head: 0, draftText: "a" } }, 3)
     const ub = applyPresenceUpdate(ua.presence, tabB, { t: "presence.update", selection: { side: "target", anchor: 0, head: 0, draftText: "b" } }, 4)
-    for (const m of [...ua.emit, ...ub.emit]) if (m.t === "presence.draft") throttle.push(m)
-    expect(sent.map((f) => [f.connId, f.draftText])).toEqual([["tab-a", "a"], ["tab-b", "b"]])
+    const drafts = [...ua.emit, ...ub.emit].filter(
+      (m): m is ServerPresenceDraft => m.t === "presence.draft",
+    )
+    // AQU-1831 batches by connId (see PresenceTier2Batcher), so the two tabs
+    // of one user each keep their own draft rather than shadowing each other.
+    expect(drafts.map((f) => [f.connId, f.draftText])).toEqual([["tab-a", "a"], ["tab-b", "b"]])
   })
 })
 

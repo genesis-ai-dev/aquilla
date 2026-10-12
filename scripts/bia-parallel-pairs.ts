@@ -24,3 +24,17 @@ export const SLICES: ReadonlyArray<readonly [string, number | undefined]> = [
   ["full", undefined],
   ["first 2000", 2000],
 ]
+
+/**
+ * Language-agnosticism checks (never tuning targets): scripts written without
+ * spaces between words, and highly agglutinative / polysynthetic targets.
+ * Same English source as the low-resource pairs.
+ */
+export const AGNOSTIC_PAIRS: readonly ParallelPair[] = [
+  { label: "eng→tha (Thai, no spaces)", source: "eng-engwebp.txt", target: "tha-thaKJV.txt", lowResource: false },
+  { label: "eng→mya (Burmese, no spaces)", source: "eng-engwebp.txt", target: "mya-mya.txt", lowResource: false },
+  { label: "eng→jpn (Japanese, no spaces; NT)", source: "eng-engwebp.txt", target: "jpn-jpn1965.txt", lowResource: false },
+  { label: "eng→qub (Quechua, agglutinative)", source: "eng-engwebp.txt", target: "qub-qub.txt", lowResource: false },
+  { label: "eng→esk (Inupiatun, polysynthetic; NT)", source: "eng-engwebp.txt", target: "esk-eskNT.txt", lowResource: false },
+  { label: "eng→tur (Turkish, agglutinative)", source: "eng-engwebp.txt", target: "tur-turytc.txt", lowResource: false },
+]

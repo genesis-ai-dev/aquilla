@@ -20,12 +20,24 @@ export interface Accuracy {
   ms: number
 }
 
+/**
+ * Per-position outcomes, for paired bootstrap CIs over test verses:
+ * `verse[i]` is the test verse of position i, and each method's `hits[i]` is
+ * 1 (top-1 hit, which is also a top-3 hit) | 2 (top-3 hit) bits.
+ */
+export interface TaskHits {
+  verse: number[]
+  methods: Record<string, number[]>
+}
+
 export interface EvalReport {
   trainCells: number
   testCells: number
   next: Record<string, Accuracy>
   infill: Record<string, Accuracy>
   msPerQuery: number
+  /** Present when `recordHits` was set. */
+  hits?: { next: TaskHits; infill: TaskHits }
 }
 
 export interface EvalOptions {
@@ -41,6 +53,12 @@ export interface EvalOptions {
   variants?: Record<string, SuggestOptions>
   /** Index construction options (e.g. the stem length). */
   index?: BiaIndexOptions
+  /** Keep every position's outcome per method (EvalReport.hits). */
+  recordHits?: boolean
+  /** "variants" only: the variant names also scored on infill (default: all). */
+  infillVariants?: readonly string[]
+  /** Extra next-word predictors scored on the same positions (e.g. eval-only baselines). */
+  extraNext?: Record<string, Predictor>
 }
 
 /** A held-out verse: its target text, and its source when evaluating alignment. */
@@ -53,7 +71,8 @@ export const WITH_CHAINS = "BIA + chains (no source)"
 export const WITH_SOURCE = "BIA + source"
 export const SOURCE_ONLY = "source lexicon only"
 
-type Predictor = (left: string[], right: string[], source: string | undefined) => string[]
+/** Ranked folded word keys for the blank between `left` and `right`. */
+export type Predictor = (left: string[], right: string[], source: string | undefined) => string[]
 
 class Tally {
   private hits1 = 0
@@ -127,10 +146,14 @@ export function runForecastEval(train: readonly ForecastCell[], testItems: reado
   const nextMethods: Record<string, Predictor> = {
     ...(baselines ? { "unigram": () => unigram, "bigram-markov": (left: string[]) => bigramNext(left.at(-1)) } : {}),
     ...biaMethods,
+    ...(opts.extraNext ?? {}),
   }
+  const infillOnly = opts.methods === "variants" && opts.infillVariants
+    ? Object.fromEntries(opts.infillVariants.map((name) => [`bia ${name}`, biaMethods[`bia ${name}`]]))
+    : biaMethods
   const infillMethods: Record<string, Predictor> = {
     ...(baselines ? { "unigram": (): string[] => unigram, "bigram-markov": bigramInfill } : {}),
-    ...biaMethods,
+    ...infillOnly,
   }
 
   function bigramInfill(left: string[], right: string[]): string[] {
@@ -148,29 +171,38 @@ export function runForecastEval(train: readonly ForecastCell[], testItems: reado
 
   let queries = 0
   const started = Date.now()
-  const score = (methods: Record<string, Predictor>, pts: Array<[number, number]>, infill: boolean) => {
+  const score = (methods: Record<string, Predictor>, pts: Array<[number, number]>, infill: boolean, hits?: TaskHits) => {
     const out: Record<string, Accuracy> = {}
     for (const [name, predict] of Object.entries(methods)) {
       const tally = new Tally()
+      const outcomes: number[] = []
       const t0 = performance.now()
       for (const [c, i] of pts) {
         const tokens = tests[c]
         const predicted = predict(tokens.slice(0, i), infill ? tokens.slice(i + 1) : [], items[c].source)
         if (name !== "unigram" && name !== "bigram-markov") queries++
         tally.add(predicted, tokens[i])
+        if (hits) outcomes.push((predicted[0] === tokens[i] ? 1 : 0) | (predicted.slice(0, 3).includes(tokens[i]) ? 2 : 0))
       }
       out[name] = tally.result(performance.now() - t0)
+      if (hits) hits.methods[name] = outcomes
     }
     return out
   }
-  const next = score(nextMethods, positions(tests, 1, 0, max), false)
-  const infill = score(infillMethods, positions(tests, 1, 1, max), true)
+  const nextPts = positions(tests, 1, 0, max)
+  const infillPts = positions(tests, 1, 1, max)
+  const hits = opts.recordHits
+    ? { next: { verse: nextPts.map(([c]) => c), methods: {} }, infill: { verse: infillPts.map(([c]) => c), methods: {} } }
+    : undefined
+  const next = score(nextMethods, nextPts, false, hits?.next)
+  const infill = score(infillMethods, infillPts, true, hits?.infill)
   return {
     trainCells: index.size,
     testCells: tests.length,
     next,
     infill,
     msPerQuery: queries > 0 ? (Date.now() - started) / queries : 0,
+    ...(hits ? { hits } : {}),
   }
 }
 

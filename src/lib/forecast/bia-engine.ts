@@ -56,10 +56,14 @@
  *   - Daniel's notes allow the Markov chain to "filter or weight"; the editor
  *     ships "weight" plus 1/|d| vote decay (FAITHFUL_OPTIONS keeps the
  *     Python behaviour for comparison; see the eval results).
- *   - Next-word without a source signal restores the per-distance chains of
- *     Daniel's 2024 forecaster (full counts of the word 1, 2, 3 places after
- *     each word, product of experts) — see `chains`. With a source verse the
- *     bigram factor + source lexicon measured better, so it stays.
+ *   - Per-distance chains (`chains`): full counts of the words 1, 2 and 3
+ *     places after AND before each word, combined as a product of experts.
+ *     Not a port of one Codex Editor version: the per-distance lookup is the
+ *     first Python forecaster's (TextGenerator, 8f8f4a41, 2024-03, forward
+ *     only) and BIA's distance votes, precomputed as counts; the 2024-09
+ *     TypeScript forecaster (c42263ea) used only adjacent (±1) forward and
+ *     backward bigrams. Next word reads the last 3 words forward; infill also
+ *     reads the next 3 words backward.
  *   - Infill may optionally apply the Markov chain on both sides
  *     (`can_be_next` on the left and the unused `can_preclude` on the right).
  */
@@ -129,19 +133,68 @@ export interface SuggestOptions extends Pick<PredictOptions, "neighbors" | "deca
   /** Weight β of the grapheme-stem back-off in the source lexicon (0 = off). */
   sourceStemWeight?: number
   /**
-   * Next-word mode only: weight candidates by the per-distance chains of
-   * Daniel's 2024 forecaster, Π_k (P_k(w | word k back) + ε·P(w))^(1/k) for
-   * k = 1..3, instead of the bigram factor 1 + ln(1 + count(prev→w)).
-   * Default: on exactly when there is no source signal for the cell (see
-   * `fill`); with a source verse the bigram factor measured better.
+   * Weight candidates by the per-distance chains instead of the bigram factor
+   * 1 + ln(1 + count(prev→w)): Π_k (P_k(w | word k back) + ε·P(w))^(1/k) over
+   * the last 3 words and, for infill, × Π_k (P_k(w | word k ahead) + ε·P(w))^(1/k)
+   * over the next 3 words (bidirectional).
+   * Default: `chooseGuesser` (next word with no source signal only; never
+   * for infill, where it measured worse than BIA).
    */
   chains?: boolean
   /**
    * With chains: skip the BIA vote and rank only the chains' own candidates.
-   * Default: on whenever chains are on by default (same accuracy on dev,
-   * 5–20× faster).
+   * Default: `chooseGuesser` (only when the cell has no source signal).
    */
   chainsOnly?: boolean
+  /**
+   * Translated verse pairs the project needs before infill uses the source
+   * lexicon (default SOURCE_MIN_PAIRS); see `chooseGuesser`.
+   */
+  sourceMinPairs?: number
+}
+
+/**
+ * Below this many translated (source, target) verse pairs the project-learned
+ * lexicon is too noisy to fill a blank: on the test split of 10 target
+ * languages, source-aware infill lost to plain BIA at 100–250 pairs and won
+ * at 1,000+ in every language (docs/forecast/bia-head-to-head.md).
+ */
+export const SOURCE_MIN_PAIRS = 1000
+
+export interface GuesserChoice {
+  /** Mix the source lexicon into the scores. */
+  source: boolean
+  /** Weight by the per-distance chains instead of the bigram factor. */
+  chains: boolean
+  /** Rank only the chains' candidates (skip the BIA vote). */
+  chainsOnly: boolean
+}
+
+/**
+ * The default guesser for a blank, from signals the app has at runtime and
+ * nothing language-specific: the task, whether the cell has a source verse
+ * (and the project any translated pairs), and how many translated pairs the
+ * project has.
+ *
+ *   next word, no source           → per-distance chains only
+ *   next word, with a source       → BIA + source, bigram-weighted
+ *   infill,    < minPairs or none  → BIA
+ *   infill,    ≥ minPairs pairs    → BIA + source
+ *
+ * Measured but not the default: chain-weighting the next-word source mix
+ * scores higher below ~1,000 pairs, but the chain product floors any word
+ * only the source proposes, so a key term the target context never predicts
+ * (the point of the source) can no longer surface mid-sentence.
+ */
+export function chooseGuesser(
+  task: "next" | "infill",
+  hasSource: boolean,
+  pairCount: number,
+  minPairs = SOURCE_MIN_PAIRS,
+): GuesserChoice {
+  if (task === "infill") return { source: hasSource && pairCount >= minPairs, chains: false, chainsOnly: false }
+  if (!hasSource) return { source: false, chains: true, chainsOnly: true }
+  return { source: true, chains: false, chainsOnly: false }
 }
 
 /**
@@ -257,17 +310,25 @@ export class BiaEngine {
     next: string | undefined,
     mode: MarkovMode,
     limit: number,
-    chainContext?: readonly string[],
+    chainContext?: { left: readonly string[]; right: readonly string[] },
   ): Ranked {
     if (mode === "off" || (prev === undefined && next === undefined)) return ranked
     const { index } = this
-    if (mode === "weight" && chainContext && next === undefined) {
-      const depth = Math.min(index.chainDepth, chainContext.length)
+    if (mode === "weight" && chainContext) {
+      // Product of experts over the per-distance chains: the words k places
+      // to the left predict forward, the words k places to the right predict
+      // backward, each expert weighted 1/k.
+      const { left, right } = chainContext
+      const leftDepth = Math.min(index.chainDepth, left.length)
+      const rightDepth = Math.min(index.chainDepth, right.length)
       const chained = ranked.map(([w, s]): [string, number] => {
         let log = 0
         const floor = CHAIN_EPSILON * index.probability(w)
-        for (let k = 1; k <= depth; k++) {
-          log += Math.log(index.chainProbability(k, chainContext[chainContext.length - k], w) + floor) / k
+        for (let k = 1; k <= leftDepth; k++) {
+          log += Math.log(index.chainProbability(k, left[left.length - k], w) + floor) / k
+        }
+        for (let k = 1; k <= rightDepth; k++) {
+          log += Math.log(index.backChainProbability(k, right[k - 1], w) + floor) / k
         }
         return [w, s * Math.exp(log)]
       })
@@ -306,13 +367,16 @@ export class BiaEngine {
     const fits = (w: string) => w.startsWith(prefix) && w !== prefix
     const source = this.sourceTokens(opts.source)
     const alpha = opts.sourceWeight ?? SOURCE_WEIGHT
+    const pairs = this.index.lexicon.pairCount
     // Is there anything for the source term to say? (A verse, a weight, and
     // translated pairs to have learned a lexicon from.)
-    const sourceSignal = source.length > 0 && alpha > 0 && this.index.lexicon.pairCount > 0
+    const hasSource = source.length > 0 && alpha > 0 && pairs > 0
     const nextWord = rightTokens.length === 0
-    const chains = nextWord && (opts.chains ?? !sourceSignal)
-    const chainsOnly = chains && (opts.chainsOnly ?? opts.chains === undefined)
-    let ranked = chainsOnly ? this.chainCandidates(leftTokens) : this.predictAt(tokens, target, {
+    const choice = chooseGuesser(nextWord ? "next" : "infill", hasSource, pairs, opts.sourceMinPairs)
+    const sourceSignal = choice.source
+    const chains = opts.chains ?? choice.chains
+    const chainsOnly = chains && (opts.chainsOnly ?? (opts.chains === undefined && choice.chainsOnly))
+    let ranked = chainsOnly ? this.chainCandidates(leftTokens, rightTokens) : this.predictAt(tokens, target, {
       excludeCellId: opts.excludeCellId,
       neighbors: opts.neighbors,
       decay: opts.decay ?? SHIPPED_DECAY,
@@ -331,7 +395,7 @@ export class BiaEngine {
       ranked = this.rank(mixScores(ranked, aligned, alpha, opts.sourceMix ?? SOURCE_MIX))
     }
     if (prefix) ranked = ranked.filter(([w]) => fits(w))
-    ranked = this.markov(ranked, prev, next, mode, limit, chains ? leftTokens : undefined)
+    ranked = this.markov(ranked, prev, next, mode, limit, chains ? { left: leftTokens, right: rightTokens } : undefined)
     const out = ranked.slice(0, limit).map(([word, score]) => ({ word, score, source: "bia" as const }))
     if (out.length > 0 || opts.fallback === false) return out
 
@@ -349,11 +413,17 @@ export class BiaEngine {
       .map(([word, score]) => ({ word, score, source: "frequency" as const }))
   }
 
-  /** Every word the per-distance chains have seen after the last 3 words (score 1). */
-  private chainCandidates(left: readonly string[]): Ranked {
+  /**
+   * Every word the per-distance chains have seen k places after one of the
+   * last 3 words, or k places before one of the next 3 (score 1).
+   */
+  private chainCandidates(left: readonly string[], right: readonly string[] = []): Ranked {
     const seen = new Set<string>()
     for (let k = 1; k <= Math.min(this.index.chainDepth, left.length); k++) {
       for (const w of this.index.chainFollowers(k, left[left.length - k])) seen.add(w)
+    }
+    for (let k = 1; k <= Math.min(this.index.chainDepth, right.length); k++) {
+      for (const w of this.index.chainPredecessors(k, right[k - 1])) seen.add(w)
     }
     return Array.from(seen, (w): [string, number] => [w, 1])
   }

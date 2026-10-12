@@ -37,7 +37,7 @@ const POWERS = list("powers", "1").map(Number)
 const IDFS = list("idfs", "0").map(Number)
 const STEMS = list("stems", "0").map(Number)
 const BETAS = list("betas", "0").map(Number)
-// Next-word chains (Daniel's 2024 per-distance forecaster): 0 off, 1 on, only = chains without BIA.
+// Per-distance chains (words 1–3 away, product of experts): 0 off, 1 on, only = chains without BIA.
 const CHAINS = list("chains", "0")
 const chainOpts = (c: string): SuggestOptions => (c === "0" ? { chains: false } : c === "1" ? { chains: true } : { chains: true, chainsOnly: true })
 // Low-resource targets only, unless asked: they are who the tool is for.

@@ -82,6 +82,12 @@ function bump(table: WeightTable, a: string, b: string, by: number): void {
   }
 }
 
+function addTotal(totals: Map<string, number>, key: string, by: number): void {
+  const t = (totals.get(key) ?? 0) + by
+  if (t <= EPSILON) totals.delete(key)
+  else totals.set(key, t)
+}
+
 /**
  * Stem length in graphemes for the source lexicon's back-off: a target word's
  * first N user-perceived characters, no per-language rules. Inflected forms
@@ -111,12 +117,20 @@ export class BiaIndex {
   /** next → (prev → weight): the Python `MarkovChain.reverse_mapping`. */
   private readonly backward: WeightTable = new Map()
   /**
-   * Per-distance chains (Daniel's 2024 Codex Editor forecaster, before BIA):
-   * chains[k-1] maps a word to the words found exactly k places after it,
-   * with full counts; chainTotals[k-1] the row sums. k = 1 is `forward`.
+   * Per-distance chains, in both directions: chains[k-1] maps a word to the
+   * words found exactly k places AFTER it, backChains[k-1] to the words found
+   * exactly k places BEFORE it, with full counts; the totals are the row sums.
+   * k = 1 is `forward` / `backward`. Provenance: the per-distance lookup is
+   * Codex Editor's first forecaster (Python TextGenerator, 8f8f4a41,
+   * 2024-03 — forward only) and the distance votes of BIA; Codex Editor's
+   * 2024-09 TypeScript forecaster (c42263ea) kept only the adjacent (±1)
+   * forward/backward bigrams. Keeping k = 1..3 on both sides is a
+   * reconstruction of that family, not a port of one version.
    */
   private readonly chains: WeightTable[] = [this.forward, new Map(), new Map()]
   private readonly chainTotals: Array<Map<string, number>> = [new Map(), new Map(), new Map()]
+  private readonly backChains: WeightTable[] = [this.backward, new Map(), new Map()]
+  private readonly backChainTotals: Array<Map<string, number>> = [new Map(), new Map(), new Map()]
   private totalWeight = 0
   private nextOrder = 0
   /** Source-side lexicon over the same cells (see source-lexicon.ts). */
@@ -179,8 +193,8 @@ export class BiaIndex {
     this.stemDfs.clear()
     this.stemForms.clear()
     this.forward.clear()
-    for (const table of this.chains) table.clear()
-    for (const totals of this.chainTotals) totals.clear()
+    for (const table of [...this.chains, ...this.backChains]) table.clear()
+    for (const totals of [...this.chainTotals, ...this.backChainTotals]) totals.clear()
     this.totalWeight = 0
     this.backward.clear()
     this.nextOrder = 0
@@ -228,17 +242,12 @@ export class BiaIndex {
         }
       }
       this.totalWeight += sign * weight
-      if (pos > 0) {
-        const prev = tokens[pos - 1]
-        bump(this.backward, word, prev, sign * weight)
-      }
       for (let k = 1; k <= this.chains.length && pos - k >= 0; k++) {
         const back = tokens[pos - k]
         bump(this.chains[k - 1], back, word, sign * weight)
-        const totals = this.chainTotals[k - 1]
-        const t = (totals.get(back) ?? 0) + sign * weight
-        if (t <= EPSILON) totals.delete(back)
-        else totals.set(back, t)
+        bump(this.backChains[k - 1], word, back, sign * weight)
+        addTotal(this.chainTotals[k - 1], back, sign * weight)
+        addTotal(this.backChainTotals[k - 1], word, sign * weight)
       }
     })
   }
@@ -253,6 +262,18 @@ export class BiaIndex {
   /** Words seen exactly k places after `back`. */
   chainFollowers(k: number, back: string): Iterable<string> {
     return this.chains[k - 1]?.get(back)?.keys() ?? []
+  }
+
+  /** P(word appears k places before `after`), from the backward chains. */
+  backChainProbability(k: number, after: string, word: string): number {
+    const total = this.backChainTotals[k - 1]?.get(after) ?? 0
+    if (total <= 0) return 0
+    return (this.backChains[k - 1].get(after)?.get(word) ?? 0) / total
+  }
+
+  /** Words seen exactly k places before `after`. */
+  chainPredecessors(k: number, after: string): Iterable<string> {
+    return this.backChains[k - 1]?.get(after)?.keys() ?? []
   }
 
   /** Unigram probability of `word`. */

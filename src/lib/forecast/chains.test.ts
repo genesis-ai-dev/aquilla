@@ -1,6 +1,6 @@
-// Per-distance chains (Daniel's 2024 forecaster, restored for next-word mode
-// when a cell has no source signal): full counts of which word appears 1, 2, 3
-// places after each word, combined as a product of experts.
+// Per-distance chains: full counts of which word appears 1, 2, 3 places after
+// (and before) each word, combined as a product of experts. Next word reads
+// the left context forward; infill also reads the right context backward.
 
 import { describe, expect, it } from "vitest"
 import { BiaEngine } from "./bia-engine"
@@ -33,23 +33,23 @@ describe("per-distance chains", () => {
     expect(best.word).toBe("land")
   })
 
-  it("is the default only when the cell has no source signal", () => {
-    const engine = new BiaEngine(indexOf(
-      ["they rule the land", "we see the king", "we see the king"],
-      ["ils règnent sur le pays", "nous voyons le roi", "nous voyons le roi"],
-    ))
-    const auto = engine.suggestNext("they rule the ", { extend: false })
-    const chainsOnly = engine.suggestNext("they rule the ", { extend: false, chains: true, chainsOnly: true })
-    expect(auto).toEqual(chainsOnly)
-    const withSource = engine.suggestNext("they rule the ", { extend: false, source: "nous voyons le roi" })
-    const bigramPath = engine.suggestNext("they rule the ", { extend: false, source: "nous voyons le roi", chains: false })
-    expect(withSource).toEqual(bigramPath)
+  it("fills a gap from both sides: the right context predicts backwards", () => {
+    // After "the", "blue" is the commoner follower; but only "red" is ever
+    // seen right before "king", so the backward chain decides.
+    const engine = new BiaEngine(indexOf(["the red king", "the blue sea", "the blue sea"]))
+    const [infill] = engine.suggestInfill("the ", " king", { chains: true, chainsOnly: true })
+    expect(infill.word).toBe("red")
+    const [next] = engine.suggestNext("the ", { extend: false, chains: true, chainsOnly: true })
+    expect(next.word).toBe("blue")
   })
 
-  it("leaves infill on BIA", () => {
-    const engine = new BiaEngine(indexOf(["they rule the land", "we see the king"]))
-    const a = engine.suggestInfill("they rule ", " land", { chains: true })
-    const b = engine.suggestInfill("they rule ", " land", { chains: false })
-    expect(a).toEqual(b)
+  it("counts the words 1, 2 and 3 places before each word, incrementally", () => {
+    const index = indexOf(["a b c d", "x b c d"])
+    expect(index.backChainProbability(1, "d", "c")).toBeCloseTo(1)
+    expect(index.backChainProbability(3, "d", "a")).toBeCloseTo(1 / 2)
+    expect(Array.from(index.chainPredecessors(3, "d")).sort()).toEqual(["a", "x"])
+    index.remove(["c0"])
+    expect(index.backChainProbability(3, "d", "a")).toBe(0)
+    expect(index.backChainProbability(3, "d", "x")).toBeCloseTo(1)
   })
 })

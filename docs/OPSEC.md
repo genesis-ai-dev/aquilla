@@ -281,7 +281,27 @@
 > unexamined, with `changeset-approvals.ts` (the human gate in front of agent
 > writes) flagged as the one most likely to be wrong next. Reported, not fixed:
 > the right unit of work is one recorded decision per route, which the new
-> coverage test now makes possible.
+> coverage test now makes possible. **OPS-46** came out of checking the pass's
+> own PR tick instead of trusting it: `adversarial-jev.yml` is the **only**
+> workflow in the repo with a `pull_request:` trigger, so the checks a PR
+> receives are that workflow's advisory `pr` job plus Cloudflare *compiling* the
+> bundle — `ci.yml`, which owns `lint`, `typecheck`, `unit`, `build`,
+> `schema-migrations` and all three worker suites, is `workflow_dispatch` only.
+> Half of that is a documented cost decision (AQU-564: Workers Builds owns PR
+> compilation); the half that is not is that `ci.yml:68` still labels three of
+> those jobs *"Required branch-protection checks"* inside a workflow that can
+> never report on a PR — and this pass's own PR settles which way it falls, since
+> GitHub called it `mergeable_state: "clean"` with only the Jev check present.
+> So no test, lint or typecheck gates a pull request, which is why this pass
+> found six red test files nothing had flagged and why the green tick on its own
+> PR meant nothing (that run reported *"HARNESS UNAVAILABLE … This run says
+> nothing about the change."*). This is OPS-21 two months on and worse: the
+> worker suites are no longer merely unreachable behind a failing first phase,
+> their workflow is not wired to pull requests at all. Reported, not fixed —
+> wiring the trigger spends the runner minutes AQU-564 set out to save and goes
+> red immediately on the six known-failing files, so the ordering, and whether
+> those contexts are meant to be required at all, is a maintainer's
+> control-plane call.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

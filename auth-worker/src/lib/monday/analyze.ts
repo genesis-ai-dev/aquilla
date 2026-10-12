@@ -61,6 +61,7 @@ function buildPrompt(args: AnalyzeArgs): string {
     "- itemGranularity 'project' = one board item for the whole project; 'file' = one item per file.",
     "- Map an 'external_id' text column when one exists (used for idempotent re-linking).",
     "- 'deadline' is the project's due date (a date column such as Deadline or Due date); 'has_audio_pct' is the share of lines that have a recording, not how many recordings are approved ('audio_validated_pct').",
+    "- 'schedule_status' (On track / Due soon / Overdue / Behind plan) suits a status column like Schedule or Health; 'project_link' a link column; 'books_done' (like '12 of 27') and 'books_in_progress' text columns; 'next_target_date' a date column; 'project_manager' a person-name text column; 'languages' a language text column.",
     "- Set notes to a short human rationale.",
     "",
     `Project: ${summary.projectName} (${summary.projectId})`,

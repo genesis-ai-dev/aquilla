@@ -15,6 +15,16 @@ export type MondayMetricKey =
   | "last_activity" // date of last event (date col, UTC date-only)
   | "status_auto" // derived label: 'Not started' | 'In progress' | 'Complete'
   | "deadline" // the project's deadline (date col, 'YYYY-MM-DD'); empty when unset
+  | "project_link" // link to the project in Aquilla (link col; a file row opens that file)
+  | "schedule_status" // 'On track' | 'Due soon' | 'Overdue' | 'Behind plan' (status col), the org dashboard's flags
+  | "books_done" // '12 of 27': plan units marked Done of all units (text col)
+  | "next_target_date" // nearest upcoming plan target date (date col); empty when none
+  | "days_since_activity" // whole days since the last activity (number col)
+  | "project_manager" // the project manager's display name (text col)
+  | "languages" // active target language names, comma-joined (text col)
+  | "active_contributors_30d" // distinct people active in the last 30 days (number col)
+  | "books_in_progress" // units started and not marked Done, comma-joined (text col)
+  | "recorded_minutes" // minutes of selected dub audio (number col)
   | "project_name" // item name source when creating items
   | "external_id" // aquilla entity id (text col; used for idempotent re-linking)
 
@@ -128,6 +138,16 @@ export const METRIC_KEYS: readonly MondayMetricKey[] = [
   "last_activity",
   "status_auto",
   "deadline",
+  "project_link",
+  "schedule_status",
+  "books_done",
+  "next_target_date",
+  "days_since_activity",
+  "project_manager",
+  "languages",
+  "active_contributors_30d",
+  "books_in_progress",
+  "recorded_minutes",
   "project_name",
   "external_id",
 ]
@@ -163,6 +183,16 @@ export const WRITABLE_TYPES_BY_METRIC: Record<MondayMetricKey, readonly string[]
   last_activity: ["date", "text"],
   status_auto: ["status", "text"],
   deadline: ["date", "text"],
+  project_link: ["link", "text"],
+  schedule_status: ["status", "text"],
+  books_done: TEXT_TYPES,
+  next_target_date: ["date", "text"],
+  days_since_activity: NUMERIC_TYPES,
+  project_manager: TEXT_TYPES,
+  languages: TEXT_TYPES,
+  active_contributors_30d: NUMERIC_TYPES,
+  books_in_progress: TEXT_TYPES,
+  recorded_minutes: NUMERIC_TYPES,
   project_name: TEXT_TYPES,
   external_id: TEXT_TYPES,
 }

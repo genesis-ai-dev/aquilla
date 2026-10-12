@@ -75,6 +75,8 @@ function columnValueFor(
     case "validated_pct":
     case "audio_validated_pct":
     case "has_audio_pct":
+    case "active_contributors_30d":
+    case "recorded_minutes":
     case "filled_count":
     case "total_count":
     case "validated_count":
@@ -91,6 +93,20 @@ function columnValueFor(
       // for every column type, a date column included.
       if (!m.deadline) return ""
       return columnType === "date" ? { date: m.deadline } : m.deadline
+    case "next_target_date":
+      if (!m.next_target_date) return ""
+      return columnType === "date" ? { date: m.next_target_date } : m.next_target_date
+    case "days_since_activity":
+      return m.days_since_activity == null ? "" : String(m.days_since_activity)
+    case "project_link":
+      return columnType === "link" ? { url: m.project_link, text: "Open in Aquilla" } : m.project_link
+    case "schedule_status":
+      return columnType === "status" ? { label: m.schedule_status } : m.schedule_status
+    case "books_done":
+    case "project_manager":
+    case "languages":
+    case "books_in_progress":
+      return m[metric]
     case "project_name":
       return entity.itemName
     case "external_id":
@@ -246,7 +262,7 @@ export async function pushBoardLink(env: Env, link: IntegrationLinkRow): Promise
     return { ok: false, pushed: false, linked: true, error: "org connection missing" }
   }
 
-  const summary = await computeProjectMetrics(env.AQUILLA_PG, link.project_id)
+  const summary = await computeProjectMetrics(env.AQUILLA_PG, link.project_id, { appBaseUrl: env.BASE_URL })
   if (!summary) {
     await recordPushOutcome(env, link, "error", "project not found")
     return { ok: false, pushed: false, linked: true, error: "project not found" }

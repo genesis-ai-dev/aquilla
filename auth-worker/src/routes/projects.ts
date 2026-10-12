@@ -1186,6 +1186,9 @@ projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), asy
     .bind(pmUserId, projectId)
     .run()
   if (raised) notifyRoleChangeBestEffort(c, projectId, raised)
+  // AQU-1770: a linked Monday board can show the project manager.
+  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
   return c.json({ ok: true, pm })
 })
 

@@ -246,3 +246,40 @@ describe("the project deadline on a Monday board (AQU-1770)", () => {
     expect(values.every((v) => v.date_1 === "")).toBe(true)
   })
 })
+
+describe("project facts on a Monday board (AQU-1770)", () => {
+  it("clearing the project manager pushes the board now, with link and schedule in Monday's formats", async () => {
+    await seed()
+    await env.AQUILLA_PG.prepare("UPDATE projects SET pm_user_id = 1 WHERE id = 'p-a'").run()
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET config = ? WHERE id = 'l-a'")
+      .bind(
+        JSON.stringify({
+          ...config,
+          columns: [
+            ...config.columns,
+            { columnId: "pm_1", columnType: "text", metric: "project_manager" },
+            { columnId: "link_1", columnType: "link", metric: "project_link" },
+            { columnId: "status_9", columnType: "status", metric: "schedule_status" },
+            { columnId: "date_9", columnType: "date", metric: "next_target_date" },
+          ],
+        }),
+      )
+      .run()
+    const { mondayBodies } = mockMonday()
+    const { ctx, settle } = collectingCtx()
+    const res = await app.request(
+      "/api/v2/projects/p-a/pm",
+      { method: "PATCH", headers: authHeader(await jwtFor("olive")), body: JSON.stringify({ pmUserId: null }) },
+      env,
+      ctx,
+    )
+    expect(res.status).toBe(200)
+    await settle()
+    const values = pushedColumnValues(mondayBodies).find((v) => "pm_1" in v)!
+    expect(values.pm_1).toBe("")
+    expect(values.link_1).toEqual({ url: expect.stringMatching(/\/projects\/p-a$/), text: "Open in Aquilla" })
+    expect(values.status_9).toEqual({ label: "On track" })
+    expect(values.date_9).toBe("")
+    expect((await linkState("l-a"))!.dirty_at).toBeNull()
+  })
+})

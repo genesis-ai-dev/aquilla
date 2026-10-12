@@ -38,6 +38,26 @@ Defined twice, kept in lockstep: `auth-worker/src/lib/monday/types.ts` and
     date) on a date or text column; a project without one clears the cell (an
     empty value). File rows carry the project's deadline. Setting or clearing
     the deadline marks the project's links dirty and pushes them straight away.
+- Project facts (AQU-1770), each read from the rule a dashboard already uses.
+  A file row carries the project's value unless noted.
+
+  | Metric | Column | Value |
+  |---|---|---|
+  | `project_link` | link "Aquilla project" | `BASE_URL/projects/<id>`; a file row opens `/project/<id>/editor/file/<fileId>`. |
+  | `schedule_status` | status "Schedule" | Overdue, Behind plan, Due soon or On track, from `portfolioAttentionReasons` (deadline under the Anywhere-on-Earth rule, a unit past its target date); Stalled is left out. |
+  | `books_done` | text "Books done" | "12 of 27": plan units marked Done of all units (`planUnitCountsSql`); a file row counts its own units. Text, not numbers, so "of 27" stays. |
+  | `next_target_date` | date "Next target date" | Earliest target date of a unit not Done and not yet late; a file row reads its own units; empty when none. |
+  | `days_since_activity` | numbers "Days since activity" | Whole days since the newest event (the same moment `last_activity` reads); empty when none. |
+  | `project_manager` | text "Project manager" | The PM's display name, else username; empty when none. |
+  | `languages` | text "Languages" | Active target lanes, by the app's lane label (`laneDisplayName`). |
+  | `active_contributors_30d` | numbers "Active contributors (30 days)" | Distinct event authors in the last 30 days. |
+  | `books_in_progress` | text "Books in progress" | Units started (text or audio in an active target lane) and not marked Done, by book code or file name; a file row lists its own. |
+  | `recorded_minutes` | numbers "Recorded minutes" | Selected dub takes' duration on files whose recordings count, as the org dashboard's "recorded". |
+
+  Changing the deadline or the project manager marks the project's links dirty
+  and pushes them straight away. A plan target date or Done mark (sync-worker
+  plan route) marks them dirty and the 5-minute flush pushes them. Activity,
+  contributors, recordings and lanes move with edits, which already push.
 - `matchExisting`: how a push finds items Aquilla made before when it has no
   `integration_item_links` row for them (`{ columnId }` or `{ byName: true }`).
   Whenever the board has an Aquilla ID column (one mapped to `external_id`, or

@@ -22,7 +22,13 @@
 //     file row carries the project's.
 
 import { ROLE } from "../../types"
-import { countedFileSql } from "../../../../db/shared/counted-files"
+import { countedFileSql, inAudioCountedFileSql } from "../../../../db/shared/counted-files"
+import { aoeTodayIso, planUnitCountsSql, planUnitsSql } from "../../../../db/shared/plan-units"
+import {
+  PROJECT_STATUS_LABEL,
+  portfolioAttentionReasons,
+} from "../../../../src/lib/frontier/portfolio-metrics"
+import { laneDisplayName } from "../../../../src/lib/lanes/lane-display"
 
 export interface MondayEntityMetrics {
   completion_pct: number
@@ -37,6 +43,86 @@ export interface MondayEntityMetrics {
   status_auto: "Not started" | "In progress" | "Complete"
   /** 'YYYY-MM-DD', or null when the project has no deadline (the cell is cleared). */
   deadline: string | null
+  /** Opens the project (a file row: that file in the editor) in Aquilla. */
+  project_link: string
+  /** The org dashboard's deadline and plan flags, as one label. */
+  schedule_status: "On track" | "Due soon" | "Overdue" | "Behind plan"
+  /** "12 of 27": plan units marked Done, of all units (a file row: its own). */
+  books_done: string
+  /** Nearest target date of a unit not yet done and not yet late, or null. */
+  next_target_date: string | null
+  /** Whole days since the last activity; null when there has been none. */
+  days_since_activity: number | null
+  /** The project manager's display name, or "" when none is set. */
+  project_manager: string
+  /** The project's active target languages, comma-joined. */
+  languages: string
+  /** Distinct people who wrote anything in the project in the last 30 days. */
+  active_contributors_30d: number
+  /** Units under way (started, not marked Done), comma-joined (a file row: its own). */
+  books_in_progress: string
+  /** Minutes of selected dub audio, 1 dp (the dashboard's "recorded"). */
+  recorded_minutes: number
+}
+
+/** Project-wide facts every row shares (a file row overrides some of them). */
+interface ProjectFacts {
+  deadline: string | null
+  project_link: string
+  schedule_status: MondayEntityMetrics["schedule_status"]
+  books_done: string
+  next_target_date: string | null
+  days_since_activity: number | null
+  project_manager: string
+  languages: string
+  active_contributors_30d: number
+  books_in_progress: string
+  recorded_minutes: number
+}
+
+interface UnitRow {
+  file_id: string
+  file_name: string
+  section_key: string
+  target_date: string | null
+  done_at: number | string | null
+  started: boolean
+}
+
+/** What the plan board says about a set of units (the whole project, or one file). */
+function planFacts(units: UnitRow[], today: string) {
+  const done = units.filter((u) => u.done_at != null).length
+  const upcoming = units
+    .filter((u) => u.done_at == null && u.target_date && u.target_date >= today)
+    .map((u) => u.target_date as string)
+    .sort()
+  const inProgress = units
+    .filter((u) => u.done_at == null && u.started)
+    .map((u) => (u.section_key ? u.section_key : u.file_name))
+  return {
+    books_done: units.length > 0 ? `${done} of ${units.length}` : "",
+    next_target_date: upcoming[0] ?? null,
+    books_in_progress: inProgress.join(", "),
+  }
+}
+
+/**
+ * One label from the org dashboard's own attention rules
+ * (`portfolioAttentionReasons`): the project's deadline under the
+ * Anywhere-on-Earth rule, and "Behind plan" when a unit is past its target.
+ * Stalled is left out (it is about activity, which has its own columns).
+ * Most serious first: Overdue, Behind plan, Due soon, else On track.
+ */
+function scheduleStatus(deadline: string | null, unitsOverdue: number, now: number): ProjectFacts["schedule_status"] {
+  const kinds = new Set(
+    portfolioAttentionReasons({ filledCells: 1, lastEditAt: now, deadlineAt: deadline, unitsOverdue }, now).map(
+      (r) => r.kind,
+    ),
+  )
+  if (kinds.has("overdue")) return PROJECT_STATUS_LABEL.overdue
+  if (kinds.has("behind-plan")) return PROJECT_STATUS_LABEL.behindPlan
+  if (kinds.has("soon")) return PROJECT_STATUS_LABEL.soon
+  return PROJECT_STATUS_LABEL.onTrack
 }
 
 export interface FileMetricsEntry {
@@ -120,7 +206,7 @@ function buildMetrics(
   totals: EntityTotals,
   translators: string,
   lastActivity: string,
-  deadline: string | null,
+  facts: ProjectFacts,
 ): MondayEntityMetrics {
   const { total, filled, validated, audioValidated, hasAudio } = totals
   const completionPct = total > 0 ? round1((filled / total) * 100) : 0
@@ -135,7 +221,7 @@ function buildMetrics(
     translators,
     last_activity: lastActivity,
     status_auto: filled <= 0 ? "Not started" : completionPct >= 100 ? "Complete" : "In progress",
-    deadline,
+    ...facts,
   }
 }
 
@@ -168,11 +254,18 @@ function subtractHistogram(from: Map<number, number>, raw: unknown): void {
 export async function computeProjectMetrics(
   db: AquillaDb,
   projectId: string,
+  opts: { appBaseUrl?: string | null; now?: number } = {},
 ): Promise<ProjectMetricsSummary | null> {
+  const now = opts.now ?? Date.now()
+  const appBase = (opts.appBaseUrl || "https://aquilla.app").replace(/\/+$/, "")
   const project = await db
-    .prepare("SELECT id, name, deadline_at FROM projects WHERE id = ?")
+    .prepare(
+      `SELECT p.id, p.name, p.deadline_at, COALESCE(NULLIF(pm.display_name, ''), pm.username) AS pm_name
+         FROM projects p LEFT JOIN users pm ON pm.id = p.pm_user_id
+        WHERE p.id = ?`,
+    )
     .bind(projectId)
-    .first<{ id: string; name: string; deadline_at: unknown }>()
+    .first<{ id: string; name: string; deadline_at: unknown; pm_name: string | null }>()
   if (!project) return null
   const deadline = toDeadline(project.deadline_at)
 
@@ -301,6 +394,115 @@ export async function computeProjectMetrics(
     // events table unreachable — keep now() (contract fallback).
   }
 
+  // ── Project-wide facts ────────────────────────────────────────────────
+  const today = aoeTodayIso(now)
+  // The plan board's own unit list and counts (db/shared/plan-units.ts):
+  // units_done / units_overdue are exactly the org dashboard's numbers.
+  const counts = await db
+    .prepare(planUnitCountsSql("f.project_id = ?"))
+    .bind(today, projectId)
+    .first<{ units_total: number | string; units_done: number | string; units_overdue: number | string }>()
+  const unitsResult = await db
+    .prepare(
+      `SELECT u.file_id, u.file_name, u.section_key, pl.target_date, pl.done_at,
+              EXISTS (
+                SELECT 1 FROM file_section_progress p
+                  JOIN lanes l ON l.project_id = p.project_id AND l.id = p.lane_id
+                              AND l.role = 'target' AND l.archived_at IS NULL
+                 WHERE p.project_id = u.project_id AND p.file_id = u.file_id
+                   AND p.scope = CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END
+                   AND p.section_key = u.section_key
+                   AND (p.filled_count > 0 OR p.audio_count > 0)
+              ) AS started
+         FROM (${planUnitsSql("f.project_id = ?")}) u
+         LEFT JOIN plan_units pl
+           ON pl.project_id = u.project_id AND pl.file_id = u.file_id AND pl.section_key = u.section_key
+        ORDER BY u.file_name, u.section_key`,
+    )
+    .bind(projectId)
+    .all<UnitRow>()
+  const units = unitsResult.results ?? []
+  const projectPlan = planFacts(units, today)
+
+  const languagesResult = await db
+    .prepare(
+      `SELECT name, language, role FROM lanes
+        WHERE project_id = ? AND role = 'target' AND archived_at IS NULL
+        ORDER BY position, id`,
+    )
+    .bind(projectId)
+    .all<{ name: string | null; language: string | null; role: "target" }>()
+
+  let activeContributors = 0
+  let daysSinceActivity: number | null = null
+  try {
+    const activity = await db
+      .prepare(
+        `SELECT COUNT(DISTINCT author) FILTER (WHERE server_ts >= ?) AS active,
+                MAX(server_ts) AS last_ts
+           FROM events WHERE project_id = ?`,
+      )
+      .bind(now - 30 * 24 * 60 * 60 * 1000, projectId)
+      .first<{ active: number | string | null; last_ts: number | string | null }>()
+    activeContributors = Number(activity?.active ?? 0) || 0
+    if (activity?.last_ts != null && Number(activity.last_ts) > 0) {
+      daysSinceActivity = Math.max(0, Math.floor((now - Number(activity.last_ts)) / (24 * 60 * 60 * 1000)))
+    }
+  } catch {
+    // events table unreachable — leave the activity columns empty.
+  }
+
+  // The org dashboard's "recorded" (org-permissions.ts au_cells): every
+  // selected dub take on a file whose recordings count, cue sheets included.
+  const recorded = await db
+    .prepare(
+      `SELECT COALESCE(SUM(a.duration_ms), 0) AS ms
+         FROM cell_audio a
+        WHERE a.project_id = ? AND a.deleted = 0 AND a.selected = 1 AND a.role = 'dub'
+          AND ${inAudioCountedFileSql("a")}`,
+    )
+    .bind(projectId)
+    .first<{ ms: number | string | null }>()
+
+  const facts: ProjectFacts = {
+    deadline,
+    project_link: `${appBase}/projects/${encodeURIComponent(project.id)}`,
+    schedule_status: scheduleStatus(deadline, Number(counts?.units_overdue ?? 0) || 0, now),
+    books_done: Number(counts?.units_total ?? 0) > 0
+      ? `${Number(counts?.units_done ?? 0)} of ${Number(counts?.units_total ?? 0)}`
+      : "",
+    next_target_date: projectPlan.next_target_date,
+    days_since_activity: daysSinceActivity,
+    project_manager: project.pm_name ?? "",
+    // The app's own lane label (the name override, else the language); a
+    // lane with neither is left out rather than shown as a placeholder.
+    languages: (languagesResult.results ?? [])
+      .filter((l) => (l.name ?? "").trim() || (l.language ?? "").trim())
+      .map((l) => laneDisplayName(l))
+      .join(", "),
+    active_contributors_30d: activeContributors,
+    books_in_progress: projectPlan.books_in_progress,
+    recorded_minutes: round1((Number(recorded?.ms ?? 0) || 0) / 60000),
+  }
+  const unitsByFile = new Map<string, UnitRow[]>()
+  for (const unit of units) {
+    const list = unitsByFile.get(unit.file_id) ?? []
+    list.push(unit)
+    unitsByFile.set(unit.file_id, list)
+  }
+  // A file row keeps the project's facts except where the file has its own:
+  // its link opens the file, and its plan columns read its own units.
+  const fileFacts = (fileId: string): ProjectFacts => {
+    const own = planFacts(unitsByFile.get(fileId) ?? [], today)
+    return {
+      ...facts,
+      project_link: `${appBase}/project/${encodeURIComponent(project.id)}/editor/file/${encodeURIComponent(fileId)}`,
+      books_done: own.books_done,
+      next_target_date: own.next_target_date,
+      books_in_progress: own.books_in_progress,
+    }
+  }
+
   const fileEntries: FileMetricsEntry[] = []
   const projectTotals: EntityTotals = { total: 0, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0 }
 
@@ -370,14 +572,14 @@ export async function computeProjectMetrics(
     fileEntries.push({
       fileId: file.id,
       fileName: file.name,
-      metrics: buildMetrics(totals, translators, lastActivity, deadline),
+      metrics: buildMetrics(totals, translators, lastActivity, fileFacts(file.id)),
     })
   }
 
   return {
     projectId: project.id,
     projectName: project.name,
-    project: buildMetrics(projectTotals, translators, lastActivity, deadline),
+    project: buildMetrics(projectTotals, translators, lastActivity, facts),
     files: fileEntries,
   }
 }

@@ -17,16 +17,16 @@ import {
 export interface ColumnSpec {
   title: string
   /** Monday `ColumnType` enum value passed to create_column. */
-  type: "numbers" | "status" | "date" | "text"
+  type: "numbers" | "status" | "date" | "text" | "link"
 }
 
 /**
  * The column Aquilla creates for each metric it can fill. `project_name` is
  * absent on purpose: it names the item, it is never a column.
  *
- * Status gets no preset labels: the push writes with
- * `create_labels_if_missing: true`, so "Not started", "In progress" and
- * "Complete" appear on the first push, in Monday's own colours.
+ * Status columns (Status, Schedule) get no preset labels: the push writes with
+ * `create_labels_if_missing: true`, so their labels appear on the first push,
+ * in Monday's own colours.
  */
 export const COLUMN_SPEC_BY_METRIC: Partial<Record<MondayMetricKey, ColumnSpec>> = {
   completion_pct: { title: "Completion %", type: "numbers" },
@@ -38,6 +38,16 @@ export const COLUMN_SPEC_BY_METRIC: Partial<Record<MondayMetricKey, ColumnSpec>>
   validated_count: { title: "Validated cells", type: "numbers" },
   status_auto: { title: "Status", type: "status" },
   deadline: { title: "Deadline", type: "date" },
+  project_link: { title: "Aquilla project", type: "link" },
+  schedule_status: { title: "Schedule", type: "status" },
+  books_done: { title: "Books done", type: "text" },
+  next_target_date: { title: "Next target date", type: "date" },
+  days_since_activity: { title: "Days since activity", type: "numbers" },
+  project_manager: { title: "Project manager", type: "text" },
+  languages: { title: "Languages", type: "text" },
+  active_contributors_30d: { title: "Active contributors (30 days)", type: "numbers" },
+  books_in_progress: { title: "Books in progress", type: "text" },
+  recorded_minutes: { title: "Recorded minutes", type: "numbers" },
   last_activity: { title: "Last activity", type: "date" },
   translators: { title: "Translators", type: "text" },
   external_id: { title: "Aquilla ID", type: "text" },

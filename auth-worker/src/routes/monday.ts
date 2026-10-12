@@ -677,7 +677,7 @@ monday.post(
     const token = await orgTokenOr409(c, orgId)
     if (token instanceof Response) return token
 
-    const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId)
+    const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId, { appBaseUrl: c.env.BASE_URL })
     if (!summary) return c.json({ error: "project not found" }, 404)
 
     let boardId = body.boardId

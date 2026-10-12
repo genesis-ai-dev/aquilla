@@ -16,6 +16,16 @@ export type MondayMetricKey =
   | "last_activity" // date of last event (date col, UTC date-only)
   | "status_auto" // derived label: 'Not started' | 'In progress' | 'Complete'
   | "deadline" // the project's deadline (date col, 'YYYY-MM-DD'); empty when unset
+  | "project_link" // link to the project in Aquilla (link col; a file row opens that file)
+  | "schedule_status" // 'On track' | 'Due soon' | 'Overdue' | 'Behind plan' (status col), the org dashboard's flags
+  | "books_done" // '12 of 27': plan units marked Done of all units (text col)
+  | "next_target_date" // nearest upcoming plan target date (date col); empty when none
+  | "days_since_activity" // whole days since the last activity (number col)
+  | "project_manager" // the project manager's display name (text col)
+  | "languages" // active target language names, comma-joined (text col)
+  | "active_contributors_30d" // distinct people active in the last 30 days (number col)
+  | "books_in_progress" // units started and not marked Done, comma-joined (text col)
+  | "recorded_minutes" // minutes of selected dub audio (number col)
   | "project_name" // item name source when creating items
   | "external_id" // aquilla entity id (text col; used for idempotent re-linking)
 
@@ -55,6 +65,16 @@ export const MONDAY_METRIC_KEYS: MondayMetricKey[] = [
   "last_activity",
   "status_auto",
   "deadline",
+  "project_link",
+  "schedule_status",
+  "books_done",
+  "next_target_date",
+  "days_since_activity",
+  "project_manager",
+  "languages",
+  "active_contributors_30d",
+  "books_in_progress",
+  "recorded_minutes",
   "project_name",
   "external_id",
 ]
@@ -72,6 +92,16 @@ export const MONDAY_METRIC_LABELS: Record<MondayMetricKey, string> = {
   last_activity: "Last activity",
   status_auto: "Status (auto)",
   deadline: "Deadline",
+  project_link: "Aquilla project link",
+  schedule_status: "Schedule",
+  books_done: "Books done",
+  next_target_date: "Next target date",
+  days_since_activity: "Days since activity",
+  project_manager: "Project manager",
+  languages: "Languages",
+  active_contributors_30d: "Active contributors (30 days)",
+  books_in_progress: "Books in progress",
+  recorded_minutes: "Recorded minutes",
   project_name: "Project name",
   external_id: "External ID",
 }
@@ -102,7 +132,7 @@ export const MONDAY_READONLY_COLUMN_TYPES = new Set([
 export const MONDAY_COLUMN_CATALOG: Array<{
   metric: MondayMetricKey
   title: string
-  type: "numbers" | "status" | "date" | "text"
+  type: "numbers" | "status" | "date" | "text" | "link"
 }> = [
   { metric: "completion_pct", title: "Completion %", type: "numbers" },
   { metric: "validated_pct", title: "Validated %", type: "numbers" },
@@ -112,6 +142,16 @@ export const MONDAY_COLUMN_CATALOG: Array<{
   { metric: "deadline", title: "Deadline", type: "date" },
   { metric: "last_activity", title: "Last activity", type: "date" },
   { metric: "translators", title: "Translators", type: "text" },
+  { metric: "project_link", title: "Aquilla project", type: "link" },
+  { metric: "schedule_status", title: "Schedule", type: "status" },
+  { metric: "books_done", title: "Books done", type: "text" },
+  { metric: "next_target_date", title: "Next target date", type: "date" },
+  { metric: "days_since_activity", title: "Days since activity", type: "numbers" },
+  { metric: "project_manager", title: "Project manager", type: "text" },
+  { metric: "languages", title: "Languages", type: "text" },
+  { metric: "active_contributors_30d", title: "Active contributors (30 days)", type: "numbers" },
+  { metric: "books_in_progress", title: "Books in progress", type: "text" },
+  { metric: "recorded_minutes", title: "Recorded minutes", type: "numbers" },
   { metric: "filled_count", title: "Filled cells", type: "numbers" },
   { metric: "validated_count", title: "Validated cells", type: "numbers" },
   { metric: "total_count", title: "Total cells", type: "numbers" },
@@ -133,6 +173,16 @@ export const MONDAY_WRITABLE_TYPES_BY_METRIC: Record<MondayMetricKey, readonly s
   last_activity: ["date", "text"],
   status_auto: ["status", "text"],
   deadline: ["date", "text"],
+  project_link: ["link", "text"],
+  schedule_status: ["status", "text"],
+  books_done: TEXT_TYPES,
+  next_target_date: ["date", "text"],
+  days_since_activity: NUMERIC_TYPES,
+  project_manager: TEXT_TYPES,
+  languages: TEXT_TYPES,
+  active_contributors_30d: NUMERIC_TYPES,
+  books_in_progress: TEXT_TYPES,
+  recorded_minutes: NUMERIC_TYPES,
   project_name: TEXT_TYPES,
   external_id: TEXT_TYPES,
 }

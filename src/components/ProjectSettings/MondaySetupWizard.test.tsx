@@ -8,6 +8,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { pickSelectOption as selectOption } from "@/test-utils/select"
 import { MondaySetupWizard } from "./MondaySetupWizard"
 import * as api from "@/lib/monday/api"
+import { MONDAY_COLUMN_CATALOG } from "@/lib/monday/types"
 
 vi.mock("@/lib/monday/api", () => ({
   // Mirrors the real (message, status) signature — the typecheck holds it there.
@@ -384,7 +385,7 @@ describe("Column picker", () => {
     await waitFor(() => expect(mocked.addMondayColumns).toHaveBeenCalledTimes(1))
     const metrics = mocked.addMondayColumns.mock.calls[0][2].metrics
     expect(metrics).toContain("translators")
-    expect(metrics).toEqual(expect.arrayContaining(["completion_pct", "deadline", "has_audio_pct", "external_id", "total_count"]))
+    expect(metrics).toEqual(expect.arrayContaining(MONDAY_COLUMN_CATALOG.map((c) => c.metric)))
     expect(new Set(metrics).size).toBe(metrics.length)
   })
 
@@ -394,9 +395,7 @@ describe("Column picker", () => {
         proposal: {
           version: 1,
           itemGranularity: "project",
-          columns: ["completion_pct", "validated_pct", "has_audio_pct", "audio_validated_pct", "status_auto", "deadline", "last_activity", "translators", "filled_count", "validated_count", "total_count", "external_id"].map(
-            (metric, i) => ({ columnId: `x${i}`, columnType: "text", metric: metric as never }),
-          ),
+          columns: MONDAY_COLUMN_CATALOG.map(({ metric }, i) => ({ columnId: `x${i}`, columnType: "text", metric })),
         },
       }),
     )

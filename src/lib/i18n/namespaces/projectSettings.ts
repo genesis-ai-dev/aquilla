@@ -1270,6 +1270,16 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.columnInfo.filled_count": "How many lines are translated.",
     "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and approved.",
     "projectSettings.monday.columnInfo.total_count": "How many lines there are to translate.",
+    "projectSettings.monday.columnInfo.project_link": "A link that opens the project in Aquilla. On a row per file, it opens that file.",
+    "projectSettings.monday.columnInfo.schedule_status": "On track, Due soon, Overdue or Behind plan, from the deadline and the plan's target dates.",
+    "projectSettings.monday.columnInfo.books_done": "How many books (or files) are marked Done on the plan, like \"12 of 27\".",
+    "projectSettings.monday.columnInfo.next_target_date": "The nearest target date on the plan that isn't done or past yet.",
+    "projectSettings.monday.columnInfo.days_since_activity": "How many days since anyone last worked on the project.",
+    "projectSettings.monday.columnInfo.project_manager": "The project manager's name.",
+    "projectSettings.monday.columnInfo.languages": "The languages the project translates into.",
+    "projectSettings.monday.columnInfo.active_contributors_30d": "How many different people worked on the project in the last 30 days.",
+    "projectSettings.monday.columnInfo.books_in_progress": "The books (or files) that have been started and aren't marked Done.",
+    "projectSettings.monday.columnInfo.recorded_minutes": "Minutes of recorded audio in the project.",
     "projectSettings.monday.columnInfo.external_id": "Aquilla's own ID for each item. Needed so a later setup finds and reuses the items Aquilla made.",
     "projectSettings.monday.addMissingColumnsDone": plural({
       one: "Added {count} column to the board and matched it.",
@@ -2083,6 +2093,36 @@ export const projectSettings = defineNamespace({
         description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
       },
       "projectSettings.monday.columnInfo.total_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.project_link": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.schedule_status": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.books_done": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.next_target_date": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.days_since_activity": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.project_manager": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.languages": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.active_contributors_30d": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.books_in_progress": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.recorded_minutes": {
         description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
       },
       "projectSettings.monday.columnInfo.external_id": {

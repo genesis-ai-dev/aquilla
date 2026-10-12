@@ -40,6 +40,12 @@
 import { verifyTokenForFile, WRITE_ROLE_LEVEL, type SyncTokenClaims } from "./auth"
 import { audioObjectKey, isPathSafeId, safeAudioContentType } from "./audio"
 import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  vendorTimeoutMessage,
+  VENDOR_TIMEOUT_MS,
+} from "../../shared/vendor-timeouts"
 
 export interface DiarizationEnv {
   SNAPSHOTS: R2Bucket
@@ -173,6 +179,12 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
 
   // Kick off Modal. It spawns the GPU job and returns immediately; the turns
   // arrive later via /callback. If Modal is unreachable, fail the job loudly.
+  //
+  // AQU-1849: bounded by `modalDiarizationStart`. Modal answers this handshake
+  // at once when healthy — the GPU work happens after it — so a call still
+  // open seconds later is a hang, not a slow job. Unbounded, it held the
+  // invocation open and left the row stuck in 'queued' with nothing in the
+  // logs; now the row fails with a reason and the client gets a 504.
   try {
     const res = await fetch(env.DIARIZATION_MODAL_URL, {
       method: "POST",
@@ -184,6 +196,7 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
         callbackUrl,
         numSpeakers,
       }),
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.modalDiarizationStart),
     })
     if (!res.ok) {
       const detail = await res.text().catch(() => "")
@@ -191,6 +204,13 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
       return json({ error: "failed to start diarization" }, 502)
     }
   } catch (e) {
+    if (isAbortTimeout(e)) {
+      logVendorTimeout("modalDiarizationStart", e)
+      await setStatus(env, jobId, "failed", {
+        error: `modal start timed out: ${vendorTimeoutMessage("modalDiarizationStart")}`,
+      })
+      return json({ error: vendorTimeoutMessage("modalDiarizationStart") }, 504)
+    }
     await setStatus(env, jobId, "failed", { error: `modal unreachable: ${String(e)}` })
     return json({ error: "diarization service unreachable" }, 502)
   }

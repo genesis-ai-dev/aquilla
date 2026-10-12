@@ -27,6 +27,7 @@ import {
 } from "../lib/agent/sandbox-client"
 import { MAX_SANDBOX_PROGRAM_CHARS } from "../../../shared/import-contract"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import { logVendorTimeout, vendorDeadline } from "../../../shared/vendor-timeouts"
 
 /**
  * AQU-1848: the sandbox pool refused us because it is saturated, not broken.
@@ -366,27 +367,41 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
 
     let previousError: string | undefined
     for (let attempt = 0; attempt < 2; attempt++) {
-      const upstream = await fetch(openRouterUrl(c.env), {
-        method: "POST",
-        headers: { Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: parserPrompt({
-            fileName,
-            mime,
-            sourceLanguage,
-            targetLanguage,
-            inspection: inspected.data.stdout.slice(0, 64 * 1024),
-            previousError,
+      // AQU-1849: a deadline PER ATTEMPT on the provider's answer
+      // (`stream: false`, so the headers wait for the whole completion),
+      // linked to the client's signal. The outer catch turns a blown one into
+      // the route's import_parser_failed 502, with the vendor named in the logs.
+      const deadline = vendorDeadline("openRouterNonStreaming", signal)
+      let upstream: Response
+      try {
+        upstream = await fetch(openRouterUrl(c.env), {
+          method: "POST",
+          headers: { Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            messages: parserPrompt({
+              fileName,
+              mime,
+              sourceLanguage,
+              targetLanguage,
+              inspection: inspected.data.stdout.slice(0, 64 * 1024),
+              previousError,
+            }),
+            temperature: 0,
+            max_tokens: 10_000,
+            stream: false,
+            ...openRouterExtras(c.env.OPENROUTER_BASE_URL, "high"),
+            response_format: { type: "json_object" },
           }),
-          temperature: 0,
-          max_tokens: 10_000,
-          stream: false,
-          ...openRouterExtras(c.env.OPENROUTER_BASE_URL, "high"),
-          response_format: { type: "json_object" },
-        }),
-        signal,
-      })
+          signal: deadline.signal,
+        })
+
+      } catch (err) {
+        if (deadline.timedOut()) logVendorTimeout("openRouterNonStreaming", err)
+        throw err
+      } finally {
+        deadline.clear()
+      }
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "")
         throw new Error(detail.slice(0, 500) || `Parser model returned ${upstream.status}`)

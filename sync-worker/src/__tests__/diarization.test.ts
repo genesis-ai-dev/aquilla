@@ -175,6 +175,57 @@ describe("POST /api/v1/diarization/start", () => {
     expect(res.status).toBe(400)
     expect(getCalls()).toBe(0)
   })
+
+  // ── AQU-1849: the Modal start call is deadline-bounded ────────────────────
+  //
+  // The kick-off is a handshake — Modal spawns the GPU job and answers at once,
+  // the turns arrive later on /callback — so a call still open seconds later is
+  // a hang, not a slow job. Unbounded, it held the Worker invocation until the
+  // platform killed it and left the row stuck in 'queued' with nothing to
+  // alert on. Two halves to the guard, tested separately: the deadline is
+  // ATTACHED to the subrequest, and a BLOWN one is reported as a 504 with the
+  // job row failed. (`vendorDeadline`/`AbortSignal.timeout` firing on time is
+  // covered in shared/vendor-timeouts.test.ts, where timers are fake-able.)
+
+  it("attaches a bounded abort signal to the Modal start subrequest", async () => {
+    const env = await makeEnv()
+    let seen: RequestInit | undefined
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      seen = init
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const res = (await handleDiarizationRequest(startReq(await makeToken({ role: 400 })), env))!
+
+    expect(res.status).toBe(200)
+    expect(seen?.signal).toBeInstanceOf(AbortSignal)
+    expect(seen?.signal?.aborted).toBe(false)
+  })
+
+  it("answers 504 and fails the job when Modal never responds", async () => {
+    const env = await makeEnv()
+    // What a blown AbortSignal.timeout rejects the fetch with.
+    globalThis.fetch = (async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError")
+    }) as unknown as typeof fetch
+
+    const res = (await handleDiarizationRequest(startReq(await makeToken({ role: 400 })), env))!
+
+    // 504, not the 502 a dead upstream gets: the difference is what a user can
+    // act on ("the service is slow, retry" vs "the service is down").
+    expect(res.status).toBe(504)
+    const body = (await res.json()) as { error?: string }
+    expect(body.error).toContain("modalDiarizationStart")
+
+    // The row must not be left in 'queued' — nothing would ever move it.
+    const { results } = await env.AQUILLA_PG!
+      .prepare("SELECT status, error FROM diarization_jobs WHERE project_id = ?")
+      .bind("p1")
+      .all<{ status: string; error: string | null }>()
+    expect(results).toHaveLength(1)
+    expect(results[0]?.status).toBe("failed")
+    expect(results[0]?.error).toContain("timed out")
+  })
 })
 
 // ── AQU-1855 ────────────────────────────────────────────────────────────────

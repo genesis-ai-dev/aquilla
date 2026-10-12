@@ -25,6 +25,7 @@ import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./a
 // AbortSignal.timeout and need the same DOMException check to tell a blown
 // deadline apart from a dead upstream.
 import { isAbortTimeout } from "./inworld-tts"
+import { logVendorTimeout, VENDOR_TIMEOUT_MS } from "../../shared/vendor-timeouts"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/shared/rate-limit"
 
 export interface VoiceConvertEnv {
@@ -58,8 +59,11 @@ export const MAX_VOICE_CONVERT_REQUEST_BYTES = MAX_VOICE_CLIP_BYTES + 1024 * 102
  * diffusion steps, far below Modal's own 600 s function timeout — so a hung
  * GPU returns this 504 instead of pinning a Worker invocation until the
  * platform kills it with no diagnosis.
+ *
+ * AQU-1849: the number moved to `shared/vendor-timeouts.ts` alongside every
+ * other vendor deadline; the name stays for the callers and tests using it.
  */
-export const SEED_VC_REQUEST_TIMEOUT_MS = 120_000
+export const SEED_VC_REQUEST_TIMEOUT_MS = VENDOR_TIMEOUT_MS.modalVoiceConvert
 
 /**
  * AQU-1854: per-user sliding window (15 min, shared primitive with the TTS and
@@ -324,7 +328,7 @@ export async function handleVoiceConvertRequest(
     })
   } catch (err) {
     if (isAbortTimeout(err)) {
-      console.error("[voice-convert] upstream timed out:", err)
+      logVendorTimeout("modalVoiceConvert", err)
       return new Response(
         `voice conversion upstream did not respond within ${Math.round(SEED_VC_REQUEST_TIMEOUT_MS / 1000)}s`,
         { status: 504 },

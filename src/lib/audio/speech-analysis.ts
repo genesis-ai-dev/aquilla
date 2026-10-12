@@ -147,8 +147,8 @@ function toDecodedPcm(audio: AudioBuffer): DecodedPcm {
  */
 async function decodeWithWebAudio(bytes: ArrayBuffer, sampleRate?: number): Promise<DecodedPcm> {
   if (sampleRate !== undefined) {
-    const Offline = offlineContextCtor()
-    if (Offline) return toDecodedPcm(await new Offline(1, 1, sampleRate).decodeAudioData(bytes))
+    const decoded = await decodeOffline(bytes, sampleRate)
+    if (decoded) return decoded
   }
   const AC = audioContextCtor()
   if (!AC) throw new Error("Web Audio API is unavailable in this environment")
@@ -158,6 +158,51 @@ async function decodeWithWebAudio(bytes: ArrayBuffer, sampleRate?: number): Prom
   } finally {
     void ctx.close?.()
   }
+}
+
+/**
+ * One OfflineAudioContext per analysis rate, reused for every chunk.
+ *
+ * `decodeAudioData` does not depend on a context's rendering state, so a
+ * single context can decode any number of buffers. The chunked path used to
+ * build a fresh one per chunk — about 100 of them for a 100-minute recording,
+ * each owning its decoded AudioBuffer until the collector got to it. The QA
+ * walk on PR #1357 measured a 791 MB peak renderer RSS where the live chunk
+ * PCM is bounded at ~8 MB, and 100 uncollected 60-second buffers at 16 kHz
+ * stereo is 768 MB — that pile-up, not the chunking, was the remaining cost.
+ */
+const offlineDecoders = new Map<number, OfflineAudioContext>()
+
+/**
+ * Decode at `sampleRate` on the shared offline context, or null when this
+ * platform has no OfflineAudioContext (the caller falls back to a realtime
+ * one).
+ *
+ * A context is cached only once it has decoded something, and is dropped again
+ * if it ever rejects — so a browser that dislikes reuse poisons one chunk, not
+ * every later import. This chunk's rejection still propagates: the caller
+ * (`analyseMp3Chunks`) abandons the chunked route and the file falls back to
+ * one of the whole-file routes.
+ */
+async function decodeOffline(bytes: ArrayBuffer, sampleRate: number): Promise<DecodedPcm | null> {
+  const Offline = offlineContextCtor()
+  if (!Offline) return null
+  const existing = offlineDecoders.get(sampleRate)
+  if (existing) {
+    try {
+      return toDecodedPcm(await existing.decodeAudioData(bytes))
+    } catch (err) {
+      // `decodeAudioData` detaches its input, so the retry below would be
+      // handed an empty buffer. Only a context-level fault is recoverable
+      // here; a genuinely undecodable chunk must surface as itself.
+      offlineDecoders.delete(sampleRate)
+      throw err
+    }
+  }
+  const ctx = new Offline(1, 1, sampleRate)
+  const decoded = toDecodedPcm(await ctx.decodeAudioData(bytes))
+  offlineDecoders.set(sampleRate, ctx)
+  return decoded
 }
 
 /** True when this platform can decode audio at all. */

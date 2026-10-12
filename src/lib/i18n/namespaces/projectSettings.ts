@@ -665,6 +665,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.customOption": "Set for this project",
     "projectSettings.validation.requiredTextSourceAria": "Text validators: use the organization default or set a number for this project",
     "projectSettings.validation.requiredAudioSourceAria": "Audio validators: use the organization default or set a number for this project",
+    // AQU-1768: the media settings can follow the organization's default too.
+    "projectSettings.mediaDefaults.orgOn": "Organization default (on)",
+    "projectSettings.mediaDefaults.orgOff": "Organization default (off)",
+    "projectSettings.mediaDefaults.orgValue": "Organization default ({value})",
+    "projectSettings.mediaDefaults.cellEditingNobody": "No one",
+    "projectSettings.mediaDefaults.sourceAria": "{setting}: use the organization default or set it for this project",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
     // ── StructuralCellsProjectSection ── AQU-1083
@@ -2882,7 +2888,37 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.validation.customOption": {
         description:
-          "Option in the same dropdown. Choosing it lets this project set its own number of required validators, in a box that appears next to it.",
+          "Option in the same dropdown. Choosing it lets this project set its own value instead of the organization's. " +
+          "Also used beside the timeline, line-editing and recording-validation settings (AQU-1768).",
+      },
+      "projectSettings.mediaDefaults.orgOn": {
+        description:
+          "Option in a dropdown beside an on/off project setting (timing lock, timeline track editing, validating your own " +
+          "recordings). Choosing it means this project follows its organization's default, which is currently ON.",
+      },
+      "projectSettings.mediaDefaults.orgOff": {
+        description:
+          "Same dropdown, when the organization's default is currently OFF.",
+      },
+      "projectSettings.mediaDefaults.orgValue": {
+        description:
+          "Same dropdown beside a role setting ('Who can add and remove cells', 'Minimum role to validate recordings'). " +
+          "Choosing it means this project follows its organization's choice, shown in brackets.",
+        placeholders: {
+          value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
+        },
+      },
+      "projectSettings.mediaDefaults.cellEditingNobody": {
+        description:
+          "Short name for the 'nobody may add or remove cells' choice, shown inside 'Organization default (…)' and in the " +
+          "closed role picker on the organization's Project defaults page. Not a role.",
+      },
+      "projectSettings.mediaDefaults.sourceAria": {
+        description:
+          "Screen-reader label for that dropdown. Not shown on screen.",
+        placeholders: {
+          setting: "The setting's own label, e.g. 'Lock the timings against dragging', already translated.",
+        },
       },
       "projectSettings.validation.requiredTextSourceAria": {
         description:

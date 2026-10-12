@@ -198,6 +198,9 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   validationCountAudioOverrides: 0,
   overrideProjects: { countStructuralCells: null, validationCount: null, validationCountAudio: null },
   resetValidationCountOverrides: vi.fn(),
+  mediaDefaults: {},
+  mediaDefaultOverrides: {},
+  resetMediaDefaultOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.
   assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.

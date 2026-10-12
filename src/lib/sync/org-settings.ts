@@ -6,6 +6,8 @@ import {
 } from "./override-projects"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import { t } from "@/lib/i18n/standalone"
+import type { CellEditingTier } from "./project-settings"
+import type { MediaDefaultKey } from "../../../db/shared/media-setting-defaults"
 
 /**
  * Provider-keyed map of org-scoped API keys. Keys are provider identifiers
@@ -103,6 +105,17 @@ export interface OrgWideSettings {
    */
   validationCount?: number
   validationCountAudio?: number
+  /**
+   * AQU-1768: org-wide defaults for the media settings. A project that sets
+   * none of its own follows these; absent here, each reader keeps its
+   * built-in default (timing locked, track editing off, cell editing nobody,
+   * audio self-validation on, audio floor reviewer). Enforced on the server.
+   */
+  timingLocked?: boolean
+  allowTrackEditing?: boolean
+  cellEditingFloor?: CellEditingTier
+  allowSelfValidationAudio?: boolean
+  validationRoleFloorAudio?: "reviewer" | "project_lead" | "maintainer"
   /**
    * AQU-1391: the org-wide default for repetition auto-propagation —
    * validating a cell copies its translation into every other cell in the
@@ -222,6 +235,8 @@ export interface OrgSettingsResponse {
    * bare count, as it did before.
    */
   overrideProjects?: Partial<Record<InheritedOverrideKey, OverrideProjectList>>
+  /** AQU-1768: per media default, how many projects set their own value. */
+  mediaDefaultOverrides?: Partial<Record<MediaDefaultKey, number>>
 }
 
 
@@ -347,7 +362,16 @@ export async function resetCountStructuralOverrides(
 }
 
 /** AQU-1771: the inherited org settings the server can reset project overrides for. */
-export type ProjectOverrideSlug = "count-structural" | "validation-count" | "validation-count-audio"
+export type ProjectOverrideSlug =
+  | "count-structural"
+  | "validation-count"
+  | "validation-count-audio"
+  // AQU-1768: one per media default (MEDIA_DEFAULT_SLUGS).
+  | "timing-locked"
+  | "allow-track-editing"
+  | "cell-editing-floor"
+  | "allow-self-validation-audio"
+  | "validation-role-floor-audio"
 
 /**
  * POST .../settings/<slug>/reset-project-overrides — put every project in the

@@ -2,6 +2,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
 import { readBibleEnrichments } from "../../db/shared/bible-enrichments"
+import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -18,7 +19,17 @@ export function overlaySettings(
    * The Project settings form leaves this out: it must see only the project's
    * own value, to tell "inherit" from an explicit number.
    */
-  orgDefaults?: { validationCount?: number | null; validationCountAudio?: number | null },
+  orgDefaults?: {
+    validationCount?: number | null
+    validationCountAudio?: number | null
+    /**
+     * AQU-1768: the org's media defaults. Same rule as the counts: a project
+     * that sets none of its own carries the org's, so the editor's gates
+     * (timing lock, track editing, add/remove lines, audio validation) match
+     * what the server enforces.
+     */
+    media?: MediaDefaults
+  },
 ): ProjectRecord {
   let next: ProjectRecord | null = null
   const draft = () => {
@@ -72,14 +83,14 @@ export function overlaySettings(
   // AQU-490: the audio policy. Must reach the workspace or the gutter control
   // would apply the TEXT project's rules to recordings — the one thing Sam's
   // "separate settings" ruling exists to prevent.
-  assign("validationRoleFloorAudio", settings.validationRoleFloorAudio)
+  assign("validationRoleFloorAudio", settings.validationRoleFloorAudio ?? orgDefaults?.media?.validationRoleFloorAudio)
   assign("validationNamedUsersAudio", settings.validationNamedUsersAudio)
-  assign("allowSelfValidationAudio", settings.allowSelfValidationAudio)
-  assign("cellEditingFloor", settings.cellEditingFloor)
+  assign("allowSelfValidationAudio", settings.allowSelfValidationAudio ?? orgDefaults?.media?.allowSelfValidationAudio)
+  assign("cellEditingFloor", settings.cellEditingFloor ?? orgDefaults?.media?.cellEditingFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.
-  assign("allowTrackEditing", settings.allowTrackEditing)
+  assign("allowTrackEditing", settings.allowTrackEditing ?? orgDefaults?.media?.allowTrackEditing)
   // AQU-1246: the Autopilot opt-in. Must reach the workspace and the project
   // overview or the gate reads false everywhere and an opted-in project would
   // see no Autopilot at all — the surfaces render only when this is on (or the
@@ -109,7 +120,7 @@ export function overlaySettings(
   assign("audioTimingMode", settings.audioTimingMode)
   // AQU-646: the timeline lock. Must reach the workspace or the chips would be
   // draggable for everyone until someone opened Project Settings.
-  assign("timingLocked", settings.timingLocked)
+  assign("timingLocked", settings.timingLocked ?? orgDefaults?.media?.timingLocked)
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)

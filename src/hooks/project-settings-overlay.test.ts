@@ -142,3 +142,42 @@ describe("overlaySettings", () => {
     expect(record.validationCount).toBe(2)
   })
 })
+
+describe("overlaySettings — AQU-1768 org media defaults", () => {
+  const media = {
+    timingLocked: false,
+    allowTrackEditing: true,
+    cellEditingFloor: "project_lead" as const,
+    allowSelfValidationAudio: false,
+    validationRoleFloorAudio: "maintainer" as const,
+  }
+
+  it("fills every media key the project does not set from the org", () => {
+    const out = overlaySettings(makeRecord(), {}, undefined, { media })
+    expect(out.timingLocked).toBe(false)
+    expect(out.allowTrackEditing).toBe(true)
+    expect(out.cellEditingFloor).toBe("project_lead")
+    expect(out.allowSelfValidationAudio).toBe(false)
+    expect(out.validationRoleFloorAudio).toBe("maintainer")
+  })
+
+  it("keeps the project's own value over the org's", () => {
+    const out = overlaySettings(
+      makeRecord(),
+      { timingLocked: true, allowTrackEditing: false, cellEditingFloor: "none" },
+      undefined,
+      { media },
+    )
+    expect(out.timingLocked).toBe(true)
+    expect(out.allowTrackEditing).toBe(false)
+    expect(out.cellEditingFloor).toBe("none")
+    // Keys the project left unset still follow the org.
+    expect(out.validationRoleFloorAudio).toBe("maintainer")
+  })
+
+  it("without org defaults, leaves the record as the project's own settings say", () => {
+    const out = overlaySettings(makeRecord(), {})
+    expect(out.timingLocked).toBeUndefined()
+    expect(out.cellEditingFloor).toBeUndefined()
+  })
+})

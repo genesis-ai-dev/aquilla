@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
@@ -10,6 +10,7 @@ import {
   resetCountStructuralOverrides,
   resetProjectOverrides,
   type OrgSettingsResponse,
+  type ProjectOverrideSlug,
   type OrgWideSettings,
   type OrgPatchResult,
   type PromotionRequestResult,
@@ -21,6 +22,15 @@ import {
   type InheritedOverrideKey,
   type OverrideProjectList,
 } from "@/lib/sync/override-projects"
+import {
+  MEDIA_DEFAULT_SLUGS,
+  mediaDefaultsFromOrgSettings,
+  type MediaDefaultKey,
+  type MediaDefaults,
+} from "../../db/shared/media-setting-defaults"
+
+/** AQU-1768: one stable empty value for an org that has no overrides yet. */
+const EMPTY_OVERRIDES: Partial<Record<MediaDefaultKey, number>> = Object.freeze({})
 
 // ─── Cross-instance sync ───────────────────────────────────────────────────
 // Several surfaces mount their own useOrgSettings for the SAME org at the same
@@ -293,6 +303,17 @@ export interface UseOrgSettings {
     key: "validationCount" | "validationCountAudio",
   ) => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
+   * AQU-1768: the org's media defaults (valid values only; a key it never set
+   * is absent, and each reader then keeps its built-in default).
+   */
+  mediaDefaults: MediaDefaults
+  /** Per media default, how many projects set their own value and ignore it. */
+  mediaDefaultOverrides: Partial<Record<MediaDefaultKey, number>>
+  /** Put the projects that set their own value back on the org default. */
+  resetMediaDefaultOverrides: (
+    key: MediaDefaultKey,
+  ) => Promise<{ ok: boolean; cleared: number; message?: string }>
+  /**
    * AQU-1037: effective floor for assigning work to anyone, including
    * file/chapter/target-lane assignments and AI changeset routing.
    */
@@ -470,6 +491,16 @@ export function useOrgSettings(
     return { ok: true, cleared: result.cleared }
   }, [orgId, jwt, refresh])
 
+  /** AQU-1768: the same reset for one media default. */
+  const resetMediaOverrides = useCallback(async (key: MediaDefaultKey) => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const slug = Object.entries(MEDIA_DEFAULT_SLUGS).find(([, k]) => k === key)?.[0] as ProjectOverrideSlug
+    const result = await resetProjectOverrides(jwt, orgId, slug)
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
   useEffect(() => {
     if (!orgId) {
       writeServer(null)
@@ -588,6 +619,9 @@ export function useOrgSettings(
     validationCount: parseOverrideProjectList(server?.overrideProjects?.validationCount),
     validationCountAudio: parseOverrideProjectList(server?.overrideProjects?.validationCountAudio),
   }
+  // AQU-1768: valid values only, the same filter the server applies.
+  const mediaDefaults = useMemo(() => mediaDefaultsFromOrgSettings(server?.settings), [server?.settings])
+  const mediaDefaultOverrides = server?.mediaDefaultOverrides ?? EMPTY_OVERRIDES
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
@@ -749,6 +783,9 @@ export function useOrgSettings(
     validationCountAudioOverrides,
     overrideProjects,
     resetValidationCountOverrides: resetValidationOverrides,
+    mediaDefaults,
+    mediaDefaultOverrides,
+    resetMediaDefaultOverrides: resetMediaOverrides,
     assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,

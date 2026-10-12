@@ -32,6 +32,7 @@ import { loadTargetLanes } from './lane-read-wall'
 import type { EventKind } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { withLongOperationTimeout } from '../../../db/shim/postgres'
 
 const BATCH_LIMIT = 100
 
@@ -82,7 +83,13 @@ export async function handleRebuildProjectionRequest(
     return new Response('AQUILLA_PG binding not configured', { status: 500 })
   }
 
-  const db = env.AQUILLA_PG
+  // AQU-1876: every worker connection carries a 15s statement_timeout. A
+  // rebuild replays the whole event log — the full-log SELECT and the chunked
+  // projection writes are minutes of work by design — so it runs under the
+  // registered `project-rebuild` ceiling instead. The registry
+  // (db/shim/postgres.ts LONG_OPERATION_TIMEOUTS) is the one list of
+  // operations allowed to outrun the default.
+  const db = withLongOperationTimeout(env.AQUILLA_PG, 'project-rebuild')
   const projectId = decodeURIComponent(match[1])
   const startedAt = Date.now()
 

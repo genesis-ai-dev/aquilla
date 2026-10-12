@@ -510,12 +510,18 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   // project having opted in. Opt them in so the gate stays out of the way of
   // what they actually assert. The `es` lane has its row, as a registered lane
   // does in production (AQU-1532: a cell write to a lane with no row is a 422).
+  // So does the legacy default lane the lane-less commits address: on a project
+  // with only tagged lanes a lane-less write is a 422 (AQU-1900), and the
+  // PGlite lane-fill trigger that used to mint this row does not run in prod.
   const makeChainDb = () =>
     makeTestDb({
       project_settings: [
         { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
       ],
-      lanes: [{ id: 'eslane01', project_id: 'proj-a', role: 'target', name: 'Spanish', legacy_tag: 'es' }],
+      lanes: [
+        { id: 'deflane01', project_id: 'proj-a', role: 'target', name: null, legacy_tag: '' },
+        { id: 'eslane01', project_id: 'proj-a', role: 'target', name: 'Spanish', legacy_tag: 'es' },
+      ],
     })
 
   // snapshot() is the stored column. Writers leave it empty; the lane tag is

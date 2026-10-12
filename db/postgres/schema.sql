@@ -352,7 +352,15 @@ CREATE TABLE project_settings (
     roster_view_min_role TEXT
       GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'rosterViewMinRole') = 'number' THEN (settings::jsonb) ->> 'rosterViewMinRole' END) STORED,
     member_progress_view_min_role TEXT
-      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED,
+    -- 0162 (AQU-1768): whether the project sets its own media settings, so
+    -- org-default overrides can be counted and cleared without the blob. NULL
+    -- = inherits the org's default. One line each (dev-stack reconciler).
+    timing_locked TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'timingLocked') STORED,
+    allow_track_editing TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'allowTrackEditing') STORED,
+    cell_editing_floor TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'cellEditingFloor') STORED,
+    allow_self_validation_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'allowSelfValidationAudio') STORED,
+    validation_role_floor_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationRoleFloorAudio') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 

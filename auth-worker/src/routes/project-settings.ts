@@ -121,6 +121,7 @@ import {
 } from "../../../db/shared/retired-lane-settings"
 import { loadOrgValidationDefaults } from "../../../db/shared/validation-threshold"
 import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
+import { mediaDefaultsFromOrgSettings, type MediaDefaults } from "../../../db/shared/media-setting-defaults"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -239,8 +240,9 @@ async function withOrgDefaults(
   orgValidationCountAudio: number | null
   orgPolicy: ProjectOrgPolicy
   visibilityFloors: VisibilityFloorsView
+  orgMediaDefaults: MediaDefaults
 }> {
-  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy] = await Promise.all([
+  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy, orgMediaDefaults] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
     getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
     // AQU-1771: the org's validation defaults, null when it set none. Read
@@ -251,6 +253,8 @@ async function withOrgDefaults(
     // need, for the same reason — plus the visibility floors this project
     // actually enforces, its own stricter values included.
     getProjectOrgPolicy(env, projectId, response.settings),
+    // AQU-1768: and its media defaults, for the same reason.
+    loadOrgMediaDefaults(env, projectId),
   ])
   const { visibility } = policy
   return {
@@ -272,6 +276,30 @@ async function withOrgDefaults(
         effective: visibility.memberProgressViewMinRole,
       },
     },
+    orgMediaDefaults,
+  }
+}
+
+/**
+ * AQU-1768: the media defaults the project's org set (valid values only;
+ * empty when it set none or the project has no org). Best-effort: a failed
+ * read reports none, so the page shows each control's built-in default rather
+ * than failing the settings response.
+ */
+async function loadOrgMediaDefaults(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+): Promise<MediaDefaults> {
+  try {
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT os.settings
+         FROM projects p
+         JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.id = ?`,
+    ).bind(projectId).first<{ settings: string | null }>()
+    return mediaDefaultsFromOrgSettings(row?.settings ? JSON.parse(row.settings) : null)
+  } catch {
+    return {}
   }
 }
 

@@ -199,6 +199,82 @@ new coverage test makes possible and what it should be used for. **Recommended
 next**, in order: `changeset-approvals.ts`, then the content writes, then a
 product decision on whether cross-tenant *reads* should require elevation at all.
 
+### OPS-46 — The only check that runs on a pull request is an advisory agent suite; `ci.yml` still documents three of its jobs as required branch-protection contexts it can never report — **REPORTED, NOT FIXED** [FACT]
+
+Found by checking my own PR's green tick instead of trusting it, after the QA
+walk's green `pr` row prompted the question "which suite was that?".
+
+**`adversarial-jev.yml` is the only workflow in the repo with a
+`pull_request:` trigger.** Every other workflow — `ci.yml`,
+`audio-delta-sync.yml`, `dependency-audit.yml`, `deploy-workers.yml`,
+`dev-neon-refresh.yml`, `e2e-hetzner.yml`, `tauri-release.yml` — is
+`workflow_dispatch` and/or `schedule` only (`tauri-release.yml` on tag push).
+So the checks a PR receives are exactly:
+
+| Check | What it is |
+|---|---|
+| `pr` | the **`pr` job of `adversarial-jev.yml`** — the advisory adversarial Jev suite |
+| `nightly` | the same workflow's other job, skipped on PRs |
+| `Workers Builds: aquilla-web-preview` | Cloudflare **compiling** the SPA/worker |
+
+`ci.yml` holds `lint`, `typecheck`, `unit`, `build`, `schema-migrations`,
+`auth-worker-tests`, `sync-worker-tests` and `agent-worker-tests`. **None of
+them runs on a pull request.** No test suite, linter or typechecker gates a PR
+in this repository.
+
+**Half of this is deliberate and documented; half is not.** `ci.yml`'s header
+records the intent plainly (AQU-564): *"Cloudflare Workers Builds owns automatic
+pull-request compilation and route-free versions. This workflow is retained only
+as an explicit fallback; it has no pull-request or push trigger and therefore
+consumes no hosted runner minutes during ordinary repository activity."* That is
+a real cost decision and not a mistake. But Workers Builds **compiles**; it does
+not run a test, a lint or a typecheck. The gap between "PR compilation is
+covered" and "PR verification is covered" is the whole finding.
+
+**The part that is simply inconsistent.** `ci.yml:68` still says, immediately
+above `lint`:
+
+> `# Required branch-protection checks. Do not rename or add conditions without`
+> `# updating the main/dev protection rules in the same control-plane change.`
+
+Three jobs are documented as required branch-protection contexts inside a
+workflow that cannot report on a PR. One of two things is true, and both are
+worth knowing: either `main`/`dev` protection does require contexts named
+`lint`/`typecheck`/`unit`, in which case no PR can ever satisfy them and every
+one of them sits "Expected — waiting for status"; or protection does not require
+them, in which case the comment describes a control that is not in force. This
+PR resolves it empirically — GitHub reports `mergeable_state: "clean"` with only
+the Jev check and the Cloudflare build present — so **it is the second**. A
+control documented as required and not actually enforced is V4a's shape again,
+and OPS-38's: a second control left thin in reliance on one nobody measured.
+
+**This is OPS-21, two months on and worse.** 08-24 reported that *"the required
+PR gate is red on `dev` and fails in the first of three sequential phases, so
+the worker test suites and the SPA build never execute at all"*, with patches,
+and recorded it rather than fixing it because none of it was auth/session work.
+The suites are no longer merely unreachable behind a failing phase — their
+workflow is not wired to pull requests at all.
+
+**Why it matters beyond tidiness** [JUDGMENT]: it is the reason this pass found
+six red test files that nothing had flagged (three in `auth-worker`, three under
+`src/`, §Verification), and it is why the green tick on this very PR is not
+evidence of anything. The green `pr` check here ran the adversarial suite, which
+reported **"HARNESS UNAVAILABLE. The canary health check failed (2 of 2). This
+run says nothing about the change."** A reviewer reading ✅ would reasonably infer
+tests passed. Nothing did.
+
+**Not fixed, deliberately.** Adding `pull_request:` to `ci.yml` is a one-line
+change with consequences this pass cannot own: it starts consuming hosted runner
+minutes on every PR — the exact cost AQU-564 set out to avoid — and it would go
+red immediately on the six known-failing files, blocking unrelated work until
+those are fixed. The ordering a maintainer has to choose (fix the six, then wire
+the trigger, or wire it non-blocking first) is a control-plane decision, and the
+comment at `ci.yml:68` warns that protection rules must change in the same
+control-plane change. **Recommended**: decide whether the `lint`/`typecheck`/
+`unit` contexts are meant to be required, then either wire `ci.yml` to
+`pull_request` and fix the six red files, or correct that comment so it stops
+describing enforcement that does not exist.
+
 ---
 
 ## Reviewed, no new finding
@@ -275,6 +351,7 @@ Each was read against the code, not assumed safe by category.
 | ID | Finding | Likelihood | Impact | Risk | State |
 |---|---|---|---|---|---|
 | OPS-44 | Un-elevated platform-admin authority minted cross-tenant sync tokens and PATs, disclosed orgs' live vendor API keys, and folded projects irreversibly | **Medium** — needs a platform-admin session, but *only* a session: a stolen 30-day access token suffices, which is the attacker OPS-35 was written for, and no step-up code appears anywhere in the chain | **High** — D2 draft text and D3 membership/activity read *and written* across every tenant (via the sync-worker's six `src: "platform"` exemptions), D7 vendor keys in plaintext, D3 real identity via a `pii` PAT that outlives the session, plus irreversible destruction of a donor project | **High** | Fixed |
+| OPS-46 | No test/lint/typecheck suite runs on a pull request (`adversarial-jev.yml` is the only `pull_request`-triggered workflow); `ci.yml` still documents three jobs as required branch-protection contexts it cannot report | **Certain — it is the current state** | **Medium–High** [JUDGMENT] — no single breach, but it is why six red test files went unflagged and why a green tick on any PR, this one included, is not evidence. OPS-21's finding, now worse | **Medium–High** | Reported |
 | OPS-45 | 36 of 44 route modules resolve a platform-admin-winnable role with no elevation decision | High that some are wrong [JUDGMENT] — one of the two examined in this pass (`org-settings`) turned out to disclose a credential | Unknown, bounded by one tenant's data per route; `changeset-approvals.ts` is the one flagged as likely worse | **Medium** | Reported |
 
 ## Countermeasures applied in this change
@@ -374,6 +451,12 @@ fix was restored (`git stash` of the one source file, re-run):
   only remaining output is the `partyserver` `TS2307`s from `sync-worker`, whose
   package is not installed in this environment — same as 09-28 and 10-05).
 * `npx eslint` clean on all 15 changed files.
+* **The PR's own green CI tick is not evidence — see OPS-46.** The only check a
+  pull request receives here is the `pr` job of `adversarial-jev.yml` (plus the
+  Cloudflare build), and on this PR it reported *"HARNESS UNAVAILABLE … This run
+  says nothing about the change."* No test, lint or typecheck suite runs on a
+  PR in this repository, so the local runs below are the whole of the automated
+  evidence for this change.
 * Full `auth-worker` suite (`npx vitest run`): **307 files, 3618 passing, 2
   expected-fail, 7 failures in 3 files — all pre-existing, none in anything this
   change touches.** Each was verified rather than assumed:

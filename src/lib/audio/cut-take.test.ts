@@ -57,3 +57,19 @@ describe("selection expands to pieces", () => {
     expect(selectedDubTakes(entry).map((t) => t.audioId)).toEqual(["a", "b"])
   })
 })
+
+describe("the gutter's take list sees every piece", () => {
+  it("audioEntryFromCell keeps pieceOf and the window start, and drops removed pieces", async () => {
+    const { audioEntryFromCell } = await import("./audio-validation-permissions")
+    const entry = audioEntryFromCell({
+      attachments: {
+        a: { slot: "recording", role: "dub", trimStartMs: null, validatorCount: 1 },
+        b: { slot: "recording", role: "dub", trimStartMs: 1500, pieceOf: "a", validatorCount: 0 },
+        c: { slot: "recording", role: "dub", trimStartMs: 3000, pieceOf: "a", isDeleted: true },
+      },
+      selectedBySlot: { recording: "a" },
+      selectedAudioId: "a",
+    })!
+    expect(selectedDubTakes(entry).map((t) => [t.audioId, t.validatorCount])).toEqual([["a", 1], ["b", 0]])
+  })
+})

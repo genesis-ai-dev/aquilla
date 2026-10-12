@@ -387,6 +387,7 @@ const OVERRIDE_COUNT_KEYS = [
   "validationCountAudioOverrides",
   // AQU-1938: the projects behind those counts, kept for the same reason.
   "overrideProjects",
+  "mediaDefaultOverrides",
 ] as const satisfies ReadonlyArray<keyof OrgSettingsResponse>
 
 /** Keep `from`'s value for `key` when `to` arrived without one. */

@@ -107,6 +107,15 @@ describe("AQU-1768: org media defaults — the org route", () => {
     })
   })
 
+  it("a save carries the counts too, so the reset prompt still knows after one change", async () => {
+    await seed()
+    const res = await patchOrg("mara", { timingLocked: false })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { mediaDefaultOverrides: Record<string, number> }
+    expect(body.mediaDefaultOverrides.timingLocked).toBe(1)
+    expect(body.mediaDefaultOverrides.cellEditingFloor).toBe(1)
+  })
+
   it("reset clears one key's project overrides and leaves the others", async () => {
     await seed()
     const res = await app.request(

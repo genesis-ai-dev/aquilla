@@ -6,12 +6,17 @@ top-1 / top-3 exact-word accuracy (%). All weights chosen on dev splits of the l
 suggestions when a cell has no source signal, and "+ source" when it does. "+ stem" is the evaluated, NOT shipped,
 grapheme-stem back-off.
 
+> **Regenerated 2026-10-12** against the code at 038924b68 (unchanged in the 20c50ed merge of dev). Only the
+> Nepali full-Bible rows changed: the previous figures predated the stray-joiner tokenizer fix that landed in
+> 038924b68 (a lone ZWJ/mark is no longer a word). All other accuracy figures reproduced exactly; the speed
+> table is a fresh timing on the same machine.
+
 ## Low-resource targets
 
 | pair | slice | task | bigram | BIA | + chains (no source) | + source (shipped) | + source + stem | source only |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| eng→npi (Nepali, Devanagari) | full | next | 12.5 / 20.7 | 13.5 / 22.3 | 13.1 / 20.9 | 14.7 / 24.7 | 14.1 / 23.6 | 4.9 / 9.9 |
-| eng→npi (Nepali, Devanagari) | full | infill | 17.6 / 26.7 | 18.1 / 29.1 | — | 21.7 / 33.5 | 20.9 / 32.3 | 11.3 / 17.6 |
+| eng→npi (Nepali, Devanagari) | full | next | 12.3 / 20.4 | 13.5 / 22.7 | 13.1 / 21.3 | 14.2 / 24.7 | 13.9 / 23.3 | 4.7 / 9.8 |
+| eng→npi (Nepali, Devanagari) | full | infill | 16.3 / 25.5 | 17.3 / 28.1 | — | 21.1 / 32.5 | 20.3 / 31.6 | 10.7 / 17.5 |
 | eng→npi (Nepali, Devanagari) | first 2000 | next | 10.3 / 17.1 | 13.2 / 20.7 | 13.1 / 20.2 | 12.7 / 20.9 | 12.6 / 20.7 | 5.3 / 8.9 |
 | eng→npi (Nepali, Devanagari) | first 2000 | infill | 16.7 / 23.5 | 19.3 / 29.2 | — | 21.2 / 30.6 | 20.9 / 30.2 | 9.2 / 13.8 |
 | eng→tpi (Tok Pisin) | full | next | 24.8 / 44.1 | 25.1 / 44.1 | 25.9 / 45.5 | 23.7 / 45.1 | 25.5 / 45.4 | 4.3 / 9.8 |
@@ -40,13 +45,13 @@ grapheme-stem back-off.
 
 | pair | slice | BIA | + chains (no source) | + source |
 | --- | --- | ---: | ---: | ---: |
-| eng→npi (Nepali, Devanagari) | full | 4.29 | 1.17 | 8.14 |
-| eng→npi (Nepali, Devanagari) | first 2000 | 0.30 | 0.11 | 0.72 |
-| eng→tpi (Tok Pisin) | full | 28.34 | 1.13 | 29.51 |
-| eng→tpi (Tok Pisin) | first 2000 | 2.46 | 0.48 | 3.60 |
-| eng→quc (K'iche', Mayan; NT) | full | 10.07 | 2.63 | 16.49 |
-| eng→quc (K'iche', Mayan; NT) | first 2000 | 0.64 | 0.31 | 1.03 |
-| eng→chk (Chuukese, Austronesian) | full | 7.99 | 0.90 | 10.50 |
-| eng→chk (Chuukese, Austronesian) | first 2000 | 0.55 | 0.16 | 0.96 |
-| spa→eng (English, reference) | full | 9.97 | 1.50 | 13.41 |
-| spa→eng (English, reference) | first 2000 | 0.52 | 0.18 | 0.86 |
+| eng→npi (Nepali, Devanagari) | full | 4.22 | 1.02 | 6.21 |
+| eng→npi (Nepali, Devanagari) | first 2000 | 0.28 | 0.10 | 0.68 |
+| eng→tpi (Tok Pisin) | full | 13.42 | 0.69 | 14.51 |
+| eng→tpi (Tok Pisin) | first 2000 | 1.30 | 0.26 | 0.96 |
+| eng→quc (K'iche', Mayan; NT) | full | 2.22 | 0.75 | 3.08 |
+| eng→quc (K'iche', Mayan; NT) | first 2000 | 0.65 | 0.31 | 1.05 |
+| eng→chk (Chuukese, Austronesian) | full | 10.27 | 1.11 | 12.16 |
+| eng→chk (Chuukese, Austronesian) | first 2000 | 0.55 | 0.16 | 0.89 |
+| spa→eng (English, reference) | full | 8.50 | 1.24 | 10.28 |
+| spa→eng (English, reference) | first 2000 | 0.49 | 0.18 | 0.84 |

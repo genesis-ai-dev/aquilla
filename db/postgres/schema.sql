@@ -993,6 +993,12 @@ CREATE TABLE cell_audio (
     -- permanent home for every take that predates this column (rebuild replays
     -- historical cell.lane.retime events into it forever).
     target_offset_ms   BIGINT,
+    -- AQU-1767 (0162): the take this row was CUT from, when it is a piece of
+    -- one. NULL for every whole take and for a cut's first piece (the root).
+    -- Group key = COALESCE(piece_of, audio_id); selection is per group — every
+    -- live piece of a selected group is selected, so a row needs every piece
+    -- validated (the progress MIN over selected dubs already says so).
+    piece_of           TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

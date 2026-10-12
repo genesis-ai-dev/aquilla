@@ -147,7 +147,7 @@ export function pairRows(rows: CellRow[], lane: string, laneId: string | null = 
 }
 
 // apiRev 4 methods are delegated wholesale (rev4Delegates, constructor).
-// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging -- the rev-4 delegates are assigned in the constructor
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, @typescript-eslint/no-empty-object-type -- the rev-4 delegates are assigned in the constructor; the empty body is the merge
 export interface LiveToolData extends ToolRev4HostData {}
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging -- see above

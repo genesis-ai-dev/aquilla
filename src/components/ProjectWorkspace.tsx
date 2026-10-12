@@ -192,6 +192,7 @@ import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { ToolsDockPanel } from "./tools/ToolMounts"
 import { ExtensionEditorSurface, useExtensionEditorChoice } from "./tools/ExtensionEditor"
+import { extensionEditorWriteCaps } from "@/lib/tools/editor-write-caps"
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolHostServices } from "@/lib/tools/live-data"
 import type { ToolOrigin } from "../../shared/tools/manifest"
@@ -12638,8 +12639,9 @@ export function ProjectWorkspace() {
     activeLane,
     validationRequirement: validationCount,
     canManageLanes: canSwitchLanes(projectRoleLevel),
-    canEdit: !isReadOnly && canPerform("target.cell.commit", projectRoleLevel),
-    canValidate: canPerform("cell.validate", projectRoleLevel),
+    // AQU-1463: an archived active lane freezes target edits and validation
+    // for every role, exactly as EditorTable's capabilities do.
+    ...extensionEditorWriteCaps({ projectReadOnly: isReadOnly, laneArchived: activeLaneLock !== null, roleLevel: projectRoleLevel }),
     autoValidatesOwnEdits: shouldAutoValidateHumanEdit({
       value: "x",
       canValidate: canPerform("cell.validate", projectRoleLevel),
@@ -12661,7 +12663,7 @@ export function ProjectWorkspace() {
     lenses: ["text" as const, "audio" as const, "agent" as const],
     panels: ["history" as const, "comments" as const, "attachments" as const, "rule" as const, "term" as const, "recorder" as const],
   } : null), [activeFile, project, activeSourceLanguage, laneLabels, activeLane, activeTargetLanguage, availableLanes, laneCodes,
-    validationCount, isReadOnly, projectRoleLevel, currentUsername, fontSizes.source, fontSizes.target, fileMeta.sourceTextDirection,
+    validationCount, isReadOnly, activeLaneLock, projectRoleLevel, currentUsername, fontSizes.source, fontSizes.target, fileMeta.sourceTextDirection,
     fileMeta.targetTextDirection, fileMeta.lineNumbersEnabled, cellLabelsEnabled, sparkleReady, isCompletionAvailable,
     isBacktranslationConfigured, healthCalculationsEnabled, footnoteViewMode, lens, t])
   const extensionVoiceFor = useCallback((cellId: string) => {

@@ -1,4 +1,14 @@
 import { useState, type ReactNode } from "react"
+import { LaneAccessFields } from "@/components/LaneAccessFields"
+import { useCurrentTargetLanes, type TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
+import {
+  chosenLaneLabels,
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+  type MemberLaneAccess,
+} from "@/lib/lanes/lane-access-choice"
 import { Trash2, GitMerge } from "lucide-react"
 import type { SecondarySrc } from "@/lib/frontier/members"
 import { Button } from "@/components/ui/button"
@@ -14,11 +24,17 @@ import { RoleLabel } from "@/components/RoleLabel"
 import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
-  roleName,
   type RoleLevel,
 } from "@/lib/frontier/roles"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { addProjectMember, removeProjectMember } from "@/lib/frontier/members"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
+import { toast } from "@/components/ui/toast"
+import {
+  describeGrant,
+  grantProjectName,
+  type GrantScope,
+} from "@/lib/access/grant-scope-sentence"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -29,6 +45,13 @@ interface CellEditorProps {
   userId: number
   username: string
   projectId: string
+  /** Display name of the project column. */
+  projectName: string
+  /**
+   * Lane scope of this grant. A new cell is every lane. An existing cell uses
+   * the scopes already saved, or "unknown" until that fetch lands.
+   */
+  grantLanes: "all" | "unknown" | readonly string[]
   /** Called after a successful mutation so the matrix can re-fetch. */
   onMutated: () => Promise<void> | void
   /** Visual styling derived by parent (color tier). */
@@ -97,6 +120,8 @@ export function MembersMatrixCellEditor({
   userId,
   username,
   projectId,
+  projectName,
+  grantLanes,
   onMutated,
   cellClassName,
   sourceHint,
@@ -105,22 +130,43 @@ export function MembersMatrixCellEditor({
   footer,
 }: CellEditorProps) {
   const t = useT()
+  const { locale } = useI18n()
   const { session } = useFrontierSession()
+  const grantScope: GrantScope = {
+    kind: "project",
+    projectName: grantProjectName(t, projectName),
+    lanes: grantLanes,
+  }
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<Status>("idle")
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const { lanes: targetLanes } = useCurrentTargetLanes(!cell && open ? projectId : null)
 
   const source = cell?.role.source
   const isImmutable =
     source === "creator" || source === "group" || source === "org"
   const canEdit = !isImmutable && Boolean(session?.jwt)
 
-  async function applyRole(level: RoleLevel) {
+  async function applyRole(level: RoleLevel, laneAccess?: MemberLaneAccess) {
     if (!session?.jwt) return
     setStatus("submitting")
     setErrorMsg(null)
     try {
-      await addProjectMember(session.jwt, projectId, username, level)
+      if (laneAccess) {
+        await addProjectMember(session.jwt, projectId, username, level, laneAccess)
+      } else {
+        await addProjectMember(session.jwt, projectId, username, level)
+      }
+      const scope = grantScopeWithChoice(grantScope, targetLanes, level, laneAccess, false)
+      toast.add({
+        type: "success",
+        title: describeGrant(t, {
+          names: [username],
+          roleLevel: level,
+          scope,
+          locale,
+        }).sentence,
+      })
       await onMutated()
       setOpen(false)
       setStatus("idle")
@@ -163,13 +209,16 @@ export function MembersMatrixCellEditor({
           >
             <span aria-hidden>—</span>
           </PopoverTrigger>
-          <PopoverContent className="w-56 p-2" side="bottom">
+          <PopoverContent className={targetLanes.length > 0 ? "w-72 p-2" : "w-56 p-2"} side="bottom">
             <RolePickerBody
               title={t("workspace.typeahead.addUser", { username })}
+              username={username}
+              grantScope={grantScope}
               currentLevel={null}
               onPick={applyRole}
               status={status}
               errorMsg={errorMsg}
+              targetLanes={targetLanes}
             />
           </PopoverContent>
         </Popover>
@@ -247,6 +296,7 @@ export function MembersMatrixCellEditor({
           {canEdit ? (
             <EditableBody
               username={username}
+              grantScope={grantScope}
               currentLevel={cell.role.level}
               onPick={applyRole}
               onRemove={removeFromProject}
@@ -254,7 +304,14 @@ export function MembersMatrixCellEditor({
               errorMsg={errorMsg}
             />
           ) : (
-            <ImmutableBody source={cell.role.source} onMakeException={applyRole} status={status} errorMsg={errorMsg} />
+            <ImmutableBody
+              source={cell.role.source}
+              username={username}
+              grantScope={grantScope}
+              onMakeException={applyRole}
+              status={status}
+              errorMsg={errorMsg}
+            />
           )}
         </PopoverContent>
       </Popover>
@@ -266,21 +323,56 @@ export function MembersMatrixCellEditor({
 /** Picker shown when adding a new project member. */
 function RolePickerBody({
   title,
+  username,
+  grantScope,
   currentLevel,
   onPick,
   status,
   errorMsg,
+  targetLanes,
 }: {
   title: string
+  username: string
+  grantScope: GrantScope
   currentLevel: number | null
-  onPick: (level: RoleLevel) => void | Promise<void>
+  onPick: (level: RoleLevel, laneAccess?: MemberLaneAccess) => void | Promise<void>
   status: Status
   errorMsg: string | null
+  /** Set only when this picker is adding a new member. A role change omits it. */
+  targetLanes?: readonly TargetLaneOption[]
 }) {
-  const t = useT()
+  const { t, locale } = useI18n()
+  // The role buttons are the submit, except a new member below project lead
+  // on a project that has lanes: that pick waits for an explicit lane choice.
+  const [preview, setPreview] = useState<number | null>(null)
+  const [pendingLevel, setPendingLevel] = useState<RoleLevel | null>(null)
+  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null)
+  const shown = preview ?? pendingLevel ?? currentLevel ?? PROJECT_ROLE_OPTIONS[0].level
+  const lanes = targetLanes ?? []
+  const confirming = pendingLevel !== null && needsLaneChoice(pendingLevel, lanes.length)
+  const copy = describeGrant(t, {
+    names: [username],
+    roleLevel: shown,
+    scope: grantScopeWithChoice(
+      grantScope,
+      lanes,
+      shown,
+      pendingLevel === shown && laneChoice ? toMemberLaneAccess(laneChoice) : undefined,
+      Boolean(targetLanes),
+    ),
+    locale,
+  })
+  function handlePick(level: RoleLevel) {
+    if (targetLanes && needsLaneChoice(level, targetLanes.length)) {
+      setPendingLevel(level)
+      return
+    }
+    void onPick(level)
+  }
   return (
     <div className="space-y-1.5">
       <div className="px-1 pb-1 text-xs font-medium border-b">{title}</div>
+      <GrantScopeNotice sentence={copy.sentence} />
       <div className="space-y-0.5">
         {PROJECT_ROLE_OPTIONS.map((opt) => {
           const isCurrent = opt.level === currentLevel
@@ -288,14 +380,19 @@ function RolePickerBody({
             <button
               key={opt.level}
               type="button"
-              onClick={() => onPick(opt.level)}
+              onClick={() => handlePick(opt.level)}
+              onMouseEnter={() => setPreview(opt.level)}
+              onFocus={() => setPreview(opt.level)}
               disabled={status === "submitting" || isCurrent}
               className={`flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-start hover:bg-muted disabled:opacity-60 disabled:cursor-not-allowed ${
                 isCurrent ? "bg-muted/60" : ""
               }`}
             >
-              <span className="text-xs font-medium capitalize">
-                <RoleLabel name={opt.name} plain />
+              <span className="text-xs font-medium">
+                <span className="capitalize">
+                  <RoleLabel name={opt.name} plain />
+                </span>
+                <span className="font-normal text-muted-foreground"> — {copy.scopeEcho}</span>
                 {isCurrent && (
                   <span className="ms-1.5 text-[9px] text-muted-foreground">
                     {t("org.membersMatrixCellEditor.currentBadge")}
@@ -307,6 +404,29 @@ function RolePickerBody({
           )
         })}
       </div>
+      {confirming && pendingLevel !== null && (
+        <div className="space-y-1.5 px-1 pt-1">
+          <LaneAccessFields
+            name={`matrix-lane-${username}`}
+            lanes={lanes}
+            value={laneChoice}
+            onChange={setLaneChoice}
+            disabled={status === "submitting"}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="w-full"
+            disabled={!laneChoiceReady(laneChoice, pendingLevel, lanes.length) || status === "submitting"}
+            onClick={() => {
+              if (!laneChoice) return
+              void onPick(pendingLevel, toMemberLaneAccess(laneChoice))
+            }}
+          >
+            {t("common.add")}
+          </Button>
+        </div>
+      )}
       {status === "submitting" && (
         <div className="flex items-center gap-1 px-1 pt-1 text-[10px] text-muted-foreground">
           <Spinner className="size-3" />
@@ -323,6 +443,7 @@ function RolePickerBody({
 /** Picker + Remove for editable (override) cells. */
 function EditableBody({
   username,
+  grantScope,
   currentLevel,
   onPick,
   onRemove,
@@ -330,6 +451,7 @@ function EditableBody({
   errorMsg,
 }: {
   username: string
+  grantScope: GrantScope
   currentLevel: number
   onPick: (level: RoleLevel) => void | Promise<void>
   onRemove: () => void | Promise<void>
@@ -341,6 +463,8 @@ function EditableBody({
     <div className="space-y-1.5">
       <RolePickerBody
         title={t("org.membersMatrixCellEditor.editPopoverTitle", { username })}
+        username={username}
+        grantScope={grantScope}
         currentLevel={currentLevel}
         onPick={onPick}
         status={status}
@@ -371,16 +495,29 @@ function EditableBody({
  */
 function ImmutableBody({
   source,
+  username,
+  grantScope,
   onMakeException,
   status,
   errorMsg,
 }: {
   source: string
+  username: string
+  grantScope: GrantScope
   onMakeException: (level: RoleLevel) => void | Promise<void>
   status: Status
   errorMsg: string | null
 }) {
-  const t = useT()
+  const { t, locale } = useI18n()
+  const exceptionRoles = PROJECT_ROLE_OPTIONS.filter((o) => o.level <= ROLE.MAINTAINER)
+  const [preview, setPreview] = useState<number | null>(null)
+  const shown = preview ?? exceptionRoles[0]?.level ?? ROLE.CONTRIBUTOR
+  const copy = describeGrant(t, {
+    names: [username],
+    roleLevel: shown,
+    scope: grantScope,
+    locale,
+  })
   if (source === "creator") {
     return (
       <div className="space-y-1 text-xs">
@@ -414,17 +551,22 @@ function ImmutableBody({
         <p className="px-1 pb-1 text-[10px] font-medium text-muted-foreground">
           {t("org.membersMatrixCellEditor.setExceptionLabel")}
         </p>
+        <GrantScopeNotice sentence={copy.sentence} />
         <div className="space-y-0.5">
-          {PROJECT_ROLE_OPTIONS.filter((o) => o.level <= ROLE.MAINTAINER).map((opt) => (
+          {exceptionRoles.map((opt) => (
             <button
               key={opt.level}
               type="button"
               onClick={() => onMakeException(opt.level)}
+              onMouseEnter={() => setPreview(opt.level)}
+              onFocus={() => setPreview(opt.level)}
               disabled={status === "submitting"}
               className="flex w-full items-center justify-between rounded px-2 py-1 text-start text-xs hover:bg-muted disabled:opacity-60"
             >
-              <RoleLabel name={opt.name} plain />
-              <RoleLabel name={roleName(opt.level)} plain className="text-[10px] text-muted-foreground" />
+              <span>
+                <RoleLabel name={opt.name} plain />
+                <span className="text-muted-foreground"> — {copy.scopeEcho}</span>
+              </span>
             </button>
           ))}
         </div>
@@ -439,4 +581,25 @@ function ImmutableBody({
       )}
     </div>
   )
+}
+
+function grantScopeWithChoice(
+  scope: GrantScope,
+  lanes: readonly TargetLaneOption[],
+  role: number,
+  laneAccess: MemberLaneAccess | undefined,
+  unchosen: boolean,
+): GrantScope {
+  if (scope.kind !== "project" || !needsLaneChoice(role, lanes.length)) return scope
+  if (!laneAccess) return unchosen ? { ...scope, lanes: "unknown" } : scope
+  return {
+    ...scope,
+    lanes: chosenLaneLabels(
+      lanes,
+      role,
+      "allCurrentLanes" in laneAccess
+        ? { kind: "all" }
+        : { kind: "lanes", laneIds: laneAccess.scopeLanes },
+    ),
+  }
 }

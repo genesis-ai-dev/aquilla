@@ -55,19 +55,32 @@ export function planNewTargetLane(input: {
   code?: string | null
   targetLanguage: string | null
   existing: readonly ExistingLaneIdentity[]
+  /**
+   * AQU-1784: accept a lane whose display name duplicates an existing one.
+   * The languages screen warns about the collision inline BEFORE the save and
+   * then lets it through — two lanes of one language is a legitimate shape
+   * (two teams, one language), and since the switcher now tells colliding
+   * labels apart, refusing the create was costing more than it bought.
+   * Everything else about the name (empty, over-long) still refuses.
+   */
+  allowDuplicateName?: boolean
 }): PlanNewTargetLaneResult {
   const language = input.language.trim()
   const name = input.name.trim() || null
 
   // Uniqueness is on what people SEE, so a new lane showing only its language
   // still collides with an existing lane whose name renders the same string.
+  // The collision is still computed when `allowDuplicateName` is set — the
+  // empty and over-long rules below it are not negotiable.
   const display = laneDisplayName({ role: "target", language, name })
   const problem = laneNameProblem({
     laneId: input.laneId,
     name: language || name ? display : "",
     others: input.existing.map((lane) => ({ id: lane.id, name: laneDisplayName(lane) })),
   })
-  if (problem) return { ok: false, problem }
+  if (problem && !(problem === "duplicate" && input.allowDuplicateName)) {
+    return { ok: false, problem }
+  }
 
   const override = canonicalLanguageCodeOverride(input.code)
   if (!override.ok) return { ok: false, problem: "malformed_code" }

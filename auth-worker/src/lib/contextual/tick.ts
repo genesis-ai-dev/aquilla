@@ -16,6 +16,7 @@
 // the [[ctx:*]] prompt markers.
 
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { modelLanguageForLane } from "../../../../db/shared/lane-language"
 import {
   getRun,
   failRun,
@@ -66,6 +67,10 @@ import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 import { ingestRunActivity } from "../team-ingest"
 import { formatSpanRange } from "../../../../shared/span-label"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+} from "../../../../shared/vendor-timeouts"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
 
@@ -304,15 +309,35 @@ export function makeLlmCall(cfg: {
         // The gate holds a slot only for the round-trip, never across the
         // backoff below — a sleeping retry must not occupy capacity.
         outcome = await gate<Attempt>(async () => {
-          const res = await fetch(cfg.url, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${cfg.apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: requestBody,
-            ...(cfg.signal ? { signal: cfg.signal } : {}),
-          })
+          // AQU-1849: a deadline PER ATTEMPT (the retry backoff below is
+          // outside it), linked to the run's signal when it has one. Without
+          // it a hung provider held a gate slot indefinitely, starving the
+          // other lanes behind the same gate.
+          const deadline = vendorDeadline("openRouterNonStreaming", cfg.signal ?? null)
+          let res: Response
+          try {
+            res = await fetch(cfg.url, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${cfg.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: requestBody,
+              signal: deadline.signal,
+            })
+          } catch (err) {
+            if (deadline.timedOut()) {
+              // Reported as a retriable 504 so the backoff loop below gets its
+              // normal attempts and then fails as provider_http_error
+              // status=504 — a hang is now indistinguishable, to the caller,
+              // from the gateway timeout it really is.
+              logVendorTimeout("openRouterNonStreaming", err)
+              return { ok: false, status: 504, code: "http_error" }
+            }
+            throw err
+          } finally {
+            deadline.clear()
+          }
           if (!res.ok) {
             // Provider bodies are untrusted and may echo credentials, prompts,
             // or user text. Never materialize them in an Error that can reach
@@ -680,7 +705,7 @@ async function loadNeighborBriefs(
   db: AquillaDb,
   projectId: string,
   fileId: string,
-  targetLang: string,
+  laneId: string,
   seed: StoredSpanSeed,
   pairs: CellPair[],
 ): Promise<NeighborBrief[]> {
@@ -688,7 +713,7 @@ async function loadNeighborBriefs(
     const approved = await listSceneBriefs(db, projectId, {
       fileId,
       status: "approved",
-      targetLang,
+      laneId,
     })
     const order = new Map(pairs.map((p, i) => [p.cellId, i]))
     const seedStart = order.get(seed.startCellId) ?? 0
@@ -728,8 +753,9 @@ async function loadParagraphStarts(
   try {
     const { results } = await db
       .prepare(
+        // AQU-1610: a source row is `side = 'source'`, whatever lane it is in.
         `SELECT cell_id FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND metadata ->> 'paragraphStart' = 'true'`,
       )
       .bind(projectId, fileId)
@@ -861,7 +887,7 @@ async function consumeSteering(
         brief &&
         brief.projectId === run.projectId &&
         brief.fileId === run.fileId &&
-        brief.targetLang === run.targetLang
+        brief.laneId === run.laneId
       ) {
         await markStale(db, briefId, "steering-refresh")
         const seed = cursor?.seeds.find(
@@ -992,7 +1018,7 @@ async function processSpan(
     db,
     run.projectId,
     run.fileId,
-    run.targetLang,
+    run.laneId,
     storedSeed,
     shared.pairs,
   )
@@ -1002,6 +1028,12 @@ async function processSpan(
   let report: SpanReport | undefined
   let occupiedAtStage = 0
   let phaseActivity = Promise.resolve()
+  const targetLanguage = await modelLanguageForLane(
+    db,
+    run.projectId,
+    { laneId: run.laneId, tag: run.targetLang },
+    shared.ctx.targetLanguage,
+  )
   try {
     report = await runSpan({
       seed,
@@ -1020,9 +1052,7 @@ async function processSpan(
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
-      ...(run.targetLang || shared.ctx.targetLanguage
-        ? { targetLanguage: run.targetLang || shared.ctx.targetLanguage }
-        : {}),
+      ...(targetLanguage ? { targetLanguage } : {}),
       // Tag every call this span makes, for cost attribution. A wave runs
       // several spans concurrently, so the span id must ride the request
       // rather than live in shared mutable state.
@@ -1050,7 +1080,7 @@ async function processSpan(
           fileId: run.fileId,
           startCellId: brief.startCellId,
           endCellId: brief.endCellId,
-          targetLang: run.targetLang,
+          laneId: run.laneId,
           construal: brief.l2Construal,
           ambiguityRegister: brief.ambiguityRegister,
           l1Summary: brief.l1Summary,
@@ -1087,7 +1117,7 @@ async function processSpan(
           projectId: run.projectId,
           fileId: run.fileId,
           cellIds: draft.cells.map((c) => c.cellId),
-          targetLang: run.targetLang,
+          laneId: run.laneId,
         })
         occupiedAtStage += occupied.size
         const fresh = draft.cells.filter((c) => !occupied.has(c.cellId))
@@ -1308,12 +1338,12 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   // Scope + cursor. Pairs are re-read every wave (cells move under the run);
   // seeds are pinned in the cursor so segmentation never shifts mid-run.
   const [pairs, excludedCellIds] = await Promise.all([
-    selectCellPairs(db, run.projectId, { fileId: run.fileId, targetLang: run.targetLang }),
+    selectCellPairs(db, run.projectId, { fileId: run.fileId, laneId: run.laneId }),
     findProposedCellsFromOtherRuns(db, {
       projectId: run.projectId,
       fileId: run.fileId,
       runId: run.id,
-      targetLang: run.targetLang,
+      laneId: run.laneId,
     }),
   ])
   let cursor = run.spanCursor
@@ -1392,7 +1422,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
 
   // Per-run context is loaded ONCE and shared by every span in the wave
   // (it was re-fetched per span before, which was pure overhead).
-  const ctx = await loadProjectContext(db, run.projectId)
+  const ctx = await loadProjectContext(db, run.projectId, {
+    laneId: run.laneId,
+    targetLang: run.targetLang,
+  })
   const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
     ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
     : []

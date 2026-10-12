@@ -13,6 +13,11 @@ import {
   setUnresolvedCommentHighlight,
 } from "@/lib/store/unresolved-comment-highlight-pref"
 import {
+  getHealthScoreColorCoding,
+  resetHealthScoreColorCodingCacheForTests,
+  setHealthScoreColorCoding,
+} from "@/lib/store/health-score-color-coding-pref"
+import {
   __resetLowMemoryForTests,
   getLowMemoryMode,
   isLowMemoryActive,
@@ -66,6 +71,8 @@ beforeEach(() => {
   setMilestoneSplit(false)
   resetUnresolvedCommentHighlightCacheForTests()
   setUnresolvedCommentHighlight(false)
+  resetHealthScoreColorCodingCacheForTests()
+  setHealthScoreColorCoding(false)
   setLowMemoryMode("auto")
   __resetLowMemoryForTests()
 })
@@ -82,6 +89,9 @@ describe("ViewSettingsMenu popover", () => {
 
     const panel = screen.getByTestId("view-settings-popover")
     expect(panel).toBeTruthy()
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller).toHaveClass("overflow-y-auto")
+    expect(scroller).toHaveClass("overflow-x-hidden")
     expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeTruthy()
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
@@ -379,5 +389,49 @@ describe("ViewSettingsMenu — highlight open comments", () => {
     fireEvent.click(toggle)
 
     expect(getUnresolvedCommentHighlight()).toBe(false)
+  })
+})
+
+describe("ViewSettingsMenu — health score color coding", () => {
+  it("offers the toggle off by default and stores the opt-in", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    expect(getHealthScoreColorCoding()).toBe(false)
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(true)
+    expect(
+      screen.getByRole("switch", { name: "Health Score Color Coding" }).getAttribute("aria-checked"),
+    ).toBe("true")
+  })
+
+  it("renders on from a stored preference and turns back off", () => {
+    setHealthScoreColorCoding(true)
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(false)
+  })
+
+  it("is disabled with no file open, since there are no drafts to mark", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-disabled")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(false)
   })
 })

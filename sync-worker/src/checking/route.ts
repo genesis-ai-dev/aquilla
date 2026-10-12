@@ -8,6 +8,7 @@ import { handleAudioRequest, type AudioEnv } from "../audio"
 import { handleEventsWriteRequest, type EventsRouteEnv } from "../events/route"
 import { resolveCommentFloors } from "../events/comment-floors"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../../../auth-worker/src/utils/password"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 import { createCheckingSchema, joinCheckingSchema, feedbackSchema, inCheckingScope, type CheckingUnit } from "./policy"
 
 export type CheckingEnv = EventsRouteEnv & AudioEnv
@@ -150,7 +151,7 @@ export async function handleCheckingRequest(request: Request, env: CheckingEnv,
         FROM jsonb_array_elements(?::text::jsonb) WITH ORDINALITY AS u(unit, ordinality)
         JOIN cells c ON c.project_id = ? AND c.file_id = u.unit->>'fileId' AND c.cell_id = u.unit->>'cellId'
         JOIN files f ON f.project_id = c.project_id AND f.id = c.file_id AND f.deleted_at IS NULL
-        WHERE c.target_lang = '' ORDER BY u.ordinality, c.side DESC`)
+        WHERE ${wireLegacyTagSql("c")} = '' ORDER BY u.ordinality, c.side DESC`)
         .bind(JSON.stringify(units), link.project_id).all()
       const audio = await db.prepare(`SELECT a.file_id AS "fileId", a.cell_id AS "cellId", a.audio_id AS "audioId",
         a.url, a.trim_start_ms AS "trimStartMs", a.trim_end_ms AS "trimEndMs"

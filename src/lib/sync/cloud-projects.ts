@@ -30,8 +30,11 @@ export interface CloudFileSummary {
   /** AQU-1569: hand-placed position within the sidebar group; absent/null when
    *  nobody has reordered that group. */
   sortIndex?: number | null
-  sourceLanguage?: string | null
-  targetLanguage?: string | null
+  /** AQU-1596: what the file's header claimed at import. Import information,
+   *  never a lane's language — it can disagree with the lane the rows live in.
+   *  A language shown to a user comes off the lane, not off here. */
+  declaredSourceLanguage?: string | null
+  declaredTargetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
   orderedBy?: string
   sourceTextDirection?: "ltr" | "rtl" | null
@@ -462,8 +465,8 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(typeof f.sortIndex === "number" && Number.isFinite(f.sortIndex)
         ? { sortIndex: f.sortIndex }
         : {}),
-      ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
-      ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
+      ...(f.declaredSourceLanguage ? { declaredSourceLanguage: f.declaredSourceLanguage } : {}),
+      ...(f.declaredTargetLanguage ? { declaredTargetLanguage: f.declaredTargetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
       ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),

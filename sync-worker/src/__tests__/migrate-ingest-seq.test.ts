@@ -254,7 +254,11 @@ describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
     ])
 
     const cells = await t.pg.query<{ side: string; target_lang: string; lane_id: string | null }>(
-      `SELECT side, target_lang, lane_id FROM cells WHERE project_id=$1 ORDER BY side, target_lang`,
+      `SELECT c.side, COALESCE(l.legacy_tag, '') AS target_lang, c.lane_id
+         FROM cells c
+         LEFT JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+        WHERE c.project_id=$1
+        ORDER BY c.side, target_lang`,
       [PROJECT],
     )
     expect(cells.rows).toHaveLength(3)

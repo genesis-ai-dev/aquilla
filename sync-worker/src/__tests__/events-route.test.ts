@@ -518,6 +518,15 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
       lanes: [{ id: 'eslane01', project_id: 'proj-a', role: 'target', name: 'Spanish', legacy_tag: 'es' }],
     })
 
+  // snapshot() is the stored column. Writers leave it empty; the lane tag is
+  // what these assertions mean by target_lang.
+  function cellsByLane(
+    tables: Record<string, Array<Record<string, unknown>>>,
+  ): Array<Record<string, unknown> & { target_lang: string }> {
+    const tag = new Map((tables.lanes ?? []).map((l) => [l.id, (l.legacy_tag as string | null) ?? '']))
+    return (tables.cells ?? []).map((c) => ({ ...c, target_lang: tag.get(c.lane_id) ?? '' }))
+  }
+
   it("two lanes' first commits share the source parent and BOTH project (separate requests)", async () => {
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
@@ -544,7 +553,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     // THE regression: this was `stale: [evt-es]` and the lane row never landed.
     expect(body2.stale).toHaveLength(0)
 
-    const cells = (await snapshot()).cells
+    const cells = cellsByLane(await snapshot())
     const targets = cells.filter((c: any) => c.side === 'target')
     expect(targets.map((c: any) => [c.target_lang, c.value]).sort()).toEqual([
       ['', 'English draft'],
@@ -613,7 +622,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     )
     // Reproduce the broken-period artifact: the event row stays, but its
     // projection row and chain claim never existed.
-    await db.prepare(`DELETE FROM cells WHERE target_lang = 'es'`).run()
+    await db.prepare(`DELETE FROM cells WHERE lane_id = 'eslane01'`).run()
     await db.prepare(`DELETE FROM chain_claims WHERE parent_key LIKE '%@lane:es'`).run()
 
     // A fresh commit chains on the projection head (the source event, since
@@ -626,7 +635,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     const r1 = await handleEventsWriteRequest(await makeRequest([retry], token), makeEnv(db))
     const body1 = (await r1!.json()) as any
     expect(body1.stale.map((s: any) => s.id)).toEqual(['evt-retry'])
-    expect((await snapshot()).cells.find((c: any) => c.target_lang === 'es')).toBeUndefined()
+    expect(cellsByLane(await snapshot()).find((c) => c.target_lang === 'es')).toBeUndefined()
 
     // Realistic log noise: an assignment event whose projection is built by
     // handleAssignmentEvent, not buildEventProjectionStmts. The rebuild must
@@ -666,7 +675,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
       makeEnv(db) as never,
     ))!
     expect(rebuildRes.status).toBe(200)
-    const healed = (await snapshot()).cells.find((c: any) => c.target_lang === 'es')
+    const healed = cellsByLane(await snapshot()).find((c) => c.target_lang === 'es')
     expect(healed?.value).toBe('ghost draft')
     expect(healed?.event_id).toBe('evt-ghost')
 
@@ -679,7 +688,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     })
     const r2 = await handleEventsWriteRequest(await makeRequest([next], token), makeEnv(db))
     expect(((await r2!.json()) as any).stale).toHaveLength(0)
-    expect((await snapshot()).cells.find((c: any) => c.target_lang === 'es')?.value).toBe('post-heal draft')
+    expect(cellsByLane(await snapshot()).find((c) => c.target_lang === 'es')?.value).toBe('post-heal draft')
   })
 
   it('a same-lane sibling still loses its slot (AD-2 preserved per lane)', async () => {
@@ -706,7 +715,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     expect(body.stale).toHaveLength(1)
     expect(body.stale[0].id).toBe('evt-es-2')
 
-    const es = (await snapshot()).cells.find((c: any) => c.side === 'target' && c.target_lang === 'es')
+    const es = cellsByLane(await snapshot()).find((c) => c.side === 'target' && c.target_lang === 'es')
     expect(es?.value).toBe('primero')
     expect(es?.event_id).toBe('evt-es-1')
   })
@@ -1233,6 +1242,67 @@ describe('POST /events — ProjectSync event.applied fan-out', () => {
     expect(applied.length).toBe(1)
     expect('via' in applied[0]).toBe(false)
   })
+
+  // AQU-1837 regression guard. The route used to `await Promise.all(doFanOut)`,
+  // so a project DO queueing the __broadcast behind its own work (big presence
+  // room, link-sync fold) added that wait to EVERY save in the project — up to
+  // the client's 15 s abort. The fan-out is best-effort, and the author's own
+  // result already rides `applied[]` in the HTTP response, so it must settle
+  // after the response, never in front of it.
+  it('responds without waiting for the ProjectSync fan-out, and still delivers it afterwards', async () => {
+    const token = await makeToken({ username: 'alice' })
+    const { db } = await makeTestDb()
+
+    // A DO whose __broadcast never answers until the test releases it.
+    const bodies: Array<Record<string, unknown>> = []
+    let releaseBroadcast!: () => void
+    const broadcastDelivered = new Promise<void>((resolve) => {
+      releaseBroadcast = resolve
+    })
+    const stubFetch = vi.fn().mockImplementation(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      await broadcastDelivered
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+    const env = {
+      ...makeEnv(db),
+      ProjectSync: {
+        idFromName: vi.fn().mockReturnValue({ id: 'do-id' }),
+        get: vi.fn().mockReturnValue({ fetch: stubFetch }),
+      } as unknown as DurableObjectNamespace,
+    }
+    const deferred: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => void deferred.push(p) }
+
+    // Stall watchdog, not a latency budget: a correct route resolves here in
+    // microseconds, and the old awaiting route would never resolve at all.
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    const outcome = await Promise.race([
+      handleEventsWriteRequest(await makeRequest([targetCreate()], token), env, ctx),
+      new Promise<'stalled'>((resolve) => {
+        watchdog = setTimeout(() => resolve('stalled'), 10_000)
+      }),
+    ])
+    if (watchdog !== undefined) clearTimeout(watchdog)
+    expect(outcome, 'POST /events did not respond while the project DO was busy').not.toBe('stalled')
+
+    const res = outcome as Response
+    expect(res.status).toBe(200)
+
+    // The author's own ack is complete without the broadcast (AC 3).
+    const body = (await res.json()) as { applied: Array<Record<string, unknown>> }
+    expect(body.applied).toHaveLength(1)
+    expect(body.applied[0].cell).toBe('cell-1')
+
+    // The fan-out was handed to waitUntil, not dropped (AC 1): the request
+    // had already been sent, and it completes once the DO answers.
+    expect(bodies).toHaveLength(1)
+    expect(deferred).toHaveLength(1)
+    releaseBroadcast()
+    await Promise.all(deferred)
+    expect(stubFetch).toHaveBeenCalledTimes(1)
+    expect((await stubFetch.mock.results[0].value).ok).toBe(true)
+  })
 })
 
 // ── event.applied carries serverSeq + projected rows ───────────────────
@@ -1314,6 +1384,42 @@ describe('POST /events — event.applied carries serverSeq + the cell\'s project
     expect(target.value).toBe('updated')
 
     // Byte-identical to what GET …/cells?cellIds=cell-1 returns for the same cell.
+    const viaRead = await readCellByIds(db, 'cell-1')
+    expect(JSON.stringify(bySideLane(rows))).toBe(JSON.stringify(bySideLane(viaRead)))
+  })
+
+  it('AQU-1780: frame rows leave out idmlMigration.diagnostics, byte-identical to the by-ids read', async () => {
+    const token = await makeToken({ role: 500, username: 'alice' })
+    const { db } = await makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+      ],
+    })
+    const kept = {
+      legacyCodex: { idmlStructure: { storyId: 'u1' } },
+      idmlMigration: { version: 2, readiness: 'unsupported-legacy-html' },
+    }
+    const diagnostics = [{ code: 'UNSUPPORTED_CONSTRUCT', message: 'Paragraph contains only protected IDML tokens' }]
+    await handleEventsWriteRequest(
+      await makeRequest([
+        sourceCreate({
+          payload: {
+            cellId: 'cell-1',
+            value: 'source text',
+            metadata: { ...kept, idmlMigration: { ...kept.idmlMigration, diagnostics } },
+          },
+        }),
+        targetCreate(),
+      ], token),
+      makeEnv(db),
+    )
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(await makeRequest([targetCommit()], token), env)
+    expect(res?.status).toBe(200)
+
+    const rows = applied()[0].rows as Array<{ side: string; metadata: unknown }>
+    expect(rows.find((r) => r.side === 'source')!.metadata).toEqual(kept)
     const viaRead = await readCellByIds(db, 'cell-1')
     expect(JSON.stringify(bySideLane(rows))).toBe(JSON.stringify(bySideLane(viaRead)))
   })

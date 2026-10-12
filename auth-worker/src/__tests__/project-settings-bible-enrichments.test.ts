@@ -4,7 +4,8 @@
 // on. Readers ignore bad values, so this is about what gets stored and shown.
 //
 // The client sends the whole settings object on every save, so a bad value
-// already stored must not block saving everything else.
+// already stored must not block saving everything else. The seeded rows keep a
+// `sourceLanguage` the way older blobs do; the client omits it (AQU-1595).
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
@@ -53,34 +54,37 @@ async function storedSettings(): Promise<Record<string, unknown>> {
 describe("project settings: bibleEnrichments (AQU-1686)", () => {
   it("stores known ids with boolean values", async () => {
     await seed()
-    const res = await save({ sourceLanguage: "en", bibleEnrichments: { voices: false, autopilot: true } })
+    const res = await save({ bibleEnrichments: { voices: false, autopilot: true } })
     expect(res.status).toBe(200)
     expect((await storedSettings()).bibleEnrichments).toEqual({ voices: false, autopilot: true })
   })
 
   it("refuses a value that is not a boolean, and stores nothing", async () => {
     await seed()
-    const res = await save({ sourceLanguage: "en", bibleEnrichments: { voices: "off" } })
+    const res = await save({ bibleEnrichments: { voices: "off" } })
     expect(res.status).toBe(400)
     expect((await storedSettings()).bibleEnrichments).toBeUndefined()
   })
 
   it("refuses an unknown enrichment id", async () => {
     await seed()
-    const res = await save({ sourceLanguage: "en", bibleEnrichments: { nope: true } })
+    const res = await save({ bibleEnrichments: { nope: true } })
     expect(res.status).toBe(400)
   })
 
   it("accepts null, which clears the key", async () => {
     await seed({ sourceLanguage: "en", bibleEnrichments: { voices: false } })
-    const res = await save({ sourceLanguage: "en", bibleEnrichments: null })
+    const res = await save({ bibleEnrichments: null })
     expect(res.status).toBe(200)
   })
 
   it("lets an older bad value through unchanged, so the rest still saves", async () => {
     await seed({ sourceLanguage: "en", bibleEnrichments: { voices: "off" } })
-    const res = await save({ sourceLanguage: "fr", bibleEnrichments: { voices: "off" } })
+    const res = await save({ systemPrompt: "Keep it plain.", bibleEnrichments: { voices: "off" } })
     expect(res.status).toBe(200)
-    expect((await storedSettings()).sourceLanguage).toBe("fr")
+    const stored = await storedSettings()
+    expect(stored.systemPrompt).toBe("Keep it plain.")
+    // The stored language key is kept, not rewritten (AQU-1595).
+    expect(stored.sourceLanguage).toBe("en")
   })
 })

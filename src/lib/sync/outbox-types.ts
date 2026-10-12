@@ -140,8 +140,10 @@ export interface AiDraftProvenance {
   provider: string
   promptVersion: string
   exampleIds: string[]
+  /** Source/target of examples placed in the prompt (#946 reload). */
+  exampleTexts?: Array<{ cellId: string; source: string; target: string }>
   generatedAt: number
-  mode: "single" | "batch" | "paragraph" | "agent" | "read"
+  mode: "single" | "batch" | "paragraph" | "agent" | "read" | "align-styles"
   /** AQU-1656: the ai_interventions row holding this draft's prompt and raw
    *  output. A row is current while the cell's draft still carries its id. */
   interventionId?: string
@@ -359,6 +361,8 @@ export interface OutboxEventPayloads {
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
+    /** AQU-1565 follow-up: "source" marks the shared programme audio; absent is a dub. */
+    role?: "dub" | "source"
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line

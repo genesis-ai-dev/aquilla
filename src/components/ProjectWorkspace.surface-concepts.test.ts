@@ -11,7 +11,8 @@
  * to prove the split.
  */
 import { describe, it, expect } from "vitest"
-import { workspaceTerminology } from "./project-workspace-helpers"
+import { editorConceptsForLane, workspaceTerminology } from "./project-workspace-helpers"
+import { conceptsForLaneTag, mapSubscribedConceptLanes } from "@/lib/terminology/rendering-lane"
 import type { Concept } from "@/lib/terminology/types"
 
 function concept(id: string, termbaseProjectId?: string): Concept {
@@ -47,5 +48,62 @@ describe("workspaceTerminology (AQU-1721)", () => {
     const local = [concept("own")]
 
     expect(workspaceTerminology(local, []).editor).toBe(local)
+  })
+})
+
+// AQU-1777: Check file and the lookup popover read the active lane's slice of
+// the editor list. A subscribed rendering reaches that list stamped with THIS
+// project's lane id (route #8 maps it from its termbase lane by language), so
+// the one lane rule puts it in the matching lane and nowhere else.
+describe("editorConceptsForLane (AQU-1777)", () => {
+  const laneRow = (id: string, legacyTag: string, language: string) => ({
+    id,
+    role: "target" as const,
+    legacyTag,
+    language,
+    name: null,
+    langCode: null,
+  })
+  // This project: a Spanish `''` lane and a French lane.
+  const laneRows = [laneRow("50000e5a", "", "Spanish"), laneRow("50000f7a", "fr", "French")]
+  // The termbase: a Spanish `''` lane (as a code) and a French lane.
+  const termbaseLanes = [laneRow("t0000e5a", "", "es"), laneRow("t0000f7a", "fr", "French")]
+
+  it("hands Check file and the lookup popover a subscribed rendering in the matching lane only", () => {
+    const local = [concept("own")]
+    const subscribed = mapSubscribedConceptLanes(
+      [
+        {
+          ...concept("grace", "tb"),
+          renderings: [
+            { rendering: "gracia", status: "preferred" as const }, // unstamped: the termbase's `''` lane
+            { rendering: "grâce", status: "preferred" as const, laneId: "t0000f7a" },
+          ],
+        },
+      ],
+      termbaseLanes,
+      laneRows,
+    )
+    const editor = workspaceTerminology(local, subscribed).editor
+    const slice = (lane: string) =>
+      editorConceptsForLane(editor, local, conceptsForLaneTag(local, lane, laneRows), lane, laneRows).map((c) => [
+        c.id,
+        c.renderings.map((r) => r.rendering),
+      ])
+
+    expect(slice("")).toEqual([
+      ["grace", ["gracia"]],
+      ["own", ["r-own"]],
+    ])
+    expect(slice("fr")).toEqual([
+      ["grace", ["grâce"]],
+      ["own", []],
+    ])
+  })
+
+  it("reuses the local slice when there are no subscriptions", () => {
+    const local = [concept("own")]
+    const laneLocal = conceptsForLaneTag(local, "", laneRows)
+    expect(editorConceptsForLane(local, local, laneLocal, "", laneRows)).toBe(laneLocal)
   })
 })

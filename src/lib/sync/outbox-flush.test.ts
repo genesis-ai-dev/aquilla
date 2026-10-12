@@ -1450,3 +1450,275 @@ describe("flushOutboxUntilSettled (AQU-579)", () => {
     expect(result).toMatchObject({ posted: 0, settled: true })
   })
 })
+
+// ---------------------------------------------------------------------------
+// AQU-1788: "role downgraded since token was issued" earns ONE re-mint + retry
+// ---------------------------------------------------------------------------
+
+describe("AQU-1788 role-downgrade re-mint and single retry", () => {
+  beforeEach(async () => {
+    _eventSeq = 0
+    await resetIdb()
+  })
+
+  /** A minter that hands out a new token every time it is forced to re-mint,
+   *  so a test can assert WHICH token each POST carried. Mirrors
+   *  makeSyncTokenMinter: a non-forced call is served from the cache. */
+  function mintSpy(): {
+    fn: (projectId: string, fileId: string, opts?: { forceRefresh?: boolean }) => Promise<TokenMintResult>
+    calls: Array<{ forceRefresh: boolean }>
+  } {
+    const calls: Array<{ forceRefresh: boolean }> = []
+    let generation = 0
+    return {
+      calls,
+      fn: async (_projectId, _fileId, opts) => {
+        const forceRefresh = opts?.forceRefresh === true
+        calls.push({ forceRefresh })
+        if (forceRefresh) generation += 1
+        return { token: `tok-${generation}`, status: 200 }
+      },
+    }
+  }
+
+  function tokensPosted(fetchMock: ReturnType<typeof vi.fn>): string[] {
+    return fetchMock.mock.calls.map(([, init]) => {
+      const headers = (init as RequestInit).headers as Record<string, string>
+      return headers.Authorization
+    })
+  }
+
+  it("re-mints and re-posts the batch once, accepting the events the retry saves", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: [],
+        rejected: [
+          { id: "e1", status: 403, reason: "role downgraded since token was issued" },
+          { id: "e2", status: 403, reason: "role downgraded since token was issued" },
+        ],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: [{ id: "e1" }, { id: "e2" }],
+        rejected: [],
+      }))
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    // Exactly one extra mint, and it asked for a fresh token.
+    expect(minter.calls).toEqual([{ forceRefresh: false }, { forceRefresh: true }])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(tokensPosted(fetchMock)).toEqual(["Bearer tok-0", "Bearer tok-1"])
+    // The Maintainer→Project Lead case: the edits save and nothing is refused.
+    expect(result).toMatchObject({ accepted: 2, quarantined: 0 })
+    expect(onForbidden).not.toHaveBeenCalled()
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("quarantines with the retry's accurate reason, not the downgrade reason", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "role downgraded since token was issued" }],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "role too low for target.cell.commit" }],
+      }))
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({ quarantined: 1, accepted: 0 })
+    // The Contributor→Viewer case: the banner explains what the role may not
+    // do, which is the whole point of retrying with a token that tells the
+    // truth about the role.
+    expect(onForbidden).toHaveBeenCalledWith([expect.objectContaining({
+      id: "e1",
+      status: 403,
+      reason: "role too low for target.cell.commit",
+    })])
+    const rec = (await peekOutboxBatch(10)).find((r) => r.id === "e1")
+    expect(rec?.status).toBe("failed")
+    expect(rec?.lastError).toMatchObject({ reason: "role too low for target.cell.commit" })
+  })
+
+  it("retries exactly once — a second downgrade rejection quarantines instead of looping", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    // A fresh Response per call: one instance cannot have its body read twice.
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "role downgraded since token was issued" }],
+      }),
+    )
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(minter.calls.filter((c) => c.forceRefresh)).toHaveLength(1)
+    expect(result).toMatchObject({ quarantined: 1 })
+    expect(await peekPendingOutboxBatch(10)).toHaveLength(0)
+  })
+
+  it("does not re-mint for a membership revocation (the retry cannot clear it)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "membership revoked" }],
+      }),
+    )
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(minter.calls).toEqual([{ forceRefresh: false }])
+    expect(result).toMatchObject({ quarantined: 1 })
+    expect(onForbidden).toHaveBeenCalledWith([expect.objectContaining({
+      reason: "membership revoked",
+    })])
+  })
+
+  it("leaves a batch with no downgrade rejection on the unchanged path (no extra mint)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "e1" }, { id: "e2" }], rejected: [] }),
+    )
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(minter.calls).toEqual([{ forceRefresh: false }])
+    expect(result).toMatchObject({ accepted: 2 })
+  })
+
+  it("gives a whole-batch 403 carrying the downgrade reason the same single retry", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response("role downgraded since token was issued", { status: 403 }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }))
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(minter.calls).toEqual([{ forceRefresh: false }, { forceRefresh: true }])
+    expect(result).toMatchObject({ accepted: 1, quarantined: 0 })
+    expect(onForbidden).not.toHaveBeenCalled()
+  })
+
+  it("quarantines a whole-batch 403 that is not the downgrade reason without re-minting", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("token scoped to different project", { status: 403 }),
+    )
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(minter.calls).toEqual([{ forceRefresh: false }])
+    expect(result).toMatchObject({ quarantined: 1 })
+  })
+
+  it("keeps the events retryable, unburned, when the forced re-mint fails transiently", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const calls: Array<{ forceRefresh: boolean }> = []
+    const getTokenForFile = async (
+      _projectId: string,
+      _fileId: string,
+      opts?: { forceRefresh?: boolean },
+    ): Promise<TokenMintResult> => {
+      const forceRefresh = opts?.forceRefresh === true
+      calls.push({ forceRefresh })
+      // The identity worker is briefly unavailable, so the live role can't be
+      // learned. Losing the edits to a 403 we now know may be clearable would
+      // be the very data loss this issue is about.
+      return forceRefresh ? { token: null, status: 503 } : { token: "tok", status: 200 }
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [],
+        rejected: [{ id: "e1", status: 403, reason: "role downgraded since token was issued" }],
+      }),
+    )
+    const onForbidden = vi.fn()
+
+    const result = await flushOutboxBatch({
+      getTokenForFile,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(calls).toEqual([{ forceRefresh: false }, { forceRefresh: true }])
+    expect(result).toMatchObject({ authError: true, quarantined: 0 })
+    expect(onForbidden).not.toHaveBeenCalled()
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending.map((r) => r.id)).toEqual(["e1"])
+    expect(pending[0].attempts).toBe(0)
+  })
+
+  it("does not retry a response that also accepted events (their outcomes would be lost)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    const minter = mintSpy()
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [{ id: "e1" }],
+        rejected: [{ id: "e2", status: 403, reason: "role downgraded since token was issued" }],
+      }),
+    )
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: minter.fn,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(minter.calls).toEqual([{ forceRefresh: false }])
+    expect(result).toMatchObject({ accepted: 1, quarantined: 1 })
+  })
+})

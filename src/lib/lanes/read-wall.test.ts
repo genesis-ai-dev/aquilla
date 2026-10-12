@@ -10,6 +10,7 @@ import {
   portfolioTextFromVisibleLanes,
   restoreHiddenLaneSettings,
   visibilityCacheToken,
+  scopedTargetVisibilityClause,
   visibleDefaultLaneLanguage,
   visibleLaneTags,
 } from "./read-wall"
@@ -22,12 +23,16 @@ describe("lane read wall", () => {
     expect(laneReadWallEnabled("true")).toBe(true)
   })
 
-  it("shows every lane to a maintainer and nothing to an ungranted contributor", () => {
+  it("shows every lane to a project lead and nothing to an ungranted contributor", () => {
+    // AQU-1795: the wall opens at project lead (500), not only at maintainer.
+    expect(visibleLaneTags({ enabled: true, role: 500 })).toBeNull()
     expect(visibleLaneTags({ enabled: true, role: 600 })).toBeNull()
     expect(visibleLaneTags({ enabled: true, role: 400, src: "platform" })).toBeNull()
     expect(visibleLaneTags({ enabled: false, role: 400 })).toBeNull()
     const none = visibleLaneTags({ enabled: true, role: 400 })
     expect(none).toEqual(new Set())
+    const reviewer = visibleLaneTags({ enabled: true, role: 300 })
+    expect(reviewer).toEqual(new Set())
   })
 
   it("treats es, spa, and Spanish as one grant", () => {
@@ -202,5 +207,33 @@ describe("lane read wall", () => {
         settings: { targetLanes: [] },
       })
     })
+  })
+})
+
+describe("scoped target visibility", () => {
+  it("matches a lane id or a target_lang, including the former default lane", () => {
+    const clause = scopedTargetVisibilityClause({
+      ids: ["lane-es"],
+      tags: ["es", ""],
+      sideExpr: "side",
+      laneIdExpr: "lane_id",
+      targetLangExpr: "target_lang",
+    })
+    expect(clause.sql).toBe(
+      "AND (side = 'source' OR lane_id IN (?) OR target_lang IN (?, ?))",
+    )
+    expect(clause.binds).toEqual(["lane-es", "es", ""])
+  })
+
+  it("hides every target row when the scope named nothing", () => {
+    expect(
+      scopedTargetVisibilityClause({
+        ids: [],
+        tags: [],
+        sideExpr: "side",
+        laneIdExpr: "lane_id",
+        targetLangExpr: "target_lang",
+      }),
+    ).toEqual({ sql: "AND side = 'source'", binds: [] })
   })
 })

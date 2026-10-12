@@ -36,7 +36,10 @@ import {
 import { conceptToRegexSource } from "../../../../src/lib/terminology/match"
 import { coerceMatchOptions } from "../../../../src/lib/terminology/match-options"
 import type { TermMatchOptions, TermMatchingSettings } from "../../../../src/lib/terminology/model"
+import { conceptsForLane, mapSubscribedConceptLanes } from "../../../../src/lib/terminology/rendering-lane"
 import { readProjectConcepts } from "../concepts-read"
+import type { LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
+import { languagesForLanes, loadLaneRows } from "../read-lane-language"
 
 // ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
 
@@ -45,6 +48,8 @@ export type RenderingStatus = "preferred" | "admitted" | "forbidden"
 export interface TermRendering {
   rendering: string
   status: RenderingStatus
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 export interface Concept {
@@ -103,6 +108,12 @@ export interface TermGuidance {
 export interface ProjectContext {
   sourceLanguage?: string
   targetLanguage?: string
+  /**
+   * Lane rows, so a run can resolve its own lane's language. Not a prompt
+   * field — the languages above are already resolved for the source lane and
+   * the former default lane.
+   */
+  lanes?: LaneLanguageRow[]
   /** Model-generated compression of the whole brief, when one exists. */
   projectBriefL1?: string
   /** The brief's structured answers — used verbatim when there is no L1. */
@@ -137,7 +148,12 @@ function parseConcepts(raw: unknown): Concept[] {
         const rr = r as Record<string, unknown>
         if (typeof rr.rendering !== "string" || !rr.rendering.trim()) continue
         if (rr.status !== "preferred" && rr.status !== "admitted" && rr.status !== "forbidden") continue
-        renderings.push({ rendering: rr.rendering.trim(), status: rr.status })
+        const laneId = typeof rr.laneId === "string" && rr.laneId !== "" ? rr.laneId : undefined
+        renderings.push({
+          rendering: rr.rendering.trim(),
+          status: rr.status,
+          ...(laneId ? { laneId } : {}),
+        })
       }
     }
     const match = coerceMatchOptions(c.match)
@@ -335,8 +351,6 @@ interface SettingsDb {
 
 interface SettingsRow {
   settings: unknown
-  source_language: string | null
-  target_language: string | null
 }
 
 function parseSettings(raw: unknown): Record<string, unknown> {
@@ -364,6 +378,7 @@ function parseSettings(raw: unknown): Record<string, unknown> {
 export async function loadProjectContext(
   db: SettingsDb,
   projectId: string,
+  lane?: { laneId?: string | null; targetLang?: string | null },
 ): Promise<ProjectContext> {
   const empty: ProjectContext = {
     briefParameters: {},
@@ -374,8 +389,7 @@ export async function loadProjectContext(
   try {
     row = await db
       .prepare(
-        `SELECT settings, source_language, target_language
-           FROM project_settings WHERE project_id = ?`,
+        `SELECT settings FROM project_settings WHERE project_id = ?`,
       )
       .bind(projectId)
       .first<SettingsRow>()
@@ -391,15 +405,21 @@ export async function loadProjectContext(
       ? (brief as Record<string, unknown>)
       : {}
 
-  const concepts = [
+  const lanes: LaneLanguageRow[] = await loadLaneRows(db, projectId).catch(() => [])
+  const loaded = [
     ...(await loadLocalConcepts(db, projectId)),
-    ...(await loadSubscribedConcepts(db, projectId)),
+    ...(await loadSubscribedConcepts(db, projectId, lanes)),
   ]
+  const concepts = lane ? await conceptsForRequestedLane(db, projectId, loaded, lane) : loaded
+  const resolved = languagesForLanes(lanes, settings, "")
+  const sourceLanguage = resolved.sourceLanguage ?? ""
+  const targetLanguage = resolved.targetLanguage ?? ""
   const termMatching = parseTermMatching(settings.termMatching)
 
   return {
-    ...(asString(row.source_language) ? { sourceLanguage: asString(row.source_language) } : {}),
-    ...(asString(row.target_language) ? { targetLanguage: asString(row.target_language) } : {}),
+    ...(sourceLanguage ? { sourceLanguage } : {}),
+    ...(targetLanguage ? { targetLanguage } : {}),
+    lanes,
     ...(asString(briefObj.l1Summary) ? { projectBriefL1: asString(briefObj.l1Summary) } : {}),
     briefParameters: parseBriefParameters(briefObj.parameters),
     concepts,
@@ -408,14 +428,82 @@ export async function loadProjectContext(
   }
 }
 
+async function targetLaneId(
+  db: SettingsDb,
+  projectId: string,
+  ref: { laneId?: string | null; targetLang?: string | null },
+): Promise<string | null> {
+  const id = (ref.laneId ?? "").trim()
+  if (id) {
+    const row = await db
+      .prepare(`SELECT id FROM lanes WHERE project_id = ? AND id = ? AND role = 'target'`)
+      .bind(projectId, id)
+      .first<{ id: string }>()
+    return row?.id ?? null
+  }
+  const row = await db
+    .prepare(
+      `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`,
+    )
+    .bind(projectId, ref.targetLang ?? "")
+    .first<{ id: string }>()
+  return row?.id ?? null
+}
+
+/** Same rule as renderingLaneId. No `''` row: leave the list alone. */
+async function conceptsForRequestedLane(
+  db: SettingsDb,
+  projectId: string,
+  concepts: Concept[],
+  lane: { laneId?: string | null; targetLang?: string | null },
+): Promise<Concept[]> {
+  const emptyId = await targetLaneId(db, projectId, { targetLang: "" })
+  if (!emptyId) return concepts
+  const activeId = await targetLaneId(db, projectId, lane)
+  if (!activeId) return concepts.map((concept) => ({ ...concept, renderings: [] }))
+  return conceptsForLane(concepts, activeId, emptyId)
+}
+
 function stringList(raw: unknown): string[] {
   return Array.isArray(raw)
     ? raw.filter((item): item is string => typeof item === "string" && item.trim() !== "")
     : []
 }
 
-/** Empty string is always the project-default lane. Named lanes must be
- *  registered in settings.targetLanes and not archived. */
+/**
+ * Is this lane one the project may draft into?
+ *
+ * AQU-1610: a lane id is checked against the `lanes` table — the lane's own
+ * row, archived or not — which is the only identity that cannot name two
+ * lanes at once. A legacy TAG still falls back to the settings rule
+ * (`settings.targetLanes` minus `archivedLanes`, with `''` the project-default
+ * lane) because older clients send tags and the project-level lists are
+ * AQU-1595's to remove, not this ticket's.
+ */
+export async function isRegisteredLaneId(
+  db: SettingsDb,
+  projectId: string,
+  laneId: string,
+): Promise<boolean> {
+  if (!laneId) return false
+  try {
+    const row = await db
+      .prepare(
+        `SELECT 1 AS ok FROM lanes
+          WHERE project_id = ? AND id = ? AND role = 'target' AND archived_at IS NULL`,
+      )
+      .bind(projectId, laneId)
+      .first<{ ok: number }>()
+    return row != null
+  } catch {
+    return false
+  }
+}
+
+/** Legacy-tag form of {@link isRegisteredLaneId}. Empty string is the
+ *  project-default lane; named lanes must be in settings.targetLanes and not
+ *  archived. The tag is matched exactly: "es" is not the lane registered as
+ *  "Spanish". Removed with the project-level lane lists (AQU-1595). */
 export async function isRegisteredTargetLane(
   db: SettingsDb,
   projectId: string,
@@ -470,8 +558,17 @@ async function loadLocalConcepts(db: SettingsDb, projectId: string): Promise<Con
  *  the editor's read (route #8), so the editor and autopilot apply the same
  *  termbases (AQU-1721). Deleting a project cascades to none of the
  *  subscription, settings or concept rows, so the join on `projects` is what
- *  drops a deleted termbase. */
-async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promise<Concept[]> {
+ *  drops a deleted termbase.
+ *
+ *  Each termbase's renderings carry ITS lane ids. They are mapped onto this
+ *  project's lanes by language (mapSubscribedConceptLanes, AQU-1777) before
+ *  `conceptsForRequestedLane` runs, as route #8 maps them for the editor, so a
+ *  lane's run and that lane's editor see the same subscribed renderings. */
+async function loadSubscribedConcepts(
+  db: SettingsDb,
+  projectId: string,
+  subscriberLanes: readonly LaneLanguageRow[],
+): Promise<Concept[]> {
   try {
     // The order the subscriptions list shows: priority, then age.
     const { results } = await db
@@ -494,9 +591,15 @@ async function loadSubscribedConcepts(db: SettingsDb, projectId: string): Promis
     // settings blob only while it has none. Reading only the blob gave
     // subscribers nothing once the termbase was migrated.
     const termbases = await Promise.all(
-      results.map((r) => readProjectConcepts(db, r.termbase_project_id)),
+      results.map(async (r) => {
+        const [concepts, termbaseLanes] = await Promise.all([
+          readProjectConcepts(db, r.termbase_project_id),
+          loadLaneRows(db, r.termbase_project_id),
+        ])
+        return mapSubscribedConceptLanes(parseConcepts(concepts), termbaseLanes, subscriberLanes)
+      }),
     )
-    return termbases.flatMap((concepts) => parseConcepts(concepts))
+    return termbases.flat()
   } catch (err) {
     // Draft without them rather than fail the run, but say so: a silently
     // empty termbase is the failure this read exists to end.

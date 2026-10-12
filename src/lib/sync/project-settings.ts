@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
 import type {
@@ -12,6 +13,7 @@ import type {
 import type { Concept } from "@/lib/terminology/types"
 import type { CellUnit, LivingMemoryEntry } from "@/lib/parsers/types"
 import type { TranslationBrief } from "@/lib/brief/types"
+import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
 
@@ -350,6 +352,12 @@ export interface ProjectWideSettings {
    * whole map: writers must send the full merged object.
    */
   fileGenres?: Record<string, string>
+  /**
+   * AQU-1075: which settings this project copies from its upstream, and which
+   * of those the maintainer has detached. Absent on a project that has not
+   * been offered the choice. The server owns `knowledgeDocCopies`.
+   */
+  inheritedFromLink?: InheritedFromLink
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -560,7 +568,16 @@ export type CreateLaneResult =
 export async function createProjectLane(
   jwt: string,
   projectId: string,
-  input: { name: string; language: string; code?: string | null },
+  /** AQU-1784: `allowDuplicateName` accepts a display name that duplicates an
+   *  active lane's — sent by the languages screen, which shows the collision
+   *  inline before the save. Omitted everywhere else, where a duplicate is
+   *  still refused with `{ kind: "duplicate" }`. */
+  input: {
+    name: string
+    language: string
+    code?: string | null
+    allowDuplicateName?: boolean
+  },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CreateLaneResult> {
   let res: Response
@@ -726,12 +743,20 @@ export async function fetchProjectSettings(
 
 /**
  * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
- * settings blob (no per-key merge) — send a complete blob. Per-key merge is
- * only available via the `useProjectSettings` hook and the Agent API
- * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
- * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
- * `{kind: "forbidden", required, role}`.
+ * settings blob (no per-key merge). The four retired lane keys are omitted
+ * here; the server rejects a body that includes them and keeps the stored
+ * copies. Per-key merge is only available via the `useProjectSettings` hook
+ * and the Agent API PatchSettings command. Caller must include
+ * `ifMatchVersion`; mismatched version returns `{kind: "conflict", latest}`.
+ * Sub-PROJECT_LEAD callers get `{kind: "forbidden", required, role}`.
  */
+/** Drop the retired language keys. The server rejects a body that includes them. */
+function settingsForPatch(settings: ProjectWideSettings): ProjectWideSettings {
+  const next: ProjectWideSettings = { ...settings }
+  for (const key of RETIRED_LANE_SETTINGS_KEYS) delete next[key]
+  return next
+}
+
 export async function patchProjectSettings(
   jwt: string,
   projectId: string,
@@ -746,7 +771,7 @@ export async function patchProjectSettings(
       {
         method: "PATCH",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ settings, ifMatchVersion }),
+        body: JSON.stringify({ settings: settingsForPatch(settings), ifMatchVersion }),
       },
     )
   } catch (e) {

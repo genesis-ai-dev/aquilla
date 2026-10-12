@@ -7,17 +7,18 @@ describe("resolveActiveTargetLanguage (AQU-602)", () => {
     // Switching to the 'es' lane must translate into Spanish, regardless of the
     // file/project default target — the core AQU-602 regression. With no lane
     // rows (a server that predates AQU-1418) the tag is all there is.
-    expect(resolveActiveTargetLanguage("es", "fr", "fr")).toBe("es")
-    expect(resolveActiveTargetLanguage("swh", undefined, "fr")).toBe("swh")
-    expect(resolveActiveTargetLanguage("fr-CA", "fr-BE", "French")).toBe("fr-CA")
+    expect(resolveActiveTargetLanguage("es", "fr", { targetLanguage: "fr" })).toBe("es")
+    expect(resolveActiveTargetLanguage("swh", undefined, { targetLanguage: "fr" })).toBe("swh")
+    expect(resolveActiveTargetLanguage("fr-CA", "fr-BE", { targetLanguage: "French" })).toBe("fr-CA")
   })
 
-  it("uses only the project target for the default lane, ignoring the file (AQU-583)", () => {
-    // The per-file target is an import-time snapshot. On the default lane the
-    // project setting is authoritative: it wins over any file value...
-    expect(resolveActiveTargetLanguage("", "fr", "es")).toBe("es")
-    expect(resolveActiveTargetLanguage("", null, "es")).toBe("es")
-    expect(resolveActiveTargetLanguage("", undefined, "es")).toBe("es")
+  it("ignores the file stamp and settings for the default lane when there is no row (AQU-1595)", () => {
+    // The per-file target is an import-time snapshot, and the settings key is
+    // not the lane. With no row, `''` names no language — so the caller shows
+    // "Set target language" rather than either of those strings.
+    expect(resolveActiveTargetLanguage("", "fr", { targetLanguage: "es" })).toBeUndefined()
+    expect(resolveActiveTargetLanguage("", null, { targetLanguage: "es" })).toBeUndefined()
+    expect(resolveActiveTargetLanguage("", undefined, { targetLanguage: "es" })).toBeUndefined()
   })
 
   it("returns undefined when the project has no target, even if a file carries one (AQU-583)", () => {
@@ -26,7 +27,7 @@ describe("resolveActiveTargetLanguage (AQU-602)", () => {
     // (e.g. "English"), regardless of how many files were imported.
     expect(resolveActiveTargetLanguage("", "English", null)).toBeUndefined()
     expect(resolveActiveTargetLanguage("", "fr", undefined)).toBeUndefined()
-    expect(resolveActiveTargetLanguage("", "fr", "")).toBeUndefined()
+    expect(resolveActiveTargetLanguage("", "fr", { targetLanguage: "" })).toBeUndefined()
     expect(resolveActiveTargetLanguage("", null, null)).toBeUndefined()
     expect(resolveActiveTargetLanguage("", undefined, undefined)).toBeUndefined()
   })
@@ -45,32 +46,32 @@ describe("resolveActiveTargetLanguage — the language comes from the lane row (
   ]
 
   it("sends the lane's LANGUAGE, not its id, for a lane tagged with its own id", () => {
-    expect(resolveActiveTargetLanguage("a3f09c1e", null, "Spanish", lanes)).toBe("Spanish")
+    expect(resolveActiveTargetLanguage("a3f09c1e", null, { targetLanguage: "Spanish" }, lanes)).toBe("Spanish")
   })
 
   it("leaves a lane whose tag IS a language exactly as it was", () => {
     // Nothing that already worked may change: this lane's tag is its language,
     // so it keeps going to the model verbatim rather than becoming "fra".
-    expect(resolveActiveTargetLanguage("fr-CA", "fr-BE", "Spanish", lanes)).toBe("fr-CA")
+    expect(resolveActiveTargetLanguage("fr-CA", "fr-BE", { targetLanguage: "Spanish" }, lanes)).toBe("fr-CA")
   })
 
   it("uses the lane's name when its language is not in the code registry", () => {
     expect(
-      resolveActiveTargetLanguage("b0b0b0b0", null, "Spanish", [
+      resolveActiveTargetLanguage("b0b0b0b0", null, { targetLanguage: "Spanish" }, [
         { id: "b0b0b0b0", name: "Nuer", langCode: null, legacyTag: "b0b0b0b0" },
       ]),
     ).toBe("Nuer")
   })
 
-  it("inherits the project target when the row records no language", () => {
-    // Never the lane id, and never an empty string either: an empty target
-    // language would substitute into the prompt as nothing at all. A lane that
-    // records none inherits the project's, exactly as the default lane does.
+  it("does not inherit the project target for an id-tagged lane that records no language (AQU-1593)", () => {
+    // The migration fallback is only the source lane and legacy_tag ''. An
+    // id-tagged lane with nothing else is unset — never the hex id, and never
+    // the project's target language.
     expect(
-      resolveActiveTargetLanguage("b0b0b0b0", null, "Spanish", [
+      resolveActiveTargetLanguage("b0b0b0b0", null, { targetLanguage: "Spanish" }, [
         { id: "b0b0b0b0", name: "", langCode: null, legacyTag: "b0b0b0b0" },
       ]),
-    ).toBe("Spanish")
+    ).toBeUndefined()
   })
 
   it("is undefined only when nothing at all records a target language", () => {
@@ -84,12 +85,18 @@ describe("resolveActiveTargetLanguage — the language comes from the lane row (
 
   it("sends the default lane's stored language, and still ignores the file", () => {
     expect(
-      resolveActiveTargetLanguage("", "English", "Spanish", [
+      resolveActiveTargetLanguage("", "English", { targetLanguage: "Spanish" }, [
         { id: "defa0001", language: "French", name: null, langCode: null, legacyTag: "" },
       ]),
     ).toBe("French")
-    // No rows: the project target remains the fallback.
-    expect(resolveActiveTargetLanguage("", "fr", "es")).toBe("es")
+    // No rows: settings are not the default lane's language.
+    expect(resolveActiveTargetLanguage("", "fr", { targetLanguage: "es" })).toBeUndefined()
+    // An un-backfilled row answers from its name, not from settings.
+    expect(
+      resolveActiveTargetLanguage("", "fr", { targetLanguage: "es" }, [
+        { id: "defa0001", language: null, name: "Nuer", langCode: null, legacyTag: "" },
+      ]),
+    ).toBe("Nuer")
   })
 
   // AGENTS.md rule 12: run the real PRODUCER's output through the consumer.
@@ -125,13 +132,13 @@ describe("resolveActiveTargetLanguage — the language comes from the lane row (
       langCode: plan.langCode,
       legacyTag: plan.legacyTag,
     }
-    const target = resolveActiveTargetLanguage(plan.legacyTag, null, "Spanish", [row])
+    const target = resolveActiveTargetLanguage(plan.legacyTag, null, { targetLanguage: "Spanish" }, [row])
     expect(target).toBe(language)
     // The point of the ticket: whatever we send, it is never the lane id.
     expect(target).not.toBe(laneId)
     if (language === "Yoruba") {
       expect(
-        resolveActiveTargetLanguage(plan.legacyTag, null, "Spanish", [{ ...row, language: "Yoruba (Oyo)" }]),
+        resolveActiveTargetLanguage(plan.legacyTag, null, { targetLanguage: "Spanish" }, [{ ...row, language: "Yoruba (Oyo)" }]),
       ).toBe("Yoruba (Oyo)")
     }
   })
@@ -152,19 +159,30 @@ describe("laneTargetLanguages — the Import dialog's translation check (AQU-136
   const labels = { "": "Spanish", a3f09c1e: "Spanish (Mexico team)", "fr-CA": "French (Canada)" }
 
   it("reads a lane's language from its row, never its id, and marks the open lane", () => {
-    expect(laneTargetLanguages(["", "a3f09c1e", "fr-CA"], "a3f09c1e", "Spanish", labels, rows)).toEqual([
+    expect(laneTargetLanguages(["", "a3f09c1e", "fr-CA"], "a3f09c1e", { targetLanguage: "Spanish" }, labels, rows)).toEqual([
       { language: "Spanish", label: "Spanish", active: false },
       { language: "Spanish", label: "Spanish (Mexico team)", active: true },
       { language: "fr-CA", label: "French (Canada)", active: false },
     ])
   })
 
-  it("leaves out a lane whose row records no language, and a default lane with no project target", () => {
-    expect(laneTargetLanguages(["", "b0b0b0b0"], "", "", {}, rows)).toEqual([])
+  it("leaves out an id-tagged lane that records no language, and keeps a typed default lane", () => {
+    expect(laneTargetLanguages(["", "b0b0b0b0"], "", { targetLanguage: "" }, {}, rows)).toEqual([
+      { language: "Spanish", label: null, active: true },
+    ])
   })
 
-  it("falls back to the tag only when there are no rows at all", () => {
-    expect(laneTargetLanguages(["", "tt"], "tt", "Siberian Tatar", {})).toEqual([
+  it("uses a non-empty tag when no row matches, and a row's name rather than settings", () => {
+    // `''` is not a language, and settings are not consulted. `tt` has no row,
+    // so the tag itself is the language a pre-lane server can still name.
+    expect(laneTargetLanguages(["", "tt"], "tt", { targetLanguage: "Siberian Tatar" }, {})).toEqual([
+      { language: "tt", label: null, active: true },
+    ])
+    expect(
+      laneTargetLanguages(["", "tt"], "tt", { targetLanguage: "Spanish" }, {}, [
+        { id: "defl0001", role: "target", language: null, name: "Siberian Tatar", langCode: null, legacyTag: "" },
+      ]),
+    ).toEqual([
       { language: "Siberian Tatar", label: null, active: false },
       { language: "tt", label: null, active: true },
     ])

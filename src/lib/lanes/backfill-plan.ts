@@ -20,7 +20,7 @@
  *     else null (honest for freeform labels like "Grade 7 English" or BLANK).
  */
 
-import { LANGUAGES } from '../languages/catalog'
+import { LANGUAGES, NAMED_VARIETY_LANGUAGES } from '../languages/catalog'
 import { isLaneId } from './lane-id'
 import { isPrimaryRegistryLane } from './registry-lanes'
 
@@ -63,14 +63,25 @@ export type ProjectLaneInputs = {
   dataTargetTags: string[]
 }
 
-/** ISO 639-1 code for a stored language label (English name or code), else null. */
+/**
+ * Code for a stored language label, else null.
+ *
+ * A catalog name ("Spanish") or a named variety ("Traditional Han") derives
+ * its tag. A label that is already a known code ("zh-Hant") derives that
+ * same tag, so an old code typed into the name field still has a code. A
+ * freeform description ("Grade 7 English") derives nothing.
+ */
 export function codeForLanguageLabel(label: string | null | undefined): string | null {
   const s = (label ?? '').trim()
   if (!s) return null
   const lc = s.toLowerCase()
-  const byName = LANGUAGES.find((e) => e.name.toLowerCase() === lc)
+  const byName =
+    NAMED_VARIETY_LANGUAGES.find((e) => e.name.toLowerCase() === lc) ??
+    LANGUAGES.find((e) => e.name.toLowerCase() === lc)
   if (byName) return byName.code
-  const byCode = LANGUAGES.find((e) => e.code.toLowerCase() === lc)
+  const byCode =
+    NAMED_VARIETY_LANGUAGES.find((e) => e.code.toLowerCase() === lc) ??
+    LANGUAGES.find((e) => e.code.toLowerCase() === lc)
   if (byCode) return byCode.code
   return null
 }

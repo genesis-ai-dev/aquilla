@@ -32,6 +32,7 @@
 
 import { verifyTokenForProject } from "../auth"
 import { resolveMemberProgressFloor } from "./member-progress-floor"
+import { countedFileSql } from "../../../db/shared/counted-files"
 
 export interface MemberActivityReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -120,7 +121,9 @@ export async function handleMemberActivityReadRequest(
         "COUNT(*) AS cells_touched, COALESCE(SUM(c.word_count), 0) AS word_count, " +
         "MAX(c.last_edit_at) AS last_activity_at " +
         "FROM cells c JOIN files f ON f.id = c.file_id " +
-        "WHERE c.project_id = ? AND c.last_editor = ? AND f.deleted_at IS NULL " +
+        // AQU-1566: retiming a cue on the timeline edits a hidden file's cell;
+        // that is not a file the member worked on in any sense the panel means.
+        `WHERE c.project_id = ? AND c.last_editor = ? AND ${countedFileSql("f")} ` +
         "GROUP BY c.file_id, f.name " +
         "ORDER BY last_activity_at DESC",
     )

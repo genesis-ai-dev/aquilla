@@ -27,6 +27,7 @@ import { SeverityBadge, SeverityIcon } from "@/components/rules/RuleSeverity"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { rulesForLane, ruleLaneScope, type RuleLaneScope } from "@/lib/rules/rule-engine"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { RuleSuggestionItem, RuleSuggestionsFooter } from "@/components/rules/RuleSuggestions"
 import { useRuleSuggestions } from "@/hooks/useRuleSuggestions"
@@ -137,16 +138,16 @@ export function RulesSurface({
   // through LaneCombobox because projects can carry 150+ lanes.
   const [localLane, setLocalLane] = useState("")
   const laneOptions = (() => {
-    const tags = laneRows.length > 0
-      ? [...laneRows].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id)).map((lane) => lane.legacyTag ?? "")
-      : projectLanes
-    const unique = [...new Set(tags)]
-    if (!unique.includes("")) unique.unshift("")
+    const fallback = [...new Set(projectLanes)]
+    if (!fallback.includes("")) fallback.unshift("")
+    const tags = switcherLaneTags(laneRows, fallback)
     const archived = new Set(laneRows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? ""))
-    return unique.map((tag) => ({ tag, archived: archived.has(tag) }))
+    return tags.map((tag) => ({ tag, archived: archived.has(tag) }))
   })()
   const requestedLane = activeLane ?? localLane
-  const viewLane = laneOptions.some((o) => o.tag === requestedLane) ? requestedLane : ""
+  const viewLane = laneOptions.some((o) => o.tag === requestedLane)
+    ? requestedLane
+    : (laneOptions[0]?.tag ?? "")
   const setViewLane = onActiveLaneChange ?? setLocalLane
   const hasLaneRules = userRules.some((rule) => rule.scope === "lane")
   const multiLane = laneOptions.length > 1 || hasLaneRules

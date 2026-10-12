@@ -72,7 +72,7 @@ describe("AssignWork", () => {
     expect(screen.getByRole("button", { name: "Assign…" })).toBeInTheDocument()
   })
 
-  it("passes the active lane as targetLang when assigning", async () => {
+  it("pre-fills the lane the manager arrived from and sends that lane's id", async () => {
     rosterOk()
     mockCreate.mockResolvedValue("as-lane")
     render(
@@ -81,23 +81,31 @@ describe("AssignWork", () => {
         files={files}
         jwt="jwt"
         author="wendi"
-        targetLang="es"
+        arrivedLane="es"
+        laneTags={["", "es"]}
+        laneLabels={{ "": "French", es: "Spanish" }}
+        defaultLaneLabel="French"
+        laneRows={[
+          { id: "lane-default", legacyTag: "" },
+          { id: "lane-es", legacyTag: "es" },
+        ]}
         onAssigned={vi.fn()}
       />,
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(screen.getByTestId("assign-work-lane").textContent).toMatch(/Spanish/)
     await pickSelectOption(/^assignee$/i, /^anna$/)
     fireEvent.click(screen.getByRole("button", { name: "Assign" }))
 
     await waitFor(() =>
       expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ targetLang: "es" }),
+        expect.objectContaining({ targetLang: "es", laneId: "lane-es" }),
       ),
     )
   })
 
-  it("omits targetLang for the default lane", async () => {
+  it("names the only lane and sends its id, omitting targetLang for the default lane", async () => {
     rosterOk()
     mockCreate.mockResolvedValue("as-default")
     render(
@@ -106,7 +114,38 @@ describe("AssignWork", () => {
         files={files}
         jwt="jwt"
         author="wendi"
-        targetLang=""
+        arrivedLane={null}
+        defaultLaneLabel="French"
+        laneRows={[{ id: "lane-default", legacyTag: "" }]}
+        onAssigned={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    expect(screen.getByTestId("assign-work-lane-fixed")).toHaveTextContent("French")
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ laneId: "lane-default" }),
+      ),
+    )
+    expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("targetLang")
+  })
+
+  it("refuses to submit from the All tab until a lane is chosen", async () => {
+    rosterOk()
+    render(
+      <AssignWork
+        projectId="p1"
+        files={files}
+        jwt="jwt"
+        author="wendi"
+        arrivedLane={null}
+        laneTags={["", "es"]}
+        laneLabels={{ "": "French", es: "Spanish" }}
+        defaultLaneLabel="French"
         onAssigned={vi.fn()}
       />,
     )
@@ -115,11 +154,33 @@ describe("AssignWork", () => {
     await pickSelectOption(/^assignee$/i, /^anna$/)
     fireEvent.click(screen.getByRole("button", { name: "Assign" }))
 
-    await waitFor(() =>
-      expect(mockCreate).toHaveBeenCalledWith(
-        expect.not.objectContaining({ targetLang: expect.anything() }),
-      ),
+    expect(document.querySelector("[data-slot='field-error']")).toHaveTextContent(
+      "Choose the language lane this work is for.",
     )
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it("omits the lane id when the project has no lane rows yet", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-default")
+    render(
+      <AssignWork
+        projectId="p1"
+        files={files}
+        jwt="jwt"
+        author="wendi"
+        defaultLaneLabel="French"
+        onAssigned={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() => expect(mockCreate).toHaveBeenCalled())
+    expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("laneId")
+    expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("targetLang")
   })
 
   it("opens, loads members, and emits a book-scope assignment.create", async () => {

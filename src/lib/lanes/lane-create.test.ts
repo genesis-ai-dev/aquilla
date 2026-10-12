@@ -145,4 +145,50 @@ describe("planNewTargetLane", () => {
     })
     expect(plan).toEqual({ ok: false, problem: "duplicate" })
   })
+
+  // AQU-1784: the languages screen shows the collision inline before the save
+  // and then lets it through — two teams translating into one language is a
+  // real shape, and the switcher now tells the two labels apart.
+  it("refuses a duplicate display name by default", () => {
+    const plan = planNewTargetLane({
+      laneId: "aabbccdd",
+      name: "",
+      language: "Spanish",
+      targetLanguage: "Spanish",
+      existing: spanishDefault,
+    })
+    expect(plan).toEqual({ ok: false, problem: "duplicate" })
+  })
+
+  it("accepts a duplicate display name when the caller has warned about it", () => {
+    const plan = planNewTargetLane({
+      laneId: "aabbccdd",
+      name: "",
+      language: "Spanish",
+      targetLanguage: "Spanish",
+      existing: spanishDefault,
+      allowDuplicateName: true,
+    })
+    // The tag is the opaque lane id: the language is the default lane's, so
+    // the second Spanish lane cannot borrow it (AQU-1418).
+    expect(plan).toEqual({
+      ok: true,
+      language: "Spanish",
+      name: null,
+      legacyTag: "aabbccdd",
+      langCode: null,
+    })
+  })
+
+  it("still refuses an empty name with the duplicate waiver set", () => {
+    const plan = planNewTargetLane({
+      laneId: "aabbccdd",
+      name: "",
+      language: "",
+      targetLanguage: "Spanish",
+      existing: spanishDefault,
+      allowDuplicateName: true,
+    })
+    expect(plan).toEqual({ ok: false, problem: "empty" })
+  })
 })

@@ -3,20 +3,28 @@
  *
  * The wall is on when `LANE_READ_WALL` is "1" or "true". Deployed dev and prod
  * set that in wrangler. Local and e2e leave it unset, so every caller still
- * sees every lane. Below Maintainer, no grant means no target lane — the
+ * sees every lane. Below project lead, no grant means no target lane — the
  * grant phase of scripts/neon-backfill-lanes.ts has to have been applied in
  * that environment before the workers that set the flag are deployed.
  *
  * A grant is a lane id. The screen shows that lane's name, which may be the
- * language. A grant below Viewer (100) does not reveal a lane. Maintainer (600) and
- * platform operators see every lane. Source text is not a lane and is never
- * hidden by these rules.
+ * language. A grant below Viewer (100) does not reveal a lane. Project lead
+ * (500) and above, and platform operators, see every lane (AQU-1795). Source
+ * text is not a lane and is never hidden by these rules.
  */
 
 /** Viewer. A grant below this does not reveal a lane. Matches frontier/roles. */
 const VIEWER = 100
-/** Maintainer. At and above this role, every lane is visible. */
-export const READ_WALL_MAINTAINER = 600
+/**
+ * Floor at which the read wall stops hiding lanes.
+ *
+ * Historically Maintainer (600). AQU-1795 lowered it to project lead (500):
+ * a project lead sees every target lane, the same as a maintainer. A
+ * contributor or reviewer still sees only the lanes they hold a grant on.
+ * The export name is unchanged so every wall check — settings, portfolio,
+ * cells, and the sync worker — moves together.
+ */
+export const READ_WALL_MAINTAINER = 500
 
 /** `lane` is `lanes.id`, never a language name or code. */
 export interface LaneGrant {
@@ -271,4 +279,40 @@ export function visibleDefaultLaneLanguage(
 ): string | null {
   if (allowedTags === null) return targetLanguage
   return allowedTags.has("") ? targetLanguage : null
+}
+
+/**
+ * AND-clause for a member limited by lane scopes while the read wall is off.
+ *
+ * Matches a target row by lane id OR by `target_lang`. The tag match is what
+ * keeps a translation visible before the backfill has stamped `lane_id`
+ * (NULL on the former default lane, and on any row written before its lane
+ * existed). Source rows stay. An empty id list and an empty tag list hide
+ * every target row — a scope that named nothing is not "see everything".
+ */
+export function scopedTargetVisibilityClause(args: {
+  ids: readonly string[]
+  tags: readonly string[]
+  sideExpr?: string
+  laneIdExpr: string
+  targetLangExpr: string
+}): { sql: string; binds: unknown[] } {
+  const parts: string[] = []
+  const binds: unknown[] = []
+  if (args.ids.length > 0) {
+    parts.push(`${args.laneIdExpr} IN (${args.ids.map(() => "?").join(", ")})`)
+    binds.push(...args.ids)
+  }
+  if (args.tags.length > 0) {
+    parts.push(`${args.targetLangExpr} IN (${args.tags.map(() => "?").join(", ")})`)
+    binds.push(...args.tags)
+  }
+  if (parts.length === 0) {
+    return args.sideExpr
+      ? { sql: `AND ${args.sideExpr} = 'source'`, binds: [] }
+      : { sql: "AND FALSE", binds: [] }
+  }
+  const match = parts.join(" OR ")
+  if (!args.sideExpr) return { sql: `AND (${match})`, binds }
+  return { sql: `AND (${args.sideExpr} = 'source' OR ${match})`, binds }
 }

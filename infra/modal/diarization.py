@@ -58,11 +58,30 @@ image = (
         # contemporaneous huggingface_hub that still accepts it (removed in 1.x).
         "huggingface_hub==0.23.4",
         "pyannote.audio==3.3.2",
-        "httpx",
-        "fastapi[standard]",  # required in-image for @modal.fastapi_endpoint
+        "httpx==0.27.2",
+        "fastapi[standard]==0.115.14",  # required in-image for @modal.fastapi_endpoint
     )
     .run_function(_bake_model, secrets=[HF_SECRET])
 )
+
+
+# AQU-1855: how many of these GPU containers Modal may run at once, and how
+# hard we try to deliver a callback.
+#
+# Without a ceiling, a burst of jobs scaled T4 containers out without limit —
+# real money, and no bound on the blast radius of a client that keeps pressing
+# Diarize. At the cap Modal QUEUES the spawned job instead of failing it, so a
+# capped burst still completes, just serially. The worker enforces the matching
+# per-user / per-project ceiling before it ever spawns
+# (DIARIZATION_MAX_LIVE_PER_PROJECT in sync-worker/src/diarization.ts).
+MAX_CONTAINERS = 4
+
+# A callback the worker misses leaves the job to the worker's stale-job sweep
+# (35 min), which is far slower than the job really took — so a transient
+# failure (worker restart, 502 from the edge, a dropped connection) is worth
+# retrying here rather than giving up after one attempt, as this used to.
+CALLBACK_ATTEMPTS = 4
+CALLBACK_BACKOFF_S = (2, 5, 15)
 
 
 @app.cls(
@@ -71,6 +90,7 @@ image = (
     secrets=[HF_SECRET, APP_SECRET],
     timeout=1800,            # 30 min ceiling for a long episode
     scaledown_window=120,    # keep a warm container ~2 min between jobs
+    max_containers=MAX_CONTAINERS,
 )
 class Diarizer:
     @modal.enter()
@@ -120,24 +140,62 @@ class Diarizer:
         num_speakers: int | None = None,
     ) -> None:
         """Fetch audio from a URL, diarize, POST turns to the worker callback.
-        Always reports back — success OR failure — so the job never hangs."""
-        import httpx
+        Reports back — success OR failure — so the job never hangs.
 
+        AQU-1855: the work and the reporting are separated. They used to share
+        one try/except, so once _post retried and could still raise, a run that
+        diarized PERFECTLY and then failed to deliver its turns would fall into
+        the except branch and report the job FAILED — losing a completed GPU
+        run to a transient network error. Delivery failure is now left to the
+        worker's stale-job sweep, which is what that guard is for.
+
+        What no code here can cover: Modal killing the container at `timeout`.
+        The except branch does not run, so nothing is reported at all — the
+        worker-side sweep is the only backstop for that case, by design.
+        """
         secret = os.environ["DIARIZATION_SHARED_SECRET"]
         try:
             audio_bytes = _fetch_validated(audio_url, "audioUrl")
             turns = self._run(audio_bytes, num_speakers)
-            _post(callback_url, {"jobId": job_id, "status": "succeeded", "turns": turns}, secret)
         except Exception as e:  # noqa: BLE001 — report any failure to the worker
-            _post(callback_url, {"jobId": job_id, "status": "failed", "error": str(e)}, secret)
+            try:
+                _post(callback_url, {"jobId": job_id, "status": "failed", "error": str(e)}, secret)
+            except Exception:  # noqa: BLE001 — never mask the real failure
+                print(f"[diarize] job {job_id}: failure callback undeliverable", flush=True)
             raise
+        _post(callback_url, {"jobId": job_id, "status": "succeeded", "turns": turns}, secret)
 
 
 def _post(url: str, payload: dict, secret: str) -> None:
+    """POST a callback to the worker, retrying a TRANSIENT failure.
+
+    AQU-1855: this used to post once and ignore the outcome entirely — a 502
+    from the edge, a worker restart mid-deploy, or a dropped connection lost
+    the result silently and left the job at `running` until something swept it.
+
+    Retried: a transport error, a 5xx, and a 429. Not retried: any other 4xx —
+    a rejected secret or an unknown jobId will be rejected again, so retrying
+    only delays the raise. Raises once the attempts are spent, which the caller
+    treats per direction (see diarize_and_callback).
+    """
+    import time
+
     import httpx
 
-    with httpx.Client(timeout=60) as c:
-        c.post(url, json=payload, headers={"X-Diarization-Secret": secret})
+    last: Exception | None = None
+    for attempt in range(CALLBACK_ATTEMPTS):
+        try:
+            with httpx.Client(timeout=60) as c:
+                resp = c.post(url, json=payload, headers={"X-Diarization-Secret": secret})
+            if resp.status_code < 500 and resp.status_code != 429:
+                resp.raise_for_status()  # 2xx: delivered. Other 4xx: permanent.
+                return
+            last = RuntimeError(f"callback {resp.status_code}: {resp.text[:200]}")
+        except httpx.HTTPError as e:
+            last = e
+        if attempt < CALLBACK_ATTEMPTS - 1:
+            time.sleep(CALLBACK_BACKOFF_S[min(attempt, len(CALLBACK_BACKOFF_S) - 1)])
+    raise last if last else RuntimeError("callback undeliverable")
 
 
 def _validate_host_public(hostname: str, label: str) -> set[str]:

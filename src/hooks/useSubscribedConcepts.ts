@@ -20,6 +20,14 @@
 // no concepts and no error. Autopilot (`loadSubscribedConcepts`) and the Agent
 // API prompt preview apply the same rule.
 //
+// Lanes (AQU-1777): a termbase is a project with its own lanes, so its
+// renderings are stamped with ITS lane ids. Route #8 maps each one onto this
+// project's lane of the same language (mapSubscribedConceptLanes in
+// src/lib/terminology/rendering-lane.ts) before answering, so `laneId` here is
+// always one of THIS project's lanes and every lane filter downstream
+// (useRules, Check file, the lookup popover) treats a subscribed rendering
+// exactly like a local one. A rendering no lane here matches never arrives.
+//
 // Thin-client (AD-3): plain `useState` + a race-guarded `useEffect`, like
 // `useConcepts`. No React Query hooks.
 

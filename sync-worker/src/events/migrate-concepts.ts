@@ -39,7 +39,7 @@ import { allocateSeqRange } from './event-insert'
 interface BlobConcept {
   id?: string
   sourceTerm?: string
-  renderings?: Array<{ rendering?: string; status?: string }>
+  renderings?: Array<{ rendering?: string; status?: string; laneId?: string }>
   notes?: string
   status?: string
   createdAt?: string
@@ -86,7 +86,9 @@ function normalizeRenderings(raw: BlobConcept['renderings']): Array<{ rendering:
       r?.status === 'preferred' || r?.status === 'admitted' || r?.status === 'forbidden'
         ? r.status
         : 'preferred'
-    return rendering ? [{ rendering, status }] : []
+    if (!rendering) return []
+    const laneId = typeof r?.laneId === 'string' && r.laneId !== '' ? r.laneId : undefined
+    return [{ rendering, status, ...(laneId ? { laneId } : {}) }]
   })
 }
 

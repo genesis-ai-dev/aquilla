@@ -49,25 +49,38 @@ function canonicalize(raw: string): string {
   return western.replace(/[^0-9]/g, "")
 }
 
-export function runCheck(source: string, target: string): InfractionSpan[] | null {
-  const sourceMatches = [...source.matchAll(NUMBER_RE)]
-  if (sourceMatches.length === 0) return null
+/** One number as it appears in a cell: its value, canonicalised so ٤٠, ၄၀
+ *  and 40 compare equal, and where it sits in the raw string. */
+export interface CellNumber {
+  value: string
+  start: number
+  end: number
+  raw: string
+}
 
-  const targetCanonical = new Set(
-    [...target.matchAll(NUMBER_RE)].map((m) => canonicalize(m[0])),
-  )
+/** Every number in `text`, in order, read the way this check reads them: any
+ *  script's decimal digits, the separators above, a leading minus. Shared with
+ *  `number-integrity-extra` (AQU-1761), which reads the other direction, so
+ *  the two can never disagree about what counts as a number. */
+export function readNumbers(text: string): CellNumber[] {
+  const out: CellNumber[] = []
+  for (const m of text.matchAll(NUMBER_RE)) {
+    if (m.index === undefined) continue
+    out.push({ value: canonicalize(m[0]), start: m.index, end: m.index + m[0].length, raw: m[0] })
+  }
+  return out
+}
+
+export function runCheck(source: string, target: string): InfractionSpan[] | null {
+  const sourceNumbers = readNumbers(source)
+  if (sourceNumbers.length === 0) return null
+
+  const targetValues = new Set(readNumbers(target).map((n) => n.value))
 
   const missing: InfractionSpan[] = []
-  for (const m of sourceMatches) {
-    if (m.index === undefined) continue
-    const canon = canonicalize(m[0])
-    if (!targetCanonical.has(canon)) {
-      missing.push({
-        side: "source",
-        start: m.index,
-        end: m.index + m[0].length,
-        matchedText: m[0],
-      })
+  for (const n of sourceNumbers) {
+    if (!targetValues.has(n.value)) {
+      missing.push({ side: "source", start: n.start, end: n.end, matchedText: n.raw })
     }
   }
 

@@ -6,7 +6,7 @@ describe("attachmentDisposition", () => {
     const h = attachmentDisposition('a"\r\nX-Evil: 1;\\b.docx')
     expect(h).not.toMatch(/[\r\n]/)
     expect(h.split("filename*")[0]).not.toMatch(/X-Evil: 1;/)
-    expect(h).toMatch(/^attachment; filename="[^"\;]*"; filename\*=UTF-8''/)
+    expect(h).toMatch(/^attachment; filename="[^";]*"; filename\*=UTF-8''/)
   })
   it("keeps non-latin names valid for header values", () => {
     const h = attachmentDisposition("Библия.zip")

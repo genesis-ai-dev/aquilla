@@ -18,15 +18,15 @@
  * label. Nothing can drift if nothing derived is stored — so the derivation
  * lives here, on the read path, and every reader goes through it.
  *
- * MIGRATION FALLBACK: rows that predate migration 0152 carry their label in
- * `name` and a write-time-derived code in `langCode`, with `language` NULL.
- * `laneLanguage` therefore falls back to `name`, and a stored `langCode` is
- * honoured as an override. The batch backfill (AQU-1616) is what fills
- * `language` and clears the names and codes that were derived; until it runs,
- * these fallbacks are what make an un-backfilled row read correctly.
+ * Rows that predate migration 0152 carry their label in `name` and a
+ * write-time-derived code in `langCode`, with `language` NULL. `laneLanguage`
+ * therefore falls back to `name`, then (when a context was passed) the tag and
+ * the code. It does not read project settings. The batch backfill (AQU-1616)
+ * fills `language`; until it runs, the name is what an un-backfilled row says.
  */
 
 import { BLANK_LANE_PLACEHOLDER, codeForLanguageLabel, SOURCE_LANE_PLACEHOLDER } from "./backfill-plan"
+import { isLaneId } from "./lane-id"
 
 /**
  * The identity fields of a lane row, as every representation of one carries
@@ -42,16 +42,66 @@ export interface LaneIdentity {
 }
 
 /**
+ * Kept so existing callers still type-check. {@link laneLanguage} does not
+ * read these keys (AQU-1595). Backfill code reads them on its own.
+ */
+export interface LaneLanguageSettings {
+  sourceLanguage?: unknown
+  targetLanguage?: unknown
+}
+
+/**
+ * Optional context for {@link laneLanguage}. Existing callers that only have
+ * a lane row keep compiling; every consumer that needs a language passes this
+ * so the migration fallback and the tag can run.
+ */
+export interface LaneLanguageContext {
+  settings?: LaneLanguageSettings | null
+  /** Used when the lane object itself has no role. */
+  role?: "source" | "target"
+  /**
+   * The lane's `legacy_tag`. `''` is the former default lane. `null` is the
+   * source lane's tag and must not be treated as the default lane.
+   */
+  legacyTag?: string | null
+}
+
+/** A language string, or null when it is blank or an opaque 8-hex lane id. */
+function usableLanguage(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!trimmed || isLaneId(trimmed)) return null
+  return trimmed
+}
+
+/**
  * The language this lane translates into, as the user typed it.
  *
- * Falls back to the stored `name` for a row that predates 0152 (see MIGRATION
- * FALLBACK above). Returns "" when the lane carries neither — a BLANK project
- * whose target language was never set.
+ * A typed `language` wins. When `language` is null the name → tag → code
+ * chain answers. Project settings are not consulted: a null `language` does
+ * not read `settings.sourceLanguage` or `settings.targetLanguage`. An 8-hex
+ * lane id is never a language. Returns "" when nothing names one.
+ *
+ * Without `context`, this is the name fallback alone (display and code
+ * derivation). Tag and code are consulted only when the caller passed a
+ * context, because that is what distinguishes "the row's name" from "resolve
+ * the language a consumer should be told".
  */
-export function laneLanguage(lane: LaneIdentity): string {
-  const language = (lane.language ?? "").trim()
-  if (language) return language
-  return (lane.name ?? "").trim()
+export function laneLanguage(lane: LaneIdentity, context?: LaneLanguageContext): string {
+  const typed = usableLanguage(lane.language)
+  if (typed) return typed
+
+  const legacyTag = context?.legacyTag
+
+  const name = usableLanguage(lane.name)
+  if (name) return name
+  if (context) {
+    const tag = usableLanguage(legacyTag)
+    if (tag) return tag
+    const code = usableLanguage(lane.langCode)
+    if (code) return code
+  }
+  return ""
 }
 
 /**
@@ -80,15 +130,15 @@ export function laneDisplayName(lane: LaneIdentity): string {
  * the row holds; rejecting malformed input is the write path's job
  * ({@link canonicalLanguageCodeOverride}).
  */
-export function laneLanguageCode(lane: LaneIdentity): string | null {
+export function laneLanguageCode(lane: LaneIdentity, context?: LaneLanguageContext): string | null {
   const override = (lane.langCode ?? "").trim()
-  if (override) return canonicalizeBcp47(override) ?? override
-  return codeForLanguageLabel(laneLanguage(lane))
+  if (override && !isLaneId(override)) return canonicalizeBcp47(override) ?? override
+  return codeForLanguageLabel(laneLanguage({ ...lane, langCode: null }, context))
 }
 
 /** The code the "Advanced" disclosure shows as its placeholder. */
-export function derivedLaneLanguageCode(lane: LaneIdentity): string | null {
-  return codeForLanguageLabel(laneLanguage(lane))
+export function derivedLaneLanguageCode(lane: LaneIdentity, context?: LaneLanguageContext): string | null {
+  return codeForLanguageLabel(laneLanguage({ ...lane, langCode: null }, context))
 }
 
 /** True when this lane carries an explicit code override rather than deriving one. */

@@ -36,6 +36,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { roleWithoutUnelevatedAdmin } from "../services/elevation-gate"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listDownstreamProjects, loadProjectWithSource } from "../services/source-linking"
@@ -153,11 +154,32 @@ mergeSibling.post(
         403,
       )
     }
+    // OPS-44: folding is irreversible and cross-tenant — a platform admin
+    // resolves 700 on BOTH sides of a merge between two projects they have no
+    // genuine grant on. AQU-1322 already requires elevation to add one member
+    // to one project; destroying a donor project outranks that. Admin power is
+    // stripped unless elevated, then the SAME role floor is re-applied to what
+    // remains, so an operator who genuinely leads the project is unaffected.
+    // Checked per side so the host is settled before the donor row is read.
+    const hostEffective = await roleWithoutUnelevatedAdmin(c, user, hostId, hostRole)
+    if (!hostEffective || hostEffective.level < MERGE_MIN_ROLE) {
+      return c.json(
+        { error: "elevation required to fold a sibling project with platform-admin access" },
+        403,
+      )
+    }
     const donorRole = await resolveProjectRole(c.env, user, donorProjectId)
     if (!donorRole) return c.json({ error: "not found or no access to donor project" }, 403)
     if (donorRole.level < MERGE_MIN_ROLE) {
       return c.json(
         { error: `role >= project_lead (${MERGE_MIN_ROLE}) required on donor project` },
+        403,
+      )
+    }
+    const donorEffective = await roleWithoutUnelevatedAdmin(c, user, donorProjectId, donorRole)
+    if (!donorEffective || donorEffective.level < MERGE_MIN_ROLE) {
+      return c.json(
+        { error: "elevation required to fold a sibling project with platform-admin access" },
         403,
       )
     }
@@ -180,7 +202,8 @@ mergeSibling.post(
       )
     }
 
-    // Lane must not already be registered on the host.
+    // Exact tag only. A second lane of the same language is legal; a display
+    // name another lane already shows is refused just below.
     const hostSettings = await loadProjectSettings(c.env, hostId)
     const existingLanes = readTargetLanes(hostSettings.settings)
     if (existingLanes.includes(lane)) {
@@ -235,9 +258,10 @@ mergeSibling.post(
     // AQU-1602 asked for this registry write to go. It stays for now because
     // POST /:projectId/lanes — the canonical way a lane is created (AQU-1418) —
     // still makes it, for the readers that have not moved to lane rows yet
-    // (billing's `project_settings.target_lanes`, the contextual project
-    // context, the external API's PatchSettings). Dropping it here alone would
-    // make a merged lane the only lane missing from them. AQU-1595 removes the
+    // (the contextual project context, the external API's PatchSettings).
+    // Billing counts lanes rows (AQU-1595). Dropping the registry write here
+    // alone would make a merged lane the only lane missing from them.
+    // AQU-1595 removes the
     // four settings keys everywhere, once those readers are on lane rows.
     const registered = await mergeSettingsArray(
       c.env.AQUILLA_PG,

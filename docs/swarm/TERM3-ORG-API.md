@@ -98,6 +98,20 @@ routes, which would require an upstream role the implicit grant intentionally
 withholds. An upstream with no concepts, or with a corrupt legacy blob, gives
 `[]`.
 
+**Lane mapping (AQU-1777):** a rendering's `laneId` is a `lanes.id` of the
+project the concept is read in (AQU-1508), and the upstream's rows carry the
+UPSTREAM's lane ids. Route #8 rewrites each rendering onto the subscriber's
+lanes with `mapSubscribedConceptLanes` (`src/lib/terminology/rendering-lane.ts`)
+before answering: a rendering applies in every subscriber lane whose language
+equals the language of its upstream lane (the AQU-1597 normalizer, so "es" and
+"Spanish" agree); an upstream rendering with no `laneId` is read as the
+UPSTREAM's `legacy_tag ''` lane, never the subscriber's; when either lane has no
+language the two `legacy_tag`s must be equal; a rendering no subscriber lane
+matches is left out of the response. The returned `laneId`s are therefore the
+SUBSCRIBER's, and the editor's lane filter needs no subscription awareness.
+Autopilot (`loadSubscribedConcepts`) and the Agent API prompt preview apply the
+same function.
+
 ## Implicit grant (Q19) — RESOLVED
 
 A subscription row confers an implicit **viewer** read on the upstream termbase

@@ -30,6 +30,11 @@ import { cn } from "@/lib/utils"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
+import {
+  createHealthScoreDecorationExtension,
+  healthScorePluginKey,
+  type HealthScoreDecorationSpan,
+} from "@/lib/richtext/health-score-decoration-plugin"
 import { createSmartEditDecorationExtension, smartEditPluginKey, smartEditRange } from "@/lib/richtext/smart-edit-decoration-plugin"
 import { suggestionId } from "@/lib/smart-edits/store"
 import type { SmartEditSuggestion } from "@/lib/smart-edits/client"
@@ -101,6 +106,7 @@ export const PRESENCE_DRAFT_IDLE_MS = 650
 export const PRESENCE_WORD_BATCH_SIZE = 2
 /** Keep presence frames lightweight even if a malformed/imported cell is huge. */
 export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
+const EMPTY_HEALTH_SPANS: readonly HealthScoreDecorationSpan[] = []
 
 function placeDomCaretAtProseMirrorPosition(view: EditorView, position: number): void {
   const selection = view.dom.ownerDocument.getSelection()
@@ -482,6 +488,8 @@ interface TranslatedEditorProps {
    * the parent to return focus to the grid row wrapper.
    */
   onEscapeToGrid?: () => void
+  /** Display-only AI-draft provenance wash (#946). Empty when the toggle is off. */
+  healthSpans?: readonly HealthScoreDecorationSpan[]
 }
 
 export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEditorProps>(function TranslatedEditor({
@@ -531,6 +539,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onFootnoteHover,
   ariaLabel,
   onEscapeToGrid,
+  healthSpans = EMPTY_HEALTH_SPANS,
 }, ref) {
   const t = useT()
   // Held in a ref so the editor's keydown handler — created once per cellId —
@@ -570,6 +579,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
     waivedRuleIds: waivedRuleIds ?? new Set<string>(),
   })
+  const latestHealthSpansRef = useRef(healthSpans)
 
   const latestSmartEditsRef = useRef<readonly SmartEditSuggestion[]>(smartEdits ?? [])
   const [openSmartEdit, setOpenSmartEdit] = useState<{ suggestion: SmartEditSuggestion; anchor: HTMLElement } | null>(null)
@@ -813,6 +823,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         () => showFootnoteTooltipsRef.current,
       ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
+      createHealthScoreDecorationExtension(() => latestHealthSpansRef.current),
       createSmartEditDecorationExtension(() => latestSmartEditsRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(smartQuotes ? [createSmartQuotesExtension(lang)] : []),
@@ -1678,6 +1689,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       editor.view.dispatch(tr)
     }
   }, [editor, infractions, ruleSeverity, waivedRuleIds])
+
+  useEffect(() => {
+    latestHealthSpansRef.current = healthSpans
+    if (editor) {
+      editor.view.dispatch(editor.state.tr.setMeta(healthScorePluginKey, "rebuild"))
+    }
+  }, [editor, healthSpans])
 
   useEffect(() => {
     latestSmartEditsRef.current = smartEdits ?? []

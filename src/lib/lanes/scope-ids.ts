@@ -166,3 +166,22 @@ export function laneScopesAsTags<T extends { kind: string; value: string }>(
     return lane ? { ...scope, value: lane.legacyTag ?? "" } : scope
   })
 }
+
+/**
+ * What a settings response should keep for a member limited to these lane
+ * scopes. `visible` is the set `filterSettingsToVisibleLanes` tests membership
+ * against. With lane rows, that set is lane ids. With none yet — a project
+ * the lane backfill has not given rows — each stored value is the tag itself,
+ * so the synthetic identity uses that value as id, name, and legacy tag.
+ * Does not read `lanes.language`.
+ */
+export function lanesForScopeVisibility(
+  values: readonly string[],
+  lanes: readonly LaneIdentity[],
+): { visible: ReadonlySet<string>; lanes: readonly LaneIdentity[] } {
+  if (lanes.length === 0) {
+    const synthetic = values.map((value) => ({ id: value, name: value, legacyTag: value }))
+    return { visible: new Set(values), lanes: synthetic }
+  }
+  return { visible: laneScopeIds(values, lanes).ids, lanes }
+}

@@ -9,12 +9,14 @@
 import { quotationCheck } from "./quotes"
 import { referenceCheck } from "./reference"
 import { sentenceCheck } from "./sentence"
+import { connectiveCheck } from "./connectives"
 import type { FindingOptions, HarmonizerCell, HarmonizerFinding, HarmonizerQuestion, HarmonyCheck } from "./types"
 
 /** Registered checks. Order is the order findings are reported in. */
 export const CHECKS: readonly HarmonyCheck<unknown>[] = [
   quotationCheck as HarmonyCheck<unknown>,
   sentenceCheck as HarmonyCheck<unknown>,
+  connectiveCheck as HarmonyCheck<unknown>,
 ]
 
 /**

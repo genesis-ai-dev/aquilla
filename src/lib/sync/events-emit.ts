@@ -17,7 +17,7 @@
 import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
-import { canPerform, requiredRoleFor, ROLE } from "./role-policy"
+import { canAttachSourceAudio, canPerform, requiredRoleFor, ROLE, SOURCE_AUDIO_ATTACH_FLOOR } from "./role-policy"
 import type { TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 import {
   OUTBOX_SCHEMA_VERSION,
@@ -575,6 +575,13 @@ export interface CellAudioAttachInput {
   source?: TelemetrySource
   /** AQU-1572: where in the app it was done ("cell", "selection", "batch"…). Telemetry only, never on the wire. */
   surface?: TelemetrySurface
+  /**
+   * AQU-1565 follow-up: `"source"` marks the shared programme audio (an
+   * uploaded or linked recording cut into media rows), so it is never read as
+   * somebody's dub: no mic on every row, no "recorded 100%". Omitted for a
+   * take, which the server stores as a dub. Project Lead and above only.
+   */
+  role?: "dub" | "source"
   author: string
   clientTs?: number
 }
@@ -594,6 +601,13 @@ function playedDuration(input: CellAudioAttachInput): { durationMs?: number } {
 }
 
 export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<string> {
+  // AQU-1565 follow-up: the server refuses `role: "source"` below Project Lead
+  // (authorize.ts). Refuse it here too, before the outbox, so a certain 403
+  // never sits in the durable queue.
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  if (input.role === "source" && !canAttachSourceAudio(roleLevel)) {
+    throw new InsufficientRoleError("cell.audio.attach", roleLevel ?? 0, SOURCE_AUDIO_ATTACH_FLOOR)
+  }
   const { eventId } = await enqueueEvent({
     kind: "cell.audio.attach",
     projectId: input.projectId,
@@ -614,6 +628,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.trimEndMs !== undefined ? { trimEndMs: intMs(input.trimEndMs) } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
+      ...(input.role !== undefined ? { role: input.role } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
@@ -1262,6 +1277,15 @@ export interface CellHarmonizeInput {
   parentId: string | null
   /** AD-9 staleness pin. */
   sourceEventId?: string | null
+  /**
+   * AQU-1805: the target lane this sweep addresses — same contract as
+   * `CellCommitInput.targetLang`. A rule fix is proposed against the lane the
+   * reader is looking at, so it must commit to that lane's own row; omitting
+   * it landed every fix on the default lane.
+   */
+  targetLang?: string
+  /** AQU-1805: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   value: string
   valueHtml?: string
   author: string
@@ -1328,6 +1352,7 @@ export async function emitCellHarmonize(
       value: input.value,
       ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
       ...(input.sourceEventId !== undefined ? { sourceEventId: input.sourceEventId } : {}),
+      ...targetLaneFields(input),
       harmonize_origin: {
         rule_or_check_id: input.ruleOrCheckId,
         proposal_kind: input.proposalKind,

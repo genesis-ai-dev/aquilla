@@ -22,6 +22,7 @@
 // lane's — only the client's choice of row was wrong.
 
 import { verifyTokenForFile } from '../auth'
+import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 
 export interface CellsAuditReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -68,7 +69,7 @@ export async function handleCellsAuditReadRequest(
     SELECT
       cell_id,
       side,
-      target_lang,
+      ${wireLegacyTagSql("cells")} AS target_lang,
       lane_id,
       content_hash,
       last_edit_at,

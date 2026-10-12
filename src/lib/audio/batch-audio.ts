@@ -61,8 +61,14 @@ const CONCURRENCY = 2
  * Run `fn` over `items` with a sliding concurrency window.
  * Stops accepting new work when `isCancelled()` returns true (in-flight jobs
  * complete naturally).
+ *
+ * AQU-1722: exported as `runBatchJobs` so the selection-driven voice batch
+ * (`batch-voice.ts`) runs on THIS queue rather than standing up a second one.
+ * One queue means one progress slot, one banner, and one Cancel button — two
+ * would both write `_progress` and the banner's Cancel would reach whichever
+ * happened to be on screen.
  */
-async function runBatch<T>(
+export async function runBatchJobs<T>(
   items: T[],
   fn: (item: T) => Promise<unknown>,
   opts: {
@@ -123,6 +129,17 @@ export function cancelBatchTranscribe() {
 
 export function cancelBatchSynth() {
   _synthCancelFlag = true
+}
+
+/** AQU-1722: arm the synth cancel flag for a fresh run. Shared by
+ *  `runSynthAll` and the selection-driven voice batch, which share the flag
+ *  because they share the one progress slot the banner's Cancel targets. */
+export function resetBatchSynthCancel() {
+  _synthCancelFlag = false
+}
+
+export function isBatchSynthCancelled(): boolean {
+  return _synthCancelFlag
 }
 
 export function cancelBatchMeasure() {
@@ -212,7 +229,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   args.onProgress?.(0, targets.length)
   let completed = 0
 
-  await runBatch(
+  await runBatchJobs(
     targets,
     (cell) =>
       transcribeCell({
@@ -407,7 +424,7 @@ export async function runMeasureAll(args: MeasureAllArgs): Promise<MeasureAllRes
 
   _measureCancelFlag = false
 
-  await runBatch(
+  await runBatchJobs(
     targets,
     async ({ cellId, att }) => {
       try {
@@ -508,7 +525,7 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
 
   _synthCancelFlag = false
 
-  await runBatch(
+  await runBatchJobs(
     targets,
     (t) =>
       generateCellVoice({

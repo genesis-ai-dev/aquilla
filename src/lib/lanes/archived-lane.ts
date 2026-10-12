@@ -77,6 +77,33 @@ export function writesLaneRow(kind: string): boolean {
 }
 
 /**
+ * AQU-1884: kinds that mint the `''` bridge lane themselves.
+ *
+ * A lane-less `target.cell.*` write splices `ensureBlankTargetBridgeStmt` into
+ * its own batch (AQU-1594, sync-worker/src/events/handlers/cell-events.ts), so
+ * for those kinds the lane row may legitimately not exist yet. A validation
+ * endorses a commit that already ran that batch, so it never creates a lane and
+ * always needs the row up front.
+ */
+export function createsBlankLaneBridge(kind: string): boolean {
+  return kind.startsWith("target.cell.")
+}
+
+/**
+ * AQU-1532 / AQU-1884: why a lane-row write cannot resolve its lane.
+ *
+ * A named tag is simply unknown, and the caller's fix is to register it. An
+ * omitted tag asked for the DEFAULT lane, which projects created today do not
+ * have — every lane carries a real tag, such as its language — so there the
+ * fix is to name the lane, not to register one.
+ */
+export function missingLaneReason(tag: string): string {
+  return tag === ""
+    ? "no lane named: this project has no default lane; name the target lane with laneId (or targetLang)"
+    : `unknown lane "${tag}"; register it in settings.targetLanes`
+}
+
+/**
  * The lane tag this event is asking to write, or null when the event is not
  * a lane write. `''` is the default lane.
  */

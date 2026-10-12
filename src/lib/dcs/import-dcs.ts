@@ -5,6 +5,8 @@
 //
 // The BulkImportCell.id is the DETERMINISTIC EVENT id `uuidv5(repo|sha|cellId)`,
 // so re-running the same import dedupes through the server's idempotent /import.
+// Event ids AND file ids are project-scoped (AQU-1891), so the same resource can
+// be imported into any number of projects without one landing on another's rows.
 
 import type { FileReference } from "@/lib/parsers/types"
 import type { SourceArtifactFormat } from "../../../shared/import-contract"
@@ -145,6 +147,7 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
   const parsedFiles = route.parse({
     entry,
     manifest,
+    projectId: args.projectId,
     files,
     options: { excludeFrontMatter: args.excludeFrontMatter },
   })

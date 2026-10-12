@@ -3,6 +3,7 @@ import * as emptyTarget from "./check-functions/empty-target"
 import * as targetEqualsSource from "./check-functions/target-equals-source"
 import * as placeholderIntegrity from "./check-functions/placeholder-integrity"
 import * as numberIntegrity from "./check-functions/number-integrity"
+import * as numberIntegrityExtra from "./check-functions/number-integrity-extra"
 import * as endPunctuationMismatch from "./check-functions/end-punctuation-mismatch"
 import * as punctuationIntegrity from "./check-functions/punctuation-integrity"
 import * as doubleSpace from "./check-functions/double-space"
@@ -81,6 +82,18 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     runsOnEmptyTarget: false,
     run: numberIntegrity.runCheck,
     message: numberIntegrity.MESSAGE,
+  },
+  // AQU-1761: the other direction, as its own check so it has its own switch
+  // and severity. Minor by default: an added number is sometimes legitimate.
+  "number-integrity-extra": {
+    id: "number-integrity-extra",
+    name: "Extra numbers",
+    description: "Numerals in the translation should also appear in the source — catches a number the translator added.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: numberIntegrityExtra.runCheck,
+    message: numberIntegrityExtra.MESSAGE,
   },
   "end-punctuation-mismatch": {
     id: "end-punctuation-mismatch",
@@ -170,6 +183,7 @@ export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "target-equals-source",
   "placeholder-integrity",
   "number-integrity",
+  "number-integrity-extra",
   "end-punctuation-mismatch",
   "punctuation-integrity",
   "double-space",

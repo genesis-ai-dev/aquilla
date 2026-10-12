@@ -12,7 +12,7 @@
 // The resolution rule is the client's (`src/lib/lanes/lane-language.ts`), so
 // the preview reports the language the editor would actually send.
 
-import { laneRowLanguage } from '../../../src/lib/lanes/lane-language'
+import { laneLanguage as resolveLaneLanguage, type LaneLanguageSettings } from '../../../src/lib/lanes/lane-display'
 
 interface LaneRow {
   id: string
@@ -26,14 +26,15 @@ interface LaneRow {
  * The language of the target lane tagged `legacyTag` in this project, or null
  * when no row carries that tag or the row names no language.
  *
- * The caller falls back to `settings.targetLanguage`: a tag with no row is a
- * lane the registry never recorded, and the project default is a better answer
- * for the model than an opaque key.
+ * A tag with no row resolves through {@link resolveLaneLanguage} too: the tag
+ * itself when it is a language, never when it is an 8-hex lane id, and the
+ * former default lane (`''`) through the migration fallback.
  */
 export async function laneLanguage(
   db: AquillaDb,
   projectId: string,
   legacyTag: string,
+  settings?: LaneLanguageSettings | null,
 ): Promise<string | null> {
   const row = await db
     .prepare(
@@ -42,12 +43,16 @@ export async function laneLanguage(
     )
     .bind(projectId, legacyTag)
     .first<LaneRow>()
-  if (!row) return null
-  return laneRowLanguage({
-    id: row.id,
-    language: row.language,
-    name: row.name,
-    langCode: row.lang_code,
-    legacyTag: row.legacy_tag,
-  })
+  const resolved = resolveLaneLanguage(
+    row
+      ? {
+          role: "target",
+          language: row.language,
+          name: row.name,
+          langCode: row.lang_code,
+        }
+      : { role: "target", language: null },
+    { settings, role: "target", legacyTag: row?.legacy_tag ?? legacyTag },
+  )
+  return resolved || null
 }

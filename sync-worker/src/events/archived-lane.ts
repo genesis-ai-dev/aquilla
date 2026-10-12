@@ -57,19 +57,40 @@ export function targetLaneRowsFor(
 
 /**
  * AQU-1532: true when the project has a target lane row whose legacy tag is
- * exactly `tag` — the same match the projection's lane_id lookup uses. The
- * default lane (`''`) always counts as present. Shares the per-request lane
- * list with the archived-lane check.
+ * exactly `tag` — the same match the projection's lane_id lookup uses, so a
+ * false here is exactly the write that would resolve a NULL `lane_id`.
+ * A named tag has to exist or the write is a 422.
+ *
+ * AQU-1884: `''` — the omitted tag, the former default lane — is no longer
+ * waved through for every kind. A validation never mints a lane: it endorses a
+ * commit whose own batch already did, so on a project whose target lanes all
+ * carry a real tag it addresses a lane that does not exist, and used to fail
+ * the whole batch as a per-event 500 ("DB batch failed") instead of saying so.
+ * It resolves when the project HAS the `''` row (a legacy/migrated project),
+ * and on a project with NO target lane at all — there the bridge may be minted
+ * by a sibling event in this very batch (an editor's outbox flush carries the
+ * commit and its validation together on a brand-new project), which this
+ * pre-flight read cannot see.
+ *
+ * `bridges` is `createsBlankLaneBridge` for the event's kind. Those kinds are
+ * waved through on `''` exactly as before: such a write on a project that
+ * already has tagged lanes gains no bridge and cannot succeed either
+ * (AQU-1615), but that 500 is not this ticket's and tightening it here would
+ * change a behaviour two AQU-1462 tests pin.
+ *
+ * Shares the per-request lane list with the archived-lane check.
  */
 export async function targetLaneRowExists(
   db: AquillaDb,
   projectId: string,
   tag: string,
   cache: RequestCache,
+  bridges = false,
 ): Promise<boolean> {
-  if (tag === '') return true
+  if (tag === '' && bridges) return true
   const lanes = await rowsFor(db, projectId, cache)
-  return lanes.some((lane) => lane.legacyTag === tag)
+  if (lanes.some((lane) => lane.legacyTag === tag)) return true
+  return tag === '' && lanes.length === 0
 }
 
 /**

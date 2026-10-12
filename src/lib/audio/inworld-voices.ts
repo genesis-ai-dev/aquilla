@@ -14,6 +14,7 @@ import {
   type InworldSupportedLanguage,
 } from "./inworld-supported-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { isLaneArchived } from "@/components/project-lane-archive"
 
 export type { InworldCatalogVoice }
 
@@ -40,18 +41,13 @@ export function projectTargetLaneLanguages(project: {
   targetLanes?: readonly string[]
   archivedLanes?: readonly string[]
 }): string[] {
-  const archived = new Set(
-    (project.archivedLanes ?? [])
-      .map((lane) => lane.trim().toLowerCase())
-      .filter(Boolean),
-  )
+  const archived = project.archivedLanes ?? []
   const out: string[] = []
   const add = (raw: string | undefined) => {
     const value = raw?.trim()
     if (!value) return
-    const key = value.toLowerCase()
-    if (archived.has(key)) return
-    if (out.some((existing) => existing.toLowerCase() === key)) return
+    if (isLaneArchived(value, archived)) return
+    if (out.some((existing) => existing.toLowerCase() === value.toLowerCase())) return
     out.push(value)
   }
   add(project.targetLanguage)

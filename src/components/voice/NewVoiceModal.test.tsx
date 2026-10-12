@@ -678,6 +678,31 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     expect(saved.designPreviewAudioId).toMatch(/^design-preview-.+\.wav$/)
   })
 
+  it("shows the next step when publishing a designed voice gets the bare 502 (AQU-1755)", async () => {
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+    ])
+    vi.mocked(publishInworldVoice).mockRejectedValue(
+      new Error("Inworld TTS failed (502): voice provider request failed"),
+    )
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({
+      provider: "inworld",
+      projectId: "p1",
+      fileId: "f1",
+      session: { jwt: "tok", username: "dev" } as FrontierSession,
+    })
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    await user.type(screen.getByLabelText("Describe the voice"), DESIGN_PROMPT)
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    expect(await screen.findByText("Preview 1")).toBeTruthy()
+    create("British narrator")
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent(/Try again later/)
+    expect(alert).not.toHaveTextContent("502")
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it("stops the design preview when the dialog closes", async () => {
     const pause = vi.fn()
     vi.stubGlobal(

@@ -327,6 +327,42 @@ describe("useOrgSettings — rollback on rejected writes (AQU-255 follow-up)", (
     expect(result.current.orgRules.map((r) => r.id)).toEqual(["r1", "r2"])
     expect(result.current.version).toBe(4)
   })
+
+  it("a save whose reply lacks the override counts keeps the last known counts (AQU-1771)", async () => {
+    // The reset prompt reads these before each change; losing them after one
+    // save meant it never came back.
+    mockFetchResponse = { ...serverTruth(), validationCountOverrides: 1, countStructuralOverrides: 2 }
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({
+      kind: "ok",
+      value: { orgId: 1, settings: { validationCount: 2 }, version: 4, updatedAt: null, updatedBy: 9 },
+    })
+
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.validationCountOverrides).toBe(1))
+
+    await act(async () => {
+      await result.current.patch({ validationCount: 2 })
+    })
+
+    expect(result.current.version).toBe(4)
+    expect(result.current.validationCountOverrides).toBe(1)
+    expect(result.current.countStructuralOverrides).toBe(2)
+  })
+
+  it("a reply that carries the counts replaces them, so a reset to 0 sticks", async () => {
+    mockFetchResponse = { ...serverTruth(), validationCountOverrides: 1 }
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({
+      kind: "ok",
+      value: { orgId: 1, settings: {}, version: 4, updatedAt: null, updatedBy: 9, validationCountOverrides: 0 },
+    })
+
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.validationCountOverrides).toBe(1))
+    await act(async () => {
+      await result.current.patch({ validationCount: 3 })
+    })
+    expect(result.current.validationCountOverrides).toBe(0)
+  })
 })
 
 // ───────────────────────────────────────────────────────────────────────────

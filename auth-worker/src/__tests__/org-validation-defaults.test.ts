@@ -127,6 +127,27 @@ describe("AQU-1771: org validation defaults", () => {
     expect(body.validationCountAudioOverrides).toBe(1)
   })
 
+  it("a save and a version clash carry the override counts too, not only the GET", async () => {
+    // The client replaces its whole copy with each response; without the
+    // counts the reset prompt read "no overrides" after the first save.
+    await seed()
+    const saved = await patchOrg("mara", { validationCount: 2 })
+    expect(saved.status).toBe(200)
+    const body = (await saved.json()) as {
+      countStructuralOverrides: number
+      validationCountOverrides: number
+      validationCountAudioOverrides: number
+    }
+    expect(body.validationCountOverrides).toBe(1)
+    expect(body.validationCountAudioOverrides).toBe(1)
+    expect(typeof body.countStructuralOverrides).toBe("number")
+
+    const clash = await patchOrg("mara", { validationCount: 3 }, 0)
+    expect(clash.status).toBe(409)
+    const current = ((await clash.json()) as { current: { validationCountOverrides: number } }).current
+    expect(current.validationCountOverrides).toBe(1)
+  })
+
   it("reset clears the project overrides and re-projects those projects at the org value", async () => {
     await seed()
     expect((await patchOrg("mara", { validationCount: 2 })).status).toBe(200)

@@ -322,22 +322,9 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   if (role == null) return c.json({ error: "no access to org" }, 403)
 
   const response = await loadSettings(c.env, orgId)
-  // AQU-1083: how many projects have opted out of the org's structural-cell
-  // default. The Project defaults page needs it to know whether changing that
-  // default would silently miss anyone — a project with its own answer is
-  // deliberately deaf to this switch, and saying nothing about that is how the
-  // switch becomes a no-op nobody can see.
-  // AQU-1771: the same count for the two validation thresholds.
-  const [overrides, validationCountOverrides, validationCountAudioOverrides] = await Promise.all([
-    countOverrides(c.env, orgId, "count_structural"),
-    countOverrides(c.env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCount),
-    countOverrides(c.env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCountAudio),
-  ])
-  const counts = {
-    countStructuralOverrides: overrides,
-    validationCountOverrides,
-    validationCountAudioOverrides,
-  }
+  // AQU-1083 / AQU-1771: how many projects have their own answer for each
+  // inherited default (see loadOverrideCounts).
+  const counts = await loadOverrideCounts(c.env, orgId)
   // OPS-44: the unredacted branch hands back the org's LIVE vendor API keys
   // (D7 — someone else's credential we chose to hold). getEffectiveOrgRole
   // returns 700 for any platform operator on any org, so without this an
@@ -363,6 +350,35 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   }
   return c.json({ ...response, ...counts })
 })
+
+/**
+ * AQU-1083: how many projects have opted out of each org default the Project
+ * defaults page offers. The page needs it to know whether changing a default
+ * would silently miss anyone — a project with its own answer is deliberately
+ * deaf to the org's switch, and saying nothing about that is how the switch
+ * becomes a no-op nobody can see. AQU-1771: the same count for the two
+ * validation thresholds.
+ *
+ * Every response that carries the settings carries these too (GET, PATCH and
+ * its 409s): the client replaces its whole copy with each response, so a
+ * response without them read as "no overrides" and the reset prompt never
+ * came back after the first save.
+ */
+async function loadOverrideCounts(env: AuthHonoEnv["Bindings"], orgId: number) {
+  const [countStructuralOverrides, validationCountOverrides, validationCountAudioOverrides] =
+    await Promise.all([
+      countOverrides(env, orgId, "count_structural"),
+      countOverrides(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCount),
+      countOverrides(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCountAudio),
+    ])
+  return { countStructuralOverrides, validationCountOverrides, validationCountAudioOverrides }
+}
+
+/** The settings plus the override counts: the shape every settings response carries. */
+async function loadSettingsWithCounts(env: AuthHonoEnv["Bindings"], orgId: number) {
+  const [settings, counts] = await Promise.all([loadSettings(env, orgId), loadOverrideCounts(env, orgId)])
+  return { ...settings, ...counts }
+}
 
 /**
  * Projects in this org whose settings carry their own value for an inherited
@@ -541,7 +557,7 @@ orgSettings.on(
     const current = await loadSettings(c.env, orgId)
 
     if (ifMatchVersion !== current.version) {
-      return c.json({ error: "version mismatch", current }, 409)
+      return c.json({ error: "version mismatch", current: { ...current, ...(await loadOverrideCounts(c.env, orgId)) } }, 409)
     }
 
     const newSettingsJson = JSON.stringify(body.settings)
@@ -556,7 +572,7 @@ orgSettings.on(
           .bind(orgId, newSettingsJson, newVersion, user.id)
           .run()
       } catch (err) {
-        const fresh = await loadSettings(c.env, orgId)
+        const fresh = await loadSettingsWithCounts(c.env, orgId)
         if (fresh.version !== newVersion) {
           return c.json({ error: "version mismatch", current: fresh }, 409)
         }
@@ -577,7 +593,7 @@ orgSettings.on(
 
       const changes = result.meta?.changes
       if (typeof changes === "number" && changes === 0) {
-        const fresh = await loadSettings(c.env, orgId)
+        const fresh = await loadSettingsWithCounts(c.env, orgId)
         return c.json({ error: "version mismatch", current: fresh }, 409)
       }
     }
@@ -629,7 +645,8 @@ orgSettings.on(
       [...toNotify].map(([projectId, version]) => ({ projectId, version })),
     )
 
-    return c.json(reprojectionFailed ? { ...fresh, warning: "reprojection_failed" } : fresh)
+    const saved = { ...fresh, ...(await loadOverrideCounts(c.env, orgId)) }
+    return c.json(reprojectionFailed ? { ...saved, warning: "reprojection_failed" } : saved)
   },
 )
 

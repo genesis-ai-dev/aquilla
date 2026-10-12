@@ -344,6 +344,17 @@ export interface UseOrgSettings {
  *   Falls back to orgRoleLevel when not provided (personal projects / no-org contexts).
  */
 /** How often returning to the tab may re-read org settings (see the effect). */
+/**
+ * The per-default "how many projects set their own" counts a settings
+ * response carries (GET, PATCH, 409). writeServer keeps the last known counts
+ * when a response arrives without them.
+ */
+const OVERRIDE_COUNT_KEYS = [
+  "countStructuralOverrides",
+  "validationCountOverrides",
+  "validationCountAudioOverrides",
+] as const satisfies ReadonlyArray<keyof OrgSettingsResponse>
+
 const REFETCH_ON_RETURN_MS = 10_000
 
 export function useOrgSettings(
@@ -360,6 +371,18 @@ export function useOrgSettings(
 
   const serverRef = useRef<OrgSettingsResponse | null>(null)
   const writeServer = useCallback((next: OrgSettingsResponse | null) => {
+    // The override counts come with the GET; an optimistic write, a sibling's
+    // broadcast or an older server's PATCH reply may not carry them. Keep the
+    // last known counts rather than reading their absence as "no project
+    // overrides", which silently stopped the reset prompt after one save.
+    const prev = serverRef.current
+    if (next && prev && prev.orgId === next.orgId) {
+      const filled = { ...next }
+      for (const key of OVERRIDE_COUNT_KEYS) {
+        if (filled[key] === undefined && prev[key] !== undefined) filled[key] = prev[key]
+      }
+      next = filled
+    }
     serverRef.current = next
     setServer(next)
   }, [])

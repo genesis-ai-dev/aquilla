@@ -174,9 +174,9 @@ describe("GET /contextual/overview|runs|activity through the cache", () => {
       })
       // Cold: the route's own reads plus the gate. Warm/304: the gate only —
       // the `projects` row plus the direct + group membership paths (session
-      // cache absorbs auth) — and, for activity, the project-scoping `getRun`
-      // that guards the 404.
-      const gateOnly = path.includes("/activity") ? 4 : 3
+      // cache absorbs auth), the platform_admins lookup (AQU-1239) — and, for
+      // activity, the project-scoping `getRun` that guards the 404.
+      const gateOnly = path.includes("/activity") ? 5 : 4
       expect({ path, cold, warm, conditional }).toEqual({
         path,
         cold: expect.any(Number),

@@ -1,7 +1,6 @@
-import { useId, useState } from "react"
-import { AlertCircle, X } from "lucide-react"
+import { useState } from "react"
+import { AlertCircle, ArrowUp, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, CommentThread as CommentThreadType } from "@/lib/parsers/types"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
@@ -10,6 +9,8 @@ import { canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { CommentThread } from "./CommentThread"
+import { MentionTextarea } from "./MentionTextarea"
+import type { MentionCandidate } from "@/lib/comments/mention-suggest"
 import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -23,6 +24,8 @@ interface CommentsDrawerProps {
   onReply: (threadId: string, text: string) => void
   onResolve: (threadId: string, closingMessage?: string) => void
   onReopen: (threadId: string) => void
+  onEdit?: (commentId: string, body: string) => void
+  onDelete?: (commentId: string) => void
   /**
    * AQU-1000: the signed-in user's username, matched against each thread's
    * root `authorId` to tell "my thread" from "someone else's" — the two carry
@@ -45,6 +48,18 @@ interface CommentsDrawerProps {
   isLoadingRest?: boolean
   /** Re-runs the comments load; wired to the error state's Retry button. */
   onRetry?: () => void
+  /** Project members the @mention picker may name. The drawer does not fetch them. */
+  mentionRoster?: readonly MentionCandidate[]
+  /**
+   * AQU-1815: `mentionRoster` is the caller's lane-scoped subset because the
+   * org hides the roster from them; the composer's empty state says so.
+   */
+  mentionRestricted?: boolean
+  /**
+   * Scroll this comment into view and highlight it. A notification click names
+   * the reply; opening the cell from its comment badge does not.
+   */
+  focusCommentId?: string | null
 }
 
 /** Convert flat CommentRecord[] (event-log model) → CommentThread[] (legacy cell model) */
@@ -72,18 +87,22 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
       messages: [root, ...replies].map((r) => ({
         id: r.commentId,
         author: r.authorLabel ?? r.authorId,
+        authorId: r.authorId,
         authorType: "user" as const,
         text: r.deletedAt ? "[deleted]" : r.body,
         timestamp: new Date(r.createdAt).toISOString(),
+        editedAt:
+          !r.deletedAt && r.updatedAt !== r.createdAt
+            ? new Date(r.updatedAt).toISOString()
+            : undefined,
       })),
     } satisfies CommentThreadType
   })
 }
 
-export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, currentUsername, isError = false, isLoadingRest = false, onRetry }: CommentsDrawerProps) {
+export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, onEdit, onDelete, currentUsername, isError = false, isLoadingRest = false, onRetry, mentionRoster = [], mentionRestricted = false, focusCommentId = null }: CommentsDrawerProps) {
   const t = useT()
   const [newThreadText, setNewThreadText] = useState("")
-  const newThreadHeadingId = useId()
   const permissions = useProjectPermissions(project)
   // Use liveComments (from useComments hook) when available; fall back to cell.threads
   const threads = liveComments !== undefined ? recordsToThreads(liveComments) : cell.threads
@@ -147,17 +166,27 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
     }
   }
 
+  function canMutateMessage(
+    kind: "comment.edit" | "comment.delete",
+    thread: CommentThreadType,
+    message: { id: string; authorId?: string },
+  ): boolean {
+    if (roleLevel === null) return permissions.canEditComments
+    const authorId = message.authorId ?? (message.id === thread.id ? thread.authorId : undefined)
+    const isOwn = currentUsername != null && authorId != null && authorId === currentUsername
+    return canMutateComment(kind, roleLevel, isOwn, floors)
+  }
+
   function handleCreate() {
     if (!newThreadText.trim()) return
     onNewThread(newThreadText)
     setNewThreadText("")
   }
 
-  function handleNewThreadKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault()
-      handleCreate()
-    }
+  function handleNewThreadKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    handleCreate()
   }
 
   return (
@@ -183,7 +212,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
         )}
       </div>
 
-      <div className="flex-1 overflow-auto p-3 space-y-2">
+      <div className="flex-1 overflow-auto p-3 space-y-2" data-comments-scroll="">
         {/*
           AQU-1275: a failed or half-finished load must never read as "this cell
           has no comments". The error banner stays above whatever threads did
@@ -229,39 +258,58 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
                 onReply={(text) => onReply(thread.id, text)}
                 onResolve={(msg) => onResolve(thread.id, msg)}
                 onReopen={() => onReopen(thread.id)}
+                onEdit={(messageId, text) => onEdit?.(messageId, text)}
+                onDelete={(messageId) => onDelete?.(messageId)}
+                canEditMessage={(message) => canMutateMessage("comment.edit", thread, message)}
+                canDeleteMessage={(message) => canMutateMessage("comment.delete", thread, message)}
+                projectId={project.id}
+                fileId={cell.fileId}
+                cellId={cell.id}
+                mentionRoster={mentionRoster}
+                mentionRestricted={mentionRestricted}
+                currentUsername={currentUsername}
+                highlightCommentId={focusCommentId}
               />
             )
           })
         )}
-      </div>
 
       {canComment ? (
-        <div className="border-t p-3 space-y-1.5">
-          <p id={newThreadHeadingId} className="text-xs font-medium">{t("comments.drawer.newThreadHeading")}</p>
-          <Textarea
-            value={newThreadText}
-            onChange={(e) => setNewThreadText(e.target.value)}
-            onKeyDown={handleNewThreadKeyDown}
-            // A placeholder is not an accessible name: it disappears on the
-            // first keystroke and screen readers may never announce it. Point
-            // at the heading that is already on screen.
-            aria-labelledby={newThreadHeadingId}
-            placeholder={t("comments.drawer.newThreadPlaceholder")}
-            rows={2}
-            className="resize-none"
-          />
-          <Button onClick={handleCreate} disabled={!newThreadText.trim()} className="w-full">
-            {t("comments.drawer.post")}
-          </Button>
-        </div>
+        <div className="relative">
+            <MentionTextarea
+              value={newThreadText}
+              onChange={setNewThreadText}
+              onKeyDown={handleNewThreadKeyDown}
+              candidates={mentionRoster}
+              restricted={mentionRestricted}
+              currentUsername={currentUsername}
+              aria-label={t("comments.drawer.newThreadHeading")}
+              placeholder={t("comments.drawer.newThreadPlaceholder")}
+              rows={2}
+              className="resize-none pb-8"
+            />
+            <div className="absolute end-1.5 bottom-1.5">
+              <Button
+                type="button"
+                size="icon-xs"
+                variant={newThreadText.trim() ? "default" : "outline"}
+                aria-label={t("comments.drawer.post")}
+                onClick={handleCreate}
+                disabled={!newThreadText.trim()}
+              >
+                <ArrowUp />
+              </Button>
+            </div>
+          </div>
       ) : (
-        <div className="border-t p-3">
+        <div>
           {/* AQU-427: show a human-readable denial for roles that cannot comment. */}
           <p className="text-xs text-muted-foreground" data-testid="comments-drawer-denial">
             {commentDenialReason ?? t("common.readOnlyGit")}
           </p>
         </div>
       )}
+      </div>
     </div>
     </RightSidebarPanel>
   )

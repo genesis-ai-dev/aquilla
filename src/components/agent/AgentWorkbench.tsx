@@ -112,6 +112,8 @@ export interface AgentWorkbenchProps {
      *  fills the file's repeated source segments from it (AQU-1391). */
     onCellValidated?: (cellId: string) => unknown
     cellLockHolders?: ReadonlyMap<string, string>
+    /** Active target lane. Lock leases are keyed `cellId@lane:<tag>`. */
+    lane?: string
     onClaimCell?: (cellId: string) => void
     onReleaseCell?: (cellId: string) => void
     onViewCell?: (cellId: string | null) => void

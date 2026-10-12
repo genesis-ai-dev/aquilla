@@ -3,31 +3,42 @@ import { resolveActiveSourceLanguage } from "./project-workspace-source-language
 
 const gom = { sourceLanguage: "Gom" }
 
+function sourceLane(language: string | null, name: string | null = null) {
+  return {
+    id: "50dce001",
+    role: "source" as const,
+    language,
+    name,
+    langCode: null,
+    legacyTag: null,
+  }
+}
+
 describe("resolveActiveSourceLanguage (AQU-848)", () => {
-  it("uses the source lane's migration fallback, ignoring the file's import-time stamp", () => {
+  it("ignores the file stamp and project settings when there is no source row", () => {
     // The reported regression: a project configured for Gom kept reporting
     // English because a file imported earlier carried an English stamp.
-    // With no source row yet, laneLanguage answers from settings.
-    expect(resolveActiveSourceLanguage("English", gom)).toBe("Gom")
-    expect(resolveActiveSourceLanguage("en", gom)).toBe("Gom")
-    expect(resolveActiveSourceLanguage("en", { sourceLanguage: "gom" })).toBe("gom")
+    // AQU-1595: with no source row, settings are not that configuration.
+    expect(resolveActiveSourceLanguage("English", gom)).toBeUndefined()
+    expect(resolveActiveSourceLanguage("en", gom)).toBeUndefined()
+    expect(resolveActiveSourceLanguage("en", { sourceLanguage: "gom" })).toBeUndefined()
   })
 
-  it("reflects a changed setting without recreating the project", () => {
-    // Same stamped file, new project setting — the editor must follow the
-    // setting, not the stamp, until the source lane carries its own language.
+  it("follows the source lane's language, ignoring a settings change and the file stamp", () => {
     const stamped = "English"
-    expect(resolveActiveSourceLanguage(stamped, { sourceLanguage: "English" })).toBe("English")
-    expect(resolveActiveSourceLanguage(stamped, gom)).toBe("Gom")
+    expect(resolveActiveSourceLanguage(stamped, { sourceLanguage: "Gom" }, sourceLane("English"))).toBe("English")
+    expect(resolveActiveSourceLanguage(stamped, { sourceLanguage: "English" }, sourceLane("Gom"))).toBe("Gom")
   })
 
   it("holds for a language with no ISO shortcut, not just major languages", () => {
     // The source field is free text; an unrecognized tag or a full name must
     // survive untouched rather than being normalized toward a major language.
-    expect(resolveActiveSourceLanguage("en", { sourceLanguage: "Konkani (Goan)" })).toBe("Konkani (Goan)")
-    expect(resolveActiveSourceLanguage(null, { sourceLanguage: "xyz-Latn-x-custom" })).toBe(
-      "xyz-Latn-x-custom",
+    expect(resolveActiveSourceLanguage("en", { sourceLanguage: "English" }, sourceLane("Konkani (Goan)"))).toBe(
+      "Konkani (Goan)",
     )
+    expect(
+      resolveActiveSourceLanguage(null, { sourceLanguage: "en" }, sourceLane("xyz-Latn-x-custom")),
+    ).toBe("xyz-Latn-x-custom")
   })
 
   it("returns undefined when the project has no source, even if a file carries one", () => {
@@ -37,13 +48,13 @@ describe("resolveActiveSourceLanguage (AQU-848)", () => {
     expect(resolveActiveSourceLanguage("en", undefined)).toBeUndefined()
     expect(resolveActiveSourceLanguage("en", { sourceLanguage: "" })).toBeUndefined()
     expect(resolveActiveSourceLanguage("en", { sourceLanguage: "   " })).toBeUndefined()
+    expect(resolveActiveSourceLanguage("en", gom, sourceLane(null, "   "))).toBeUndefined()
     expect(resolveActiveSourceLanguage(null, null)).toBeUndefined()
   })
 
-  it("does not regress projects whose source really is English", () => {
-    expect(resolveActiveSourceLanguage("Gom", { sourceLanguage: "English" })).toBe("English")
-    expect(resolveActiveSourceLanguage(undefined, { sourceLanguage: "English" })).toBe("English")
-    expect(resolveActiveSourceLanguage(undefined, { sourceLanguage: "en" })).toBe("en")
+  it("does not regress a source lane whose language really is English", () => {
+    expect(resolveActiveSourceLanguage("Gom", gom, sourceLane("English"))).toBe("English")
+    expect(resolveActiveSourceLanguage(undefined, { sourceLanguage: "Gom" }, sourceLane("en"))).toBe("en")
   })
 
   it("uses a typed source-lane language and does not let settings override it (AQU-1593)", () => {
@@ -58,15 +69,9 @@ describe("resolveActiveSourceLanguage (AQU-848)", () => {
     expect(resolveActiveSourceLanguage("en", { sourceLanguage: "English" }, lane)).toBe("Gom")
   })
 
-  it("falls back to settings for an unbackfilled source lane (AQU-1593)", () => {
-    const lane = {
-      id: "50dce001",
-      role: "source" as const,
-      language: null,
-      name: "Source",
-      langCode: null,
-      legacyTag: null,
-    }
-    expect(resolveActiveSourceLanguage("en", gom, lane)).toBe("Gom")
+  it("uses an unbackfilled source lane's name and ignores settings (AQU-1595)", () => {
+    expect(resolveActiveSourceLanguage("en", { sourceLanguage: "English" }, sourceLane(null, "Gom"))).toBe("Gom")
+    // A stored placeholder name is the name fallback. Settings do not replace it.
+    expect(resolveActiveSourceLanguage("en", gom, sourceLane(null, "Source"))).toBe("Source")
   })
 })

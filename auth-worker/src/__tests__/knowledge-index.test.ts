@@ -54,7 +54,7 @@ describe("indexKnowledgeDoc", () => {
     await createDoc(env.AQUILLA_PG, {
       id: DOC, scope: { projectId: "proj-idx" }, name: "g.md", contentType: "text/markdown",
       sizeBytes: 10, sha256: "s", r2Key: "kb/project/proj-idx/" + DOC,
-      extractedText: "# A\nalpha body\n# B\nbeta body", createdBy: "ryder",
+      extractedText: "# A\nalpha body\n# B\nbeta body", createdBy: "test-user",
     })
   }
 
@@ -155,7 +155,7 @@ describe("indexDocOnOwnConnection", () => {
     await createDoc(env.AQUILLA_PG, {
       id: DOC, scope: { projectId: "proj-own-conn" }, name: "g.md", contentType: "text/markdown",
       sizeBytes: 10, sha256: "s", r2Key: "kb/project/proj-own-conn/" + DOC,
-      extractedText: "# A\nalpha body\n# B\nbeta body", createdBy: "ryder",
+      extractedText: "# A\nalpha body\n# B\nbeta body", createdBy: "test-user",
     })
   }
 

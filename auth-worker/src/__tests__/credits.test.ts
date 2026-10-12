@@ -293,6 +293,19 @@ describe("readSpend", () => {
     expect(spend.agentDayCredits).toBe(0)
   })
 
+  // AQU-1871: org 0 is the no-org bucket every project-less AI call lands in,
+  // so a caller with no real org to bill must read its own rows, not the whole
+  // shared bucket — otherwise one person's spend is everybody else's cap.
+  it("narrows to one user's rows when userId is given — intent: a shared fallback " +
+     "bucket must still cap per person", async () => {
+    await insertRawRow(0, 1, today(), "llm", 10)
+    await insertRawRow(0, 2, today(), "llm", 90)
+    const whole = await readSpend(env.AQUILLA_PG, 0, defaultCfg)
+    const mine = await readSpend(env.AQUILLA_PG, 0, defaultCfg, 1)
+    expect(whole.dayCredits).toBe(400) // (10 + 90) × 4 — the pooled reading
+    expect(mine.dayCredits).toBe(40)   // 10 × 4 — only this user's spend
+  })
+
   it("converts raw cents to credits using markup — intent: markup applied at read, not write", async () => {
     // 10 raw × 4 markup = 40 credits.
     await insertRawRow(1, 1, today(), "llm", 10)

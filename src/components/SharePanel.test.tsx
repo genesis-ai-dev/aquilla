@@ -128,7 +128,12 @@ describe("SharePanel — member scopes wiring", () => {
       version: 3,
       updatedAt: "2026-07-01T00:00:00Z",
       updatedBy: null,
-      settings: { targetLanguage: "fr", targetLanes: ["es", "de"] },
+      settings: { targetLanguage: "en", targetLanes: ["es", "de"] },
+      lanes: [
+        { id: "lnfr0001", role: "target", language: "fr", name: "fr", langCode: "fr", legacyTag: "", position: 1, archivedAt: null },
+        { id: "lnes0001", role: "target", language: "es", name: "es", langCode: "es", legacyTag: "es", position: 2, archivedAt: null },
+        { id: "lnde0001", role: "target", language: "de", name: "de", langCode: "de", legacyTag: "de", position: 3, archivedAt: null },
+      ],
     })
     mockResolveCloudProjectResult.mockResolvedValue({
       ok: true,
@@ -152,15 +157,36 @@ describe("SharePanel — member scopes wiring", () => {
 
     const config = lastMembersPanelProps!.scopeConfig!
     expect(config.lanes).toEqual([
-      { value: "", label: "fr" },
-      { value: "es", label: "es" },
-      { value: "de", label: "de" },
+      { value: "lnfr0001", label: "fr" },
+      { value: "lnes0001", label: "es" },
+      { value: "lnde0001", label: "de" },
     ])
     expect(config.files).toEqual([
       { id: "f1", name: "Genesis" },
       { id: "f2", name: "Exodus" },
     ])
     expect(typeof config.onSave).toBe("function")
+  })
+
+  it("labels a lane tagged with its own id by the row's code, never the id", async () => {
+    mockFetchProjectSettings.mockResolvedValue({
+      version: 3,
+      updatedAt: "2026-07-01T00:00:00Z",
+      updatedBy: null,
+      settings: { targetLanguage: "Spanish", targetLanes: ["a3f09c1e"] },
+      lanes: [
+        { id: "lnmain01", role: "target", language: "Spanish", name: "Spanish", langCode: "es", legacyTag: "", position: 1, archivedAt: null },
+        { id: "a3f09c1e", role: "target", language: null, name: "", langCode: "es-MX", legacyTag: "a3f09c1e", position: 2, archivedAt: null },
+      ],
+    })
+    renderPanel()
+
+    await waitFor(() => {
+      expect(lastMembersPanelProps?.scopeConfig?.lanes).toEqual([
+        { value: "lnmain01", label: "Spanish" },
+        { value: "a3f09c1e", label: "es-MX" },
+      ])
+    })
   })
 
   it("does not pass scopeConfig when callerMaxRole < 500", async () => {
@@ -192,8 +218,9 @@ describe("SharePanel — member scopes wiring", () => {
     expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("test-jwt", "proj-1", 1)
 
     await waitFor(() => {
+      // AQU-1607: a stored legacy tag is shown as the lane id once rows exist.
       expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[2]).toEqual([
-        { kind: "lane", value: "es" },
+        { kind: "lane", value: "lnes0001" },
       ])
     })
   })

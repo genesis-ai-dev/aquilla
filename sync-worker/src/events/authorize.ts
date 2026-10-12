@@ -643,6 +643,21 @@ export async function authorize<K extends EventKind>(
     }
   }
 
+  // AQU-1565 follow-up: marking a clip as the file's SOURCE audio needs
+  // PROJECT_LEAD. `cell.audio.attach` sits at CONTRIBUTOR for takes, but a
+  // `role: 'source'` clip is the shared programme recording every media row
+  // plays: it is never counted as recorded and never waits on validation. A
+  // contributor able to stamp that on their own take would take it out of
+  // review. Project Lead is the floor the import route already holds for the
+  // same audio. Unconditional on `db`: it reads nothing but the payload.
+  if (
+    raw.kind === 'cell.audio.attach' &&
+    (raw.payload as { role?: unknown } | null)?.role === 'source' &&
+    tokenClaims.role < ROLE.PROJECT_LEAD
+  ) {
+    return { ok: false, status: 403, reason: 'marking a clip as source audio requires project lead' }
+  }
+
   // AQU-1068: removing an IMPORTED cell needs MAINTAINER. This is the one rule
   // about cell structure that this perimeter still enforces.
   //

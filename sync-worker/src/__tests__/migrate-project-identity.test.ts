@@ -76,7 +76,10 @@ it('retains the running daemon POST contract, renamed title and lane initializat
   const next = projectIdFor('124', 'gitlab')
   expect((await post(next))?.status).toBe(200)
   expect((await post(next))?.status).toBe(200)
+  // A migrate POST names no languages, so it creates the source lane only.
+  // A target lane is not invented; the blank bridge arrives with the first
+  // target cell (ensureProjectLaneStmts).
   expect((await t.db.prepare('SELECT role FROM lanes WHERE project_id=? ORDER BY role').bind(next).all()).results)
-    .toEqual([{ role: 'source' }, { role: 'target' }])
+    .toEqual([{ role: 'source' }])
   expect((await get({ gitlabId: '124', projectId: next }))?.status).toBe(200)
 })

@@ -278,10 +278,9 @@ export async function buildPromptPreview(
   const brief = objectSetting(settings, "translationBrief")
   const draftContext = objectSetting(settings, "draftContext")
 
-  // AQU-1593: both languages come from the lane row. `targetLang` is the
-  // lane's legacy_tag — an event key, and an 8-hex id when the language
-  // string was already taken. Settings are passed through for the migration
-  // fallback inside laneLanguage; this function does not read the keys.
+  // AQU-1593 / AQU-1595: both languages come from the lane row. `targetLang`
+  // is the lane's legacy_tag — an event key, and an 8-hex id when the language
+  // string was already taken. Settings are not consulted.
   const sourceLane = (lanes ?? []).find((lane) => lane.role === "source")
   const sourceLanguage = laneLanguage(sourceLane ?? { role: "source" }, {
     settings,

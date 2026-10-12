@@ -11,6 +11,10 @@ import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import type { OrgMember } from "@/lib/frontier/orgs"
 import { t } from "@/lib/i18n/standalone"
 
+vi.mock("@/hooks/useCurrentTargetLanes", () => ({
+  useCurrentTargetLanes: () => ({ lanes: [], ready: true }),
+}))
+
 // ─── Mocks ────────────────────────────────────────────────────────────────
 
 const mockMembers = [

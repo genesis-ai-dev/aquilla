@@ -1115,3 +1115,49 @@ describe("authorize() archived lanes (AQU-1462)", () => {
     }
   })
 })
+
+describe("authorize() — source audio needs Project Lead (AQU-1565 follow-up)", () => {
+  // WHY: `role: 'source'` takes a clip out of "recorded" and out of review on
+  // every row it sits on. A take is a contributor's to attach; declaring the
+  // file's programme audio is setting the file up, so it sits with the import
+  // that would otherwise bring that recording in.
+  function attach(role?: "dub" | "source"): RawEvent<"cell.audio.attach"> {
+    return {
+      id: "00000000-0000-7000-0000-0000000000bb",
+      schemaVersion: 1,
+      kind: "cell.audio.attach",
+      projectId: "proj-a",
+      fileId: "file-x",
+      cellId: "cell-1",
+      parentId: null,
+      author: "alice",
+      payload: {
+        audioId: "file-x-clip.wav",
+        url: "frontier-audio://file-x-clip.wav",
+        slot: "recording",
+        ...(role ? { role } : {}),
+      },
+      clientTs: Date.now(),
+    }
+  }
+
+  it("refuses a contributor marking a clip as source audio", async () => {
+    const result = await authorize(await makeToken({ role: 400 }), attach("source"), SECRET)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      expect(result.reason).toContain("source audio")
+    }
+  })
+
+  it("accepts a project lead marking a clip as source audio", async () => {
+    const result = await authorize(await makeToken({ role: 500 }), attach("source"), SECRET)
+    expect(result.ok).toBe(true)
+  })
+
+  it("still accepts a contributor's ordinary take, with or without role dub", async () => {
+    const token = await makeToken({ role: 400 })
+    expect((await authorize(token, attach(), SECRET)).ok).toBe(true)
+    expect((await authorize(token, attach("dub"), SECRET)).ok).toBe(true)
+  })
+})

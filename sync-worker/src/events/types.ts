@@ -235,8 +235,10 @@ export interface AiDraftProvenance {
   provider: string
   promptVersion: string
   exampleIds: string[]
+  /** Source/target of examples placed in the prompt (#946 reload). */
+  exampleTexts?: Array<{ cellId: string; source: string; target: string }>
   generatedAt: number
-  mode: 'single' | 'batch' | 'paragraph' | 'agent' | 'read'
+  mode: 'single' | 'batch' | 'paragraph' | 'agent' | 'read' | 'align-styles'
   projectState: {
     sourceLanguage: string
     targetLanguage: string

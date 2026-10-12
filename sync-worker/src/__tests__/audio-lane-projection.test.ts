@@ -320,6 +320,9 @@ describe('a source clip on a project with no blank target lane (AQU-1594)', () =
   })
 
   it('does not mint a blank lane for a dub that names none', async () => {
+    // The harness fills a NULL lane_id by inserting a lane. This test is
+    // about the product write, which leaves the take unassigned.
+    await h.pg.query(`SELECT set_config('aquilla.test_lane_fill', 'off', false)`)
     await attach('take-omitted')
     expect((await takes())[0].lane_id).toBeNull()
     const tags = await h.pg.query<{ legacy_tag: string | null }>(

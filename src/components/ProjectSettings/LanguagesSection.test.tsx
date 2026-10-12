@@ -31,9 +31,10 @@ beforeEach(() => {
 })
 
 describe("LanguagesSection", () => {
-  it("renders the default target language read-only", () => {
+  it("lists the project's target language with the other target lanes", () => {
     renderSection({ defaultTargetLanguage: "French" })
-    expect(screen.getByText("French")).toBeTruthy()
+    expect(screen.getByTestId("target-lanes-list").textContent).toContain("French")
+    expect(screen.queryByText("Default target language")).toBeNull()
   })
 
   it("renders the existing lanes list", () => {
@@ -43,16 +44,16 @@ describe("LanguagesSection", () => {
     expect(list.textContent).toContain("fr-BE")
   })
 
-  it("shows an empty state when there are no extra lanes", () => {
-    renderSection({ targetLanes: [] })
+  it("shows an empty state when there are no target lanes", () => {
+    renderSection({ defaultTargetLanguage: "", targetLanes: [] })
     expect(screen.queryByTestId("target-lanes-list")).toBeNull()
-    expect(screen.getByText(/no additional lanes yet/i)).toBeTruthy()
+    expect(screen.getByText(/no target lanes yet/i)).toBeTruthy()
   })
 
   it("rejects an empty lane", async () => {
     const { patch } = renderSection({ targetLanes: [] })
     fireEvent.click(screen.getByTestId("add-target-lang-btn"))
-    await waitFor(() => expect(screen.getByText(/enter a language tag/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/enter a language name/i)).toBeTruthy())
     expect(patch).not.toHaveBeenCalled()
   })
 
@@ -445,6 +446,12 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     expect(screen.getByText("es")).toBeTruthy()
   })
 
+  it("suggests language names when changing a lane's language", () => {
+    renderIdentity()
+    const field = screen.getByTestId("lane-language-lane-yo")
+    expect(field.getAttribute("role")).toBe("combobox")
+  })
+
   it("submits a language edit as a language, not a rename", async () => {
     const { onRenameLane } = renderIdentity()
     const field = screen.getByTestId("lane-language-lane-yo")
@@ -606,6 +613,17 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
         allowDuplicateName: false,
       }),
     )
+  })
+
+  it("fills the empty code box with the code derived from the language name (AQU-1792)", async () => {
+    renderIdentity()
+    fireEvent.change(screen.getByTestId("add-target-lang-input"), {
+      target: { value: "Turkana" },
+    })
+    fireEvent.click(screen.getByTestId("add-lane-advanced-toggle"))
+    const code = screen.getByTestId("add-lane-code-input") as HTMLInputElement
+    expect(code.value).toBe("")
+    await waitFor(() => expect(code.placeholder).toBe("tuv"))
   })
 
   it("reports a malformed code from the create path", async () => {

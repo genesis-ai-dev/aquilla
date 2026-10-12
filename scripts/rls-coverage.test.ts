@@ -83,6 +83,10 @@ const UNCOVERED: Record<string, string> = {
   agent_memories: "never granted to app_runtime",
   ai_interventions: "never granted to app_runtime",
   agent_read_audit: "never granted to app_runtime",
+  // Platform bookkeeping for the react watcher (0158, AQU-1846): a cursor into
+  // the event log, per-file cooldown stamps and the round-robin visit stamp.
+  // No user content and no reader outside the watcher itself.
+  agent_react_state: "never granted to app_runtime",
   agent_runs: "never granted to app_runtime",
   agent_sessions: "never granted to app_runtime",
   api_credentials: "never granted to app_runtime",

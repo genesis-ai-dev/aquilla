@@ -32,7 +32,7 @@ describe("AdminElevationGate", () => {
     mockVerify.mockResolvedValue({ elevatedUntil: "2026-07-01T00:00:00Z" })
     const onElevated = vi.fn()
 
-    render(<AdminElevationGate jwt="jwt" email="danieljlosey@gmail.com" onElevated={onElevated} />)
+    render(<AdminElevationGate jwt="jwt" email="admin@example.com" onElevated={onElevated} />)
 
     fireEvent.click(screen.getByRole("button", { name: /email me a code/i }))
 

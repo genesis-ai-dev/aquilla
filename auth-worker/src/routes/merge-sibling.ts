@@ -36,6 +36,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { roleWithoutUnelevatedAdmin } from "../services/elevation-gate"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listDownstreamProjects, loadProjectWithSource } from "../services/source-linking"
@@ -153,11 +154,32 @@ mergeSibling.post(
         403,
       )
     }
+    // OPS-44: folding is irreversible and cross-tenant — a platform admin
+    // resolves 700 on BOTH sides of a merge between two projects they have no
+    // genuine grant on. AQU-1322 already requires elevation to add one member
+    // to one project; destroying a donor project outranks that. Admin power is
+    // stripped unless elevated, then the SAME role floor is re-applied to what
+    // remains, so an operator who genuinely leads the project is unaffected.
+    // Checked per side so the host is settled before the donor row is read.
+    const hostEffective = await roleWithoutUnelevatedAdmin(c, user, hostId, hostRole)
+    if (!hostEffective || hostEffective.level < MERGE_MIN_ROLE) {
+      return c.json(
+        { error: "elevation required to fold a sibling project with platform-admin access" },
+        403,
+      )
+    }
     const donorRole = await resolveProjectRole(c.env, user, donorProjectId)
     if (!donorRole) return c.json({ error: "not found or no access to donor project" }, 403)
     if (donorRole.level < MERGE_MIN_ROLE) {
       return c.json(
         { error: `role >= project_lead (${MERGE_MIN_ROLE}) required on donor project` },
+        403,
+      )
+    }
+    const donorEffective = await roleWithoutUnelevatedAdmin(c, user, donorProjectId, donorRole)
+    if (!donorEffective || donorEffective.level < MERGE_MIN_ROLE) {
+      return c.json(
+        { error: "elevation required to fold a sibling project with platform-admin access" },
         403,
       )
     }

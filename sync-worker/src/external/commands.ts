@@ -316,6 +316,15 @@ export type Command =
  *  imports is a Wave-3 TRACE (see docs/swarm/AGENT-API-TRACES.md). */
 export const PLAN_IMPORT_MAX_CELLS = 5000
 
+/** Hard cap on SetTranslation commands per changeset (AQU-1852). Above this the
+ *  plan is rejected at PREPARE with validation_failed naming the cap, rather
+ *  than staged and then failing at apply — an approver must never be shown a
+ *  plan the engine cannot land. Matched to PLAN_IMPORT_MAX_CELLS: a whole book
+ *  of target commits is the largest batch the apply path pages through, and the
+ *  prepare-time precondition lookup is paged to match
+ *  (PRECONDITION_LOOKUP_CHUNK). Larger batches split into several changesets. */
+export const SET_TRANSLATION_MAX_COMMANDS = 5000
+
 /** Longest org name CreateOrg will stage (AQU-1221). The column is TEXT; this
  *  is a sanity bound so an agent cannot park a document in the org switcher. */
 export const CREATE_ORG_MAX_NAME_LENGTH = 120

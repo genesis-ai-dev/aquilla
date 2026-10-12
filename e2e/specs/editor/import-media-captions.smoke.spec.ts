@@ -142,9 +142,9 @@ for (const format of ["m4a", "mp4"]) {
     const mediaName = `embedded.${format}`
     await ws.previewEmbeddedMedia({ name: mediaName,
       mimeType: format === "mp4" ? "video/mp4" : "audio/mp4", buffer: bytes })
-    await expect(alice.getByLabel("Segment 1 wording", { exact: true }))
-      .toHaveValue("Embedded first caption.")
-    await alice.getByLabel("Segment 1 wording", { exact: true }).fill("Reviewed embedded caption.")
+    await expect(alice.getByTestId("media-preview-row").first()).toContainText("Embedded first caption.")
+    await alice.getByRole("button", { name: "Edit caption 1", exact: true }).click()
+    await alice.getByLabel("Caption 1 wording", { exact: true }).fill("Reviewed embedded caption.")
     await ws.confirmMediaPreview(mediaName)
     await ws.openFileBySubstring(mediaName)
     await ws.waitForEditor()
@@ -254,7 +254,8 @@ test(`media and ${format} captions publish reviewed segments and playable audio`
     { name: "companion.mp3", mimeType: "audio/mpeg", buffer: audio },
     { name: `companion.${format}`, mimeType: "text/plain", buffer: Buffer.from(captions) },
   )
-  await alice.getByLabel("Segment 1 wording", { exact: true }).fill("Reviewed first caption.")
+  await alice.getByRole("button", { name: "Edit caption 1", exact: true }).click()
+  await alice.getByLabel("Caption 1 wording", { exact: true }).fill("Reviewed first caption.")
   // Timeline hydration may prefetch the same bytes playback uses. Observe
   // publication onward rather than requiring a redundant GET after Play.
   // Match the storage route, not Vite's /src/lib/audio/*.ts modules.

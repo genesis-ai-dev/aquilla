@@ -6,6 +6,7 @@ import { execCode, MAX_TIMEOUT_MS } from "./exec"
 import { decodeBase64, encodeBase64 } from "./base64"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import type { ResolveSandbox, SandboxLike } from "./sandbox"
+import { admitWithWait, ANONYMOUS_TENANT, POOL_DO_NAME, type PoolGate, type WaitedAdmitResult } from "./pool"
 import type { Env } from "./types"
 
 /** Uploads via /files are capped at 25MB decoded (contract §1). */
@@ -32,7 +33,31 @@ export function slowThresholdFor(path: string): number {
 export interface AppDeps {
   /** Injectable so tests can supply a fake sandbox (no Docker in CI). */
   resolveSandbox: ResolveSandbox
+  /**
+   * AQU-1848: admission control for the container pool. Injectable for the same
+   * reason as `resolveSandbox` — route tests drive an in-memory ledger instead
+   * of a Durable Object.
+   */
+  pool: PoolGate
+  /** Injected so the full-pool wait is instant in tests. */
+  sleep?: (ms: number) => Promise<void>
 }
+
+/**
+ * AQU-1848: how long a request will wait for a slot before giving up with
+ * `pool_busy`. Kept well under the Worker's own request budget so the caller
+ * gets a structured 503 rather than a timeout, and overridable per environment
+ * via `SANDBOX_POOL_WAIT_MS`.
+ */
+export const DEFAULT_POOL_WAIT_MS = 20_000
+
+/**
+ * Opaque tenant key, set by auth-worker (`user:<id>`). It is the unit the
+ * per-tenant cap counts, so that one project lead firing off sandbox imports
+ * cannot take every slot from everyone else. Absent means `anonymous` — all
+ * such callers then share one tenant budget, which is the safe default.
+ */
+export const TENANT_HEADER = "X-Sandbox-Tenant"
 
 function jsonError(c: Context, code: ErrorCode, message: string): Response {
   return c.json(envelope(code, message), statusFor(code))
@@ -51,7 +76,7 @@ function runInBackground(c: Context<{ Bindings: Env }>, task: Promise<void>): vo
   }
 }
 
-function statusFor(code: ErrorCode): 400 | 401 | 404 | 413 | 500 {
+function statusFor(code: ErrorCode): 400 | 401 | 404 | 413 | 500 | 503 {
   switch (code) {
     case "unauthorized":
       return 401
@@ -61,6 +86,8 @@ function statusFor(code: ErrorCode): 400 | 401 | 404 | 413 | 500 {
       return 400
     case "too_large":
       return 413
+    case "pool_busy":
+      return 503
     case "exec_failed":
       return 500
   }
@@ -90,6 +117,48 @@ async function tokenMatches(token: string, expected: string): Promise<boolean> {
   let diff = 0
   for (let i = 0; i < av.length; i++) diff |= av[i] ^ bv[i]
   return diff === 0
+}
+
+/**
+ * AQU-1848: take (or renew) this session's pool lease before touching a
+ * container.
+ *
+ * A full pool is waited out — that is the point of the ticket, and it is why
+ * the third concurrent run completes instead of failing at container-start.
+ * Being over the caller's OWN per-tenant cap is refused at once: waiting there
+ * would park the caller behind its own containers.
+ */
+async function admitSession(
+  c: Context<{ Bindings: Env }>,
+  sessionId: string,
+  deps: AppDeps,
+): Promise<WaitedAdmitResult> {
+  const tenant = c.req.header(TENANT_HEADER)?.trim() || ANONYMOUS_TENANT
+  const configured = Number(c.env.SANDBOX_POOL_WAIT_MS)
+  const maxWaitMs = Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_POOL_WAIT_MS
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  return admitWithWait(deps.pool, c.env, { sessionId, tenant }, {
+    maxWaitMs,
+    sleep,
+    now: () => Date.now(),
+  })
+}
+
+/**
+ * The `pool_busy` response. The message is written to be shown to a person —
+ * it is what the import dialog surfaces when every sandbox is taken — and
+ * `Retry-After` lets a caller back off without guessing.
+ */
+function poolBusy(c: Context<{ Bindings: Env }>, admitted: WaitedAdmitResult): Response {
+  if (admitted.granted) throw new Error("poolBusy called on a granted admission")
+  const message = admitted.reason === "tenant_full"
+    ? `You already have ${admitted.activeForTenant} sandbox runs in flight. Wait for one to finish and try again.`
+    : "Waiting for a sandbox — every sandbox is busy right now. Please try again in a moment."
+  const retryAfterSec = Math.max(1, Math.ceil(admitted.retryAfterMs / 1000))
+  console.warn(
+    `[sandbox-pool] ${admitted.reason} after ${admitted.waitedMs}ms (active ${admitted.activeTotal}, tenant ${admitted.activeForTenant})`,
+  )
+  return c.json(envelope("pool_busy", message), 503, { "Retry-After": String(retryAfterSec) })
 }
 
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
@@ -157,6 +226,21 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     return deps.resolveSandbox(c.env, sessionId)
   }
 
+  /**
+   * AQU-1848: `sandboxFor` plus a pool lease. Every route that may START a
+   * container goes through here, so the global and per-tenant caps are
+   * enforced in one place; a session that already holds a lease just renews it,
+   * which keeps a long-running run alive without consuming a second slot.
+   */
+  type Claim = { ok: true; sandbox: SandboxLike } | { ok: false; res: Response }
+  const claimSandbox = async (c: Context<{ Bindings: Env }>): Promise<Claim> => {
+    const sessionId = c.req.param("sessionId")
+    if (!sessionId) return { ok: false, res: jsonError(c, "validation_failed", "sessionId is required") }
+    const admitted = await admitSession(c, sessionId, deps)
+    if (!admitted.granted) return { ok: false, res: poolBusy(c, admitted) }
+    return { ok: true, sandbox: deps.resolveSandbox(c.env, sessionId) }
+  }
+
   // POST /sessions/:sessionId/exec
   app.post("/sessions/:sessionId/exec", async (c) => {
     const body = await c.req.json<{ language?: string; code?: string; timeoutMs?: number }>().catch(() => null)
@@ -166,8 +250,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     if (typeof body.code !== "string" || body.code.length === 0) {
       return jsonError(c, "validation_failed", "code is required")
     }
+    const claim = await claimSandbox(c)
+    if (!claim.ok) return claim.res
     try {
-      const out = await execCode(sandboxFor(c), {
+      const out = await execCode(claim.sandbox, {
         language: body.language,
         code: body.code,
         timeoutMs: body.timeoutMs,
@@ -194,8 +280,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     if (bytes.length > FILE_PUT_MAX_BYTES) {
       return jsonError(c, "too_large", `file exceeds ${FILE_PUT_MAX_BYTES} bytes`)
     }
+    const claim = await claimSandbox(c)
+    if (!claim.ok) return claim.res
     try {
-      await sandboxFor(c).writeFile(target, body.contentBase64, { encoding: "base64" })
+      await claim.sandbox.writeFile(target, body.contentBase64, { encoding: "base64" })
       return c.json({ ok: true })
     } catch (err) {
       return jsonError(c, "exec_failed", err instanceof Error ? err.message : String(err))
@@ -241,8 +329,10 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const obj = await c.env.SNAPSHOTS.get(body.key)
     if (!obj) return jsonError(c, "not_found", `artifact ${body.key} not found`)
     const bytes = new Uint8Array(await obj.arrayBuffer())
+    const claim = await claimSandbox(c)
+    if (!claim.ok) return claim.res
     try {
-      await sandboxFor(c).writeFile(target, encodeBase64(bytes), { encoding: "base64" })
+      await claim.sandbox.writeFile(target, encodeBase64(bytes), { encoding: "base64" })
       return c.json({ ok: true, bytes: bytes.length })
     } catch (err) {
       return jsonError(c, "exec_failed", err instanceof Error ? err.message : String(err))
@@ -251,15 +341,34 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
 
   // DELETE /sessions/:sessionId — destroy the container (idempotent).
   app.delete("/sessions/:sessionId", async (c) => {
+    const sessionId = c.req.param("sessionId")
     try {
       await sandboxFor(c).destroy()
     } catch (err) {
       // Idempotent: a missing/already-destroyed container is still success.
       if (!isNotFound(err)) {
+        // AQU-1848: give the slot back even when teardown reports a real
+        // failure. Holding the lease would punish the next caller for a
+        // container this one has already stopped using, and the container is
+        // the pool's TTL to reap either way.
+        if (sessionId) await deps.pool.release(c.env, sessionId)
         return jsonError(c, "exec_failed", err instanceof Error ? err.message : String(err))
       }
     }
+    if (sessionId) await deps.pool.release(c.env, sessionId)
     return c.json({ ok: true })
+  })
+
+  // AQU-1848: pool occupancy, for the dev-stack and for confirming the caps
+  // actually bite under load. Bearer-gated like every other route.
+  app.get("/pool/stats", async (c) => {
+    const ns = c.env.SANDBOX_POOL
+    try {
+      const res = await ns.get(ns.idFromName(POOL_DO_NAME)).fetch("https://sandbox-pool/stats")
+      return c.json(await res.json() as Record<string, unknown>)
+    } catch (err) {
+      return jsonError(c, "exec_failed", err instanceof Error ? err.message : String(err))
+    }
   })
 
   return app

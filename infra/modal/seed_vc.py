@@ -51,6 +51,16 @@ REPO = "https://github.com/Plachtaa/seed-vc.git"
 REPO_COMMIT = "51383efd921027683c89e5348211d93ff12ac2a8"
 GPU = "L40S"          # fine alternatives: "A10G", "A100-40GB". T4 may OOM in fp16.
 SCALEDOWN = 300       # seconds to keep a warm container after the last request
+# AQU-1854: hard ceiling on concurrent containers. Each GPU container is billed
+# L40S time, and nothing upstream of Modal used to bound how many could be
+# started at once — a looped or scripted caller fanned out without limit. The
+# sync worker now throttles per user as well, but this is the spend backstop
+# that does not depend on the caller: past this, Modal queues requests instead
+# of starting another GPU. Raise it deliberately, with the cost in view.
+MAX_GPU_CONTAINERS = 4
+# The ASGI shim is CPU-only and just proxies to the class above, so it needs
+# only enough containers to hold the in-flight requests the GPUs can serve.
+MAX_WEB_CONTAINERS = 4
 CACHE_DIR = "/cache"  # HF + torch download cache, persisted across runs via the Volume
 SEED_VC_DIR = "/seed-vc"
 
@@ -62,7 +72,7 @@ image = (
         f"git clone {REPO} {SEED_VC_DIR} && cd {SEED_VC_DIR} && git checkout {REPO_COMMIT}",
         f"cd {SEED_VC_DIR} && pip install -r requirements.txt",
     )
-    .pip_install("fastapi[standard]", "python-multipart")  # for the asgi endpoint
+    .pip_install("fastapi[standard]==0.115.14", "python-multipart==0.0.20")  # for the asgi endpoint
     .env(
         {
             "HF_HOME": f"{CACHE_DIR}/hf",
@@ -83,6 +93,11 @@ auth_secret = modal.Secret.from_name("seed-vc-auth")  # must contain SEED_VC_TOK
     volumes={CACHE_DIR: cache_vol},
     scaledown_window=SCALEDOWN,
     timeout=600,
+    max_containers=MAX_GPU_CONTAINERS,
+    # Explicit: never hold a warm GPU when nothing is converting. SCALEDOWN
+    # already drains to zero, but stating the floor keeps a later keep-warm
+    # change from being an accident.
+    min_containers=0,
 )
 class SeedVC:
     @modal.enter()
@@ -278,7 +293,12 @@ class SeedVC:
 
 
 # --- Web endpoint: ASGI app built in-container so local deploy needs no fastapi ---
-@app.function(image=image, secrets=[auth_secret])
+@app.function(
+    image=image,
+    secrets=[auth_secret],
+    max_containers=MAX_WEB_CONTAINERS,
+    min_containers=0,
+)
 @modal.asgi_app()
 def web():
     from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile

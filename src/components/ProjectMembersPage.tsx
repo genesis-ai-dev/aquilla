@@ -27,6 +27,16 @@ import { cn } from "@/lib/utils"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
+import { LaneAccessFields } from "@/components/LaneAccessFields"
+import {
+  chosenLaneLabels,
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+  type MemberLaneAccess,
+} from "@/lib/lanes/lane-access-choice"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
@@ -35,7 +45,7 @@ import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import {
   revokeAllProjectAccess, partitionMembers, type RevokeAllResult,
 } from "@/lib/frontier/members"
-import { createServerInvite } from "@/lib/sync/invites"
+import { createServerInviteWithChoice } from "@/lib/sync/invite-with-choice"
 import { GrantScopeNotice } from "@/components/GrantScopeNotice"
 import { toast } from "@/components/ui/toast"
 import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
@@ -96,6 +106,7 @@ export function MembersTab({
   const t = useT()
   const { session } = useFrontierSession()
   const { members, isLoading, error, rosterHidden, refresh, add, addMany, remove } = useProjectMembers(projectId)
+  const { lanes: targetLanes } = useCurrentTargetLanes(projectId)
   const callerMaxRole = ROLE.MAINTAINER
   const callerUserId = null
 
@@ -155,8 +166,16 @@ export function MembersTab({
 
   // AQU-734 parity: grant the whole staged batch in ONE request; per-person
   // failures come back in `results` and are named by the add row itself.
-  const handleAddMany = useCallback(async (usernames: string[], role: number) => {
-    const results = await addMany(usernames.map((username) => ({ username, role })))
+  const handleAddMany = useCallback(async (
+    usernames: string[],
+    role: number,
+    laneAccess?: MemberLaneAccess,
+  ) => {
+    const results = await addMany(usernames.map((username) => ({
+      username,
+      role,
+      ...(laneAccess ? { laneAccess } : {}),
+    })))
     return results.map((r) => ({
       username: r.username,
       ok: r.ok,
@@ -401,6 +420,7 @@ export function MembersTab({
             lanes: "all",
           }}
           onAdd={handleAddMany}
+          targetLanes={targetLanes}
           excludedUserIds={[...directGrantUserIds]}
           suggestions={
             visibleOrgMembers.length > 0
@@ -647,6 +667,9 @@ export function InviteLinkTab({
   const [issuedUrl, setIssuedUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const { lanes: targetLanes } = useCurrentTargetLanes(projectId)
+  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null)
+  const choiceReady = laneChoiceReady(laneChoice, inviteRole, targetLanes.length)
   const wrapClass = embedded ? "space-y-4" : "mx-auto max-w-lg space-y-4"
   const inviteCopy = describeGrant(t, {
     link: inviteEmail.trim().length === 0,
@@ -655,7 +678,7 @@ export function InviteLinkTab({
     scope: {
       kind: "project",
       projectName: grantProjectName(t, projectName),
-      lanes: "all",
+      lanes: chosenLaneLabels(targetLanes, inviteRole, laneChoice),
     },
     locale,
   })
@@ -673,15 +696,22 @@ export function InviteLinkTab({
       setServerError(t("projectSettings.share.signInToInvite"))
       return
     }
+    if (!choiceReady) {
+      setServerError(t("projectSettings.share.laneChoiceRequired"))
+      return
+    }
+    const laneAccess = needsLaneChoice(inviteRole, targetLanes.length) && laneChoice
+      ? toMemberLaneAccess(laneChoice)
+      : undefined
     setBusy(true)
     try {
-      const serverInvite = await createServerInvite(
+      const serverInvite = await createServerInviteWithChoice(
         session.jwt,
         projectId,
         inviteRole,
-        undefined,
         trimmedEmail || undefined,
         expiresInDays,
+        laneAccess,
       )
       if (!serverInvite) {
         setServerError(t("projectSettings.share.createInviteFailed"))
@@ -707,6 +737,7 @@ export function InviteLinkTab({
     setInviteEmail("")
     setInviteRole(DEFAULT_INVITE_ROLE)
     setExpiresInDays(DEFAULT_EXPIRY_DAYS)
+    setLaneChoice(null)
   }
 
   if (issuedUrl) {
@@ -843,10 +874,18 @@ export function InviteLinkTab({
           <p className="text-xs text-destructive">{serverError}</p>
         )}
 
+        {needsLaneChoice(inviteRole, targetLanes.length) && (
+          <LaneAccessFields
+            lanes={targetLanes}
+            value={laneChoice}
+            onChange={setLaneChoice}
+            disabled={!session?.jwt || busy}
+          />
+        )}
         <GrantScopeNotice sentence={inviteCopy.sentence} />
         <Button
           onClick={() => void handleCreate()}
-          disabled={busy || !session?.jwt}
+          disabled={busy || !session?.jwt || !choiceReady}
           className="w-full"
         >
           {busy

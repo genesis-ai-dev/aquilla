@@ -989,6 +989,18 @@ export function isVideoTimedSubtitleFile(
 export function resolveFileTimingMode(
   file: Pick<FileReference, "timingMode" | "type" | "coreMediaUrl"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
+  opts?: {
+    /**
+     * AQU-1565 follow-up: the file is timed to a linked YouTube video, so its
+     * DEFAULT is Original timing and the Media view shows the video. The
+     * legacy project-level Free timing no longer reaches it (it hid the video
+     * on a "Link video only" file that nobody had set). A choice made on the
+     * file itself still stands: Free timing there was picked through a
+     * warning that the video stays hidden. A flag rather than a URL test so
+     * this module stays import-free.
+     */
+    timedToLinkedVideo?: boolean
+  },
 ): AudioTimingMode {
   // AQU-646, rescoped by AQU-1704: Free timing does not exist for a subtitle
   // import whose video is linked here. This check runs BEFORE the file's own
@@ -1003,6 +1015,8 @@ export function resolveFileTimingMode(
   // AQU-1704: every other file reads its own choice next, so the picker the
   // workspace now shows a video-less subtitle file is not inert.
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
+  // Below the file's own choice, above the project's: see `timedToLinkedVideo`.
+  if (opts?.timedToLinkedVideo) return "dubbing"
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
   // arbitrary top-level keys), reads as Original timing. Same normalization
@@ -1135,9 +1149,13 @@ export interface CellHistoryEntry {
 export interface CommentMessage {
   id: string
   author: string
+  /** Username when the record has one. Edit and delete use it, not the label. */
+  authorId?: string
   authorType: "user" | "anonymous"
   text: string
   timestamp: string
+  /** Set when the body was changed after it was posted. */
+  editedAt?: string
   mentions?: string[]
 }
 

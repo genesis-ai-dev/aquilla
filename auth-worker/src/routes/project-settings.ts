@@ -72,6 +72,7 @@ import {
 } from "../../../db/shared/lanes"
 import {
   filterSettingsToVisibleLanes,
+  READ_WALL_MAINTAINER,
   restoreHiddenLaneSettings,
 } from "../../../src/lib/lanes/read-wall"
 import { lanesForScopeVisibility } from "../../../src/lib/lanes/scope-ids"
@@ -225,10 +226,15 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
     c.env.AQUILLA_PG, c.env.LANE_READ_WALL, projectId, user.id, role.level,
   )
   // AQU-1039: local and e2e leave the read wall off, but a member staffed on
-  // one lane still must not be handed the other lanes. Maintainer and an
-  // unscoped member are unchanged. Does not read lanes.language, so a row
-  // the backfill has not filled yet filters the same way.
-  if (visible === null && role.level < ROLE.MAINTAINER) {
+  // one lane still must not be handed the other lanes. An unscoped member is
+  // unchanged. Does not read lanes.language, so a row the backfill has not
+  // filled yet filters the same way.
+  //
+  // AQU-1795: this runs whenever the wall left the caller unrestricted, wall
+  // on or off, so it stops at the wall's own floor. A project lead who still
+  // carries a scope row from before a promotion sees every lane, the same as
+  // the sync worker's scopeReadClause and the portfolio give them.
+  if (visible === null && role.level < READ_WALL_MAINTAINER) {
     const scoped = await laneScopeValuesFor(c.env.AQUILLA_PG, projectId, user.id)
     if (scoped.length > 0) {
       const identities = await loadTargetLaneIdentities(c.env.AQUILLA_PG, projectId)
@@ -592,6 +598,29 @@ export async function mergeSettingsArray(
   return "conflict"
 }
 
+/**
+ * AQU-1816: a lane-row write relays to the project DO the way the settings
+ * PATCH and the archive route already do, so a workspace open in another tab
+ * (or for another member) lists the new or renamed lane without a reload.
+ * Best-effort, like the other relays: `executionCtx` is absent in some test
+ * harnesses, and the correctness path is the client's own re-read.
+ */
+function notifySettingsChangedBestEffort(
+  c: {
+    env: Parameters<typeof notifySyncWorkerOfProjectSettingsChange>[0]
+    executionCtx: { waitUntil(promise: Promise<unknown>): void }
+  },
+  projectId: string,
+  version: number,
+): void {
+  const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, version)
+  try {
+    c.executionCtx.waitUntil(notifyPromise)
+  } catch {
+    void notifyPromise
+  }
+}
+
 // AQU-1418: lane rows are what the screen edits. The settings string registry
 // stays in step so events, the external API, and older clients still resolve
 // a lane by its legacy tag. The id is never shown. A duplicate display name
@@ -659,6 +688,7 @@ projectSettings.post(
     // AQU-1594: the lane row is the registry. Do not mirror the tag into
     // settings.targetLanes.
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
     const lane = fresh.lanes?.find((row) => row.id === created.laneId) ?? null
     return c.json({ lane }, 201)
   },
@@ -692,7 +722,9 @@ projectSettings.patch(
       return c.json({ error: result.status }, 400)
     }
     if (result.status !== "ok") return c.json({ error: result.status }, 400)
-    return c.json({ lane: result.lane })
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )
 

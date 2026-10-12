@@ -26,6 +26,7 @@
 import { removedCellsForFile } from './removed-cells'
 import { hiddenCellsForFile } from './hidden-cells'
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
+import { cellMetadataWireSql } from '../../../db/shared/cell-metadata-sql'
 import type { UsfmEdits } from '../lib/usfm-lossless'
 import { readUsfmNotes, reattachUsfmNotes } from '../lib/usfm-notes'
 
@@ -85,7 +86,7 @@ export async function buildUsfmExportPlan(
   //    (project_id, file_id, cell_id) and inherits its addressability.
   const cells = await db
     .prepare(
-      `SELECT s.canonical_ref AS canonical_ref, t.value AS value, s.metadata AS source_metadata
+      `SELECT s.canonical_ref AS canonical_ref, t.value AS value, ${cellMetadataWireSql('s')} AS source_metadata
          FROM cells t
          JOIN cells s
            ON s.project_id = t.project_id

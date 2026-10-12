@@ -24,7 +24,7 @@ import { t } from "./i18n/standalone"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
-import { detectSpeechSegments } from "./timeline/silence-split"
+import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
 import { createMediaCueSpecs } from "./import/media-cues"
@@ -1776,9 +1776,15 @@ export interface MediaSegmentSpec {
 export async function computeMediaSegmentSpecs(
   file: File,
 ): Promise<{ durationMs: number | undefined; specs: MediaSegmentSpec[] }> {
-  const decoded = await decodeAudioFile(file).catch(() => null)
-  const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
-  const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
+  // AQU-1857: the analysis decode is sized to the recording — a 100-minute MP3
+  // is decoded a minute at a time instead of as one multi-gigabyte PCM buffer.
+  // `null` (platform can't decode) and an empty `segments` (too long to
+  // analyse at all) both land on the single whole-file fallback below.
+  const analysis = await analyseSpeechInFile(file, {
+    probeDurationMs: (blob) => probeMediaDurationMs(blob).catch(() => undefined),
+  }).catch(() => null)
+  const durationMs = analysis?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
+  const segments = analysis?.segments ?? []
 
   const timings = tileSegments(segments, durationMs)
   const specs: MediaSegmentSpec[] =
@@ -1921,6 +1927,9 @@ export function createMediaFileCommit(
           audioId: `${upload.audioId}.${upload.ext}`,
           url: upload.url,
           slot: "recording",
+          // AQU-1565 follow-up: the imported recording is the file's shared
+          // programme audio, not a dub of each row (see attach-media.ts).
+          role: "source",
           ...(s.transcription !== undefined ? { transcription: s.transcription } : {}),
           ...(file.type ? { mimeType: file.type } : {}),
           ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
@@ -1960,41 +1969,6 @@ export function createMediaFileCommit(
       return result
     })().finally(() => { inFlight = null })
     return inFlight
-  }
-}
-
-/**
- * Decode an audio file to mono PCM for silence-splitting. Returns null when
- * the platform can't decode it (no AudioContext, or an undecodable container
- * such as most video) — callers then fall back to a single whole-file segment.
- */
-async function decodeAudioFile(
-  file: File,
-): Promise<{ channel: Float32Array; sampleRate: number; durationMs: number } | null> {
-  const AC: typeof AudioContext | undefined =
-    typeof window !== "undefined"
-      ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      : undefined
-  if (!AC) return null
-  const buf = await file.arrayBuffer()
-  const audioCtx = new AC()
-  try {
-    // decodeAudioData rejects with a cryptic DOMException ("EncodingError:
-    // Decoding failed") — rewrap so anything that surfaces or logs the message
-    // is user-actionable. The original error is preserved as `cause`.
-    const audio = await audioCtx.decodeAudioData(buf).catch((err: unknown) => {
-      throw new Error(
-        t("importExport.errors.couldNotDecodeAudio", { fileName: file.name }),
-        { cause: err },
-      )
-    })
-    return {
-      channel: audio.getChannelData(0),
-      sampleRate: audio.sampleRate,
-      durationMs: audio.duration * 1000,
-    }
-  } finally {
-    void audioCtx.close?.()
   }
 }
 

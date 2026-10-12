@@ -108,6 +108,13 @@ export type FixProposal =
   | { kind: "per-cell"; previews: FixPreview[] }
   | { kind: "none"; reason: string }
 
+/**
+ * How a replacement was computed, as recorded in `harmonize_origin`. Named
+ * here so the proposing surface and the committing host agree on the set
+ * (AQU-1805); `CellHarmonizeInput.proposalKind` is the same union.
+ */
+export type ProposalKind = "cached-regex" | "batch-regex" | "per-cell"
+
 export function buildRegexProposal(
   fix: RuleAutofix,
   cells: CellData[],

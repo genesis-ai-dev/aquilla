@@ -67,6 +67,10 @@ import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 import { ingestRunActivity } from "../team-ingest"
 import { formatSpanRange } from "../../../../shared/span-label"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+} from "../../../../shared/vendor-timeouts"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
 
@@ -305,15 +309,35 @@ export function makeLlmCall(cfg: {
         // The gate holds a slot only for the round-trip, never across the
         // backoff below — a sleeping retry must not occupy capacity.
         outcome = await gate<Attempt>(async () => {
-          const res = await fetch(cfg.url, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${cfg.apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: requestBody,
-            ...(cfg.signal ? { signal: cfg.signal } : {}),
-          })
+          // AQU-1849: a deadline PER ATTEMPT (the retry backoff below is
+          // outside it), linked to the run's signal when it has one. Without
+          // it a hung provider held a gate slot indefinitely, starving the
+          // other lanes behind the same gate.
+          const deadline = vendorDeadline("openRouterNonStreaming", cfg.signal ?? null)
+          let res: Response
+          try {
+            res = await fetch(cfg.url, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${cfg.apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: requestBody,
+              signal: deadline.signal,
+            })
+          } catch (err) {
+            if (deadline.timedOut()) {
+              // Reported as a retriable 504 so the backoff loop below gets its
+              // normal attempts and then fails as provider_http_error
+              // status=504 — a hang is now indistinguishable, to the caller,
+              // from the gateway timeout it really is.
+              logVendorTimeout("openRouterNonStreaming", err)
+              return { ok: false, status: 504, code: "http_error" }
+            }
+            throw err
+          } finally {
+            deadline.clear()
+          }
           if (!res.ok) {
             // Provider bodies are untrusted and may echo credentials, prompts,
             // or user text. Never materialize them in an Error that can reach

@@ -1681,6 +1681,38 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
   return eventId
 }
 
+export interface SourceCellRestoreInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The removal to undo. Omit to undo the cell's newest removal — the outbox
+   *  may have re-sent a stale removal under a new id. */
+  deleteEventId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1767 phase 2: undo a removal — `source.cell.restore` puts the cell back
+ * as the removal found it (rows, translations, votes, takes, links, comments),
+ * from the archive the removal's projection wrote. Not chain-mutating: the row
+ * is gone, so there is no head to name. The server refuses it unless the
+ * sender removed the cell themselves or is a maintainer.
+ */
+export async function emitSourceCellRestore(input: SourceCellRestoreInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.restore",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: input.deleteEventId ? { deleteEventId: input.deleteEventId } : {},
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface SourceCellVisibilityInput {
   projectId: string
   fileId: string

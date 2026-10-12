@@ -66,6 +66,11 @@ export type EventKind =
   // comments and validations survive and come back on show. Hiding is per CELL,
   // not per lane, which is why one source-side kind covers every language.
   | 'source.cell.visibility.set'
+  // AQU-1767 phase 2: put back a cell a `source.cell.delete` removed — its
+  // rows, translations, validations, takes, links and comments — from the
+  // archive that delete's projection wrote. Non-chain-mutating (the row does
+  // not exist, so there is no head to extend); the undo of "Remove row".
+  | 'source.cell.restore'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -320,6 +325,20 @@ export interface EventPayloads {
   'source.cell.visibility.set': {
     /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
     hidden: boolean
+  }
+  /**
+   * AQU-1767 phase 2: undo a removal. Restores the cell from
+   * `removed_cell_archive` — the state the removal took, as it was — and only
+   * while no live source row exists for it. `deleteEventId` names the removal
+   * to undo; absent, the cell's newest unrestored removal is used (a removal
+   * the outbox had to re-send under a new id is still found).
+   *
+   * Takes, links and comments come back only where the removal itself took
+   * them and nobody has changed them since. The removal's chain claim is
+   * released, so the restored cell's head can move again.
+   */
+  'source.cell.restore': {
+    deleteEventId?: string
   }
 
   // ── Target-side ────────────────────────────────────────────────────────

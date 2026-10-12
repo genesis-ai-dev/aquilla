@@ -996,6 +996,7 @@ describe('isChainMutatingKind', () => {
     // row and never advances the source head (a hide must not make every
     // lane's translation go stale under AD-9) — non-chain-mutating by design.
     'source.cell.visibility.set': false,
+    'source.cell.restore': false,
     'target.cell.create': true,
     'target.cell.commit': true,
     'target.cell.delete': true,
@@ -1091,8 +1092,11 @@ describe('source.cell.delete — dependent cleanup', () => {
     return recorded
   }
 
+  // The AQU-1767 archive statement READS every dependent table (it copies what
+  // the cascade is about to take), so it is left out of the per-table shape
+  // checks and asserted on its own below.
   const sqlFor = (recorded: RecordedStmt[], table: string) =>
-    recorded.filter((r) => r.sql.includes(table))
+    recorded.filter((r) => r.sql.includes(table) && !r.sql.includes('removed_cell_archive'))
 
   /**
    * The same cleanup for a delete that carries a PARENT — i.e. every removal
@@ -1295,6 +1299,17 @@ describe('source.cell.delete — dependent cleanup', () => {
     const backtranslations = sqlFor(recorded, 'cell_backtranslations')
     expect(backtranslations).toHaveLength(1)
     expect(backtranslations[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'proj-1', '', ''])
+  })
+
+  it('archives what it is about to take FIRST, so a removal can be undone (AQU-1767)', () => {
+    const recorded = deleteStmts('source.cell.delete')
+    const firstCascade = recorded.findIndex((r) => r.sql.includes('DELETE FROM cells'))
+    const archive = recorded.findIndex((r) => r.sql.includes('INSERT INTO removed_cell_archive'))
+    expect(archive).toBeGreaterThanOrEqual(0)
+    expect(archive).toBeLessThan(firstCascade)
+    expect(recorded[archive].sql).toContain('ON CONFLICT (delete_event_id) DO NOTHING')
+    // A target (single-lane) delete keeps the cell, so nothing is archived.
+    expect(deleteStmts('target.cell.delete', {}).some((r) => r.sql.includes('removed_cell_archive'))).toBe(false)
   })
 
   it('gates every dependent write on the chain claim, like the cells write', () => {

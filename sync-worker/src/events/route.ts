@@ -95,7 +95,10 @@ function isEventAppliedRowsKind(kind: string): boolean {
     // `rows` and every collaborator's client falls back to a by-ids refetch to
     // learn a row left the file — correct, but a round trip for a one-column
     // change we already have in hand.
-    kind === 'source.cell.visibility.set'
+    kind === 'source.cell.visibility.set' ||
+    // AQU-1767 phase 2: a restore brings a cell's rows back, so collaborators
+    // get them in the frame rather than a refetch.
+    kind === 'source.cell.restore'
   )
 }
 

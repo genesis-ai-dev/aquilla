@@ -910,6 +910,30 @@ export const editor = defineNamespace({
     "editor.timeline.snapToggleAria": "Snap to neighboring edges",
     "editor.timeline.snapOnTooltip": "Snapping on — edges magnet to neighbors",
     "editor.timeline.snapOffTooltip": "Snapping off",
+    // AQU-1767 phase 1: cutting takes into independent pieces.
+    "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
+    "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
+    "editor.timeline.bladeOffTooltip": "Blade (B): cut a take where you click",
+    "editor.timeline.bladeFreeTiming": "Cutting takes isn't available in Free timing yet",
+    "editor.timeline.cutAtPlayheadAria": "Cut takes at the playhead",
+    "editor.timeline.cutAtPlayheadTooltip": "Cut the takes under the playhead into two pieces",
+    // AQU-1767: the edit history (Undo / Redo), the first slice of app-wide undo.
+    "editor.history.undoAria": "Undo",
+    "editor.history.redoAria": "Redo",
+    "editor.history.undoTooltip": "Undo: {step}",
+    "editor.history.redoTooltip": "Redo: {step}",
+    "editor.history.nothingToUndo": "Nothing to undo",
+    "editor.history.nothingToRedo": "Nothing to redo",
+    "editor.history.stepCut": "Cut take",
+    "editor.history.stepCutMany": "Cut takes",
+    "editor.history.stepTrim": "Trim take",
+    "editor.history.stepMove": "Move take",
+    "editor.history.undone": "Undid: {step}",
+    "editor.history.redone": "Redid: {step}",
+    "editor.history.skippedChanged": "Skipped “{step}”: it was changed since",
+    "editor.history.skippedGone": "Skipped “{step}”: that take is gone",
+    "editor.history.failed": "Couldn't save “{step}”. Try again.",
+    "editor.history.nothingToCut": "No take to cut there",
     "editor.timeline.videoHiddenNote":
       "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
     "editor.timeline.outputLatencyNote":
@@ -5777,6 +5801,119 @@ export const editor = defineNamespace({
           "Tooltip of the snapping toggle while snapping is off — dragged edges land " +
           "wherever they are dropped. Two words, no sentence.",
         maxLength: 20,
+      },
+      "editor.timeline.bladeToggleAria": {
+        description:
+          "Screen-reader name of the timeline toolbar's blade toggle. With the blade on, " +
+          "clicking a recorded or generated take on the timeline cuts it in two at that " +
+          "point; the two pieces stay on the same line. 'Blade' is the editing tool, as " +
+          "in audio and video editors — not a knife.",
+      },
+      "editor.timeline.bladeOnTooltip": {
+        description:
+          "Tooltip of the blade toggle while it is on. (B) is the keyboard shortcut — keep it " +
+          "as the Latin letter B.",
+        maxLength: 60,
+      },
+      "editor.timeline.bladeOffTooltip": {
+        description:
+          "Tooltip of the blade toggle while it is off. (B) is the keyboard shortcut — keep it " +
+          "as the Latin letter B.",
+        maxLength: 60,
+      },
+      "editor.timeline.bladeFreeTiming": {
+        description:
+          "Tooltip of the disabled blade and cut buttons when the file is in 'Free timing' " +
+          "(the mode where lines are laid out end to end). Use the same name for Free timing " +
+          "as the timing-mode picker does.",
+      },
+      "editor.timeline.cutAtPlayheadAria": {
+        description:
+          "Screen-reader name of the timeline toolbar button that cuts every take under the " +
+          "playhead (the vertical line showing the current time) into two pieces.",
+      },
+      "editor.timeline.cutAtPlayheadTooltip": {
+        description: "Tooltip of the same button. A 'take' is one recording or generated voice on a line.",
+        maxLength: 60,
+      },
+      "editor.history.undoAria": {
+        description: "Screen-reader name of the timeline toolbar's Undo button (icon only).",
+        maxLength: 20,
+      },
+      "editor.history.redoAria": {
+        description: "Screen-reader name of the timeline toolbar's Redo button (icon only).",
+        maxLength: 20,
+      },
+      "editor.history.undoTooltip": {
+        description: "Tooltip of the Undo button, naming the step it would take back.",
+        placeholders: { step: "The step's name, e.g. 'Cut take' or 'Move take'." },
+        maxLength: 50,
+      },
+      "editor.history.redoTooltip": {
+        description: "Tooltip of the Redo button, naming the step it would do again.",
+        placeholders: { step: "The step's name, e.g. 'Cut take' or 'Move take'." },
+        maxLength: 50,
+      },
+      "editor.history.nothingToUndo": {
+        description: "Tooltip of the Undo button when there is nothing to undo.",
+        maxLength: 30,
+      },
+      "editor.history.nothingToRedo": {
+        description: "Tooltip of the Redo button when there is nothing to redo.",
+        maxLength: 30,
+      },
+      "editor.history.stepCut": {
+        description:
+          "Name of one step in the edit history: a take (a recording or generated voice on a " +
+          "line) was cut into two pieces. Shown in the Undo/Redo tooltips and toasts. A short " +
+          "verb phrase.",
+        maxLength: 30,
+      },
+      "editor.history.stepCutMany": {
+        description:
+          "Name of one step in the edit history where several takes were cut at once, at the " +
+          "playhead. Short verb phrase, plural.",
+        maxLength: 30,
+      },
+      "editor.history.stepTrim": {
+        description:
+          "Name of one step in the edit history: the start or end of a take was shortened or " +
+          "lengthened by dragging its edge. Short verb phrase.",
+        maxLength: 30,
+      },
+      "editor.history.stepMove": {
+        description:
+          "Name of one step in the edit history: a take was dragged to a new time. Short verb phrase.",
+        maxLength: 30,
+      },
+      "editor.history.undone": {
+        description: "Toast after Undo succeeded.",
+        placeholders: { step: "The step's name, e.g. 'Cut take'." },
+      },
+      "editor.history.redone": {
+        description: "Toast after Redo succeeded.",
+        placeholders: { step: "The step's name, e.g. 'Cut take'." },
+      },
+      "editor.history.skippedChanged": {
+        description:
+          "Toast when Undo or Redo was not applied because someone (a collaborator, or the user " +
+          "another way) changed the same take after the step was made. Nothing was changed.",
+        placeholders: { step: "The step's name, e.g. 'Cut take'." },
+      },
+      "editor.history.skippedGone": {
+        description:
+          "Toast when Undo or Redo was not applied because the take it would change has been " +
+          "deleted since. Nothing was changed.",
+        placeholders: { step: "The step's name, e.g. 'Cut take'." },
+      },
+      "editor.history.failed": {
+        description: "Toast when Undo or Redo could not be saved (for example, a network error).",
+        placeholders: { step: "The step's name, e.g. 'Cut take'." },
+      },
+      "editor.history.nothingToCut": {
+        description:
+          "Toast after 'Cut takes at the playhead' when no recorded or generated take lies under " +
+          "the playhead, or it is too close to a take's edge to cut.",
       },
       "editor.timeline.videoHiddenNote": {
         description:

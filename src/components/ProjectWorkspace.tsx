@@ -238,7 +238,12 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
 import { injectOptimisticAudioTrim,
-  injectOptimisticAudioPlace, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+  injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove,
+  notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
+import { recordStep, setHistoryScope, type HistoryResult } from "@/lib/history/history"
+import { useHistoryShortcuts } from "@/lib/history/useHistory"
+import { cutStep, takePlaceStep, takeWindowStep, type CutRecord } from "@/lib/history/take-steps"
 import { enqueueTakeRemovals } from "@/lib/audio/take-actions"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
 import { useOutbox } from "@/context/OutboxContext"
@@ -248,7 +253,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -3295,7 +3300,7 @@ export function ProjectWorkspace() {
   // trims. Order matters: optimistic inject first (instant chip width), then
   // the durable event, then flush BEFORE the bus notify so the refetch can't
   // read pre-projection state and flash the old trim back.
-  const handleTrimTarget = useCallback(
+  const applyTakeTrim = useCallback(
     async (cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }) => {
       if (!project?.id || !activeFileId) return
       // Stage 4: a chip on the Target row may belong to an AUDIO CUE in the
@@ -3356,6 +3361,43 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, activeLane],
   )
 
+  // AQU-1767: a take as it reads RIGHT NOW, through the same resolver every
+  // write uses — what the history's "changed since?" guard compares against.
+  const readTake = useCallback((cellId: string, audioId: string) => {
+    const owner = resolveTakeCellRef.current(cellId)
+    const att = owner?.cell.attachments?.[audioId]
+    return owner && att && !att.isDeleted ? { owner, att } : null
+  }, [])
+
+  // The chip edge drag: trim, and record it as a step (AQU-1767) so Undo can
+  // put the old window back. The step stores both windows; its guard is "the
+  // take still has the window this drag left it with".
+  const handleTrimTarget = useCallback(
+    async (cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }) => {
+      const before = readTake(cellId, audioId)
+      if (!before) return
+      const was = { trimStartMs: before.att.trimStartMs ?? undefined, trimEndMs: before.att.trimEndMs ?? undefined }
+      const now = { trimStartMs: trims.trimStartMs, trimEndMs: trims.trimEndMs }
+      const same = (a: { trimStartMs?: number; trimEndMs?: number }) => {
+        const cur = readTake(cellId, audioId)
+        if (!cur) return null
+        return (cur.att.trimStartMs ?? undefined) === a.trimStartMs && (cur.att.trimEndMs ?? undefined) === a.trimEndMs
+      }
+      recordStep(
+        takeWindowStep({
+          labelKey: "editor.history.stepTrim",
+          at: Date.now(),
+          isAt: same,
+          before: was,
+          after: now,
+          apply: (w) => applyTakeTrim(cellId, audioId, w),
+        }),
+      )
+      await applyTakeTrim(cellId, audioId, trims)
+    },
+    [applyTakeTrim, readTake],
+  )
+
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
   // gutter's picker. PURE assignment (no auto-synthesis — generation stays an
   // explicit act); apply-to-speaker covers every line sharing the diarized
@@ -3388,8 +3430,8 @@ export function ProjectWorkspace() {
   // Round 8: stored RELATIVE to the cell (target_offset_ms) so the take travels
   // with its line — the callers still hand an absolute anchor, and this is the
   // one place that converts.
-  const handleRetimeTarget = useCallback(
-    async (cellId: string, anchorSec: number, audioId: string) => {
+  const applyTakePlace = useCallback(
+    async (cellId: string, audioId: string, targetOffsetMs: number | null) => {
       if (!project?.id || !activeFileId) return
       // Without the cell we'd have no start to measure against, and defaulting
       // it to 0 would quietly persist an absolute value into an offset field.
@@ -3397,9 +3439,6 @@ export function ProjectWorkspace() {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
       const { fileId: takeFileId, cell } = owner
-      // targetOffsetMsFor carries the old "never before file zero" floor into
-      // the offset domain; enforced here, at the single persistence point.
-      const targetOffsetMs = targetOffsetMsFor(cell, anchorSec)
 
       // AQU-646 stage 3: THE PLACEMENT GOES ON THE TAKE, not on the line.
       //
@@ -3447,7 +3486,7 @@ export function ProjectWorkspace() {
         // A cue cell is not in this file's store, so the store's optimistic
         // path cannot reach it — and its file is read once and never
         // revalidated, so without this the chip springs back until a reload.
-        setCueAnchorOverridesRef.current(cellId, targetOffsetMs)
+        setCueAnchorOverridesRef.current(cellId, targetOffsetMs ?? 0)
       }
 
       await placeP
@@ -3456,6 +3495,182 @@ export function ProjectWorkspace() {
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
   )
+  const handleRetimeTarget = useCallback(
+    async (cellId: string, anchorSec: number, audioId: string) => {
+      const owner = resolveTakeCellRef.current(cellId)
+      if (!owner) return
+      // targetOffsetMsFor carries the old "never before file zero" floor into
+      // the offset domain; enforced here, at the single persistence point.
+      const targetOffsetMs = targetOffsetMsFor(owner.cell, anchorSec)
+      // AQU-1767: a step, so Undo can move it back. `null` before is a real
+      // value ("never placed by hand"), and undoing to it clears the placement.
+      const was = owner.cell.attachments?.[audioId]?.targetOffsetMs ?? null
+      recordStep(
+        takePlaceStep({
+          at: Date.now(),
+          isAt: (offset) => {
+            const cur = readTake(cellId, audioId)
+            return cur ? (cur.att.targetOffsetMs ?? null) === offset : null
+          },
+          before: was,
+          after: targetOffsetMs,
+          apply: (offset) => applyTakePlace(cellId, audioId, offset),
+        }),
+      )
+      await applyTakePlace(cellId, audioId, targetOffsetMs)
+    },
+    [applyTakePlace, readTake],
+  )
+
+  // AQU-1767 phase 1: CUT dub takes into independent pieces — from the blade
+  // (one chip, where it was clicked) or "cut at the playhead" (every dub chip
+  // under it). One user action is one history step, however many cuts it made.
+  const applyTakeCut = useCallback(
+    async (cellId: string, audioId: string, atMs: number, newAudioId: string): Promise<boolean> => {
+      if (!project?.id) return false
+      const cur = readTake(cellId, audioId)
+      if (!cur || !canCutAt(cur.att, atMs)) return false
+      const { owner, att } = cur
+      const takeFileId = owner.fileId
+      const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+      const labels = pieceLabels(audioId, owner.cell.attachments)
+      const cutP = emitCellAudioCut({
+        projectId: project.id,
+        fileId: takeFileId,
+        cellId,
+        audioId,
+        atMs,
+        newAudioId,
+        ...labels,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      })
+      // The picture of what the server will make: the first piece ends at the
+      // cut, the new one starts there, both unvalidated. The new piece claims
+      // no selection — it rides its group's, through `pieceOf`.
+      const shared = attachmentOutFrom(audioId, att, slot)
+      injectOptimisticAudioTrim(takeFileId, cellId, {
+        ...shared,
+        trimEndMs: Math.round(atMs),
+        validatorCount: 0,
+        validators: [],
+        ...(labels.firstLabel ? { label: labels.firstLabel } : {}),
+      }, cutP)
+      injectOptimisticAudioAttachment(takeFileId, cellId, {
+        ...shared,
+        audioId: newAudioId,
+        trimStartMs: Math.round(atMs),
+        validatorCount: 0,
+        validators: [],
+        pieceOf: att.pieceOf ?? audioId,
+        ...(labels.newLabel ? { label: labels.newLabel } : {}),
+      }, cutP, { claimSelection: false })
+      await cutP
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(takeFileId)
+      return true
+    },
+    [project?.id, readTake, activeLane, currentUsername, getTokenForProjectFile],
+  )
+  const applyTakeRemove = useCallback(
+    async (cellId: string, audioId: string) => {
+      if (!project?.id) return
+      const cur = readTake(cellId, audioId)
+      if (!cur) return
+      const slot = cur.att.slot ?? "recording"
+      const removeP = emitCellAudioRemove({
+        projectId: project.id,
+        fileId: cur.owner.fileId,
+        cellId,
+        audioId,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      })
+      injectOptimisticAudioRemove(cur.owner.fileId, cellId, audioId, slot, removeP)
+      await removeP
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(cur.owner.fileId)
+    },
+    [project?.id, readTake, activeLane, currentUsername, getTokenForProjectFile],
+  )
+  const applyTakeRename = useCallback(
+    async (cellId: string, audioId: string, label: string | null) => {
+      if (!project?.id) return
+      const cur = readTake(cellId, audioId)
+      if (!cur) return
+      await emitCellAudioRename({
+        projectId: project.id,
+        fileId: cur.owner.fileId,
+        cellId,
+        audioId,
+        label,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      })
+    },
+    [project?.id, readTake, activeLane, currentUsername],
+  )
+  const handleCutTargets = useCallback(
+    async (cuts: readonly { cellId: string; audioId: string; atMs: number }[]) => {
+      const made: CutRecord[] = []
+      for (const cut of cuts) {
+        const cur = readTake(cut.cellId, cut.audioId)
+        if (!cur || !canCutAt(cur.att, cut.atMs)) continue
+        const newAudioId = newPieceAudioId(cut.cellId, cut.audioId)
+        const before = {
+          trimEndMs: cur.att.trimEndMs ?? null,
+          label: cur.att.label ?? null,
+          targetOffsetMs: cur.att.targetOffsetMs ?? null,
+        }
+        const renamed = pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null
+        if (await applyTakeCut(cut.cellId, cut.audioId, cut.atMs, newAudioId)) {
+          made.push({ ...cut, atMs: Math.round(cut.atMs), newAudioId, before, renamed })
+        }
+      }
+      if (made.length === 0) {
+        toast.add({ type: "info", title: t("editor.history.nothingToCut") })
+        return
+      }
+      recordStep(
+        cutStep({
+          at: Date.now(),
+          cuts: made,
+          readTake: (cellId, audioId) => readTake(cellId, audioId)?.att ?? null,
+          cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
+          uncut: async (c) => {
+            await applyTakeRemove(c.cellId, c.newAudioId)
+            await applyTakeTrim(c.cellId, c.audioId, {
+              trimStartMs: readTake(c.cellId, c.audioId)?.att.trimStartMs ?? undefined,
+              trimEndMs: c.before.trimEndMs ?? undefined,
+            })
+            if (c.renamed) await applyTakeRename(c.cellId, c.audioId, c.before.label)
+          },
+          newPieceId: (c) => newPieceAudioId(c.cellId, c.audioId),
+        }),
+      )
+    },
+    [readTake, applyTakeCut, applyTakeRemove, applyTakeTrim, applyTakeRename, t],
+  )
+  // Cmd/Ctrl+Z and its friends, app-wide; say what was undone, or why not.
+  useEffect(() => {
+    setHistoryScope(project?.id ?? null, currentUsername || null)
+    return () => setHistoryScope(null, null)
+  }, [project?.id, currentUsername])
+  const reportHistory = useCallback(
+    (which: "undo" | "redo", result: HistoryResult) => {
+      const name = t(result.step.labelKey as never, result.step.labelParams as never)
+      const o = result.outcome
+      if (o.kind === "done") {
+        toast.add({ type: "info", title: t(which === "undo" ? "editor.history.undone" : "editor.history.redone", { step: name }) })
+      } else if (o.kind === "skipped") {
+        toast.add({ type: "warning", title: t(o.reason === "gone" ? "editor.history.skippedGone" : "editor.history.skippedChanged", { step: name }) })
+      } else {
+        toast.add({ type: "error", title: t("editor.history.failed", { step: name }) })
+      }
+    },
+    [t],
+  )
+  useHistoryShortcuts(reportHistory)
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
   // the file row, so refresh the project (not just cells). `file.video.set`
@@ -14252,6 +14467,8 @@ export function ProjectWorkspace() {
                     onRetimeTarget={handleRetimeTarget}
                     onRetimeCue={handleRetimeAudioCue}
                     onTrimTarget={handleTrimTarget}
+                    onCutTargets={handleCutTargets}
+                    onHistoryResult={reportHistory}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
                     onAddLine={handleAddLine}

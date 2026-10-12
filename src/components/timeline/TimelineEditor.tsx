@@ -37,6 +37,10 @@ import {
   LocateFixed,
   Magnet,
   Minus,
+  Redo2,
+  Scissors,
+  SquareSplitHorizontal,
+  Undo2,
   MoreHorizontal,
   Plus,
   Users,
@@ -46,6 +50,10 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useHistoryView } from "@/lib/history/useHistory"
+import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
+import { canCutAt } from "@/lib/audio/cut-take"
+import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
@@ -123,7 +131,7 @@ import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } fr
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
-import { resolveTargetAudio } from "@/lib/audio/track-audio"
+import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
 import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
@@ -212,6 +220,13 @@ export interface TimelineEditorProps {
   onRetimeCue?(cellId: string, startSec: number, endSec: number): void
   /** Round 7: trim a dub chip — complete trim state (undefined clears). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  /** AQU-1767 phase 1: cut dub takes into independent pieces. `atMs` is a
+   *  position in each take's OWN audio. One call is one user action (one
+   *  history step), however many cuts it carries. Absent = no blade. */
+  onCutTargets?(cuts: { cellId: string; audioId: string; atMs: number }[]): void
+  /** AQU-1767: what Undo/Redo from the toolbar did, so the workspace can say
+   *  so (the same report the keyboard shortcut gives). Absent = no buttons. */
+  onHistoryResult?(which: "undo" | "redo", result: HistoryResult): void
   /** Round 7 (SUB-44): Space — toggle queue playback (playing→pause,
    *  paused→resume, idle→start). The editor claims the app-wide audio
    *  shortcut while mounted so a last-played single cell can't steal Space. */
@@ -631,6 +646,20 @@ const SPEAKER_TOGGLE_KEYS: Record<
 }
 
 const zoomKey = (fileId: string) => `aquilla:timelineZoom:${fileId}`
+
+/**
+ * AQU-1767: one lane item per PIECE of a line's take. A take never cut is one
+ * item, exactly as before; a cut take is its pieces, numbered in clip order so
+ * each chip has a stable test id ("…-p2") beside the first's unchanged one.
+ */
+function piecesAsItems(cell: CellData, pieces: readonly TargetAudioRef[]): TargetAudioItem[] {
+  return pieces.map((p, i) => ({
+    cell,
+    kind: p.kind,
+    audioId: p.audioId,
+    ...(pieces.length > 1 ? { pieceIndex: i, pieceCount: pieces.length } : {}),
+  }))
+}
 
 function loadZoom(fileId: string): number {
   try {
@@ -1121,6 +1150,8 @@ export function TimelineEditor({
   virtualIsTransport = false,
   timingLocked = false,
   onTrimTarget,
+  onCutTargets,
+  onHistoryResult,
   onTogglePlay,
   onRequestLinkVideo,
   onAddLine,
@@ -1225,6 +1256,10 @@ export function TimelineEditor({
   // through toggleAudibility, which merges against the store.
   const audibility = useQueueAudibility()
   const [snapOn, setSnapOn] = useState(loadSnapEnabled)
+  // AQU-1767: the blade. Personal and per-session — a tool in your hand, not a
+  // setting — and off whenever cutting is not possible here.
+  const [bladeOn, setBladeOn] = useState(false)
+  const history = useHistoryView()
   // AQU-646 stage 2: which folders this person has closed, on THIS file.
   // Personal state — folder membership syncs, but whether a folder is open is
   // where somebody is looking, and syncing that would fold a collaborator's
@@ -2328,13 +2363,11 @@ export function TimelineEditor({
   // media cells — and picking the cell set above already decides that, so the
   // gate was guarding a case that can no longer arise.
   const resolveTarget = resolveTargetAudio
+  // AQU-1767: ONE CHIP PER PIECE. A take cut in two is two selected pieces of
+  // one group; each is drawn, moved, trimmed and approved on its own.
   const targetItems = useMemo<TargetAudioItem[]>(
-    () =>
-      targetSource.flatMap((c) => {
-        const target = resolveTarget(c)
-        return target ? [{ cell: c, kind: target.kind, audioId: target.audioId }] : []
-      }),
-    [targetSource, resolveTarget],
+    () => targetSource.flatMap((c) => piecesAsItems(c, resolveTargetPieces(c))),
+    [targetSource],
   )
   // SUB-51: the complement — sections still waiting for a dub. Their empty
   // space in the Target row offers a record button on hover.
@@ -2412,11 +2445,58 @@ export function TimelineEditor({
     const items: TargetAudioItem[] = []
     const empty: CellData[] = []
     for (const c of cellList) {
-      const target = resolveTargetAudio(c, slot)
-      if (target) items.push({ cell: c, kind: target.kind, audioId: target.audioId })
+      const pieces = resolveTargetPieces(c, slot)
+      if (pieces.length > 0) items.push(...piecesAsItems(c, pieces))
       else empty.push(c)
     }
     return { items, empty }
+  }
+
+  // ── AQU-1767: cutting takes ─────────────────────────────────────────────
+  // Free timing lays lines out end to end and computes every position, so a
+  // piece has nowhere of its own to be; cutting waits for phase 4 there.
+  const canCut = Boolean(onCutTargets) && editable && !audioFirst
+  const bladeActive = bladeOn && canCut
+  useEffect(() => {
+    if (!canCut) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
+      if (isTextEntryTarget(event.target)) return
+      if (event.key === "b" || event.key === "B") {
+        event.preventDefault()
+        setBladeOn((on) => !on)
+      } else if (event.key === "Escape") {
+        setBladeOn(false)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [canCut])
+  /** Every dub chip under the playhead, on every target track, cut there. */
+  function cutAtPlayhead() {
+    if (!onCutTargets) return
+    const sec = displayCurrentSec
+    const all = [
+      ...targetItems,
+      ...tracks.filter((tr) => tr.kind === "audio").flatMap((tr) => targetItemsForTrack(tr).items),
+    ]
+    const cuts: { cellId: string; audioId: string; atMs: number }[] = []
+    for (const item of all) {
+      const att = item.cell.attachments?.[item.audioId]
+      const geom = layout.targetGeom(item.cell, att)
+      if (!geom || geom.usingFallback || sec <= geom.start || sec >= geom.end) continue
+      const atMs = (sec - geom.anchor) * 1000
+      if (canCutAt(att, atMs)) cuts.push({ cellId: item.cell.id, audioId: item.audioId, atMs })
+    }
+    onCutTargets(cuts)
+  }
+  const cutOne = canCut && onCutTargets
+    ? (cellId: string, audioId: string, atMs: number) => onCutTargets([{ cellId, audioId, atMs }])
+    : undefined
+  const runHistory = (which: "undo" | "redo") => {
+    void (which === "undo" ? undoLast() : redoLast()).then((result) => {
+      if (result) onHistoryResult?.(which, result)
+    })
   }
 
   /**
@@ -3757,6 +3837,8 @@ export function TimelineEditor({
             // is nothing to drag it to. Trimming stays — and re-flows.
             onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
             onTrimTarget={onTrimTarget}
+            bladeActive={bladeActive}
+            onCutTarget={cutOne}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
@@ -3825,6 +3907,8 @@ export function TimelineEditor({
             onSeek={laneProps.onSeek}
             onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
             onTrimTarget={onTrimTarget}
+            bladeActive={bladeActive}
+            onCutTarget={cutOne}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}
@@ -3972,6 +4056,92 @@ export function TimelineEditor({
               <AudioLines className="h-3.5 w-3.5" />
             </button>
           </AppTooltip>
+          {/* AQU-1767: Undo / Redo — the edit history, app-wide. */}
+          {onHistoryResult && (
+            <>
+              <AppTooltip
+                content={
+                  history.nextUndo
+                    ? t("editor.history.undoTooltip", { step: t(history.nextUndo.labelKey as never) })
+                    : t("editor.history.nothingToUndo")
+                }
+              >
+                <button
+                  type="button"
+                  aria-label={t("editor.history.undoAria")}
+                  data-testid="tl-undo"
+                  disabled={!history.canUndo}
+                  onClick={() => runHistory("undo")}
+                  className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                </button>
+              </AppTooltip>
+              <AppTooltip
+                content={
+                  history.nextRedo
+                    ? t("editor.history.redoTooltip", { step: t(history.nextRedo.labelKey as never) })
+                    : t("editor.history.nothingToRedo")
+                }
+              >
+                <button
+                  type="button"
+                  aria-label={t("editor.history.redoAria")}
+                  data-testid="tl-redo"
+                  disabled={!history.canRedo}
+                  onClick={() => runHistory("redo")}
+                  className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
+                >
+                  <Redo2 className="h-3.5 w-3.5" />
+                </button>
+              </AppTooltip>
+            </>
+          )}
+          {/* AQU-1767: the blade, and "cut at the playhead". */}
+          {onCutTargets && editable && (
+            <>
+              <AppTooltip
+                content={
+                  audioFirst
+                    ? t("editor.timeline.bladeFreeTiming")
+                    : bladeActive
+                      ? t("editor.timeline.bladeOnTooltip")
+                      : t("editor.timeline.bladeOffTooltip")
+                }
+              >
+                <button
+                  type="button"
+                  aria-label={t("editor.timeline.bladeToggleAria")}
+                  aria-pressed={bladeActive}
+                  data-testid="tl-blade-toggle"
+                  disabled={!canCut}
+                  onClick={() => setBladeOn((on) => !on)}
+                  className={cn(
+                    "inline-flex items-center rounded-md border border-border px-1.5 py-1 disabled:opacity-40",
+                    bladeActive
+                      ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                      : "bg-background text-foreground/70 hover:bg-muted",
+                  )}
+                >
+                  <Scissors className="h-3.5 w-3.5" />
+                </button>
+              </AppTooltip>
+              <AppTooltip
+                content={audioFirst ? t("editor.timeline.bladeFreeTiming") : t("editor.timeline.cutAtPlayheadTooltip")}
+              >
+                <button
+                  type="button"
+                  aria-label={t("editor.timeline.cutAtPlayheadAria")}
+                  data-testid="tl-cut-at-playhead"
+                  disabled={!canCut}
+                  onClick={cutAtPlayhead}
+                  className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
+                >
+                  <SquareSplitHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </AppTooltip>
+            </>
+          )}
           {/* SUB-53: nothing to snap to when positions are computed. */}
           {!audioFirst && (
           <AppTooltip content={snapOn ? t("editor.timeline.snapOnTooltip") : t("editor.timeline.snapOffTooltip")}>

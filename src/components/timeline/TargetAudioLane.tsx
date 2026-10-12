@@ -43,6 +43,7 @@ import {
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { canCutAt } from "@/lib/audio/cut-take"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { trackChipClass, trackChipPlayingClass, trackHueVars } from "@/lib/timeline/track-colors"
 import { DragTimeChip } from "./DragTimeChip"
@@ -67,6 +68,10 @@ export interface TargetAudioItem {
   kind: "take" | "generated"
   /** The active dub attachment's id (for duration/trim lookup). */
   audioId: string
+  /** AQU-1767: which piece of a cut take this is (0-based, clip order), and
+   *  how many there are. Absent for a take that was never cut. */
+  pieceIndex?: number
+  pieceCount?: number
 }
 
 export interface TargetAudioLaneProps {
@@ -117,6 +122,10 @@ export interface TargetAudioLaneProps {
   /** Round 7: trim a chip — the COMPLETE desired trim state (both keys
    *  resolved; undefined clears a key back to the clip edge). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  /** AQU-1767: the blade is in hand — a click on a chip cuts it there. */
+  bladeActive?: boolean
+  /** AQU-1767: cut one take at `atMs`, a position in its own audio. */
+  onCutTarget?(cellId: string, audioId: string, atMs: number): void
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
   /** SUB-51: timed media sections with NO dub yet. Their empty space in this
@@ -203,6 +212,8 @@ function TargetAudioChip({
   onSeek,
   onRetimeTarget,
   onTrimTarget,
+  bladeActive = false,
+  onCutTarget,
   onOpenRecording,
   validationRequirementAudio = 1,
   currentUsername = "",
@@ -252,6 +263,8 @@ function TargetAudioChip({
    *  would make dragging one chip move the other. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  bladeActive?: boolean
+  onCutTarget?(cellId: string, audioId: string, atMs: number): void
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
@@ -263,6 +276,11 @@ function TargetAudioChip({
   const t = useT()
   const { cell } = chip.item
   const { geom, section } = chip
+  // AQU-1767: the first (or only) piece keeps the chip's historical test id;
+  // later pieces add "-p2", "-p3"… so every piece is addressable.
+  const testKey = chip.item.pieceIndex ? `${cell.id}-p${chip.item.pieceIndex + 1}` : cell.id
+  // AQU-1767: where the blade would cut, while it hovers over this chip.
+  const [bladeX, setBladeX] = useState<number | null>(null)
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
   /**
    * AQU-646 stage 5: is THIS chip's own preview sounding?
@@ -494,12 +512,36 @@ function TargetAudioChip({
   // The height term is the same argument as the width one: a trim handle is a
   // target you have to hit, and on a compact band it is smaller than the
   // pointer that has to find it.
+  // AQU-1767: with the blade in hand the chip is a cutting surface — no trim
+  // handles to catch the pointer, and no move.
+  const blade = bladeActive && editable && Boolean(onCutTarget)
+  /** The take-relative ms under a pointer x, and whether a cut there is legal. */
+  const bladeAt = (clientX: number): { atMs: number; ok: boolean; x: number } | null => {
+    const el = chipRef.current
+    if (!el) return null
+    const x = clientX - el.getBoundingClientRect().left
+    const sec = paintedStart + pxToSec(x, pxPerSec)
+    const atMs = (sec - geom.anchor) * 1000
+    return { atMs, ok: canCutAt(chipTake, atMs), x }
+  }
+  const cutRef = useRef(false)
   const canResize =
-    editable && Boolean(onTrimTarget) && chip.resizable &&
+    !blade && editable && Boolean(onTrimTarget) && chip.resizable &&
     chipH >= MIN_CHIP_GRIP_H_PX &&
     secToPx(geom.end - geom.start, pxPerSec) >= 24
 
   function beginDrag(mode: ChipDragMode, e: React.PointerEvent) {
+    if (blade) {
+      // AQU-1767: the blade cuts where it lands, on the primary button only.
+      if (mode !== "move" || e.button !== 0 || e.ctrlKey) return
+      e.stopPropagation()
+      const at = bladeAt(e.clientX)
+      if (at?.ok) {
+        cutRef.current = true
+        onCutTarget?.(cell.id, chip.item.audioId, at.atMs)
+      }
+      return
+    }
     if (mode === "move" ? !canMove : !canResize) return
     // Primary button only, and not a macOS context-click — see the identical
     // guard in TimelineCard.beginDrag for why this is a real bug and not
@@ -719,7 +761,7 @@ function TargetAudioChip({
         <div key="tail" className="text-red-600 dark:text-red-400">
           {tailOverlapSec != null && (
             <span
-              data-testid={`tl-target-${cell.id}-tip-overlap`}
+              data-testid={`tl-target-${testKey}-tip-overlap`}
               className="font-semibold tabular-nums"
             >
               −{tailOverlapSec.toFixed(1)}s{" "}
@@ -734,7 +776,7 @@ function TargetAudioChip({
         <div key="head" className="text-red-600 dark:text-red-400">
           {headOverlapSec != null && (
             <span
-              data-testid={`tl-target-${cell.id}-tip-overlap-head`}
+              data-testid={`tl-target-${testKey}-tip-overlap-head`}
               className="font-semibold tabular-nums"
             >
               −{headOverlapSec.toFixed(1)}s{" "}
@@ -778,7 +820,7 @@ function TargetAudioChip({
     <button
       type="button"
       ref={chipRef}
-      data-testid={`tl-target-${cell.id}`}
+      data-testid={`tl-target-${testKey}`}
       // Space after clicking a chip belongs to the TRANSPORT (same opt-in as
       // the timeline cards); the corner record button inside stays native.
       data-spacebar-transport=""
@@ -803,12 +845,28 @@ function TargetAudioChip({
       data-span-end={span.end.toFixed(3)}
       {...(chip.ratio != null ? { "data-ratio": chip.ratio.toFixed(2) } : {})}
       onClick={() => {
+        // AQU-1767: a blade click cut the take; it is not also a seek.
+        if (cutRef.current) {
+          cutRef.current = false
+          return
+        }
         onSelect(cell.id)
         if (!movedRef.current) onSeek?.(cell.id)
         movedRef.current = false
       }}
       onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
+      onPointerLeave={() => {
+        setHovered(false)
+        setBladeX(null)
+      }}
+      onPointerMove={(e) => {
+        if (!blade) return
+        const at = bladeAt(e.clientX)
+        setBladeX(at?.ok ? at.x : null)
+      }}
+      {...(blade ? { "data-blade": "" } : {})}
+      data-audio-id={chip.item.audioId}
+      {...(chip.item.pieceCount ? { "data-piece": `${(chip.item.pieceIndex ?? 0) + 1}/${chip.item.pieceCount}` } : {})}
       onFocus={() => setHovered(true)}
       onBlur={() => setHovered(false)}
       // AQU-646 stage 2: A RIGHT-CLICK ON A CHIP OPENS NOTHING, DELIBERATELY.
@@ -875,7 +933,7 @@ function TargetAudioChip({
         // for the informational src/tgt end difference.
         overflow === "overlap" &&
           "border-red-500 ring-1 ring-red-500/70 bg-red-100/80 text-red-800 dark:bg-red-950/70 dark:text-red-300",
-        canMove && "cursor-grab active:cursor-grabbing",
+        blade ? "cursor-crosshair" : canMove && "cursor-grab active:cursor-grabbing",
         "hover:brightness-105",
         selected && "ring-2 ring-sky-500",
       )}
@@ -890,6 +948,15 @@ function TargetAudioChip({
           startSec={span.start}
           endSec={span.end}
           deltaSec={drag.mode === "resize-r" ? span.end - geom.end : span.start - geom.start}
+        />
+      )}
+      {blade && bladeX != null && (
+        // AQU-1767: where the blade will cut — a dashed line under the pointer.
+        <span
+          aria-hidden
+          data-testid={`tl-target-${testKey}-blade-line`}
+          style={{ left: `${bladeX}px` }}
+          className="pointer-events-none absolute inset-y-0 z-20 w-0 border-l-2 border-dashed border-amber-500"
         />
       )}
       {waveform && (
@@ -909,7 +976,7 @@ function TargetAudioChip({
       {canResize && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-handle-l`}
+          data-testid={`tl-target-${testKey}-handle-l`}
           onPointerDown={(e) => beginDrag("resize-l", e)}
           className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
@@ -944,7 +1011,7 @@ function TargetAudioChip({
       {chip.item.kind === "generated" && !showLeftGlyph && chipH >= MIN_CHIP_GRIP_H_PX && paintedPx >= 24 && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-generated`}
+          data-testid={`tl-target-${testKey}-generated`}
                   // AQU-646 stage 5: the play button wants this side too. The sparkle
             // is decorative and the button is an action, so on hover the
             // action wins — the same reason the sparkle already gives way to a
@@ -967,7 +1034,7 @@ function TargetAudioChip({
       {geom.usingFallback && fitsBadges && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-unknown-length`}
+          data-testid={`tl-target-${testKey}-unknown-length`}
           className="ml-0.5 shrink-0 text-[10px] font-semibold leading-none opacity-70"
         >
           ?
@@ -988,7 +1055,7 @@ function TargetAudioChip({
                   ? t("editor.timeline.takeLoading")
                   : t("editor.timeline.takeSaving")
           }
-          data-testid={`tl-target-${cell.id}-${leftGlyph}`}
+          data-testid={`tl-target-${testKey}-${leftGlyph}`}
           className="absolute left-1.5 top-1 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/85 shadow-sm ring-1 ring-border"
         >
           {leftGlyph === "missing" ? (
@@ -1026,7 +1093,7 @@ function TargetAudioChip({
           title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
           aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
           aria-busy={priming || undefined}
-          data-testid={`tl-target-${cell.id}-play`}
+          data-testid={`tl-target-${testKey}-play`}
           onPointerDown={(e) => { e.stopPropagation(); preview.prime() }}
           onClick={(e) => { e.stopPropagation(); togglePreview() }}
           onKeyDown={(e) => {
@@ -1048,7 +1115,7 @@ function TargetAudioChip({
           role="button"
           tabIndex={0}
           title={t("workspace.targetAudioLane.recordAudio")}
-          data-testid={`tl-target-${cell.id}-record`}
+          data-testid={`tl-target-${testKey}-record`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
@@ -1070,7 +1137,7 @@ function TargetAudioChip({
       )}
       {(chipValidationState === "self" || chipValidationState === "full") && (
         <span
-          data-testid={`tl-target-${cell.id}-validated`}
+          data-testid={`tl-target-${testKey}-validated`}
           title={chipValidationState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
@@ -1093,7 +1160,7 @@ function TargetAudioChip({
         <span
           aria-hidden
           ref={playlineRef}
-          data-testid={`tl-target-${cell.id}-playline`}
+          data-testid={`tl-target-${testKey}-playline`}
           className={CHIP_PLAYLINE_CLASS}
         />
       )}
@@ -1103,7 +1170,7 @@ function TargetAudioChip({
       {truncatedHead && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-overflow-head`}
+          data-testid={`tl-target-${testKey}-overflow-head`}
           className={cn(
             "absolute inset-y-0 left-0 flex w-[6px] items-center justify-center",
             overflow === "overlap"
@@ -1117,7 +1184,7 @@ function TargetAudioChip({
       {truncatedTail && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-overflow`}
+          data-testid={`tl-target-${testKey}-overflow`}
           className={cn(
             "absolute inset-y-0 right-0 flex w-[6px] items-center justify-center",
             overflow === "overlap"
@@ -1131,7 +1198,7 @@ function TargetAudioChip({
       {canResize && (
         <span
           aria-hidden
-          data-testid={`tl-target-${cell.id}-handle-r`}
+          data-testid={`tl-target-${testKey}-handle-r`}
           onPointerDown={(e) => beginDrag("resize-r", e)}
           className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
@@ -1159,6 +1226,8 @@ export function TargetAudioLane({
   onSeek,
   onRetimeTarget,
   onTrimTarget,
+  bladeActive = false,
+  onCutTarget,
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
@@ -1222,6 +1291,13 @@ export function TargetAudioLane({
     })
   }
 
+  // AQU-1767: in TIME order, not line order. A line's pieces come in clip order,
+  // but a piece moved past the next line's chip must still meet its real
+  // neighbours — the overlap, trespass and snap rules below all read the array
+  // as the left-to-right row. Stable, and a no-op for takes never cut: the move
+  // clamp already keeps a chip from passing its neighbour's start.
+  chips.sort((a, b) => a.geom.start - b.geom.start)
+
   // AQU-646: peaks for the chips actually on screen AND actually drawable.
   //
   // Both filters matter. Visibility keeps a 70-minute episode from decoding
@@ -1258,11 +1334,13 @@ export function TargetAudioLane({
   const boundPreview = useChipPreview({ projectId: projectId ?? null, session: session ?? null })
   const makePreview = previewFactory ?? boundPreview
 
-  const candidatesFor = (cellId: string, section: { start: number; end: number }): number[] => {
+  // AQU-1767: by TAKE, not by line — a piece snaps to its sibling's edges, which
+  // is how two pieces are laid back end to end.
+  const candidatesFor = (audioId: string, section: { start: number; end: number }): number[] => {
     if (!snapEnabled) return []
     const out: number[] = [section.start, section.end]
     for (const c of chips) {
-      if (c.item.cell.id === cellId) continue
+      if (c.item.audioId === audioId) continue
       out.push(c.geom.start, c.geom.end)
     }
     return out
@@ -1424,7 +1502,8 @@ export function TargetAudioLane({
       {chips.map((chip, i) =>
         isVisible(chip.geom.start, chip.geom.end, viewStartSec, viewEndSec) ? (
           <TargetAudioChip
-            key={chip.item.cell.id}
+            // AQU-1767: keyed by TAKE — a cut line has a chip per piece.
+            key={`${chip.item.cell.id}:${chip.item.audioId}`}
             chip={chip}
             prevChip={
               i > 0
@@ -1445,11 +1524,13 @@ export function TargetAudioLane({
             loading={loadingCellId === chip.item.cell.id}
             missing={missingCellIds?.has(chip.item.cell.id) ?? false}
             editable={editable}
-            snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.cell.id, chip.section) }}
+            snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.audioId, chip.section) }}
             onSelect={onSelect}
             onSeek={onSeek}
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
+            bladeActive={bladeActive}
+            onCutTarget={onCutTarget}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
             currentUsername={session?.username ?? ""}

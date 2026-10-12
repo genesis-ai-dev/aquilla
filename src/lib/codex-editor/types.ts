@@ -129,6 +129,8 @@ export interface CodexCellAttachment {
   validators?: string[];
   role?: "dub" | "source";
   recordedBy?: string | null;
+  /** AQU-1767: the take this one was cut from (its piece group's root). */
+  pieceOf?: string | null;
   /** AQU-646 round 8: the take's permanent display name ("Take 3", or a
    *  rename). Carried so the Recording tab can head an added-track take with
    *  its own name rather than its track id. */

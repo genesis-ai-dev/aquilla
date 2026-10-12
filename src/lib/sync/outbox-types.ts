@@ -49,6 +49,8 @@ export type OutboxEventKind =
   | "cell.audio.rename"
   | "cell.audio.trim"
   | "cell.audio.place"
+  // AQU-1767: cut one dub piece in two (contributor, like trim).
+  | "cell.audio.cut"
   | "cell.audio.measure"
   // AQU-777: per-cell file attachments (screenshots / reference images).
   // Contributor-level, non-chain-mutating. The bytes are already in R2 by the
@@ -439,6 +441,24 @@ export interface OutboxEventPayloads {
   "cell.audio.place": {
     audioId: string
     targetOffsetMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-1767: cut a dub piece in two at `atMs`, a position in the clip's OWN
+   * audio (the trim window's domain). The server copies the piece into
+   * `newAudioId` over the same bytes, windowed [atMs, old end], shortens the
+   * original to [old start, atMs], and resets both halves' votes. A cut it
+   * cannot make (too near an edge, not a dub, unknown length) changes nothing.
+   */
+  "cell.audio.cut": {
+    audioId: string
+    atMs: number
+    newAudioId: string
+    newLabel?: string
+    firstLabel?: string
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

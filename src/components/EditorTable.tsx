@@ -499,6 +499,8 @@ export function applyRowOverlays(
         ...(attachment.validators ? { validators: attachment.validators } : {}),
         ...(attachment.role ? { role: attachment.role } : {}),
         ...(attachment.recordedBy != null ? { recordedBy: attachment.recordedBy } : {}),
+        // AQU-1767: see mergeCellsWithAudio — the same list, the same rule.
+        ...(attachment.pieceOf ? { pieceOf: attachment.pieceOf } : {}),
       }
     }
     next = {

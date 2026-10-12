@@ -7,7 +7,7 @@
 import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
-import { activeTargetForCell, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
+import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell } from "./track-audio"
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { hasTiming, sortByLens } from "@/lib/timeline/derive"
@@ -381,7 +381,14 @@ function overlayCapacity(): number {
 /** The (cell, slot) pairs currently sounding. A cell alone is not enough: two
  *  takes on one line, on different tracks, are the point of multi-track. */
 function soundingKeys(): ReadonlySet<string> {
-  return new Set(overlayPool.map((e) => `${e.cellId}\u0000${e.slot}`))
+  // AQU-1767: each entry answers for its track AND for its own piece, so a cut
+  // line's second piece is not mistaken for the first one still ringing.
+  return new Set(overlayPool.flatMap((e) => [`${e.cellId}\u0000${e.slot}`, overlayPieceKey(e.cellId, e.slot, e.audioId)]))
+}
+
+/** AQU-1767: one PIECE of a cut take on one track. */
+export function overlayPieceKey(cellId: string, slot: string, audioId: string): string {
+  return `${cellId}\u0000${slot}\u0000${audioId}`
 }
 
 export function overlayKey(cellId: string, slot: string): string {
@@ -1735,6 +1742,10 @@ export type TargetOverlayPlan =
       /** Seek semantics: clear the pool first (an earlier section's
        *  overhanging tail does NOT resurrect on seek — documented rule). */
       exclusive: boolean
+      /** AQU-1767: when this line's take was CUT, the start (file seconds) of
+       *  the piece after this one — armed as soon as this one fires, so the
+       *  next piece sounds even under a master that only re-plans on arms. */
+      nextDueSec?: number
     }
   | { kind: "arm"; cellId: string; dueSec: number; overlay: "keep" | "silence" }
 
@@ -1799,11 +1810,23 @@ export function planTargetOverlay(
   if (!cell || !target || (needsSourceClip && !sourceClipAudioForCell(cell))) {
     return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   }
+  // AQU-1767: a take CUT into pieces sounds piece by piece. The one that
+  // matters now is the first whose audible end is still ahead of the clock;
+  // the piece after it is armed when it fires (`nextDueSec`).
+  const pieces = resolveTargetPieces(cell, isDefaultSlot ? undefined : slot)
+    .map((p) => ({ ref: p, geom: targetChipGeom(cell, cell.attachments?.[p.audioId]) }))
+    .sort((a, b) => (a.geom?.start ?? 0) - (b.geom?.start ?? 0))
+  const cut = pieces.length > 1
+  const currentIdx = cut ? pieces.findIndex((p) => (p.geom?.end ?? Infinity) > masterSec) : 0
+  if (currentIdx < 0) return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
+  const piece = cut ? pieces[currentIdx].ref : target
+  const nextDueSec = cut ? pieces[currentIdx + 1]?.geom?.start : undefined
   // (cell, slot), not cell: two takes on ONE line, on DIFFERENT tracks, are
   // the point of multi-track — suppressing the second is what this key change
-  // exists to stop.
-  if (reason === "advance" && sounding.has(overlayKey(cell.id, slot))) return { kind: "keep" }
-  const att = cell.attachments?.[target.audioId]
+  // exists to stop. A cut line asks after its own PIECE (AQU-1767).
+  const soundingKey = cut ? overlayPieceKey(cell.id, slot, piece.audioId) : overlayKey(cell.id, slot)
+  if (reason === "advance" && sounding.has(soundingKey)) return { kind: "keep" }
+  const att = cell.attachments?.[piece.audioId]
   const geom = targetChipGeom(cell, att)
   const dueSec = geom?.start ?? cell.startTime ?? 0
   if (masterSec < dueSec) {
@@ -1820,11 +1843,12 @@ export function planTargetOverlay(
     kind: "fire",
     cellId: cell.id,
     slot,
-    audioId: target.audioId,
-    url: target.url,
+    audioId: piece.audioId,
+    url: piece.url,
     startAtClipSec: trimStartSec + intoDubSec,
     stopAtClipSec: geom?.trimEndSec ?? null,
     exclusive: reason === "seek",
+    ...(nextDueSec != null ? { nextDueSec } : {}),
   }
 }
 
@@ -1944,6 +1968,11 @@ function applyTargetOverlay(
   }
   pendingDubs = others
   executeFire(plan, opts)
+  // AQU-1767: the next piece of a cut take, armed now — under the queue master
+  // nothing else would ask for it before the line ends.
+  if (plan.nextDueSec != null) {
+    pendingDubs = [...pendingDubs, { cellId: plan.cellId, slot, dueSec: plan.nextDueSec }]
+  }
 }
 
 /**

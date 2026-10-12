@@ -870,6 +870,56 @@ export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<st
   return eventId
 }
 
+export interface CellAudioCutInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The piece being cut. */
+  audioId: string
+  /** Where, in the clip's OWN audio (ms) — the trim window's domain. */
+  atMs: number
+  /** The second piece's id, minted by the caller so the step can be undone. */
+  newAudioId: string
+  newLabel?: string
+  firstLabel?: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.cut` — one dub piece becomes two over the same bytes.
+ * (AQU-1767 phase 1)
+ *
+ * Not a pair of trims plus an attach: the server makes the new row from the
+ * stored one in a single projection, so it can never disagree with itself
+ * about the url, slot, lane, role or placement the two pieces share, and a
+ * cut it refuses changes nothing at all.
+ */
+export async function emitCellAudioCut(input: CellAudioCutInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.cut",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      atMs: Math.round(input.atMs),
+      newAudioId: input.newAudioId,
+      ...(input.newLabel ? { newLabel: input.newLabel } : {}),
+      ...(input.firstLabel ? { firstLabel: input.firstLabel } : {}),
+      ...targetLaneFields(input),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellLinkSetInput {
   projectId: string
   /** The SUBTITLE side — rides the envelope, so per-file auth works. */

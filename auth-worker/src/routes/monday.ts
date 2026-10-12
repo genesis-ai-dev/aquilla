@@ -219,7 +219,7 @@ monday.post(
     }
     const { backTo } = c.req.valid("json")
     // backTo must be an app path, never an absolute URL (open-redirect guard).
-    if (backTo != null && (!backTo.startsWith("/") || backTo.startsWith("//"))) {
+    if (backTo != null && !isSafeAppPath(backTo)) {
       return c.json({ error: "backTo must be a path" }, 400)
     }
     // OAuth 2.1 PKCE: the code_verifier must survive to the callback without
@@ -272,7 +272,7 @@ monday.get("/oauth/callback", async (c) => {
     return fail("bad_state", 401)
   }
   const backTo =
-    typeof state.backTo === "string" && state.backTo.startsWith("/") && !state.backTo.startsWith("//")
+    typeof state.backTo === "string" && isSafeAppPath(state.backTo)
       ? state.backTo
       : "/settings/monday"
   const orgId = Number(state.orgId)
@@ -790,5 +790,15 @@ monday.post("/internal/push", zValidator("json", internalPushSchema), async (c) 
   const result = await schedulePush(c.env, projectId)
   return c.json(result)
 })
+
+/**
+ * [Pen test] Auth & session mgmt (2026-10-12): an app-relative path only.
+ * Browsers normalise `\` to `/`, so `/\evil.com` is a protocol-relative
+ * redirect that the old `startsWith("//")` check let through. Also reject
+ * control characters (tab/CR/LF are stripped by URL parsers: `/\t/evil.com`).
+ */
+export function isSafeAppPath(p: string): boolean {
+  return p.startsWith("/") && !p.startsWith("//") && !/[\\\u0000-\u001f]/.test(p)
+}
 
 export default monday

@@ -65,6 +65,7 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
 
 export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorChoice }) {
   const t = useT()
+  const defaultEditorId = useToolsMount()?.defaultEditorId ?? null
   const [wholeProject, setWholeProject] = useState(false)
   if (choice.editors.length === 0) return null
   return (
@@ -80,7 +81,8 @@ export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorCho
           <option value={STANDARD_EDITOR}>{t("extensions.editor.standard")}</option>
           {choice.editors.map((ed) => (
             <option key={ed.id} value={ed.id}>
-              {ed.firstParty ? t("extensions.editor.firstPartyOption", { name: ed.name }) : ed.name}
+              {/* "(default)" only when it IS the default — the native editor is otherwise. */}
+              {ed.id === defaultEditorId ? t("extensions.editor.firstPartyOption", { name: ed.name }) : ed.name}
             </option>
           ))}
         </select>

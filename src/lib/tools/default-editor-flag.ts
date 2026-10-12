@@ -1,14 +1,18 @@
 /**
- * Whether the first-party "Aquilla Editor" extension is the DEFAULT editor
- * (and gets installed into the project on open). On by default.
+ * Whether the first-party "Aquilla Editor" extension is the DEFAULT editor.
+ * OFF by default: the Aquilla native (built-in) editor is everyone's default.
+ * The extension editor proves the whole editor can be built as a Smart
+ * Extension; it is always installed into the project (so it can be picked),
+ * but a user only edits with it after opting in.
  *
- * Off switches, in order:
- * - localStorage `aquilla.extensions.defaultEditor` = "off" (per browser;
- *   "on" forces it on),
- * - build env `VITE_EXTENSION_DEFAULT_EDITOR=off`. The e2e stack sets this so
- *   the existing editor smoke journeys keep exercising the built-in editor they
- *   were written for; the extension-editor specs opt back in per page.
- * Either way the built-in editor stays one switch away ("Standard editor").
+ * Ways to opt in, in order:
+ * - the "Edit with" picker, per file or "Use for every file in this project"
+ *   (editor-choice.ts) — the product's opt-in, remembered per user + project;
+ * - localStorage `aquilla.extensions.defaultEditor` = "on" (per browser; "off"
+ *   forces the native default back). `E2E_EDITOR=extension` sets it so the
+ *   core journeys run against the extension editor;
+ * - build env `VITE_EXTENSION_DEFAULT_EDITOR=on`.
+ * Either way the native editor stays one switch away ("Standard editor").
  */
 
 export const DEFAULT_EDITOR_FLAG_KEY = "aquilla.extensions.defaultEditor"
@@ -24,7 +28,7 @@ export function defaultEditorExtensionEnabled(
   } catch {
     // blocked storage → fall through to the build default
   }
-  return envValue !== "off"
+  return envValue === "on"
 }
 
 function safeStorage(): Storage | null {

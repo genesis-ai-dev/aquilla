@@ -125,13 +125,14 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!jwt || !projectId) return
     let cancelled = false
-    // First-party default editor: the server installs (or upgrades) it from
-    // the repo's reviewed source. Best-effort — a failure leaves the built-in
-    // editor as the default, never blocks the list. Runs IN PARALLEL with the
-    // list (one round trip to first paint), and its answer carries the
-    // editor's source, which seeds the detail cache so mounting it needs no
-    // further fetch.
-    const ensured: Promise<FirstPartyEnsureResult | null> = defaultEditorOn && version === 0
+    // First-party editor extension: the server installs (or upgrades) it from
+    // the repo's reviewed source, so it is always there to OPT INTO from the
+    // "Edit with" picker. It is not the default (the native editor is, see
+    // default-editor-flag.ts). Best-effort — a failure only means it is not
+    // offered, never blocks the list. Runs IN PARALLEL with the list (one
+    // round trip), and its answer carries the editor's source, which seeds
+    // the detail cache so mounting it needs no further fetch.
+    const ensured: Promise<FirstPartyEnsureResult | null> = version === 0
       ? ensureFirstPartyTool(jwt, projectId, FIRST_PARTY_DEFAULT_EDITOR).catch((err: unknown) => {
           console.warn("[extensions] first-party editor install failed:", err)
           return null
@@ -156,7 +157,7 @@ export function ToolsMountProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [jwt, projectId, version, defaultEditorOn, details])
+  }, [jwt, projectId, version, details])
   const toolsReady = loadedFor === projectId
 
   const refresh = useCallback(() => {

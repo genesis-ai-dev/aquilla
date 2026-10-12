@@ -466,7 +466,13 @@ describe("re-linking a board Aquilla has written to before", () => {
       if (body.includes("items_page_by_column_values")) {
         expect(body).toContain("text_aq")
         expect(body).toContain("proj-1")
-        return jsonResponse({ data: { items_page_by_column_values: { items: [{ id: 555 }] } } })
+        return jsonResponse({
+          data: {
+            items_page_by_column_values: {
+              items: [{ id: 555, column_values: [{ id: "text_aq", text: "proj-1" }] }],
+            },
+          },
+        })
       }
       if (body.includes("change_multiple_column_values")) {
         return jsonResponse({ data: { u0: { id: "555" } } })
@@ -750,7 +756,9 @@ describe("PATCH /api/v2/monday/projects/:projectId/link (mapping change)", () =>
     const fetchFn = mockFetch(() => null)
     const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { enabled: false })
     expect(res.status).toBe(200)
-    expect(fetchFn).not.toHaveBeenCalled()
+    // The only call is the sync-worker's link-changed notice (AQU-1828), never Monday.
+    const urls = fetchFn.mock.calls.map(([url]) => String(url))
+    expect(urls.filter((url) => url.startsWith("https://api.monday.com"))).toEqual([])
     expect(((await res.json()) as { link: { structureStale: boolean } }).link.structureStale).toBe(true)
   })
 })

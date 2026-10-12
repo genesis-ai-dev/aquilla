@@ -118,7 +118,7 @@ export const extensions = defineNamespace({
     "extensions.editor.wholeProject": "Use for every file in this project",
     "extensions.editor.firstPartyOption": "{name} (default)",
     "extensions.firstParty.autoGranted":
-      "{name} is a first-party extension and is the default editor. It was granted these permissions automatically: {scopes}.",
+      "{name} is a first-party extension. It was granted these permissions automatically: {scopes}.",
     "extensions.firstParty.granted": "{name} (first-party extension) · permissions: {scopes}.",
     "extensions.firstParty.none": "none — it is read-only until you allow more",
     "extensions.firstParty.manage": "Manage",

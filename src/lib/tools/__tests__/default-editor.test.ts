@@ -23,7 +23,7 @@ function mount(data: ToolHostData) {
   const stop = host.listen(pair.host as unknown as Window)
   pair.run(
     buildToolSrcdoc(DEFAULT_EDITOR_SOURCE, {
-      tool: { id: "fp", name: "Aquilla Editor", version: 1 },
+      tool: { id: "fp", name: "Aquilla editor (Smart Extension)", version: 1 },
       project: { id: "p", name: "P" },
       user: { username: "alice", roleLevel: 400 },
       mount: "editor",

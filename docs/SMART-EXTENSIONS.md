@@ -91,8 +91,10 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
 
 ## The full editor as an extension (opt-in)
 
-The Aquilla **native** (built-in) editor is the default editor for every file. The standard
-translation editor ALSO ships as a **first-party extension**, "Aquilla Editor"
+The Aquilla **native** (built-in) editor — "Aquilla editor" in the "Edit with" picker — is the
+default editor for every file. The same editor ALSO ships as a **first-party extension**,
+"Aquilla editor (Smart Extension)" (its manifest name, shown identically in the picker and on the Smart
+Extensions page)
 (`shared/tools/first-party/default-editor*.ts`, on the SDK below), at feature parity with the
 native editor. It exists to prove that the extension API can carry the whole editing
 experience; a user edits with it only after opting in. It runs exactly like any other
@@ -106,6 +108,14 @@ comment panels only through the bridge calls above, which any `editor` extension
   per-project tool id (no schema change). Upgraded in place to the shipped code only while the
   current version is pristine (a project's "Change it" edit is left alone). Removing it on the
   management page keeps it removed.
+- **Names.** One name per editor: "Aquilla editor" (native) and "Aquilla editor (Smart
+  Extension)" (this extension). "(default)" is appended in the picker to whichever editor is the
+  effective default — the native one unless the user opted in. Renaming the manifest changed its
+  code hash, so a pristine install gets one upgrade version; grants are untouched by an upgrade.
+- **How often.** Copied into a project once (deterministic per-project id); upgraded at most once
+  per project per shipped change (lazily, on the next open by any member, only while pristine);
+  granted once per user (all declared scopes on first ensure), plus once per scope a later
+  shipped version newly declares — never a scope the user already saw or revoked.
 - **Opt in.** The "Edit with" picker above the native editor lists it; pick it for one file, or
   tick "Use for every file in this project" (remembered per user and project). "Standard
   editor" in the same picker goes back. A project or user that never chose gets the native
@@ -113,8 +123,10 @@ comment panels only through the bridge calls above, which any `editor` extension
 - **Grants — explicit and visible.** Its declared scopes (`read:cells`, `write:target`,
   `write:validation`, `read:comments`) are auto-granted to each user the first time only; a
   later revoke sticks. The editor bar says so ("…granted these permissions automatically…",
-  with a Manage link) and its card on the management page carries a "First-party ·
-  auto-granted at install" badge. Role ceilings and the server's `authorize()` apply as for any
+  with a Manage link: "… ships with Aquilla. It was given these permissions automatically: …")
+  and its card on the management page carries a "First party · built in" badge. Its code ships in
+  the repo and is installed by the server — no model is called on this path. Role ceilings and
+  the server's `authorize()` apply as for any
   extension.
 - **Default override (testing).** `localStorage["aquilla.extensions.defaultEditor"]="on"` (per
   browser) or build env `VITE_EXTENSION_DEFAULT_EDITOR=on` makes it the default instead (the

@@ -186,7 +186,7 @@ test("default editor extension vs built-in editor on a full gospel", async ({ al
 
   // ── Built-in editor (one switch away) ──────────────────────────────────
   {
-    await tools.switchEditor("Standard editor")
+    await tools.switchEditor("Aquilla editor")
     const t0 = Date.now()
     await alice.reload()
     // The built-in editor reopens where you were (chapter-paged), so wait for

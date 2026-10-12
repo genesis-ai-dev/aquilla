@@ -25,7 +25,7 @@ function mount(d: ToolHostData) {
   const host = createBridgeHost({ getFrameWindow: () => pair.frame as unknown as Window, handlers: createToolHandlers(d), authorize: async () => {} })
   const stop = host.listen(pair.host as unknown as Window)
   pair.run(buildToolSrcdoc(DEFAULT_EDITOR_SOURCE, {
-    tool: { id: "fp", name: "Aquilla Editor", version: 1 },
+    tool: { id: "fp", name: "Aquilla editor (Smart Extension)", version: 1 },
     project: { id: "p", name: "P" },
     user: { username: "alice", roleLevel: 400 },
     mount: "editor",

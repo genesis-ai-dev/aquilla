@@ -1,7 +1,12 @@
 import { expect, type FrameLocator, type Locator, type Page } from "@playwright/test"
 
-/** The first-party default editor extension's name. */
-export const DEFAULT_EDITOR = "Aquilla Editor"
+/** The first-party editor extension's name (manifest name, also its "Edit with" label). */
+export const DEFAULT_EDITOR = "Aquilla editor (Smart Extension)"
+
+/** The native (built-in) editor's "Edit with" label; "(default)" is appended
+ *  to whichever editor is the effective default. */
+export const NATIVE_EDITOR = "Aquilla editor"
+export const NATIVE_EDITOR_DEFAULT = "Aquilla editor (default)"
 
 /**
  * Smart Extensions (prototype): the management page (/project/:id/extensions), a mounted
@@ -33,7 +38,7 @@ export class ToolsPage {
     await this.page.waitForURL(opts.landsIn === "editor" ? /\/editor/ : /\/extensions\/[0-9a-f-]{36}$/)
   }
 
-  /** Pick an editor in the file view's editor switcher ("Standard editor" or an extension). */
+  /** Pick an editor in the file view's editor switcher (the native "Aquilla editor" or an extension). */
   async switchEditor(label: string): Promise<void> {
     await this.page.getByRole("combobox", { name: "Edit with" }).first().selectOption({ label })
   }

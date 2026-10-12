@@ -1,5 +1,5 @@
 // Smart Extensions: the DEFAULT editor is itself an extension. With the
-// first-party "Aquilla Editor" on, opening a file shows it (no install step,
+// first-party "Aquilla editor (Smart Extension)" opted in, opening a file shows it (no install step,
 // its scopes auto-granted and SAID so), and it does the standard editor's job
 // purely through the sandboxed bridge: rich-text edits committed as ordinary
 // events with tool provenance, validate, another person's presence and live
@@ -55,7 +55,7 @@ test("the default editor is a first-party extension that edits, validates, shows
 
   // Opening the file IS opening the extension editor: no install, no prompt.
   const frame = await tools.openFileInDefaultEditor(seeded.projectId, seeded.fileId, "MAT 1:1")
-  await expect(alice.getByTestId("first-party-notice")).toContainText("granted these permissions automatically")
+  await expect(alice.getByTestId("first-party-notice")).toContainText("ships with Aquilla. It was given these permissions automatically")
   await expect(alice.getByRole("combobox", { name: "Edit with" })).toHaveValue(/[0-9a-f-]{36}/)
   await expect(tools.editorRow(frame, "MAT 1:1")).toContainText("The book of the genealogy of Jesus Christ")
 
@@ -99,7 +99,7 @@ test("the default editor is a first-party extension that edits, validates, shows
   await expect(tools.editorRow(frame, "MAT 1:3").locator("[data-cell-presence-state=editing]")).toHaveCount(0)
 
   // The built-in editor is one switch away, shows the same text, and back.
-  await tools.switchEditor("Standard editor")
+  await tools.switchEditor("Aquilla editor")
   await expect(alice.getByTestId("extension-editor-surface")).toHaveCount(0)
   await expect(alice.getByText("Libro de la genealogía de Jesucristo.").first()).toBeVisible()
   await tools.switchEditor(`${DEFAULT_EDITOR} (default)`)

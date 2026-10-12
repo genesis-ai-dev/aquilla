@@ -13,7 +13,7 @@ export function editorUnderTest(): EditorUnderTest {
 }
 
 /** The first-party editor extension's frame (ToolFrame title). */
-export const EXTENSION_EDITOR_FRAME = 'iframe[title="Aquilla Editor (sandboxed extension)"]'
+export const EXTENSION_EDITOR_FRAME = 'iframe[title="Aquilla editor (Smart Extension) (sandboxed extension)"]'
 
 /** Init-script source that opts a browser context into the extension editor. */
 export function editorOptInScript(): string {

@@ -66,6 +66,7 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
 export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorChoice }) {
   const t = useT()
   const defaultEditorId = useToolsMount()?.defaultEditorId ?? null
+  const nativeIsDefault = defaultEditorId === null || !choice.editors.some((ed) => ed.id === defaultEditorId)
   const [wholeProject, setWholeProject] = useState(false)
   if (choice.editors.length === 0) return null
   return (
@@ -78,11 +79,17 @@ export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorCho
           value={choice.selected}
           onChange={(e) => choice.choose(e.target.value, wholeProject)}
         >
-          <option value={STANDARD_EDITOR}>{t("extensions.editor.standard")}</option>
+          {/* One name per editor, the same as on the Smart Extensions page;
+              "(default)" marks whichever editor is the effective default —
+              the native one unless the user opted into an extension. */}
+          <option value={STANDARD_EDITOR}>
+            {nativeIsDefault
+              ? t("extensions.editor.defaultOption", { name: t("extensions.editor.standard") })
+              : t("extensions.editor.standard")}
+          </option>
           {choice.editors.map((ed) => (
             <option key={ed.id} value={ed.id}>
-              {/* "(default)" only when it IS the default — the native editor is otherwise. */}
-              {ed.id === defaultEditorId ? t("extensions.editor.firstPartyOption", { name: ed.name }) : ed.name}
+              {ed.id === defaultEditorId ? t("extensions.editor.defaultOption", { name: ed.name }) : ed.name}
             </option>
           ))}
         </select>

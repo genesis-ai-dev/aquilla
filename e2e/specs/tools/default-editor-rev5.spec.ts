@@ -1,6 +1,6 @@
 // Smart Extensions (AQU-1793), after Daniel's 2026-10-12 decision: the
 // Aquilla NATIVE editor is everyone's default, and the first-party
-// "Aquilla Editor" extension — server-installed, at feature parity — is an
+// "Aquilla editor (Smart Extension)" extension — server-installed, at feature parity — is an
 // opt-in from the "Edit with" picker. Then one apiRev 5 parity item that
 // crosses layers: the AI-draft provenance wash (#946) on a real draft (mock
 // LLM through the auth-worker, aiDrafted projected by the sync-worker) paints
@@ -54,6 +54,8 @@ test("the native editor is the default; the extension editor is an opt-in that p
   await workspace.waitForEditor()
   const picker = alice.getByRole("combobox", { name: "Edit with" })
   await expect(picker).toHaveValue("standard")
+  // One name per editor: the native one marked (default), the extension by its manifest name.
+  await expect(picker.locator("option[value=standard]")).toHaveText("Aquilla editor (default)")
   await expect(picker.locator("option", { hasText: DEFAULT_EDITOR })).toHaveText(DEFAULT_EDITOR)
   await expect(alice.getByTestId("extension-editor-surface")).toHaveCount(0)
 
@@ -87,11 +89,11 @@ test("the native editor is the default; the extension editor is an opt-in that p
   })
   expect(painted).toBe(nativeKinds.length)
 
-  // The choice is remembered for the file; "Standard editor" goes back.
+  // The choice is remembered for the file; the native "Aquilla editor (default)" goes back.
   await alice.reload()
   await expect(tools.translationBox(tools.toolFrame(DEFAULT_EDITOR), "MAT 1:1")).toBeVisible({ timeout: 30_000 })
   await expect(tools.toolFrame(DEFAULT_EDITOR).locator(`.cell[data-cell-id="${cellId}"] [data-target-read-view]`)).toHaveAttribute("data-health-spans", /\d+\/\d+/)
-  await tools.switchEditor("Standard editor")
+  await tools.switchEditor("Aquilla editor (default)")
   await expect(alice.getByTestId("extension-editor-surface")).toHaveCount(0)
   await workspace.waitForEditor()
 })

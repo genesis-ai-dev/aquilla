@@ -1,5 +1,5 @@
 /**
- * Whether the first-party "Aquilla Editor" extension is the DEFAULT editor.
+ * Whether the first-party "Aquilla editor (Smart Extension)" extension is the DEFAULT editor.
  * OFF by default: the Aquilla native (built-in) editor is everyone's default.
  * The extension editor proves the whole editor can be built as a Smart
  * Extension; it is always installed into the project (so it can be picked),
@@ -12,7 +12,7 @@
  *   forces the native default back). `E2E_EDITOR=extension` sets it so the
  *   core journeys run against the extension editor;
  * - build env `VITE_EXTENSION_DEFAULT_EDITOR=on`.
- * Either way the native editor stays one switch away ("Standard editor").
+ * Either way the native editor stays one switch away ("Aquilla editor").
  */
 
 export const DEFAULT_EDITOR_FLAG_KEY = "aquilla.extensions.defaultEditor"

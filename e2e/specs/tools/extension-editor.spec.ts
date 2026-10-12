@@ -107,7 +107,7 @@ test("a custom editor extension replaces the editor, writes with attribution, an
   // The choice is remembered; switching back shows the standard editor.
   await alice.reload()
   await expect(tools.toolFrame(EDITOR).getByLabel("Translation")).toBeVisible()
-  await tools.switchEditor("Standard editor")
+  await tools.switchEditor("Aquilla editor (default)")
   await expect(alice.getByTestId("extension-editor-surface")).toHaveCount(0)
   await expect(alice.getByText("Libro de la genealogía de Jesucristo.").first()).toBeVisible()
 })

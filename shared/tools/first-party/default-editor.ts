@@ -21,7 +21,7 @@ import { DEFAULT_EDITOR_APP } from "./default-editor-app"
 export const FIRST_PARTY_DEFAULT_EDITOR = "default-editor"
 
 export const DEFAULT_EDITOR_MANIFEST: ToolManifest = {
-  name: "Aquilla Editor",
+  name: "Aquilla editor (Smart Extension)",
   description:
     "The standard translation editor, as a first-party extension: the full editing experience — rich text, validation, AI drafting, back-translation, key terms, rule issues, footnotes, live presence, comments, history and audio.",
   scopes: ["read:cells", "read:terms", "write:target", "write:validation", "read:comments", "ai:draft", "write:audio", "write:source"],

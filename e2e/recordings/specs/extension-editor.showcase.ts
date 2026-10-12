@@ -85,7 +85,7 @@ test("Smart Extensions — a custom editor", async ({ page }, testInfo) => {
   await expect(frame.getByText("Validated", { exact: true }).first()).toBeVisible()
   await page.waitForTimeout(1500)
 
-  await tools.switchEditor("Standard editor")
+  await tools.switchEditor("Aquilla editor (default)")
   await expect(page.getByText("José llamó al niño Jesús.").first()).toBeVisible()
   await page.waitForTimeout(3000)
 

@@ -10,7 +10,7 @@ import { DEFAULT_EDITOR, ToolsPage } from "../../helpers/page-objects/ToolsPage"
 
 /**
  * Smart Extensions — the DEFAULT editor is an extension, 1280×720.
- * Opening a file shows the first-party "Aquilla Editor" extension (sandboxed,
+ * Opening a file shows the first-party "Aquilla editor (Smart Extension)" extension (sandboxed,
  * auto-granted and saying so). Alice translates with rich text and validates;
  * Bob (a second browser, off camera) takes a verse — his focus lock and then
  * his text appear live; the built-in editor is one switch away, and back.
@@ -85,7 +85,7 @@ test("Smart Extensions — the default editor is an extension", async ({ page, b
   await page.waitForTimeout(2500)
 
   // The built-in editor is one switch away — same text — and back.
-  await tools.switchEditor("Standard editor")
+  await tools.switchEditor("Aquilla editor")
   await expect(page.getByText("José le puso por nombre Jesús.").first()).toBeVisible()
   await page.waitForTimeout(3000)
   await tools.switchEditor(`${DEFAULT_EDITOR} (default)`)

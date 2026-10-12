@@ -256,6 +256,33 @@ describe("first-party extensions", () => {
     expect(again.tool?.grantedScopes).not.toContain("read:terms")
   })
 
+  it("a shipped rename is one upgrade version that keeps every user's grants (2026-10-12 naming)", async () => {
+    await seedProject()
+    const owner = await jwtFor("owner")
+    const viewer = await jwtFor("viewer")
+    const { tool } = (await (await ensure(owner)).json()) as Ensure
+    await ensure(viewer)
+    // The owner narrowed their grant since; the viewer kept the auto-grant.
+    await call(`/tools/${tool!.id}/grant`, owner, { method: "PUT", body: { scopes: ["read:cells", "write:target"] } })
+    // Simulate the build before the rename: same code and scopes, the old name.
+    const older = { ...DEFAULT_EDITOR_MANIFEST, name: "Aquilla Editor" }
+    await env.AQUILLA_PG.prepare("UPDATE project_tool_versions SET code_hash = ?, manifest = ?::text::jsonb WHERE tool_id = ?")
+      .bind("0".repeat(64), JSON.stringify(older), tool!.id).run()
+    await env.AQUILLA_PG.prepare("UPDATE project_tools SET name = ? WHERE id = ?").bind("Aquilla Editor", tool!.id).run()
+
+    const upgraded = (await (await ensure(owner)).json()) as Ensure
+    expect(upgraded.tool?.currentVersion).toBe(2)
+    expect(upgraded.tool?.name).toBe("Aquilla editor (Smart Extension)")
+    expect(upgraded.autoGranted).toEqual([])
+    expect(upgraded.tool?.grantedScopes.sort()).toEqual(["read:cells", "write:target"])
+    const viewerAfter = (await (await ensure(viewer)).json()) as Ensure
+    expect(viewerAfter.tool?.currentVersion).toBe(2)
+    expect(viewerAfter.autoGranted).toEqual([])
+    expect(viewerAfter.tool?.grantedScopes.sort()).toEqual([...DEFAULT_EDITOR_MANIFEST.scopes].sort())
+    // Idempotent: no further version for the same shipped code.
+    expect(((await (await ensure(owner)).json()) as Ensure).tool?.currentVersion).toBe(2)
+  })
+
   it("upgrades a pristine install to the shipped code, never an edited one", async () => {
     await seedProject()
     const owner = await jwtFor("owner")

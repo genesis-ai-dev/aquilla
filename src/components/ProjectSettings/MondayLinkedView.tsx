@@ -3,6 +3,7 @@
 // reconfigure-with-AI textarea. Split from MondayIntegrationSection to keep
 // each file under the ~500-line budget; all state lives in the parent.
 
+import type { ReactNode } from "react"
 import { AlertTriangle, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FieldLabel } from "@/components/ui/field"
@@ -35,6 +36,7 @@ export function MondayLinkedView({
   onReconfigure,
   onUnlink,
   warnings,
+  missingColumns = null,
 }: {
   link: MondayBoardLink
   structure: MondayBoardStructure | null
@@ -52,6 +54,8 @@ export function MondayLinkedView({
   onReconfigure: () => void
   onUnlink: () => void
   warnings: string[]
+  /** "Add the missing columns for me", when some numbers have no column. */
+  missingColumns?: ReactNode
 }) {
   const { t } = useI18n()
   return (
@@ -143,6 +147,7 @@ export function MondayLinkedView({
 
       <div className="space-y-2">
         <p className="text-sm font-medium">{t("projectSettings.monday.columnMappingLabel")}</p>
+        {missingColumns}
         {canManage ? (
           <MondayMappingEditor
             key={JSON.stringify(link.config.columns)}

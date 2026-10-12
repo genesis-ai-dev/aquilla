@@ -18,6 +18,7 @@ vi.mock("@/lib/monday/api", () => ({
   fetchMondayBoardStructure: vi.fn(),
   putMondayLink: vi.fn(),
   patchMondayLink: vi.fn(),
+  addMondayColumns: vi.fn(),
   deleteMondayLink: vi.fn(),
   analyzeMondayMapping: vi.fn(),
   syncMondayNow: vi.fn(),
@@ -248,4 +249,37 @@ it("refreshes organization authorization when returning from another tab", async
   mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
   fireEvent.focus(window)
   expect(await screen.findByRole("button", { name: "Scan and propose" })).toBeTruthy()
+})
+
+describe("Add the missing columns for me (linked board)", () => {
+  it("adds the columns and saves them into the mapping in the same click", async () => {
+    mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
+    mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+    mocked.addMondayColumns.mockResolvedValue({
+      created: [{ metric: "validated_pct", columnId: "v1", columnType: "numbers", title: "Validated %" }],
+      reused: [],
+      failed: [],
+      structure: { columns: [{ id: "v1", title: "Validated %", type: "numbers" }], groups: [] },
+    })
+    mocked.patchMondayLink.mockResolvedValue({ link: makeLink(), warnings: [] })
+
+    renderSection()
+    const button = await screen.findByRole("button", { name: /add the missing columns for me/i })
+    fireEvent.click(button)
+
+    await waitFor(() => expect(mocked.patchMondayLink).toHaveBeenCalled())
+    expect(mocked.addMondayColumns.mock.calls[0][2].boardId).toBe("b1")
+    expect(mocked.patchMondayLink.mock.calls[0][2].config?.columns).toEqual([
+      { columnId: "numbers_1", columnType: "numbers", metric: "completion_pct" },
+      { columnId: "v1", columnType: "numbers", metric: "validated_pct" },
+    ])
+  })
+
+  it("below maintainer: no add-columns button", async () => {
+    mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
+    mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+    renderSection({ roleLevel: 400 })
+    await waitFor(() => expect(screen.getByText(/translation tracker/i)).toBeTruthy())
+    expect(screen.queryByRole("button", { name: /add the missing columns for me/i })).toBeNull()
+  })
 })

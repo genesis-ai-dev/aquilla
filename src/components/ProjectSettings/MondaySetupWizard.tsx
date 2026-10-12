@@ -54,6 +54,7 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { openExternal } from "@/lib/open-external"
 import type { MondayColumnMapping, MondayMapping } from "@/lib/monday/types"
 import { MondayMappingRows } from "./MondayMappingEditor"
+import { MondayMissingColumns } from "./MondayMissingColumns"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type Stage = "intro" | "connect" | "scanning" | "review" | "applying" | "done"
@@ -477,6 +478,18 @@ export function MondaySetupWizard({
               <p>{t("projectSettings.monday.wizardRecommendation", { granularity, mappedCount })}</p>
               <p className="text-muted-foreground" data-testid="monday-wizard-match-existing">{matchLine}</p>
               {boardUrl && <a href={boardUrl} target="_blank" rel="noopener noreferrer" className="underline">{t("projectSettings.monday.wizardPreviewBoardLink")}</a>}
+              {/* A board without the right columns gives the AI nothing to map
+                  to; offer to make them rather than send the user to Monday. */}
+              <MondayMissingColumns
+                jwt={jwt}
+                projectId={projectId}
+                boardId={analysis.boardId}
+                rows={rows}
+                onAdded={(next, built) => {
+                  setRows(next)
+                  setStructure(built)
+                }}
+              />
               <Button variant="outline" onClick={() => setCustomizing(!customizing)}>
                 {customizing ? t("projectSettings.monday.wizardHideCustomization") : t("projectSettings.monday.wizardShowCustomization")}
               </Button>

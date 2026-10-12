@@ -56,6 +56,7 @@ export const error = defineNamespace({
     "error.monday.removeLink": "Couldn't remove the Monday board link.",
     "error.monday.analyze": "Couldn't build a board mapping suggestion.",
     "error.monday.sync": "Couldn't push this project to Monday.",
+    "error.monday.addColumns": "Couldn't add the columns to the Monday board.",
     "error.termbase.publish": "Couldn't share this termbase with the organization.",
     "error.termbase.unpublish": "Couldn't stop sharing this termbase.",
     "error.termbase.listPublished": "Couldn't load the termbases shared in this organization.",

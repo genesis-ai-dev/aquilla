@@ -83,3 +83,59 @@ export const MONDAY_READONLY_COLUMN_TYPES = new Set([
   "autonumber",
   "button",
 ])
+
+/**
+ * The numbers "Add the missing columns for me" offers to create, in board
+ * order. Counts and the project name are left out: counts are optional extras
+ * a user can still map by hand, and the project name is the item's own name.
+ */
+export const MONDAY_SUGGESTED_COLUMN_METRICS: MondayMetricKey[] = [
+  "completion_pct",
+  "validated_pct",
+  "audio_validated_pct",
+  "status_auto",
+  "last_activity",
+  "translators",
+  "external_id",
+]
+
+/**
+ * The title Aquilla gives a column it creates. Monday data, not UI copy: it
+ * is the column's name on the customer's board, so it is never translated.
+ * Mirrors COLUMN_SPEC_BY_METRIC in auth-worker/src/lib/monday/columns.ts.
+ */
+export const MONDAY_NEW_COLUMN_TITLES: Partial<Record<MondayMetricKey, string>> = {
+  completion_pct: "Completion %",
+  validated_pct: "Validated %",
+  audio_validated_pct: "Audio validated %",
+  status_auto: "Status",
+  last_activity: "Last activity",
+  translators: "Translators",
+  external_id: "Aquilla ID",
+}
+
+/** Suggested numbers that no row maps to a column yet. */
+export function missingColumnMetrics(rows: MondayColumnMapping[]): MondayMetricKey[] {
+  const mapped = new Set(rows.filter((r) => r.columnId).map((r) => r.metric))
+  return MONDAY_SUGGESTED_COLUMN_METRICS.filter((m) => !mapped.has(m))
+}
+
+/**
+ * Map each added column to its number: fill a row that names the metric but
+ * has no column yet, else append a row. A column already mapped is left alone.
+ */
+export function mergeAddedColumns(
+  rows: MondayColumnMapping[],
+  added: Array<{ metric: MondayMetricKey; columnId: string; columnType: string }>,
+): MondayColumnMapping[] {
+  const next = [...rows]
+  for (const col of added) {
+    if (next.some((r) => r.columnId === col.columnId)) continue
+    if (next.some((r) => r.metric === col.metric && r.columnId)) continue
+    const empty = next.findIndex((r) => r.metric === col.metric && !r.columnId)
+    const row = { columnId: col.columnId, columnType: col.columnType, metric: col.metric }
+    if (empty >= 0) next[empty] = row
+    else next.push(row)
+  }
+  return next
+}

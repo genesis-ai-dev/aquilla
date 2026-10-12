@@ -61,6 +61,7 @@ import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingTable } from "./MondayMappingEditor"
 import { MondayLinkedView } from "./MondayLinkedView"
 import { MondaySetupWizard } from "./MondaySetupWizard"
+import { MondayMissingColumns } from "./MondayMissingColumns"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const MAINTAINER = 600
@@ -399,6 +400,23 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               onReconfigure={() => void runAnalyze(link.boardId, reconfigureMsg.trim() || undefined, link.config)}
               onUnlink={() => setUnlinkOpen(true)}
               warnings={warnings}
+              missingColumns={
+                canManage ? (
+                  <MondayMissingColumns
+                    jwt={jwt}
+                    projectId={projectId}
+                    boardId={link.boardId}
+                    rows={link.config.columns}
+                    disabled={savingMapping}
+                    onAdded={(next, built) => {
+                      setStructure(built)
+                      // Mapped straight away: the user asked for these columns
+                      // to be used, so saving is part of the same click.
+                      void handleSaveMapping(next)
+                    }}
+                  />
+                ) : null
+              }
             />
           ) : !canManage ? (
             <p className="text-sm text-muted-foreground">
@@ -472,6 +490,17 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               <p className="text-sm font-medium">{t("projectSettings.monday.aiProposalLabel")}</p>
               <p className="text-sm text-muted-foreground">{proposal.summary}</p>
               <MondayMappingTable columns={proposal.proposal.columns} structure={structure} />
+              <MondayMissingColumns
+                jwt={jwt}
+                projectId={projectId}
+                boardId={link?.boardId ?? selectedBoardId}
+                rows={proposal.proposal.columns}
+                disabled={applying}
+                onAdded={(next, built) => {
+                  setProposal((p) => (p ? { ...p, proposal: { ...p.proposal, columns: next } } : p))
+                  setStructure(built)
+                }}
+              />
               {proposal.proposal.notes && (
                 <p className="text-xs text-muted-foreground">{proposal.proposal.notes}</p>
               )}

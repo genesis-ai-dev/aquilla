@@ -12,7 +12,7 @@ import { notifyMondayLinkChanged } from "./events"
 import { AUTH_BASE } from "../frontier/auth"
 import type { MessageKey } from "../i18n/messages/en"
 import { t } from "../i18n/standalone"
-import type { MondayMapping } from "./types"
+import type { MondayMapping, MondayMetricKey } from "./types"
 
 function authHeaders(jwt: string): HeadersInit {
   return {
@@ -319,6 +319,51 @@ export async function analyzeMondayMapping(
     boardName: data.boardName ?? null,
     boardUrl: data.boardUrl ?? null,
     boardReason: data.boardReason ?? "",
+  }
+}
+
+/** One column on the board that now serves an Aquilla number. */
+export interface MondayAddedColumn {
+  metric: MondayMetricKey
+  columnId: string
+  columnType: string
+  title: string
+}
+
+export interface MondayAddColumnsResult {
+  /** Columns Aquilla created on the board just now. */
+  created: MondayAddedColumn[]
+  /** Columns that were already there under Aquilla's title; nothing created. */
+  reused: MondayAddedColumn[]
+  /** Columns Monday refused, with its reason (shown in English). */
+  failed: Array<{ metric: MondayMetricKey; title: string; error: string }>
+  /** The board's columns after the change. */
+  structure: MondayBoardStructure
+}
+
+/**
+ * POST /api/v2/monday/projects/:projectId/columns (maintainer+). "Add the
+ * missing columns for me": creates the board columns for `metrics` that the
+ * board lacks (plus an "Aquilla ID" column when it has none) and reuses any
+ * already there under the same title.
+ */
+export async function addMondayColumns(
+  jwt: string,
+  projectId: string,
+  body: { boardId: string; metrics: MondayMetricKey[] },
+): Promise<MondayAddColumnsResult> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/columns`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) await readError(res, "error.monday.addColumns")
+  const data = (await res.json()) as Partial<MondayAddColumnsResult> & { structure: MondayBoardStructure }
+  return {
+    created: data.created ?? [],
+    reused: data.reused ?? [],
+    failed: data.failed ?? [],
+    structure: data.structure,
   }
 }
 

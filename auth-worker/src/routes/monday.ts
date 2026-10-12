@@ -12,6 +12,7 @@
 //   DELETE /projects/:projectId/link          project maintainer+
 //   POST   /projects/:projectId/analyze       project maintainer+ — AI mapping proposal
 //                                             (boardId optional — omit it and the AI picks the board too)
+//   POST   /projects/:projectId/columns       project maintainer+ — add the missing Aquilla columns to a board
 //   POST   /projects/:projectId/sync          project maintainer+ — push now
 //   POST   /webhook                           NO auth (Monday JWT via MONDAY_SIGNING_SECRET)
 //   POST   /internal/push                     Bearer SYNC_SECRET_KEY (sync-worker fire-and-forget)
@@ -66,6 +67,7 @@ import {
   NoBoardsError,
 } from "../lib/monday/analyze"
 import { pushBoardLink, schedulePush } from "../lib/monday/push"
+import { addMissingColumns, findExistingColumn, isCreatableMetric } from "../lib/monday/columns"
 import { notifySyncWorkerOfMondayLinkChange } from "../services/sync-worker-notify"
 import { secureCompare } from "../utils/secure-compare"
 
@@ -742,6 +744,111 @@ monday.post(
   },
 )
 
+// "Add the missing columns for me": create the board columns a project's
+// progress needs, so a board with no number columns can still be linked
+// without leaving for Monday. Same permission as saving a link.
+const addColumnsSchema = z.object({
+  boardId: z.string().min(1),
+  metrics: z.array(z.string()).max(20),
+})
+
+monday.post(
+  "/projects/:projectId/columns",
+  authMiddleware,
+  zValidator("json", addColumnsSchema),
+  async (c) => {
+    const guard = await projectGuard(c, MANAGE_MIN_ROLE)
+    if (guard instanceof Response) return guard
+    const body = c.req.valid("json")
+
+    const orgId = await getProjectOrgId(c.env, guard.projectId)
+    if (orgId == null) return c.json({ error: "project has no org" }, 409)
+    const token = await orgTokenOr409(c, orgId)
+    if (token instanceof Response) return token
+
+    let before
+    try {
+      before = await fetchBoardStructure(token, body.boardId)
+    } catch (err) {
+      console.error("[monday] add columns: board read failed:", err)
+      return c.json({ error: "Monday API error" }, 502)
+    }
+
+    const metrics = body.metrics.filter(isCreatableMetric)
+    // Matching on re-link depends on the Aquilla ID column, so a board that
+    // lacks one always gets it, asked for or not.
+    if (!metrics.includes("external_id") && !findExistingColumn("external_id", before.columns)) {
+      metrics.push("external_id")
+    }
+
+    const result = await addMissingColumns(token, body.boardId, metrics, before.columns)
+
+    // Columns we create fire our own create_column webhook. Recording them in
+    // every link's saved structure for this board first means the webhook
+    // recognises them and doesn't raise "Board structure changed" for a
+    // change the user just asked for. Only OUR columns are added: anything
+    // else that appeared on the board meanwhile still flags the link.
+    if (result.created.length > 0) {
+      await rememberCreatedColumns(c.env, body.boardId, result.created)
+    }
+
+    let structure
+    try {
+      structure = await fetchBoardStructure(token, body.boardId)
+    } catch {
+      structure = {
+        ...before,
+        columns: [
+          ...before.columns,
+          ...result.created.map((col) => ({ id: col.columnId, title: col.title, type: col.columnType })),
+        ],
+      }
+    }
+    return c.json({
+      ...result,
+      structure: {
+        url: structure.url ?? null,
+        name: structure.name ?? null,
+        columns: structure.columns.map(({ id, title, type }) => ({ id, title, type })),
+        groups: structure.groups,
+      },
+    })
+  },
+)
+
+async function rememberCreatedColumns(
+  env: Env,
+  boardId: string,
+  created: Array<{ columnId: string; title: string; columnType: string }>,
+): Promise<void> {
+  const links = await env.AQUILLA_PG.prepare(
+    "SELECT id, remote_state FROM integration_links WHERE external_id = ? AND provider = ?",
+  )
+    .bind(boardId, PROVIDER)
+    .all<{ id: string; remote_state: unknown }>()
+  for (const link of links.results ?? []) {
+    const saved = parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)
+    const columns = [...(saved?.columns ?? [])]
+    for (const col of created) {
+      if (!columns.some((existing) => existing.id === col.columnId)) {
+        columns.push({ id: col.columnId, title: col.title, type: col.columnType })
+      }
+    }
+    const next: MondayBoardStructure = {
+      fetchedAt: saved?.fetchedAt ?? new Date().toISOString(),
+      url: saved?.url ?? null,
+      name: saved?.name ?? null,
+      columns,
+      groups: saved?.groups ?? [],
+    }
+    await env.AQUILLA_PG.prepare(
+      "UPDATE integration_links SET remote_state = ?::jsonb, updated_at = now() WHERE id = ?",
+    )
+      .bind(JSON.stringify(next), link.id)
+      .run()
+  }
+}
+
 monday.post("/projects/:projectId/sync", authMiddleware, async (c) => {
   const guard = await projectGuard(c, MANAGE_MIN_ROLE)
   if (guard instanceof Response) return guard
@@ -794,10 +901,16 @@ monday.post("/webhook", async (c) => {
 
   // Do the (cheap) work inline and always answer 200 fast.
   if ((type === "create_column" || type.startsWith("create_column")) && boardId) {
+    // A column the link already knows about is not a structure change: that
+    // is how a column Aquilla itself just added ("Add the missing columns for
+    // me") arrives here, recorded before the webhook could fire.
+    const columnId = event.columnId != null ? String(event.columnId) : null
     await c.env.AQUILLA_PG.prepare(
-      "UPDATE integration_links SET remote_state_stale = TRUE WHERE external_id = ? AND provider = ?",
+      `UPDATE integration_links SET remote_state_stale = TRUE
+        WHERE external_id = ? AND provider = ?
+          AND NOT COALESCE(remote_state -> 'columns' @> jsonb_build_array(jsonb_build_object('id', ?::text)), FALSE)`,
     )
-      .bind(boardId, PROVIDER)
+      .bind(boardId, PROVIDER, columnId)
       .run()
   } else if (
     (type === "item_deleted" || type === "item_archived" || type === "delete_pulse" || type === "archive_pulse") &&

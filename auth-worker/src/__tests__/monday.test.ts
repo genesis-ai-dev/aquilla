@@ -1308,3 +1308,182 @@ describe("analyze board selection", () => {
     expect(body.error).toMatch(/no boards/i)
   })
 })
+
+// ── "Add the missing columns for me" ───────────────────────────────────────
+
+describe("POST /api/v2/monday/projects/:projectId/columns", () => {
+  /** A fake board whose columns grow as create_column is called. */
+  function fakeBoard(initial: Array<{ id: string; title: string; type: string }>, failTitles: string[] = []) {
+    const columns = [...initial]
+    const creates: string[] = []
+    const fn = mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("create_column(")) {
+        const title = /title: \\"([^"\\]+)\\"/.exec(body)?.[1] ?? "?"
+        const type = /column_type: (\w+)/.exec(body)?.[1] ?? "?"
+        creates.push(`${title}:${type}`)
+        if (failTitles.includes(title)) {
+          return jsonResponse({ errors: [{ message: `Column "${title}" refused` }] })
+        }
+        const col = { id: `col_${creates.length}`, title, type }
+        columns.push(col)
+        return jsonResponse({ data: { create_column: col } })
+      }
+      if (body.includes("settings_str")) {
+        return jsonResponse({
+          data: {
+            boards: [{ name: "Ruth Board", url: "https://acme.monday.com/boards/9", columns: [...columns], groups: [{ id: "topics", title: "Group" }] }],
+          },
+        })
+      }
+      return null
+    })
+    return { fn, columns, creates }
+  }
+
+  it("creates only the missing columns with plain titles and the right types, and always adds Aquilla ID", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([
+      { id: "name", title: "Name", type: "name" },
+      { id: "numbers_1", title: "Completion %", type: "numbers" },
+    ])
+
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["completion_pct", "validated_pct", "status_auto", "last_activity", "translators", "project_name"],
+    })
+    expect(res.status).toBe(200)
+    const out = (await res.json()) as {
+      created: Array<{ metric: string; columnId: string; title: string; columnType: string }>
+      reused: Array<{ metric: string; columnId: string }>
+      failed: unknown[]
+      structure: { columns: Array<{ id: string }> }
+    }
+    expect(board.creates).toEqual([
+      "Validated %:numbers",
+      "Status:status",
+      "Last activity:date",
+      "Translators:text",
+      "Aquilla ID:text",
+    ])
+    expect(out.reused).toEqual([{ metric: "completion_pct", columnId: "numbers_1", columnType: "numbers", title: "Completion %" }])
+    expect(out.created.map((col) => col.metric)).toEqual([
+      "validated_pct",
+      "status_auto",
+      "last_activity",
+      "translators",
+      "external_id",
+    ])
+    expect(out.failed).toEqual([])
+    expect(out.structure.columns.map((col) => col.id)).toContain("col_5")
+  })
+
+  it("is idempotent: asking again for columns the board now has creates nothing", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([
+      { id: "a", title: "validated %", type: "numbers" },
+      { id: "b", title: "Aquilla ID", type: "text" },
+    ])
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["validated_pct", "external_id"],
+    })
+    expect(res.status).toBe(200)
+    expect(board.creates).toEqual([])
+    const out = (await res.json()) as { created: unknown[]; reused: Array<{ columnId: string }> }
+    expect(out.created).toEqual([])
+    expect(out.reused.map((col) => col.columnId)).toEqual(["a", "b"])
+  })
+
+  it("does not reuse a same-titled column the metric can't write to", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([
+      { id: "f", title: "Validated %", type: "formula" },
+      { id: "b", title: "Aquilla ID", type: "text" },
+    ])
+    await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["validated_pct"],
+    })
+    expect(board.creates).toEqual(["Validated %:numbers"])
+  })
+
+  it("contributor (400) gets 403 and nothing is created", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([])
+    const res = await request("tom", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["completion_pct"],
+    })
+    expect(res.status).toBe(403)
+    expect(board.creates).toEqual([])
+  })
+
+  it("a column Monday refuses is reported, and the others are still created", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const board = fakeBoard([{ id: "b", title: "Aquilla ID", type: "text" }], ["Status"])
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["completion_pct", "status_auto", "validated_pct"],
+    })
+    expect(res.status).toBe(200)
+    const out = (await res.json()) as {
+      created: Array<{ metric: string }>
+      failed: Array<{ metric: string; title: string; error: string }>
+    }
+    expect(out.created.map((col) => col.metric)).toEqual(["completion_pct", "validated_pct"])
+    expect(out.failed).toEqual([{ metric: "status_auto", title: "Status", error: 'Column "Status" refused' }])
+    expect(board.creates).toHaveLength(3)
+  })
+
+  it("columns Aquilla adds don't raise 'Board structure changed'; a column someone else adds still does", async () => {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE integration_links SET remote_state = ?::jsonb WHERE id = 'link-1'",
+    )
+      .bind(JSON.stringify({ fetchedAt: "2026-10-01T00:00:00Z", columns: [{ id: "numbers_1", title: "Completion %", type: "numbers" }], groups: [] }))
+      .run()
+    fakeBoard([
+      { id: "numbers_1", title: "Completion %", type: "numbers" },
+      { id: "b", title: "Aquilla ID", type: "text" },
+    ])
+    const res = await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["validated_pct"],
+    })
+    expect(res.status).toBe(200)
+    const { created } = (await res.json()) as { created: Array<{ columnId: string }> }
+    expect(created).toHaveLength(1)
+
+    const now = Math.floor(Date.now() / 1000)
+    const webhookJwt = await sign({ iat: now, exp: now + 300 }, menv.MONDAY_SIGNING_SECRET, "HS256")
+    const post = (event: Record<string, unknown>) =>
+      app.request(
+        "/api/v2/monday/webhook",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${webhookJwt}` },
+          body: JSON.stringify({ event }),
+        },
+        menv,
+      )
+    const stale = async () =>
+      (
+        await env.AQUILLA_PG.prepare(
+          "SELECT remote_state_stale FROM integration_links WHERE id = 'link-1'",
+        ).first<{ remote_state_stale: boolean }>()
+      )!.remote_state_stale
+
+    expect((await post({ type: "create_column", boardId: "board-9", columnId: created[0]!.columnId })).status).toBe(200)
+    expect(await stale()).toBe(false)
+
+    expect((await post({ type: "create_column", boardId: "board-9", columnId: "someone_elses" })).status).toBe(200)
+    expect(await stale()).toBe(true)
+  })
+})

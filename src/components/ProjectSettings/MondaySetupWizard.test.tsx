@@ -18,6 +18,7 @@ vi.mock("@/lib/monday/api", () => ({
       this.status = status
     }
   },
+  addMondayColumns: vi.fn(),
   analyzeMondayMapping: vi.fn(),
   deleteMondayLink: vi.fn(),
   fetchMondayBoards: vi.fn(),
@@ -310,4 +311,85 @@ it("does not call a skipped push successful", async () => {
   expect(screen.queryByRole("combobox", { name: /board items/i })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /apply and push/i }))
   expect(await screen.findByRole("heading", { name: /sync needs attention/i })).toBeTruthy()
+})
+
+describe("Add the missing columns for me", () => {
+  it("a board with nothing to map to: lists the missing columns, adds them, maps them, and Apply sends them", async () => {
+    mocked.analyzeMondayMapping.mockResolvedValue(
+      analysis({ proposal: { version: 1, itemGranularity: "project", columns: [] } }),
+    )
+    mocked.addMondayColumns.mockResolvedValue({
+      created: [
+        { metric: "completion_pct", columnId: "c1", columnType: "numbers", title: "Completion %" },
+        { metric: "external_id", columnId: "c7", columnType: "text", title: "Aquilla ID" },
+      ],
+      reused: [{ metric: "validated_pct", columnId: "v0", columnType: "numbers", title: "Validated %" }],
+      failed: [],
+      structure: {
+        columns: [
+          { id: "c1", title: "Completion %", type: "numbers" },
+          { id: "v0", title: "Validated %", type: "numbers" },
+          { id: "c7", title: "Aquilla ID", type: "text" },
+        ],
+        groups: [],
+      },
+    })
+    renderWizard()
+    await scanToReview()
+
+    const apply = screen.getByRole("button", { name: /apply and push/i }) as HTMLButtonElement
+    expect(apply.disabled).toBe(true)
+    const block = screen.getByTestId("monday-missing-columns")
+    expect(block.textContent).toMatch(/Completion %, Validated %, Audio validated %, Status, Last activity, Translators, Aquilla ID/)
+
+    fireEvent.click(screen.getByRole("button", { name: /add the missing columns for me/i }))
+    await waitFor(() => expect(mocked.addMondayColumns).toHaveBeenCalledTimes(1))
+    expect(mocked.addMondayColumns.mock.calls[0][2]).toEqual({
+      boardId: "b1",
+      metrics: ["completion_pct", "validated_pct", "audio_validated_pct", "status_auto", "last_activity", "translators", "external_id"],
+    })
+    expect(await screen.findByText(/added 2 columns to the board and matched them/i)).toBeTruthy()
+
+    await waitFor(() => expect(apply.disabled).toBe(false))
+    fireEvent.click(apply)
+    await waitFor(() => expect(mocked.putMondayLink).toHaveBeenCalled())
+    expect(mocked.putMondayLink.mock.calls[0][2].config.columns).toEqual([
+      { columnId: "v0", columnType: "numbers", metric: "validated_pct" },
+      { columnId: "c1", columnType: "numbers", metric: "completion_pct" },
+      { columnId: "c7", columnType: "text", metric: "external_id" },
+    ])
+  })
+
+  it("is hidden when every suggested number already has a column", async () => {
+    const metrics = ["completion_pct", "validated_pct", "audio_validated_pct", "status_auto", "last_activity", "translators", "external_id"] as const
+    mocked.analyzeMondayMapping.mockResolvedValue(
+      analysis({
+        proposal: {
+          version: 1,
+          itemGranularity: "project",
+          columns: metrics.map((metric, i) => ({ columnId: `x${i}`, columnType: "text", metric })),
+        },
+      }),
+    )
+    renderWizard()
+    await scanToReview()
+    expect(screen.queryByTestId("monday-missing-columns")).toBeNull()
+  })
+
+  it("names what Monday refused and leaves the button to try again", async () => {
+    mocked.analyzeMondayMapping.mockResolvedValue(
+      analysis({ proposal: { version: 1, itemGranularity: "project", columns: [] } }),
+    )
+    mocked.addMondayColumns.mockResolvedValue({
+      created: [{ metric: "completion_pct", columnId: "c1", columnType: "numbers", title: "Completion %" }],
+      reused: [],
+      failed: [{ metric: "status_auto", title: "Status", error: "Complexity budget exhausted" }],
+      structure: { columns: [{ id: "c1", title: "Completion %", type: "numbers" }], groups: [] },
+    })
+    renderWizard()
+    await scanToReview()
+    fireEvent.click(screen.getByRole("button", { name: /add the missing columns for me/i }))
+    expect(await screen.findByText(/couldn't add: status\. monday said: complexity budget exhausted/i)).toBeTruthy()
+    expect(screen.getByRole("button", { name: /add the missing columns for me/i })).toBeTruthy()
+  })
 })

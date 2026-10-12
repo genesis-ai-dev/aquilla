@@ -1252,6 +1252,17 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
     "projectSettings.monday.granularityFileLabel": "One item per file",
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
+    "projectSettings.monday.missingColumnsLine": "This board has no column for: {columns}.",
+    "projectSettings.monday.addMissingColumnsButton": "Add the missing columns for me",
+    "projectSettings.monday.addMissingColumnsDone": plural({
+      one: "Added {count} column to the board and matched it.",
+      other: "Added {count} columns to the board and matched them.",
+    }, "count"),
+    "projectSettings.monday.addMissingColumnsMatchedOnly": plural({
+      one: "Matched {count} column that was already on the board.",
+      other: "Matched {count} columns that were already on the board.",
+    }, "count"),
+    "projectSettings.monday.addMissingColumnsFailed": "Couldn't add: {columns}. Monday said: {reason}",
     "projectSettings.monday.reviewRowsCaption": "What gets pushed — change any row before applying",
     "projectSettings.monday.applyingStatus": "Linking the board and pushing your progress…",
     "projectSettings.monday.progressPushesAutomatically": "Progress pushes automatically as translators work.",
@@ -1994,6 +2005,44 @@ export const projectSettings = defineNamespace({
         description: "Body text of the confirmation dialog before unlinking the project's Monday board.",
         placeholders: {
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
+        },
+      },
+      "projectSettings.monday.missingColumnsLine": {
+        description:
+          "Line in a project's Monday.com setup, above the \"Add the missing columns for me\" " +
+          "button, naming the progress numbers that have no column on the chosen Monday board " +
+          "yet, so Aquilla has nowhere to write them.",
+        placeholders: {
+          columns:
+            "Comma-separated titles of the columns Aquilla would create on the Monday board, " +
+            "e.g. 'Validated %, Audio validated %, Aquilla ID'. Monday data, shown untranslated.",
+        },
+      },
+      "projectSettings.monday.addMissingColumnsButton": {
+        description:
+          "Button in a project's Monday.com setup. Clicking it makes Aquilla create the " +
+          "listed columns on the user's Monday board and connect them to the project's " +
+          "progress numbers, so the user doesn't have to add them in Monday by hand.",
+      },
+      "projectSettings.monday.addMissingColumnsDone": {
+        description:
+          "Confirmation after \"Add the missing columns for me\": how many columns Aquilla " +
+          "created on the Monday board. They are already connected to the progress numbers.",
+        placeholders: { count: "How many columns were created." },
+      },
+      "projectSettings.monday.addMissingColumnsMatchedOnly": {
+        description:
+          "Confirmation after \"Add the missing columns for me\" when the board already had " +
+          "columns with the right names: nothing was created, those columns were connected instead.",
+        placeholders: { count: "How many existing columns were connected." },
+      },
+      "projectSettings.monday.addMissingColumnsFailed": {
+        description:
+          "Error after \"Add the missing columns for me\" when Monday refused to create " +
+          "some columns. The others were still created.",
+        placeholders: {
+          columns: "Comma-separated titles of the columns Monday refused (Monday data, untranslated).",
+          reason: "Monday's own error message, in English, shown as received.",
         },
       },
       "projectSettings.monday.wizardRecommendation": {

@@ -64,6 +64,8 @@ interface ProgressRow {
   structural_count: number
   structural_filled_count: number
   structural_validator_histogram: unknown
+  audio_validator_histogram: unknown
+  structural_audio_validator_histogram: unknown
 }
 
 function parseHistogram(raw: unknown): Map<number, number> {
@@ -117,9 +119,21 @@ function buildMetrics(
   }
 }
 
-function toThreshold(raw: unknown, fallback: number): number {
+/** Same clamp as every other reader of these counts (progress read, portfolio): 1–15. */
+const MAX_VALIDATION_LEVELS = 15
+
+function toThreshold(raw: unknown): number {
   const n = Number(raw)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
+  return Number.isFinite(n) && n >= 1 ? Math.min(MAX_VALIDATION_LEVELS, Math.floor(n)) : 1
+}
+
+/** Bucket-wise subtraction, because validatedAtThreshold reads cumulatively. */
+function subtractHistogram(from: Map<number, number>, raw: unknown): void {
+  for (const [bucket, amount] of parseHistogram(raw)) {
+    const remaining = (from.get(bucket) ?? 0) - amount
+    if (remaining > 0) from.set(bucket, remaining)
+    else from.delete(bucket)
+  }
 }
 
 /** Compute project + per-file metrics. Returns null if the project doesn't exist. */
@@ -145,8 +159,11 @@ export async function computeProjectMetrics(
     )
     .bind(projectId)
     .first<{ validation_count: string | null; validation_count_audio: string | null }>()
-  const threshold = toThreshold(settings?.validation_count, 1)
-  const audioThreshold = toThreshold(settings?.validation_count_audio, threshold)
+  const threshold = toThreshold(settings?.validation_count)
+  // AQU-1771: an unset audio count means one vote, as on the dashboards. It
+  // used to fall back to the TEXT count, so a project needing two text votes
+  // reported its audio against two as well.
+  const audioThreshold = toThreshold(settings?.validation_count_audio)
 
   // AQU-1083: do headings count? The project's answer, else its org's, else
   // yes. Generated columns on both, for the reason stated above about blobs.
@@ -210,7 +227,9 @@ export async function computeProjectMetrics(
               fsp.validator_histogram AS validator_histogram,
               fsp.structural_count AS structural_count,
               fsp.structural_filled_count AS structural_filled_count,
-              fsp.structural_validator_histogram AS structural_validator_histogram
+              fsp.structural_validator_histogram AS structural_validator_histogram,
+              fsp.audio_validator_histogram AS audio_validator_histogram,
+              fsp.structural_audio_validator_histogram AS structural_audio_validator_histogram
          FROM file_section_progress fsp
          JOIN lanes l
            ON l.project_id = fsp.project_id AND l.id = fsp.lane_id AND l.role = 'target'
@@ -259,30 +278,36 @@ export async function computeProjectMetrics(
     let totals: { total: number; filled: number; validated: number; audioValidated: number }
     if (laneRows.length > 0) {
       const histogram = new Map<number, number>()
+      // AQU-1771: audio has its own histogram (validator counts on the
+      // selected dub take, weakest track deciding — db/shared/audio-progress.ts).
+      // Audio % used to be read off the TEXT histogram, so it reported text
+      // validation under an audio heading.
+      const audioHistogram = new Map<number, number>()
       let total = 0
       let filled = 0
       for (const lane of laneRows) {
         total += Number(lane.total_count) || 0
         filled += Number(lane.filled_count) || 0
-        for (const [bucket, amount] of parseHistogram(lane.validator_histogram)) {
-          histogram.set(bucket, (histogram.get(bucket) ?? 0) + amount)
-        }
+        const laneHistogram = parseHistogram(lane.validator_histogram)
+        const laneAudio = parseHistogram(lane.audio_validator_histogram)
         if (!countStructural) {
           total -= Number(lane.structural_count) || 0
           filled -= Number(lane.structural_filled_count) || 0
-          // Bucket-wise, because validatedAtThreshold reads cumulatively.
-          for (const [bucket, amount] of parseHistogram(lane.structural_validator_histogram)) {
-            const remaining = (histogram.get(bucket) ?? 0) - amount
-            if (remaining > 0) histogram.set(bucket, remaining)
-            else histogram.delete(bucket)
-          }
+          subtractHistogram(laneHistogram, lane.structural_validator_histogram)
+          subtractHistogram(laneAudio, lane.structural_audio_validator_histogram)
+        }
+        for (const [bucket, amount] of laneHistogram) {
+          histogram.set(bucket, (histogram.get(bucket) ?? 0) + amount)
+        }
+        for (const [bucket, amount] of laneAudio) {
+          audioHistogram.set(bucket, (audioHistogram.get(bucket) ?? 0) + amount)
         }
       }
       totals = {
         total: Math.max(0, total),
         filled: Math.max(0, filled),
         validated: validatedAtThreshold(histogram, threshold),
-        audioValidated: validatedAtThreshold(histogram, audioThreshold),
+        audioValidated: validatedAtThreshold(audioHistogram, audioThreshold),
       }
     } else {
       // Pre-backfill fallback: file counters (approved ≈ validated), and only

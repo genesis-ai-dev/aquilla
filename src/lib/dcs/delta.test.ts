@@ -571,3 +571,147 @@ describe("front-matter opt-out survives re-parse (AQU-686)", () => {
     expect(delta).toEqual({ creates: [], commits: [], deletes: [] })
   })
 })
+
+describe("computeDelta — a changed path that is absent at the new ref (AQU-1860)", () => {
+  // compareRefs returns the union of the filenames touched by EVERY commit in
+  // the range, so a file renamed or deleted part-way through shows up in the
+  // changed list while not existing at the new ref. Measured on
+  // WycliffeAssociates/en_udb v19-01...v19-10: 84 changed paths, 73 present at
+  // v19-10, 11 absent (all historical front-matter .md folders, no .usfm).
+  // Letting one 404 abort the batch lost the entire release.
+  const STALE_MD = "00-UDBfront&back/UDB-3-Appendix.md"
+  const LIVE_MD = "00-UDB_front&back/UDB-1-Intro.md"
+
+  /** Built standalone rather than by mutating fakeClient(), so the raw-fetch
+   *  stub is typed as returning plain `string` instead of that helper's
+   *  inferred union of its own literals. */
+  function clientWithStalePath(
+    raw: (path: string) => Promise<string>,
+  ) {
+    return {
+      getCatalogEntry: vi.fn(),
+      searchCatalog: vi.fn(),
+      compareRefs: vi.fn(async () => ({
+        totalCommits: 479,
+        changedFiles: [STALE_MD, TIT_PATH, LIVE_MD],
+      })),
+      getTree: vi.fn(),
+      fetchRaw: vi.fn(
+        async (_o: string, _r: string, _ref: string, path: string): Promise<string> =>
+          raw(path),
+      ),
+    }
+  }
+
+  /** The measured en_udb case: one changed path absent at the new ref. */
+  const stalePathRaw = async (path: string): Promise<string> => {
+    if (path === "manifest.yaml") return MANIFEST_YAML
+    if (path === TIT_PATH) return NEW_TIT_USFM
+    if (path === LIVE_MD) return "# intro"
+    if (path === STALE_MD) {
+      // Exactly what DcsClient.fetchRaw raises for a 404.
+      throw new Error(
+        "DCS raw fetch failed (HTTP 404) for " +
+          `https://git.door43.org/WycliffeAssociates/en_udb/raw/tag/v19-10/${path}`,
+      )
+    }
+    return ""
+  }
+
+  it("skips the absent member and still delivers the rest of the release", async () => {
+    const client = clientWithStalePath(stalePathRaw)
+    const delta = await computeDelta({
+      client: client as never,
+      cursor: {
+        owner: "unfoldingWord",
+        repo: "en_ult",
+        subject: "Aligned Bible",
+        contentFormat: "usfm",
+        trackMode: "release",
+        ref: OLD_ENTRY.ref,
+        commitSha: OLD_ENTRY.commitSha,
+        released: OLD_ENTRY.released,
+        importedAt: "2026-05-02T00:00:00Z",
+      },
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: currentCells(),
+    })
+
+    // The USFM book still classified: v1 edited, v3 added, v4 tombstoned.
+    expect(delta.commits.map((c) => c.cell.cellId)).toEqual([V1])
+    expect(delta.creates.map((c) => c.cell.cellId)).toEqual([V3])
+    expect(delta.deletes).toEqual([V4_GONE])
+
+    // It was attempted, not silently dropped from the request list.
+    const requested = client.fetchRaw.mock.calls.map((call) => call[3])
+    expect(requested).toContain(STALE_MD)
+    expect(requested).toContain(TIT_PATH)
+  })
+
+  it("aborts on any failure that is NOT a missing member", async () => {
+    // A throttled or broken upstream must never look like an empty delta.
+    const client = clientWithStalePath(async (path) => {
+      if (path === "manifest.yaml") return MANIFEST_YAML
+      if (path === TIT_PATH) {
+        throw new Error("DCS raw fetch failed (HTTP 503) for https://git.door43.org/x")
+      }
+      return ""
+    })
+    await expect(
+      computeDelta({
+        client: client as never,
+        cursor: {
+          owner: "unfoldingWord",
+          repo: "en_ult",
+          subject: "Aligned Bible",
+          contentFormat: "usfm",
+          trackMode: "release",
+          ref: OLD_ENTRY.ref,
+          commitSha: OLD_ENTRY.commitSha,
+          released: OLD_ENTRY.released,
+          importedAt: "2026-05-02T00:00:00Z",
+        },
+        oldEntry: OLD_ENTRY,
+        newEntry: NEW_ENTRY,
+        currentCells: currentCells(),
+      }),
+    ).rejects.toThrow(/HTTP 503/)
+  })
+
+  it("never tombstones cells belonging to a member it could not read", async () => {
+    // The dangerous reading of "absent upstream" would be "delete its cells".
+    // classifyAgainstCurrent scopes deletes to the files the parse produced, so
+    // a skipped member's cells must survive untouched.
+    const client = clientWithStalePath(stalePathRaw)
+    const held = currentCells()
+    const staleFileId = dcsFileId(REPO, STALE_MD)
+    const ORPHAN = dcsCellId(`${REPO}|appendix-1`)
+    held.set(ORPHAN, {
+      eventId: dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, ORPHAN),
+      contentHash: contentHash("appendix text"),
+      fileId: staleFileId,
+    })
+
+    const delta = await computeDelta({
+      client: client as never,
+      cursor: {
+        owner: "unfoldingWord",
+        repo: "en_ult",
+        subject: "Aligned Bible",
+        contentFormat: "usfm",
+        trackMode: "release",
+        ref: OLD_ENTRY.ref,
+        commitSha: OLD_ENTRY.commitSha,
+        released: OLD_ENTRY.released,
+        importedAt: "2026-05-02T00:00:00Z",
+      },
+      oldEntry: OLD_ENTRY,
+      newEntry: NEW_ENTRY,
+      currentCells: held,
+    })
+
+    expect(delta.deletes).not.toContain(ORPHAN)
+    expect(delta.deletes).toEqual([V4_GONE])
+  })
+})

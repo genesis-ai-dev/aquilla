@@ -15,7 +15,7 @@
 
 import { mapWithConcurrency } from "@/lib/concurrency"
 import type { DcsCatalogEntry, DcsCell, DcsCursor, DcsFile } from "./types"
-import type { DcsClient, RefKind } from "./catalog"
+import { isDcsRawNotFound, type DcsClient, type RefKind } from "./catalog"
 import { parseManifest } from "./manifest"
 import { routeFor } from "./resource-map"
 import { dcsEventId, dcsFileId } from "./cell-id"
@@ -68,7 +68,26 @@ const RAW_FETCH_CONCURRENCY = 4
 /**
  * Fetch every `path` at one ref into a path→text map. Results are folded in
  * INPUT order, so the map (and therefore the parse, and therefore the
- * classification) is identical to what the old serial loop produced.
+ * classification) does not depend on which fetch finished first.
+ *
+ * A member that is ABSENT at this ref is skipped, not fatal. `compareRefs`
+ * returns the union of the filenames touched by every commit in the range, so a
+ * file renamed or deleted part-way through legitimately appears in the changed
+ * list while not existing at the new ref: on WycliffeAssociates/en_udb
+ * v19-01...v19-10, 11 of 84 changed paths are absent. Letting one of those
+ * abort the batch meant a single stale front-matter path lost the whole
+ * release — every USFM book included — which is what it did before this guard
+ * (the pre-existing serial loop propagated the 404 the same way).
+ *
+ * Skipping is the conservative half of the repair: the member is simply not in
+ * `parsedFiles`, and `classifyAgainstCurrent` scopes deletes to the files the
+ * parse produced, so no cell is tombstoned on account of a path we could not
+ * read. A file genuinely deleted upstream therefore keeps its cells rather than
+ * losing them to a guess — the same position the "a brand-new upstream file is
+ * NOT auto-added here" note above takes on the other side.
+ *
+ * Every other failure (403, 5xx, a size or encoding refusal) still aborts, so a
+ * throttled or broken upstream never looks like an empty delta.
  */
 async function fetchRawFiles(
   client: DcsClient,
@@ -79,10 +98,18 @@ async function fetchRawFiles(
 ): Promise<Map<string, string>> {
   const texts = await mapWithConcurrency(paths, RAW_FETCH_CONCURRENCY, async (path) => {
     if (signal?.aborted) throw new Error(cancelMessage)
-    return client.fetchRaw(at.owner, at.repoName, at.ref, path, at.refKind, signal)
+    try {
+      return await client.fetchRaw(at.owner, at.repoName, at.ref, path, at.refKind, signal)
+    } catch (error) {
+      if (isDcsRawNotFound(error)) return null
+      throw error
+    }
   })
   const fileTexts = new Map<string, string>()
-  paths.forEach((path, index) => fileTexts.set(path, texts[index]))
+  paths.forEach((path, index) => {
+    const text = texts[index]
+    if (text !== null) fileTexts.set(path, text)
+  })
   return fileTexts
 }
 

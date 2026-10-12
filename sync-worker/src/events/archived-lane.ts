@@ -57,12 +57,19 @@ export function targetLaneRowsFor(
 
 /**
  * AQU-1532: true when the project has a target lane row whose legacy tag is
- * exactly `tag` — the same match the projection's lane_id lookup uses.
- * `''` is not refused as missing. A bare project has no target lane yet, and
- * the cell-write batch creates that bridge before resolving lane_id
- * (AQU-1594). A project that already has a target lane does not: the write
- * reaches the cells insert and fails there (AQU-1615), rather than as a 422.
- * A named tag still has to exist or the write is a 422.
+ * exactly `tag` — the same match the projection's lane_id lookup uses, so a
+ * false here is exactly the write that would resolve a NULL `lane_id`.
+ * A named tag has to exist or the write is a 422.
+ *
+ * AQU-1884: `''` — the omitted tag, the former default lane — is no longer
+ * waved through. It resolves only when the project HAS a `''` lane row
+ * (a legacy/migrated project), or when this very write mints the bridge:
+ * `ensureBlankTargetBridgeStmt`'s `NOT EXISTS` inserts the bridge only for a
+ * project with no target lane at all, so a bridging kind on a project that
+ * already has tagged lanes gains nothing and used to fail the whole batch as a
+ * 500 ("DB batch failed"). `bridges` is {@link createsBlankLaneBridge} for the
+ * event's kind — false for the validation kinds, which never mint a lane.
+ *
  * Shares the per-request lane list with the archived-lane check.
  */
 export async function targetLaneRowExists(
@@ -70,10 +77,11 @@ export async function targetLaneRowExists(
   projectId: string,
   tag: string,
   cache: RequestCache,
+  bridges = false,
 ): Promise<boolean> {
-  if (tag === '') return true
   const lanes = await rowsFor(db, projectId, cache)
-  return lanes.some((lane) => lane.legacyTag === tag)
+  if (lanes.some((lane) => lane.legacyTag === tag)) return true
+  return tag === '' && bridges && lanes.length === 0
 }
 
 /**

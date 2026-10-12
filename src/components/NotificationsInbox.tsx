@@ -28,7 +28,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
-import { cellTextSnippet, mentionNoticesFor, type MentionNotice } from "@/lib/comments/mention-inbox"
+import { mentionNoticesFor, type MentionNotice } from "@/lib/comments/mention-inbox"
 import {
   dismissMentions,
   markMentionsRead,
@@ -41,10 +41,10 @@ import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
 /**
- * Rough row height. Each row is the place, "{author} mentioned you", and the
- * comment, so a fixed estimate is enough.
+ * Rough row height. Each row is the verse and file, then who commented and
+ * the comment, so a fixed estimate is enough.
  */
-const NOTICE_ROW_PX = 72
+const NOTICE_ROW_PX = 56
 
 /** The fields both a React key event and a window KeyboardEvent provide. */
 type InboxKeyEvent = {
@@ -66,26 +66,22 @@ type PendingDelete =
  * In-app inbox for comment @mentions (AQU-761). Derived from comments already
  * loaded for the open project — there is no notification table. Read and
  * dismissed state live on this device. Dismissing a row hides it here; the
- * comment stays. The row title is "{author} mentioned you in {file}" when the
- * mention is on a file, and "{author} mentioned you" when it is not. The
- * comment sits beneath that, and the time on the right. A verse or cell text
- * sits under the title when the mention has one. Opening the inbox does not
- * highlight a row; keyboard navigation does.
+ * comment stays. The first line is the verse and file, like "GEN 1:1 in
+ * Genesis.usfm", when the mention has them. The second line is "{author}
+ * commented: {message}". The time sits on the right of the first line.
+ * Opening the inbox does not highlight a row; keyboard navigation does.
  */
 export function NotificationsInbox({
   projectId,
   readerUsername,
   comments,
   files = [],
-  cellTextById,
 }: {
   projectId: string
   readerUsername: string
   comments: readonly CommentRecord[]
-  /** File names for a mention that sits on a file rather than a cell. */
+  /** File names used in the first line of a mention that belongs to a file. */
   files?: readonly { id: string; name: string }[]
-  /** Source text of cells loaded in the editor, keyed by cell id. */
-  cellTextById?: ReadonlyMap<string, string>
 }) {
   const t = useT()
   const navigate = useNavigate()
@@ -318,7 +314,6 @@ export function NotificationsInbox({
               notices={shown}
               readIds={readIds}
               files={files}
-              cellTextById={cellTextById}
               listRef={listRef}
               keyDownRef={listKeyDownRef}
               markReadLabel={t("comments.inbox.markRead")}
@@ -361,7 +356,6 @@ function NotificationList({
   notices,
   readIds,
   files,
-  cellTextById,
   listRef,
   keyDownRef,
   markReadLabel,
@@ -377,7 +371,6 @@ function NotificationList({
   notices: MentionNotice[]
   readIds: ReadonlySet<string>
   files: readonly { id: string; name: string }[]
-  cellTextById: ReadonlyMap<string, string> | undefined
   listRef: RefObject<HTMLDivElement | null>
   keyDownRef: RefObject<(event: InboxKeyEvent) => void>
   markReadLabel: string
@@ -515,7 +508,11 @@ function NotificationList({
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const notice = notices[virtualItem.index]
           if (!notice) return null
-          const place = placeLabel(notice, cellTextById)
+          const location = locationLabel(notice, files, t)
+          const commented = t("comments.inbox.commented", {
+            author: notice.authorLabel,
+            message: notice.excerpt,
+          })
           return (
             <div
               key={virtualItem.key}
@@ -536,10 +533,9 @@ function NotificationList({
                   virtualItem.index === activeIndex ||
                   (activeIndex < 0 && virtualItem.index === 0)
                 }
-                title={mentionTitle(notice, files, t)}
-                place={place}
+                title={location ?? commented}
                 timeLabel={formatRelativeTime(notice.createdAt, t)}
-                message={notice.excerpt}
+                message={location ? commented : ""}
                 markReadLabel={markReadLabel}
                 markUnreadLabel={markUnreadLabel}
                 deleteLabel={deleteLabel}
@@ -565,7 +561,6 @@ function NotificationRow({
   active,
   tabbable,
   title,
-  place,
   timeLabel,
   message,
   markReadLabel,
@@ -584,8 +579,6 @@ function NotificationRow({
   active: boolean
   tabbable: boolean
   title: string
-  /** Verse, cell text, or file. Absent for a project-wide mention. */
-  place: string | null
   timeLabel: string
   message: string
   markReadLabel: string
@@ -635,11 +628,6 @@ function NotificationRow({
               {timeLabel}
             </span>
           </span>
-          {place ? (
-            <span className="mt-0.5 block truncate text-xs text-foreground/80" data-ph-mask>
-              {place}
-            </span>
-          ) : null}
           {message ? (
             <span className="mt-0.5 block truncate text-xs text-muted-foreground" data-ph-mask>
               {message}
@@ -681,25 +669,16 @@ function fileNameOf(
   return name || null
 }
 
-function mentionTitle(
+/** "GEN 1:1 in Genesis.usfm", or whichever of the verse and file is known. */
+function locationLabel(
   notice: MentionNotice,
   files: readonly { id: string; name: string }[],
   t: TFunction,
-): string {
-  const file = fileNameOf(notice, files)
-  if (!file) return t("comments.inbox.mentionedYou", { author: notice.authorLabel })
-  return t("comments.inbox.mentionedYouInFile", { author: notice.authorLabel, file })
-}
-
-function placeLabel(
-  notice: MentionNotice,
-  cellTextById: ReadonlyMap<string, string> | undefined,
 ): string | null {
-  if (notice.scopeKind !== "cell") return null
-  // The file name is already in the title. A verse or the cell text names where.
-  if (notice.cellRef) return notice.cellRef
-  const live = notice.cellId ? cellTextById?.get(notice.cellId) : undefined
-  return cellTextSnippet(live) ?? notice.cellText
+  const file = fileNameOf(notice, files)
+  const verse = notice.scopeKind === "cell" ? notice.cellRef : null
+  if (verse && file) return t("comments.inbox.verseInFile", { verse, file })
+  return verse || file
 }
 
 function formatRelativeTime(timestamp: number, t: TFunction): string {

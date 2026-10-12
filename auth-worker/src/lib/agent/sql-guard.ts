@@ -146,6 +146,7 @@ export const READABLE_TABLES: Record<string, string> = {
   cell_backtranslations: "SELECT * FROM cell_backtranslations WHERE project_id = :project",
   cell_audio: "SELECT * FROM cell_audio WHERE project_id = :project",
   cell_word_morph: "SELECT * FROM cell_word_morph WHERE project_id = :project",
+  source_word_alignment: "SELECT * FROM source_word_alignment WHERE project_id = :project",
   assignments: "SELECT * FROM assignments WHERE project_id = :project",
   project_settings: "SELECT * FROM project_settings WHERE project_id = :project",
   project_members: "SELECT * FROM project_members WHERE project_id = :project",
@@ -490,7 +491,7 @@ export function guardSql(
   // touches no project data and is the L3 escape hatch ("the agent is never
   // stuck"). Any project table name in the query re-imposes the requirement.
   const PROJECT_TABLES =
-    /\b(cells|files|events|comments|assignments|assignment_cells|cell_validators|cell_waivers|cell_backtranslations|cell_audio|cell_word_morph|project_settings|project_members|users|agent_runs|chain_claims|project_seq_counters|scene_briefs|contextual_runs|contextual_steering|contextual_drafts|contextual_run_events|contextual_project_leases)\b/i
+    /\b(cells|files|events|comments|assignments|assignment_cells|cell_validators|cell_waivers|cell_backtranslations|cell_audio|cell_word_morph|source_word_alignment|project_settings|project_members|users|agent_runs|chain_claims|project_seq_counters|scene_briefs|contextual_runs|contextual_steering|contextual_drafts|contextual_run_events|contextual_project_leases)\b/i
   const catalogOnly = /\binformation_schema\s*\./i.test(masked) && !PROJECT_TABLES.test(masked)
   // Require :project in an actual equality against a project_id column, not
   // merely present anywhere in the text — `WHERE project_id <> :project` (or

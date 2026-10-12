@@ -30,6 +30,8 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { BIBLE_ENRICHMENTS } from "../../../db/shared/bible-enrichments"
 import { RightSidebarPanel } from "../RightSidebarPanel"
+import { ROLE } from "@/lib/frontier/roles"
+import { WhosWhoAlignment } from "./WhosWhoAlignment"
 import { WhosWhoCast, type CastActions } from "./WhosWhoCast"
 import { requestBibleFilter, requestMentionJump, useActiveBibleFilter } from "./bible-data-bus"
 import { participantName } from "./people-text"
@@ -44,6 +46,11 @@ interface WhosWhoSidebarProps {
   trackedRef: string | null
   /** The open file's source language, else the project's. */
   sourceLanguage: string | null | undefined
+  /**
+   * Sync tokens (AQU-1694). With one, the alignment note becomes the word
+   * alignment's status, and a maintainer's "Align source text to Greek".
+   */
+  getTokenForFile?: (fileId: string) => Promise<string | null>
   open: boolean
   onToggle: () => void
   className?: string
@@ -97,6 +104,7 @@ function WhosWhoPanel({
   fileId,
   trackedRef,
   sourceLanguage,
+  getTokenForFile,
   onToggle,
 }: Omit<WhosWhoSidebarProps, "open" | "className">) {
   const t = useT()
@@ -165,11 +173,20 @@ function WhosWhoPanel({
           </p>
         </div>
         <WhosWhoCast index={index} cast={cast} hereRefs={here.refs} nameOf={nameOf} actions={actions} />
-        {!originalSource && (
-          <p data-testid="whos-who-alignment-note" className="border-t px-3 py-2 text-xs text-muted-foreground">
-            {t("bibleData.whosWho.panel.alignmentNote")}
-          </p>
-        )}
+        {!originalSource &&
+          (fileId && getTokenForFile ? (
+            <WhosWhoAlignment
+              projectId={project.id}
+              fileId={fileId}
+              text={loaded?.text ?? null}
+              canAlign={(project.syncRole?.level ?? 0) >= ROLE.MAINTAINER}
+              getTokenForFile={getTokenForFile}
+            />
+          ) : (
+            <p data-testid="whos-who-alignment-note" className="border-t px-3 py-2 text-xs text-muted-foreground">
+              {t("bibleData.whosWho.panel.alignmentNote")}
+            </p>
+          ))}
       </>
     )
   }

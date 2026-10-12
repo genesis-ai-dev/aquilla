@@ -115,6 +115,7 @@
     "media:chapters": "tsx scripts/media-chapters.ts",
     "media:chapters:eval": "tsx scripts/media-chapters-eval.ts",
     "seams:eval": "tsx scripts/seam-eval.ts",
+    "bridges:eval": "tsx --expose-gc scripts/bridge-align-eval.ts",
     "tags:eval": "tsx scripts/passage-tags-eval.ts",
     "seed:extract": "tsx scripts/seed-extract.ts",
     "seed:fetch": "tsx scripts/seed-fetch.ts",

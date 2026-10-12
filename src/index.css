@@ -480,6 +480,52 @@ textarea,
 .mention-mark[data-thread-slot="5"] { --mention-color: var(--color-violet-600, oklch(0.541 0.281 293.009)); }
 .mention-mark[data-thread-slot="6"] { --mention-color: var(--color-teal-600, oklch(0.6 0.118 184.704)); }
 
+/* AQU-1694: a mention placed by word alignment with low confidence is
+   "approximate". Lit or tinted, it keeps a dotted underline and a fainter
+   wash, so it never looks as sure as the rest. */
+.mention-mark[data-mention-approximate="true"][data-mention-tinted="true"],
+.mention-mark[data-mention-approximate="true"][data-mention-lit="true"] {
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--mention-color) 6%, transparent) 8%,
+    color-mix(in oklch, var(--mention-color) 6%, transparent) 92%,
+    transparent 100%
+  );
+}
+.mention-mark[data-mention-approximate="true"][data-mention-lit="true"] {
+  text-decoration-style: dotted;
+}
+
+/* AQU-1694: Who's Who tints on the target column, painted with the CSS
+   Custom Highlight API (src/components/bible-data/target-tint-layer.ts), so
+   the editor's rendering is untouched. Same language as the source: a wash
+   and a solid underline when lit, dotted when approximate. */
+::highlight(aq-mention-lit) {
+  background-color: color-mix(in oklch, var(--primary) 12%, transparent);
+  text-decoration: underline solid 2px var(--primary);
+}
+::highlight(aq-mention-lit-approx) {
+  background-color: color-mix(in oklch, var(--primary) 6%, transparent);
+  text-decoration: underline dotted 2px var(--primary);
+}
+::highlight(aq-mention-slot-0) { background-color: color-mix(in oklch, var(--primary) 12%, transparent); }
+::highlight(aq-mention-slot-1) { background-color: color-mix(in oklch, var(--color-sky-600, oklch(0.588 0.158 241.966)) 12%, transparent); }
+::highlight(aq-mention-slot-2) { background-color: color-mix(in oklch, var(--color-rose-600, oklch(0.586 0.253 17.585)) 12%, transparent); }
+::highlight(aq-mention-slot-3) { background-color: color-mix(in oklch, var(--color-emerald-600, oklch(0.596 0.145 163.225)) 12%, transparent); }
+::highlight(aq-mention-slot-4) { background-color: color-mix(in oklch, var(--color-amber-600, oklch(0.666 0.179 58.318)) 12%, transparent); }
+::highlight(aq-mention-slot-5) { background-color: color-mix(in oklch, var(--color-violet-600, oklch(0.541 0.281 293.009)) 12%, transparent); }
+::highlight(aq-mention-slot-6) { background-color: color-mix(in oklch, var(--color-teal-600, oklch(0.6 0.118 184.704)) 12%, transparent); }
+::highlight(aq-mention-slot-0-approx),
+::highlight(aq-mention-slot-1-approx),
+::highlight(aq-mention-slot-2-approx),
+::highlight(aq-mention-slot-3-approx),
+::highlight(aq-mention-slot-4-approx),
+::highlight(aq-mention-slot-5-approx),
+::highlight(aq-mention-slot-6-approx) {
+  text-decoration: underline dotted 1px currentColor;
+}
+
 .usfm-footnote-marker {
   position: relative;
   display: inline-flex;

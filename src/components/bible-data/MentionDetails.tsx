@@ -31,11 +31,17 @@ interface MentionDetailsProps {
   id: string
   view: CellMentionView
   at: MentionAt
+  /**
+   * How the word was found in the cell (AQU-1694): it is the pack's own word
+   * ("exact"), or the stored word alignment put it there ("aligned"), with
+   * low confidence ("approximate").
+   */
+  placement?: "exact" | "aligned" | "approximate"
   /** After a jump: the row this popover hangs from may scroll away. */
   onJumped: () => void
 }
 
-export function MentionDetails({ id, view, at, onJumped }: MentionDetailsProps) {
+export function MentionDetails({ id, view, at, placement = "exact", onJumped }: MentionDetailsProps) {
   const t = useT()
   const fmt = useFormat()
   const { context, refs } = view
@@ -75,6 +81,11 @@ export function MentionDetails({ id, view, at, onJumped }: MentionDetailsProps) 
       </PopoverTitle>
       {facts.length > 0 && <p className="text-muted-foreground">{facts.join(" · ")}</p>}
       {first && <p>{t("bibleData.whosWho.firstMention", { ref: fmt.isolate(first.ref) })}</p>}
+      {placement !== "exact" && (
+        <p data-testid="mention-placement" className="text-muted-foreground">
+          {t(placement === "approximate" ? "bibleAlignment.placedApproximate" : "bibleAlignment.placedAligned")}
+        </p>
+      )}
       {(sources.length > 0 || hops >= SHOW_HOPS_FROM) && (
         <p className="text-muted-foreground">
           {sources.length > 0 &&

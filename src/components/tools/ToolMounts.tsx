@@ -7,7 +7,7 @@
  *   cell, which the tool receives as `aquilla.context.cell`.
  */
 
-import { useState, type MutableRefObject, type ReactNode } from "react"
+import { useEffect, useState, type MutableRefObject, type ReactNode } from "react"
 import type { ToolFrameControl } from "./useToolHost"
 import { Link } from "react-router-dom"
 import { ExternalLink, Settings2 } from "lucide-react"
@@ -36,6 +36,7 @@ export function MountedTool({
   revealCellId,
   frameOverlay,
   controlRef,
+  onFailure,
 }: {
   toolId: string
   mount: "panel" | "inline" | "editor"
@@ -47,11 +48,17 @@ export function MountedTool({
   revealCellId?: string | null
   frameOverlay?: ReactNode
   controlRef?: MutableRefObject<ToolFrameControl | null>
+  /** The tool failed to load or to draw anything (editor mounts fall back to
+   *  the original editor on this). */
+  onFailure?: (reason: string) => void
 }) {
   const ctx = useToolsMount()
   const { project, roleLevel } = useProject(ctx?.projectId ?? "")
   const { tool, error } = useMountedTool(toolId)
   const edit = useEditTool(ctx?.projectId ?? "", ctx?.session?.jwt ?? null)
+  useEffect(() => {
+    if (error) onFailure?.(error)
+  }, [error, onFailure])
   if (error) return <p role="alert" className="p-2 text-xs text-destructive">{error}</p>
   if (!ctx?.session || !tool || !project) return <Spinner className="m-3" />
   return (
@@ -75,6 +82,7 @@ export function MountedTool({
       {...(revealCellId !== undefined ? { revealCellId } : {})}
       {...(frameOverlay ? { frameOverlay } : {})}
       {...(controlRef ? { controlRef } : {})}
+      {...(onFailure ? { onFailure } : {})}
     />
   )
 }

@@ -55,10 +55,24 @@ export function resolveEditor(
   fileId: string,
   installed: readonly string[],
   defaultEditor: string | null = null,
+  /** Extension editors that failed to load this session: the native editor
+   *  stands in for them (never persisted — the next session tries again). */
+  failed: ReadonlySet<string> = NO_FAILURES,
 ): string {
-  const fallback = defaultEditor && installed.includes(defaultEditor) ? defaultEditor : STANDARD_EDITOR
+  const usable = (id: string) => installed.includes(id) && !failed.has(id)
+  const fallback = defaultEditor && usable(defaultEditor) ? defaultEditor : STANDARD_EDITOR
   const pick = state.files[fileId] ?? state.project ?? fallback
-  return pick === STANDARD_EDITOR || installed.includes(pick) ? pick : fallback
+  if (pick === STANDARD_EDITOR || usable(pick)) return pick
+  // A failed editor → native; a remembered one that is gone → the default.
+  return failed.has(pick) ? STANDARD_EDITOR : fallback
+}
+
+const NO_FAILURES: ReadonlySet<string> = new Set()
+
+/** "Use the original Aquilla editor": the native editor for every file of
+ *  this project, for this user — a local choice no role or permission gates. */
+export function chooseOriginalEditor(): EditorChoiceState {
+  return { project: STANDARD_EDITOR, files: {} }
 }
 
 /** Choose an editor for one file, or (wholeProject) as the project default. */

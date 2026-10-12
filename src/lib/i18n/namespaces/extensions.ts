@@ -117,6 +117,8 @@ export const extensions = defineNamespace({
     "extensions.editor.standard": "Aquilla editor",
     "extensions.editor.wholeProject": "Use for every file in this project",
     "extensions.editor.defaultOption": "{name} (default)",
+    "extensions.editor.useOriginal": "Use the original Aquilla editor",
+    "extensions.editor.fallback": "{name} couldn't load, so the original Aquilla editor is open.",
     "extensions.firstParty.autoGranted":
       "{name} ships with Aquilla. It was given these permissions automatically: {scopes}.",
     "extensions.firstParty.granted": "{name} ships with Aquilla · permissions: {scopes}.",
@@ -199,6 +201,18 @@ export const extensions = defineNamespace({
           "\"Edit with\" picker option for whichever editor is the effective default (the built-in " +
           "editor unless the user opted into an extension). Appends a short \"default\" marker.",
         placeholders: { name: "Editor name, e.g. \"Aquilla editor\"." },
+      },
+      "extensions.editor.useOriginal": {
+        description:
+          "Button beside the \"Edit with\" picker while an extension editor is open: switches this user, " +
+          "for every file in the project, back to the app's own built-in editor (\"Aquilla editor\"). " +
+          "Any user can use it. Keep \"Aquilla\" as the product name.",
+      },
+      "extensions.editor.fallback": {
+        description:
+          "Notice above the built-in editor when the extension editor failed to load and the built-in " +
+          "\"Aquilla editor\" opened instead. A Retry button follows.",
+        placeholders: { name: "Extension editor name, e.g. \"Aquilla editor (Smart Extension)\"." },
       },
       "extensions.firstParty.autoGranted": {
         description:

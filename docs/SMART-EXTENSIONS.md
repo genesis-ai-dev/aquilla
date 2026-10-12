@@ -89,50 +89,60 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
 - **Capability twins.** `capability-contract.test.ts` keeps runtime, handlers, permission map,
   smoke stub and builder prompt in agreement.
 
-## The full editor as an extension (opt-in)
+## The default editor is a Smart Extension
 
-The Aquilla **native** (built-in) editor — "Aquilla editor" in the "Edit with" picker — is the
-default editor for every file. The same editor ALSO ships as a **first-party extension**,
-"Aquilla editor (Smart Extension)" (its manifest name, shown identically in the picker and on the Smart
-Extensions page)
-(`shared/tools/first-party/default-editor*.ts`, on the SDK below), at feature parity with the
-native editor. It exists to prove that the extension API can carry the whole editing
-experience; a user edits with it only after opting in. It runs exactly like any other
-extension — the same sandboxed frame, CSP, bridge, permission gate and event path, with tool
-provenance on every write. Nothing privileged: it reaches the workspace's live focus locks and
-comment panels only through the bridge calls above, which any `editor` extension gets.
+The standard translation editor ships as a **first-party extension**, "Aquilla editor (Smart
+Extension)" (`shared/tools/first-party/default-editor*.ts`, on the SDK below), at feature parity
+with the built-in editor, and it is the **default editor** for anyone who has not chosen one.
+The original built-in editor — "Aquilla editor" — is always one click away. It runs exactly like
+any other extension — the same sandboxed frame, CSP, bridge, permission gate and event path,
+with tool provenance on every write. Nothing privileged: it reaches the workspace's live focus
+locks and comment panels only through the bridge calls above, which any `editor` extension gets.
 
+### Why the Smart Extension editor is the default
+
+Daniel, 2026-10-12: shipping the extension as the default forces every future editor change and
+decision to stay compatible with the Smart Extensions API — whatever the default editor can do,
+an extension can do — which is what makes the system useful for anything else people want to
+build with Smart Extensions. Parity is not a one-off audit; it is kept by construction. The
+safety valve is the easy switch back below.
+
+- **Switch back, any user.** While the extension editor is open, "Use the original Aquilla
+  editor" sits beside the "Edit with" picker: one click opens the built-in editor for every file
+  of the project, remembered per user and project (`editor-choice.ts`, local). No role or
+  extension permission is involved, so nothing can block it. The picker lists both editors;
+  picking "Aquilla editor (Smart Extension)" there goes back to the extension.
+- **Fallback.** If the extension fails to load — its code cannot be fetched, it draws nothing
+  (render check), or it throws before drawing anything — the built-in editor opens instead for
+  that session with a notice ("… couldn't load, so the original Aquilla editor is open.") and a
+  Retry. A runtime error after it has drawn keeps the user's work on screen behind the error bar
+  (with "Heal it"); "Use the original Aquilla editor" is still one click.
+- **Names.** One name per editor, identical in the picker and on the Smart Extensions page:
+  "Aquilla editor" (built-in) and "Aquilla editor (Smart Extension)" (this extension).
+  "(default)" is appended in the picker to whichever editor is the effective default. Renaming
+  the manifest changed its code hash, so a pristine install gets one upgrade version; grants are
+  untouched by an upgrade.
 - **Install.** The SERVER installs it (`POST /tools/first-party {key:"default-editor"}`) from
   the repo's reviewed source — a client cannot choose the bytes — whenever a project's
-  extensions load, so it is always available to pick. Idempotent via a deterministic
-  per-project tool id (no schema change). Upgraded in place to the shipped code only while the
-  current version is pristine (a project's "Change it" edit is left alone). Removing it on the
-  management page keeps it removed.
-- **Names.** One name per editor: "Aquilla editor" (native) and "Aquilla editor (Smart
-  Extension)" (this extension). "(default)" is appended in the picker to whichever editor is the
-  effective default — the native one unless the user opted in. Renaming the manifest changed its
-  code hash, so a pristine install gets one upgrade version; grants are untouched by an upgrade.
+  extensions load. Idempotent via a deterministic per-project tool id (no schema change).
+  Upgraded in place to the shipped code only while the current version is pristine (a project's
+  "Change it" edit is left alone). Removing it on the management page keeps it removed (the
+  built-in editor is then everyone's default there). No model is called on this path.
 - **How often.** Copied into a project once (deterministic per-project id); upgraded at most once
   per project per shipped change (lazily, on the next open by any member, only while pristine);
   granted once per user (all declared scopes on first ensure), plus once per scope a later
   shipped version newly declares — never a scope the user already saw or revoked.
-- **Opt in.** The "Edit with" picker above the native editor lists it; pick it for one file, or
-  tick "Use for every file in this project" (remembered per user and project). "Standard
-  editor" in the same picker goes back. A project or user that never chose gets the native
-  editor — installing it never changes anyone's editor.
-- **Grants — explicit and visible.** Its declared scopes (`read:cells`, `write:target`,
-  `write:validation`, `read:comments`) are auto-granted to each user the first time only; a
-  later revoke sticks. The editor bar says so ("…granted these permissions automatically…",
-  with a Manage link: "… ships with Aquilla. It was given these permissions automatically: …")
-  and its card on the management page carries a "First party · built in" badge. Its code ships in
-  the repo and is installed by the server — no model is called on this path. Role ceilings and
-  the server's `authorize()` apply as for any
-  extension.
-- **Default override (testing).** `localStorage["aquilla.extensions.defaultEditor"]="on"` (per
-  browser) or build env `VITE_EXTENSION_DEFAULT_EDITOR=on` makes it the default instead (the
-  picker then labels it "(default)", and the client waits for the project's extensions so the
-  native editor doesn't flash first). `E2E_EDITOR=extension` sets the localStorage override so
-  the core editor journeys run against it; the e2e build pins the env to `off`.
+- **Grants — explicit and visible.** Its declared scopes are auto-granted to each user the first
+  time only; a later revoke sticks. The editor bar says so ("… ships with Aquilla. It was given
+  these permissions automatically: …", with a Manage link) and its card on the management page
+  carries a "First party · built in" badge. Role ceilings and the server's `authorize()` apply
+  as for any extension.
+- **Overrides (testing).** `localStorage["aquilla.extensions.defaultEditor"]="off"` (per
+  browser) or build env `VITE_EXTENSION_DEFAULT_EDITOR=off` makes the built-in editor the
+  default instead. The e2e build pins the env to `off` so the native-editor journeys keep the
+  editor they were written for; `E2E_EDITOR=extension` (and the extension specs) set the
+  localStorage override back `on`. While the extension is the default the client waits for the
+  project's extensions before choosing, so the built-in editor never flashes first.
 
 **Parity.** `docs/SMART-EXTENSIONS-PARITY.md` is the feature-by-feature matrix against the
 built-in editor (EditorTable + TranslatedEditor + the workspace around them). In short: an

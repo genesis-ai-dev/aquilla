@@ -11,13 +11,15 @@ import { useCallback, useImperativeHandle, useMemo, useRef, useState, type React
 import type { EditorTableHandle } from "@/components/EditorTable"
 import type { ToolFrameControl } from "./useToolHost"
 import { Link } from "react-router-dom"
-import { ShieldCheck, X } from "lucide-react"
+import { ShieldCheck, Undo2, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import type { ToolHostServices } from "@/lib/tools/live-data"
 import { useScopeLabel } from "./scope-label"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   STANDARD_EDITOR,
   chooseEditor,
+  chooseOriginalEditor,
   readEditorChoice,
   resolveEditor,
   writeEditorChoice,
@@ -34,6 +36,15 @@ export interface ExtensionEditorChoice {
   /** The default may be an extension but the project's extensions have not
    *  loaded yet: show a placeholder, not a flash of the built-in editor. */
   pending: boolean
+  /** "Use the original Aquilla editor": native for every file of this
+   *  project, for this user. Local; no role or permission gates it. */
+  useOriginal: () => void
+  /** The extension editor failed to load (load error, blank render, or an
+   *  error before it drew anything): the native editor stands in for it this
+   *  session. Reported by the surface; `retry` clears it. */
+  failure: { toolId: string; name: string; reason: string } | null
+  reportFailure: (toolId: string, reason: string) => void
+  retry: () => void
 }
 
 export function useExtensionEditorChoice(username: string, projectId: string, fileId: string | null): ExtensionEditorChoice {
@@ -46,7 +57,24 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
     setStateKey(`${username}:${projectId}`)
     setState(readEditorChoice(username, projectId))
   }
-  const selected = fileId ? resolveEditor(state, fileId, editors.map((e) => e.id), ctx?.defaultEditorId ?? null) : STANDARD_EDITOR
+  const [failures, setFailures] = useState<ReadonlyMap<string, string>>(() => new Map())
+  const failedIds = useMemo(() => new Set(failures.keys()), [failures])
+  const selected = fileId ? resolveEditor(state, fileId, editors.map((e) => e.id), ctx?.defaultEditorId ?? null, failedIds) : STANDARD_EDITOR
+  // What the user would have had without the failure (the failed editor).
+  const intended = fileId && failedIds.size > 0 ? resolveEditor(state, fileId, editors.map((e) => e.id), ctx?.defaultEditorId ?? null) : null
+  const failure = intended && failures.has(intended)
+    ? { toolId: intended, name: editors.find((e) => e.id === intended)?.name ?? intended, reason: failures.get(intended) ?? "" }
+    : null
+  const reportFailure = useCallback((toolId: string, reason: string) => {
+    console.warn(`[extensions] editor ${toolId} failed to load; using the original Aquilla editor:`, reason)
+    setFailures((prev) => (prev.has(toolId) ? prev : new Map(prev).set(toolId, reason)))
+  }, [])
+  const retry = useCallback(() => setFailures(new Map()), [])
+  const useOriginal = useCallback(() => {
+    const next = chooseOriginalEditor()
+    writeEditorChoice(username, projectId, next)
+    setState(next)
+  }, [username, projectId])
   const choose = useCallback(
     (editorId: string, wholeProject: boolean) => {
       if (!fileId) return
@@ -60,7 +88,7 @@ export function useExtensionEditorChoice(username: string, projectId: string, fi
   )
   const explicitStandard = fileId ? (state.files[fileId] ?? state.project) === STANDARD_EDITOR : false
   const pending = Boolean(fileId && ctx?.defaultEditorEnabled && ctx.session && !ctx.toolsReady && !explicitStandard)
-  return { editors, selected, choose, pending }
+  return { editors, selected, choose, pending, useOriginal, failure, reportFailure, retry }
 }
 
 export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorChoice }) {
@@ -98,6 +126,27 @@ export function ExtensionEditorSwitcher({ choice }: { choice: ExtensionEditorCho
         <input type="checkbox" checked={wholeProject} onChange={(e) => setWholeProject(e.target.checked)} />
         {t("extensions.editor.wholeProject")}
       </label>
+      {/* The safety valve for the extension default: one click, any user. */}
+      {choice.selected !== STANDARD_EDITOR && (
+        <Button size="xs" variant="outline" onClick={choice.useOriginal} data-testid="use-original-editor">
+          <Undo2 className="size-3.5" aria-hidden />
+          {t("extensions.editor.useOriginal")}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/** The extension editor failed to load, so the original editor is open. */
+export function ExtensionEditorFallbackNotice({ choice }: { choice: ExtensionEditorChoice }) {
+  const t = useT()
+  if (!choice.failure) return null
+  return (
+    <div role="status" data-testid="extension-editor-fallback" className="flex items-center gap-2 border-b bg-amber-50 px-3 py-1.5 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+      <span className="min-w-0 flex-1 truncate" title={choice.failure.reason}>
+        {t("extensions.editor.fallback", { name: choice.failure.name })}
+      </span>
+      <Button size="xs" variant="ghost" onClick={choice.retry}>{t("common.retry")}</Button>
     </div>
   )
 }
@@ -164,6 +213,8 @@ export function ExtensionEditorSurface({
         {...(revealCellId !== undefined ? { revealCellId } : {})}
         {...(toolbarTrailing ? { frameOverlay: toolbarTrailing } : {})}
         controlRef={controlRef}
+        // The original editor is the fallback whenever the extension fails to load.
+        onFailure={(reason) => choice.reportFailure(choice.selected, reason)}
       />
     </div>
   )

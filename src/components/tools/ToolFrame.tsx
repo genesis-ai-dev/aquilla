@@ -45,9 +45,12 @@ export interface ToolFrameProps {
   frameOverlay?: ReactNode
   /** apiRev 3: host → frame commands (the editor handle adapter). */
   controlRef?: MutableRefObject<ToolFrameControl | null>
+  /** The tool failed to load: it drew nothing (render check), or threw before
+   *  drawing anything. Editor mounts fall back to the original editor. */
+  onFailure?: (reason: string) => void
 }
 
-export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null, frameOverlay, controlRef }: ToolFrameProps) {
+export function ToolFrame({ project, tool, session, roleLevel, mount = "page", cell, file, onGrantChange, onHeal, healing = false, className, services, revealCellId = null, frameOverlay, controlRef, onFailure }: ToolFrameProps) {
   const t = useT()
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -61,7 +64,13 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
     ro.observe(el)
     return () => ro.disconnect()
   }, [frameOverlay])
-  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage, blank } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef })
+  const { prompt, errors, clearErrors, removedApi, messages, dismissMessage, blank, rendered } = useToolHost({ frameRef, projectId: project.id, tool, session, roleLevel, onGrantChange, services, revealCellId, chrome, controlRef })
+  // A failure to LOAD (not a later runtime error, which keeps the user's work
+  // on screen behind the error bar): blank, or an error before the first draw.
+  const loadFailure = !prompt && (blank && errors.length === 0 ? "blank" : !rendered && errors.length > 0 ? errors[errors.length - 1].message : null)
+  useEffect(() => {
+    if (loadFailure) onFailure?.(loadFailure)
+  }, [loadFailure, onFailure])
   // The first reveal rides in the boot data (so the editor opens there); later
   // ones are pushed live. Read once per frame load.
   const [initialReveal] = useState(revealCellId)

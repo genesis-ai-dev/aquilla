@@ -52,6 +52,8 @@ export interface ToolHostState {
   ready: boolean
   /** apiRev 3: the frame loaded but shows nothing (render.check). */
   blank: boolean
+  /** The frame has drawn something at least once. */
+  rendered: boolean
 }
 
 /** Host → frame commands for a mounted tool (apiRev 3). */
@@ -65,6 +67,8 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
   const [errors, setErrors] = useState<ToolErrorReport[]>([])
   const [ready, setReady] = useState(false)
   const [blank, setBlank] = useState(false)
+  /** The frame has drawn something at least once (a render.check came back non-empty). */
+  const [rendered, setRendered] = useState(false)
   const [removedApi, setRemovedApi] = useState<string | null>(null)
   const [messages, setMessages] = useState<string[]>([])
 
@@ -174,7 +178,10 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       onReady: () => setReady(true),
       onApiRemoved: (_method, message) => setRemovedApi(message),
       onToolError: (err) => setErrors((prev) => [...prev.slice(-4), err]),
-      onRender: (report) => setBlank(report.empty),
+      onRender: (report) => {
+        setBlank(report.empty)
+        if (!report.empty) setRendered(true)
+      },
     })
     hostRef.current = host
     dataRef.current = data
@@ -393,6 +400,7 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
     clearErrors: () => setErrors([]),
     ready,
     blank,
+    rendered,
     removedApi,
     messages,
     dismissMessage: (index: number) => setMessages((prev) => prev.filter((_, i) => i !== index)),

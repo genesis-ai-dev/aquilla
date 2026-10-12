@@ -43,9 +43,8 @@ export class ToolsPage {
     await this.page.getByRole("combobox", { name: "Edit with" }).first().selectOption({ label })
   }
 
-  /** Opt this page's browser context into the first-party editor extension
-   *  as its default (the native editor is the product default). Call before
-   *  navigating. */
+  /** Restore the product default for this browser context — the first-party
+   *  editor extension (the e2e build pins it off). Call before navigating. */
   async optIntoDefaultEditorExtension(): Promise<void> {
     await this.page.context().addInitScript(() => {
       localStorage.setItem("aquilla.extensions.defaultEditor", "on")

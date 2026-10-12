@@ -1,18 +1,21 @@
 /**
- * Whether the first-party "Aquilla editor (Smart Extension)" extension is the DEFAULT editor.
- * OFF by default: the Aquilla native (built-in) editor is everyone's default.
- * The extension editor proves the whole editor can be built as a Smart
- * Extension; it is always installed into the project (so it can be picked),
- * but a user only edits with it after opting in.
+ * Whether the first-party "Aquilla editor (Smart Extension)" is the DEFAULT
+ * editor for a user who never chose one. ON by default (Daniel, 2026-10-12):
+ * shipping the extension as the default forces every future editor change to
+ * stay possible through the Smart Extensions API, so anything others build on
+ * it can do whatever the built-in editor can.
  *
- * Ways to opt in, in order:
- * - the "Edit with" picker, per file or "Use for every file in this project"
- *   (editor-choice.ts) — the product's opt-in, remembered per user + project;
- * - localStorage `aquilla.extensions.defaultEditor` = "on" (per browser; "off"
- *   forces the native default back). `E2E_EDITOR=extension` sets it so the
- *   core journeys run against the extension editor;
- * - build env `VITE_EXTENSION_DEFAULT_EDITOR=on`.
- * Either way the native editor stays one switch away ("Aquilla editor").
+ * The original "Aquilla editor" (native) is always one click away for ANY
+ * user — "Use the original Aquilla editor" beside "Edit with", remembered per
+ * user and project (editor-choice.ts), never gated by role or extension
+ * permissions — and it is the fallback whenever the extension fails to load.
+ *
+ * Overrides, in order:
+ * - localStorage `aquilla.extensions.defaultEditor` = "off" (native default
+ *   for this browser) / "on";
+ * - build env `VITE_EXTENSION_DEFAULT_EDITOR=off`. The e2e stack pins it off so
+ *   the native-editor journeys keep exercising the native editor;
+ *   `E2E_EDITOR=extension` sets the localStorage override back on.
  */
 
 export const DEFAULT_EDITOR_FLAG_KEY = "aquilla.extensions.defaultEditor"
@@ -28,7 +31,7 @@ export function defaultEditorExtensionEnabled(
   } catch {
     // blocked storage → fall through to the build default
   }
-  return envValue === "on"
+  return envValue !== "off"
 }
 
 function safeStorage(): Storage | null {

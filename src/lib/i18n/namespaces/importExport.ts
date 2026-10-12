@@ -365,6 +365,23 @@ export const importExport = defineNamespace({
     "importExport.landing.spreadsheet.title": "Spreadsheet",
     "importExport.landing.spreadsheet.hint": "CSV / XLSX",
     "importExport.landing.spreadsheet.description": "Map which columns are source, target, label, cast, or timestamp.",
+
+    // — JSON key picker (AQU-525) —
+    "importExport.jsonKeys.title": "Choose which keys to translate",
+    "importExport.jsonKeys.description":
+      "Tick the values in {fileName} that hold translatable text. Everything you leave " +
+      "unticked stays in the file and is written back unchanged when you export.",
+    "importExport.jsonKeys.selectAll": "Select all keys",
+    "importExport.jsonKeys.rootGroup": "Top level",
+    "importExport.jsonKeys.groupCount": "{selected} of {total}",
+    "importExport.jsonKeys.selectedCount": "{selected} of {total} strings selected",
+    "importExport.jsonKeys.moreInKey": plural({
+      one: "+{count} more string in this key",
+      other: "+{count} more strings in this key",
+    }),
+    "importExport.jsonKeys.confirm": "Import selected keys",
+    "importExport.jsonKeys.reading": "Reading the JSON file…",
+    "importExport.jsonKeys.noStrings": "{fileName} has no translatable text — every value is a number, boolean, null or empty string.",
     "importExport.landing.macula.title": "Macula Hebrew + Greek",
     "importExport.landing.macula.description":
       "Original-language OT/NT with per-word lemma, morphology, and Strong's.",
@@ -589,6 +606,7 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleHelloao": "Bible API (helloao.org)",
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
+    "importExport.dialog.titleJsonKeys": "JSON keys",
     "importExport.dialog.titlePaired": "Paired Translation Import",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
@@ -630,6 +648,13 @@ export const importExport = defineNamespace({
       "preserved; mixed per-run formatting inside a translated paragraph keeps the first run's " +
       "styling. Requires the original file to have been imported after round-trip export support " +
       "was added — re-import older files to enable.",
+    // AQU-525: JSON round-trip — only the keys the user picked at import are
+    // rewritten; the rest of the document is preserved.
+    "importExport.format.json.label": "JSON",
+    "importExport.format.json.description":
+      "Translations written back into the original JSON document at the keys you chose when " +
+      "importing. Every other key, value and nesting level is preserved. Requires the original " +
+      "file data on the server (re-import to enable for older files).",
     "importExport.format.sdbhXml.label": "SDBH XML (MARBLE)",
     "importExport.format.sdbhXml.description":
       "Localized lexicon reinjected into the original MARBLE XML edition — pick the original " +
@@ -899,6 +924,11 @@ export const importExport = defineNamespace({
     "importExport.status.downloadedParagraphsTranslated": plural({
       one: "Downloaded {fileName} ({count} paragraph translated)",
       other: "Downloaded {fileName} ({count} paragraphs translated)",
+    }),
+    // AQU-525: JSON round-trip counts values, not paragraphs.
+    "importExport.status.downloadedJsonValuesTranslated": plural({
+      one: "Downloaded {fileName} ({count} value translated)",
+      other: "Downloaded {fileName} ({count} values translated)",
     }),
     "importExport.status.validatingProtectedTranslations": "Validating protected translations…",
     "importExport.status.downloadedIdmlUnchanged": "Downloaded {fileName} (no translations — original bytes returned unchanged)",
@@ -4380,6 +4410,57 @@ export const importExport = defineNamespace({
           "Link-style button after the amber note on the translation import's match review that says the uploaded file is for another book. Runs the same upload against the project file that holds that book. Imperative.",
         placeholders: {
           fileName: "Display name of the project file the upload is for, e.g. 'Ruth'. Do not translate the substituted value.",
+        },
+      },
+
+      // JSON key picker (AQU-525) — the step between dropping a .json source
+      // file and importing it, where the user ticks which of the document's
+      // values hold translatable text. "Key" is the JSON sense throughout:
+      // the name a value sits under, shown as its path (`app.title`,
+      // `messages[2]`). Keys and paths are code, never translated.
+      "importExport.jsonKeys.description": {
+        description:
+          "Instruction under the key-picker's heading, naming the file being configured and promising that anything left unticked stays in the document and comes back unchanged on export.",
+        placeholders: {
+          fileName: "Name of the uploaded JSON file, e.g. 'en.json'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.jsonKeys.groupCount": {
+        description:
+          "Count beside one JSON key in the picker, saying how many of the values under that key are ticked. Sits next to the key's path, so it reads as '3 of 5'.",
+        placeholders: {
+          selected: "Number of values under this key that are ticked for translation.",
+          total: "Total number of translatable values under this key.",
+        },
+      },
+      "importExport.jsonKeys.selectedCount": {
+        description:
+          "Running total under the key picker, counting the ticked values across the whole document. Sits next to the import button, which is disabled while the count is zero.",
+        placeholders: {
+          selected: "Number of values ticked for translation across the document.",
+          total: "Total number of translatable values in the document.",
+        },
+      },
+      "importExport.jsonKeys.moreInKey": {
+        description:
+          "Shown under one JSON key in the picker when it holds more values than the picker lists individually. The unlisted values are still covered by the key's own checkbox, so this is a note about the list's length, not about anything being left out of the import.",
+        placeholders: {
+          count: "Number of this key's values not listed individually.",
+        },
+      },
+      "importExport.jsonKeys.noStrings": {
+        description:
+          "Failure message when an uploaded JSON file parses but holds no translatable text at all — every value is a number, boolean, null or an empty string. Nothing is imported.",
+        placeholders: {
+          fileName: "Name of the uploaded JSON file, e.g. 'numbers.json'. Do not translate the substituted value.",
+        },
+      },
+      "importExport.status.downloadedJsonValuesTranslated": {
+        description:
+          "Success-status message after a JSON round-trip export, counting the values that carried a translation into the downloaded document. Counts values rather than paragraphs because a JSON cell is one value under one key.",
+        placeholders: {
+          fileName: "Name of the downloaded file, e.g. 'en.json'. Do not translate the substituted value.",
+          count: "Number of values that carried a translation into the exported document.",
         },
       },
     },

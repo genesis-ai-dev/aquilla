@@ -366,7 +366,23 @@ fix was restored (`git stash` of the one source file, re-run):
     `origin/dev`**, which is the decisive check since that is the only changed
     module `source-linking` reaches.
 
-  **This is a regression on `dev`, not here, and it is worth flagging:** 10-05
+* Root `app` suite (`npx vitest run --project app`): **1762 files, 19964
+  passing, 23 skipped, 5 failures in 3 files — all pre-existing.** This change
+  touches **nothing under `src/`** (`git diff --name-only origin/dev HEAD` has
+  no `src/` entry), and all three files are byte-identical to `origin/dev`:
+  - `src/partner-integrations/biblica/__tests__/idml.biblica-scripture.test.ts` (3)
+  - `src/lib/i18n/namespaces/no-duplicates.test.ts` (1)
+  - `src/lib/egress/zip-core.test.ts` (1) — *"survives output larger than one
+    flush window"* dies on the 60 s stall watchdog (AGENTS.md rule 15). The
+    first guess was CPU contention from concurrent suite runs; **re-running the
+    file alone disproves that** — 63 s and the same failure on an otherwise
+    idle machine. It is a real red test on `dev`, not a scheduling artifact.
+
+  Note the 6 `ScriptAlignmentDialog.test.tsx` failures 10-05 reported as
+  pre-existing are gone; these three are different files.
+
+  **The auth-worker reds are a regression on `dev`, not here, and worth
+  flagging:** 10-05
   recorded this package as *"266 files, 3085 passing, 2 expected-fail, 0
   failures… there is now nothing red in this package."* Three files have gone
   red in the week since, two of them traceable to work that merged on 10-07.

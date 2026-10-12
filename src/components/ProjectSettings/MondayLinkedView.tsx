@@ -54,7 +54,7 @@ export function MondayLinkedView({
   onReconfigure: () => void
   onUnlink: () => void
   warnings: string[]
-  /** "Add the missing columns for me", when some numbers have no column. */
+  /** The column picker: add Aquilla's columns to the board and map them. */
   missingColumns?: ReactNode
 }) {
   const { t } = useI18n()

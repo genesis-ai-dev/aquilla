@@ -313,83 +313,110 @@ it("does not call a skipped push successful", async () => {
   expect(await screen.findByRole("heading", { name: /sync needs attention/i })).toBeTruthy()
 })
 
-describe("Add the missing columns for me", () => {
-  it("a board with nothing to map to: lists the missing columns, adds them, maps them, and Apply sends them", async () => {
+describe("Column picker", () => {
+  const blank = () =>
     mocked.analyzeMondayMapping.mockResolvedValue(
       analysis({ proposal: { version: 1, itemGranularity: "project", columns: [] } }),
     )
-    mocked.addMondayColumns.mockResolvedValue({
-      created: [
-        { metric: "completion_pct", columnId: "c1", columnType: "numbers", title: "Completion %" },
-        { metric: "external_id", columnId: "c7", columnType: "text", title: "Aquilla ID" },
-      ],
-      reused: [{ metric: "validated_pct", columnId: "v0", columnType: "numbers", title: "Validated %" }],
-      failed: [],
-      structure: {
-        columns: [
-          { id: "c1", title: "Completion %", type: "numbers" },
-          { id: "v0", title: "Validated %", type: "numbers" },
-          { id: "c7", title: "Aquilla ID", type: "text" },
-        ],
-        groups: [],
-      },
+  const box = (title: RegExp) => screen.getByRole("checkbox", { name: title })
+
+  it("lists every column; what's on the board can't be ticked; Aquilla ID is required while missing", async () => {
+    blank()
+    mocked.fetchMondayBoardStructure.mockResolvedValue({
+      columns: [{ id: "c9", title: "Completion %", type: "numbers" }],
+      groups: [],
     })
     renderWizard()
     await scanToReview()
+    const picker = screen.getByTestId("monday-column-picker")
+    expect(picker.textContent).toMatch(/Has audio %/)
+    expect(picker.textContent).toMatch(/Deadline/)
+    expect(screen.getByTestId("monday-column-completion_pct").textContent).toMatch(/on your board/i)
+    expect(box(/^Completion %$/).getAttribute("aria-disabled") ?? String((box(/^Completion %$/) as HTMLButtonElement).disabled)).toMatch(/true/)
+    const id = box(/^Aquilla ID$/)
+    expect(id.getAttribute("aria-checked")).toBe("true")
+    expect(screen.getByTestId("monday-column-external_id").textContent).toMatch(/required/i)
+    expect(box(/^Validated %$/).getAttribute("aria-checked")).toBe("false")
+  })
 
+  it("Add selected sends the ticked columns plus the required Aquilla ID, maps the result, and Apply sends it", async () => {
+    blank()
+    mocked.addMondayColumns.mockResolvedValue({
+      created: [
+        { metric: "validated_pct", columnId: "v1", columnType: "numbers", title: "Validated %" },
+        { metric: "external_id", columnId: "x1", columnType: "text", title: "Aquilla ID" },
+      ],
+      reused: [],
+      failed: [],
+      structure: { columns: [{ id: "v1", title: "Validated %", type: "numbers" }, { id: "x1", title: "Aquilla ID", type: "text" }], groups: [] },
+    })
+    renderWizard()
+    await scanToReview()
     const apply = screen.getByRole("button", { name: /apply and push/i }) as HTMLButtonElement
     expect(apply.disabled).toBe(true)
-    const block = screen.getByTestId("monday-missing-columns")
-    expect(block.textContent).toMatch(/Completion %, Validated %, Audio validated %, Status, Last activity, Translators, Aquilla ID/)
 
-    fireEvent.click(screen.getByRole("button", { name: /add the missing columns for me/i }))
+    fireEvent.click(box(/^Validated %$/))
+    await waitFor(() => expect(box(/^Validated %$/).getAttribute("aria-checked")).toBe("true"))
+    fireEvent.click(screen.getByRole("button", { name: /add selected to my board/i }))
     await waitFor(() => expect(mocked.addMondayColumns).toHaveBeenCalledTimes(1))
-    expect(mocked.addMondayColumns.mock.calls[0][2]).toEqual({
-      boardId: "b1",
-      metrics: ["completion_pct", "validated_pct", "audio_validated_pct", "status_auto", "last_activity", "translators", "external_id"],
-    })
+    expect(mocked.addMondayColumns.mock.calls[0][2]).toEqual({ boardId: "b1", metrics: ["validated_pct", "external_id"] })
     expect(await screen.findByText(/added 2 columns to the board and matched them/i)).toBeTruthy()
 
     await waitFor(() => expect(apply.disabled).toBe(false))
     fireEvent.click(apply)
     await waitFor(() => expect(mocked.putMondayLink).toHaveBeenCalled())
     expect(mocked.putMondayLink.mock.calls[0][2].config.columns).toEqual([
-      { columnId: "v0", columnType: "numbers", metric: "validated_pct" },
-      { columnId: "c1", columnType: "numbers", metric: "completion_pct" },
-      { columnId: "c7", columnType: "text", metric: "external_id" },
+      { columnId: "v1", columnType: "numbers", metric: "validated_pct" },
+      { columnId: "x1", columnType: "text", metric: "external_id" },
     ])
   })
 
-  it("is hidden when every suggested number already has a column", async () => {
-    const metrics = ["completion_pct", "validated_pct", "audio_validated_pct", "status_auto", "last_activity", "translators", "external_id"] as const
+  it("Add all sends every column not on the board, and a matched-but-unmapped one rides along to be mapped", async () => {
+    blank()
+    mocked.fetchMondayBoardStructure.mockResolvedValue({
+      columns: [{ id: "t9", title: "Translators", type: "text" }],
+      groups: [],
+    })
+    mocked.addMondayColumns.mockResolvedValue({ created: [], reused: [], failed: [], structure: { columns: [], groups: [] } })
+    renderWizard()
+    await scanToReview()
+    fireEvent.click(screen.getByRole("button", { name: /^add all$/i }))
+    await waitFor(() => expect(mocked.addMondayColumns).toHaveBeenCalledTimes(1))
+    const metrics = mocked.addMondayColumns.mock.calls[0][2].metrics
+    expect(metrics).toContain("translators")
+    expect(metrics).toEqual(expect.arrayContaining(["completion_pct", "deadline", "has_audio_pct", "external_id", "total_count"]))
+    expect(new Set(metrics).size).toBe(metrics.length)
+  })
+
+  it("with everything on the board, there is nothing to add", async () => {
     mocked.analyzeMondayMapping.mockResolvedValue(
       analysis({
         proposal: {
           version: 1,
           itemGranularity: "project",
-          columns: metrics.map((metric, i) => ({ columnId: `x${i}`, columnType: "text", metric })),
+          columns: ["completion_pct", "validated_pct", "has_audio_pct", "audio_validated_pct", "status_auto", "deadline", "last_activity", "translators", "filled_count", "validated_count", "total_count", "external_id"].map(
+            (metric, i) => ({ columnId: `x${i}`, columnType: "text", metric: metric as never }),
+          ),
         },
       }),
     )
     renderWizard()
     await scanToReview()
-    expect(screen.queryByTestId("monday-missing-columns")).toBeNull()
+    expect(screen.getByTestId("monday-column-picker").textContent).toMatch(/every column aquilla can fill is on your board/i)
+    expect(screen.queryByRole("button", { name: /add selected to my board/i })).toBeNull()
   })
 
-  it("names what Monday refused and leaves the button to try again", async () => {
-    mocked.analyzeMondayMapping.mockResolvedValue(
-      analysis({ proposal: { version: 1, itemGranularity: "project", columns: [] } }),
-    )
+  it("names what Monday refused", async () => {
+    blank()
     mocked.addMondayColumns.mockResolvedValue({
-      created: [{ metric: "completion_pct", columnId: "c1", columnType: "numbers", title: "Completion %" }],
+      created: [{ metric: "external_id", columnId: "x1", columnType: "text", title: "Aquilla ID" }],
       reused: [],
       failed: [{ metric: "status_auto", title: "Status", error: "Complexity budget exhausted" }],
-      structure: { columns: [{ id: "c1", title: "Completion %", type: "numbers" }], groups: [] },
+      structure: { columns: [], groups: [] },
     })
     renderWizard()
     await scanToReview()
-    fireEvent.click(screen.getByRole("button", { name: /add the missing columns for me/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^add all$/i }))
     expect(await screen.findByText(/couldn't add: status\. monday said: complexity budget exhausted/i)).toBeTruthy()
-    expect(screen.getByRole("button", { name: /add the missing columns for me/i })).toBeTruthy()
   })
 })

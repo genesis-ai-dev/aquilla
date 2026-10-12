@@ -54,7 +54,7 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { openExternal } from "@/lib/open-external"
 import type { MondayColumnMapping, MondayMapping } from "@/lib/monday/types"
 import { MondayMappingRows } from "./MondayMappingEditor"
-import { MondayMissingColumns } from "./MondayMissingColumns"
+import { MondayColumnPicker } from "./MondayColumnPicker"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type Stage = "intro" | "connect" | "scanning" | "review" | "applying" | "done"
@@ -480,11 +480,12 @@ export function MondaySetupWizard({
               {boardUrl && <a href={boardUrl} target="_blank" rel="noopener noreferrer" className="underline">{t("projectSettings.monday.wizardPreviewBoardLink")}</a>}
               {/* A board without the right columns gives the AI nothing to map
                   to; offer to make them rather than send the user to Monday. */}
-              <MondayMissingColumns
+              <MondayColumnPicker
                 jwt={jwt}
                 projectId={projectId}
                 boardId={analysis.boardId}
                 rows={rows}
+                boardColumns={structure?.columns}
                 onAdded={(next, built) => {
                   setRows(next)
                   setStructure(built)

@@ -91,39 +91,76 @@ export const MONDAY_READONLY_COLUMN_TYPES = new Set([
 ])
 
 /**
- * The numbers "Add the missing columns for me" offers to create, in board
- * order. Counts and the project name are left out: counts are optional extras
- * a user can still map by hand, and the project name is the item's own name.
+ * Every column Aquilla can create on a board, in the order the column picker
+ * lists them. `title` and `type` mirror COLUMN_SPEC_BY_METRIC in
+ * auth-worker/src/lib/monday/columns.ts. The title is Monday data, not UI copy
+ * (it becomes the column's name on the customer's board), so it is never
+ * translated; each entry's one-line description is
+ * `projectSettings.monday.columnInfo.<metric>`. `project_name` is absent: it is
+ * the item's own name, never a column.
  */
-export const MONDAY_SUGGESTED_COLUMN_METRICS: MondayMetricKey[] = [
-  "completion_pct",
-  "validated_pct",
-  "audio_validated_pct",
-  "status_auto",
-  "last_activity",
-  "translators",
-  "external_id",
+export const MONDAY_COLUMN_CATALOG: Array<{
+  metric: MondayMetricKey
+  title: string
+  type: "numbers" | "status" | "date" | "text"
+}> = [
+  { metric: "completion_pct", title: "Completion %", type: "numbers" },
+  { metric: "validated_pct", title: "Validated %", type: "numbers" },
+  { metric: "has_audio_pct", title: "Has audio %", type: "numbers" },
+  { metric: "audio_validated_pct", title: "Audio validated %", type: "numbers" },
+  { metric: "status_auto", title: "Status", type: "status" },
+  { metric: "deadline", title: "Deadline", type: "date" },
+  { metric: "last_activity", title: "Last activity", type: "date" },
+  { metric: "translators", title: "Translators", type: "text" },
+  { metric: "filled_count", title: "Filled cells", type: "numbers" },
+  { metric: "validated_count", title: "Validated cells", type: "numbers" },
+  { metric: "total_count", title: "Total cells", type: "numbers" },
+  { metric: "external_id", title: "Aquilla ID", type: "text" },
 ]
 
-/**
- * The title Aquilla gives a column it creates. Monday data, not UI copy: it
- * is the column's name on the customer's board, so it is never translated.
- * Mirrors COLUMN_SPEC_BY_METRIC in auth-worker/src/lib/monday/columns.ts.
- */
-export const MONDAY_NEW_COLUMN_TITLES: Partial<Record<MondayMetricKey, string>> = {
-  completion_pct: "Completion %",
-  validated_pct: "Validated %",
-  audio_validated_pct: "Audio validated %",
-  status_auto: "Status",
-  last_activity: "Last activity",
-  translators: "Translators",
-  external_id: "Aquilla ID",
+/** Writable Monday column types per metric — mirror of the server's table. */
+const NUMERIC_TYPES = ["numbers", "text"]
+const TEXT_TYPES = ["text", "long_text", "name"]
+export const MONDAY_WRITABLE_TYPES_BY_METRIC: Record<MondayMetricKey, readonly string[]> = {
+  completion_pct: NUMERIC_TYPES,
+  validated_pct: NUMERIC_TYPES,
+  audio_validated_pct: NUMERIC_TYPES,
+  has_audio_pct: NUMERIC_TYPES,
+  filled_count: NUMERIC_TYPES,
+  total_count: NUMERIC_TYPES,
+  validated_count: NUMERIC_TYPES,
+  translators: TEXT_TYPES,
+  last_activity: ["date", "text"],
+  status_auto: ["status", "text"],
+  deadline: ["date", "text"],
+  project_name: TEXT_TYPES,
+  external_id: TEXT_TYPES,
 }
 
-/** Suggested numbers that no row maps to a column yet. */
-export function missingColumnMetrics(rows: MondayColumnMapping[]): MondayMetricKey[] {
-  const mapped = new Set(rows.filter((r) => r.columnId).map((r) => r.metric))
-  return MONDAY_SUGGESTED_COLUMN_METRICS.filter((m) => !mapped.has(m))
+const normalizeColumnTitle = (title: string | undefined): string =>
+  (title ?? "").toLowerCase().replace(/[^a-z0-9%]/g, "")
+
+/**
+ * Is this metric already on the board? Either a mapping row sends it to a
+ * column, or the board has a column under Aquilla's title (case and spacing
+ * ignored) of a type the metric can write — the same match the server uses to
+ * reuse a column instead of creating a second one.
+ */
+export function metricOnBoard(
+  metric: MondayMetricKey,
+  rows: MondayColumnMapping[],
+  boardColumns: Array<{ id: string; title: string; type: string }> | null | undefined,
+): boolean {
+  if (rows.some((r) => r.metric === metric && r.columnId)) return true
+  const entry = MONDAY_COLUMN_CATALOG.find((c) => c.metric === metric)
+  if (!entry || !boardColumns) return false
+  const want = normalizeColumnTitle(entry.title)
+  return boardColumns.some(
+    (c) =>
+      normalizeColumnTitle(c.title) === want &&
+      !MONDAY_READONLY_COLUMN_TYPES.has(c.type) &&
+      MONDAY_WRITABLE_TYPES_BY_METRIC[metric].includes(c.type),
+  )
 }
 
 /**

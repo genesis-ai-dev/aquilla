@@ -251,7 +251,7 @@ it("refreshes organization authorization when returning from another tab", async
   expect(await screen.findByRole("button", { name: "Scan and propose" })).toBeTruthy()
 })
 
-describe("Add the missing columns for me (linked board)", () => {
+describe("Column picker (linked board)", () => {
   it("adds the columns and saves them into the mapping in the same click", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
@@ -264,8 +264,10 @@ describe("Add the missing columns for me (linked board)", () => {
     mocked.patchMondayLink.mockResolvedValue({ link: makeLink(), warnings: [] })
 
     renderSection()
-    const button = await screen.findByRole("button", { name: /add the missing columns for me/i })
-    fireEvent.click(button)
+    const box = await screen.findByRole("checkbox", { name: /^Validated %$/ })
+    fireEvent.click(box)
+    await waitFor(() => expect(box.getAttribute("aria-checked")).toBe("true"))
+    fireEvent.click(screen.getByRole("button", { name: /add selected to my board/i }))
 
     await waitFor(() => expect(mocked.patchMondayLink).toHaveBeenCalled())
     expect(mocked.addMondayColumns.mock.calls[0][2].boardId).toBe("b1")
@@ -275,11 +277,11 @@ describe("Add the missing columns for me (linked board)", () => {
     ])
   })
 
-  it("below maintainer: no add-columns button", async () => {
+  it("below maintainer: no column picker", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
     renderSection({ roleLevel: 400 })
     await waitFor(() => expect(screen.getByText(/translation tracker/i)).toBeTruthy())
-    expect(screen.queryByRole("button", { name: /add the missing columns for me/i })).toBeNull()
+    expect(screen.queryByTestId("monday-column-picker")).toBeNull()
   })
 })

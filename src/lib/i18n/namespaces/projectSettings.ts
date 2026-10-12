@@ -1252,8 +1252,25 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
     "projectSettings.monday.granularityFileLabel": "One item per file",
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
-    "projectSettings.monday.missingColumnsLine": "This board has no column for: {columns}.",
-    "projectSettings.monday.addMissingColumnsButton": "Add the missing columns for me",
+    "projectSettings.monday.columnPickerTitle": "Columns Aquilla can fill",
+    "projectSettings.monday.columnPickerIntro": "Tick the ones to add to your board. Aquilla creates them and fills them in.",
+    "projectSettings.monday.columnPickerAllOnBoard": "Every column Aquilla can fill is on your board.",
+    "projectSettings.monday.columnPickerOnBoard": "On your board",
+    "projectSettings.monday.columnPickerRequired": "Required",
+    "projectSettings.monday.addSelectedColumnsButton": "Add selected to my board",
+    "projectSettings.monday.addAllColumnsButton": "Add all",
+    "projectSettings.monday.columnInfo.completion_pct": "How much of the project or file is translated, as a percentage.",
+    "projectSettings.monday.columnInfo.validated_pct": "How much is translated and approved by enough reviewers, as a percentage.",
+    "projectSettings.monday.columnInfo.has_audio_pct": "How many lines have a recording, as a percentage.",
+    "projectSettings.monday.columnInfo.audio_validated_pct": "How many lines have an approved recording, as a percentage.",
+    "projectSettings.monday.columnInfo.status_auto": "Not started, In progress or Complete, worked out from the translation progress.",
+    "projectSettings.monday.columnInfo.deadline": "The project's deadline. Empty when the project has none.",
+    "projectSettings.monday.columnInfo.last_activity": "The date someone last worked on the project.",
+    "projectSettings.monday.columnInfo.translators": "The names of the people who can translate in the project.",
+    "projectSettings.monday.columnInfo.filled_count": "How many lines are translated.",
+    "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and approved.",
+    "projectSettings.monday.columnInfo.total_count": "How many lines there are to translate.",
+    "projectSettings.monday.columnInfo.external_id": "Aquilla's own ID for each item. Needed so a later setup finds and reuses the items Aquilla made.",
     "projectSettings.monday.addMissingColumnsDone": plural({
       one: "Added {count} column to the board and matched it.",
       other: "Added {count} columns to the board and matched them.",
@@ -2007,38 +2024,85 @@ export const projectSettings = defineNamespace({
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
         },
       },
-      "projectSettings.monday.missingColumnsLine": {
+      "projectSettings.monday.columnPickerTitle": {
         description:
-          "Line in a project's Monday.com setup, above the \"Add the missing columns for me\" " +
-          "button, naming the progress numbers that have no column on the chosen Monday board " +
-          "yet, so Aquilla has nowhere to write them.",
-        placeholders: {
-          columns:
-            "Comma-separated titles of the columns Aquilla would create on the Monday board, " +
-            "e.g. 'Validated %, Audio validated %, Aquilla ID'. Monday data, shown untranslated.",
-        },
+          "Heading of the column picker in a project's Monday.com setup: a list of every " +
+          "column Aquilla can create on the user's Monday board and keep filled in with " +
+          "the project's progress.",
       },
-      "projectSettings.monday.addMissingColumnsButton": {
+      "projectSettings.monday.columnPickerIntro": {
+        description: "Line under the column picker heading, telling the user to tick the columns to add to their Monday board.",
+      },
+      "projectSettings.monday.columnPickerAllOnBoard": {
+        description: "Line under the column picker heading when every column Aquilla can fill already exists on the Monday board.",
+      },
+      "projectSettings.monday.columnPickerOnBoard": {
         description:
-          "Button in a project's Monday.com setup. Clicking it makes Aquilla create the " +
-          "listed columns on the user's Monday board and connect them to the project's " +
-          "progress numbers, so the user doesn't have to add them in Monday by hand.",
+          "Small badge beside a column in the picker when that column already exists on the " +
+          "user's Monday board (so it can't be ticked to add again).",
+      },
+      "projectSettings.monday.columnPickerRequired": {
+        description:
+          "Small badge beside the \"Aquilla ID\" column in the picker: it must be added, " +
+          "because a later setup uses it to find the items Aquilla already made.",
+      },
+      "projectSettings.monday.addSelectedColumnsButton": {
+        description: "Button under the column picker: create the ticked columns on the user's Monday board and connect them to the project's numbers.",
+      },
+      "projectSettings.monday.addAllColumnsButton": {
+        description: "Button under the column picker: create every listed column that isn't on the Monday board yet.",
+      },
+      "projectSettings.monday.columnInfo.completion_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.validated_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.has_audio_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.audio_validated_pct": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.status_auto": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.deadline": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.last_activity": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.translators": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.filled_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.validated_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.total_count": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
+      },
+      "projectSettings.monday.columnInfo.external_id": {
+        description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
       },
       "projectSettings.monday.addMissingColumnsDone": {
         description:
-          "Confirmation after \"Add the missing columns for me\": how many columns Aquilla " +
+          "Confirmation after adding columns from the column picker: how many columns Aquilla " +
           "created on the Monday board. They are already connected to the progress numbers.",
         placeholders: { count: "How many columns were created." },
       },
       "projectSettings.monday.addMissingColumnsMatchedOnly": {
         description:
-          "Confirmation after \"Add the missing columns for me\" when the board already had " +
+          "Confirmation after adding columns from the column picker when the board already had " +
           "columns with the right names: nothing was created, those columns were connected instead.",
         placeholders: { count: "How many existing columns were connected." },
       },
       "projectSettings.monday.addMissingColumnsFailed": {
         description:
-          "Error after \"Add the missing columns for me\" when Monday refused to create " +
+          "Error after adding columns from the column picker when Monday refused to create " +
           "some columns. The others were still created.",
         placeholders: {
           columns: "Comma-separated titles of the columns Monday refused (Monday data, untranslated).",

@@ -61,7 +61,7 @@ import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingTable } from "./MondayMappingEditor"
 import { MondayLinkedView } from "./MondayLinkedView"
 import { MondaySetupWizard } from "./MondaySetupWizard"
-import { MondayMissingColumns } from "./MondayMissingColumns"
+import { MondayColumnPicker } from "./MondayColumnPicker"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const MAINTAINER = 600
@@ -402,11 +402,12 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               warnings={warnings}
               missingColumns={
                 canManage ? (
-                  <MondayMissingColumns
+                  <MondayColumnPicker
                     jwt={jwt}
                     projectId={projectId}
                     boardId={link.boardId}
                     rows={link.config.columns}
+                    boardColumns={structure?.columns}
                     disabled={savingMapping}
                     onAdded={(next, built) => {
                       setStructure(built)
@@ -490,11 +491,12 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               <p className="text-sm font-medium">{t("projectSettings.monday.aiProposalLabel")}</p>
               <p className="text-sm text-muted-foreground">{proposal.summary}</p>
               <MondayMappingTable columns={proposal.proposal.columns} structure={structure} />
-              <MondayMissingColumns
+              <MondayColumnPicker
                 jwt={jwt}
                 projectId={projectId}
                 boardId={link?.boardId ?? selectedBoardId}
                 rows={proposal.proposal.columns}
+                boardColumns={structure?.columns}
                 disabled={applying}
                 onAdded={(next, built) => {
                   setProposal((p) => (p ? { ...p, proposal: { ...p.proposal, columns: next } } : p))

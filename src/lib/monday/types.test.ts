@@ -1,21 +1,26 @@
 import { describe, it, expect } from "vitest"
-import { mergeAddedColumns, missingColumnMetrics, type MondayColumnMapping } from "./types"
+import { mergeAddedColumns, metricOnBoard, type MondayColumnMapping } from "./types"
 
-describe("missingColumnMetrics", () => {
-  it("lists suggested numbers no row maps to a column, ignoring rows without one", () => {
-    const rows: MondayColumnMapping[] = [
-      { columnId: "a", columnType: "numbers", metric: "completion_pct" },
-      { columnId: "", columnType: "numbers", metric: "validated_pct" },
-      { columnId: "c", columnType: "numbers", metric: "filled_count" },
+describe("metricOnBoard", () => {
+  const rows: MondayColumnMapping[] = [
+    { columnId: "a", columnType: "numbers", metric: "completion_pct" },
+    { columnId: "", columnType: "numbers", metric: "validated_pct" },
+  ]
+  it("counts a mapped row, and a board column under Aquilla's title of a type the metric can write", () => {
+    const board = [
+      { id: "v", title: "validated  %", type: "numbers" },
+      { id: "d", title: "Deadline", type: "formula" },
+      { id: "x", title: "AQUILLA ID", type: "text" },
     ]
-    expect(missingColumnMetrics(rows)).toEqual([
-      "validated_pct",
-      "audio_validated_pct",
-      "status_auto",
-      "last_activity",
-      "translators",
-      "external_id",
-    ])
+    expect(metricOnBoard("completion_pct", rows, board)).toBe(true)
+    expect(metricOnBoard("validated_pct", rows, board)).toBe(true)
+    expect(metricOnBoard("deadline", rows, board)).toBe(false)
+    expect(metricOnBoard("external_id", rows, board)).toBe(true)
+    expect(metricOnBoard("translators", rows, board)).toBe(false)
+  })
+  it("without the board's columns, only mapped rows count", () => {
+    expect(metricOnBoard("validated_pct", rows, null)).toBe(false)
+    expect(metricOnBoard("completion_pct", rows, null)).toBe(true)
   })
 })
 

@@ -69,20 +69,25 @@ contract beyond "maintainer can, member can view":
   AI") show the warnings.
 - `POST /projects/:projectId/sync` pushes now. It refuses (409) while the
   link's Sync switch is off.
-- `POST /projects/:projectId/columns { boardId, metrics }` is "Add the
-  missing columns for me" (same permission as saving a link). Aquilla only
-  ever writes items, so a board without number columns gave the user nothing
-  to map to. This creates a column for each requested metric the board lacks,
-  with a plain title and type (`lib/monday/columns.ts`: percentages and counts
-  are `numbers`, Status is `status` with labels created on the first push,
-  Last activity is `date`, Translators and Aquilla ID are `text`), and always
-  adds an Aquilla ID column when the board has none. A column already on the
-  board under that title, with a type the metric can write, is reused instead,
-  so asking twice creates nothing. Columns are created one at a time; any
-  Monday refuses come back in `failed` while the rest still land. The answer
-  is `{ created, reused, failed, structure }`. The settings UI offers it in
-  the "Set up with AI" review, the manual proposal review and the linked
-  board's mapping (where the new columns are saved into the mapping at once).
+- `POST /projects/:projectId/columns { boardId, metrics }` backs the column
+  picker (same permission as saving a link). Aquilla only ever writes items,
+  so a board without number columns gave the user nothing to map to. This
+  creates a column for each requested metric the board lacks, with a plain
+  title and type (`COLUMN_SPEC_BY_METRIC` in `lib/monday/columns.ts`, mirrored
+  by `MONDAY_COLUMN_CATALOG` in `src/lib/monday/types.ts`), and always adds an
+  Aquilla ID column when the board has none. A column already on the board
+  under that title, with a type the metric can write, is reused instead, so
+  asking twice creates nothing. Columns are created one at a time; any Monday
+  refuses come back in `failed` while the rest still land. The answer is
+  `{ created, reused, failed, structure }`.
+- The column picker (`MondayColumnPicker`) sits in the "Set up with AI"
+  review, the manual proposal review and a linked board's mapping. It lists
+  every catalog column with a checkbox, its title and a one-line description.
+  Columns already on the board (mapped, or there under Aquilla's title with a
+  writable type) read "On your board" and can't be ticked. Aquilla ID is
+  ticked and locked while it's missing. "Add selected to my board" and "Add
+  all" create the rest, also send any matched-but-unmapped column so it gets
+  mapped, and map the result (on a linked board the mapping is saved at once).
 - `POST /webhook` is Monday's board webhook (JWT signed with
   `MONDAY_SIGNING_SECRET`): a new column marks the link stale, a deleted or
   archived item forgets its `integration_item_links` row. A column the link's

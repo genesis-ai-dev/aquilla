@@ -16,6 +16,10 @@ import {
   __resetStoragePressureForTests,
   markStorageQuotaExceeded,
 } from "@/lib/storage/storage-pressure"
+import {
+  __resetOpfsAvailabilityForTests,
+  markOpfsUnavailable,
+} from "@/lib/storage/opfs-availability"
 
 let session: { jwt: string; username: string; createdAt: string } | null = null
 let loading = false
@@ -44,6 +48,7 @@ beforeEach(() => {
 
 afterEach(() => {
   __resetStoragePressureForTests()
+  __resetOpfsAvailabilityForTests()
   vi.restoreAllMocks()
 })
 
@@ -84,6 +89,15 @@ describe("StorageFullBanner", () => {
     loading = false
     rerender(<StorageFullBanner />)
     expect(screen.getByText(message)).toBeInTheDocument()
+  })
+
+  it("yields to the private-mode banner, which explains the same symptom", async () => {
+    // Both pin to the top of the viewport; two stacked banners is a bug, and
+    // "private browsing is restricting storage" is the more specific message.
+    markOpfsUnavailable()
+    render(<StorageFullBanner />)
+    await act(async () => { markStorageQuotaExceeded() })
+    expect(screen.queryByText(message)).toBeNull()
   })
 
   it("re-arms for a different account in the same tab", async () => {

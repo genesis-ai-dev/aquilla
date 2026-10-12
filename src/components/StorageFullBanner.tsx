@@ -4,11 +4,14 @@
 // let an edit fail, so the app keeps working past this point — but it works
 // slower (every file open refetches), and on a shared or nearly-full machine
 // the user is the only one who can actually free the disk. Mirrors
-// `PrivateModeBanner`: one line, dismissible per session.
+// `PrivateModeBanner`: one line, dismissible per session — and it yields to that
+// banner, since both pin themselves to the top of the viewport and a restricted
+// private-browsing context is the more specific explanation for the same symptom.
 
 import { useState } from "react"
 import { HardDrive, X } from "lucide-react"
 import { useStoragePressure } from "@/hooks/useStoragePressure"
+import { useOpfsAvailability } from "@/hooks/useOpfsAvailability"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -40,6 +43,7 @@ function writeDismissed(key: string): void {
 export function StorageFullBanner() {
   const t = useT()
   const nearlyFull = useStoragePressure()
+  const opfsAvailable = useOpfsAvailability()
   const { session, loading } = useFrontierSession()
   const sessionReady = !loading && Boolean(session?.username && session?.createdAt)
   const key = session?.username && session.createdAt
@@ -50,7 +54,7 @@ export function StorageFullBanner() {
   // without an effect that re-reads storage on every render.
   const [dismissedKey, setDismissedKey] = useState<string | null>(null)
 
-  if (!sessionReady || !key || !nearlyFull) return null
+  if (!sessionReady || !key || !nearlyFull || !opfsAvailable) return null
   if (dismissedKey === key || readDismissed(key)) return null
 
   function handleDismiss() {

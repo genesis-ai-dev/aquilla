@@ -77,6 +77,22 @@ import { BiaIndex } from "./bia-index"
 
 export type MarkovMode = "filter" | "weight" | "off"
 
+/**
+ * How the per-distance chains become a weight on a candidate's score:
+ *   "product"      Π_k (P_k + ε·P(w))^(1/k) — a product of experts; a word
+ *                  never seen in this slot is pushed to ~0.
+ *   "soft-product" 1 + ln(1 + scale · that product) — the bigram factor's
+ *                  shape (1 + ln(1 + count)) with the chains inside, so an
+ *                  unseen word keeps factor 1 instead of ~0.
+ *   "soft-sum"     1 + ln(1 + scale · Σ_k P_k / k) — the same, with the
+ *                  experts added: evidence from any one distance counts.
+ *   "soft-lift"    1 + ln(1 + scale · mean_k (P_k / P(w))), weights 1/k — the
+ *                  chains' LIFT over the word's base rate, so a word the
+ *                  context specifically predicts gains and a word that is
+ *                  common everywhere ("and", "the") gains little.
+ */
+export type ChainForm = "product" | "soft-product" | "soft-sum" | "soft-lift"
+
 export interface Suggestion {
   /** The full suggested word (first word of a multi-word suggestion). */
   word: string
@@ -141,6 +157,16 @@ export interface SuggestOptions extends Pick<PredictOptions, "neighbors" | "deca
    * for infill, where it measured worse than BIA).
    */
   chains?: boolean
+  /** How the chains weight a candidate (default "product"; see ChainForm). */
+  chainForm?: ChainForm
+  /** The `scale` of the soft chain forms. */
+  chainScale?: number
+  /**
+   * With chains and a source: where the chain weight applies. "final"
+   * (default) weights the mixed score; "target" weights only the target-side
+   * guess before the source is mixed in, and the mix gets the bigram factor.
+   */
+  chainStage?: "final" | "target"
   /**
    * With chains: skip the BIA vote and rank only the chains' own candidates.
    * Default: `chooseGuesser` (only when the cell has no source signal).
@@ -161,6 +187,13 @@ export interface SuggestOptions extends Pick<PredictOptions, "neighbors" | "deca
  */
 export const SOURCE_MIN_PAIRS = 1000
 
+/**
+ * Next-word source weight α. SOURCE_WEIGHT (2) was tuned on ~1,800-pair dev
+ * splits; over 100–2,000-pair projects α = 1 scored 1.3 points higher on dev
+ * (docs/forecast/bia-chain-tuning-dev.md). Infill and the thesaurus keep 2.
+ */
+export const NEXT_SOURCE_WEIGHT = 1
+
 export interface GuesserChoice {
   /** Mix the source lexicon into the scores. */
   source: boolean
@@ -168,6 +201,12 @@ export interface GuesserChoice {
   chains: boolean
   /** Rank only the chains' candidates (skip the BIA vote). */
   chainsOnly: boolean
+  /** How the chains weight a candidate, when `chains`. */
+  chainForm?: ChainForm
+  /** Where the chain weight applies when there is also a source. */
+  chainStage?: "final" | "target"
+  /** Mixing weight α of the source, when it differs from SOURCE_WEIGHT. */
+  sourceWeight?: number
 }
 
 /**
@@ -177,14 +216,18 @@ export interface GuesserChoice {
  * project has.
  *
  *   next word, no source           → per-distance chains only
- *   next word, with a source       → BIA + source, bigram-weighted
+ *   next word, with a source       → BIA vote weighted by the chains
+ *                                    ("soft-sum", CHAIN_SCALE), then
+ *                                    + NEXT_SOURCE_WEIGHT × source, then
+ *                                    the bigram factor
  *   infill,    < minPairs or none  → BIA
  *   infill,    ≥ minPairs pairs    → BIA + source
  *
- * Measured but not the default: chain-weighting the next-word source mix
- * scores higher below ~1,000 pairs, but the chain product floors any word
- * only the source proposes, so a key term the target context never predicts
- * (the point of the source) can no longer surface mid-sentence.
+ * The next-word recipe was tuned on dev splits (docs/forecast/bia-chain-
+ * tuning-dev.md). The chains weight only the target-side guess: weighting
+ * the mixed score instead (chainStage "final", form "product") scored about
+ * as well but floored every word only the source proposes, so a key term
+ * the target context never predicts could not surface mid-sentence.
  */
 export function chooseGuesser(
   task: "next" | "infill",
@@ -194,7 +237,9 @@ export function chooseGuesser(
 ): GuesserChoice {
   if (task === "infill") return { source: hasSource && pairCount >= minPairs, chains: false, chainsOnly: false }
   if (!hasSource) return { source: false, chains: true, chainsOnly: true }
-  return { source: true, chains: false, chainsOnly: false }
+  return {
+    source: true, chains: true, chainsOnly: false, chainForm: "soft-sum", chainStage: "target", sourceWeight: NEXT_SOURCE_WEIGHT,
+  }
 }
 
 /**
@@ -225,6 +270,8 @@ export const SOURCE_TARGET_IDF = 3
 export const SOURCE_STEM_WEIGHT = 0
 /** Unigram smoothing ε in the per-distance chain factor. */
 const CHAIN_EPSILON = 0.001
+/** `scale` of the soft chain forms (tuned on dev splits; see ChainForm). */
+export const CHAIN_SCALE = 300
 
 
 export const DEFAULT_ANCHORS = 15
@@ -311,26 +358,38 @@ export class BiaEngine {
     mode: MarkovMode,
     limit: number,
     chainContext?: { left: readonly string[]; right: readonly string[] },
+    shape: { form: ChainForm; scale: number } = { form: "product", scale: 1 },
   ): Ranked {
     if (mode === "off" || (prev === undefined && next === undefined)) return ranked
     const { index } = this
     if (mode === "weight" && chainContext) {
-      // Product of experts over the per-distance chains: the words k places
-      // to the left predict forward, the words k places to the right predict
-      // backward, each expert weighted 1/k.
+      // The per-distance chains: the words k places to the left predict
+      // forward, the words k places to the right predict backward, each
+      // expert weighted 1/k (see ChainForm for how they become a factor).
       const { left, right } = chainContext
       const leftDepth = Math.min(index.chainDepth, left.length)
       const rightDepth = Math.min(index.chainDepth, right.length)
+      const experts = (w: string): number[] => [
+        ...Array.from({ length: leftDepth }, (_, i) => index.chainProbability(i + 1, left[left.length - 1 - i], w)),
+        ...Array.from({ length: rightDepth }, (_, i) => index.backChainProbability(i + 1, right[i], w)),
+      ]
+      const weightOf = (k: number) => 1 / (k < leftDepth ? k + 1 : k - leftDepth + 1)
       const chained = ranked.map(([w, s]): [string, number] => {
-        let log = 0
+        const ps = experts(w)
+        if (shape.form === "soft-sum") {
+          const sum = ps.reduce((t, p, k) => t + p * weightOf(k), 0)
+          return [w, s * (1 + Math.log1p(shape.scale * sum))]
+        }
+        if (shape.form === "soft-lift") {
+          // How much more likely the context makes w than its base rate.
+          const base = Math.max(index.probability(w), Number.MIN_VALUE)
+          const weights = ps.reduce((t, _p, k) => t + weightOf(k), 0)
+          const lift = weights > 0 ? ps.reduce((t, p, k) => t + (p / base) * weightOf(k), 0) / weights : 0
+          return [w, s * (1 + Math.log1p(shape.scale * lift))]
+        }
         const floor = CHAIN_EPSILON * index.probability(w)
-        for (let k = 1; k <= leftDepth; k++) {
-          log += Math.log(index.chainProbability(k, left[left.length - k], w) + floor) / k
-        }
-        for (let k = 1; k <= rightDepth; k++) {
-          log += Math.log(index.backChainProbability(k, right[k - 1], w) + floor) / k
-        }
-        return [w, s * Math.exp(log)]
+        const product = Math.exp(ps.reduce((t, p, k) => t + Math.log(p + floor) * weightOf(k), 0))
+        return [w, s * (shape.form === "soft-product" ? 1 + Math.log1p(shape.scale * product) : product)]
       })
       return chained.sort((a, b) => b[1] - a[1] || index.frequency(b[0]) - index.frequency(a[0]))
     }
@@ -381,6 +440,13 @@ export class BiaEngine {
       neighbors: opts.neighbors,
       decay: opts.decay ?? SHIPPED_DECAY,
     })
+    const shape = { form: opts.chainForm ?? choice.chainForm ?? "product", scale: opts.chainScale ?? CHAIN_SCALE }
+    const chainContext = chains ? { left: leftTokens, right: rightTokens } : undefined
+    // "target": the chains refine the target-side guess BEFORE the source is
+    // mixed in, and the mix is then weighted by the bigram factor as without
+    // chains — so a word only the source proposes keeps its chance.
+    const chainsOnTarget = chains && sourceSignal && (opts.chainStage ?? choice.chainStage) === "target"
+    if (chainsOnTarget) ranked = this.markov(ranked, prev, next, mode, limit, chainContext, shape)
     if (sourceSignal) {
       const aligned = this.index.lexicon.scoreTargets(source, {
         left: leftTokens,
@@ -392,10 +458,10 @@ export class BiaEngine {
       })
       const q = opts.sourceTargetIdf ?? SOURCE_TARGET_IDF
       if (q !== 0) for (const [t, v] of aligned) aligned.set(t, v * this.index.idf(t) ** q)
-      ranked = this.rank(mixScores(ranked, aligned, alpha, opts.sourceMix ?? SOURCE_MIX))
+      ranked = this.rank(mixScores(ranked, aligned, opts.sourceWeight ?? choice.sourceWeight ?? alpha, opts.sourceMix ?? SOURCE_MIX))
     }
     if (prefix) ranked = ranked.filter(([w]) => fits(w))
-    ranked = this.markov(ranked, prev, next, mode, limit, chains ? { left: leftTokens, right: rightTokens } : undefined)
+    ranked = this.markov(ranked, prev, next, mode, limit, chainsOnTarget ? undefined : chainContext, shape)
     const out = ranked.slice(0, limit).map(([word, score]) => ({ word, score, source: "bia" as const }))
     if (out.length > 0 || opts.fallback === false) return out
 

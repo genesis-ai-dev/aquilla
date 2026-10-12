@@ -180,6 +180,18 @@ export interface E2EImpact {
   reasons: string[]
 }
 
+/**
+ * The specs the affected gate may run: every smoke spec, plus every domain
+ * sentinel that exists even when it is not a smoke spec (e.g. the BIA
+ * ghost-text journey, `e2e/specs/editor/ghost-text.spec.ts`). Without the
+ * second half a non-smoke sentinel was silently filtered out of every real
+ * pre-push run, so forecast changes selected no browser journey.
+ */
+export function affectedSpecPool(smokeSpecs: string[], exists: (spec: string) => boolean): string[] {
+  const sentinels = [...CORE_SENTINELS, ...DOMAIN_RULES.flatMap(({ sentinels }) => sentinels)]
+  return [...new Set([...smokeSpecs, ...sentinels.filter((spec) => exists(spec))].map(normalize))].sort()
+}
+
 export function selectAffectedE2E(changedFiles: string[], availableSmokeSpecs: string[]): E2EImpact {
   const smokeSpecs = availableSmokeSpecs.map(normalize).sort()
   const available = new Set(smokeSpecs)

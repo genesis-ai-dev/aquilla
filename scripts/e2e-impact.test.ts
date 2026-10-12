@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { selectAffectedE2E } from "./lib/e2e-impact"
+import { existsSync, readdirSync } from "node:fs"
+import path from "node:path"
+import { affectedSpecPool, selectAffectedE2E } from "./lib/e2e-impact"
 import {
   affectedRunMode,
   FAST_AFFECTED_SPEC_LIMIT,
@@ -25,6 +27,29 @@ const specs = [
   "e2e/specs/rules/violation.smoke.spec.ts",
   "e2e/specs/editor/ghost-text.spec.ts",
 ]
+
+/** The repo's real smoke specs, as scripts/e2e-affected.ts lists them. */
+function realSmokeSpecs(dir = "e2e/specs"): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const rel = path.posix.join(dir, entry.name)
+    if (entry.isDirectory()) return realSmokeSpecs(rel)
+    return entry.name.endsWith(".smoke.spec.ts") ? [rel] : []
+  })
+}
+
+describe("affected spec pool (the real pre-push composition)", () => {
+  it("keeps non-smoke domain sentinels, so a forecast change runs the ghost-text journey", () => {
+    // Regression: the gate used to pass only *.smoke.spec.ts files, which
+    // silently dropped e2e/specs/editor/ghost-text.spec.ts from every push.
+    const pool = affectedSpecPool(realSmokeSpecs(), (spec) => existsSync(spec))
+    expect(pool).toContain("e2e/specs/editor/ghost-text.spec.ts")
+    expect(selectAffectedE2E(["src/lib/forecast/bia-engine.ts"], pool).specs).toContain("e2e/specs/editor/ghost-text.spec.ts")
+  })
+
+  it("only adds sentinels that exist on disk", () => {
+    expect(affectedSpecPool([], () => false)).toEqual([])
+  })
+})
 
 describe("changed-file E2E impact selection", () => {
   it("selects media publication coverage for media import contracts", () => {

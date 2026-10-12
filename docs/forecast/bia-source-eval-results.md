@@ -6,6 +6,11 @@ top-1 / top-3 exact-word accuracy (%). All weights chosen on dev splits of the l
 suggestions when a cell has no source signal, and "+ source" when it does. "+ stem" is the evaluated, NOT shipped,
 grapheme-stem back-off.
 
+> **2026-10-12:** the "+ source" figures below were produced when the shipped path was BIA + source with the bigram
+> weight at α = 2. The editor's next-word default with a source is now the chain-weighted BIA vote + 1 × source +
+> bigram weight, and infill uses the source only from 1,000 translated pairs, so rerunning `pnpm bia:eval-source`
+> measures that instead (see `bia-head-to-head.md`, `bia-chain-tuning-dev.md`).
+
 > **Regenerated 2026-10-12** against the code at 038924b68 (unchanged in the 20c50ed merge of dev). Only the
 > Nepali full-Bible rows changed: the previous figures predated the stray-joiner tokenizer fix that landed in
 > 038924b68 (a lone ZWJ/mark is no longer a word). All other accuracy figures reproduced exactly; the speed

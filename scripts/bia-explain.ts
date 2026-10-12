@@ -1,20 +1,22 @@
-// Walk one real next-word suggestion through the source-aware path, printing
-// the actual intermediate values from the engine's own code (not a
-// re-implementation): the BIA vote, the source lexicon's per-source-word
-// contributions, the mix, and the final Markov / chain weighting. The last
-// step is checked against BiaEngine.suggestNext, so the trace cannot drift
-// from what the editor computes.
+// Walk one real next-word suggestion through the DEFAULT source-aware path
+// (chooseGuesser), printing the actual intermediate values from the engine's
+// own code (not a re-implementation): the BIA vote, its per-distance chain
+// weight, the source lexicon's per-source-word contributions, the mix, and the
+// bigram weight. The last step is checked against BiaEngine.suggestNext, so
+// the trace cannot drift from what the editor computes.
 //
-//   pnpm bia:explain [-- --target tpi-tpi.txt --limit 2000 --pick right|wrong --nth 0 --chains]
+//   pnpm bia:explain [-- --target tpi-tpi.txt --limit 2000 --pick right|wrong --nth 0]
 //
-// Picks a held-out position where adding the source CHANGES the top-1 next
-// word versus plain BIA and the new word is right (--pick right) or wrong.
+// Picks a held-out position where the default CHANGES the top-1 next word
+// versus plain BIA and the new word is right (--pick right) or wrong.
 
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { resolve } from "node:path"
 import { splitParallel } from "../src/lib/forecast/bia-eval"
-import { BiaEngine, SOURCE_LAMBDA, SOURCE_POWER, SOURCE_TARGET_IDF, SOURCE_WEIGHT, mixScores, type Ranked } from "../src/lib/forecast/bia-engine"
+import {
+  BiaEngine, CHAIN_SCALE, NEXT_SOURCE_WEIGHT, SOURCE_LAMBDA, SOURCE_POWER, SOURCE_TARGET_IDF, mixScores, type ChainForm, type Ranked,
+} from "../src/lib/forecast/bia-engine"
 import { BiaIndex } from "../src/lib/forecast/bia-index"
 import { COVERED_PENALTY } from "../src/lib/forecast/source-lexicon"
 import { fold, wordKeys } from "../src/lib/forecast/forecast-tokenize"
@@ -29,7 +31,6 @@ const target = arg("target") ?? "tpi-tpi.txt"
 const limit = arg("limit") === "full" ? undefined : Number(arg("limit") ?? 2000)
 const pick = arg("pick") ?? "right"
 const nth = Number(arg("nth") ?? 0)
-const chains = process.argv.includes("--chains")
 
 const srcLines = readFileSync(resolve(dir, "eng-engwebp.txt"), "utf8").split("\n")
 const tgtLines = readFileSync(resolve(dir, target), "utf8").split("\n")
@@ -45,8 +46,11 @@ const top = (r: Ranked, n = 5) => r.slice(0, n).map(([w, s]) => `${w} ${s.toFixe
 const f3 = (x: number) => x.toFixed(3)
 
 const base = { extend: false, limit: 3 } as const
-const plain = (left: string[]) => engine.suggestNext(`${left.join(" ")} `, { ...base, sourceWeight: 0, chains }).map((s) => fold(s.word))
-const withSource = (left: string[], source: string) => engine.suggestNext(`${left.join(" ")} `, { ...base, source, chains }).map((s) => fold(s.word))
+const plain = (left: string[]) => engine.suggestNext(`${left.join(" ")} `, { ...base, sourceWeight: 0, chains: false }).map((s) => fold(s.word))
+const withSource = (left: string[], source: string) => engine.suggestNext(`${left.join(" ")} `, { ...base, source }).map((s) => fold(s.word))
+type Markov = (r: Ranked, p: string | undefined, n: string | undefined, m: string, l: number,
+  c?: { left: readonly string[]; right: readonly string[] }, shape?: { form: ChainForm; scale: number }) => Ranked
+const markov = (engine as unknown as { markov: Markov }).markov.bind(engine)
 
 // 1. Find the example.
 let found: { left: string[]; gold: string; text: string; source: string } | undefined
@@ -85,6 +89,17 @@ index.postingsOf = original
 console.log(`\n## Step 1 — target side (BIA vote over ${index.size} validated verses)`)
 console.log(`Anchors looked up (rarest first, distance from the blank, IDF): ${anchorCalls.map((w) => `${w} (d=${left.lastIndexOf(w) - left.length}, idf ${index.idf(w).toFixed(2)})`).join(", ")}`)
 console.log(`Top BIA votes: ${top(bia)}`)
+
+// 2b. The per-distance chains weight the target-side guess (soft-sum).
+const chained = markov(bia, left.at(-1), undefined, "weight", 3, { left, right: [] }, { form: "soft-sum", scale: CHAIN_SCALE })
+console.log(`\n## Step 1b — chain weight on the BIA vote: × (1 + ln(1 + ${CHAIN_SCALE} · Σ_k P_k(w | word k back) / k))`)
+const back = left.slice(-3).reverse()
+for (const w of [...new Set([gold, plain(left)[0]])]) {
+  const ps = back.map((ctx, k) => index.chainProbability(k + 1, ctx, w))
+  const sum = ps.reduce((t, p, k) => t + p / (k + 1), 0)
+  console.log(`  "${w}": ${back.map((ctx, k) => `P_${k + 1}(${w} | ${ctx}) = ${ps[k].toFixed(3)}`).join(", ")} → factor ${(1 + Math.log1p(CHAIN_SCALE * sum)).toFixed(2)}`)
+}
+console.log(`Top chain-weighted votes: ${top(chained)}`)
 
 // 3. Source side.
 const srcTokens = wordKeys(source)
@@ -133,12 +148,11 @@ console.log(`Top source scores: ${top(alignedTop)}`)
 console.log(`  "${gold}": idf ${index.idf(gold).toFixed(2)}${plainTop !== gold ? `; "${plainTop}": idf ${index.idf(plainTop).toFixed(2)}` : ""}`)
 
 // 4. Mix and Markov / chains, through the engine's own functions.
-const mixed = engine.rank(mixScores(bia, aligned, SOURCE_WEIGHT, "add"))
-console.log(`\n## Step 4 — mix: BIA/max(BIA) + ${SOURCE_WEIGHT} × source/max(source)`)
+const mixed = engine.rank(mixScores(chained, aligned, NEXT_SOURCE_WEIGHT, "add"))
+console.log(`\n## Step 4 — mix: chained/max(chained) + ${NEXT_SOURCE_WEIGHT} × source/max(source)`)
 console.log(`Top mixed: ${top(mixed)}`)
-const markov = (engine as unknown as { markov: (r: Ranked, p: string | undefined, n: string | undefined, m: string, l: number, c?: { left: readonly string[]; right: readonly string[] }) => Ranked }).markov.bind(engine)
-const final = markov(mixed, left.at(-1), undefined, "weight", 3, chains ? { left, right: [] } : undefined)
-console.log(`\n## Step 5 — ${chains ? "per-distance chain weight (words 1–3 back)" : `bigram weight × (1 + ln(1 + count("${left.at(-1)}" → w)))`}`)
+const final = markov(mixed, left.at(-1), undefined, "weight", 3)
+console.log(`\n## Step 5 — bigram weight × (1 + ln(1 + count("${left.at(-1)}" → w)))`)
 for (const w of [gold, plainTop]) console.log(`  count("${left.at(-1)}" → "${w}") = ${index.bigram(left.at(-1) ?? "", w)}`)
 console.log(`Final ranking: ${top(final)}`)
 const engineSays = withSource(left, source)

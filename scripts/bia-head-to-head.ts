@@ -11,9 +11,11 @@
 //                       the next 3 words, backward (bidirectional).
 //   BIA + chains      — the BIA vote, weighted by the chains instead of bigram
 //   source            — BIA + the project-learned source lexicon (+ bigram)
-//   source + chains   — BIA + source, weighted by the chains instead of bigram
-//   source + chains-only — the chains' candidates + source, chain-weighted
-//   default           — what the editor does (chooseGuesser in bia-engine.ts)
+//   source + chains   — BIA + source, the MIXED score weighted by the chain product
+//   previous default  — the default before the next-word retune (537d554c0)
+//   default           — what the editor does now (chooseGuesser in bia-engine.ts):
+//                       next word with a source = BIA vote weighted by the
+//                       soft-sum chains, + 1 × source, then the bigram factor
 //   BIA src+tgt corpus — plain BIA trained on the training SOURCE verses and
 //                       target verses as one unaligned corpus: the spring-2024
 //                       Codex Editor setup (complete_draft.txt, 2024-03-23 to
@@ -47,37 +49,38 @@ export const METHODS: Record<string, SuggestOptions> = {
   "BIA": { sourceWeight: 0, chains: false },
   "chains": { sourceWeight: 0, chains: true, chainsOnly: true },
   "BIA + chains": { sourceWeight: 0, chains: true, chainsOnly: false },
-  // The source columns force the lexicon on at every size (sourceMinPairs: 0).
-  "source": { chains: false, sourceMinPairs: 0 },
-  "source + chains": { chains: true, chainsOnly: false, sourceMinPairs: 0 },
-  "source + chains-only": { chains: true, chainsOnly: true, sourceMinPairs: 0 },
-  // What the editor does: chooseGuesser picks per task and project size.
+  // The source columns force the lexicon on at every size (sourceMinPairs: 0)
+  // with the original mixing weight α = 2.
+  "source": { chains: false, sourceWeight: 2, sourceMinPairs: 0 },
+  "source + chains": { chains: true, chainsOnly: false, chainForm: "product", chainStage: "final", sourceWeight: 2, sourceMinPairs: 0 },
+  // The previous default (537d554c0): bigram-weighted source mix at α = 2 for
+  // next word; infill gated at SOURCE_MIN_PAIRS as now.
+  "previous default": { chains: false, sourceWeight: 2 },
+  // What the editor does now: chooseGuesser picks per task and project size.
   "default": {},
 }
 export const V6 = "V6 (2024-09)"
 export const SPRING_2024 = "BIA src+tgt corpus"
-const COLUMNS = ["BIA", V6, "chains", "BIA + chains", "source", "source + chains", "source + chains-only", SPRING_2024, "default"]
+const COLUMNS = ["BIA", V6, "chains", "BIA + chains", "source", "source + chains", SPRING_2024, "previous default", "default"]
 /** The comparisons a default decision turns on: [task, A, B] (A − B). */
 const COMPARISONS: Array<["next" | "infill", string, string]> = [
+  ["next", "default", "previous default"],
+  ["next", "default", "BIA"],
+  ["next", "default", "chains"],
+  ["next", "source + chains", "default"],
   ["next", "chains", "BIA"],
   ["next", V6, "BIA"],
   ["next", "chains", V6],
   ["next", "BIA + chains", "chains"],
   ["next", "source", "BIA"],
-  ["next", "source", "chains"],
   ["next", "source + chains", "source"],
-  ["next", "source + chains", "chains"],
-  ["next", "source + chains-only", "chains"],
   ["next", SPRING_2024, "BIA"],
-  ["next", "default", "chains"],
-  ["next", "source + chains", "default"],
+  ["infill", "default", "previous default"],
+  ["infill", "default", "BIA"],
+  ["infill", "source", "BIA"],
   ["infill", "chains", "BIA"],
   ["infill", "BIA + chains", "BIA"],
-  ["infill", "source", "BIA"],
-  ["infill", "source + chains", "source"],
-  ["infill", "source + chains-only", "source"],
   ["infill", SPRING_2024, "BIA"],
-  ["infill", "default", "source"],
 ]
 const EARLY_SPAN = 2000
 
@@ -174,10 +177,10 @@ const ciCell = (r: BootstrapResult) => `${r.diff >= 0 ? "+" : ""}${r.diff.toFixe
 const SIZES = ["100", "250", "500", "1000", "2000", "full"]
 /** Per-row CIs printed in full (the rest are summarised by size). */
 const DECIDING: Array<["next" | "infill", string, string]> = [
+  ["next", "default", "previous default"],
+  ["next", "default", "BIA"],
   ["next", "default", "chains"],
-  ["next", "source + chains", "default"],
-  ["next", "chains", V6],
-  ["infill", "default", "source"],
+  ["infill", "default", "BIA"],
   ["infill", "source", "BIA"],
   ["infill", "chains", "BIA"],
 ]

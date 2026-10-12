@@ -12,7 +12,9 @@ import { Showcase } from "../helpers/showcase"
  * Money moment: on a fresh verse (Genesis 1:22) the very first ghost word, and
  * the key term "Fructificad", come from the cell's own SOURCE verse ("God
  * blessed them … Be fruitful") through the lexicon the project learned from
- * its validated verses — no earlier verse continues the target that way. The
+ * its validated verses — no earlier verse continues the target that way.
+ * (A later "birds" → "aves" beat was dropped when the next-word default was
+ * retuned in AQU-1794: at α = 1 the context's "aguas" now outranks it there.) The
  * take asserts the accepted text landed in the projection before it calls
  * itself verified. Same journey as the second test in
  * e2e/specs/editor/ghost-text.spec.ts, paced for viewers.
@@ -58,16 +60,10 @@ test("BIA · ghost text that reads the source verse", async ({ page }) => {
     await show.caption("“Be fruitful” → “Fructificad”: learned from this project's verses, not from any earlier context.")
     await show.beat(2600)
     await assist.acceptNextWord()
-    await show.beat(700)
+    await show.caption("→ accepts one word.")
+    await show.beat(1400)
 
-    await assist.type(" y multiplicad, y henchid las aguas en los mares, y las ", 45)
-    await expect(assist.ghost(cellId)).toHaveText(/^aves/)
-    await show.caption("“birds” in the source → “aves”. → accepts one word.")
-    await show.beat(2200)
-    await assist.acceptNextWord()
-    await show.beat(800)
-
-    const expected = "Y Dios los bendijo diciendo: Fructificad y multiplicad, y henchid las aguas en los mares, y las aves"
+    const expected = "Y Dios los bendijo diciendo: Fructificad"
     await expect.poll(() => assist.documentText(cellId)).toBe(expected)
     await ws.blurEditor()
     await expect.poll(async () => {

@@ -61,6 +61,9 @@ export function JsonImportPanel({
   const [leaves, setLeaves] = useState<readonly JsonStringLeaf[]>([])
   // Rendered, so it is state — the File itself stays in a ref (commit-time data).
   const [fileName, setFileName] = useState("")
+  // Kept so a retry after a failed upload reopens the picker on the selection
+  // the user actually confirmed, not on a fresh everything-ticked one.
+  const [confirmedPaths, setConfirmedPaths] = useState<readonly string[] | undefined>(undefined)
   const sourceText = useRef<string>("")
   const sourceBytes = useRef<ArrayBuffer | null>(null)
   const sourceFile = useRef<File | null>(null)
@@ -130,6 +133,7 @@ export function JsonImportPanel({
     const bytes = sourceBytes.current
     if (!file || !bytes) return
     setError(null)
+    setConfirmedPaths(includePaths)
     const importResult: ImportResult = {
       name: file.name,
       strings: extractJsonStrings(sourceText.current, { include: includePaths }),
@@ -151,6 +155,7 @@ export function JsonImportPanel({
         <JsonKeyPickerPanel
           fileName={fileName}
           leaves={leaves}
+          initialSelection={confirmedPaths}
           onConfirm={handleConfirm}
           onCancel={onCancel}
         />

@@ -123,12 +123,21 @@ describe("JsonImportPanel", () => {
     expect(importFile).not.toHaveBeenCalled()
   })
 
-  it("surfaces a failed commit and keeps the selection so a retry does not re-import", async () => {
+  it("surfaces a failed commit and reopens the picker on the selection the user confirmed", async () => {
     vi.mocked(importFile).mockRejectedValueOnce(new Error("Upload failed: 503"))
     renderPanel()
-    await user.click(await screen.findByRole("button", { name: "Import selected keys" }))
+    // Exclude a key, then fail the upload.
+    await user.click(await screen.findByRole("checkbox", { name: "app.legal" }))
+    await user.click(screen.getByRole("button", { name: "Import selected keys" }))
 
     expect(await screen.findByText("Upload failed: 503")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Import selected keys" })).toBeInTheDocument()
+    // The retry must not silently re-tick the key the user excluded.
+    expect(screen.getByRole("checkbox", { name: "app.legal" })).not.toBeChecked()
+    expect(screen.getByText("1 of 2 strings selected")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Import selected keys" }))
+    await waitFor(() => expect(importFile).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(importFile).mock.calls[1][2]!.results[0].strings.map((str) => str.context))
+      .toEqual(["app.title"])
   })
 })

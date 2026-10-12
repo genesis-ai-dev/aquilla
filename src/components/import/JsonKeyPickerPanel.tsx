@@ -27,6 +27,13 @@ export interface JsonKeyPickerPanelProps {
   fileName: string
   /** Every string leaf in the document, in walk order (`listJsonStringPaths`). */
   leaves: readonly JsonStringLeaf[]
+  /**
+   * Paths to start ticked. Defaults to every leaf (the pre-AQU-525 behavior,
+   * so a user who wants the whole file just confirms). The parent passes the
+   * last confirmed selection back after a failed upload, so a retry does not
+   * silently re-tick the keys the user excluded.
+   */
+  initialSelection?: readonly string[]
   /** Confirmed selection, as the exact leaf paths to import. */
   onConfirm: (includePaths: string[]) => void
   onCancel: () => void
@@ -39,13 +46,11 @@ export interface JsonKeyPickerPanelProps {
  */
 const MAX_ROWS_PER_GROUP = 50
 
-export function JsonKeyPickerPanel({ fileName, leaves, onConfirm, onCancel }: JsonKeyPickerPanelProps) {
+export function JsonKeyPickerPanel({ fileName, leaves, initialSelection, onConfirm, onCancel }: JsonKeyPickerPanelProps) {
   const t = useT()
   const groups = useMemo(() => groupJsonLeaves(leaves), [leaves])
-  // Default: everything selected — the pre-AQU-525 behavior, so a user who
-  // wants the whole file just confirms.
   const [selected, setSelected] = useState<ReadonlySet<string>>(
-    () => new Set(leaves.map((leaf) => leaf.path)),
+    () => new Set(initialSelection ?? leaves.map((leaf) => leaf.path)),
   )
 
   const allSelected = selected.size === leaves.length

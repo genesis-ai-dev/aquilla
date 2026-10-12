@@ -220,6 +220,43 @@ export const SDK_CORE = String.raw`
     if (!plainOf(node).trim()) return "";
     return /^<p[\s>]/i.test(inner) ? inner : "<p>" + inner + "</p>";
   }
+  /** DOM point for a plain-text offset inside root, by plainOf's rules
+   *  (footnote chips count their raw USFM, <br> one newline, a block start one
+   *  newline). An offset inside a chip snaps after it. */
+  function pointAt(root, target) {
+    var pos = 0, last = "", res = null;
+    (function walk(n) {
+      var kids = n.childNodes;
+      for (var i = 0; i < kids.length && !res; i++) {
+        var c = kids[i];
+        if (c.nodeType === 3) {
+          var len = c.nodeValue.length;
+          if (target <= pos + len) { res = { node: c, offset: target - pos }; return; }
+          pos += len; if (len) last = c.nodeValue.charAt(len - 1);
+        } else if (c.nodeType === 1) {
+          if (c.classList && c.classList.contains("ghost")) continue;
+          var fn = c.getAttribute && c.getAttribute("data-usfm-footnote");
+          if (fn !== null && fn !== undefined) {
+            if (target <= pos) { res = { node: n, offset: i }; return; }
+            pos += fn.length; last = fn.charAt(fn.length - 1);
+            if (target < pos) { res = { node: n, offset: i + 1 }; return; }
+            continue;
+          }
+          if (c.tagName === "BR") { if (target <= pos) { res = { node: n, offset: i }; return; } pos += 1; last = "\n"; continue; }
+          if ((c.tagName === "P" || c.tagName === "DIV") && pos > 0 && last !== "\n") { pos += 1; last = "\n"; }
+          walk(c);
+        }
+      }
+    })(root);
+    return res || { node: root, offset: root.childNodes.length };
+  }
+  /** A Range over [start, end) plain-text offsets of root (null if invalid). */
+  function plainRange(root, start, end) {
+    if (!(end > start)) return null;
+    var a = pointAt(root, start), b = pointAt(root, end), r = doc.createRange();
+    try { r.setStart(a.node, a.offset); r.setEnd(b.node, b.offset); } catch (e) { return null; }
+    return r;
+  }
   /** Plain-text offset of a DOM point inside root (footnotes count raw). */
   function offsetOf(root, container, offset) {
     var r = doc.createRange();

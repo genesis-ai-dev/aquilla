@@ -14,7 +14,15 @@ export const SDK_ROW = String.raw`
     items.push({ key: "attach", icon: "paperclip", label: t("editor.attachments.attach"), run: function () { actions.openAttachments(id); } });
     items.push({ key: "comments", icon: "message-circle", label: st.comments > 0 ? t("editor.comments.open", { count: st.comments }) : t("editor.cell.addComment"), run: function () { actions.openComments(id); }, dot: st.comments > 0 ? "primary" : null });
     items.push({ key: "history", icon: "history", label: t("agentWorkspace.editHistory"), run: function () { actions.openHistory(id); } });
-    void c;
+    // apiRev 5: Align styles, the last icon in the built-in's cell menu
+    // (AlignStylesButton: same tooltip states and gates), IDML multi-run cells.
+    if (c && c.canAlignStyles) {
+      var conf = cfg().ai, aligning = !!(st.ai && st.ai.phase === "aligning"), busy = st.drafting;
+      var alabel = !st.editable ? t("common.readOnly") : !conf.configured ? t("editor.ai.setUpToEnable") : !conf.available ? t("editor.ai.serviceUnavailable")
+        : !st.hasText ? t("editor.ai.alignStylesNeedsText") : aligning ? t("editor.ai.aligningStyles") : busy ? t("editor.ai.generating") : t("editor.ai.alignStyles");
+      items.push({ key: "align-styles", icon: "baseline", label: alabel, disabled: busy || !st.hasText || !st.editable || !conf.available,
+        run: function () { if (!busy) actions.alignStyles(id); } });
+    }
     return items;
   }
   function openCellMenu(id, anchor, items) {

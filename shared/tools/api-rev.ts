@@ -67,6 +67,12 @@ export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
     "terms.selection / terms.view / terms.add / agent.ask: the source selection toolbar",
     "manifest.sdk (1): the host injects the extension SDK as window.aq — live data hooks (useFile, useCells, useCell, useSelection, usePresence), Aquilla components (CellList, CellRow, SourceText, TargetEditor, ValidateButton, ChapterPicker, …), a UI kit (aq.ui) and actions (aq.actions); see AQ_SDK_EXPORTS",
   ],
+  5: [
+    "ai.alignStyles: Align styles for IDML multi-run cells (scope ai:draft); signals ai phase \"aligning\"",
+    "ai.healthSpans: the AI-draft provenance wash for a live draft (scope read:cells)",
+    "editor-mount cell fields: canAlignStyles, healthSpans, ribbon.needsAttention; cells.signals issue ruleName is the localized check name",
+    "editor.config: readOnlyLabel, readOnlyKind (the built-in's read-only / archived-lane banner)",
+  ],
 }
 
 export function removedApi(method: string): RemovedApi | null {

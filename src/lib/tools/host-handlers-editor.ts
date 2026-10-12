@@ -11,6 +11,7 @@ import type {
   ToolBacktranslation,
   ToolCellSignals,
   ToolEditorConfig,
+  ToolHealthSpan,
   ToolLens,
   ToolPresencePeer,
   ToolSection,
@@ -41,6 +42,12 @@ export interface ToolEditorHostData {
   openTerm: (conceptId: string) => Promise<boolean>
   draft: (fileId: string, cellIds: string[], opts: { regenerate: boolean }) => Promise<boolean>
   draftParagraph: (fileId: string, cellId: string) => Promise<boolean>
+  /** apiRev 5: Align styles — move an IDML cell's existing translation into
+   *  the source's style runs (the host's own pipeline; an AI draft). */
+  alignStyles: (fileId: string, cellId: string) => Promise<boolean>
+  /** apiRev 5: the AI-draft provenance wash for `text` (the live draft while
+   *  editing); [] when the cell is not AI-drafted or the View setting is off. */
+  healthSpans: (fileId: string, cellId: string, text: string) => Promise<ToolHealthSpan[]>
   listBacktranslations: (fileId: string) => Promise<Record<string, ToolBacktranslation>>
   runBacktranslation: (fileId: string, cellId: string) => Promise<boolean>
   saveBacktranslation: (fileId: string, cellId: string, text: string) => Promise<boolean>
@@ -138,6 +145,16 @@ export function createEditorHandlers(data: ToolEditorHostData): Record<string, B
     "ai.draftParagraph": async (params) => {
       const ref = cell(params)
       return data.draftParagraph(ref.fileId, ref.cellId)
+    },
+    "ai.alignStyles": async (params) => {
+      const ref = cell(params)
+      return data.alignStyles(ref.fileId, ref.cellId)
+    },
+    "ai.healthSpans": async (params) => {
+      const ref = cell(params)
+      const text = obj(params).text
+      if (typeof text !== "string" || text.length > 20_000) bad("text must be a string of at most 20000 characters")
+      return data.healthSpans(ref.fileId, ref.cellId, text)
     },
     "backtranslation.list": async (params) => data.listBacktranslations(file(params)),
     "backtranslation.run": async (params) => {

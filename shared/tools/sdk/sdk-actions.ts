@@ -55,6 +55,26 @@ export const SDK_ACTIONS = String.raw`
     });
   }
   function hostCall(p) { return p.catch(function (err) { toast(errText(err)); }); }
+  /** apiRev 5: Align styles — the host moves the cell's existing translation
+   *  into the source's style runs (an AI draft); "Saved" on success, as the
+   *  built-in's AlignStylesButton shows. Not set up: the host opens the
+   *  "Set up AI" chooser. */
+  function alignStyles(id) {
+    delete S.errors[id];
+    return aquilla.ai.alignStyles(S.fileId, id).then(function (ok) {
+      if (ok) {
+        S.saved[id] = Date.now();
+        later(function () { if (S.saved[id] && Date.now() - S.saved[id] >= 2300) { delete S.saved[id]; notify([id]); } }, 2400);
+      }
+      notify([id]);
+      return !!ok;
+    }, function (err) {
+      if (err && err.code === "ai_not_configured") return false;
+      S.errors[id] = errText(err);
+      notify([id]);
+      return false;
+    });
+  }
   function generateVoice(id) {
     S.voicing[id] = "busy";
     notify([id]);
@@ -72,6 +92,7 @@ export const SDK_ACTIONS = String.raw`
     draft: draft,
     regenerate: function (id) { return draft([id], { regenerate: true }); },
     draftParagraph: draftParagraph,
+    alignStyles: alignStyles,
     openHistory: function (id) { return hostCall(aquilla.history.open(S.fileId, id)); },
     openComments: function (id) { return hostCall(aquilla.comments.open(S.fileId, id)); },
     openAttachments: function (id) { return hostCall(aquilla.attachments.open(S.fileId, id)); },

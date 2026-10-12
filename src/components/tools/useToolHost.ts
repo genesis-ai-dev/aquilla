@@ -268,6 +268,18 @@ export function useToolHost({ frameRef, projectId, tool, session, roleLevel, onG
       if (timer) clearTimeout(timer)
     }
   }, [ready, editorStore, boundFile])
+  // apiRev 5: a host-side derivation changed with no store change (the wash
+  // View setting, the decay threshold): re-send every cell already read.
+  const editorDerived = editor?.derivedVersion
+  const derivedSeenRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!ready || !boundFile || editorDerived === undefined) return
+    const before = derivedSeenRef.current
+    derivedSeenRef.current = editorDerived
+    if (before === undefined || before === editorDerived) return
+    const ids = dataRef.current?.editor.seenCellIds() ?? []
+    for (let i = 0; i < ids.length; i += 500) hostRef.current?.push({ type: "cells.changed", fileId: boundFile, cellIds: ids.slice(i, i + 500) })
+  }, [ready, editorDerived, boundFile])
   const editorSignals = editor?.signals
   const editorPeers = editor?.peers
   const editorSelection = editor?.selection

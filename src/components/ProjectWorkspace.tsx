@@ -192,7 +192,8 @@ import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { ToolsDockPanel } from "./tools/ToolMounts"
 import { ExtensionEditorSurface, useExtensionEditorChoice } from "./tools/ExtensionEditor"
-import { extensionEditorWriteCaps } from "@/lib/tools/editor-write-caps"
+import { extensionEditorReadOnlyBanner, extensionEditorWriteCaps } from "@/lib/tools/editor-write-caps"
+import { lockHoldersOnLane } from "@/lib/tools/editor-parity-rev5"
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolHostServices } from "@/lib/tools/live-data"
 import type { ToolOrigin } from "../../shared/tools/manifest"
@@ -331,6 +332,8 @@ import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diari
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
 import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
+import { categorizeAiError } from "@/lib/audio/ai-error"
+import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
@@ -12585,6 +12588,9 @@ export function ProjectWorkspace() {
     const text = (cell?.translated ?? "").trim()
     if (!cell || !text || !project?.id || !frontierSession) return false
     const voice = resolveCastVoice(tts.settings, cell.id)
+    // AQU-510: the extension shows the reason this throws, so give it the
+    // same localized, actionable sentence the built-in voice button shows
+    // (AQU-891's categoriser), never a raw provider payload.
     await generateAndAttachCellVoice({
       projectId: project.id,
       fileId: cell.fileId,
@@ -12603,6 +12609,8 @@ export function ProjectWorkspace() {
       username: currentUsername,
       ...(activeLane ? { targetLang: activeLane } : {}),
       surface: "cell",
+    }).catch((e: unknown) => {
+      throw new Error(categorizeAiError(e instanceof Error ? e.message : String(e)).body, { cause: e })
     })
     await handleCellCommitted(cell.id)
     return true
@@ -12642,6 +12650,8 @@ export function ProjectWorkspace() {
     // AQU-1463: an archived active lane freezes target edits and validation
     // for every role, exactly as EditorTable's capabilities do.
     ...extensionEditorWriteCaps({ projectReadOnly: isReadOnly, laneArchived: activeLaneLock !== null, roleLevel: projectRoleLevel }),
+    // apiRev 5: the built-in's own banner wording (archived lane, role, imported).
+    ...extensionEditorReadOnlyBanner({ project, archivedLaneLabel: activeLaneLock?.label ?? null, username: currentUsername, t }),
     autoValidatesOwnEdits: shouldAutoValidateHumanEdit({
       value: "x",
       canValidate: canPerform("cell.validate", projectRoleLevel),
@@ -12666,6 +12676,14 @@ export function ProjectWorkspace() {
     validationCount, isReadOnly, activeLaneLock, projectRoleLevel, currentUsername, fontSizes.source, fontSizes.target, fileMeta.sourceTextDirection,
     fileMeta.targetTextDirection, fileMeta.lineNumbersEnabled, cellLabelsEnabled, sparkleReady, isCompletionAvailable,
     isBacktranslationConfigured, healthCalculationsEnabled, footnoteViewMode, lens, t])
+  // apiRev 5: an empty time-ordered file gets EditorTable's empty state, not a blank frame.
+  const extensionFileEmptyTimeOrdered = extensionEditorActive && activeFileTimeOrdered && !cellsLoading
+    && readAtVersion(cellStoreVersion, () => cellStore.getCellIds().length === 0)
+  // apiRev 5: EditorTable's decay config, for "Not yet validated" attention.
+  const extensionDecayWarnThreshold = useMemo(
+    () => (project ? resolveDecayConfig(project.decaySettings, readValidationCount(project)).decayWarnThreshold : undefined),
+    [project],
+  )
   const extensionVoiceFor = useCallback((cellId: string) => {
     const voice = resolveCastVoice(tts.settings, cellId)
     return voice ? { name: voice.name, explicit: Boolean(assignedCastVoiceId(tts.settings, cellId)) } : null
@@ -12751,6 +12769,8 @@ export function ProjectWorkspace() {
     completeSingle: handleCompleteSingle,
     completeBatch,
     completeParagraph: handleCompleteParagraph,
+    alignStyles: handleAlignStyles,
+    decayWarnThreshold: extensionDecayWarnThreshold,
     openAiSetup: handleAiSetupNeeded,
     runBacktranslation,
     saveBacktranslation,
@@ -12777,15 +12797,17 @@ export function ProjectWorkspace() {
       }
     },
   })
+  // AQU-1808: only leases on the lane this editor is pointed at lock a row.
+  const extensionLockHolders = useMemo(() => lockHoldersOnLane(cellLockHolders, activeLane), [cellLockHolders, activeLane])
   const extensionEditorServices = useMemo<ToolHostServices>(() => ({
     fileId: activeFileId ?? undefined,
-    lockHolders: cellLockHolders,
+    lockHolders: extensionLockHolders,
     claimCell: handleClaimCell,
     releaseCell: handleReleaseCell,
     commentCounts: liveCellOpenCommentCount,
     openComments: handleOpenComments,
     ...(extensionEditorPipeline ? { editor: extensionEditorPipeline } : {}),
-  }), [activeFileId, cellLockHolders, handleClaimCell, handleReleaseCell, liveCellOpenCommentCount, handleOpenComments, extensionEditorPipeline])
+  }), [activeFileId, extensionLockHolders, handleClaimCell, handleReleaseCell, liveCellOpenCommentCount, handleOpenComments, extensionEditorPipeline])
 
   const handleBulkValidationCommitted = useCallback(async () => {
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -14568,7 +14590,21 @@ export function ProjectWorkspace() {
                 // place INSIDE the same layout — the media lens's timeline and
                 // video, the footnote tray, the search overlay and the load
                 // strip stay the host's own, around it.
-                <>
+                extensionFileEmptyTimeOrdered ? (
+                  // apiRev 5 parity (AQU-1565/1566): an empty time-ordered file
+                  // says what the built-in says — attach captions as rows, use a
+                  // caption track, attach media, or wait — instead of a blank frame.
+                  <TimeOrderedEmptyState
+                    linkedVideoEmptyState={linkedVideoEmptyState}
+                    placement={lens === "audio" ? "media" : "text"}
+                    canEdit={extensionEditorConfig?.canEdit ?? false}
+                    onAttachMediaFile={canUploadSourceMedia ? handleAttachMediaFile : undefined}
+                    onAttachMediaUrl={canUploadSourceMedia ? handleAttachMediaUrl : undefined}
+                    onOpenMediaView={lens === "audio" ? undefined : handleOpenMediaView}
+                    onAttachCaptions={offerCaptionRows ? handleAttachCaptionsAsRows : undefined}
+                    onUseCaptionTrackAsRows={offerCaptionRows ? requestUseTrackAsRows : undefined}
+                  />
+                ) : <>
                 <ExtensionEditorSurface
                   choice={extensionEditorChoice}
                   file={{ fileId: activeFileId, name: activeFile.name }}

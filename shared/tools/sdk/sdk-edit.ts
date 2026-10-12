@@ -13,6 +13,62 @@ export const SDK_EDIT = String.raw`
   var SUGGEST_MS = 450;
   var EDS = Object.create(null);   // cellId → its TargetEditor surface
 
+  // ── apiRev 5: the AI-draft provenance wash (#946) — green where a word is
+  // also in a validated example, orange where the model guessed. Painted with
+  // the CSS Custom Highlight API so it never touches the editable DOM (the
+  // built-in uses ProseMirror decorations for the same reason), in plainOf
+  // offsets so footnote chips line up. Title = the cited example, on hover.
+  var WASH = Object.create(null);   // cellId → [{ kind, range, title }]
+  var HAS_HL = typeof CSS !== "undefined" && !!CSS.highlights && typeof Highlight !== "undefined";
+  function repaintWash() {
+    if (!HAS_HL) return;
+    var sup = new Highlight(), gue = new Highlight();
+    Object.keys(WASH).forEach(function (id) {
+      WASH[id] = WASH[id].filter(function (w) { return w.range.startContainer.isConnected; });
+      if (!WASH[id].length) { delete WASH[id]; return; }
+      WASH[id].forEach(function (w) { (w.kind === "supported" ? sup : gue).add(w.range); });
+    });
+    CSS.highlights.set("aq-hs-supported", sup);
+    CSS.highlights.set("aq-hs-guessed", gue);
+  }
+  function paintWash(id, root, spans) {
+    if (!spans || !spans.length) { if (WASH[id]) { delete WASH[id]; repaintWash(); } root.removeAttribute("data-health-spans"); return; }
+    WASH[id] = spans.map(function (s) {
+      var rg = plainRange(root, s.start, s.end);
+      return rg ? { kind: s.kind, range: rg, title: s.title || "" } : null;
+    }).filter(Boolean);
+    // Test/assistive hook: how many runs of each kind are painted.
+    root.setAttribute("data-health-spans", WASH[id].filter(function (w) { return w.kind === "supported"; }).length + "/" + WASH[id].filter(function (w) { return w.kind === "guessed"; }).length);
+    repaintWash();
+  }
+  /** The wash for what the cell shows now: the committed text's (host-sent),
+   *  or the live draft's once the host has measured it. */
+  function washSpans(id) {
+    var c = S.byId[id], d = S.drafts[id];
+    if (!c || !c.healthSpans) return null;
+    if (d && d.dirty) { var live = S.liveHs[id]; return live && live.text === d.value ? live.spans : null; }
+    return c.healthSpans;
+  }
+  function measureLiveWash(id) {
+    var c = S.byId[id], d = S.drafts[id];
+    if (!c || !c.healthSpans || !d || !d.dirty) return;
+    var text = d.value;
+    aquilla.ai.healthSpans(S.fileId, id, text).then(function (spans) {
+      var now = S.drafts[id];
+      if (!now || now.value !== text) return;
+      S.liveHs[id] = { text: text, spans: spans };
+      var r = ed(id);
+      if (r) paintWash(id, r.read, spans);
+    }, noop);
+  }
+  function washTitleAt(id, read, e) {
+    var lock = S.locks[id];
+    if (lock || !WASH[id] || !doc.caretRangeFromPoint) return;
+    var p = doc.caretRangeFromPoint(e.clientX, e.clientY), hit = null;
+    if (p) WASH[id].forEach(function (w) { if (!hit && w.title && w.range.isPointInRange(p.startContainer, p.startOffset)) hit = w; });
+    if (hit) read.setAttribute("title", hit.title); else read.removeAttribute("title");
+  }
+
   function ed(id) {
     var read = EDS[id];
     if (!read || !read.isConnected) return null;
@@ -35,6 +91,7 @@ export const SDK_EDIT = String.raw`
     read.addEventListener("blur", function () { onEditorBlur(id); });
     read.addEventListener("paste", function (e) { onPaste(id, e); });
     read.addEventListener("beforeinput", function (e) { idmlGuard(id, read, e); });
+    read.addEventListener("mousemove", function (e) { washTitleAt(id, read, e); });
     var readKey = null;
     read.__repaint = function () { readKey = null; };
     return bindCell(id, well, function () {
@@ -57,7 +114,8 @@ export const SDK_EDIT = String.raw`
         var peers = peersFor(id);
         var peerDraft = peers.filter(function (p) { return p.draftText !== null && p.draftText !== undefined; })[0];
         var idml = c.idml && !c.idml.error ? c.idml : null;
-        var key = [targetPlain, d && d.dirty ? d.html : c.targetHtml, peerDraft ? peerDraft.username + ":" + peerDraft.draftText : "", termKey(id, "target"), issueKey(st.issues, "target"), st.drafting ? 1 : 0, idml ? idml.html : ""].join("\u0001");
+        var wash = washSpans(id);
+        var key = [targetPlain, d && d.dirty ? d.html : c.targetHtml, peerDraft ? peerDraft.username + ":" + peerDraft.draftText : "", termKey(id, "target"), issueKey(st.issues, "target"), st.drafting ? 1 : 0, idml ? idml.html : "", wash ? JSON.stringify(wash) : ""].join("\u0001");
         if (key !== readKey) {
           readKey = key;
           if (idml && !peerDraft) {
@@ -69,6 +127,7 @@ export const SDK_EDIT = String.raw`
           } else if ((targetPlain || "").trim()) {
             showInto(read, d && d.dirty ? d.html : c.targetHtml, targetPlain);
             decorate(read, decorations(id, "target", st.issues));
+            paintWash(id, read, wash);
           } else {
             read.textContent = "";
             read.appendChild(el("span", { "aria-hidden": "true", style: { display: "block", "min-height": "1.6em" } }));
@@ -82,15 +141,17 @@ export const SDK_EDIT = String.raw`
       // AI overlay (streaming preview / phase pill) + progress
       Array.prototype.forEach.call(well.querySelectorAll(".ai-overlay, .fills"), function (n) { n.remove(); });
       if (st.drafting) {
-        var ai = st.ai;
-        if (!(targetPlain || "").trim()) {
+        var ai = st.ai, aligning = ai.phase === "aligning";
+        var phaseText = ai.phase === "searching" ? t("editor.ai.lookingUpExamples") : aligning ? t("editor.ai.aligningStyles") : t("editor.ai.generatingTranslation");
+        // apiRev 5: Align styles keeps the overlay over existing text, as the built-in does.
+        if (!(targetPlain || "").trim() || aligning) {
           var ov = el("div", { class: "ai-overlay", "aria-live": "polite", "aria-busy": "true" });
-          if (ai.preview) ov.appendChild(el("p", { dir: "auto" }, [ai.preview, el("span", { class: "ai-caret", "aria-hidden": "true" })]));
-          else ov.appendChild(el("div", { class: "ai-pill" }, [ai.phase === "searching" ? t("editor.ai.lookingUpExamples") : t("editor.ai.generatingTranslation")]));
+          if (ai.preview && !aligning) ov.appendChild(el("p", { dir: "auto" }, [ai.preview, el("span", { class: "ai-caret", "aria-hidden": "true" })]));
+          else ov.appendChild(el("div", { class: "ai-pill" }, [phaseText]));
           well.appendChild(ov);
           read.classList.add("subdued");
         }
-        well.appendChild(el("div", { class: "fills", role: "progressbar", "aria-label": ai.phase === "searching" ? t("editor.ai.lookingUpExamples") : t("editor.ai.generatingTranslation") }, [el("i")]));
+        well.appendChild(el("div", { class: "fills", role: "progressbar", "aria-label": aligning ? t("editor.row.aligningStyles", { cellRef: cellRef(c) }) : phaseText }, [el("i")]));
       }
     });
   }
@@ -119,6 +180,7 @@ export const SDK_EDIT = String.raw`
     if (c.idml) idmlInto(r.read, d && d.dirty ? d.html : c.idml.html);
     else showInto(r.read, d && d.dirty ? d.html : c.targetHtml, d && d.dirty ? d.value : c.target);
     r.read.__repaint();
+    paintWash(id, r.read, washSpans(id));
     r.read.classList.remove("empty");
     r.read.setAttribute("contenteditable", "true");
     r.read.focus();
@@ -210,6 +272,10 @@ export const SDK_EDIT = String.raw`
     d.typingTimer = later(function () { d.typingTimer = null; sendTyping(id); }, TYPING_MS);
     if (d.suggestTimer) clearTimeout(d.suggestTimer);
     d.suggestTimer = later(function () { d.suggestTimer = null; suggest(id); }, SUGGEST_MS);
+    // apiRev 5: re-measure the provenance wash on the live draft (the
+    // built-in recomputes it from the editor's text on every change).
+    if (d.washTimer) clearTimeout(d.washTimer);
+    d.washTimer = later(function () { d.washTimer = null; measureLiveWash(id); }, 200);
     updateBubble();
     emit("cells", [id]);
   }

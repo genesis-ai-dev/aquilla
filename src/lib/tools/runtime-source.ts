@@ -268,6 +268,9 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       reviewContextual: function (fileId, cellId, draftId, accept) { return call("ai.reviewContextual", { fileId: fileId, cellId: cellId, draftId: draftId, accept: !!accept }); },
       smartEdits: function (fileId, cellId) { return call("ai.smartEdits", { fileId: fileId, cellId: cellId }); },
       smartEditFeedback: function (fileId, cellId, id, action) { return call("ai.smartEditFeedback", { fileId: fileId, cellId: cellId, id: id, action: action }); },
+      // apiRev 5: Align styles, and the AI-draft provenance wash for a live draft.
+      alignStyles: function (fileId, cellId) { return call("ai.alignStyles", { fileId: fileId, cellId: cellId }); },
+      healthSpans: function (fileId, cellId, text) { return call("ai.healthSpans", { fileId: fileId, cellId: cellId, text: String(text || "") }); },
     },
     tell: function (message) { return call("tell", { message: String(message) }); },
     on: function (type, cb) {

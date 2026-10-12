@@ -62,6 +62,12 @@ export interface ToolEditorConfig {
   canManageLanes: boolean
   /** The host can open these panels for a cell (history.open, …). */
   panels: ToolPanelKind[]
+  /** apiRev 5: the read-only banner the built-in editor shows (role, imported
+   *  project, or an archived lane — AQU-1463), localized; null when none. */
+  readOnlyLabel?: string | null
+  /** apiRev 5: why — "lane-archived" (the lane is frozen for every role) or
+   *  "role" (this reader's role / project permissions). */
+  readOnlyKind?: "lane-archived" | "role" | null
 }
 
 export type ToolPanelKind = "history" | "comments" | "attachments" | "rule" | "term" | "recorder"
@@ -102,8 +108,9 @@ export interface ToolCellIssue {
 }
 
 export interface ToolAiState {
-  /** "searching" (finding examples) | "generating" | null when idle. */
-  phase: "searching" | "generating" | null
+  /** "searching" (finding examples) | "generating" | "aligning" (apiRev 5:
+   *  Align styles moving the text into the source's style runs) | null. */
+  phase: "searching" | "generating" | "aligning" | null
   /** Streaming preview text while generating. */
   preview: string | null
   error: string | null
@@ -216,6 +223,22 @@ export interface ToolCellViewRev3 {
   /** The voice this line speaks in (Audio lens): name, and whether someone
    *  chose it (else the project default). */
   voice?: { name: string; explicit: boolean } | null
+  /** apiRev 5: an IDML cell with two or more editable style runs — "Align
+   *  styles" (ai.alignStyles) can move its translation into the source's runs. */
+  canAlignStyles?: boolean
+  /** apiRev 5: the AI-draft provenance wash (#946) over the committed target —
+   *  words also found in a validated example ("supported") vs guessed. Only on
+   *  AI-drafted cells while the reader's View setting is on; else absent. */
+  healthSpans?: ToolHealthSpan[] | null
+}
+
+/** apiRev 5: one run of the AI-draft provenance wash, in plain-text offsets. */
+export interface ToolHealthSpan {
+  start: number
+  end: number
+  kind: "supported" | "guessed"
+  /** Hover text naming the cited example (supported spans), localized. */
+  title?: string
 }
 
 export interface ToolRibbon {
@@ -225,4 +248,8 @@ export interface ToolRibbon {
   /** Rounded score 0–100 when known. */
   score: number | null
   label: string
+  /** apiRev 5: the line has text and its automatic confidence is below the
+   *  project's warn threshold — the built-in tints the number for it and
+   *  explains "Not yet validated" on hover (AQU-757). */
+  needsAttention?: boolean
 }

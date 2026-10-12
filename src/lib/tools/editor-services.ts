@@ -16,6 +16,7 @@ import type { CellStore } from "@/hooks/useActiveCellStore"
 import { sanitizeSourceDisplayHtml } from "@/lib/richtext/editor-content"
 import { hasIdmlCellMetadata, prepareIdmlEditorContent, resolveIdmlEditorConfiguration } from "@/lib/richtext/idml-editor"
 import { findConceptMatches } from "@/lib/terminology/match"
+import { cellCanAlignStyles } from "@/lib/idml/align-styles"
 import { cellNumberLabel, importDisplayLabel, verseRangeLabel } from "@/lib/scripture-reference"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import type { ToolOrigin } from "../../../shared/tools/manifest"
@@ -23,6 +24,7 @@ import type {
   ToolBacktranslation,
   ToolCellSignals,
   ToolEditorConfig,
+  ToolHealthSpan,
   ToolLens,
   ToolPresencePeer,
   ToolSection,
@@ -70,6 +72,15 @@ export interface ToolEditorServices {
   /** AI isn't set up yet: open the host's "Set up AI" chooser. */
   openAiSetup: () => void
   draftParagraph: (cellId: string) => Promise<boolean>
+  /** apiRev 5: Align styles (the built-in's AlignStylesButton path). */
+  alignStyles: (cellId: string) => Promise<boolean>
+  /** apiRev 5: the AI-draft provenance wash for `text` (default: the cell's
+   *  committed target); null when off or the cell is not AI-drafted. */
+  healthSpansFor: (cellId: string, text?: string) => ToolHealthSpan[] | null
+  /** apiRev 5: changes when a host-side cell derivation changes without a
+   *  store change (the wash View setting, the decay threshold); the host then
+   *  re-sends every cell the extension has read. */
+  derivedVersion?: string
   backtranslate: (cellId: string) => Promise<boolean>
   saveBacktranslation: (cellId: string, text: string) => boolean
   openHistory: (cellId: string) => void
@@ -109,6 +120,7 @@ export interface ToolViewExtras {
   structureFor?: (cellId: string) => ToolCellStructure
   voiceFor?: (cellId: string) => { name: string; explicit: boolean } | null
   lineNumbers?: boolean
+  healthSpansFor?: (cellId: string) => ToolHealthSpan[] | null
 }
 
 export function cellToToolView(store: CellStore, cell: CellData, extras: ToolViewExtras = {}): ToolCellView {
@@ -158,6 +170,8 @@ export function cellToToolView(store: CellStore, cell: CellData, extras: ToolVie
     paragraph: structure?.paragraph ?? null,
     voice: extras.voiceFor?.(cell.id) ?? null,
     idml: idmlViewOf(cell),
+    canAlignStyles: cellCanAlignStyles(cell),
+    healthSpans: extras.healthSpansFor?.(cell.id) ?? null,
   }
 }
 

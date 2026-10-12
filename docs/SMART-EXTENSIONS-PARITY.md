@@ -1,6 +1,7 @@
 # Smart Extensions editor parity (AQU-1793)
 
-The product's default editor is **Aquilla Editor**, a first-party Smart Extension
+The product's default editor is the Aquilla **native** (built-in) editor. **Aquilla Editor**
+is the same editor rebuilt as a first-party Smart Extension, an opt-in
 (`shared/tools/first-party/default-editor*.ts`), written on the extension SDK
 (`window.aq`, `shared/tools/sdk/`, see SMART-EXTENSIONS.md). It runs in the same sandboxed,
 opaque-origin, no-network frame as any extension and reaches Aquilla only through
@@ -35,7 +36,7 @@ call goes through the scope gate; no extension gets anything privileged.
 | 4 | Lens toggle, hidden-cells toggle, ⋯ File options, View settings | `FileChapterToolbar` + `ViewSettingsMenu` | 🧩 the host draws the **same component** over the frame's chapter row; the frame keeps that width clear | `editor.chrome` event |
 | 5 | Column header | gutter marks (☑ ⚑ #), Source + language chip, Target + check marks (T, audio) | ✅ | `editor.config` |
 | 6 | Lane switcher | chip with ⌄; lanes, "Change target language…", "Add lane…" (maintainers) | ✅ | `editor.setLane`, `editor.openSettings` |
-| 7 | Read-only banner | amber banner for viewer/commenter/reviewer roles | ✅ | `editor.config.canEdit` |
+| 7 | Read-only banner | amber banner for viewer/commenter/reviewer roles (and an archived lane, row 77) | ✅ (exact wording since apiRev 5) | `editor.config.canEdit`, `readOnlyLabel` |
 | 8 | Responsive layout | md (≥768): 3 columns; below that, target stacked under source; keyed off the **app** viewport | ✅ breakpoints from the app's viewport, not the frame's | theme `--aq-viewport-width` |
 | 9 | Typography and colours | Geist Variable, 14px/1.6 cells, light/dark tokens | ✅ app font sent as bytes (FontFace), tokens + `html.dark` | `fonts` event, theme vars |
 | 10 | Icons | lucide | ✅ same glyphs, generated from the installed lucide-react | — |
@@ -112,18 +113,44 @@ call goes through the scope gate; no extension gets anything privileged.
 | — | Alt+arrow shortcuts | don't exist | n/a | — |
 | — | "Revert removing validations" | no such built-in feature | ✅ Smart Extensions revert now **puts back validations an extension withdrew** (`shared/tools/revert.ts` `revalidates`) | — |
 
-**Count:** of the 72 rows, 65 are ✅ and 7 are 🧩 (host panel, identical by construction): **72/72 at parity**. The last seven (39, 47, 51, 52, 60, 61, 71) landed in apiRev 4.
-So 65 of 72 are at parity, 4 are partial and 3 are gaps.
+### apiRev 5 — what dev's built-in editor gained after the apiRev 4 claim (audit 2026-10-12)
+
+Every dev commit since the branch's merge base that touched the built-in editor or the
+workspace around it was audited. Host-drawn surfaces were already at parity by construction:
+the File options menu (AQU-358 group names, AQU-983 batch validate/draft dialog), the selection
+bar (AQU-1722 batch voice), View settings (Editor Settings scroll, the #946 toggle itself), the
+rules panel (AQU-1805 jump/fix), comments (AQU-761), the AQU-1463 must-dismiss modal and the
+media timeline (AQU-1565). The rest needed work:
+
+| # | Feature | Built-in behaviour | Extension | Bridge API |
+|---|---|---|---|---|
+| 73 | Integrity explanations (AQU-757) | hover on the line number and the ribbon names each active check and why it fired; aria-label carries it | ✅ same lines, same aria/role/testid (`cell-issue-flag`); check names localized like the built-in's | `cells.signals` issues (`ruleName` localized) |
+| 74 | Low-confidence attention (AQU-757) | number tinted when automatic confidence is below the warn threshold; hover "Not yet validated — …" | ✅ (the tint was a silent gap before rev 5) | `ribbon.needsAttention` |
+| 75 | Align styles (IDML multi-run cells) | last cell-menu action; tooltip states; "Aligning styles…" overlay; Saved | ✅ same gates, states and overlay, through the host's `alignCellStyles` | `ai.alignStyles`, cell `canAlignStyles`, ai phase `aligning` |
+| 76 | Validated vs guessed words (#946) | green/orange wash over AI drafts, cited example on hover, read view and editor, recomputed as you type | ✅ painted with the CSS Custom Highlight API (read view and editing surface), host-computed spans (re-measured on the live draft), cited example as the hover title | cell `healthSpans`, `ai.healthSpans` |
+| 77 | Read-only banner wording | role / imported / reviewer-without-text-validation / archived-lane sentences, `role-read-only-banner` / `lane-archived-banner` | ✅ the built-in's own label and testid (row 7 was really 🟡 before: one generic sentence) | `editor.config.readOnlyLabel/readOnlyKind` |
+| 78 | Archived lane locks writes (AQU-1463) | target edits and validation off for every role | ✅ | `editor.config.canEdit/canValidate` |
+| 79 | Focus locks per lane (AQU-1808) | a lease on another lane never locks this row | ✅ only the active lane's leases reach the frame | `presence.changed` |
+| 80 | Presence per connection (AQU-1791) | cell rows stay per connection while the roster collapses a user | ✅ per-connection rows (a second tab keeps its caret) | `presence.peers` |
+| 81 | Empty time-ordered file (AQU-1565/1566) | linked-video panel (captions as rows / use a track), attach media, or waiting | 🧩 the host's own component (`TimeOrderedEmptyState`, shared with EditorTable) in place of a blank frame | — |
+| 82 | Voice failure reason (AQU-510) | localized, actionable sentence (`categorizeAiError`) | ✅ the host returns the same sentence | `audio.generate` |
+
+**Count:** **82/82 at parity** — 74 ✅ and 8 🧩 (host UI, identical by construction). Before
+rev 5, measured against the current dev: 71/82 (row 7 partial; rows 73–82 missing). The
+original 72 rows: 65 ✅ and 7 🧩; the last seven (39, 47, 51, 52, 60, 61, 71) landed in apiRev 4.
 
 ## Remaining differences
 
-None of the 72 rows is partial. Small, deliberate differences, stated in their rows: smart edits
+None of the 82 rows is partial. Small, deliberate differences, stated in their rows: smart edits
 underline the read view rather than the open editor (they are flag-gated and off by default), and
 the Audio lens has no per-line volume slider (a per-device preference). Structural source edits
 (insert / remove / hide) run through the host's own handlers, so they are attributed to the user
 without a `tool_origin` stamp; the source text commit carries one. Tool revert ("revert since T")
 covers target and validation writes, not structural source changes — `write:source` is a separate,
-explicit scope for that reason.
+explicit scope for that reason. The provenance wash (row 76) is painted with the CSS Custom
+Highlight API (Chromium 105+, Safari 17.2+, Firefox 140+); a browser without it shows no wash in
+the extension editor, and the cited example appears as the native hover title rather than a
+decorated element.
 
 ## Sandbox notes
 

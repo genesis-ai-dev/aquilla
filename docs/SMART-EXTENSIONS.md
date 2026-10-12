@@ -89,33 +89,38 @@ Postgres     project_tools / project_tool_versions (source, manifest, sha256, ap
 - **Capability twins.** `capability-contract.test.ts` keeps runtime, handlers, permission map,
   smoke stub and builder prompt in agreement.
 
-## The default editor is an extension
+## The full editor as an extension (opt-in)
 
-The standard translation editor ships as a **first-party extension**, "Aquilla Editor"
-(`shared/tools/first-party/default-editor*.ts`, on the SDK below), and is the default editor for every file. It
-runs exactly like any other extension — the same sandboxed frame, CSP, bridge, permission gate
-and event path, with tool provenance on every write — so it doubles as the proof that the
-extension API can carry the whole editing experience. Nothing privileged: it reaches the
-workspace's live focus locks and comment panels only through the apiRev 2 bridge calls above,
-which any `editor` extension gets.
+The Aquilla **native** (built-in) editor is the default editor for every file. The standard
+translation editor ALSO ships as a **first-party extension**, "Aquilla Editor"
+(`shared/tools/first-party/default-editor*.ts`, on the SDK below), at feature parity with the
+native editor. It exists to prove that the extension API can carry the whole editing
+experience; a user edits with it only after opting in. It runs exactly like any other
+extension — the same sandboxed frame, CSP, bridge, permission gate and event path, with tool
+provenance on every write. Nothing privileged: it reaches the workspace's live focus locks and
+comment panels only through the bridge calls above, which any `editor` extension gets.
 
 - **Install.** The SERVER installs it (`POST /tools/first-party {key:"default-editor"}`) from
-  the repo's reviewed source — a client cannot choose the bytes. Idempotent via a deterministic
+  the repo's reviewed source — a client cannot choose the bytes — whenever a project's
+  extensions load, so it is always available to pick. Idempotent via a deterministic
   per-project tool id (no schema change). Upgraded in place to the shipped code only while the
   current version is pristine (a project's "Change it" edit is left alone). Removing it on the
-  management page keeps it removed (the built-in editor becomes the default again).
+  management page keeps it removed.
+- **Opt in.** The "Edit with" picker above the native editor lists it; pick it for one file, or
+  tick "Use for every file in this project" (remembered per user and project). "Standard
+  editor" in the same picker goes back. A project or user that never chose gets the native
+  editor — installing it never changes anyone's editor.
 - **Grants — explicit and visible.** Its declared scopes (`read:cells`, `write:target`,
   `write:validation`, `read:comments`) are auto-granted to each user the first time only; a
   later revoke sticks. The editor bar says so ("…granted these permissions automatically…",
-  with a Manage link), the switcher labels it "(default)", and its card on the management page
-  carries a "First-party · auto-granted at install" badge. Role ceilings and the server's
-  `authorize()` apply as for any extension.
-- **Fallback.** The built-in editor stays one switch away ("Standard editor" in the editor
-  switcher; remembered per file or project-wide). The client waits for the project's
-  extensions before choosing, so the built-in never flashes first.
-- **Off switch.** `localStorage["aquilla.extensions.defaultEditor"]="off"` (per browser) or
-  build env `VITE_EXTENSION_DEFAULT_EDITOR=off`. The e2e stack builds with it off so the
-  editor smoke journeys keep guarding the built-in editor; the extension-editor specs opt in.
+  with a Manage link) and its card on the management page carries a "First-party ·
+  auto-granted at install" badge. Role ceilings and the server's `authorize()` apply as for any
+  extension.
+- **Default override (testing).** `localStorage["aquilla.extensions.defaultEditor"]="on"` (per
+  browser) or build env `VITE_EXTENSION_DEFAULT_EDITOR=on` makes it the default instead (the
+  picker then labels it "(default)", and the client waits for the project's extensions so the
+  native editor doesn't flash first). `E2E_EDITOR=extension` sets the localStorage override so
+  the core editor journeys run against it; the e2e build pins the env to `off`.
 
 **Parity.** `docs/SMART-EXTENSIONS-PARITY.md` is the feature-by-feature matrix against the
 built-in editor (EditorTable + TranslatedEditor + the workspace around them). In short: an
@@ -150,6 +155,17 @@ and `agent.ask` (the source selection toolbar; the popovers and the chat are the
 editor mounts carry `idml` (the slot markup to edit) and the footnote tray is fed from `editor.visible`.
 Events: `audio.changed`, `contextual.changed`, `examples.changed`, `smartedits.changed`.
 
+Added in apiRev 5 (additive) — what dev's built-in editor gained after that claim, so the matrix is
+82/82 (see the parity doc): `ai.alignStyles` (Align styles for IDML multi-run cells, scope `ai:draft`;
+ai phase `aligning`) and `ai.healthSpans` (the AI-draft provenance wash for a live draft). Editor-mount
+cells carry `canAlignStyles`, `healthSpans` and `ribbon.needsAttention`; `editor.config` carries the
+built-in's `readOnlyLabel` / `readOnlyKind` (role, imported project, archived lane); issue `ruleName`s
+are localized. Host-side, only the active lane's focus leases reach the frame (AQU-1808), presence
+stays per connection (AQU-1791), an empty time-ordered file shows the host's own empty state, and a
+host-side derivation change (the wash View setting) re-sends the cells already read. Tests:
+`src/lib/tools/__tests__/rev5.test.ts`, `default-editor-flag.test.ts`, and
+`e2e/specs/tools/default-editor-rev5.spec.ts`.
+
 ## The extension SDK (`window.aq`, apiRev 4)
 
 A manifest with `"sdk": 1` gets the **extension SDK** injected next to the bridge runtime
@@ -181,7 +197,7 @@ real `window.aq` and the builder prompt (`auth-worker/src/lib/tools/build-prompt
 teaches the model the SDK with two worked examples). Side panels now receive the editor's open
 file as `aquilla.context.file`, so `aq.useCells()` in a panel follows the file being edited.
 
-**The default editor is written on it.** `shared/tools/first-party/default-editor-app.ts` is the
+**The first-party editor extension is written on it.** `shared/tools/first-party/default-editor-app.ts` is the
 whole editor: ~110 lines composing `aq.Toolbar`, `aq.ChapterPicker`, `aq.ColumnHeader` and
 `aq.CellList` of `aq.CellRow`s, plus its cell-details panel (health / back-translation /
 footnotes / issues). Before the SDK the editor was 2,533 lines of extension code.
@@ -214,7 +230,7 @@ validated is still the live head.
 - Workers: `auth-worker/src/__tests__/tools-routes.test.ts`, `tools-builder.test.ts`;
   `sync-worker/src/__tests__/tool-provenance.test.ts`.
 - E2E: `e2e/specs/tools/tools-heatmap.spec.ts`, `e2e/specs/tools/extension-editor.spec.ts`,
-  `e2e/specs/tools/default-editor-extension.spec.ts` (first-party default editor: edit, rich
+  `e2e/specs/tools/default-editor-extension.spec.ts` (first-party editor extension: edit, rich
   text, validate, a second user's lock + live edit, switch to built-in and back, revert since T),
   `e2e/specs/tools/default-editor-perf.spec.ts` (full gospel, extension vs built-in; reports).
 - Unit (apiRev 2): `api-rev2.test.ts`, `live-data-rev2.test.ts`, `default-editor.test.ts`;

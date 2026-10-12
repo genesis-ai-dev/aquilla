@@ -19,7 +19,7 @@ export const SDK_DATA = String.raw`
     peers: [], peersByCell: Object.create(null), locks: Object.create(null), comments: Object.create(null), audio: Object.create(null),
     bts: Object.create(null), terms: Object.create(null), termsAsked: Object.create(null),
     selection: Object.create(null), selCount: 0, selAnchor: null, voicing: Object.create(null),
-    activeId: null, focusRowId: null, claimed: null, drafts: Object.create(null), saved: Object.create(null), errors: Object.create(null),
+    activeId: null, focusRowId: null, claimed: null, drafts: Object.create(null), saved: Object.create(null), errors: Object.create(null), liveHs: Object.create(null),
     expanded: Object.create(null),
     pendingReveal: ctx.file && ctx.file.revealCellId ? ctx.file.revealCellId : null,
     username: ctx.user ? ctx.user.username : "",

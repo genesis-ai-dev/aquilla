@@ -75,6 +75,9 @@ export function stubEditorData(populated: boolean): ToolEditorHostData {
     openTerm: yes,
     draft: yes,
     draftParagraph: yes,
+    alignStyles: yes,
+    healthSpans: async (fileId, cellId, text) =>
+      populated && fileId === "f1" && cellId === "c1" && text ? [{ start: 0, end: Math.min(5, text.length), kind: "supported" as const, title: "Example → Ejemplo" }] : [],
     listBacktranslations: async (fileId): Promise<Record<string, ToolBacktranslation>> =>
       populated && fileId === "f1"
         ? { c1: { cellId: "c1", text: "Book of the genealogy of Jesus Christ", stale: false, polished: true, author: null, error: null } }

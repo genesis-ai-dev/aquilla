@@ -188,15 +188,42 @@ export const SDK_CELLS = String.raw`
     var marked = /<(b|strong|i|em|u|s|code)[\s>]/i;
     return !!(c.sourceHtml && marked.test(c.sourceHtml) && !(c.targetHtml && marked.test(c.targetHtml)));
   }
-  /** The verse/cell number pill, tinted by the worst live rule issue. */
+  /** apiRev 5 (AQU-757): what the tint means — each live check with why it
+   *  fired, else "Not yet validated" when only low confidence tints the line. */
+  function issueLines(st) {
+    return st.liveIssues.map(function (i) { return { name: i.ruleName, reason: i.message }; });
+  }
+  function issueHint(st) {
+    var c = st.cell;
+    return !st.liveIssues.length && c && c.ribbon && c.ribbon.needsAttention ? t("editor.issues.notYetValidated") : "";
+  }
+  function issueSummary(st) {
+    var lines = issueLines(st);
+    return lines.length ? lines.map(function (l) { return l.name + " — " + l.reason; }).join(". ") : issueHint(st);
+  }
+  /** The CellIssueLines block the built-in's hover shows. */
+  function IssueLinesNode(st) {
+    var lines = issueLines(st);
+    if (!lines.length) { var h = issueHint(st); return h ? el("div", { text: h }) : null; }
+    return el("div", { class: "issue-lines" }, lines.map(function (l) { return el("p", {}, [el("b", { text: l.name }), " — " + l.reason]); }));
+  }
+  /** The verse/cell number pill, tinted by the worst live rule issue (or low
+   *  confidence); hover names every active check and why it fired. */
   function CellNumber(id) {
     var num = el("span", { class: "num" });
+    tip(num, function () { return IssueLinesNode(cellState(id)); }, "right");
     return bindCell(id, num, function () {
       var c = S.byId[id];
       if (!c) return;
       var st = cellState(id);
-      num.textContent = numberOf(c);
-      num.className = "num" + (st.major ? " major" : st.liveIssues.length ? " issue" : "");
+      var label = numberOf(c), summary = issueSummary(st);
+      var attention = !!(c.ribbon && c.ribbon.needsAttention);
+      num.textContent = label;
+      num.className = "num" + (st.major ? " major" : st.liveIssues.length || attention ? " issue" : "");
+      var lineAria = t("editor.row.lineAria", { number: label });
+      num.setAttribute("aria-label", summary ? lineAria + ". " + summary : lineAria);
+      if (summary) { num.setAttribute("role", "img"); num.setAttribute("data-testid", "cell-issue-flag"); }
+      else { num.removeAttribute("role"); num.removeAttribute("data-testid"); }
     });
   }
   /** Health ribbon (retrieval support), desktop or mobile variant. */
@@ -204,7 +231,13 @@ export const SDK_CELLS = String.raw`
     var mobile = opts && opts.mobile;
     var r = mobile ? el("span", { class: "ribbon-m", "data-testid": "health-ribbon-mobile", "aria-hidden": "true" }, [el("i")])
       : el("span", { class: "ribbon", "data-testid": "health-ribbon", role: "img", tabindex: "0" }, [el("i")]);
-    if (!mobile) tip(r, function () { var x = S.byId[id] && S.byId[id].ribbon; return x ? x.label : ""; }, "right");
+    if (!mobile) tip(r, function () {
+      var x = S.byId[id] && S.byId[id].ribbon;
+      if (!x) return "";
+      // apiRev 5 (AQU-757): the built-in's ribbon hover names the checks too.
+      var lines = IssueLinesNode(cellState(id));
+      return lines ? el("div", {}, [el("p", { text: x.label }), lines]) : x.label;
+    }, "right");
     return bindCell(id, r, function () {
       var c = S.byId[id];
       if (!c || !c.ribbon) { r.hidden = true; return; }
@@ -212,7 +245,9 @@ export const SDK_CELLS = String.raw`
       r.hidden = false;
       r.firstChild.style.backgroundImage = c.ribbon.background;
       if (!mobile) {
-        r.setAttribute("aria-label", c.ribbon.label + (st.major ? " · major automatic issue" : st.liveIssues.length ? " · automatic issue" : ""));
+        // The built-in's label: named checks, else the low-confidence hint, else the generic issue.
+        var named = issueSummary(st);
+        r.setAttribute("aria-label", c.ribbon.label + (named ? " · " + named : st.major ? " · major automatic issue" : st.liveIssues.length ? " · automatic issue" : ""));
         r.setAttribute("data-health-stage", c.ribbon.stage);
       }
     });

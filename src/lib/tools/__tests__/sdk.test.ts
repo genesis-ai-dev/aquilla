@@ -10,7 +10,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { TOOLS_BUILDER_SYSTEM_PROMPT } from "../../../../auth-worker/src/lib/tools/build-prompt"
 import { API_REV_ADDITIONS } from "../../../../shared/tools/api-rev"
-import { TOOLS_API_REV, TOOL_SCOPES, toolCodeHash, validateManifest, type ToolManifest, type ToolScope } from "../../../../shared/tools/manifest"
+import { TOOLS_API_REV, TOOLS_SDK_MIN_API_REV, TOOL_SCOPES, toolCodeHash, validateManifest, type ToolManifest, type ToolScope } from "../../../../shared/tools/manifest"
 import { AQ_SDK_EXPORTS, AQ_SDK_VERSION } from "../../../../shared/tools/sdk/sdk"
 import { createBridgeHost } from "../host-bridge"
 import { createToolHandlers, type ToolHostData } from "../host-handlers"
@@ -59,7 +59,7 @@ describe("extension SDK (window.aq)", () => {
     expect(surface(aq)).toEqual([...AQ_SDK_EXPORTS].sort())
     for (const name of AQ_SDK_EXPORTS) expect(TOOLS_BUILDER_SYSTEM_PROMPT, name).toContain(`aq.${name}`)
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain(`"sdk": 1`)
-    expect(API_REV_ADDITIONS[TOOLS_API_REV]?.join(" ")).toContain("window.aq")
+    expect(API_REV_ADDITIONS[TOOLS_SDK_MIN_API_REV]?.join(" ")).toContain("window.aq")
     stop()
   })
 

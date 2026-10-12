@@ -17,6 +17,7 @@ import type {
   ToolBacktranslation,
   ToolCellSignals,
   ToolEditorConfig,
+  ToolHealthSpan,
   ToolLens,
   ToolPresencePeer,
   ToolSection,
@@ -67,7 +68,7 @@ export class LiveEditorData implements ToolEditorHostData {
   // ── Reads served from the workspace's store ──────────────────────────────
 
   private extras(s: ToolEditorServices): ToolViewExtras {
-    return { ribbonFor: s.ribbonFor, structureFor: s.structureFor, voiceFor: s.voiceFor, lineNumbers: s.config.lineNumbers }
+    return { ribbonFor: s.ribbonFor, structureFor: s.structureFor, voiceFor: s.voiceFor, lineNumbers: s.config.lineNumbers, healthSpansFor: s.healthSpansFor }
   }
 
   private remember(views: ToolCellView[], s: ToolEditorServices): ToolCellView[] {
@@ -122,6 +123,12 @@ export class LiveEditorData implements ToolEditorHostData {
       }
     }
     return out
+  }
+
+  /** apiRev 5: every cell the extension has read (re-sent when a host-side
+   *  derivation changes with no store change — see derivedVersion). */
+  seenCellIds(): string[] {
+    return [...this.seen.keys()]
   }
 
   // ── Writes through the host's own commit / validation pipeline ───────────
@@ -244,6 +251,21 @@ export class LiveEditorData implements ToolEditorHostData {
       throw new BridgeError("ai_not_configured", "AI drafting is not set up for this project")
     }
     return s.draftParagraph(cellId)
+  }
+
+  async alignStyles(fileId: string, cellId: string): Promise<boolean> {
+    const s = this.need(fileId)
+    if (!s.config.ai.configured) {
+      s.openAiSetup()
+      throw new BridgeError("ai_not_configured", "AI drafting is not set up for this project")
+    }
+    if (!s.store.getCellView(cellId)) throw new BridgeError("not_found", "cell not found in the open file")
+    return s.alignStyles(cellId)
+  }
+
+  async healthSpans(fileId: string, cellId: string, text: string): Promise<ToolHealthSpan[]> {
+    const s = this.need(fileId)
+    return s.healthSpansFor(cellId, text) ?? []
   }
 
   async listBacktranslations(fileId: string): Promise<Record<string, ToolBacktranslation>> {

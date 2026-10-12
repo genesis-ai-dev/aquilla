@@ -19,8 +19,11 @@
  *  panels (history, attachments, rules, recorder) and the bulk selection.
  *  Rev 4 (additive only): `manifest.sdk` — the host injects the in-frame
  *  extension SDK (`window.aq`: live data hooks, Aquilla components, UI kit,
- *  actions) on top of the bridge. See API_REV_ADDITIONS in api-rev.ts. */
-export const TOOLS_API_REV = 4
+ *  actions) on top of the bridge. Rev 5 (additive only): what dev's built-in
+ *  editor gained after rev 4 — Align styles, the AI-draft provenance wash,
+ *  integrity-check explanations and the read-only/archived-lane banner. See
+ *  API_REV_ADDITIONS in api-rev.ts. */
+export const TOOLS_API_REV = 5
 
 /** SDK majors the host can inject (manifest.sdk; shared/tools/sdk/sdk.ts). */
 export const TOOLS_SDK_MAJORS: readonly number[] = [1]

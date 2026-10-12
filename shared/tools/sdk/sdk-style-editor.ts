@@ -318,6 +318,14 @@ export const SDK_EDITOR_STYLE = String.raw`
   /* Tooltip */
   .tip { position: fixed; z-index: 60; max-width: 280px; pointer-events: none; border-radius: var(--r-md); background: var(--foreground); color: var(--background);
          padding: 4px 8px; font-size: 12px; line-height: 1.35; animation: pop-in .1s ease-out; }
+  .tip .issue-lines p { margin: 0 0 4px; text-align: start; } .tip .issue-lines p:last-child { margin-bottom: 0; } .tip b { font-weight: 500; }
+  .tip:has(.issue-lines) { max-width: 320px; }
+
+  /* AI-draft provenance wash (#946): HEALTH_SPAN_CLASS emerald-500/20, amber-500/25 */
+  .hs-supported { background-color: color-mix(in oklab, oklch(69.6% 0.17 162.48) 20%, transparent); }
+  .hs-guessed { background-color: color-mix(in oklab, oklch(76.9% 0.188 70.08) 25%, transparent); }
+  ::highlight(aq-hs-supported) { background-color: color-mix(in oklab, oklch(69.6% 0.17 162.48) 20%, transparent); }
+  ::highlight(aq-hs-guessed) { background-color: color-mix(in oklab, oklch(76.9% 0.188 70.08) 25%, transparent); }
 
   /* Formatting bubble (TranslatedEditor) */
   .bubble { position: fixed; z-index: 30; display: flex; gap: 2px; border-radius: var(--r-lg); background: var(--card); padding: 2px;

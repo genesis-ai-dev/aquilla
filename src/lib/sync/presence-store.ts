@@ -373,6 +373,26 @@ export class ProjectPresenceStore {
     return this.rosterSnapshot
   }
 
+  private connectionCache: { roster: ProjectPresencePeer[]; peers: ProjectPresencePeer[] } | null = null
+
+  /**
+   * One row per CONNECTION (self excluded), the shape cell presence is built
+   * from — the roster (getPeers) collapses a user's connections into one row
+   * (AQU-1791), which would drop a second tab's row and caret. Recomputed
+   * whenever the roster is (every roster-visible change rebuilds it), so a
+   * roster listener can read it.
+   */
+  getConnectionPeers(): ProjectPresencePeer[] {
+    if (this.connectionCache?.roster === this.rosterSnapshot) return this.connectionCache.peers
+    const peers: ProjectPresencePeer[] = []
+    for (const user of this.users.values()) {
+      if (!this.isSelfRow(user)) peers.push(this.toPeer(user))
+    }
+    peers.sort((a, b) => a.username.localeCompare(b.username) || a.peerId.localeCompare(b.peerId))
+    this.connectionCache = { roster: this.rosterSnapshot, peers }
+    return peers
+  }
+
   getCellPresence(cellId: string): CellPresencePeer[] {
     return this.cellSnapshots.get(cellId) ?? EMPTY_CELL_PEERS
   }

@@ -49,7 +49,7 @@ Components (pass a cellId; they stay live):
                   aq.ColumnHeader() — source/target header; aq.ReadOnlyBanner().
 Actions (Promises; they confirm where the app does): aq.actions.commit(id, text, html?), aq.actions.validate(id),
                   aq.actions.unvalidate(id), aq.actions.draft(ids|id, { regenerate }), aq.actions.regenerate(id),
-                  aq.actions.draftParagraph(id), aq.actions.openHistory(id), aq.actions.openComments(id),
+                  aq.actions.draftParagraph(id), aq.actions.alignStyles(id) (IDML multi-run cells: cell.canAlignStyles), aq.actions.openHistory(id), aq.actions.openComments(id),
                   aq.actions.openAttachments(id), aq.actions.openRule(id, ruleId), aq.actions.openTerm(conceptId),
                   aq.actions.playAudio(id), aq.actions.stopAudio(), aq.actions.recordAudio(id), aq.actions.generateVoice(id),
                   aq.actions.backtranslate(id), aq.actions.saveBacktranslation(id, text), aq.actions.addFootnote(id),

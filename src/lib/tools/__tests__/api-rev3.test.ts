@@ -51,7 +51,7 @@ function services(store: CellStore, over: Partial<ToolEditorServices> = {}): Too
     store, storeLoading: false, config: smokeEditorConfig(true), signals: { stale: [], upstreamStale: [], assignments: {}, repetition: {}, issues: {}, health: {}, ai: {}, backtranslating: [], remoteChanged: [] },
     peers: [], backtranslations: new Map(), selection: [], pericopes: [], concepts: [],
     commitTarget: vi.fn(async () => ({ autoValidated: false })), setValidation: vi.fn(async () => true), settle: vi.fn(),
-    draft: vi.fn(async () => true), openAiSetup: vi.fn(), draftParagraph: vi.fn(async () => true), backtranslate: vi.fn(async () => true), saveBacktranslation: vi.fn(() => true),
+    draft: vi.fn(async () => true), openAiSetup: vi.fn(), draftParagraph: vi.fn(async () => true), alignStyles: vi.fn(async () => true), healthSpansFor: () => null, backtranslate: vi.fn(async () => true), saveBacktranslation: vi.fn(() => true),
     openHistory: vi.fn(), openAttachments: vi.fn(), openRule: vi.fn(), openTerm: vi.fn(), openRecorder: vi.fn(), generateAudio: vi.fn(async () => true),
     typing: vi.fn(), viewing: vi.fn(), visible: vi.fn(), setSelection: vi.fn(), setLane: vi.fn(), setLens: vi.fn(), openSettings: vi.fn(),
     suggest: vi.fn(async () => []), suggestionFeedback: noop, ribbonFor: () => null,

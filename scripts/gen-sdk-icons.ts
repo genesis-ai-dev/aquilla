@@ -16,7 +16,7 @@ export const EDITOR_ICONS = [
   "italic", "underline", "strikethrough", "code", "sparkles", "refresh-cw", "pilcrow-right", "pilcrow", "ellipsis", "mic",
   "upload", "play", "pause", "volume-2", "notebook-pen", "paperclip", "history", "activity", "file-text", "pencil",
   "trash-2", "x", "eye-off", "book-open", "corner-down-left", "search", "loader-circle", "lock", "arrow-right", "info",
-  "git-branch", "user-round",
+  "git-branch", "user-round", "baseline",
   // UI kit (aq.ui) extras for extensions
   "list", "layout-grid", "chart-column", "settings", "star", "funnel", "eye", "copy", "circle-check", "circle-alert", "clock", "users",
   "book", "bookmark", "save", "arrow-left", "arrow-up", "arrow-down", "external-link", "minus", "grip-vertical", "sliders-horizontal",

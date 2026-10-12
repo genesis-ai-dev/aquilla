@@ -553,6 +553,8 @@ export class LiveToolData implements ToolHostData {
   openTerm = (conceptId: string) => this.editor.openTerm(conceptId)
   draft = (fileId: string, cellIds: string[], opts: { regenerate: boolean }) => this.editor.draft(fileId, cellIds, opts)
   draftParagraph = (fileId: string, cellId: string) => this.editor.draftParagraph(fileId, cellId)
+  alignStyles = (fileId: string, cellId: string) => this.editor.alignStyles(fileId, cellId)
+  healthSpans = (fileId: string, cellId: string, text: string) => this.editor.healthSpans(fileId, cellId, text)
   listBacktranslations = (fileId: string) => this.editor.listBacktranslations(fileId)
   runBacktranslation = (fileId: string, cellId: string) => this.editor.runBacktranslation(fileId, cellId)
   saveBacktranslation = (fileId: string, cellId: string, text: string) => this.editor.saveBacktranslation(fileId, cellId, text)

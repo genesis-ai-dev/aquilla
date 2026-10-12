@@ -274,7 +274,12 @@ export const SDK_LIST = String.raw`
     var slot = el("div", { class: "aq-banner" });
     return bindCell("*", slot, function () {
       slot.textContent = "";
-      if (S.readOnly || (S.cfg && !S.cfg.canEdit)) slot.appendChild(el("div", { class: "readonly-banner", role: "status" }, [icon("lock", "s35"), t("extensions.editor.readOnly")]));
+      // apiRev 5: the built-in's own banner (archived lane, role, imported
+      // project), testid included; the generic sentence only for an extension
+      // the host made read-only for its own reasons (scope).
+      var c = S.cfg, label = c && c.readOnlyLabel;
+      if (label) slot.appendChild(el("div", { class: "readonly-banner", role: "status", "data-testid": c.readOnlyKind === "lane-archived" ? "lane-archived-banner" : "role-read-only-banner" }, [icon("lock", "s35"), label]));
+      else if (S.readOnly || (c && !c.canEdit)) slot.appendChild(el("div", { class: "readonly-banner", role: "status" }, [icon("lock", "s35"), t("extensions.editor.readOnly")]));
     });
   }
   function ColumnHeader() {

@@ -9,7 +9,7 @@ import {
 import {
   Check, AlertTriangle,
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
-  Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
+  Activity, NotebookPen, Pencil, ChevronDown, Braces,
   Languages,
   Plus,
   Pilcrow,
@@ -33,7 +33,6 @@ import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
-import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
@@ -84,8 +83,7 @@ import { createScopedRibbonCache } from "@/lib/health/scoped-ribbon"
 import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { useLowMemoryActive } from "@/lib/perf/low-memory"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
-import { TimelineAddMedia } from "./TimelineAddMedia"
-import { TimelineLinkedVideoEmpty } from "./TimelineLinkedVideoEmpty"
+import { TimeOrderedEmptyState } from "./TimeOrderedEmptyState"
 import type { LinkedVideoEmptyState } from "@/lib/editor/linked-video-empty-state"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellIssuesTab } from "./CellIssuesTab"
@@ -3186,42 +3184,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           />
         </div>
       ) : isTimeOrdered ? (
-        // 2026-08-07: keyed on isTimeOrdered, not audioLens — the media lens
-        // renders this table in text mode under the timeline now, and an empty
-        // time-ordered file must still offer "attach a clip" there.
-        // AQU-1565: a linked video IS media, so the attach-media prompt below
-        // would be lying. This file wants captions, not a clip.
-        linkedVideoEmptyState ? (
-          <div className="flex-1">
-            <TimelineLinkedVideoEmpty
-              isYouTube={linkedVideoEmptyState.isYouTube}
-              captionTracks={linkedVideoEmptyState.captionTracks}
-              placement={linkedVideoEmptyPlacement}
-              onAttachFile={canEdit ? onAttachMediaFile : undefined}
-              onOpenMediaView={onOpenMediaView}
-              onAttachCaptions={canEdit ? onAttachCaptions : undefined}
-              onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
-            />
-          </div>
-        ) : canEdit && onAttachMediaFile && onAttachMediaUrl ? (
-          <div className="flex-1">
-            <TimelineAddMedia onAttachFile={onAttachMediaFile} onAttachUrl={onAttachMediaUrl} />
-          </div>
-        ) : (
-          <div className="flex-1">
-            <EmptyState
-              variant="inline"
-              className="h-full py-10"
-              icon={Music}
-              title={t("editor.empty.noMediaSegments")}
-              // AQU-1565 follow-up: this branch is reached only by someone
-              // with no upload (below Project Lead, or read-only), and a file
-              // with no rows has nothing to record a take on, so "import or
-              // record" would send them nowhere.
-              description={t("editor.empty.mediaLayerWaiting")}
-            />
-          </div>
-        )
+        // Shared with the Smart Extensions editor surface (AQU-1565/1566).
+        <TimeOrderedEmptyState
+          linkedVideoEmptyState={linkedVideoEmptyState}
+          placement={linkedVideoEmptyPlacement}
+          canEdit={canEdit}
+          onAttachMediaFile={onAttachMediaFile}
+          onAttachMediaUrl={onAttachMediaUrl}
+          onOpenMediaView={onOpenMediaView}
+          onAttachCaptions={onAttachCaptions}
+          onUseCaptionTrackAsRows={onUseCaptionTrackAsRows}
+        />
       ) : (
         <div className="flex-1" />
       )}

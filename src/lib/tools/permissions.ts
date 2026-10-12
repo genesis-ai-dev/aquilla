@@ -49,6 +49,9 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   "terms.open": "read:terms",
   "ai.draft": "ai:draft",
   "ai.draftParagraph": "ai:draft",
+  // apiRev 5: Align styles rewrites the target (an AI draft) — same gate.
+  "ai.alignStyles": "ai:draft",
+  "ai.healthSpans": "read:cells",
   "backtranslation.list": "read:cells",
   "backtranslation.run": "ai:draft",
   "backtranslation.save": "write:target",

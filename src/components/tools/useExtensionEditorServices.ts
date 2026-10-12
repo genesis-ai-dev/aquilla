@@ -26,6 +26,8 @@ import { compareAddresses, parseRef } from "@/lib/pericope/sections"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import type { ToolCellStructure } from "@/lib/tools/editor-services"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { useHealthScoreColorCoding } from "@/lib/store/health-score-color-coding-pref"
+import { healthSpansForCell, issueRuleName, ribbonNeedsAttention } from "@/lib/tools/editor-parity-rev5"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ToolEditorServices } from "@/lib/tools/editor-services"
 import type { ToolRev4Services } from "@/lib/tools/host-handlers-rev4"
@@ -78,6 +80,10 @@ export interface ExtensionEditorServicesArgs {
   completeSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   completeBatch: (cells: CellData[]) => void
   completeParagraph: (cellId: string) => void
+  /** apiRev 5: Align styles (useCompletion's alignCellStyles). */
+  alignStyles: (cell: CellData) => Promise<boolean>
+  /** apiRev 5: the project's decay warn threshold (cellNeedsAttention). */
+  decayWarnThreshold?: number
   openAiSetup: () => void
   runBacktranslation: (cell: CellData, source: "read-back" | "refresh" | "regenerate") => Promise<void> | void
   saveBacktranslation: (cell: CellData, text: string, polished: boolean) => void
@@ -122,12 +128,14 @@ function severityOf(rule: TranslationRule | undefined): ToolCellIssue["severity"
   return rule?.severity === "major" ? "error" : "warning"
 }
 
-/** Collaborators with their colour, cell and live draft (presence store). */
+/** Collaborators with their colour, cell and live draft (presence store).
+ *  Per CONNECTION, like the built-in's cell presence: the roster collapses a
+ *  user's tabs into one row (AQU-1791), which would hide a second tab. */
 function usePeers(store: ProjectPresenceStore, fileId: string | null): ToolPresencePeer[] {
   const peers = useSyncExternalStore(
     useCallback((cb: () => void) => store.subscribeRoster(cb), [store]),
-    useCallback(() => store.getPeers(), [store]),
-    () => store.getPeers(),
+    useCallback(() => store.getConnectionPeers(), [store]),
+    () => store.getConnectionPeers(),
   )
   return useMemo(
     () =>
@@ -184,11 +192,36 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
         examples: (id) => examples.get(id) ?? EMPTY_EXAMPLES,
       })
     })
+    const threshold = args.decayWarnThreshold
     return (cellId: string) => {
       const point = reader.get(cellId)
-      return point ? ribbonToTool(point) : null
+      if (!point) return null
+      const hasContent = Boolean(store.getCellView(cellId)?.translated.trim())
+      return { ...ribbonToTool(point), needsAttention: ribbonNeedsAttention(point, hasContent, threshold) }
     }
-  }, [args.enabled, args.healthEnabled, args.store, args.storeVersion, args.healthMap, args.examples, ribbonCache])
+  }, [args.enabled, args.healthEnabled, args.store, args.storeVersion, args.healthMap, args.examples, args.decayWarnThreshold, ribbonCache])
+
+  // apiRev 5: the AI-draft provenance wash (#946), EditorTable's own rule.
+  const washOn = useHealthScoreColorCoding()
+  const healthSpansFor = useMemo(() => {
+    const store = args.store
+    const examples = args.examples
+    return readAtVersion(args.storeVersion, () => (cellId: string, text?: string) => {
+      const cell = store.getCellView(cellId)
+      if (!cell) return null
+      return healthSpansForCell({
+        enabled: washOn,
+        cell,
+        ...(text !== undefined ? { text } : {}),
+        live: examples.get(cellId) ?? null,
+        lookup: (id) => {
+          const view = store.getCellView(id)
+          return view?.translated.trim() ? { source: view.original, target: view.translated } : undefined
+        },
+        t,
+      })
+    })
+  }, [washOn, args.store, args.storeVersion, args.examples, t])
 
   // Gutter numbering + paragraph groups, as EditorTable derives them.
   const structureCache = useMemo(() => createEditorStructureCache(), [args.store])
@@ -250,7 +283,8 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
       const waived = new Set((args.store.getCellView(cellId)?.waivers ?? []).map((w) => w.ruleId))
       issues[cellId] = list.map((inf) => ({
         ruleId: inf.ruleId,
-        ruleName: ruleById.get(inf.ruleId)?.name ?? inf.ruleId,
+        // AQU-757: the localized check name the built-in's hover shows.
+        ruleName: issueRuleName(ruleById.get(inf.ruleId), inf.ruleId, t),
         message: formatInfractionReason(inf, t),
         severity: severityOf(ruleById.get(inf.ruleId)),
         spans: inf.spans.map((s) => ({ side: s.side, start: s.start, end: s.end })),
@@ -264,7 +298,7 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
     }
     const ai: ToolCellSignals["ai"] = {}
     for (const [cellId, phase] of args.completing) {
-      ai[cellId] = { phase: phase === "searching" ? "searching" : "generating", preview: args.previews.get(cellId) ?? null, error: null }
+      ai[cellId] = { phase: phase === "searching" ? "searching" : phase === "aligning" ? "aligning" : "generating", preview: args.previews.get(cellId) ?? null, error: null }
     }
     for (const [cellId, error] of args.errors) ai[cellId] = { phase: ai[cellId]?.phase ?? null, preview: ai[cellId]?.preview ?? null, error }
     return {
@@ -340,6 +374,7 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
       return true
     },
     openAiSetup: () => argsRef.current.openAiSetup(),
+    alignStyles: (cellId: string) => argsRef.current.alignStyles(cellOf(cellId)),
     draftParagraph: async (cellId: string) => {
       cellOf(cellId)
       argsRef.current.completeParagraph(cellId)
@@ -393,10 +428,12 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
       concepts: args.concepts,
       termMatching: args.termMatching,
       ribbonFor,
+      healthSpansFor,
+      derivedVersion: `${washOn ? 1 : 0}:${args.decayWarnThreshold ?? ""}`,
       structureFor,
       voiceFor: args.voiceFor,
       ...actions,
       ...(args.rev4 ? { rev4: args.rev4, rev4Versions: args.rev4Versions } : {}),
     }
-  }, [args.rev4, args.rev4Versions, args.voiceFor, pericopes, structureFor, args.enabled, args.store, args.storeLoading, args.concepts, args.termMatching, config, signals, peers, backtranslations, selection, actions, ribbonFor])
+  }, [args.rev4, args.rev4Versions, args.voiceFor, pericopes, structureFor, args.enabled, args.store, args.storeLoading, args.concepts, args.termMatching, config, signals, peers, backtranslations, selection, actions, ribbonFor, healthSpansFor, washOn, args.decayWarnThreshold])
 }

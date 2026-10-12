@@ -136,6 +136,16 @@ through the global \`aquilla\` object the host injects before your code runs.
 - aquilla.agent.ask(fileId, cellId, text) — opens the app's AI chat with the selected source text as context.   scope read:cells
 - Events: "audio.changed" (re-read audio.takes / audio.take), "contextual.changed".
 
+### apiRev 5 — editor parity additions (editor mount; elsewhere "not_available")
+- aquilla.ai.alignStyles(fileId, cellId) — "Align styles": moves an IDML cell's existing translation into the source's bold/italic/plain
+    runs without changing the words (an AI draft; refuses a reworded result). Offer it only where the cell has canAlignStyles: true;
+    progress arrives as signals ai phase "aligning".   scope ai:draft
+- aquilla.ai.healthSpans(fileId, cellId, text) → [{ start, end, kind:"supported"|"guessed", title? }] — the AI-draft provenance wash for
+    a live draft (green = also in a validated example, orange = guessed); [] when off or not AI-drafted.   scope read:cells
+- Editor-mount cells also carry: canAlignStyles, healthSpans (the wash over the committed text), ribbon.needsAttention (low confidence:
+    tint the number and say "Not yet validated" on hover). editor.config also carries readOnlyLabel and readOnlyKind
+    ("lane-archived" | "role") — show readOnlyLabel as the read-only banner.
+
 Every bridge error is an Error with a .code. Wrap awaits in try/catch and show errors in the UI.
 Start your script with: \`(async () => { … })()\` and render a loading state first.
 

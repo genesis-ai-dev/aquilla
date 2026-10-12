@@ -70,7 +70,7 @@ const SDK_FALLBACK: Record<string, string> = {
 export const AQ_SDK_EXPORTS: readonly string[] = [
   "version", "h", "icon", "t", "strings", "mount", "Layout",
   "useFile", "useCells", "useCell", "useSelection", "usePresence",
-  "actions.commit", "actions.validate", "actions.unvalidate", "actions.draft", "actions.regenerate", "actions.draftParagraph",
+  "actions.commit", "actions.validate", "actions.unvalidate", "actions.draft", "actions.regenerate", "actions.draftParagraph", "actions.alignStyles",
   "actions.openHistory", "actions.openComments", "actions.openAttachments", "actions.openRule", "actions.openTerm",
   "actions.playAudio", "actions.stopAudio", "actions.recordAudio", "actions.generateVoice", "actions.backtranslate", "actions.saveBacktranslation",
   "actions.suggestNext", "actions.nextUnfinished", "actions.goNextUnfinished", "actions.edit", "actions.reveal", "actions.select", "actions.addFootnote",

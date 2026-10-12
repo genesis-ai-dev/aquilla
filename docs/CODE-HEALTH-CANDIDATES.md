@@ -1706,3 +1706,46 @@ re-run on its own and failed the same way, so future runs should expect them:
 `onnxruntime-node` install script's own documented skip flag (`script/install.js`), so it
 suppresses exactly the CUDA-EP download that `ECONNRESET`s on the proxy and nothing else.
 Prefer this over both earlier recipes.
+
+### Smoke 2026-10-12: 92/99, and a NEW full-suite-only flake worth a ledger line
+
+`npx tsx scripts/e2e-shard.ts 1 -- smoke.spec` (one shard, per the 2026-10-09 recipe):
+**92 passed, 7 failed, 18.7m.** Six of the seven are the documented Chromium-revision-gap
+media set from the 2026-10-02 run, at their current line numbers after intervening churn:
+`import-and-edit.smoke.spec.ts:177` (imported video keeps its authenticated picture — was
+`:138`), `import-and-edit.smoke.spec.ts:333` × 3 (the YouTube srt/vtt/sbv caption exports —
+was `:294`), and `import-media-captions.smoke.spec.ts:132` × 2 (embedded m4a/mp4). That
+entry's standing advice holds: do not read them as an import regression without a machine
+carrying the real rev-1243 Chromium.
+
+**The seventh is new to this ledger**: `collab/bt-edit-locked-for-reviewer.smoke.spec.ts:79`
+("BT Edit is locked with Contributor+ tooltip for reviewer") failed at line 136 —
+`expect.poll(() => hasPersistedBacktranslation(…, "fr"), { timeout: 30_000 }).toBe(true)`
+never became true, i.e. alice's backtranslation never showed up server-side within 30s,
+before the test even reaches the reviewer-lock assertion the spec is named for.
+
+It is a **full-suite-only flake, A/B'd rather than assumed**. Both arms were re-run as a
+single-spec shard in the same container:
+
+| arm | result |
+| --- | --- |
+| `lane-batch-backfill.ts` reverted to `HEAD~1` (pristine `dev`) | 1 passed, 19.0s |
+| the shipped change in place | 1 passed, 17.7s |
+
+Same spec, same stack, passes either way — so it is ordering/timing under the full 99-test
+run, not this diff (which cannot reach the SPA at all: a grep of all 192 `dist/assets/*.js`
+chunks for `planLaneBatch`/`unresolvable` after a green `pnpm build` returns nothing, because
+the module's only non-test importer is the `scripts/neon-backfill-lane-batch.ts` ops script).
+Same family as the `AssignedToMe`/`TeamsList`/`ArchivedProjects` full-suite flakes under
+issue [#410](https://github.com/genesis-ai-dev/aquilla/issues/410), but on the Playwright
+side rather than vitest's. **So the expected smoke baseline in this container is 92/99, not
+88/96** — the four-test delta from the 2026-10-02 figure is spec growth plus
+`project-trash` and `agent-connection` having since been fixed; neither appeared this run.
+
+**And one more re-confirmation of the stale-wrangler rule, because it bit again and cost a
+whole arm**: killing `wrangler`/`workerd` and *immediately* launching the next shard is not
+enough. The first attempt at arm B died at `[e2e-up] fatal: Error: [sync] timed out waiting
+for :9788` / `exit 143` — the previous stack's processes were gone from `ps` but the port was
+still held. Poll until **both** `ps -eo pid,comm | grep -E "workerd|wrangler"` and
+`ss -ltn | grep -E "9787|9788|6173"` come back empty before re-launching; the retry then
+booted and passed in 18.8s.

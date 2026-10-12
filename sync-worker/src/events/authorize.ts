@@ -16,7 +16,12 @@ import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
 import { visibleLaneTags, type LaneIdentity } from '../../../src/lib/lanes/read-wall'
 import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
-import { laneTagForArchiveCheck, writesLaneRow } from '../../../src/lib/lanes/archived-lane'
+import {
+  createsBlankLaneBridge,
+  laneTagForArchiveCheck,
+  missingLaneReason,
+  writesLaneRow,
+} from '../../../src/lib/lanes/archived-lane'
 import { loadLaneGrants } from '../../../db/shared/lane-visibility'
 import { refusalForArchivedLane, targetLaneRowExists, targetLaneRowsFor } from './archived-lane'
 import { eventLaneIdOf, resolveEventLane } from '../../../src/lib/lanes/event-lane'
@@ -474,15 +479,24 @@ export async function authorize<K extends EventKind>(
     // AQU-1532: a cell or validator write whose lane tag has no lane row
     // would project a NULL lane_id and fail the whole batch as a 500. Refuse
     // it here with a reason the caller can act on.
+    //
+    // AQU-1884: that includes a validation with NO lane at all. It asks for
+    // the default lane, and a project created today has none — every lane
+    // carries a real tag — so it is this 4xx rather than the per-event 500 it
+    // used to project as. Only a kind that mints the bridge itself, or a
+    // project with no target lane at all (where a sibling event in this batch
+    // may be minting it), may name `''` before the row exists.
     if (
       writesLaneRow(raw.kind) &&
-      !(await targetLaneRowExists(db, raw.projectId, archiveTag, settings))
+      !(await targetLaneRowExists(
+        db,
+        raw.projectId,
+        archiveTag,
+        settings,
+        createsBlankLaneBridge(raw.kind),
+      ))
     ) {
-      return {
-        ok: false,
-        status: 422,
-        reason: `unknown lane "${archiveTag}"; register it in settings.targetLanes`,
-      }
+      return { ok: false, status: 422, reason: missingLaneReason(archiveTag) }
     }
   }
 

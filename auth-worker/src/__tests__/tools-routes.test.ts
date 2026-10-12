@@ -187,7 +187,7 @@ describe("tools API", () => {
 // repo's source — idempotently, auto-granted once per user (a revoke sticks),
 // upgraded only while pristine, and a removal is respected.
 describe("first-party extensions", () => {
-  interface Ensure { tool: (ToolBody["tool"] & { firstParty: string | null; origin: string }) | null; removed: boolean; created?: boolean; autoGranted: string[] }
+  interface Ensure { tool: (ToolBody["tool"] & { firstParty: string | null; origin: string; name: string }) | null; removed: boolean; created?: boolean; autoGranted: string[] }
   const ensure = async (jwt: string, key = "default-editor") => call("/tools/first-party", jwt, { method: "POST", body: { key } })
 
   it("installs once, auto-grants each user once, and shows up as first-party", async () => {

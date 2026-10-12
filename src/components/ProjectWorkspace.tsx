@@ -176,6 +176,7 @@ import {
   workspaceTerminology,
   timelinePlayReady,
   ruleFixPreflight,
+  fetchDeletedFilesWithProjectToken,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -8938,7 +8939,15 @@ export function ProjectWorkspace() {
     try {
       // Flush first so a just-enqueued file.delete is projected before we read.
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      const files = await fetchDeletedFiles(project.id, frontierSession.jwt)
+      // AQU-1894: sync-worker only accepts a project sync token here — the
+      // session jwt this used to send was rejected 401 every time.
+      const files = await fetchDeletedFilesWithProjectToken({
+        projectId: project.id,
+        getTokenForFile,
+        fetchFiles: fetchDeletedFiles,
+      })
+      // null = no token could be minted; keep whatever the list already shows.
+      if (!files) return
       setDeletedFiles(files)
       // Drop optimistic rows the server now knows about.
       const serverIds = new Set(files.map((f) => f.fileId))
@@ -8950,7 +8959,7 @@ export function ProjectWorkspace() {
     } catch {
       // Non-fatal — trash section shows optimistic entries / empty on error.
     }
-  }, [project?.id, frontierSession?.jwt, getTokenForProjectFile])
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, getTokenForProjectFile])
   useEffect(() => {
     if (trashOpen) void refreshDeletedFiles()
   }, [trashOpen, refreshDeletedFiles])

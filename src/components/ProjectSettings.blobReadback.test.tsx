@@ -312,6 +312,10 @@ describe("ProjectSettings — the re-sync does not stomp an in-progress edit", (
     currentHasFetched = false
     const view = renderSettings("validation")
     const count = () => screen.getByRole("spinbutton", { name: "Required validators (text)" })
+    // AQU-1771: with no stored count the project follows the organization's
+    // default, so the user first picks "Set for this project".
+    await user.click(screen.getByRole("combobox", { name: /Text validators: use the organization default/i }))
+    await user.click(await screen.findByRole("option", { name: "Set for this project" }))
     // The field clamps an empty value back to 1, so set it in one change.
     fireEvent.change(count(), { target: { value: "2" } })
     expect(count()).toHaveValue(2)

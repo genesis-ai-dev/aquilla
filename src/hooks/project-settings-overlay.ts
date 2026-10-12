@@ -11,6 +11,14 @@ export function overlaySettings(
   record: ProjectRecord,
   settings: ProjectWideSettings,
   lanes?: ProjectLaneView[] | null,
+  /**
+   * AQU-1771: the org's validation defaults. When given, a project with no
+   * value of its own carries the org's, so every reader of the record
+   * (readValidationCount and friends) sees the threshold actually in force.
+   * The Project settings form leaves this out: it must see only the project's
+   * own value, to tell "inherit" from an explicit number.
+   */
+  orgDefaults?: { validationCount?: number | null; validationCountAudio?: number | null },
 ): ProjectRecord {
   let next: ProjectRecord | null = null
   const draft = () => {
@@ -55,8 +63,8 @@ export function overlaySettings(
   assign("alignmentSeeds", settings.alignmentSeeds)
   assign("livingMemoryEntries", settings.livingMemoryEntries)
   assign("translationBrief", settings.translationBrief)
-  assign("validationCount", settings.validationCount)
-  assign("validationCountAudio", settings.validationCountAudio)
+  assign("validationCount", settings.validationCount ?? orgDefaults?.validationCount)
+  assign("validationCountAudio", settings.validationCountAudio ?? orgDefaults?.validationCountAudio)
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)

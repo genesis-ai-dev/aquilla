@@ -475,6 +475,14 @@ export interface ProjectSettingsResponse {
    */
   orgCountStructuralCells?: boolean | null
   /**
+   * AQU-1771: the org's defaults for how many validations a cell / a take
+   * needs, used when `settings` carries no `validationCount` /
+   * `validationCountAudio` of its own. Null when the org set none (or the
+   * project has no org); then the threshold is 1.
+   */
+  orgValidationCount?: number | null
+  orgValidationCountAudio?: number | null
+  /**
    * Whether the org lets bulk text validation take untouched AI drafts. On
    * this response for the same reason as the line above, and because a project
    * member outside the org cannot read the org's settings at all. Null when

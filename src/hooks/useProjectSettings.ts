@@ -268,6 +268,13 @@ export interface UseProjectSettings {
    * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
    */
   orgCountStructuralCells: boolean | null
+  /**
+   * AQU-1771: the org's validation defaults this project inherits when it has
+   * no `validationCount` / `validationCountAudio` of its own. Null when the
+   * org set none, or before the first response that carries them.
+   */
+  orgValidationCount: number | null
+  orgValidationCountAudio: number | null
   /** The org's "Allow bulk validation of AI drafts", carried on the project's
    *  own settings response so a member outside the org sees it too. Null when
    *  the project has no org, or before the first response that carries it. */
@@ -492,6 +499,8 @@ export function useProjectSettings(
   // project control's meaning while a save was in flight.
   const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
   const [orgAllowBulkValidateAiDrafts, setOrgAllowBulkValidateAiDrafts] = useState<boolean | null>(null)
+  const [orgValidationCount, setOrgValidationCount] = useState<number | null>(null)
+  const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
@@ -502,6 +511,8 @@ export function useProjectSettings(
     if (next?.orgAllowBulkValidateAiDrafts !== undefined) {
       setOrgAllowBulkValidateAiDrafts(next.orgAllowBulkValidateAiDrafts)
     }
+    if (next?.orgValidationCount !== undefined) setOrgValidationCount(next.orgValidationCount)
+    if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
@@ -979,6 +990,8 @@ export function useProjectSettings(
     hasFetched,
     orgCountStructuralCells,
     orgAllowBulkValidateAiDrafts,
+    orgValidationCount,
+    orgValidationCountAudio,
     lanes,
     isOnline,
     canEdit,

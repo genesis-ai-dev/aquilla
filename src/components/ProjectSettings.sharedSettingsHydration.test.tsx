@@ -15,6 +15,7 @@
 // `read-validation-count` is deliberately NOT mocked here, so the counts go
 // through the real reader.
 
+import userEvent from "@testing-library/user-event"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
@@ -224,11 +225,14 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
     expect(saveButton()).toBeNull()
   })
 
-  it("keeps a value the user changed before the settings arrived", () => {
+  it("keeps a value the user changed before the settings arrived", async () => {
     currentHasFetched = false
     const { rerender } = render(tree("validation"))
-    const textCount = () => screen.getByLabelText(/required validators \(text\)/i) as HTMLInputElement
-    // The default shows 1; the user asks for 3 before the GET lands.
+    const textCount = () => screen.getByRole("spinbutton", { name: /required validators \(text\)/i }) as HTMLInputElement
+    // AQU-1771: unset follows the organization's default; the user picks
+    // "Set for this project" (which shows 1), then asks for 3, before the GET lands.
+    await userEvent.click(screen.getByRole("combobox", { name: /Text validators: use the organization default/i }))
+    await userEvent.click(await screen.findByRole("option", { name: "Set for this project" }))
     fireEvent.change(textCount(), { target: { value: "3" } })
     expect(textCount().value).toBe("3")
 

@@ -267,8 +267,9 @@ interface Baseline {
   validationBatchSize: number
   autoSyncEnabled: boolean
   autoSyncInterval: number
-  validationCount: number
-  validationCountAudio: number
+  /** AQU-1771: the project's own numbers; null = take the organization's default. */
+  validationCount: number | null
+  validationCountAudio: number | null
   validationRoleFloor: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers: string[]
   allowSelfValidation: boolean
@@ -326,8 +327,11 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationBatchSize: project.completionSettings?.validationBatchSize ?? 0,
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
     autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
-    validationCount: readValidationCount(project),
-    validationCountAudio: readValidationCountAudio(project),
+    // AQU-1771: `project` here carries only the project's own blob (this page
+    // passes includeSettings: false, and overlays without org defaults), so
+    // an absent value means "Organization default", not 1.
+    validationCount: project.validationCount == null ? null : readValidationCount(project),
+    validationCountAudio: project.validationCountAudio == null ? null : readValidationCountAudio(project),
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
@@ -481,6 +485,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
+    // AQU-1771: what "Organization default" means for the two counts.
+    orgValidationCount,
+    orgValidationCountAudio,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
     // AQU-1086: the org's language-edit floor rides on the project record, so
     // the language fields below can be enabled for a project lead when the org
@@ -711,8 +718,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationBatchSize, setValidationBatchSize] = useState(0)
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
-  const [validationCount, setValidationCount] = useState(1)
-  const [validationCountAudio, setValidationCountAudio] = useState(1)
+  const [validationCount, setValidationCount] = useState<number | null>(null)
+  const [validationCountAudio, setValidationCountAudio] = useState<number | null>(null)
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
@@ -1211,9 +1218,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
 
       const sharedUpdates: ProjectWideSettings = {}
-      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
+      // AQU-1771: null → undefined, which the merged blob drops: the project
+      // goes back to the organization's default.
+      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount ?? undefined; changedFieldLabels.push("validation count") }
       if (validationCountAudio !== baseline.validationCountAudio) {
-        sharedUpdates.validationCountAudio = validationCountAudio
+        sharedUpdates.validationCountAudio = validationCountAudio ?? undefined
         changedFieldLabels.push("audio validation count")
       }
       if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push("validation role floor") }
@@ -2826,6 +2835,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               }
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
+              orgValidationCount={orgValidationCount}
+              orgValidationCountAudio={orgValidationCountAudio}
               validationRoleFloor={validationRoleFloor}
               validationNamedUsers={validationNamedUsers}
               allowSelfValidation={allowSelfValidation}

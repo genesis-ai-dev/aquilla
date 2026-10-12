@@ -90,6 +90,14 @@ export interface OrgWideSettings {
    */
   countStructuralCells?: boolean
   /**
+   * AQU-1771: the org-wide defaults for how many validations a cell
+   * (validationCount) and a recorded take (validationCountAudio) need. Unset
+   * means 1. A project may set its own; the server re-derives the projects
+   * that follow the default when it changes.
+   */
+  validationCount?: number
+  validationCountAudio?: number
+  /**
    * AQU-1391: the org-wide default for repetition auto-propagation —
    * validating a cell copies its translation into every other cell in the
    * file whose source text is identical (the "repetitions" behaviour of
@@ -199,6 +207,9 @@ export interface OrgSettingsResponse {
    * not appear, which is the pre-feature behaviour.
    */
   countStructuralOverrides?: number
+  /** AQU-1771: the same count for the two validation defaults. */
+  validationCountOverrides?: number
+  validationCountAudioOverrides?: number
 }
 
 export type OrgPatchResult =
@@ -319,9 +330,26 @@ export async function resetCountStructuralOverrides(
   orgId: number,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<{ kind: "ok"; cleared: number } | { kind: "error"; message: string }> {
+  return resetProjectOverrides(jwt, orgId, "count-structural", apiUrl)
+}
+
+/** AQU-1771: the inherited org settings the server can reset project overrides for. */
+export type ProjectOverrideSlug = "count-structural" | "validation-count" | "validation-count-audio"
+
+/**
+ * POST .../settings/<slug>/reset-project-overrides — put every project in the
+ * org back on the org's default for one inherited setting. Clears the
+ * per-project key, like resetCountStructuralOverrides above.
+ */
+export async function resetProjectOverrides(
+  jwt: string,
+  orgId: number,
+  slug: ProjectOverrideSlug,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ kind: "ok"; cleared: number } | { kind: "error"; message: string }> {
   try {
     const res = await fetch(
-      `${apiUrl}/api/v2/orgs/${orgId}/settings/count-structural/reset-project-overrides`,
+      `${apiUrl}/api/v2/orgs/${orgId}/settings/${slug}/reset-project-overrides`,
       { method: "POST", headers: authHeaders(jwt) },
     )
     if (!res.ok) {

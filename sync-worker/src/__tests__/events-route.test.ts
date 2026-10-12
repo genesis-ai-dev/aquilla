@@ -1242,6 +1242,67 @@ describe('POST /events — ProjectSync event.applied fan-out', () => {
     expect(applied.length).toBe(1)
     expect('via' in applied[0]).toBe(false)
   })
+
+  // AQU-1837 regression guard. The route used to `await Promise.all(doFanOut)`,
+  // so a project DO queueing the __broadcast behind its own work (big presence
+  // room, link-sync fold) added that wait to EVERY save in the project — up to
+  // the client's 15 s abort. The fan-out is best-effort, and the author's own
+  // result already rides `applied[]` in the HTTP response, so it must settle
+  // after the response, never in front of it.
+  it('responds without waiting for the ProjectSync fan-out, and still delivers it afterwards', async () => {
+    const token = await makeToken({ username: 'alice' })
+    const { db } = await makeTestDb()
+
+    // A DO whose __broadcast never answers until the test releases it.
+    const bodies: Array<Record<string, unknown>> = []
+    let releaseBroadcast!: () => void
+    const broadcastDelivered = new Promise<void>((resolve) => {
+      releaseBroadcast = resolve
+    })
+    const stubFetch = vi.fn().mockImplementation(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      await broadcastDelivered
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+    const env = {
+      ...makeEnv(db),
+      ProjectSync: {
+        idFromName: vi.fn().mockReturnValue({ id: 'do-id' }),
+        get: vi.fn().mockReturnValue({ fetch: stubFetch }),
+      } as unknown as DurableObjectNamespace,
+    }
+    const deferred: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => void deferred.push(p) }
+
+    // Stall watchdog, not a latency budget: a correct route resolves here in
+    // microseconds, and the old awaiting route would never resolve at all.
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    const outcome = await Promise.race([
+      handleEventsWriteRequest(await makeRequest([targetCreate()], token), env, ctx),
+      new Promise<'stalled'>((resolve) => {
+        watchdog = setTimeout(() => resolve('stalled'), 10_000)
+      }),
+    ])
+    if (watchdog !== undefined) clearTimeout(watchdog)
+    expect(outcome, 'POST /events did not respond while the project DO was busy').not.toBe('stalled')
+
+    const res = outcome as Response
+    expect(res.status).toBe(200)
+
+    // The author's own ack is complete without the broadcast (AC 3).
+    const body = (await res.json()) as { applied: Array<Record<string, unknown>> }
+    expect(body.applied).toHaveLength(1)
+    expect(body.applied[0].cell).toBe('cell-1')
+
+    // The fan-out was handed to waitUntil, not dropped (AC 1): the request
+    // had already been sent, and it completes once the DO answers.
+    expect(bodies).toHaveLength(1)
+    expect(deferred).toHaveLength(1)
+    releaseBroadcast()
+    await Promise.all(deferred)
+    expect(stubFetch).toHaveBeenCalledTimes(1)
+    expect((await stubFetch.mock.results[0].value).ok).toBe(true)
+  })
 })
 
 // ── event.applied carries serverSeq + projected rows ───────────────────

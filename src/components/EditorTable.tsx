@@ -768,6 +768,12 @@ interface EditorTableProps {
    *  toggle, so a mistaken/retired lane stops cluttering the picker while
    *  staying reachable. Absent/empty ⇒ every lane shows (pre-archive behavior). */
   archivedLanes?: string[]
+  /** AQU-1463: set to the active lane's label when that lane is itself
+   *  archived, null otherwise. A frozen lane is read-only for every role
+   *  (AQU-1462 refuses its writes server-side), so this overrides the role
+   *  ladder: it turns off editing and validation and puts a banner naming the
+   *  lane above the table. The host derives it with `laneLockFor`. */
+  archivedLaneLabel?: string | null
   /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
    *  is used. Omit to keep the tag non-interactive. */
   onLaneChange?: (lane: string) => void
@@ -1090,7 +1096,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, archivedLaneLabel = null, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
@@ -1211,6 +1217,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   )
   const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel: roleReadOnlyLabel } = useEditorCapabilities(project, {
     hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
+    // AQU-1463: a frozen lane outranks the role ladder — see the prop's note.
+    archivedLaneLabel,
   })
   // AQU-1571: the reviewer banner promised "you can validate" even where the
   // project's minimum role or named-validator list shuts this reader out of
@@ -3021,9 +3029,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           )
         : null}
       <div className="shrink-0 bg-background">
-        {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
+        {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer).
+            AQU-1463: and for an archived lane, which freezes the lane for every
+            role. The testid carries which of the two it is, so a test can tell a
+            lane that went read-only from a reader who always was. */}
         {readOnlyLabel && (
-          <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+          <div
+            data-testid={archivedLaneLabel !== null ? "lane-archived-banner" : "role-read-only-banner"}
+            className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+          >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             {readOnlyLabel}
           </div>

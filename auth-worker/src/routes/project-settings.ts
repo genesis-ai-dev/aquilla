@@ -598,6 +598,29 @@ export async function mergeSettingsArray(
   return "conflict"
 }
 
+/**
+ * AQU-1816: a lane-row write relays to the project DO the way the settings
+ * PATCH and the archive route already do, so a workspace open in another tab
+ * (or for another member) lists the new or renamed lane without a reload.
+ * Best-effort, like the other relays: `executionCtx` is absent in some test
+ * harnesses, and the correctness path is the client's own re-read.
+ */
+function notifySettingsChangedBestEffort(
+  c: {
+    env: Parameters<typeof notifySyncWorkerOfProjectSettingsChange>[0]
+    executionCtx: { waitUntil(promise: Promise<unknown>): void }
+  },
+  projectId: string,
+  version: number,
+): void {
+  const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, version)
+  try {
+    c.executionCtx.waitUntil(notifyPromise)
+  } catch {
+    void notifyPromise
+  }
+}
+
 // AQU-1418: lane rows are what the screen edits. The settings string registry
 // stays in step so events, the external API, and older clients still resolve
 // a lane by its legacy tag. The id is never shown. A duplicate display name
@@ -665,6 +688,7 @@ projectSettings.post(
     // AQU-1594: the lane row is the registry. Do not mirror the tag into
     // settings.targetLanes.
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
     const lane = fresh.lanes?.find((row) => row.id === created.laneId) ?? null
     return c.json({ lane }, 201)
   },
@@ -698,7 +722,9 @@ projectSettings.patch(
       return c.json({ error: result.status }, 400)
     }
     if (result.status !== "ok") return c.json({ error: result.status }, 400)
-    return c.json({ lane: result.lane })
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )
 

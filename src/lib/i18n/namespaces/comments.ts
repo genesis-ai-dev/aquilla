@@ -20,6 +20,7 @@ export const comments = defineNamespace({
     "comments.mention.typeMore": "Type more to search…",
     "comments.mention.noResults": "No users found.",
     "comments.mention.noMembers": "No one on this project to mention.",
+    "comments.mention.restricted": "No one in your lanes to mention yet.",
     "comments.mention.suggestionsAria": "Project members",
     "comments.composer.editPlaceholder": "Edit comment…",
     "comments.composer.replyPlaceholder": "Leave a reply...",
@@ -198,6 +199,12 @@ export const comments = defineNamespace({
         description:
           "Empty-state row in the @mention dropdown when this project has no other members " +
           "to mention (the signed-in user is not listed).",
+      },
+      "comments.mention.restricted": {
+        description:
+          "Empty-state row in the @mention dropdown for a member whose organisation hides the " +
+          "project's member list from them: they can only mention people who share a lane " +
+          "with them plus the project's maintainers, and none are available yet.",
       },
       "comments.mention.suggestionsAria": {
         description:

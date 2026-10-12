@@ -14,9 +14,8 @@ import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useProject } from "@/hooks/useProject"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { useRules } from "@/hooks/useRules"
-import { checkRulesForCell } from "@/lib/rules/rule-engine"
+import { useProjectInfractions } from "@/hooks/useProjectInfractions"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
-import type { RuleInfraction } from "@/lib/parsers/types"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { RulesSurface } from "@/components/RulesSurface"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -131,15 +130,14 @@ export function RulesSettingsSection({
   const cells = useMemo(() => files.flatMap((file) => file.cells), [files])
 
   const enabledRules = useMemo(() => rules.filter((rule) => rule.enabled), [rules])
-  const infractions = useMemo(() => {
-    const out = new Map<string, RuleInfraction[]>()
-    if (enabledRules.length === 0 || cells.length === 0) return out
-    for (const cell of cells) {
-      const cellInf = checkRulesForCell(cell, cell.fileId, enabledRules)
-      if (cellInf.length > 0) out.set(cell.id, cellInf)
-    }
-    return out
-  }, [cells, enabledRules])
+  // AQU-1864: the scan used to run right here, in a render-time memo — every
+  // enabled rule over every cell of the project, synchronously. A full Bible
+  // (~31k cells, ~20 rules) froze the page for seconds on open, and again on
+  // every outbox change, because `useProjectCells` republishes the corpus each
+  // time the outbox moves. The hook slices the same work across frames and
+  // caches it per cell, so counts fill in progressively and a single edit
+  // re-evaluates a single cell.
+  const { infractions } = useProjectInfractions(cells, enabledRules)
 
   if (loading || !project) {
     return <LoadingPanel label={t("rules.loadingLabel")} />

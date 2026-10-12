@@ -186,7 +186,6 @@ export function useFocusLock(
   // synchronizes the *external* WS lease lifetime to the cellId prop;
   // setIsHeld inside release() is the only React state and it's reflecting
   // the WS state, not deriving new state from props.
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     // Compare against the composed key: switching cell OR lane must release
     // the prior lease (otherwise the renewal timer keeps firing the old key).
@@ -194,7 +193,6 @@ export function useFocusLock(
       release()
     }
   }, [lockKey, release])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Drop the lock on unmount so a refresh or navigate-away doesn't strand a
   // lease (would otherwise wait for leaseMs to auto-expire).

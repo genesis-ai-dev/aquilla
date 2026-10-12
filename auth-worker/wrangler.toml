@@ -287,13 +287,11 @@ ADMIN_REQUIRE_ELEVATION = "true"
 # PostHog ingest region + *project* token (public — same one shipped in the SPA
 # bundle). Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 # AQU-854: telemetry moved to PostHog EU Cloud. The host is stated explicitly
-# so a deploy never relies on the code default. POSTHOG_KEY is intentionally
-# EMPTY until the EU project exists — the retired US project token must not be
-# posted to an EU endpoint, and `shipLog` no-ops on a blank key, so worker log
-# shipping stays off (local logging is unaffected) until the EU token is filled
-# in here. See the Linear issue's "Account-side dependency".
+# so a deploy never relies on the code default. AQU-1814 connects the verified
+# Frontier R&D EU project (282623); keep this public token aligned with
+# config/posthog.json. Local and e2e profiles leave log shipping off.
 POSTHOG_HOST = "https://eu.i.posthog.com"
-POSTHOG_KEY = ""
+POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"
 MONDAY_APP_ID = "11760401"
@@ -366,6 +364,8 @@ name = "EMAIL"
 binding = "CF_VERSION_METADATA"
 
 [env.development.vars]
+POSTHOG_HOST = "https://eu.i.posthog.com"
+POSTHOG_KEY = "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
 ALGORITHM = "HS256"
 # [Pen test] Auth & session mgmt (2026-09-28): see top-level [vars] for why
 # this dropped from 43200 (30 days).

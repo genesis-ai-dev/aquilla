@@ -10,9 +10,11 @@ const ROSTER = [{ username: "bob" }, { username: "bobby" }, { username: "carol" 
 function Harness({
   onKeyDown,
   candidates = ROSTER,
+  restricted = false,
 }: {
   onKeyDown?: (event: React.KeyboardEvent<HTMLDivElement>) => void
   candidates?: readonly MentionCandidate[]
+  restricted?: boolean
 }) {
   const [value, setValue] = useState("Check ")
   return (
@@ -21,6 +23,7 @@ function Harness({
         value={value}
         onChange={setValue}
         candidates={candidates}
+        restricted={restricted}
         currentUsername="alice"
         aria-labelledby="label"
         onKeyDown={onKeyDown}
@@ -116,5 +119,49 @@ describe("MentionTextarea", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
     expect(field.querySelector("[data-mention]")).not.toBeInTheDocument()
     expect(field).toHaveTextContent("Check @")
+  })
+})
+
+/**
+ * AQU-1815: a Contributor the org hides the roster from gets a lane-scoped
+ * list. When even that is empty the composer must not claim the project has
+ * no one on it.
+ */
+describe("MentionTextarea — empty list copy", () => {
+  it("says the list is lane-scoped when the roster is hidden from the author", async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <span id="label">Comment</span>
+        <Harness candidates={[]} restricted />
+      </>,
+    )
+    await user.type(screen.getByRole("textbox", { name: "Comment" }), "@")
+    expect(screen.getByText("No one in your lanes to mention yet.")).toBeInTheDocument()
+    expect(screen.queryByText("No one on this project to mention.")).not.toBeInTheDocument()
+  })
+
+  it("keeps the project-wide copy when the full roster is simply empty", async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <span id="label">Comment</span>
+        <Harness candidates={[]} />
+      </>,
+    )
+    await user.type(screen.getByRole("textbox", { name: "Comment" }), "@")
+    expect(screen.getByText("No one on this project to mention.")).toBeInTheDocument()
+  })
+
+  it("reports no match, not an empty list, when a lane-scoped list has no hit", async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <span id="label">Comment</span>
+        <Harness candidates={[{ username: "carol" }]} restricted />
+      </>,
+    )
+    await user.type(screen.getByRole("textbox", { name: "Comment" }), "@zz")
+    expect(screen.getByText("No users found.")).toBeInTheDocument()
   })
 })

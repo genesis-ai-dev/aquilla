@@ -475,7 +475,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
     lanes: sharedLanes,
-    refresh: refreshSharedSettings,
+    refreshAfterWrite: refreshSharedSettingsAfterWrite,
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
@@ -534,6 +534,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
 
+  // AQU-1816: the lane-row endpoints write around `patchShared`, which is the
+  // only path that told the page behind this modal (overview, workspace) that
+  // the settings row moved — so a lane added here stayed invisible behind the
+  // dialog until a reload (the AQU-1570 shape, for lanes). Every lane write
+  // below re-reads through `refreshSharedSettingsAfterWrite`, which broadcasts
+  // first and then refreshes this instance.
+  //
   // AQU-1592: the languages screen sends the identity fields the user touched —
   // the language, or a nullable name/code override. A null clears an override
   // rather than writing a derived value back.
@@ -545,13 +552,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!jwt || !id) return "invalid" as const
     const result = await renameProjectLane(jwt, id, laneId, edit)
     if (result.kind === "ok") {
-      await refreshSharedSettings()
+      await refreshSharedSettingsAfterWrite()
       return "ok" as const
     }
     if (result.kind === "duplicate") return "duplicate" as const
     if (result.kind === "malformed_code") return "malformed_code" as const
     return "invalid" as const
-  }, [session?.jwt, id, refreshSharedSettings])
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const createLane = useCallback(async (
     input: {
@@ -566,22 +573,22 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!jwt || !id) return "invalid" as const
     const result = await createProjectLane(jwt, id, input)
     if (result.kind === "ok") {
-      await refreshSharedSettings()
+      await refreshSharedSettingsAfterWrite()
       return "ok" as const
     }
     if (result.kind === "duplicate") return "duplicate" as const
     if (result.kind === "malformed_code") return "malformed_code" as const
     return "invalid" as const
-  }, [session?.jwt, id, refreshSharedSettings])
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
     const jwt = session?.jwt
     if (!jwt || !id) return false
     const result = await setProjectLaneArchived(jwt, id, laneId, archived)
     if (result.kind !== "ok") return false
-    await refreshSharedSettings()
+    await refreshSharedSettingsAfterWrite()
     return true
-  }, [session?.jwt, id, refreshSharedSettings])
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   // AQU-1464: the archive confirmation asks when the lane was last translated in.
   // No session or project id means we genuinely cannot answer — report that as an

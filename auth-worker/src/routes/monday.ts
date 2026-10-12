@@ -66,6 +66,7 @@ import {
   NoBoardsError,
 } from "../lib/monday/analyze"
 import { pushBoardLink, schedulePush } from "../lib/monday/push"
+import { notifySyncWorkerOfMondayLinkChange } from "../services/sync-worker-notify"
 import { secureCompare } from "../utils/secure-compare"
 
 const monday = new Hono<AuthHonoEnv>()
@@ -218,7 +219,7 @@ monday.post(
     }
     const { backTo } = c.req.valid("json")
     // backTo must be an app path, never an absolute URL (open-redirect guard).
-    if (backTo != null && (!backTo.startsWith("/") || backTo.startsWith("//"))) {
+    if (backTo != null && !isSafeAppPath(backTo)) {
       return c.json({ error: "backTo must be a path" }, 400)
     }
     // OAuth 2.1 PKCE: the code_verifier must survive to the callback without
@@ -271,7 +272,7 @@ monday.get("/oauth/callback", async (c) => {
     return fail("bad_state", 401)
   }
   const backTo =
-    typeof state.backTo === "string" && state.backTo.startsWith("/") && !state.backTo.startsWith("//")
+    typeof state.backTo === "string" && isSafeAppPath(state.backTo)
       ? state.backTo
       : "/settings/monday"
   const orgId = Number(state.orgId)
@@ -426,6 +427,28 @@ const putLinkSchema = z.object({
   enabled: z.boolean().optional(),
 })
 
+/**
+ * AQU-1828: the project's DO caches "this project has no Monday link" so it
+ * stops nudging identity on every edit. Any change to the link row has to drop
+ * that cache, or a freshly linked project would not start pushing until the
+ * DO's backstop TTL lapsed. Best-effort: `executionCtx` is absent in some test
+ * harnesses, and the link row itself is already durable.
+ */
+function notifyLinkChangedBestEffort(
+  c: {
+    env: Parameters<typeof notifySyncWorkerOfMondayLinkChange>[0]
+    executionCtx: { waitUntil(promise: Promise<unknown>): void }
+  },
+  projectId: string,
+): void {
+  const notifyPromise = notifySyncWorkerOfMondayLinkChange(c.env, projectId)
+  try {
+    c.executionCtx.waitUntil(notifyPromise)
+  } catch {
+    void notifyPromise
+  }
+}
+
 monday.put(
   "/projects/:projectId/link",
   authMiddleware,
@@ -510,6 +533,7 @@ monday.put(
 
     const link = await getLink(c.env, guard.projectId)
     if (!link) return c.json({ error: "link write failed" }, 500)
+    notifyLinkChangedBestEffort(c, guard.projectId)
     return c.json({ link: linkResponse(link, true), warnings })
   },
 )
@@ -552,6 +576,9 @@ monday.patch(
 
     const fresh = await getLink(c.env, guard.projectId)
     if (!fresh) return c.json({ error: "link update failed" }, 500)
+    // `enabled` is part of what the DO caches, so even a config-only edit
+    // re-checks rather than guessing which fields mattered.
+    notifyLinkChangedBestEffort(c, guard.projectId)
     return c.json({ link: linkResponse(fresh, true), warnings })
   },
 )
@@ -572,6 +599,7 @@ monday.delete("/projects/:projectId/link", authMiddleware, async (c) => {
   await c.env.AQUILLA_PG.prepare("DELETE FROM integration_links WHERE id = ?")
     .bind(link.id)
     .run()
+  notifyLinkChangedBestEffort(c, guard.projectId)
   return c.json({ ok: true, deleted: true })
 })
 
@@ -762,5 +790,15 @@ monday.post("/internal/push", zValidator("json", internalPushSchema), async (c) 
   const result = await schedulePush(c.env, projectId)
   return c.json(result)
 })
+
+/**
+ * [Pen test] Auth & session mgmt (2026-10-12): an app-relative path only.
+ * Browsers normalise `\` to `/`, so `/\evil.com` is a protocol-relative
+ * redirect that the old `startsWith("//")` check let through. Also reject
+ * control characters (tab/CR/LF are stripped by URL parsers: `/\t/evil.com`).
+ */
+export function isSafeAppPath(p: string): boolean {
+  return p.startsWith("/") && !p.startsWith("//") && !/[\\\u0000-\u001f]/.test(p)
+}
 
 export default monday

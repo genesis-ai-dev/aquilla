@@ -25,7 +25,7 @@
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
 // role-policy.ts). Author is bound to the token, never the request body.
 
-import { verifyTokenForDoc } from '../auth'
+import { verifyDocScope, verifySyncToken } from '../auth'
 import { youTubeVideoId } from '../../../src/lib/video/youtube'
 import { ROLE } from './role-policy'
 import { withCors } from '../cors'
@@ -39,10 +39,20 @@ import {
 } from './event-projection'
 import { dataTargetTagsFromEvents, ensureBlankTargetBridgeStmt, ensureProjectLanes } from '../../../db/shared/lanes'
 import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
-import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
+import {
+  allocateSeqRange,
+  buildBulkEventInsertStmt,
+  buildBulkEventInsertStmts,
+  buildSettleSeqRangeStmt,
+} from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
-import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES, MAX_CELL_TEXT_BYTES } from '../../../shared/import-contract'
+import {
+  MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
+  MAX_CELL_TEXT_BYTES,
+  MAX_IMPORT_REQUEST_BODY_BYTES,
+} from '../../../shared/import-contract'
+import { readTextBodyWithLimit } from '../../../shared/http-body-limit'
 import { publishImportedTrack, type ImportedTrackPublication } from './import-track-publication'
 import { promoteCaptionsToRows, type CaptionRowsPromotion } from './import-caption-promotion'
 
@@ -50,7 +60,22 @@ import { promoteCaptionsToRows, type CaptionRowsPromotion } from './import-capti
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
  *  order of magnitude under it while keeping SQL text small. */
 const BULK_ROWS = 1000
-const MAX_IMPORT_ATTACHMENTS = 10_000
+// AQU-1861: a silence-split media import attaches one clip window per segment,
+// and a long recording routinely splits into more segments than a Bible book
+// has verses. The old 10,000 ceiling rejected those imports at the very last
+// step — after every byte was uploaded and every cell written — and was itself
+// above what this route could execute: the finalize built ONE events INSERT for
+// all of them, and postgres.js refuses a statement binding 65,534+ values, so
+// anything past ~5,461 attachments (12 binds/row) died with
+// MAX_PARAMETERS_EXCEEDED before this check could ever have passed it.
+//
+// Every finalize statement is now bounded by BULK_ROWS (the events rows go
+// through buildBulkEventInsertStmts, the existence checks are paged), so the
+// ceiling is no longer a driver limit but a budget on how much work one request
+// may fan out to: ~4 pipelined statements per attachment. 20,000 clears a
+// silence-split recording of roughly eleven hours with headroom, while still
+// stopping one request from spending the shared Postgres backend without bound.
+const MAX_IMPORT_ATTACHMENTS = 20_000
 const MAX_IMPORT_WORD_TIMINGS = 50_000
 
 function optionalFiniteNonNegative(value: unknown): boolean {
@@ -107,6 +132,27 @@ async function runImportBatch(
     return
   }
   await db.batch(stmts)
+}
+
+/** The subset of `ids` that exist, looked up in BULK_ROWS-sized pages so one
+ *  statement's bind count never grows with the request (AQU-1861). `sql` is
+ *  given the page's placeholder list; `scope` binds ahead of the page. */
+async function selectExistingIds(
+  db: AquillaDb,
+  ids: string[],
+  sql: (placeholders: string) => string,
+  scope: unknown[],
+): Promise<Set<string>> {
+  const present = new Set<string>()
+  for (let i = 0; i < ids.length; i += BULK_ROWS) {
+    const page = ids.slice(i, i + BULK_ROWS)
+    const rows = await db
+      .prepare(sql(page.map(() => '?').join(', ')))
+      .bind(...scope, ...page)
+      .all<{ id: string }>()
+    for (const row of rows.results) present.add(row.id)
+  }
+  return present
 }
 
 export interface ImportRouteEnv {
@@ -260,9 +306,36 @@ export async function handleBulkImportRequest(
   }
   const db = env.AQUILLA_PG
 
+  // AQU-1858: authenticate and size-gate BEFORE the body is materialized.
+  // Parsing first let an unauthenticated caller spend the isolate's shared
+  // ~128 MB of memory on a body this route was always going to refuse, taking
+  // every other request on that isolate down with it. Only the (project,
+  // file) scope check needs the parsed body; it runs below, on these claims.
+  const authHeader = request.headers.get('Authorization') ?? ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const auth = await verifySyncToken(token, env.SYNC_SECRET_KEY)
+  if (!auth.ok) {
+    return withCors(new Response(auth.reason, { status: auth.status }), request)
+  }
+  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+    return withCors(new Response('role too low for source import', { status: 403 }), request)
+  }
+
+  const read = await readTextBodyWithLimit(
+    request.headers,
+    request.body,
+    MAX_IMPORT_REQUEST_BODY_BYTES,
+  )
+  if (!read.ok) {
+    return withCors(
+      Response.json({ error: read.error, maxBytes: read.maxBytes }, { status: read.status }),
+      request,
+    )
+  }
+
   let body: unknown
   try {
-    body = await request.json()
+    body = JSON.parse(read.text)
   } catch {
     return withCors(new Response('invalid JSON body', { status: 400 }), request)
   }
@@ -271,6 +344,15 @@ export async function handleBulkImportRequest(
       new Response('body must be { projectId, fileId, cells[] }', { status: 400 }),
       request,
     )
+  }
+
+  // Auth, second half: the token must be scoped to the (project, file) the
+  // body names. Signature, audience and the PROJECT_LEAD+ role floor
+  // (source.* is importer/lead-only per role-policy.ts) were checked above,
+  // before the body was read.
+  const scope = verifyDocScope(auth.claims, { projectId: body.projectId, fileId: body.fileId })
+  if (!scope.ok) {
+    return withCors(new Response(scope.reason, { status: scope.status }), request)
   }
   if (body.video !== undefined) {
     const video = body.video
@@ -367,22 +449,6 @@ export async function handleBulkImportRequest(
         request,
       )
     }
-  }
-
-  // Auth: token must be scoped to this (project, file) and hold a source-write
-  // role. Source-side writes are PROJECT_LEAD+ (importer authority).
-  const authHeader = request.headers.get('Authorization') ?? ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const auth = await verifyTokenForDoc(
-    token,
-    { projectId: body.projectId, fileId: body.fileId },
-    env.SYNC_SECRET_KEY,
-  )
-  if (!auth.ok) {
-    return withCors(new Response(auth.reason, { status: auth.status }), request)
-  }
-  if (auth.claims.role < ROLE.PROJECT_LEAD) {
-    return withCors(new Response('role too low for source import', { status: 403 }), request)
   }
 
   const author =
@@ -535,24 +601,31 @@ export async function handleBulkImportRequest(
       if (finalizeEvents.length > 0) {
         const cellIds = [...new Set(finalizeEvents.map((event) => event.cellId!))]
         const audioIds = [...new Set((body.attachments ?? []).map((attachment) => attachment.audioId))]
-        const cellPlaceholders = cellIds.map(() => '?').join(', ')
-        const audioPlaceholders = audioIds.map(() => '?').join(', ')
-        const [cells, artifacts] = await Promise.all([
-          db.prepare(
-            `SELECT cell_id FROM cells
+        // AQU-1861: these bind one value per id, so a 12,000-segment import put
+        // 12,000 of them in a single statement. Paged at BULK_ROWS — the budget
+        // the inserts use — no statement's bind count grows with the request.
+        const [presentCells, presentAudio] = await Promise.all([
+          selectExistingIds(
+            db,
+            cellIds,
+            (placeholders) => `SELECT cell_id AS id FROM cells
               WHERE project_id = ? AND file_id = ? AND side = 'source'
-                AND cell_id IN (${cellPlaceholders})`,
-          ).bind(body.projectId, body.fileId, ...cellIds).all<{ cell_id: string }>(),
-          db.prepare(
-            `SELECT audio_id FROM artifacts
+                AND cell_id IN (${placeholders})`,
+            [body.projectId, body.fileId],
+          ),
+          selectExistingIds(
+            db,
+            audioIds,
+            (placeholders) => `SELECT audio_id AS id FROM artifacts
               WHERE project_id = ? AND file_id = ? AND kind = 'audio'
-                AND audio_id IN (${audioPlaceholders})`,
-          ).bind(body.projectId, body.fileId, ...audioIds).all<{ audio_id: string }>(),
+                AND audio_id IN (${placeholders})`,
+            [body.projectId, body.fileId],
+          ),
         ])
-        if (new Set(cells.results.map((row) => row.cell_id)).size !== cellIds.length) {
+        if (presentCells.size !== cellIds.length) {
           return withCors(new Response('media attachment refers to a cell outside this file', { status: 409 }), request)
         }
-        if (new Set(artifacts.results.map((row) => row.audio_id)).size !== audioIds.length) {
+        if (presentAudio.size !== audioIds.length) {
           return withCors(new Response('media attachment has no matching uploaded artifact', { status: 409 }), request)
         }
       }
@@ -583,7 +656,11 @@ export async function handleBulkImportRequest(
       }
       if (finalizeEvents.length > 0) {
         const seqBase = await allocateSeqRange(db, body.projectId, finalizeEvents.length)
-        finalizeStmts.push(buildBulkEventInsertStmt(db, finalizeEvents.map((event, index) => ({
+        // AQU-1861: ...Stmts, not ...Stmt — one statement per BULK_ROWS of
+        // attachments. A single INSERT binds 12 values per row, so one
+        // statement for every attachment in the request broke the driver's
+        // 65,534-bind ceiling on any import past ~5,461 segments.
+        finalizeStmts.push(...buildBulkEventInsertStmts(db, finalizeEvents.map((event, index) => ({
           id: event.id,
           schemaVersion: event.schemaVersion,
           projectId: event.projectId,

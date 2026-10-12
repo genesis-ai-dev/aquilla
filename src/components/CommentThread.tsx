@@ -70,6 +70,8 @@ interface CommentThreadProps {
   cellId?: string
   /** Project members the reply box may @mention. */
   mentionRoster?: readonly MentionCandidate[]
+  /** AQU-1815: `mentionRoster` is the caller's lane-scoped subset, not the roster. */
+  mentionRestricted?: boolean
   /** Signed-in username, left out of the mention list. */
   currentUsername?: string | null
   /**
@@ -90,7 +92,7 @@ function readDraft(storageKey: string): string {
   try { return localStorage.getItem(storageKey) ?? "" } catch { return "" }
 }
 
-export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, resolveDenialReason, onReply, onResolve, onReopen, onEdit, onDelete, canEdit = false, canDelete = false, canEditMessage, canDeleteMessage, projectId, fileId, cellId, mentionRoster = [], currentUsername, highlightCommentId }: CommentThreadProps) {
+export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, resolveDenialReason, onReply, onResolve, onReopen, onEdit, onDelete, canEdit = false, canDelete = false, canEditMessage, canDeleteMessage, projectId, fileId, cellId, mentionRoster = [], mentionRestricted = false, currentUsername, highlightCommentId }: CommentThreadProps) {
   const { t, locale } = useI18n()
   const highlightRef = useRef<HTMLDivElement>(null)
   const [, setOwnerRevision] = useState(0)
@@ -257,6 +259,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             fileId={fileId}
             cellId={cellId}
             mentionRoster={mentionRoster}
+            mentionRestricted={mentionRestricted}
             currentUsername={currentUsername}
             safeHtml={safeCommentHtml(message.text)}
           />
@@ -273,6 +276,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             onChange={setReplyText}
             onKeyDown={handleReplyKeyDown}
             candidates={mentionRoster}
+            restricted={mentionRestricted}
             currentUsername={currentUsername}
             placeholder={t("comments.thread.replyPlaceholder")}
             rows={1}
@@ -438,6 +442,7 @@ function CommentMessageRow({
   fileId,
   cellId,
   mentionRoster,
+  mentionRestricted,
   currentUsername,
   safeHtml,
 }: {
@@ -464,6 +469,7 @@ function CommentMessageRow({
   fileId?: string
   cellId?: string
   mentionRoster: readonly MentionCandidate[]
+  mentionRestricted: boolean
   currentUsername?: string | null
   safeHtml: string
 }) {
@@ -542,6 +548,7 @@ function CommentMessageRow({
                 value={editText}
                 onChange={onEditText}
                 candidates={mentionRoster}
+                restricted={mentionRestricted}
                 currentUsername={currentUsername}
                 placeholder={t("comments.composer.editPlaceholder")}
                 autoHeight

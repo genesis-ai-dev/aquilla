@@ -322,6 +322,24 @@ CREATE TABLE project_settings (
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
+-- 0158 (AQU-1846): the react watcher's per-project bookmark and its
+-- round-robin stamp. Deliberately NOT in the settings blob: persisting the
+-- cursor there meant a read-modify-write of a multi-MB TEXT column every five
+-- minutes per swept project, racing any human settings edit. `cursor_ms` is
+-- epoch millis matching events.server_ts (NULL = never swept);
+-- `last_reaction_at` is fileId -> ISO timestamp, the per-file cooldown input;
+-- `last_swept_at` is when the cron last VISITED the project (NULL = never),
+-- which is the sweep's ordering key so no project starves behind the LIMIT.
+CREATE TABLE agent_react_state (
+    project_id       TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    cursor_ms        BIGINT,
+    last_reaction_at JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_swept_at    TIMESTAMPTZ,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX agent_react_state_last_swept
+  ON agent_react_state(last_swept_at ASC NULLS FIRST, project_id ASC);
+
 CREATE TABLE org_settings (
     org_id     BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
     settings   TEXT NOT NULL DEFAULT '{}',
@@ -1097,6 +1115,9 @@ CREATE TABLE diarization_jobs (
     num_speakers INTEGER,
     turns_json   TEXT,
     error        TEXT,
+    -- AQU-1855: which user started the job, so a per-user concurrency cap has
+    -- something to count. NULL on rows that predate the column.
+    created_by   BIGINT,
     created_at   BIGINT NOT NULL,
     updated_at   BIGINT NOT NULL
 );
@@ -1188,6 +1209,8 @@ CREATE INDEX idx_checkpoints_project ON checkpoints(project_id, created_at);
 CREATE INDEX comments_project_scope ON comments(project_id, scope_kind, file_id, cell_id);
 CREATE INDEX comments_thread ON comments(project_id, parent_comment_id);
 CREATE INDEX idx_diarization_jobs_file ON diarization_jobs(project_id, file_id);
+-- AQU-1855: the stale-job sweep and the concurrency cap both read live jobs by age.
+CREATE INDEX idx_diarization_jobs_live ON diarization_jobs(status, updated_at);
 -- idx_events_author and idx_events_cell were dropped in migration 0081
 -- (AQU-1005): zero/near-zero reads on production, and every event INSERT paid
 -- their maintenance inside the seq-counter lock window.
@@ -1711,6 +1734,8 @@ CREATE TABLE IF NOT EXISTS integration_links (
   last_pushed_at TIMESTAMPTZ,
   last_push_status TEXT,              -- 'ok' | 'error'
   last_push_error TEXT,
+  push_attempts INTEGER NOT NULL DEFAULT 0,  -- consecutive failed pushes (0159; AQU-1828)
+  next_retry_at TIMESTAMPTZ,          -- earliest the cron flush may retry; NULL = no backoff
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),

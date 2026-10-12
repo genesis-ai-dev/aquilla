@@ -5,7 +5,9 @@ import {
   useProjectSettings,
   describePatchFailure,
   broadcastProjectSettingsUpdated,
+  PROJECT_SETTINGS_UPDATED_EVENT,
   type PatchOutcome,
+  type ProjectSettingsUpdatedDetail,
   isCountStructuralOnlyPatch,
 } from "./useProjectSettings"
 import * as restClient from "@/lib/sync/project-settings"
@@ -1056,6 +1058,94 @@ describe("useProjectSettings — same-tab propagation after a write (AQU-979)", 
     // Give any errant refresh a chance to fire before asserting it did not.
     await new Promise((r) => setTimeout(r, 0))
     expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-1816 — the lane-row endpoints (create / rename / archive) write around
+// `patch`, so the siblings `patch` would have told — the overview or workspace
+// behind the settings modal — kept their old lanes until a reload. Those
+// writers call `refreshAfterWrite` instead of a bare `refresh()`.
+describe("useProjectSettings — refreshAfterWrite (AQU-1816)", () => {
+  const SOURCE: restClient.ProjectLaneView = {
+    id: "ln-src", role: "source", language: "Greek", name: null, langCode: null,
+    legacyTag: null, position: 0, archivedAt: null,
+  }
+  const FRENCH: restClient.ProjectLaneView = {
+    id: "ln-fr", role: "target", language: "French", name: null, langCode: null,
+    legacyTag: "French", position: 1, archivedAt: null,
+  }
+  const SPANISH: restClient.ProjectLaneView = {
+    id: "ln-es", role: "target", language: "Spanish", name: null, langCode: null,
+    legacyTag: "Spanish", position: 2, archivedAt: null,
+  }
+  const laneIds = (hook: { current: { lanes: restClient.ProjectLaneView[] | null } }) =>
+    (hook.current.lanes ?? []).map((lane) => lane.id)
+
+  it("makes a sibling instance list the lane the writer just created", async () => {
+    const fetchSpy = mockSettingsFetch({
+      version: 1, updatedAt: "x", updatedBy: null, settings: {}, lanes: [SOURCE, FRENCH],
+    })
+    // The overview under the modal…
+    const { result: overview } = renderHook(() => useProjectSettings("p1", 700))
+    // …and the settings dialog whose Languages section creates the lane.
+    const { result: dialog } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(laneIds(overview)).toEqual(["ln-src", "ln-fr"]))
+    await waitFor(() => expect(laneIds(dialog)).toEqual(["ln-src", "ln-fr"]))
+    const before = fetchSpy.mock.calls.length
+
+    // The lane row is on the server; from here on every GET lists it.
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      value: { version: 1, updatedAt: "x", updatedBy: null, settings: {}, lanes: [SOURCE, FRENCH, SPANISH] },
+    })
+    await act(async () => {
+      await dialog.current.refreshAfterWrite()
+    })
+
+    // No reload, no tab focus, no DO frame — the overview instance converges…
+    await waitFor(() => expect(laneIds(overview)).toEqual(["ln-src", "ln-fr", "ln-es"]))
+    // …and so does the writer, through its own refresh.
+    expect(laneIds(dialog)).toEqual(["ln-src", "ln-fr", "ln-es"])
+    // One GET per instance: the writer skips its own broadcast.
+    expect(fetchSpy.mock.calls.length).toBe(before + 2)
+  })
+
+  it("tells the page behind with the project id and its own origin", async () => {
+    mockSettingsFetch({ version: 1, updatedAt: "x", updatedBy: null, settings: {}, lanes: [SOURCE, FRENCH] })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const seen: ProjectSettingsUpdatedDetail[] = []
+    const onUpdated = (event: Event) => {
+      seen.push((event as CustomEvent<ProjectSettingsUpdatedDetail>).detail)
+    }
+    window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
+    try {
+      await act(async () => {
+        await result.current.refreshAfterWrite()
+      })
+    } finally {
+      window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
+    }
+    // The overview keys its portfolio reload on the project id alone; the
+    // origin is what keeps the writer from answering its own event.
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.projectId).toBe("p1")
+    expect(seen[0]?.origin).toBeTruthy()
+  })
+
+  it("is a no-op broadcast with no project", async () => {
+    const { result } = renderHook(() => useProjectSettings(null, 700))
+    const seen: unknown[] = []
+    const onUpdated = (event: Event) => seen.push((event as CustomEvent).detail)
+    window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
+    try {
+      await act(async () => {
+        expect(await result.current.refreshAfterWrite()).toBeNull()
+      })
+    } finally {
+      window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
+    }
+    expect(seen).toEqual([])
   })
 })
 

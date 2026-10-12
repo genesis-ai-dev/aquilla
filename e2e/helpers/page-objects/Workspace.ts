@@ -559,6 +559,9 @@ export class Workspace {
    */
   async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
     await row.scrollIntoViewIfNeeded()
+    // A parked pointer can already be inside an idle-collapsed row. Leave it
+    // before entering again so this is a fresh reveal gesture.
+    await this.page.getByRole("banner").hover()
     await row.hover()
     const rail = row.locator('[data-slot="cell-action-rail"]')
     await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
@@ -572,6 +575,31 @@ export class Workspace {
     return action
   }
 
+  /** The branded recovery screen an ErrorBoundary shows after a render throw
+   * (src/components/ErrorBoundary.tsx). The root and AppShell boundaries both
+   * render it; the side-panel boundaries pass their own `fallback` instead, so
+   * this never matches a panel that failed on its own. */
+  private get crashScreen(): Locator {
+    return this.page.locator('[data-slot="error-boundary-fallback"]').first()
+  }
+
+  /** Report a crashed editor as a crash. AQU-642 sat open for three months as
+   * "all editor smokes fail at waitForEditor" because a render throw in the
+   * cell grid is indistinguishable, from the locator's point of view, from a
+   * slow route: the boundary swaps the grid for the recovery screen and
+   * `[data-cell-id]` simply never appears. */
+  private async failCrashedEditor(): Promise<never> {
+    const screen = this.crashScreen
+    const boundary = await screen.getAttribute("data-boundary")
+    const heading = (await screen.locator("h3").first().textContent())?.trim()
+    throw new Error(
+      `Editor crashed at mount: the "${boundary ?? "unknown"}" ErrorBoundary is showing `
+        + `("${heading ?? "no heading"}") in place of the cell grid, so no [data-cell-id] row `
+        + "can ever appear. A component threw during render — re-run this spec with "
+        + "`--trace on` and read the console entries at editor mount for the throw itself.",
+    )
+  }
+
   async waitForEditor(expectedCellId?: string): Promise<void> {
     // Seeded fixture ids are UUIDs, so they are safe in this quoted attribute
     // selector. Passing the expected id prevents a file navigation from being
@@ -579,9 +607,34 @@ export class Workspace {
     const firstCell = expectedCellId
       ? this.page.locator(`[data-cell-id="${expectedCellId}"]`)
       : this.page.locator("[data-cell-id]").first()
-    await expect(firstCell).toBeVisible({
-      timeout: EDITOR_READY_TIMEOUT_MS,
-    })
+
+    // Race the first row against the crash screen. Both branches resolve
+    // rather than reject, so neither can win merely by timing out first, and
+    // the whole wait stays bounded by the one EDITOR_READY_TIMEOUT_MS budget —
+    // this is a better diagnosis of the same stall, not a shorter deadline.
+    const ready = firstCell
+      .waitFor({ state: "visible", timeout: EDITOR_READY_TIMEOUT_MS })
+      .then(() => true, () => false)
+    const crashed = this.crashScreen
+      .waitFor({ state: "visible", timeout: EDITOR_READY_TIMEOUT_MS })
+      .then(() => true, () => false)
+
+    const first = await Promise.race<"ready" | "no-row" | "crashed" | "no-crash">([
+      ready.then((ok) => (ok ? "ready" : "no-row")),
+      crashed.then((ok) => (ok ? "crashed" : "no-crash")),
+    ])
+    if (first === "crashed") await this.failCrashedEditor()
+    if (first === "ready") return
+
+    // The race was settled by a branch that only reports what did *not*
+    // happen, so consult both before deciding which stall this is.
+    if (await crashed) await this.failCrashedEditor()
+    if (await ready) return
+    throw new Error(
+      `Editor never mounted: ${expectedCellId ? `[data-cell-id="${expectedCellId}"]` : "[data-cell-id]"} `
+        + `was not visible within ${EDITOR_READY_TIMEOUT_MS} ms and the editor did not crash — `
+        + "the route is still hydrating, or the cells request returned no rows.",
+    )
   }
 
   async showFilesSidebar(): Promise<void> {
@@ -681,7 +734,7 @@ export class Workspace {
       requestAt = Date.now()
     })
     const blurStarted = Date.now()
-    await this.page.locator("aside").click()
+    await this.blurEditor()
     const response = await committed
     await requestSeen
     const ackedAt = Date.now()
@@ -987,7 +1040,7 @@ export class Workspace {
         return false
       }
     }, { timeout: 20_000 })
-    await this.page.locator("aside").click()
+    await this.blurEditor()
     await multilineCommitted
 
     const readView = this.targetReadView(index)
@@ -1185,6 +1238,16 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /Editor settings/i }).click()
   }
 
+  /** Confirm a draft for every empty cell in the current file. */
+  async draftAllEmptyCells(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Draft all \(review required\)/i }).click()
+    const dialog = this.page.getByRole("dialog", { name: "Draft this file", exact: true })
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    await dialog.getByRole("checkbox", { name: /empty cells$/ }).check()
+    await dialog.getByRole("button", { name: "Draft", exact: true }).click()
+  }
+
   /** Export lives in the file options overflow menu. */
   async openExportDialog(): Promise<void> {
     await this.openFileOverflowMenu()
@@ -1282,11 +1345,14 @@ export class Workspace {
     return destination
   }
 
-  /** Leave the active editor by clicking sidebar chrome. Unlike editCell this
+  /** Leave the active editor by clicking the source metadata lane. Unlike editCell this
    * does not wait for a commit — the value may already be committed by the
    * idle debounce, in which case blur only releases the focus lock. */
   async blurEditor(): Promise<void> {
-    await this.page.locator("aside").click()
+    // The sidebar's center can land on Comments and navigate away. The source
+    // metadata lane has inert padding and keeps the current editor mounted.
+    await this.page.getByTestId("source-context-line")
+      .filter({ visible: true }).first().click({ position: { x: 1, y: 1 } })
   }
 
   /** Open the per-cell "Edit history" drawer through the action overflow. */

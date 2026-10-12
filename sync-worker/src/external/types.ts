@@ -43,6 +43,10 @@ export interface ChangesetWarning {
     /** ProjectSetup (AQU-1294): a plan step whose end-state already existed, so
      *  it is skipped rather than applied. A healthy outcome, not a problem. */
     | 'superseded_step'
+    /** AQU-1852: the apply stopped partway. The receipt's `eventIds` are the
+     *  events that DID land; the changeset is still `committing`, so retrying
+     *  the commit resumes from there without duplicating them. */
+    | 'apply_incomplete'
   fileId: string
   cellId: string
   message: string

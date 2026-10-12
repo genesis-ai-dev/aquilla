@@ -148,6 +148,7 @@ const rosterCoalescer = createRequestCoalescer<ProjectRosterResult>({ cacheTtlMs
  *  next read is one cheap GET). */
 export function invalidateProjectRosters(): void {
   rosterCoalescer.invalidate()
+  mentionCoalescer.invalidate()
 }
 
 async function fetchProjectRosterUncached(
@@ -169,6 +170,49 @@ async function fetchProjectRosterUncached(
   if (!res.ok) throw new UserError(res.status, "", "project");
   const body = (await res.json()) as { members: ProjectMember[] };
   return { kind: "ok", members: body.members };
+}
+
+/** One row of GET …/mention-candidates (AQU-1815): no email, by design. */
+export interface MentionCandidateRow {
+  userId: number
+  username: string
+}
+
+export interface MentionCandidatesResult {
+  candidates: MentionCandidateRow[]
+  /** True when the list is the caller's lane-scoped subset, not the roster. */
+  restricted: boolean
+}
+
+const mentionCoalescer = createRequestCoalescer<MentionCandidatesResult>({ cacheTtlMs: ROSTER_CACHE_TTL_MS })
+
+/**
+ * GET /api/v2/projects/:id/mention-candidates — who the caller may @mention
+ * in a comment (AQU-1815). Unlike the roster read this never 403s on the org
+ * roster floor: below it the server answers with the caller's lane-mates
+ * plus Maintainer and above. No access (403/404) is an empty, unrestricted
+ * list, as for a local-only project; real failures still throw.
+ */
+export async function fetchMentionCandidates(
+  jwt: string,
+  projectId: string,
+  opts?: { fresh?: boolean },
+): Promise<MentionCandidatesResult> {
+  const key = `${jwt}|${projectId}`
+  return mentionCoalescer.run(
+    key,
+    async () => {
+      const res = await fetch(
+        `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/mention-candidates`,
+        { headers: authHeaders(jwt) },
+      )
+      if (res.status === 403 || res.status === 404) return { candidates: [], restricted: false }
+      if (!res.ok) throw new UserError(res.status, "", "project")
+      const body = (await res.json()) as Partial<MentionCandidatesResult>
+      return { candidates: body.candidates ?? [], restricted: body.restricted === true }
+    },
+    { fresh: opts?.fresh },
+  )
 }
 
 /**

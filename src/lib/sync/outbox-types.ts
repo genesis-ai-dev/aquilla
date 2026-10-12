@@ -16,7 +16,7 @@
  */
 
 import type { CameraState } from "@/lib/sync/cells-read-types"
-import type { TermRendering, TermMatchOptions } from "@/lib/terminology/types"
+import type { ConceptExternalIds, TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 
 // ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
 
@@ -589,6 +589,8 @@ export interface OutboxEventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptions
+    /** AQU-1693: the Bible entity the concept names. */
+    externalIds?: ConceptExternalIds
   }
   // Partial patch: only the keys present are written, so two people editing
   // different fields of one concept both survive. `renderings` is replaced
@@ -600,6 +602,8 @@ export interface OutboxEventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptions
+    /** AQU-1693: replaces the links wholesale; `{}` unlinks. */
+    externalIds?: ConceptExternalIds
   }
   "term.delete": {
     conceptId: string // soft-delete: stamps deleted_at

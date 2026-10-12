@@ -16,6 +16,7 @@
 
 import { verifyTokenForProject } from '../auth'
 import { readBlobConcepts } from './migrate-concepts'
+import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 
 export interface ConceptsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -33,6 +34,7 @@ interface ConceptRowRaw {
   status: string
   case_sensitive: number
   match_options: unknown
+  external_ids: unknown
   created_by: string | null
   created_at: number
   updated_at: number
@@ -52,6 +54,11 @@ export interface TermMatchOptionsOut {
   excludedForms?: string[]
 }
 
+/** Mirrors `ConceptExternalIds` in src/lib/terminology/model.ts (AQU-1693). */
+export interface ConceptExternalIdsOut {
+  acai: string
+}
+
 export interface ConceptRowOut {
   conceptId: string
   projectId: string
@@ -61,6 +68,8 @@ export interface ConceptRowOut {
   status: 'active' | 'draft' | 'deprecated'
   caseSensitive: boolean
   matchOptions: TermMatchOptionsOut | null
+  /** The Bible entity the concept names; null when not linked. */
+  externalIds: ConceptExternalIdsOut | null
   createdBy: string | null
   createdAt: number
   updatedAt: number
@@ -127,6 +136,15 @@ function parseMatchOptions(raw: unknown): TermMatchOptionsOut | null {
   return out
 }
 
+/**
+ * AQU-1693: normalize `external_ids` to a link or null. A malformed value, or
+ * the `{}` an unlink stores, is no link: the client must never see a half-link.
+ */
+function parseExternalIds(raw: unknown): ConceptExternalIdsOut | null {
+  const acai = coerceExternalIds(raw)?.acai
+  return acai ? { acai } : null
+}
+
 function toOut(row: ConceptRowRaw): ConceptRowOut {
   const status = row.status === 'active' || row.status === 'deprecated' ? row.status : 'draft'
   return {
@@ -138,6 +156,7 @@ function toOut(row: ConceptRowRaw): ConceptRowOut {
     status,
     caseSensitive: row.case_sensitive === 1,
     matchOptions: parseMatchOptions(row.match_options),
+    externalIds: parseExternalIds(row.external_ids),
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -181,7 +200,7 @@ export async function handleConceptsReadRequest(
   const parts: string[] = [
     'SELECT',
     '  concept_id, project_id, source_term, renderings, notes,',
-    '  status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at',
+    '  status, case_sensitive, match_options, external_ids, created_by, created_at, updated_at, deleted_at',
     'FROM concepts',
     'WHERE project_id = ?',
   ]

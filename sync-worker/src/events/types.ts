@@ -39,6 +39,11 @@ export interface TermMatchOptionsPayload {
   excludedForms?: string[]
 }
 
+/** Mirrors `ConceptExternalIds` in src/lib/terminology/model.ts (AQU-1693). */
+export interface ConceptExternalIdsPayload {
+  acai?: string
+}
+
 export type EventKind =
   // Source-side cell events (importer / admin only).
   | 'source.cell.create'
@@ -784,6 +789,8 @@ export interface EventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptionsPayload
+    /** AQU-1693: the Bible entity the concept names. */
+    externalIds?: ConceptExternalIdsPayload
   }
   // Partial patch. Only the keys present are written — absent keys keep their
   // projected value, so two people editing DIFFERENT fields of the same
@@ -796,6 +803,8 @@ export interface EventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptionsPayload
+    /** AQU-1693: replaces the links wholesale when present; `{}` unlinks. */
+    externalIds?: ConceptExternalIdsPayload
   }
   'term.delete': {
     conceptId: string // soft-delete: stamps deleted_at

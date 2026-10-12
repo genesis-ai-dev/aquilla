@@ -88,6 +88,14 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitTermApprove: (input: unknown) => emitTermApprove(input),
   emitTermReject: (input: unknown) => emitTermReject(input),
 }))
+// AQU-1693: the "Link to a Bible person, place or group" picker reads the
+// Bible Knowledge Pack directly.
+const loadManifest = vi.fn()
+const loadLayer = vi.fn()
+vi.mock("@/lib/bible-data/pack-client", () => ({
+  loadManifest: () => loadManifest(),
+  loadLayer: (layer: string, book: string) => loadLayer(layer, book),
+}))
 let mockProject: ProjectRecord
 let mockProjectLoading = false
 // AQU-1006 follow-up: concepts come from the sync-worker projection via
@@ -122,6 +130,7 @@ import { GlossaryEditor } from "./GlossaryEditor"
 import { useProject } from "@/hooks/useProject"
 import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { JESUS, jhn4People } from "@/lib/bible-data/__fixtures__/jhn4"
 
 function concept(p: Partial<Concept>): Concept {
   return {
@@ -137,6 +146,8 @@ function concept(p: Partial<Concept>): Concept {
 beforeEach(() => {
   patchSettings.mockClear()
   for (const m of [emitTermCreate, emitTermUpdate, emitTermDelete, emitTermApprove, emitTermReject]) m.mockClear()
+  loadManifest.mockReset().mockResolvedValue({ ok: true, value: { books: { JHN: { layers: ["people"], bytes: {} } } } })
+  loadLayer.mockReset().mockResolvedValue({ ok: true, value: jhn4People() })
   projectCellsEnabled = false
   violationsEnabled = false
   projectCellsLoading = false
@@ -678,5 +689,98 @@ describe("GlossaryEditor — term-base file import (AQU-684)", () => {
 
     expect(await screen.findByText("Import failed")).toBeInTheDocument()
     expect(emitTermCreate).not.toHaveBeenCalled()
+  })
+
+  // AQU-1693: a shared termbase keeps its Bible entity links, so nobody has
+  // to link Jesus again in the project that imports it.
+  it("keeps a TBX entry's Bible entity link through the import into term.create", async () => {
+    const { container } = renderEditor()
+
+    pickFile(
+      container,
+      "shared.tbx",
+      `<martif><text><body><termEntry id="c-jesus">
+        <xref type="externalCrossReference" target="acai:person:Jesus.2">ACAI person:Jesus.2</xref>
+        <langSet xml:lang="source"><tig><term>Jesus</term></tig></langSet>
+      </termEntry></body></text></martif>`,
+    )
+
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate.mock.calls[0][0]).toMatchObject({ externalIds: { acai: "person:Jesus.2" } })
+  })
+})
+
+// AQU-1693: "Link to a Bible person, place or group" on the term detail page.
+// The control shows only with this device's Bible data experiment AND the
+// project's Bible data switch (the picker reads the pack directly). The link
+// itself is plain data: whatever the flags say, no other edit may touch it.
+describe("GlossaryEditor — link a concept to a Bible entity (AQU-1693)", () => {
+  const jesus = (p: Partial<Concept> = {}) => concept({ sourceTerm: "Jesus", renderings: [{ rendering: "Yesus", status: "preferred" }], ...p })
+  const bibleProject = (p: Partial<ProjectRecord> = {}) =>
+    ({
+      id: "p1",
+      name: "P",
+      files: [{ id: "f1", name: "JHN", type: "usfm" }],
+      experimentalFlags: { bibleData: true },
+      terminology: [jesus()],
+      ...p,
+    }) as unknown as ProjectRecord
+  const openDetail = () => renderEditor({}, "/project/p1/terminology?concept=c1")
+
+  it("links the concept to the person picked from the book it occurs in, as one term.update", async () => {
+    mockProject = bibleProject()
+    occurrenceCells = [{
+      id: "cell-1", fileId: "f1", original: "Jesus answered", translated: "", context: "JHN 4:10", group: "JHN 4",
+      type: "text", status: "empty", validationStatus: "none", activeValidators: [], validationHistory: [], history: [], threads: [],
+    }]
+    openDetail()
+
+    fireEvent.click(await screen.findByRole("button", { name: "Link to a Bible person, place or group" }))
+    // The headword's person is suggested first, from the book of the first occurrence.
+    const suggested = await screen.findByTestId("term-bible-link-suggested")
+    expect(loadLayer).toHaveBeenCalledWith("people", "JHN")
+    fireEvent.click(within(suggested).getByRole("button", { name: /Jesus/ }))
+
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalled())
+    expect(emitTermUpdate.mock.calls[0][0]).toEqual({
+      projectId: "p1",
+      conceptId: "c1",
+      author: "tester",
+      externalIds: { acai: JESUS },
+    })
+  })
+
+  it("unlinks with `{}`, the value that clears the stored link", async () => {
+    mockProject = bibleProject({ terminology: [jesus({ externalIds: { acai: JESUS } })] })
+    openDetail()
+
+    expect(await screen.findByTestId("term-bible-link-current")).toHaveTextContent("Linked to")
+    fireEvent.click(screen.getByRole("button", { name: "Unlink" }))
+
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalled())
+    expect(emitTermUpdate.mock.calls[0][0]).toMatchObject({ externalIds: {} })
+  })
+
+  it("offers nothing and reads no pack with the experiment off, and a rendering edit leaves the link alone", async () => {
+    mockProject = bibleProject({
+      experimentalFlags: {},
+      terminology: [jesus({ externalIds: { acai: JESUS }, renderings: [{ rendering: "Yesus", status: "preferred" }, { rendering: "Isa", status: "admitted" }] })],
+    })
+    openDetail()
+
+    fireEvent.click(await screen.findByRole("button", { name: /remove rendering Isa/i }))
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalled())
+    expect(emitTermUpdate.mock.calls[0][0]).not.toHaveProperty("externalIds")
+    expect(screen.queryByTestId("term-bible-link")).toBeNull()
+    expect(loadManifest).not.toHaveBeenCalled()
+  })
+
+  it("offers nothing with the project's Bible data switch off, even with the experiment on", async () => {
+    mockProject = bibleProject({ bibleResourcesEnabled: false })
+    openDetail()
+
+    expect(await screen.findByRole("button", { name: /close detail/i })).toBeInTheDocument()
+    expect(screen.queryByTestId("term-bible-link")).toBeNull()
+    expect(loadManifest).not.toHaveBeenCalled()
   })
 })

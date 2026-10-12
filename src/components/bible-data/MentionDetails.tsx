@@ -8,7 +8,8 @@
 //
 // AQU-1695: the title is the mention's own name (a deity's form at that word,
 // when the pack gives one), and pack 1.1's description and family follow the
-// facts (EntityAbout).
+// facts (EntityAbout). AQU-1693: "Add to terminology" for a participant the
+// project has not named yet.
 
 import { ArrowDown, ArrowUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -25,9 +26,10 @@ import {
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { EntityAbout } from "./EntityAbout"
+import { EntityTermAction } from "./EntityTermAction"
 import { GENDER_KEYS, NUMBER_KEYS, mentionKindKey, mentionSourceKeys } from "./people-text"
 import { labelSourceKey } from "./voice-text"
-import type { CellMentionView } from "./whos-who-context"
+import type { CellMentionView, WhosWhoContextValue } from "./whos-who-context"
 
 /** Hops at or beyond which the chain is worth saying out loud (the brief: "when hops > 1"). */
 const SHOW_HOPS_FROM = 2
@@ -165,6 +167,14 @@ export function MentionDetails({ id, view, at, placement = "exact", onJumped }: 
         </Button>
       )}
       {label && <p className="border-t border-border/60 pt-2 text-muted-foreground">{t(labelSourceKey(label))}</p>}
+      {/* AQU-1693: the lemma is the headword only where the word names them. */}
+      <EntityTermAction entity={info} name={name} lemma={kind === "explicit" ? lemmaOf(context, at) : undefined} onDone={onJumped} />
     </div>
   )
+}
+
+/** The lemma of the pack word at a mention, when the text layer is loaded. */
+function lemmaOf(context: WhosWhoContextValue, at: MentionAt): string | undefined {
+  const words = context.text?.words
+  return words && Object.hasOwn(words, at.wordId) ? words[at.wordId].lemma : undefined
 }

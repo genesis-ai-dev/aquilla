@@ -1030,6 +1030,8 @@ CREATE TABLE concepts (
     status         TEXT NOT NULL DEFAULT 'draft',
     case_sensitive INTEGER NOT NULL DEFAULT 0,
     match_options  JSONB,
+    -- AQU-1693 (0153): {"acai": "<ACAI entity id>"}; NULL or {} = not linked.
+    external_ids   JSONB,
     created_by     TEXT,
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,

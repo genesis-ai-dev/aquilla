@@ -30,6 +30,18 @@ export interface TermMatchOptions {
 }
 
 /**
+ * Links from a concept to records outside the termbase (AQU-1693). Stored
+ * verbatim in `concepts.external_ids`; NULL or `{}` there means no link.
+ */
+export interface ConceptExternalIds {
+  /**
+   * An ACAI entity id, as the Bible Knowledge Pack keys it: "person:Jesus.2".
+   * Voices and Who's Who name that entity with the concept's agreed rendering.
+   */
+  acai?: string
+}
+
+/**
  * Project-level affix inventory for source-term matching. Plain data: the
  * matcher knows "prefix strings" and "suffix strings", nothing about any
  * language. Presets (affix-presets.ts) only pre-fill these lists.

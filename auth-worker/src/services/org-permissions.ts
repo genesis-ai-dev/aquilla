@@ -33,6 +33,7 @@ import {
   type OrgPortfolioAggregate,
   type PortfolioAggregate,
 } from "../../../src/lib/frontier/portfolio-metrics"
+import { effectiveThresholdSql } from "../../../db/shared/validation-threshold"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -1455,8 +1456,10 @@ async function fetchPortfolioLanes(
       // joining the settings table hides exactly those projects. The columns
       // this used to read come back null for them, which is what they meant
       // before anyway (default threshold, no registered lanes).
+      // AQU-1771: the threshold resolves project → org → 1 like the
+      // structural policy beside it.
       `SELECT p.id AS project_id,
-              ps.validation_count AS validation_count,
+              ${effectiveThresholdSql("ps.validation_count", "os.validation_count")} AS validation_count,
               COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
@@ -1749,9 +1752,8 @@ const portfolioCtes = (orgPredicate: string) => `
               -- decoration: the column is TEXT off a jsonb ->>, so a project
               -- that ever stored a non-integer would abort the whole portfolio
               -- query with a cast error rather than just reading wrong.
-              GREATEST(1, LEAST(15, COALESCE(
-                CASE WHEN ps.validation_count_audio ~ '^[0-9]+$'
-                     THEN ps.validation_count_audio::integer END, 1))) AS audio_threshold
+              -- AQU-1771: project → org → 1.
+              ${effectiveThresholdSql("ps.validation_count_audio", "os.validation_count_audio")} AS audio_threshold
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id

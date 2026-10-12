@@ -19,6 +19,7 @@
 
 import { ROLE } from "../../types"
 import { countedFileSql } from "../../../../db/shared/counted-files"
+import { loadEffectiveThreshold } from "../../../../db/shared/validation-threshold"
 
 export interface MondayEntityMetrics {
   completion_pct: number
@@ -117,11 +118,6 @@ function buildMetrics(
   }
 }
 
-function toThreshold(raw: unknown, fallback: number): number {
-  const n = Number(raw)
-  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
-}
-
 /** Compute project + per-file metrics. Returns null if the project doesn't exist. */
 export async function computeProjectMetrics(
   db: AquillaDb,
@@ -137,16 +133,12 @@ export async function computeProjectMetrics(
   // the multi-MB settings blob inline for it); validationCountAudio has no
   // generated column yet — a single-project jsonb extract is acceptable here
   // (the org-portfolio timeout was a fan-out over every project).
-  const settings = await db
-    .prepare(
-      `SELECT validation_count,
-              (settings::jsonb)->>'validationCountAudio' AS validation_count_audio
-         FROM project_settings WHERE project_id = ?`,
-    )
-    .bind(projectId)
-    .first<{ validation_count: string | null; validation_count_audio: string | null }>()
-  const threshold = toThreshold(settings?.validation_count, 1)
-  const audioThreshold = toThreshold(settings?.validation_count_audio, threshold)
+  // AQU-1771: project → org → 1 for both, the same resolution every other
+  // progress reader uses.
+  const [threshold, audioThreshold] = await Promise.all([
+    loadEffectiveThreshold(db, projectId, "validationCount"),
+    loadEffectiveThreshold(db, projectId, "validationCountAudio"),
+  ])
 
   // AQU-1083: do headings count? The project's answer, else its org's, else
   // yes. Generated columns on both, for the reason stated above about blobs.

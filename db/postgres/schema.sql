@@ -349,7 +349,12 @@ CREATE TABLE org_settings (
     -- AQU-1083: the org-wide default for whether structural cells count toward
     -- progress. Generated so the org dashboard can resolve the policy in SQL
     -- without parsing the settings blob per project (0090).
-    count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED
+    count_structural TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'countStructuralCells') STORED,
+    -- AQU-1771: the org-wide defaults for how many validations a cell / a take
+    -- needs. NULL = unset; a project's own value wins, and absent on both reads
+    -- as 1 (0161).
+    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
+    validation_count_audio TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCountAudio') STORED
 );
 
 -- Global, runtime-editable platform config (migration 0047). Single row

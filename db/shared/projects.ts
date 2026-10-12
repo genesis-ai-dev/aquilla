@@ -26,6 +26,7 @@ import {
   type ExternalLaneSpec,
   type ProjectLaneRecord,
 } from "./lanes"
+import { clampThreshold, effectiveThreshold, loadOrgValidationDefaults } from "./validation-threshold"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Create project
@@ -215,11 +216,6 @@ export function normalizeSettings(
     next.validationCountAudio = clampThreshold(next.validationCountAudio)
   }
   return next
-}
-
-function clampThreshold(raw: unknown): number {
-  const value = Math.floor(Number(raw))
-  return Number.isFinite(value) ? Math.min(15, Math.max(1, value)) : 1
 }
 
 function validationThreshold(settings: Record<string, unknown>): number {
@@ -471,8 +467,12 @@ export async function updateProjectSettingsShared(
   const normalizedSettings = normalizeSettings(settingsToStore)
   const newSettingsJson = JSON.stringify(normalizedSettings)
   const newVersion = current.version + 1
-  const oldThreshold = validationThreshold(current.settings)
-  const newThreshold = validationThreshold(normalizedSettings)
+  // AQU-1771: compare EFFECTIVE thresholds. A project that clears its own
+  // value falls back to the org's default, which re-projects `cells.validated`
+  // exactly as typing that number in would.
+  const orgDefaults = await loadOrgValidationDefaults(db, input.projectId)
+  const oldThreshold = effectiveThreshold(current.settings.validationCount, orgDefaults.validationCount)
+  const newThreshold = effectiveThreshold(normalizedSettings.validationCount, orgDefaults.validationCount)
   const thresholdChanged = oldThreshold !== newThreshold
   // Lane ids are minted inside the attempt. The settings write is in the same
   // transaction, so a uq_lanes_id collision rolls the version change back too.

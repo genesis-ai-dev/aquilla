@@ -93,6 +93,7 @@ import {
   preserveRetiredLaneSettings,
   RETIRED_LANE_SETTINGS_MESSAGE,
 } from "../../../db/shared/retired-lane-settings"
+import { loadOrgValidationDefaults } from "../../../db/shared/validation-threshold"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -207,12 +208,24 @@ async function withOrgDefaults(
 ): Promise<ProjectSettingsResponse & {
   orgCountStructuralCells: boolean | null
   orgAllowBulkValidateAiDrafts: boolean | null
+  orgValidationCount: number | null
+  orgValidationCountAudio: number | null
 }> {
-  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts] = await Promise.all([
+  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
     getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
+    // AQU-1771: the org's validation defaults, null when it set none. Read
+    // here for the same reason as the two above: a project member who is not
+    // in the org cannot read the org settings route.
+    loadOrgValidationDefaults(env.AQUILLA_PG, projectId),
   ])
-  return { ...response, orgCountStructuralCells, orgAllowBulkValidateAiDrafts }
+  return {
+    ...response,
+    orgCountStructuralCells,
+    orgAllowBulkValidateAiDrafts,
+    orgValidationCount: orgThresholds.validationCount,
+    orgValidationCountAudio: orgThresholds.validationCountAudio,
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────

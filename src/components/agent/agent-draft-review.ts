@@ -19,6 +19,7 @@ import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { textValidationScope } from "@/lib/review/text-validation-policy"
 import { resolveIdmlEditorConfiguration, validateIdmlEditorCommit } from "@/lib/richtext/idml-editor"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { resolveTargetLaneRef } from "@/lib/lanes/target-lane-ref"
 
 export class DraftReviewError extends Error {
   readonly code: "stale" | "queued" | "locked" | "unavailable" | "readOnly" | "rejected"
@@ -97,6 +98,9 @@ export interface DraftReviewCommit {
   validationNeeded: boolean
   /** Authentication revision at enqueue; a retry must never cross accounts. */
   sessionRevision: number
+  /** AQU-1902: the lane row the commit was stamped with, so the validation
+   *  that follows (possibly on a retry) addresses the same row. */
+  laneId?: string
 }
 
 interface AcceptDraftArgs {
@@ -143,6 +147,13 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
       fresh.targetEventId !== cell.targetEventId) {
       throw new DraftReviewError("stale")
     }
+    // AQU-1902: the run's lane must be one of the project's lane rows. A run
+    // recorded with no lane ('') on a project whose lanes all carry a real tag
+    // addresses nothing: committing it would be refused and the text lost.
+    const laneRows = settings.value?.lanes?.filter((row) => row.role === "target") ?? null
+    const laneRef = laneRows ? resolveTargetLaneRef(laneRows, { targetLang: lane }) : null
+    if (laneRef && !laneRef.ok) throw new DraftReviewError("unavailable")
+    const laneId = laneRef?.ok ? laneRef.lane.laneId ?? undefined : undefined
     const invalid = validateIdmlEditorCommit(
       resolveIdmlEditorConfiguration(fresh.metadata, fresh.originalHtml), args.text,
     )
@@ -152,11 +163,13 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
       parentId: resolveTargetCommitParent({ targetEventId: fresh.targetEventId, sourceEventId: fresh.sourceEventId }),
       sourceEventId: fresh.sourceEventId,
       value: args.text, valueHtml: args.text, author: session.username, targetLang: lane,
+      ...(laneId ? { laneId } : {}),
     })
     queued = {
       eventId,
       value: args.text,
       sessionRevision: revision,
+      ...(laneId ? { laneId } : {}),
       validationNeeded: settings.value !== null && shouldAutoValidateHumanEdit({
         value: args.text,
         canValidate: canPerform("cell.validate", mint.role.level),
@@ -205,6 +218,7 @@ export async function acceptDraftReview(args: AcceptDraftArgs): Promise<void> {
       queued.validationEventId = await emitCellValidate({
         projectId, fileId: run.fileId, cellId: draft.cellId,
         editEventId: queued.eventId, author: session.username, targetLang: lane,
+        ...(queued.laneId ? { laneId: queued.laneId } : {}),
         // AQU-1572: the agent applying its own draft review, not a person.
         source: "agent",
         // …and only because the accepted text is the person's own edit now,

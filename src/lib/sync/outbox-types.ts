@@ -730,6 +730,10 @@ export interface OutboxEventPayloads {
     /** The target row's event_id as observed when the reviewer opened the
      *  review panel — the server no-ops if the head has since moved. */
     expectedTargetEventId: string
+    /** AQU-1902: the lane of the repinned target row. Absent/'' = default lane. */
+    targetLang?: string
+    /** AQU-1902: the lane row's id. Must match `targetLang`. */
+    laneId?: string
   }
 }
 

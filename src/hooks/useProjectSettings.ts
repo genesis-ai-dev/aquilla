@@ -19,6 +19,7 @@ import {
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
+import { registerSettingsAccessor } from "@/lib/history/settings-access"
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600).
 // Spec (01-personas-and-roles.md §Role ladder): "Invite / remove members; change
@@ -982,6 +983,23 @@ export function useProjectSettings(
     })
     return { kind: "error", message: result.message, status: result.status }
   }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t])
+
+  // AQU-1767 phase 2: let a history step read and write this project's
+  // settings through this hook, wherever the person presses Undo.
+  const settingsForHistoryRef = useRef(settings)
+  settingsForHistoryRef.current = settings
+  const patchForHistoryRef = useRef(patch)
+  patchForHistoryRef.current = patch
+  useEffect(() => {
+    if (!projectId) return
+    return registerSettingsAccessor(projectId, {
+      read: () => settingsForHistoryRef.current as Record<string, unknown>,
+      write: async (next) => {
+        const out = await patchForHistoryRef.current(next as ProjectWideSettings)
+        if (out.kind !== "ok") throw new Error(`settings write ${out.kind}`)
+      },
+    })
+  }, [projectId])
 
   return {
     settings,

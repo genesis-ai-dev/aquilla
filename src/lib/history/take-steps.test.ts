@@ -1,35 +1,55 @@
-// AQU-1767: undo and redo of trims, moves and cuts, and the "changed since" guard.
+// AQU-1767: undo and redo of trims, moves, cuts — and (phase 2) choosing,
+// deleting and renaming takes — with the "changed since" guard.
 import { describe, it, expect, vi } from "vitest"
-import { cutStep, takePlaceStep, takeWindowStep, type CutRecord } from "./take-steps"
+import { takeStepHandlers, type CutRecord, type TakeStepContext } from "./take-steps"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
+import type { StepHandler } from "./history"
 
-describe("takeWindowStep / takePlaceStep", () => {
+type Takes = Record<string, Partial<CodexCellAttachment>>
+
+function ctxFor(takes: Takes, overrides: Partial<TakeStepContext> = {}) {
+  const ctx: TakeStepContext = {
+    readTake: (_c, id) => (takes[id] && !takes[id].isDeleted ? (takes[id] as CodexCellAttachment) : null),
+    selectedIn: () => null,
+    applyTrim: vi.fn(async (_c, id, w) => {
+      takes[id] = { ...takes[id], trimStartMs: w.trimStartMs, trimEndMs: w.trimEndMs }
+    }),
+    applyPlace: vi.fn(async (_c, id, offset) => {
+      takes[id] = { ...takes[id], targetOffsetMs: offset }
+    }),
+    cut: vi.fn(async () => true),
+    uncut: vi.fn(async () => {}),
+    newPieceId: () => "fresh",
+    select: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+    rename: vi.fn(async () => {}),
+    ...overrides,
+  }
+  return { ctx, handlers: takeStepHandlers(ctx) as Record<string, StepHandler<unknown>> }
+}
+
+describe("take.window / take.place", () => {
   it("puts the old window back only while the take still has the new one", async () => {
-    let current = { trimStartMs: 100, trimEndMs: 900 }
-    const apply = vi.fn(async (w: { trimStartMs?: number; trimEndMs?: number }) => {
-      current = { trimStartMs: w.trimStartMs ?? 0, trimEndMs: w.trimEndMs ?? 0 }
-    })
-    const s = takeWindowStep({
-      labelKey: "x", at: 1,
-      before: { trimStartMs: 0, trimEndMs: 1000 },
-      after: { trimStartMs: 100, trimEndMs: 900 },
-      isAt: (w) => current.trimStartMs === w.trimStartMs && current.trimEndMs === w.trimEndMs,
-      apply,
-    })
-    expect(await s.undo()).toEqual({ kind: "done" })
-    expect(current).toEqual({ trimStartMs: 0, trimEndMs: 1000 })
-    current = { trimStartMs: 50, trimEndMs: 1000 } // somebody trimmed it since
-    expect(await s.redo()).toEqual({ kind: "skipped", reason: "changed" })
-    expect(apply).toHaveBeenCalledTimes(1)
+    const takes: Takes = { a: { trimStartMs: 100, trimEndMs: 900 } }
+    const { ctx, handlers } = ctxFor(takes)
+    const data = { cellId: "c", audioId: "a", before: { trimStartMs: 0, trimEndMs: 1000 }, after: { trimStartMs: 100, trimEndMs: 900 } }
+    expect(await handlers["take.window"].undo(data)).toEqual({ kind: "done" })
+    expect(takes.a).toMatchObject({ trimStartMs: 0, trimEndMs: 1000 })
+    takes.a = { trimStartMs: 50, trimEndMs: 1000 } // somebody trimmed it since
+    expect(await handlers["take.window"].redo(data)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.applyTrim).toHaveBeenCalledTimes(1)
   })
 
   it("a move whose take is gone is skipped as gone", async () => {
-    const s = takePlaceStep({ at: 1, before: null, after: 250, isAt: () => null, apply: vi.fn() })
-    expect(await s.undo()).toEqual({ kind: "skipped", reason: "gone" })
+    const { handlers } = ctxFor({})
+    expect(await handlers["take.place"].undo({ cellId: "c", audioId: "a", before: null, after: 250 })).toEqual({
+      kind: "skipped",
+      reason: "gone",
+    })
   })
 })
 
-describe("cutStep", () => {
+describe("take.cut", () => {
   const record = (): CutRecord => ({
     cellId: "c1", audioId: "a", atMs: 1500, newAudioId: "b",
     before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null },
@@ -37,46 +57,57 @@ describe("cutStep", () => {
   })
 
   it("undo joins the halves back while both are exactly as the cut left them", async () => {
-    const takes: Record<string, Partial<CodexCellAttachment>> = {
-      a: { trimEndMs: 1500 },
-      b: { trimStartMs: 1500, pieceOf: "a" },
-    }
-    const uncut = vi.fn(async () => {})
-    const s = cutStep({
-      at: 1, cuts: [record()],
-      readTake: (_c, id) => (takes[id] as CodexCellAttachment) ?? null,
-      cut: vi.fn(), uncut, newPieceId: () => "c",
-    })
-    expect(await s.undo()).toEqual({ kind: "done" })
-    expect(uncut).toHaveBeenCalledTimes(1)
+    const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1500 }, b: { trimStartMs: 1500, pieceOf: "a" } })
+    expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "done" })
+    expect(ctx.uncut).toHaveBeenCalledTimes(1)
   })
 
   it("is skipped once someone has moved or trimmed a piece, and nothing is joined", async () => {
-    const takes: Record<string, Partial<CodexCellAttachment>> = {
-      a: { trimEndMs: 1500 },
-      b: { trimStartMs: 1500, targetOffsetMs: 400, pieceOf: "a" }, // moved since
-    }
-    const uncut = vi.fn(async () => {})
-    const s = cutStep({
-      at: 1, cuts: [record()],
-      readTake: (_c, id) => (takes[id] as CodexCellAttachment) ?? null,
-      cut: vi.fn(), uncut, newPieceId: () => "c",
-    })
-    expect(await s.undo()).toEqual({ kind: "skipped", reason: "changed" })
-    expect(uncut).not.toHaveBeenCalled()
+    const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1500 }, b: { trimStartMs: 1500, targetOffsetMs: 400, pieceOf: "a" } })
+    expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.uncut).not.toHaveBeenCalled()
   })
 
   it("redo cuts again with a fresh id, only while the take is whole", async () => {
-    const takes: Record<string, Partial<CodexCellAttachment>> = { a: {} }
-    const cut = vi.fn(async () => true)
+    const { ctx, handlers } = ctxFor({ a: {} })
     const rec = record()
-    const s = cutStep({
-      at: 1, cuts: [rec],
-      readTake: (_c, id) => (takes[id] as CodexCellAttachment) ?? null,
-      cut, uncut: vi.fn(), newPieceId: () => "fresh",
-    })
-    expect(await s.redo()).toEqual({ kind: "done" })
-    expect(cut).toHaveBeenCalledWith(rec, "fresh")
+    expect(await handlers["take.cut"].redo({ cuts: [rec] })).toEqual({ kind: "done" })
+    expect(ctx.cut).toHaveBeenCalledWith(rec, "fresh")
     expect(rec.newAudioId).toBe("fresh")
+  })
+})
+
+describe("take.select / take.remove / take.rename", () => {
+  it("choosing a take is undone by choosing the previous one, while it still plays", async () => {
+    let playing: string | null = "b"
+    const { ctx, handlers } = ctxFor({ a: {}, b: {} }, { selectedIn: () => playing })
+    const data = { cellId: "c", slot: "recording", before: "a", after: "b" }
+    expect(await handlers["take.select"].undo(data)).toEqual({ kind: "done" })
+    expect(ctx.select).toHaveBeenCalledWith("c", "recording", "a")
+    playing = "z" // somebody chose another since
+    expect(await handlers["take.select"].redo(data)).toEqual({ kind: "skipped", reason: "changed" })
+  })
+
+  it("a deleted take comes back by choosing it, and the slot gets its old choice back", async () => {
+    const { ctx, handlers } = ctxFor({ a: { isDeleted: true }, b: {} }, { selectedIn: () => "b" })
+    const data = { cellId: "c", audioId: "a", slot: "recording", wasSelected: false, selectedBefore: null }
+    expect(await handlers["take.remove"].undo(data)).toEqual({ kind: "done" })
+    expect((ctx.select as ReturnType<typeof vi.fn>).mock.calls).toEqual([
+      ["c", "recording", "a"],
+      ["c", "recording", "b"],
+    ])
+  })
+
+  it("undoing a delete is skipped when the take is already back", async () => {
+    const { handlers } = ctxFor({ a: {} })
+    const data = { cellId: "c", audioId: "a", slot: "recording", wasSelected: true, selectedBefore: null }
+    expect(await handlers["take.remove"].undo(data)).toEqual({ kind: "skipped", reason: "changed" })
+  })
+
+  it("a rename goes back while the take still has the new name", async () => {
+    const { ctx, handlers } = ctxFor({ a: { label: "Hero line" } })
+    const data = { cellId: "c", audioId: "a", before: "Take 3", after: "Hero line" }
+    expect(await handlers["take.rename"].undo(data)).toEqual({ kind: "done" })
+    expect(ctx.rename).toHaveBeenCalledWith("c", "a", "Take 3")
   })
 })

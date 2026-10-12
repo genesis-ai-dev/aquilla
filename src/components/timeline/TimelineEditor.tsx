@@ -4062,7 +4062,7 @@ export function TimelineEditor({
               <AppTooltip
                 content={
                   history.nextUndo
-                    ? t("editor.history.undoTooltip", { step: t(history.nextUndo.labelKey as never) })
+                    ? t("editor.history.undoTooltip", { step: t(history.nextUndo.labelKey as never, history.nextUndo.labelParams as never) })
                     : t("editor.history.nothingToUndo")
                 }
               >
@@ -4080,7 +4080,7 @@ export function TimelineEditor({
               <AppTooltip
                 content={
                   history.nextRedo
-                    ? t("editor.history.redoTooltip", { step: t(history.nextRedo.labelKey as never) })
+                    ? t("editor.history.redoTooltip", { step: t(history.nextRedo.labelKey as never, history.nextRedo.labelParams as never) })
                     : t("editor.history.nothingToRedo")
                 }
               >

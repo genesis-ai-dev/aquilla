@@ -6,6 +6,7 @@
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { recordStep } from "@/lib/history/history"
 import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -312,6 +313,18 @@ export function TakesStrip({
       })
       if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
       await selectP
+      // AQU-1767 phase 2: choosing a take is a step — unless it also handed the
+      // recording slot back (the default track's generated-voice juggle),
+      // which a one-slot undo could not put back honestly.
+      if (!displaceRecording) {
+        const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+        recordStep({
+          kind: "take.select",
+          data: { cellId, slot, before: groupOf(effectiveSelected), after: groupOf(audioId)! },
+          labelKey: "editor.history.stepChooseTake",
+          fileId,
+        })
+      }
       if (displaceRecording) {
         const where = { projectId, fileId, cellId, slot: RECORDING_SLOT, author, ...(targetLang ? { targetLang } : {}) }
         const displaceP = sourceClip
@@ -340,7 +353,12 @@ export function TakesStrip({
       // the old binary coercion became a data-mover once a take could belong
       // to an added track.
       const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
-      await removeTake({ projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}) })
+      const playingNow = optimisticSelectedId ?? activeTakeId
+      const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+      await removeTake({
+        projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}),
+        history: { wasSelected: groupOf(playingNow) === groupOf(audioId) },
+      })
       // Was that the cell's last recording? `takes` still holds the pre-removal
       // list, so the survivors are everything else that is a take OF THIS CELL.
       if (!hasOwnRecordingLeft(takes, audioId, cellId)) onLastTakeRemoved?.(cellId)
@@ -423,7 +441,7 @@ export function TakesStrip({
       if (!label || label === displayLabel(att)) return
       setLabelOverrides((prev) => new Map(prev).set(att.audioId, label))
       try {
-        await renameTake({ projectId, fileId, cellId, audioId: att.audioId, label, author, ...(targetLang ? { targetLang } : {}) })
+        await renameTake({ projectId, fileId, cellId, audioId: att.audioId, label, author, ...(targetLang ? { targetLang } : {}), labelBefore: att.label ?? null })
       } catch {
         setLabelOverrides((prev) => {
           const next = new Map(prev)

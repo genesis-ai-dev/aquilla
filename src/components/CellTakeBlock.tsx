@@ -255,7 +255,7 @@ function CellTakeBlockView({
     setDeleting(true)
     const slot = attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
     const lane = targetLang ? { targetLang } : {}
-    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username }
+    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true } }
     if (takePlaying) pauseTake()
     // THE TRY HOLDS THE AWAIT AND NOTHING ELSE, deliberately: the React
     // Compiler cannot compile a try/finally, or a conditional inside a try,
@@ -301,7 +301,7 @@ function CellTakeBlockView({
     // Worked out before the try: a conditional inside one makes the React
     // Compiler skip the whole component (see handleDelete).
     const lane = targetLang ? { targetLang } : {}
-    const rename = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, label, author: username, ...lane }
+    const rename = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, label, author: username, ...lane, labelBefore: storedLabel }
     try {
       await renameTake(rename)
     } catch {

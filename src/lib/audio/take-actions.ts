@@ -6,6 +6,7 @@
 import { emitCellAudioRemove, emitCellAudioRename, enqueueEvents } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioRemove, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioIdSeededWith } from "@/lib/audio/upload"
+import { recordStep } from "@/lib/history/history"
 
 /**
  * Remove one take. SUB-48: the remove gets its own overlay, so the take leaves
@@ -24,12 +25,24 @@ export async function removeTake(args: {
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   author: string
+  /** AQU-1767 phase 2: whether this was the take that played, so Undo can
+   *  choose it again. Omit to record no history step (a bulk removal records
+   *  its own). */
+  history?: { wasSelected: boolean }
 }): Promise<void> {
   const { projectId, fileId, cellId, audioId, slot, author, targetLang } = args
   const removeP = emitCellAudioRemove({ projectId, fileId, cellId, audioId, author, ...(targetLang ? { targetLang } : {}) })
   injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
   await removeP
   notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordStep({
+      kind: "take.remove",
+      data: { cellId, audioId, slot, wasSelected: args.history.wasSelected, selectedBefore: null },
+      labelKey: "editor.history.stepDeleteTake",
+      fileId,
+    })
+  }
 }
 
 export interface TakeRemoval {
@@ -79,9 +92,20 @@ export async function renameTake(args: {
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   author: string
+  /** AQU-1767 phase 2: the name it had, for Undo (undefined = record no step). */
+  labelBefore?: string | null
 }): Promise<void> {
-  await emitCellAudioRename(args)
+  const { labelBefore, ...rename } = args
+  await emitCellAudioRename(rename)
   notifyAudioAttachmentsChanged(args.fileId)
+  if (labelBefore !== undefined) {
+    recordStep({
+      kind: "take.rename",
+      data: { cellId: args.cellId, audioId: args.audioId, before: labelBefore, after: args.label },
+      labelKey: "editor.history.stepRenameTake",
+      fileId: args.fileId,
+    })
+  }
 }
 
 /**

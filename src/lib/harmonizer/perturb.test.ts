@@ -86,3 +86,13 @@ describe("perturbSentenceRunOn", () => {
     expect(perturbSentenceRunOn(cells, 0)).toBeNull()
   })
 })
+
+describe("perturbConnectiveSwap", () => {
+  it("swaps 'For' to 'So' only where the Greek has γάρ", async () => {
+    const { perturbConnectiveSwap } = await import("./perturb")
+    const withGar = [cell("a", "x."), cell("b", "For God did not send His Son.", "οὐ γὰρ ἀπέστειλεν ὁ θεὸς")]
+    expect(perturbConnectiveSwap(withGar, 1)!.cells[1].target).toBe("So God did not send His Son.")
+    const without = [cell("a", "x."), cell("b", "For God did not send His Son.", "καὶ ἀπέστειλεν")]
+    expect(perturbConnectiveSwap(without, 1)).toBeNull()
+  })
+})

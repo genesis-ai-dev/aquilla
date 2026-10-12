@@ -1,8 +1,8 @@
 // LanguagesSection — AQU-538 slice 2 "project settings UI: manage target lanes",
 // AQU-1240 slice 1: `settings.targetLanes` is the COMPLETE lane registry
-// (primary included). This section shows the primary target language
-// read-only (set on Project Info) and the other registered lanes. The
-// primary is not listed again as an additional lane (AQU-1473).
+// (primary included). AQU-1796: every target lane, including the former
+// default (`legacy_tag` ''), is one list titled "Target lanes". The source
+// language stays on the source lane, above that list.
 //
 // AQU-601: lanes are ARCHIVED, not deleted. Archiving records a lane's tag in
 // `settings.archivedLanes` — the lane stays in `targetLanes` (its cell data and
@@ -31,13 +31,12 @@ import type {
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import { activeLanes, archivedRegisteredLanes } from "@/components/project-lane-archive"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
-import { codeForLanguageLabel } from "@/lib/lanes/backfill-plan"
 import {
-  derivedLaneLanguageCode,
   laneDisplayName,
   laneLanguage,
   laneLanguageCode,
 } from "@/lib/lanes/lane-display"
+import { useDerivedLanguageCode } from "@/lib/languages/use-derived-language-code"
 import { laneLabelSuffixesById } from "@/lib/lanes/lane-language"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -156,6 +155,7 @@ export function LanguagesSection({
   const [pendingArchive, setPendingArchive] = useState<string | null>(null)
   const [laneActionError, setLaneActionError] = useState<string | null>(null)
   const [busyLane, setBusyLane] = useState<string | null>(null)
+  const derivedNewLaneCode = useDerivedLanguageCode(newLane)
 
   const laneRows = laneRecords ?? []
   const targetRows = laneRows.filter((lane) => lane.role === "target")
@@ -166,13 +166,10 @@ export function LanguagesSection({
   // for a project that has no lane rows at all (pre-backfill).
   const rowMode =
     laneRows.length > 0 && !!onCreateLane && !!onRenameLane && !!onSetLaneArchived
-  const defaultRow = targetRows.find((lane) => lane.legacyTag === "")
-  // A legacy_tag '' row, when one exists, is listed in its own block and kept
-  // out of the additional-lanes list. It still archives like any other target.
-  // A new project's first target has no '' row; it is created through
-  // onCreateLane and listed with the other targets.
+  // AQU-1796: the former default target (legacy_tag '') is a target lane.
+  // It is listed with the others, not under its own heading.
   const activeRows = targetRows
-    .filter((lane) => (lane.legacyTag ?? "") !== "" && !lane.archivedAt)
+    .filter((lane) => !lane.archivedAt)
     .slice()
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
   const archivedRows = targetRows
@@ -220,11 +217,18 @@ export function LanguagesSection({
     : undefined
   const archiveBlockedTooltip = t("projectSettings.languages.lastActiveLaneTooltip")
 
-  // The primary is shown in the default-language field above. Listing it again
-  // from the complete registry made a new project's first language appear twice.
+  // Blob-mode projects have no lane rows. The primary language used to sit in
+  // its own "Default target language" field and was left out of the extras
+  // list so it would not appear twice (AQU-1473). It now leads the one target
+  // list. `extraRegistryLanes` still drops it from `active`, so prepending it
+  // does not duplicate a new project's first language.
   const registryExtras = extraRegistryLanes(targetLanes, defaultTargetLanguage)
   const active = activeLanes(registryExtras, archivedLanes)
   const archived = archivedRegisteredLanes(registryExtras, archivedLanes)
+  const primaryLane = defaultTargetLanguage.trim()
+  const blobActive = primaryLane
+    ? [primaryLane, ...active.filter((lane) => lane !== primaryLane)]
+    : active
 
   // AQU-988 / AQU-1240: suggestions skip the primary and every registered
   // lane (active or archived) so the dropdown never offers a pointless
@@ -377,79 +381,6 @@ export function LanguagesSection({
             </div>
           </div>
         )}
-        {rowMode && defaultRow && onRenameLane && (
-          <div>
-            <FieldLabel>{t("projectSettings.languages.defaultTargetLabel")}</FieldLabel>
-            <div className="mt-2 max-w-sm">
-              <LaneIdentityFields lane={defaultRow} canEdit={canEdit} onEdit={onRenameLane} />
-            </div>
-          {/* AQU-1600: the former default lane is ordinary — it archives from
-              here like any extra lane does from the list below, and reappears
-              with a Restore control in the archived list. Only the
-              last-active-lane rule still refuses. */}
-          {defaultRow && !defaultRow.archivedAt && (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {pendingArchive === defaultRow.id ? (
-                <>
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className="text-xs text-muted-foreground">
-                      {t("projectSettings.languages.archiveConfirm", { lane: laneLabel(defaultRow) })}
-                    </span>
-                    {onLoadLaneLastChange && (
-                      <LaneLastChangeNote laneId={defaultRow.id} load={onLoadLaneLastChange} />
-                    )}
-                  </div>
-                  <Button
-                    variant="destructive"
-                    disabled={busyLane === defaultRow.id}
-                    onClick={() => void handleConfirmArchive(defaultRow.id)}
-                  >
-                    {busyLane === defaultRow.id
-                      ? t("projectSettings.languages.archivingButton")
-                      : t("projectSettings.languages.confirmArchiveButton")}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={busyLane === defaultRow.id}
-                    onClick={() => setPendingArchive(null)}
-                  >
-                    {t("common.cancel")}
-                  </Button>
-                </>
-              ) : (
-                <DisabledFieldTooltip
-                  disabled={!canEdit || !canArchiveAnyLane}
-                  tooltip={canEdit ? archiveBlockedTooltip : disabledTooltip}
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0"
-                    disabled={!canEdit || !canArchiveAnyLane}
-                    data-testid={`archive-lane-${defaultRow.id}`}
-                    aria-label={t("projectSettings.languages.archiveLaneAriaLabel", {
-                      lane: laneLabel(defaultRow),
-                    })}
-                    onClick={() => {
-                      setLaneActionError(null)
-                      setPendingArchive(defaultRow.id)
-                    }}
-                  >
-                    <Archive className="h-4 w-4" />
-                  </Button>
-                </DisabledFieldTooltip>
-              )}
-            </div>
-          )}
-          </div>
-        )}
-        {!rowMode && (
-          <div>
-            <FieldLabel>{t("projectSettings.languages.defaultTargetLabel")}</FieldLabel>
-            <p className="mt-1 text-sm text-foreground">{defaultTargetLanguage || "—"}</p>
-          </div>
-        )}
-
         <div>
           <FieldLabel>{t("projectSettings.languages.additionalLanesLabel")}</FieldLabel>
           <p className="mb-2 text-xs text-muted-foreground">
@@ -532,11 +463,11 @@ export function LanguagesSection({
                 ))}
               </ul>
             )
-          ) : active.length === 0 ? (
+          ) : blobActive.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("projectSettings.languages.noAdditionalLanes")}</p>
           ) : (
             <ul data-testid="target-lanes-list" className="flex flex-col gap-1">
-              {active.map((lane) => (
+              {blobActive.map((lane) => (
                 <li
                   key={lane}
                   className="flex items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
@@ -545,7 +476,7 @@ export function LanguagesSection({
                     {lane}
                   </Badge>
                   <span className="flex-1" />
-                  {pendingArchive === lane ? (
+                  {active.includes(lane) && (pendingArchive === lane ? (
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
                         {t("projectSettings.languages.archiveConfirm", { lane })}
@@ -582,7 +513,7 @@ export function LanguagesSection({
                         <Archive className="h-4 w-4" />
                       </Button>
                     </DisabledFieldTooltip>
-                  )}
+                  ))}
                 </li>
               ))}
             </ul>
@@ -720,7 +651,7 @@ export function LanguagesSection({
                   data-testid="add-lane-code-input"
                   value={laneCode}
                   placeholder={
-                    codeForLanguageLabel(normalizeLane(newLane)) ??
+                    derivedNewLaneCode ??
                     t("projectSettings.languages.laneCodeDerivedPlaceholder")
                   }
                   disabled={!canEdit || adding}
@@ -785,13 +716,15 @@ function LaneIdentityFields({
   const storedLanguage = laneLanguage(lane)
   const storedName = lane.name ?? ""
   const storedCode = lane.langCode ?? ""
-  const derivedCode = derivedLaneLanguageCode(lane)
 
   const [language, setLanguage] = useState(storedLanguage)
   const [name, setName] = useState(storedName)
   const [code, setCode] = useState(storedCode)
   const [advanced, setAdvanced] = useState(storedCode.length > 0)
   const [error, setError] = useState<string | null>(null)
+  // The grey text tracks what is in the language box, including a name the
+  // person has typed but not saved yet.
+  const derivedCode = useDerivedLanguageCode(language)
 
   // Each field resyncs to the server's value when THAT field changes — the same
   // pattern the single-field version of this component used. Deliberately three
@@ -823,8 +756,8 @@ function LaneIdentityFields({
     )
   }
 
-  async function commitLanguage() {
-    const next = language.trim()
+  async function commitLanguage(raw?: string) {
+    const next = (raw ?? language).trim()
     if (next === storedLanguage.trim()) return
     // Required: an empty language is refused here rather than submitted, and
     // the field snaps back so the row keeps showing what is actually stored.
@@ -852,7 +785,7 @@ function LaneIdentityFields({
   return (
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <input
+        <LanguageComboboxInput
           id={`lane-language-${lane.id}`}
           value={language}
           disabled={!canEdit}
@@ -860,12 +793,17 @@ function LaneIdentityFields({
           aria-label={languageAriaLabel ?? t("projectSettings.languages.laneLanguageLabel")}
           data-testid={`lane-language-${lane.id}`}
           placeholder={t("projectSettings.languages.laneLanguagePlaceholder")}
-          className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-sm"
-          onChange={(e) => {
-            setLanguage(e.target.value)
+          className="h-8 min-w-0 flex-1 text-sm"
+          onValueChange={(next) => {
+            setLanguage(next)
             setError(null)
           }}
           onBlur={() => void commitLanguage()}
+          onEnterSelect={(name) => {
+            setLanguage(name)
+            setError(null)
+            void commitLanguage(name)
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault()

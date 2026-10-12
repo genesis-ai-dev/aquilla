@@ -354,24 +354,95 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
 
 /**
  * Accept the client's connId when it is a sane opaque token and not already
- * held by a live socket; otherwise mint one. A collision can only come from a
- * buggy/malicious client — never merge two sockets onto one presence row.
+ * held by a live socket of a DIFFERENT user; otherwise mint one.
+ *
+ * AQU-1791: a collision is no longer necessarily a buggy client. The client
+ * now keeps one connId per tab in sessionStorage, so a tab that reconnects
+ * after a dirty drop re-presents the id its previous socket used — and that
+ * previous socket is still in the DO's connection map, because a socket that
+ * dies without a close frame is only noticed by the heartbeat sweep below.
+ * Refusing the id there is what produced the reported ghosts: the tab came
+ * back under a fresh id and the dead one's row stayed in the roster.
+ *
+ * So a collision whose holder is the SAME verified user is a takeover: the
+ * caller retires the superseded socket and the returning tab reuses its row.
+ * A collision across users is still refused (a client must not be able to
+ * evict someone else's presence by guessing their connId), as is a collision
+ * when the caller passes no identity.
  */
 export function resolveConnId(
   requested: string | null,
-  connections: ReadonlyMap<unknown, { connId: string }>,
+  connections: ReadonlyMap<unknown, { connId: string; userId?: string }>,
+  requestingUserId?: string,
 ): string {
   if (requested && /^[A-Za-z0-9_-]{8,64}$/.test(requested)) {
-    let taken = false
+    let takenByOther = false
     for (const c of connections.values()) {
-      if (c.connId === requested) {
-        taken = true
-        break
-      }
+      if (c.connId !== requested) continue
+      if (requestingUserId !== undefined && c.userId === requestingUserId) continue
+      takenByOther = true
+      break
     }
-    if (!taken) return requested
+    if (!takenByOther) return requested
   }
   return crypto.randomUUID()
+}
+
+/**
+ * AQU-1791: how long a connection that has proven it heartbeats may go silent
+ * before the DO treats its socket as dead and retires it.
+ *
+ * The client pings every 25s (`heartbeatIntervalMs` in ws-reconciler.ts), so
+ * three missed pings is the bar — short enough that a field team's ghost row
+ * clears within a couple of minutes, long enough that an ordinary GC pause,
+ * a backgrounded tab's throttled timer or one dropped frame never evicts a
+ * live user.
+ */
+export const PRESENCE_HEARTBEAT_TTL_MS = 90_000
+
+/** The per-connection bookkeeping the heartbeat sweep reads. */
+export interface HeartbeatTracked {
+  connId: string
+  userId: string
+  /** Epoch ms of the last frame received from this socket. */
+  lastSeenAt: number
+  /**
+   * Whether this socket has ever sent a `ping`. Only a connection that has
+   * proven it heartbeats is subject to the TTL — an older client that never
+   * pings would otherwise be evicted every TTL while perfectly alive, the
+   * same guard the client applies before killing silent sockets
+   * (`serverPongSeen` in ws-reconciler.ts).
+   */
+  heartbeatSeen: boolean
+}
+
+/**
+ * AQU-1791: connections that are half-open — still in the DO's map, so
+ * `sweepOrphanedPresence` (AQU-1374) considers their rows live, but silent
+ * well past the heartbeat they themselves established.
+ *
+ * This is the case AQU-1374 could not reach. A VPN drop, a sleeping laptop or
+ * a carrier handover leaves the socket OPEN on the server with no close/error
+ * event, so the row keeps a live connId and the roster keeps the ghost until
+ * the DO is evicted. The client's own reconnect then adds a second row, which
+ * is why one person in one tab was listed two or three times as "viewing".
+ *
+ * Returns the connections to retire; the caller closes each socket and runs
+ * its normal disconnect path, so presence.left / lock.released are emitted
+ * exactly as a clean close would.
+ */
+export function selectStaleConnections<T extends HeartbeatTracked>(
+  connections: Iterable<T>,
+  now: number,
+  ttlMs: number = PRESENCE_HEARTBEAT_TTL_MS,
+): T[] {
+  const stale: T[] = []
+  for (const conn of connections) {
+    if (!conn.heartbeatSeen) continue
+    if (now - conn.lastSeenAt <= ttlMs) continue
+    stale.push(conn)
+  }
+  return stale
 }
 
 // ── Lock state transitions (pure) ─────────────────────────────────────────
@@ -769,9 +840,14 @@ export function applyDisconnect(
  *
  * Every row is keyed by the connId of the socket that created it, so a row
  * whose connId no longer has a live connection is definitively orphaned. That
- * makes this exact rather than heuristic — unlike a `ts`-based TTL, which would
- * evict a live but idle user, since the client sends `presence.update` only on
- * change and has no heartbeat.
+ * makes this exact rather than heuristic — unlike a `presence.update`-based
+ * TTL, which would evict a live but idle user, since the client publishes
+ * presence only on change.
+ *
+ * AQU-1791: this reaches only rows whose socket has LEFT the connection map.
+ * A half-open socket is still in it, so its row still looks live here — that
+ * residue is what `selectStaleConnections` (above) retires, keyed off the
+ * client's `ping` heartbeat rather than its presence traffic.
  *
  * Emits `presence.left` per dropped row, the same frame applyDisconnect sends,
  * so `PresenceStore.applyPresenceLeft` removes the peer with no client change.

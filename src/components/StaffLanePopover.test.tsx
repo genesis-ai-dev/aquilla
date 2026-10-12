@@ -190,7 +190,9 @@ describe("StaffLanePopover", () => {
     fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
-    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300)
+    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
+      scopeLanes: ["es"],
+    })
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [
@@ -351,6 +353,34 @@ describe("StaffLanePopover", () => {
       expect(blockedRow()).toHaveAttribute("data-reason", "hidden")
       expect(screen.getByText(/hides its member list/i)).toBeInTheDocument()
       expect(screen.queryByText(/no one in your organization yet/i)).not.toBeInTheDocument()
+    })
+
+    it("staffs a direct invite onto this lane when the org roster is hidden (AQU-1798)", async () => {
+      mockRoster = { members: [], rosterHidden: true }
+      mockProjectMembers = [
+        {
+          userId: 22,
+          username: "kean",
+          role: { level: 100, name: "viewer", source: "override" },
+          secondarySources: [],
+        },
+      ]
+      renderPopover()
+      openPopover()
+
+      expect(screen.queryByTestId("staff-lane-roster-blocked")).not.toBeInTheDocument()
+      expect(screen.getByTestId("staff-lane-roster-note")).toHaveAttribute("data-reason", "hidden")
+      fireEvent.click(screen.getByText("kean"))
+      fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+
+      await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
+      expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "kean", 300, {
+        scopeLanes: ["es"],
+      })
+      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 22, [
+        { kind: "lane", value: "es" },
+      ])
     })
 
     it("tells a non-org-member project admin that they can't see the roster", () => {

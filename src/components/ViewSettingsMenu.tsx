@@ -34,6 +34,10 @@ import {
 } from "@/lib/store/unresolved-comment-highlight-pref"
 import { setGhostTextEnabled, useGhostTextEnabled } from "@/lib/store/ghost-text-pref"
 import {
+  setHealthScoreColorCoding,
+  useHealthScoreColorCoding,
+} from "@/lib/store/health-score-color-coding-pref"
+import {
   setLowMemoryMode,
   useLowMemoryMode,
   type LowMemoryMode,
@@ -140,6 +144,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   // ProjectWorkspace would be two more parameters carrying no extra meaning.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
   const ghostTextEnabled = useGhostTextEnabled()
+  const healthScoreColorCoding = useHealthScoreColorCoding()
   const lowMemoryMode = useLowMemoryMode()
   const mismatch = useMemo(
     () =>
@@ -309,6 +314,10 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         >
           <PopoverTitle className="sr-only">{t("editor.view.settings")}</PopoverTitle>
 
+          <div
+            data-testid="view-settings-scroller"
+            className="max-h-[min(32rem,calc(100dvh-5rem))] w-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-y-contain"
+          >
           <FieldGroup className="gap-3">
             <SwitchRow
               id="view-split-milestones"
@@ -356,6 +365,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               label={t("editor.view.ghostText")}
               checked={ghostTextEnabled}
               onCheckedChange={setGhostTextEnabled}
+            />
+            <SwitchRow
+              id="view-health-score-color-coding"
+              label={t("editor.view.healthScoreColorCoding")}
+              checked={healthScoreColorCoding}
+              disabled={!fileOpen}
+              onCheckedChange={setHealthScoreColorCoding}
             />
           </FieldGroup>
 
@@ -475,6 +491,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 { label: t("editor.view.lowMemoryOff"), value: "off" },
               ]}
             />
+          </div>
           </div>
         </PopoverContent>
       </Popover>

@@ -105,11 +105,19 @@ const getPortfolio = vi.fn((_jwt: string, _orgId: number): Promise<PortfolioProj
 vi.mock("@/lib/frontier/portfolio", () => ({
   getPortfolio: (jwt: string, orgId: number) => getPortfolio(jwt, orgId),
   // Real implementations — tests must not override these with wrong stubs
-  audioPct: (p: { audioCells: number; totalCells: number }) => (p.totalCells > 0 ? p.audioCells / p.totalCells : 0),
-  // AQU-1093: denominator is totalCells, so the tile agrees with the plan
+  // AQU-1566: audio is measured against the server's audio total (a dubbing
+  // file's cue sheet), falling back to totalCells for an older server.
+  audioDenominator: (p: { audioTotalCells?: number; totalCells: number }) => p.audioTotalCells ?? p.totalCells,
+  audioPct: (p: { audioCells: number; audioTotalCells?: number; totalCells: number }) => {
+    const total = p.audioTotalCells ?? p.totalCells
+    return total > 0 ? p.audioCells / total : 0
+  },
+  // AQU-1093: denominator is the whole file, so the tile agrees with the plan
   // board's bars. The of-recorded ratio moved to the tooltip.
-  audioValidatedPct: (p: { validatedAudioCells: number; totalCells: number }) =>
-    (p.totalCells > 0 ? Math.min(1, p.validatedAudioCells / p.totalCells) : 0),
+  audioValidatedPct: (p: { validatedAudioCells: number; audioTotalCells?: number; totalCells: number }) => {
+    const total = p.audioTotalCells ?? p.totalCells
+    return total > 0 ? Math.min(1, p.validatedAudioCells / total) : 0
+  },
   audioValidatedOfRecordedPct: (p: { validatedAudioCells: number; audioCells: number }) =>
     (p.audioCells > 0 ? Math.min(1, p.validatedAudioCells / p.audioCells) : 0),
   translatedPct: (p: { filledCells: number; totalCells: number }) => (p.totalCells > 0 ? p.filledCells / p.totalCells : 0),
@@ -133,8 +141,18 @@ vi.mock("@/lib/frontier/portfolio", () => ({
 // Stub both to capture the lane they were handed (defaultLane / lane) without
 // pulling their whole fetch surface into this suite.
 vi.mock("@/components/AssignModal", () => ({
-  AssignModal: ({ open, defaultLane }: { open: boolean; defaultLane?: string }) =>
-    open ? <div data-testid="assign-modal-mock" data-lane={defaultLane ?? ""} /> : null,
+  AssignModal: ({ open, defaultLane, projectFiles }: {
+    open: boolean
+    defaultLane?: string
+    projectFiles?: Array<{ id: string }>
+  }) =>
+    open ? (
+      <div
+        data-testid="assign-modal-mock"
+        data-lane={defaultLane ?? ""}
+        data-files={(projectFiles ?? []).map((f) => f.id).join(",")}
+      />
+    ) : null,
 }))
 vi.mock("@/components/StaffLanePopover", () => ({
   StaffLanePopover: ({ lane, laneLabel }: { lane: string; laneLabel: string }) => (
@@ -1671,6 +1689,99 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
   })
 
+  // AQU-1779: the badge shows the higher of the progress and roster floors
+  // but writes only the progress floor. A value below the roster floor used
+  // to save, snap straight back, and loosen per-member progress org-wide.
+  async function openTeamPicker(settings: Record<string, unknown>) {
+    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), ...settings, patch })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.OWNER, orgId: 1 }), status: "ready", refresh })
+    renderOverview()
+    const card = await screen.findByTestId("overview-team-card")
+    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+    return patch
+  }
+
+  function choose(option: HTMLElement) {
+    fireEvent.pointerMove(option)
+    fireEvent.mouseMove(option)
+    fireEvent.keyDown(option, { key: "Enter" })
+  }
+
+  it("disables Team floors below the member-list floor and says why", async () => {
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
+
+    for (const name of [/everyone with access/i, /contributors and up/i, /project leads and up/i]) {
+      expect(await screen.findByRole("option", { name })).toHaveAttribute("aria-disabled", "true")
+    }
+    expect(screen.getByRole("option", { name: /maintainers and owners/i })).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("option", { name: /owners only/i })).not.toHaveAttribute("aria-disabled", "true")
+
+    choose(screen.getByRole("option", { name: /everyone with access/i }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(patch).not.toHaveBeenCalled()
+
+    // The why sits behind a circled-i, collapsed until clicked.
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "closed")
+    fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent(
+      "This card lists members, and the member list is set to “Maintainers and owners”. To go lower, lower it on the Members card or in Settings → Security first.",
+    )
+  })
+
+  it("repairs a progress floor the old bug left below the member list when the shown value is picked again", async () => {
+    // What production holds after the bug: progress loosened to Everyone
+    // while the member list stayed at Maintainers, so the badge shows
+    // Maintainers and the loosening is invisible here.
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.VIEWER, rosterViewMinRole: ROLE.MAINTAINER })
+
+    choose(await screen.findByRole("option", { name: /maintainers and owners/i }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.MAINTAINER }))
+    expect(patch).toHaveBeenCalledTimes(1)
+  })
+
+  it("writes nothing when the shown value is picked again and progress already matches it", async () => {
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
+
+    choose(await screen.findByRole("option", { name: /maintainers and owners/i }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(patch).not.toHaveBeenCalled()
+  })
+
+  it("names an owner-only member list in the hint and leaves only Owners only open", async () => {
+    await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.OWNER })
+
+    expect(await screen.findByRole("option", { name: /maintainers and owners/i })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("option", { name: /owners only/i })).not.toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
+    expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent("“Owners only”")
+  })
+
+  it("offers every Team floor once the member list is open to everyone, and writes only the progress floor", async () => {
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.VIEWER })
+
+    const everyone = await screen.findByRole("option", { name: /everyone with access/i })
+    expect(everyone).not.toHaveAttribute("aria-disabled", "true")
+    expect(screen.queryByRole("button", { name: /why some options are unavailable/i })).not.toBeInTheDocument()
+
+    choose(everyone)
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.VIEWER }))
+    expect(patch).toHaveBeenCalledTimes(1)
+  })
+
+  it("raises the Team floor to Owners only without touching the member-list floor", async () => {
+    const patch = await openTeamPicker({ memberProgressViewMinRole: ROLE.MAINTAINER, rosterViewMinRole: ROLE.MAINTAINER })
+
+    choose(await screen.findByRole("option", { name: /owners only/i }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: ROLE.OWNER }))
+    expect(patch).toHaveBeenCalledTimes(1)
+    expect(patch).not.toHaveBeenCalledWith(expect.objectContaining({ rosterViewMinRole: expect.anything() }))
+  })
+
   it("starts expanded again after a fresh mount, with no saved collapsed state", async () => {
     await withWorkload()
     useProject.mockReturnValue({
@@ -1901,6 +2012,25 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     // Back to All restores the cross-lane figures.
     fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("AQU-1566: hidden timeline files are neither counted nor offered for assignment", async () => {
+    // A linked video with an attached caption track and a dubbing cue sheet:
+    // one document, two timeline files the editor never lists.
+    useLaneProject([
+      { id: "f-video", name: "Episode", type: "video", createdAt: "x", cellCount: 0 },
+      { id: "f-track", name: "Episode captions", type: "vtt", role: "timeline-content", createdAt: "x", cellCount: 500 },
+      { id: "f-cues", name: "Episode audio cues", type: "vtt", role: "audio-cues", createdAt: "x", cellCount: 40 },
+    ] as ProjectRecord["files"])
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    expect(screen.getByText("1 file")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
+    fireEvent.click(screen.getByRole("menuitem", { name: /assign/i }))
+    const modal = await screen.findByTestId("assign-modal-mock")
+    expect(modal.getAttribute("data-files")).toBe("f-video")
   })
 
   it("lane row ⋯ menu has Assign and Staff, not Open", async () => {

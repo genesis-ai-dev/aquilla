@@ -3,7 +3,7 @@
 // they can never drift apart.
 
 import type { Env } from "../types"
-import { parseAdminEmails } from "../middleware/platform-admin"
+import { loadPlatformAdminEmails } from "../middleware/platform-admin"
 import { computeRetention, type RetentionMetrics } from "./retention"
 
 /** Enough history for a 12-week cohort matrix plus the 365-day Day-N pool + 30. */
@@ -27,7 +27,7 @@ export async function loadRetentionMetrics(
 ): Promise<RetentionMetrics> {
   const db = env.AQUILLA_PG
   const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10)
-  const adminEmails = Array.from(parseAdminEmails(env))
+  const adminEmails = Array.from(await loadPlatformAdminEmails(env))
 
   const [users, activity, admins] = await Promise.all([
     db

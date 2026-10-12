@@ -25,7 +25,7 @@
 // fileId), role >= PROJECT_LEAD (source.* is importer/lead-only per
 // role-policy.ts). Author is bound to the token, never the request body.
 
-import { verifyTokenForDoc } from '../auth'
+import { verifyDocScope, verifySyncToken } from '../auth'
 import { youTubeVideoId } from '../../../src/lib/video/youtube'
 import { ROLE } from './role-policy'
 import { withCors } from '../cors'
@@ -37,13 +37,19 @@ import {
   laneOfEvent,
   type PersistedEvent,
 } from './event-projection'
-import { ensureBlankTargetBridgeStmt } from '../../../db/shared/lanes'
+import { dataTargetTagsFromEvents, ensureBlankTargetBridgeStmt, ensureProjectLanes } from '../../../db/shared/lanes'
 import { grantNewLaneStmt } from '../../../db/shared/lane-grants'
 import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
-import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES, MAX_CELL_TEXT_BYTES } from '../../../shared/import-contract'
+import {
+  MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
+  MAX_CELL_TEXT_BYTES,
+  MAX_IMPORT_REQUEST_BODY_BYTES,
+} from '../../../shared/import-contract'
+import { readTextBodyWithLimit } from '../../../shared/http-body-limit'
 import { publishImportedTrack, type ImportedTrackPublication } from './import-track-publication'
+import { promoteCaptionsToRows, type CaptionRowsPromotion } from './import-caption-promotion'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
@@ -179,6 +185,11 @@ interface ImportAudioAttachment {
   trimEndMs?: number
   timings?: Array<{ word: string; t0: number; t1: number; start: number; end: number }>
   transcription?: string
+  /** AQU-1565 follow-up: `'source'` for the shared programme audio a media
+   *  import attaches to every row. Absent is also `'source'` (AQU-1594). The route is
+   *  already Project Lead+ (source import), the same floor authorize.ts sets
+   *  for a `role: 'source'` attach from the outbox. */
+  role?: 'dub' | 'source'
 }
 
 interface ImportBody {
@@ -209,6 +220,8 @@ interface ImportBody {
   attachments?: ImportAudioAttachment[]
   /** Attach a staged hidden caption file to this parent media timeline. */
   trackPublication?: ImportedTrackPublication
+  /** AQU-1566: copy a caption content file into this linked video's rows. */
+  captionPromotion?: CaptionRowsPromotion
   /** Linked picture, committed with the staged file reveal. */
   video?: { id: string; coreMediaUrl: string }
 }
@@ -252,9 +265,36 @@ export async function handleBulkImportRequest(
   }
   const db = env.AQUILLA_PG
 
+  // AQU-1858: authenticate and size-gate BEFORE the body is materialized.
+  // Parsing first let an unauthenticated caller spend the isolate's shared
+  // ~128 MB of memory on a body this route was always going to refuse, taking
+  // every other request on that isolate down with it. Only the (project,
+  // file) scope check needs the parsed body; it runs below, on these claims.
+  const authHeader = request.headers.get('Authorization') ?? ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const auth = await verifySyncToken(token, env.SYNC_SECRET_KEY)
+  if (!auth.ok) {
+    return withCors(new Response(auth.reason, { status: auth.status }), request)
+  }
+  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+    return withCors(new Response('role too low for source import', { status: 403 }), request)
+  }
+
+  const read = await readTextBodyWithLimit(
+    request.headers,
+    request.body,
+    MAX_IMPORT_REQUEST_BODY_BYTES,
+  )
+  if (!read.ok) {
+    return withCors(
+      Response.json({ error: read.error, maxBytes: read.maxBytes }, { status: read.status }),
+      request,
+    )
+  }
+
   let body: unknown
   try {
-    body = await request.json()
+    body = JSON.parse(read.text)
   } catch {
     return withCors(new Response('invalid JSON body', { status: 400 }), request)
   }
@@ -263,6 +303,15 @@ export async function handleBulkImportRequest(
       new Response('body must be { projectId, fileId, cells[] }', { status: 400 }),
       request,
     )
+  }
+
+  // Auth, second half: the token must be scoped to the (project, file) the
+  // body names. Signature, audience and the PROJECT_LEAD+ role floor
+  // (source.* is importer/lead-only per role-policy.ts) were checked above,
+  // before the body was read.
+  const scope = verifyDocScope(auth.claims, { projectId: body.projectId, fileId: body.fileId })
+  if (!scope.ok) {
+    return withCors(new Response(scope.reason, { status: scope.status }), request)
   }
   if (body.video !== undefined) {
     const video = body.video
@@ -275,7 +324,7 @@ export async function handleBulkImportRequest(
       && video.coreMediaUrl.startsWith('frontier-audio://')
       && (body.attachments ?? []).some(attachment => attachment?.url === video.coreMediaUrl)
     if (!body.complete || body.file || body.cells.length !== 0
-      || body.targets?.length || 'trackPublication' in body
+      || body.targets?.length || 'trackPublication' in body || 'captionPromotion' in body
       || typeof body.publishEventId !== 'string' || !body.publishEventId
       || body.publishEventId.length > 255
       || typeof video.id !== 'string' || !video.id || video.id.length > 255
@@ -361,27 +410,43 @@ export async function handleBulkImportRequest(
     }
   }
 
-  // Auth: token must be scoped to this (project, file) and hold a source-write
-  // role. Source-side writes are PROJECT_LEAD+ (importer authority).
-  const authHeader = request.headers.get('Authorization') ?? ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const auth = await verifyTokenForDoc(
-    token,
-    { projectId: body.projectId, fileId: body.fileId },
-    env.SYNC_SECRET_KEY,
-  )
-  if (!auth.ok) {
-    return withCors(new Response(auth.reason, { status: auth.status }), request)
-  }
-  if (auth.claims.role < ROLE.PROJECT_LEAD) {
-    return withCors(new Response('role too low for source import', { status: 403 }), request)
-  }
-
   const author =
     typeof auth.claims.username === 'string' && auth.claims.username.trim() !== ''
       ? auth.claims.username
       : `user:${auth.claims.userId}`
   const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
+
+  if (body.captionPromotion !== undefined) {
+    // Its own receipt (the parent's re-genesis id) replaces publishEventId:
+    // nothing is revealed, the parent is already live.
+    if (!body.complete || body.file || body.cells.length || body.targets?.length
+      || body.attachments?.length || 'publishEventId' in body || 'trackPublication' in body
+      || body.rawSource !== undefined || body.stageEventId !== undefined) {
+      return withCors(new Response('caption rows promotion requires an empty completion request', {
+        status: 400,
+      }), request)
+    }
+    try {
+      const result = await promoteCaptionsToRows(db, {
+        projectId: body.projectId, fileId: body.fileId, author,
+        role: auth.claims.role, clientTs, promotion: body.captionPromotion,
+      })
+      if (!result.ok) return withCors(new Response(result.reason, { status: result.status }), request)
+      if (env.ProjectSync) {
+        const notify = notifyProjectDoFileProgressChanged(
+          env, body.projectId, body.fileId, true,
+        ).catch(err => console.warn('[import] caption promotion notify failed:', err))
+        if (ctx) ctx.waitUntil(notify)
+        else await notify
+      }
+      return withCors(Response.json({ accepted: result.cellCount, fileId: body.fileId }), request)
+    } catch (err) {
+      console.error('[import] caption rows promotion failed:', err)
+      return withCors(Response.json({ error: 'Caption rows promotion failed' }, {
+        status: 500,
+      }), request)
+    }
+  }
 
   if (body.trackPublication !== undefined) {
     if (!body.complete || body.file || body.cells.length || body.targets?.length
@@ -453,6 +518,7 @@ export async function handleBulkImportRequest(
           || !validImportTimings(attachment.timings)
           || (attachment.transcription !== undefined &&
             (typeof attachment.transcription !== 'string' || attachment.slot !== 'recording'))
+          || (attachment.role !== undefined && attachment.role !== 'dub' && attachment.role !== 'source')
           || (
             attachment.trimStartMs !== undefined
             && attachment.trimEndMs !== undefined
@@ -476,8 +542,8 @@ export async function handleBulkImportRequest(
             slot: attachment.slot,
             // The shared programme clip. It performs the source, so it belongs
             // to the source lane — not to a '' target lane the project may
-            // not have (AQU-1594).
-            role: 'source',
+            // not have (AQU-1594). An explicit role on the attachment wins.
+            role: attachment.role ?? 'source',
             ...(attachment.mimeType !== undefined ? { mimeType: attachment.mimeType } : {}),
             ...(attachment.voiceId !== undefined ? { voiceId: attachment.voiceId } : {}),
             ...(attachment.referenceAudioId !== undefined ? { referenceAudioId: attachment.referenceAudioId } : {}),
@@ -744,6 +810,38 @@ export async function handleBulkImportRequest(
       clientTs,
       serverTs: serverTs++,
     })
+  }
+
+  // AQU-1240: projection resolves cells.lane_id from `lanes`. Projects created
+  // by /__dev__/seed (and any path that skipped createProjectShared) have no
+  // rows there, so the subquery is NULL and the NOT NULL column 500s the
+  // whole chunk as "DB batch failed". Codex ingest already calls this;
+  // /import did not. Only a project with no lane rows at all: one that has
+  // lanes keeps them, because asking again from the file's languages would
+  // add a tagged lane beside a '' bridge, or a '' lane beside a tagged one
+  // (AQU-1594). The default-target bridge below covers projects that have lanes.
+  try {
+    const anyLane = await db
+      .prepare(`SELECT 1 AS present FROM lanes WHERE project_id = ? LIMIT 1`)
+      .bind(body.projectId)
+      .first<{ present: number }>()
+    if (!anyLane) {
+      await ensureProjectLanes(db, body.projectId, {
+        settings: body.file
+          ? {
+              sourceLanguage: body.file.sourceLanguage,
+              targetLanguage: body.file.targetLanguage,
+            }
+          : undefined,
+        dataTargetTags: dataTargetTagsFromEvents(targetEvents),
+      })
+    }
+  } catch (err) {
+    console.error('[import] ensure lanes failed:', err)
+    return withCors(
+      Response.json({ error: 'DB batch failed' }, { status: 500 }),
+      request,
+    )
   }
 
   try {

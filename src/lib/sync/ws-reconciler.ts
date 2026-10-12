@@ -240,14 +240,32 @@ export interface WsReconcilerOptions {
   baseUrl: string
   /** Override only for tests. */
   webSocketCtor?: typeof WebSocket
-  /** Min backoff between reconnects in ms. */
+  /**
+   * AQU-1838: width of the FIRST reconnect window in ms. The delay is a
+   * uniform draw from this window (full jitter), not the window itself, so
+   * this is the longest a first reconnect waits — not the shortest.
+   */
   minBackoffMs?: number
-  /** Max backoff between reconnects in ms. */
+  /** Cap the reconnect window grows to in ms. */
   maxBackoffMs?: number
+  /** Injectable [0,1) source so tests can pin the jitter draw. */
+  randomSource?(): number
   /** How often an open socket sends a heartbeat `ping`. 0 disables. */
   heartbeatIntervalMs?: number
   /** A socket that receives nothing within this long of a ping is dead. */
   heartbeatTimeoutMs?: number
+  /**
+   * AQU-1791: sessionStorage key under which this reconciler keeps its
+   * presence `connId`, so every socket this TAB opens for this project reuses
+   * one id (see tabConnId). Omit it and each socket gets a fresh random id.
+   *
+   * Only the channel that publishes presence should pass a key: two
+   * reconcilers sharing one key in one tab would each take the other's row
+   * over on the server and fight (the DO treats a same-user collision as a
+   * returning tab). The workspace's project channel passes one; the agent
+   * review and offline adapter sockets do not.
+   */
+  connIdStorageKey?: string
 }
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────
@@ -339,6 +357,68 @@ export function newConnId(): string {
 }
 
 /**
+ * AQU-1791: the DO's close code for "another connection of yours took this
+ * presence identity over" (sync-worker `project-do.ts`). A duplicated browser
+ * tab inherits the original's sessionStorage, so both would present the same
+ * connId and take it from each other forever; the loser rotates its stored id,
+ * which settles the pair after one round.
+ */
+export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
+
+/** Forget a tab's stored presence key so the next connect mints a fresh one. */
+function rotateTabConnId(key: string): void {
+  try {
+    ;(globalThis as { sessionStorage?: Storage }).sessionStorage?.removeItem(key)
+  } catch {
+    /* unavailable — the next connect mints one anyway */
+  }
+}
+
+/**
+ * AQU-1791: one presence key per TAB (per `key`), not per socket.
+ *
+ * A fresh id on every socket meant a reconnect — the normal outcome of a VPN
+ * drop, a sleeping laptop or a carrier handover on the field teams' links —
+ * asked the DO for a *new* presence row while the old socket's row was still
+ * there, so one person in one tab was listed two or three times as "viewing".
+ * Re-presenting the same id lets the DO recognise the returning tab and
+ * replace its row instead (see resolveConnId in the sync-worker).
+ *
+ * sessionStorage is per tab and survives a reload, which is exactly the scope
+ * a presence row should have. When it is unavailable (private mode, blocked
+ * site data, a non-browser host) this degrades to the old per-socket id rather
+ * than throwing — the server's heartbeat sweep still clears the ghost.
+ */
+export function tabConnId(key: string): string {
+  let store: Storage | undefined
+  try {
+    store = (globalThis as { sessionStorage?: Storage }).sessionStorage
+    const existing = store?.getItem(key)
+    if (existing && /^[A-Za-z0-9_-]{8,64}$/.test(existing)) return existing
+  } catch {
+    /* unavailable — fall through to a per-socket id */
+  }
+  const minted = newConnId()
+  try {
+    store?.setItem(key, minted)
+  } catch {
+    /* unavailable — the id is still fine for this socket */
+  }
+  return minted
+}
+
+/**
+ * AQU-1838: a first reconnect is drawn uniformly from [RECONNECT_FLOOR_MS,
+ * 5s]. A sync-worker deploy drops every socket in the fleet at once, and each
+ * reconnect costs a socket, possibly a sync-token mint, and the AQU-845 resync
+ * fan-out — so the arrival times have to be spread, not merely delayed. The
+ * floor keeps a draw near zero from reconnecting hard against a server that is
+ * still coming up.
+ */
+const DEFAULT_FIRST_RECONNECT_WINDOW_MS = 5_000
+const RECONNECT_FLOOR_MS = 250
+
+/**
  * Create the reconciler. Begins connecting on the next tick — call `close()`
  * to halt. Listeners can be registered before/after connect; messages
  * delivered before the first listener registration are dropped.
@@ -347,10 +427,19 @@ export function createWsReconciler(
   options: WsReconcilerOptions,
   handlers: WsReconcilerHandlers = {},
 ): WsReconciler {
-  // 1s floor + jitter: a sync-worker redeploy drops every socket at once, and
-  // a 250ms floor had the whole fleet reconnecting (and resyncing) in lockstep.
-  const minBackoff = options.minBackoffMs ?? 1_000
+  // AQU-1838 full jitter: the reconnect delay is a uniform draw from the whole
+  // window, and it is the WINDOW — not the delay — that doubles per failed
+  // attempt. A 1s floor with up to +25% jitter put every client a redeploy
+  // dropped back inside one 250ms band, so 1,000 sockets reconnected (and each
+  // minted a sync token and ran a resync fan-out) in lockstep. Drawing across
+  // the window spreads the same fleet over seconds.
+  const firstWindow = options.minBackoffMs ?? DEFAULT_FIRST_RECONNECT_WINDOW_MS
   const maxBackoff = options.maxBackoffMs ?? 30_000
+  const random = options.randomSource ?? Math.random
+  // The floor never exceeds half the window, so a caller that configures a
+  // deliberately short window (the offline adapter, tests) keeps both its
+  // cadence and its jitter instead of being clamped to the default floor.
+  const reconnectFloor = Math.min(RECONNECT_FLOOR_MS, Math.round(firstWindow / 2))
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 25_000
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 10_000
   const Ctor =
@@ -363,7 +452,7 @@ export function createWsReconciler(
   let socket: WebSocket | null = null
   let connId: string | null = null
   let closed = false
-  let backoffMs = minBackoff
+  let reconnectWindow = firstWindow
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   let heartbeatDeadline: ReturnType<typeof setTimeout> | null = null
@@ -395,7 +484,7 @@ export function createWsReconciler(
     socket = null
     safeEmit(() => handlers.onError?.(new Error("ws: heartbeat timeout")))
     safeEmit(() => handlers.onClose?.({ code: 4000, reason: "heartbeat timeout", wasClean: false } as CloseEvent))
-    backoffMs = minBackoff
+    reconnectWindow = firstWindow
     void connect()
   }
 
@@ -438,9 +527,12 @@ export function createWsReconciler(
   function scheduleReconnect(): void {
     if (closed) return
     if (reconnectTimer !== null) return
-    // Up to +25% jitter so clients dropped together don't retry together.
-    const delay = Math.round(backoffMs * (1 + Math.random() * 0.25))
-    backoffMs = Math.min(maxBackoff, Math.max(minBackoff, backoffMs * 2))
+    // Full jitter: an independent point in [floor, window] per client, so a
+    // fleet dropped at the same instant arrives spread over the window instead
+    // of all at its end. The window then doubles — the "scale up while the
+    // server is failing" half of the fix — capped at maxBackoff.
+    const delay = Math.max(reconnectFloor, Math.round(random() * reconnectWindow))
+    reconnectWindow = Math.min(maxBackoff, Math.max(firstWindow, reconnectWindow * 2))
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
       void connect()
@@ -469,7 +561,9 @@ export function createWsReconciler(
     }
 
     let ws: WebSocket
-    const socketConnId = newConnId()
+    const socketConnId = options.connIdStorageKey
+      ? tabConnId(options.connIdStorageKey)
+      : newConnId()
     try {
       const url = buildProjectWsUrl(
         options.baseUrl,
@@ -489,7 +583,7 @@ export function createWsReconciler(
     connId = socketConnId
 
     ws.onopen = () => {
-      backoffMs = minBackoff
+      reconnectWindow = firstWindow
       lastReceivedAt = Date.now()
       startHeartbeat(ws)
       safeEmit(() => handlers.onOpen?.({ connId: socketConnId }))
@@ -524,6 +618,11 @@ export function createWsReconciler(
     }
     ws.onclose = (closeEvent: CloseEvent) => {
       if (socket === ws) stopHeartbeat()
+      // AQU-1791: our presence identity was taken over by another connection
+      // claiming to be this tab — give it up and reconnect under a fresh one.
+      if (closeEvent.code === CONNECTION_SUPERSEDED_CLOSE_CODE && options.connIdStorageKey) {
+        rotateTabConnId(options.connIdStorageKey)
+      }
       safeEmit(() => handlers.onClose?.(closeEvent))
       socket = null
       scheduleReconnect()
@@ -563,7 +662,7 @@ export function createWsReconciler(
           /* swallow */
         }
       }
-      backoffMs = minBackoff
+      reconnectWindow = firstWindow
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null

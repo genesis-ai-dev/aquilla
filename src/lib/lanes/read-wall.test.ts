@@ -23,12 +23,16 @@ describe("lane read wall", () => {
     expect(laneReadWallEnabled("true")).toBe(true)
   })
 
-  it("shows every lane to a maintainer and nothing to an ungranted contributor", () => {
+  it("shows every lane to a project lead and nothing to an ungranted contributor", () => {
+    // AQU-1795: the wall opens at project lead (500), not only at maintainer.
+    expect(visibleLaneTags({ enabled: true, role: 500 })).toBeNull()
     expect(visibleLaneTags({ enabled: true, role: 600 })).toBeNull()
     expect(visibleLaneTags({ enabled: true, role: 400, src: "platform" })).toBeNull()
     expect(visibleLaneTags({ enabled: false, role: 400 })).toBeNull()
     const none = visibleLaneTags({ enabled: true, role: 400 })
     expect(none).toEqual(new Set())
+    const reviewer = visibleLaneTags({ enabled: true, role: 300 })
+    expect(reviewer).toEqual(new Set())
   })
 
   it("treats es, spa, and Spanish as one grant", () => {

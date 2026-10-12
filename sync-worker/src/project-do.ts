@@ -32,6 +32,7 @@ import {
   presenceSnapshot,
   PROJECT_DO_DEFAULT_LEASE_MS,
   resolveConnId,
+  selectStaleConnections,
   stripPresenceDraft,
   sweepExpiredLeases,
   sweepOrphanedPresence,
@@ -74,6 +75,27 @@ export const MEMBER_REMOVED_CLOSE_CODE = 4403
  */
 export const TOKEN_EXPIRED_CLOSE_CODE = 4401
 
+/**
+ * AQU-1791: app-specific WS close code for "this socket went silent past the
+ * presence heartbeat TTL". The client reconnects on any close, so a
+ * live-but-wrongly-swept socket costs one reconnect; a genuinely dead one
+ * stops holding a roster row.
+ */
+export const PRESENCE_STALE_CLOSE_CODE = 4408
+
+/**
+ * AQU-1791: app-specific WS close code for "another connection of yours took
+ * this presence identity over" — normally the same tab returning after a
+ * dirty drop, whose old socket is still here.
+ *
+ * It is distinct from the TTL code because the client acts on it: a tab
+ * duplicated in the browser inherits the original's sessionStorage, so both
+ * would present one connId and take it from each other forever. Seeing this
+ * code, a client that still believes it is live rotates its stored id, which
+ * settles the pair after one round.
+ */
+export const CONNECTION_SUPERSEDED_CLOSE_CODE = 4409
+
 interface ConnectionState {
   ws: WebSocket
   /**
@@ -99,6 +121,17 @@ interface ConnectionState {
    * the socket once this passes, forcing a reconnect with a fresh token.
    */
   tokenExpiresAt: number | null
+  /**
+   * AQU-1791: epoch ms of the last frame received on this socket (any frame —
+   * the heartbeat `ping` is the one every live client sends unprompted).
+   */
+  lastSeenAt: number
+  /**
+   * AQU-1791: set once this socket has sent a `ping`. Only a connection that
+   * has proven it heartbeats is subject to the stale sweep — see
+   * selectStaleConnections.
+   */
+  heartbeatSeen: boolean
 }
 
 interface DOEnv {
@@ -135,6 +168,15 @@ interface DOEnv {
  *  dirty-flags on its side too; this only caps subrequest chatter. */
 const MONDAY_NOTIFY_THROTTLE_MS = 60_000
 
+/**
+ * AQU-1828: how long a "this project has no Monday link" answer from identity
+ * is trusted. Linking/unlinking invalidates it immediately through
+ * /__monday-link-changed, so this is only a backstop for a missed notify —
+ * long enough that an unlinked project costs ~one request per DO lifetime
+ * instead of one per 60s (at 1k active projects that was ~17 req/s of no-ops).
+ */
+const MONDAY_UNLINKED_TTL_MS = 30 * 60_000
+
 export class ProjectSync extends DurableObject<DOEnv> {
   private connections = new Map<WebSocket, ConnectionState>()
   private presence = new Map<string, PresenceState>()
@@ -165,6 +207,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
   /** Monday push nudge throttle (in-memory; eviction resets it, which is fine —
    *  identity's cron reconciliation covers gaps). */
   private lastMondayNotifyAt = 0
+  /** Epoch ms until which identity said this project has no Monday link. */
+  private mondayUnlinkedUntil = 0
 
   private async runLinkSync(projectId: string): Promise<MirrorSyncResult> {
     // Test seam takes priority; otherwise build a short-lived PG connection
@@ -247,11 +291,19 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // Monday integration nudge: content frames imply progress may have
       // changed. Throttled + best-effort; never blocks the broadcast reply.
       const mondayProject = mondayNotifyProject(frames)
-      if (mondayProject && Date.now() - this.lastMondayNotifyAt > MONDAY_NOTIFY_THROTTLE_MS) {
-        this.lastMondayNotifyAt = Date.now()
-        this.ctx.waitUntil(notifyMondayProgress(this.env, mondayProject))
-      }
+      if (mondayProject) this.maybeNotifyMonday(mondayProject)
       return Response.json({ ok: true, recipients: this.connections.size })
+    }
+
+    // AQU-1828: identity tells us the project's Monday link changed, so the
+    // cached "no link here" answer must go — the next edit nudges again.
+    if (request.method === "POST" && url.pathname === "/__monday-link-changed") {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      this.mondayUnlinkedUntil = 0
+      this.lastMondayNotifyAt = 0
+      return Response.json({ ok: true })
     }
 
     // AQU-346: membership-revocation hook. identity's member-removal routes
@@ -381,7 +433,13 @@ export class ProjectSync extends DurableObject<DOEnv> {
       userId = url.searchParams.get("user") ?? "anon"
     }
 
-    const connId = resolveConnId(url.searchParams.get("connId"), this.connections)
+    const connId = resolveConnId(url.searchParams.get("connId"), this.connections, userId)
+    // AQU-1791: the client keeps one connId per tab (sessionStorage), so a tab
+    // that reconnects after a dirty drop re-presents the id its dead socket is
+    // still holding here. resolveConnId hands the id back only when the holder
+    // is this same verified user, so retiring that socket now — before the new
+    // row is written — replaces its presence entry instead of accumulating one.
+    this.retireSupersededConnection(connId)
 
     const pair = new WebSocketPair()
     const client = pair[0]
@@ -389,7 +447,16 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
     server.accept()
 
-    const conn: ConnectionState = { ws: server, connId, userId, numericUserId, role, tokenExpiresAt }
+    const conn: ConnectionState = {
+      ws: server,
+      connId,
+      userId,
+      numericUserId,
+      role,
+      tokenExpiresAt,
+      lastSeenAt: Date.now(),
+      heartbeatSeen: false,
+    }
     this.connections.set(server, conn)
     const joined: PresenceState = { connId, userId, ts: Date.now() }
     this.presence.set(connId, joined)
@@ -417,6 +484,25 @@ export class ProjectSync extends DurableObject<DOEnv> {
     } catch {
       /* swallow */
     }
+  }
+
+  /**
+   * AQU-1828: nudge identity's Monday push only when this project can plausibly
+   * have something to push. identity answers `linked: false` for a project with
+   * no enabled link; we cache that and go quiet until the link changes (or the
+   * backstop TTL lapses), instead of paying a round trip every 60s forever.
+   */
+  private maybeNotifyMonday(projectId: string): void {
+    const now = Date.now()
+    if (now < this.mondayUnlinkedUntil) return
+    if (now - this.lastMondayNotifyAt <= MONDAY_NOTIFY_THROTTLE_MS) return
+    this.lastMondayNotifyAt = now
+    this.ctx.waitUntil(
+      notifyMondayProgress(this.env, projectId).then((linked) => {
+        if (linked === false) this.mondayUnlinkedUntil = Date.now() + MONDAY_UNLINKED_TTL_MS
+        else if (linked === true) this.mondayUnlinkedUntil = 0
+      }),
+    )
   }
 
   private broadcastToAll(msg: ProjectDoServerMessage, exceptConnId?: string): void {
@@ -450,7 +536,11 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private handleClientMessage(conn: ConnectionState, raw: string): void {
     const msg = parseProjectDoClientMessage(raw)
     if (!msg) return
+    // AQU-1791: any frame proves the socket is alive; a `ping` additionally
+    // proves this client heartbeats, which is what arms the stale sweep.
+    conn.lastSeenAt = Date.now()
     if (msg.t === "ping") {
+      conn.heartbeatSeen = true
       this.sendTo(conn.ws, msg.ts === undefined ? { t: "pong" } : { t: "pong", ts: msg.ts })
       return
     }
@@ -539,6 +629,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // BEFORE the lease sweep, so it doesn't emit presence.diff frames for
       // rows that are about to disappear anyway.
       this.reapOrphanedPresence()
+      // AQU-1791: retire half-open sockets BEFORE the lease sweep too — they
+      // are still in `connections`, so reapOrphanedPresence treats their rows
+      // as live; closing them here runs the normal disconnect path.
+      this.sweepStaleConnections(now)
       const result = sweepExpiredLeases(this.locks, this.presence, now)
       this.locks = result.locks
       this.presence = result.presence
@@ -562,6 +656,51 @@ export class ProjectSync extends DurableObject<DOEnv> {
     for (const m of result.emit) {
       if (m.t === "presence.left") this.draftThrottle.clear(m.connId)
       this.broadcastToAll(m)
+    }
+  }
+
+  /**
+   * AQU-1791: close sockets that stopped heartbeating. A dropped VPN, a
+   * sleeping laptop or a carrier handover leaves the socket OPEN here with no
+   * close/error event, so its presence row keeps a live connId and the roster
+   * keeps showing that person — while their own client reconnects and adds
+   * another row. Kathryn Day's field teams saw one tab listed 2–3× as
+   * "viewing" for exactly this reason.
+   *
+   * Closing the socket (rather than only dropping its row) is what keeps the
+   * state consistent: handleConnectionClose emits the same presence.left and
+   * releases the same per-user locks a clean close would.
+   */
+  private sweepStaleConnections(now: number): void {
+    for (const conn of selectStaleConnections([...this.connections.values()], now)) {
+      try {
+        conn.ws.close(PRESENCE_STALE_CLOSE_CODE, "presence heartbeat timeout")
+      } catch {
+        /* swallow */
+      }
+      // Server-initiated close doesn't reliably fire our own close listener —
+      // clean up presence/locks explicitly (idempotent; see the
+      // connections.has guard in handleConnectionClose).
+      this.handleConnectionClose(conn)
+    }
+  }
+
+  /**
+   * AQU-1791: a returning tab re-presents the connId its previous socket used.
+   * resolveConnId only hands that id back when the holder is the same verified
+   * user, so the holder is definitively a superseded socket of this very tab —
+   * close it and run its disconnect path so the new connection takes over the
+   * row instead of adding a second one.
+   */
+  private retireSupersededConnection(connId: string): void {
+    for (const conn of [...this.connections.values()]) {
+      if (conn.connId !== connId) continue
+      try {
+        conn.ws.close(CONNECTION_SUPERSEDED_CLOSE_CODE, "connection superseded")
+      } catch {
+        /* swallow */
+      }
+      this.handleConnectionClose(conn)
     }
   }
 

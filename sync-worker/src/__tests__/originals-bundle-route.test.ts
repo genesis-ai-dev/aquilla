@@ -89,6 +89,37 @@ describe("GET /export/originals (AQU-656)", () => {
     expect(txt).not.toContain("Matthew.docx")
   })
 
+  it("AQU-1566: leaves a caption track's and a cue sheet's original out", async () => {
+    // Attaching captions to a linked video keeps the caption file as the
+    // track content's original. The track is not a file of the project.
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "My Project", created_by: 1 }],
+      files: [
+        { id: "f1", project_id: "p1", name: "Episode.vtt", event_id: "e1" },
+        { id: "f-track", project_id: "p1", name: "Track-captions.vtt", event_id: "e2", role: "timeline-content", anchor_file_id: "f1" },
+        { id: "f-cues", project_id: "p1", name: "Audio-cues.vtt", event_id: "e3", role: "audio-cues", anchor_file_id: "f1" },
+        { id: "f-gone", project_id: "p1", name: "Deleted.vtt", event_id: "e4", deleted_at: 1 },
+      ],
+      file_source_blobs: [
+        { file_id: "f1", project_id: "p1", format: "vtt", raw_source: "WEBVTT\n" },
+        { file_id: "f-track", project_id: "p1", format: "vtt", raw_source: "WEBVTT\n" },
+        { file_id: "f-cues", project_id: "p1", format: "vtt", raw_source: "WEBVTT\n" },
+        { file_id: "f-gone", project_id: "p1", format: "vtt", raw_source: "WEBVTT\n" },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 600 })
+    const res = await handleOriginalsBundleRequest(new Request(
+      "https://x/api/v1/projects/p1/export/originals",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, SNAPSHOTS: emptyBucket() })
+    expect(res?.status).toBe(200)
+    const txt = new TextDecoder().decode(await res!.arrayBuffer())
+    expect(txt).toContain("Episode.vtt")
+    expect(txt).not.toContain("Track-captions")
+    expect(txt).not.toContain("Audio-cues")
+    expect(txt).not.toContain("Deleted")
+  })
+
   it("disambiguates colliding zip entry names as Name (2).ext", async () => {
     const { db } = await makeTestDb({
       projects: [{ id: "p1", name: "My Project", created_by: 1 }],

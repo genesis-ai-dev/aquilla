@@ -16,6 +16,8 @@ describe("neon-target hands the backfill its flags", () => {
       .toEqual(["scripts/neon-backfill-lane-batch.ts", "--apply", "--project", "p1", "--out", "reports"])
     expect(childArgs("verify-lanes", ["--require-complete"]))
       .toEqual(["scripts/neon-verify-lanes.ts", "--require-complete"])
+    expect(childArgs("repair-lane-grants", ["--out", "report.json", "--project", "p1"]))
+      .toEqual(["scripts/neon-repair-lane-grants.ts", "--out", "report.json", "--project", "p1"])
   })
 
   it("still runs an unscoped backfill when nothing follows the command", () => {

@@ -7,7 +7,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * The "double-space" check has display name "Extra whitespace" (per
  * src/lib/lqa/builtin-registry.ts). The rules page uses an `aria-label`
  * of `${def.name} enabled` for each toggle. A cell with violations
- * tints the cell number pill amber/red as the single issue surface.
+ * tints the cell number pill amber/red and names the check on that pill.
  */
 // Fixed: use keyboard.insertText() instead of keyboard.type() for the
 // double-space cell text — insertText dispatches a single input event
@@ -44,7 +44,11 @@ test("alice enables 'Extra whitespace' rule and sees a violation surfaced in edi
   await alice.keyboard.insertText("this  has  double  spaces in e2e.") // intentional doubles
   await alice.locator("aside").click() // blur
 
-  // The cell number is the issue surface and tints amber for minor infractions.
-  const linePill = contentRow.locator('[aria-label="Line 1"] span').first()
-  await expect(linePill).toHaveClass(/text-amber-600/, { timeout: 10_000 })
+  // The cell number is the issue surface: amber for a minor infraction, and
+  // its accessible name states the check plus why it fired (AQU-757).
+  const lineFlag = contentRow.getByRole("img", {
+    name: "Line 1. Extra whitespace — Extra whitespace in translation",
+  })
+  await expect(lineFlag).toBeVisible({ timeout: 10_000 })
+  await expect(lineFlag.locator("span").first()).toHaveClass(/text-amber-600/)
 })

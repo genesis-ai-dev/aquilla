@@ -120,6 +120,34 @@ describe("FileChapterToolbar draft as you read", () => {
     expect(await screen.findByRole("tooltip", { name: "Text" })).toBeVisible()
   })
 
+  // AQU-358: one menu where there used to be a chevron dropdown beside the ⋯,
+  // so every run of items in it is named.
+  it("names the groups in File options so each run of items says what it is for", async () => {
+    render(
+      <FileChapterToolbar
+        lens="text"
+        onLensChange={vi.fn()}
+        checkOpen={false}
+        checkRunning={false}
+        checkResult={null}
+        onCheckToggle={vi.fn()}
+        menuItems={[
+          { id: "runs-section", type: "label", label: "Run on this file" },
+          { id: "action-run-completions", label: "Run AI completions" },
+        ]}
+        onTranslateAsReadChange={vi.fn()}
+      />,
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "File options" }))
+    expect(screen.getByText("Editor tools")).toBeVisible()
+    expect(screen.getByText("Run on this file")).toBeVisible()
+    // Headings name their group; they are not extra things to click.
+    expect(screen.queryByRole("menuitem", { name: "Editor tools" })).not.toBeInTheDocument()
+    expect(screen.getByRole("menuitemcheckbox", { name: "Draft as you read" })).toBeVisible()
+    expect(screen.getByRole("menuitem", { name: "Run AI completions" })).toBeVisible()
+  })
+
   it("labels the read-along drafting mode \"Draft as you read\" in File options and reports the requested state", async () => {
     const onChange = vi.fn()
     render(

@@ -15,6 +15,7 @@ import {
   type ChainLink,
 } from "../../../db/shared/access-grants"
 import { resolveProjectRole } from "./project-permissions"
+import { platformAdminEmailsParam } from "../middleware/platform-admin"
 import {
   canViewRoster,
   getEffectiveOrgRole,
@@ -254,7 +255,7 @@ export async function buildMemberAccess(
       env.AQUILLA_PG,
       { id: String(subjectId), email: subject.email },
       from.id,
-      env.ADMIN_EMAILS,
+      await platformAdminEmailsParam(env),
     )
     hereLevel = resolved?.level ?? null
     for (const link of resolved?.chain ?? []) {

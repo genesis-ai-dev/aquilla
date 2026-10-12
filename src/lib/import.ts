@@ -1921,6 +1921,9 @@ export function createMediaFileCommit(
           audioId: `${upload.audioId}.${upload.ext}`,
           url: upload.url,
           slot: "recording",
+          // AQU-1565 follow-up: the imported recording is the file's shared
+          // programme audio, not a dub of each row (see attach-media.ts).
+          role: "source",
           ...(s.transcription !== undefined ? { transcription: s.transcription } : {}),
           ...(file.type ? { mimeType: file.type } : {}),
           ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),

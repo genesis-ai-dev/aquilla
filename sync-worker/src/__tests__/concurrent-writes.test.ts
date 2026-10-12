@@ -15,8 +15,8 @@
 //   (b) two chain-mutating children of one parent: exactly one advances the
 //       projection, the loser is reported via the response `stale` array
 //       (the client banner contract) while still landing in `events`.
-//   (c) rebuild's tie-break (first sibling by server_seq) agrees with the
-//       live outcome, so replay == live.
+//   (c) rebuild's tie-break agrees with the live outcome, so replay == live —
+//       including when the siblings committed OUT of seq order (AQU-1844).
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { vi } from 'vitest'
@@ -35,7 +35,8 @@ import { handleCellHistoryReadRequest } from '../events/cell-history-read-route'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
-import { buildChainClaimStmt } from '../events/chain-claims'
+import { buildChainClaimStmt, eventQualifiedParentKey } from '../events/chain-claims'
+import { buildEventInsertStmt } from '../events/event-insert'
 import { buildEventProjectionStmts } from '../events/event-projection'
 
 const SECRET = 'test-secret'
@@ -470,6 +471,107 @@ describe('head compare-and-swap: a stale branch cannot climb back onto the head 
 })
 
 // ── QW-10 guard: counters stay correct with batch-coalesced recompute ─────
+
+// ── (e) out-of-order commits: replay follows the live claim (AQU-1844) ────
+
+/**
+ * Write one sibling exactly as the live path does — event row at an EXPLICIT
+ * server_seq, chain claim, then the claim-gated projection — in one batch, i.e.
+ * one transaction. Calling this twice writes two siblings in COMMIT order,
+ * whatever seqs they hold: the shape AQU-1005 made reachable, where the seq is
+ * allocated in its own autocommit statement before the write transaction, so
+ * the request holding the lower seq can commit second.
+ */
+async function commitSiblingAtSeq(
+  id: string,
+  parentId: string | null,
+  value: string,
+  serverSeq: number,
+  cellId = 'cell-1',
+): Promise<number[]> {
+  const event = {
+    id,
+    schemaVersion: 1,
+    projectId: PROJECT,
+    fileId: FILE,
+    cellId,
+    parentId,
+    kind: 'target.cell.commit' as const,
+    author: 'alice',
+    payload: { value },
+    clientTs: 1000,
+    serverTs: 1000,
+  }
+  const gate = {
+    projectId: PROJECT,
+    fileId: FILE,
+    cellId,
+    parentKey: eventQualifiedParentKey(parentId, event.kind, event.payload),
+  }
+  const stmts: AquillaStatement[] = [
+    buildEventInsertStmt(t.db, {
+      ...event,
+      payloadJson: JSON.stringify(event.payload),
+      serverSeq,
+    }),
+    buildChainClaimStmt(t.db, gate, id),
+  ]
+  buildEventProjectionStmts(t.db, event, stmts, { chainGate: gate, deferFileCounters: true })
+  const results = await t.db.batch(stmts)
+  return results.map((r) => r.meta.changes)
+}
+
+describe('out-of-order commits: replay follows the live claim (AQU-1844)', () => {
+  it('the lower-seq sibling that lost the live claim is still stale after a rebuild', async () => {
+    await postEvents(t.db, [commit('evt-H', null, 'head')])
+    const headSeq = (await eventRows(t)).at(-1)!.server_seq
+
+    // A allocated seq headSeq+1 and B headSeq+2, but B's transaction committed
+    // FIRST: B takes the claim and the head, and A's gated writes no-op.
+    const bChanges = await commitSiblingAtSeq('evt-B', 'evt-H', 'B', headSeq + 2)
+    expect(bChanges[1]).toBe(1) // B's claim
+    const aChanges = await commitSiblingAtSeq('evt-A', 'evt-H', 'A', headSeq + 1)
+    expect(aChanges[0]).toBe(1) // A's event row: history is never lost
+    expect(aChanges[1]).toBe(0) // A's claim: the slot was already B's
+    expect(aChanges[2]).toBe(0) // A's gated cells write: no-op
+
+    // Live shows B, and the log has A at the LOWER seq.
+    expect(await headOf(t)).toMatchObject({ event_id: 'evt-B', value: 'B' })
+    expect((await eventRows(t)).map((r) => r.id)).toEqual(['evt-H', 'evt-A', 'evt-B'])
+
+    await rebuild()
+
+    // Before AQU-1844 the replay walked seq order and handed the cell to A.
+    expect(await headOf(t)).toMatchObject({ event_id: 'evt-B', value: 'B' })
+    await assertNoGhostHeads(t)
+  })
+
+  it("a later edit chained on the live winner survives the rebuild; the loser's child does not", async () => {
+    await postEvents(t.db, [commit('evt-H', null, 'head')])
+    const headSeq = (await eventRows(t)).at(-1)!.server_seq
+    await commitSiblingAtSeq('evt-B', 'evt-H', 'B', headSeq + 2)
+    await commitSiblingAtSeq('evt-A', 'evt-H', 'A', headSeq + 1)
+    // B won the race, so the next edit chains on B and advances the head.
+    await postEvents(t.db, [commit('evt-B2', 'evt-B', 'B2')])
+    expect(await headOf(t)).toMatchObject({ event_id: 'evt-B2', value: 'B2' })
+
+    await rebuild()
+    expect(await headOf(t)).toMatchObject({ event_id: 'evt-B2', value: 'B2' })
+    await assertNoGhostHeads(t)
+  })
+
+  it('a project with no sibling race rebuilds exactly as before (claims change nothing)', async () => {
+    await postEvents(t.db, [commit('evt-H', null, 'head')])
+    await postEvents(t.db, [commit('evt-1', 'evt-H', 'one')])
+    await postEvents(t.db, [commit('evt-2', 'evt-1', 'two')])
+    const before = await headOf(t)
+    expect(before).toMatchObject({ event_id: 'evt-2', value: 'two' })
+
+    await rebuild()
+    expect(await headOf(t)).toEqual(before)
+    await assertNoGhostHeads(t)
+  })
+})
 
 describe('file counters after a multi-commit batch (QW-10 semantic guard)', () => {
   it('a batch of commits to one file leaves the rollup counters correct', async () => {

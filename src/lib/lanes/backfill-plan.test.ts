@@ -23,6 +23,12 @@ describe('codeForLanguageLabel', () => {
     expect(codeForLanguageLabel(null)).toBeNull()
     expect(codeForLanguageLabel('   ')).toBeNull()
   })
+  it('derives a script or region variety from its name, not the other way around', () => {
+    expect(codeForLanguageLabel('Traditional Han')).toBe('zh-Hant')
+    expect(codeForLanguageLabel('zh-hant')).toBe('zh-Hant')
+    expect(codeForLanguageLabel('Latin American Spanish')).toBe('es-419')
+    expect(codeForLanguageLabel('Canadian French')).toBe('fr-CA')
+  })
 })
 
 describe('planLanesForProject', () => {

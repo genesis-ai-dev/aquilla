@@ -2,6 +2,7 @@ import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
 import {
+  audioDenominator,
   deadlineStatus,
   emptyPortfolioAggregate,
   latestActivityAt,
@@ -13,6 +14,7 @@ import {
 export {
   AOE_GRACE_MS,
   DEADLINE_SOON_WINDOW_MS,
+  audioDenominator,
   audioPct,
   deadlineStatus,
   isDeadlineOverdue,
@@ -69,6 +71,15 @@ export interface PortfolioProject {
    */
   aiDraftedCells: number
   lastEditAt: number | null
+  /**
+   * AQU-1566: what audio coverage is measured against. A dubbing project
+   * records against its hidden cue sheet, not its subtitles, and the two have
+   * different counts, so this is each file's cue sheet where it has one and
+   * the file itself otherwise: the plan board's own rule. Optional because an
+   * older server sends none; `audioDenominator` then falls back to the text
+   * total, as it always did.
+   */
+  audioTotalCells?: number
   audioCells: number
   /**
    * AQU-508: cells whose selected audio take has been validated by a reviewer —
@@ -349,7 +360,8 @@ export function aiDraftedPct(p: PortfolioProject): number {
  * knowing, so the tile's tooltip carries it as a second sentence.
  */
 export function audioValidatedPct(p: PortfolioProject): number {
-  return p.totalCells > 0 ? Math.min(1, p.validatedAudioCells / p.totalCells) : 0
+  const total = audioDenominator(p)
+  return total > 0 ? Math.min(1, p.validatedAudioCells / total) : 0
 }
 
 /**

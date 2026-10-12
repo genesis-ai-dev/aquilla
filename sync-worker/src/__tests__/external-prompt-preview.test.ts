@@ -180,9 +180,11 @@ async function seedBase(testDb: TestDb) {
     sourceLanguage: "English",
     targetLanguage: "French",
   })
+  // Languages live on the lane row. Settings keys above are ignored (AQU-1595).
   await testDb.pg.query(
-    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
-     VALUES ('deflane1', 'proj-a', 'target', '', 1)`,
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+       ('srclane1', 'proj-a', 'source', 'English', NULL, 0),
+       ('deflane1', 'proj-a', 'target', 'French', '', 1)`,
   )
 }
 
@@ -820,26 +822,37 @@ describe("external prompt preview", () => {
       expect(error.error.message).not.toContain("b0b0b0b0")
     })
 
-    it("uses settings for an unbackfilled source lane and not for a typed one (AQU-1593)", async () => {
-      // Project creation already inserts the one source lane.
+    it("uses an unbackfilled source lane's name, and a typed language over settings (AQU-1595)", async () => {
+      await testDb.pg.query(
+        `UPDATE lanes SET language = NULL, name = 'Koine Greek', lang_code = NULL
+          WHERE project_id = 'proj-a' AND role = 'source'`,
+      )
+      const named = await preview(testDb, token, "cell-live")
+      expect(named.body.sourceLanguage).toBe("Koine Greek")
+      // A stored placeholder name is the name fallback. Settings still say
+      // English and are not consulted.
       await testDb.pg.query(
         `UPDATE lanes SET language = NULL, name = 'Source', lang_code = NULL
           WHERE project_id = 'proj-a' AND role = 'source'`,
       )
-      const unbackfilled = await preview(testDb, token, "cell-live")
-      expect(unbackfilled.body.sourceLanguage).toBe("English")
+      const placeholder = await preview(testDb, token, "cell-live")
+      expect(placeholder.body.sourceLanguage).toBe("Source")
       await testDb.pg.query(
-        `UPDATE lanes SET language = 'Koine Greek' WHERE project_id = 'proj-a' AND role = 'source'`,
+        `UPDATE lanes SET language = 'Hebrew' WHERE project_id = 'proj-a' AND role = 'source'`,
       )
       const typed = await preview(testDb, token, "cell-live")
-      expect(typed.body.sourceLanguage).toBe("Koine Greek")
+      expect(typed.body.sourceLanguage).toBe("Hebrew")
     })
 
-    it("still inherits the project target for the default lane", async () => {
+    it("does not inherit the project target when the default lane records no language", async () => {
+      await testDb.pg.query(
+        `UPDATE lanes SET language = NULL, name = NULL, lang_code = NULL
+          WHERE project_id = 'proj-a' AND id = 'deflane1'`,
+      )
       const { body } = await preview(testDb, token, "cell-live")
       expect(body.laneId).toBe("deflane1")
       expect(body.targetLang).toBe("")
-      expect(body.targetLanguage).toBe("French")
+      expect(body.targetLanguage).toBe("")
     })
   })
 })

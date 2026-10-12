@@ -134,7 +134,7 @@
             "ENVIRONMENT": "production",
             "AUTH_WORKER_URL": "https://api.aquilla.app/identity",
             "DEPLOYMENT_WORKER_NAME": "aquilla-sync-worker",
-            "POSTHOG_KEY": ""
+            "POSTHOG_KEY": "phc_qy5gb7wTaW5RbmMW8SEyQPSLKtYFtUobaqKZWiUs7cBt"
           },
           "hyperdrives": {
             "HYPERDRIVE": "69bcc10e67464f2eaf4fe91a9141e7cd"

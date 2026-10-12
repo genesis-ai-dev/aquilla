@@ -36,7 +36,7 @@ export async function loadTargetLanes(db: AquillaDb, projectId: string): Promise
 
 /**
  * Lane ids this caller may read. `null` means every lane (wall off, or
- * Maintainer / platform). An empty list means no target lane.
+ * project lead / platform). An empty list means no target lane.
  */
 export async function grantedLaneIds(
   _db: AquillaDb,

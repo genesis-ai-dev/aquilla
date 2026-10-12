@@ -112,7 +112,7 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
               {orphanAdmins.length} allowlisted {orphanAdmins.length === 1 ? "email has" : "emails have"} no account
             </span>{" "}
             ({orphanAdmins.map((a) => a.email).join(", ")}) — a typo in{" "}
-            <code className="text-xs">ADMIN_EMAILS</code>, or the person hasn't registered yet.
+            <code className="text-xs">platform_admins</code>, or the person hasn't registered yet.
           </p>
         </div>
       )}

@@ -70,7 +70,10 @@ contract beyond "maintainer can, member can view":
 - Settings that change the pushed numbers mark links dirty too (AQU-1771,
   `db/shared/monday-dirty.ts`): a project's `countStructuralCells`,
   `validationCount` or `validationCountAudio`; the org's headings rule (every
-  link in the org); and clearing project overrides.
+  link in the org); and clearing project overrides. The settings routes then
+  push those dirty links straight after the response (`pushDirtyLinksNow`,
+  skipping links in a retry backoff, at most 20 per org change); anything left,
+  and changes made through the agent API, go out with the cron.
 - `audio_validated_pct` is audio validation: the audio histogram (selected dub
   takes, weakest track deciding) at `validationCountAudio`, default 1, capped
   at 15, the same reading as the project dashboard.

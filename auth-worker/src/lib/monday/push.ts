@@ -19,6 +19,7 @@
 // per file.
 
 import type { Env } from "../../types"
+import { makePostgres, type AquillaDb } from "../../../../db/shim/postgres"
 import {
   parseJsonColumn,
   sanitizeMapping,
@@ -504,4 +505,85 @@ export async function flushDirtyLinks(env: Env, cap = 20): Promise<number> {
     }
   }
   return flushed
+}
+
+/** Which links a settings change touched: named projects, or a whole org. */
+export type SettingsPushScope = { projectIds: readonly string[] } | { orgId: number }
+
+/**
+ * AQU-1771: push now the links a settings change just marked dirty, instead of
+ * leaving them for the 5-minute cron. Only DIRTY links are pushed, so a save
+ * that changed nothing the board shows finds nothing to do. Links waiting out
+ * an AQU-1828 retry backoff are skipped, and an org-wide change pushes at most
+ * `cap` links (the cron's per-run cap); the rest stay dirty for the cron.
+ * Bypasses the edit debounce on purpose: someone just changed what the board
+ * should say, so the board should say it.
+ */
+export async function pushDirtyLinksNow(
+  env: Env,
+  scope: SettingsPushScope,
+  cap = 20,
+): Promise<number> {
+  const byOrg = "orgId" in scope
+  if (!byOrg && scope.projectIds.length === 0) return 0
+  const where = byOrg
+    ? "il.project_id IN (SELECT p.id FROM projects p WHERE p.org_id = ? AND p.archived_at IS NULL)"
+    : `il.project_id IN (${scope.projectIds.map(() => "?").join(", ")})`
+  const result = await env.AQUILLA_PG.prepare(
+    `SELECT il.* FROM integration_links il
+      WHERE il.dirty_at IS NOT NULL AND il.enabled = TRUE AND il.provider = ?
+        AND (il.next_retry_at IS NULL OR il.next_retry_at <= now())
+        AND ${where}
+      ORDER BY il.dirty_at ASC
+      LIMIT ?`,
+  )
+    .bind(PROVIDER, ...(byOrg ? [scope.orgId] : scope.projectIds), cap)
+    .all<IntegrationLinkRow>()
+  let pushed = 0
+  for (const link of result.results ?? []) {
+    try {
+      await pushBoardLink(env, link)
+      pushed++
+    } catch (err) {
+      console.error(`[monday] settings push failed for link ${link.id}:`, err)
+    }
+  }
+  return pushed
+}
+
+/**
+ * Run `pushDirtyLinksNow` after the response, so a settings save never waits
+ * on Monday. Without an ExecutionContext (Hono's bare test harness) it does
+ * nothing and the cron flush pushes the dirty links as before.
+ *
+ * The push must not use the request-scoped `AQUILLA_PG`: index.ts closes that
+ * shim the moment the Response returns (the AQU-1763 trap), so it opens its own
+ * connection from PG_CONNECTION_STRING and releases it when the push settles.
+ * The vitest harness injects AQUILLA_PG directly and sets no connection string,
+ * so it keeps using the injected handle.
+ */
+export function pushDirtyLinksAfterResponse(
+  c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  scope: SettingsPushScope,
+): void {
+  let ctx: { waitUntil(promise: Promise<unknown>): void }
+  try {
+    ctx = c.executionCtx
+  } catch {
+    return
+  }
+  ctx.waitUntil(pushOnOwnConnection(c.env, scope))
+}
+
+async function pushOnOwnConnection(env: Env, scope: SettingsPushScope): Promise<void> {
+  const own = env.PG_CONNECTION_STRING ? makePostgres(env.PG_CONNECTION_STRING) : null
+  try {
+    await pushDirtyLinksNow(own ? { ...env, AQUILLA_PG: own as unknown as AquillaDb } : env, scope)
+  } catch (err) {
+    console.error("[monday] settings push failed:", err)
+  } finally {
+    await own?.close().catch((err: unknown) => {
+      console.error("[monday] releasing the settings-push connection failed:", err)
+    })
+  }
 }

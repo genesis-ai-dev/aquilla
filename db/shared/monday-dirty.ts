@@ -5,9 +5,11 @@
  * progress update), so turning "headings count" off, or asking for a second
  * validator, left every linked board showing the old percentages until the
  * next edit in that project. Changing one of these settings now marks the
- * affected links dirty; the identity worker's cron flush (every 5 minutes,
- * with the AQU-1828 retry backoff and per-run cap) pushes them. Nothing is
- * pushed inline, so a settings save never waits on Monday.
+ * affected links dirty. The identity worker's settings routes then push them
+ * straight after the response (auth-worker lib/monday/push.ts
+ * `pushDirtyLinksAfterResponse`); the cron flush (every 5 minutes, AQU-1828
+ * backoff, per-run cap) picks up anything left, including changes made through
+ * the agent API. A settings save never waits on Monday.
  *
  * Written once in db/shared because project settings are written from both
  * workers (the settings route and the agent's UpdateProjectSettings command

@@ -74,6 +74,7 @@ import { ROLE } from "../types"
 import { getEffectiveOrgRole, getOrgMemberRole } from "../services/org-permissions"
 import { hasActiveElevation } from "../middleware/platform-admin"
 import { markOrgMondayLinksDirty, markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
+import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 
 const orgSettings = new Hono<AuthHonoEnv>()
 
@@ -526,6 +527,7 @@ orgSettings.on(
       ).bind(orgId).all<{ project_id: string; version: number }>()
       // AQU-1771: what those projects push to Monday moved too.
       await markOrgMondayLinksDirty(c.env.AQUILLA_PG, orgId)
+      pushDirtyLinksAfterResponse(c, { orgId })
       // Their own settings row is untouched — only what it RESOLVES to moved.
       notifyProjectRoomsBestEffort(
         c,
@@ -734,6 +736,7 @@ orgSettings.post(
       c.env.AQUILLA_PG,
       affected.map((row) => row.project_id),
     )
+    pushDirtyLinksAfterResponse(c, { projectIds: affected.map((row) => row.project_id) })
     // The UPDATE above bumped each of these rows by one.
     notifyProjectRoomsBestEffort(
       c,

@@ -50,6 +50,7 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
+import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
@@ -531,6 +532,11 @@ projectSettings.on(
       // remains best-effort there just as it is in a deployed Worker.
       void notifyPromise
     }
+    // AQU-1771: a change to what a linked Monday board shows marked its link
+    // dirty in the write above; push it now rather than at the next cron.
+    pushDirtyLinksAfterResponse(c, {
+      projectIds: [projectId, ...(result.propagated ?? []).map((copy) => copy.projectId)],
+    })
     // `lanes` predates the write. A lane the write minted carries no grant,
     // so the newer list would hide exactly the same labels.
     return c.json(

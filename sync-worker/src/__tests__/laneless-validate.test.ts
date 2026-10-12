@@ -229,6 +229,29 @@ describe('AQU-1884 — a lane-less validate on a project with no default lane', 
     expect(await validatorTags()).toEqual([])
   })
 
+  it('still accepts a lane-less validate whose batch mints the bridge lane', async () => {
+    // A brand-new project has a source lane and no target lane. The editor's
+    // outbox flushes the commit and its validation together, and the commit
+    // mints the '' bridge inside that same transaction (AQU-1594) — so the
+    // lane this validation names exists by the time it projects, even though
+    // no lane row is on the project when the batch is authorized.
+    await t.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
+       VALUES ('lane1884src', $1, 'source', 'English', NULL, NULL, NULL, 0)`,
+      [PROJECT],
+    )
+
+    const r = await postEvents([
+      sourceCreate(),
+      commit({}),
+      validate('evt-1884-same-batch', 'cell.validate'),
+    ])
+
+    expect(r.rejected, JSON.stringify(r.rejected)).toEqual([])
+    expect(r.accepted).toHaveLength(3)
+    expect(await validatorTags()).toEqual([''])
+  })
+
   it('still lets a legacy project with a default lane validate without naming one', async () => {
     await seedLanes([{ id: 'lane1884default', tag: '' }])
     const written = await postEvents([

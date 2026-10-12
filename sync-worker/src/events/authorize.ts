@@ -480,12 +480,12 @@ export async function authorize<K extends EventKind>(
     // would project a NULL lane_id and fail the whole batch as a 500. Refuse
     // it here with a reason the caller can act on.
     //
-    // AQU-1884: that includes a write with NO lane at all. It asks for the
-    // default lane, and a project created today has none — every lane carries
-    // a real tag — so the only kinds that may arrive before the lane row are
-    // the ones that mint the bridge themselves, and only on a project with no
-    // target lane. A lane-less validate/unvalidate anywhere else is this
-    // 4xx rather than the per-event 500 it used to project as.
+    // AQU-1884: that includes a validation with NO lane at all. It asks for
+    // the default lane, and a project created today has none — every lane
+    // carries a real tag — so it is this 4xx rather than the per-event 500 it
+    // used to project as. Only a kind that mints the bridge itself, or a
+    // project with no target lane at all (where a sibling event in this batch
+    // may be minting it), may name `''` before the row exists.
     if (
       writesLaneRow(raw.kind) &&
       !(await targetLaneRowExists(

@@ -79,12 +79,11 @@ export function writesLaneRow(kind: string): boolean {
 /**
  * AQU-1884: kinds that mint the `''` bridge lane themselves.
  *
- * A lane-less `target.cell.*` write on a project with NO target lane splices
- * `ensureBlankTargetBridgeStmt` into its own batch (AQU-1594,
- * sync-worker/src/events/handlers/cell-events.ts), so for those kinds the lane
- * row may legitimately not exist yet. A validation endorses a commit that
- * already ran that batch, so it never creates a lane and always needs the row
- * up front.
+ * A lane-less `target.cell.*` write splices `ensureBlankTargetBridgeStmt` into
+ * its own batch (AQU-1594, sync-worker/src/events/handlers/cell-events.ts), so
+ * for those kinds the lane row may legitimately not exist yet. A validation
+ * endorses a commit that already ran that batch, so it never creates a lane and
+ * always needs the row up front.
  */
 export function createsBlankLaneBridge(kind: string): boolean {
   return kind.startsWith("target.cell.")

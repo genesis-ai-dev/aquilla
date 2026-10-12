@@ -182,8 +182,9 @@ describe("InfractionScan incrementality", () => {
     const scan = new InfractionScan()
     scan.plan([base], [forbidsBad])
     scan.step(1)
-    // hasPendingEdit flips on every outbox enqueue/flush of this cell.
-    expect(scan.plan([{ ...base, hasPendingEdit: true, lastEditAt: "2026-10-11" }], [forbidsBad]).pending).toBe(0)
+    // hasPendingEdit flips on every outbox enqueue/flush of this cell, and
+    // lastEditAt (epoch ms) moves on every commit anywhere in the chain.
+    expect(scan.plan([{ ...base, hasPendingEdit: true, lastEditAt: 1_760_000_000_000 }], [forbidsBad]).pending).toBe(0)
   })
 
   it("re-evaluates everything when a rule body changes", () => {

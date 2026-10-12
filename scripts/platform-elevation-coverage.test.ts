@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest"
 import { readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 
-const REPO = path.resolve(__dirname, "..")
+const REPO = path.resolve(import.meta.dirname, "..")
 
 /** Strip block and line comments so a doc comment naming a pattern is not a hit. */
 function stripComments(src: string): string {

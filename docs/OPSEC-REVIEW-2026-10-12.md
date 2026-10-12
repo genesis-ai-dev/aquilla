@@ -345,6 +345,33 @@ fix was restored (`git stash` of the one source file, re-run):
 * `npx tsc --noEmit` in `auth-worker` reports no error in any changed file (the
   only remaining output is the `partyserver` `TS2307`s from `sync-worker`, whose
   package is not installed in this environment — same as 09-28 and 10-05).
+* `npx eslint` clean on all 15 changed files.
+* Full `auth-worker` suite (`npx vitest run`): **307 files, 3618 passing, 2
+  expected-fail, 7 failures in 3 files — all pre-existing, none in anything this
+  change touches.** Each was verified rather than assumed:
+  - `rls-backstop.test.ts` (5) — the replayed RLS migrations abort on
+    `column "target_lang" does not exist`, which the setup catches and logs as
+    *"expected on some PGlite versions"* before continuing with the policies
+    never installed. The real cause is AQU-1611 (`2026-10-07`, "Stop projection
+    writers filling target_lang"), the last commit to touch this file: the
+    column is gone but a migration the test replays still names it.
+  - `changeset-floor.test.ts` (1) — `requiredRoleForChangeset` returns 500 where
+    the test expects 600 for a non-terminology settings patch.
+    `lib/changeset-floor.ts`, `routes/changeset-approvals.ts` and the test are
+    **byte-identical to `origin/dev`**, and `changeset-floor.ts` imports nothing
+    this change touches.
+  - `source-linking-cycle.test.ts` (1) — a legitimate B→C link 400s. Source,
+    route and test are byte-identical to `origin/dev`, and the failure
+    **reproduces with this change's `project-permissions.ts` reverted to
+    `origin/dev`**, which is the decisive check since that is the only changed
+    module `source-linking` reaches.
+
+  **This is a regression on `dev`, not here, and it is worth flagging:** 10-05
+  recorded this package as *"266 files, 3085 passing, 2 expected-fail, 0
+  failures… there is now nothing red in this package."* Three files have gone
+  red in the week since, two of them traceable to work that merged on 10-07.
+  Reported rather than fixed — none of it is auth/session work, and `dev` owns
+  it — in the same spirit as OPS-21.
 
 ---
 

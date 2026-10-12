@@ -7,7 +7,11 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["@cloudflare/workers-types", "node"],
+    // Code shared from ../src is written against the `@/` alias and, in modules
+    // the contract tests import, Vite's types. tsconfig.runtime.json checks the
+    // Worker code without Vite's types.
+    "types": ["@cloudflare/workers-types", "node", "vite/client"],
+    "paths": { "@/*": ["../src/*"] },
     "lib": ["ES2022"]
   },
   "include": ["src/**/*.ts"]

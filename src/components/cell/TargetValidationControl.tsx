@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState, type SyntheticEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react"
 import { Check, CheckCheck, Circle, Trash2 } from "lucide-react"
 import type { EditValidationSummary, ValidationStatus } from "@/hooks/useCells"
 import { AppTooltip } from "@/components/ui/tooltip"
+import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import type { TextValidationBlock } from "@/lib/review/text-validation-policy"
+import { nextValidatorsListState } from "./validators-list-state"
 
 interface TargetValidationControlProps {
   cellRef: string
@@ -17,6 +20,12 @@ interface TargetValidationControlProps {
   validationRequirement: number
   canValidate: boolean
   canValidateThisCell: boolean
+  /**
+   * AQU-1571: why the project's own text rules refuse this viewer's vote here
+   * (`textValidationBlock`), when they do. Only chooses the words: whether a
+   * click votes is still `canValidateThisCell`, which the caller narrows by it.
+   */
+  blockedReason?: TextValidationBlock | null
   onValidationChange: (validated: boolean) => unknown
 }
 
@@ -107,10 +116,18 @@ export function TargetValidationControl({
   validationRequirement,
   canValidate,
   canValidateThisCell,
+  blockedReason = null,
   onValidationChange,
 }: TargetValidationControlProps) {
   const { t } = useI18n()
   const [popoverOpen, setPopoverOpen] = useState(false)
+  // A click opened (or kept) the list, so the pointer leaving must not close it.
+  const [popoverPinned, setPopoverPinned] = useState(false)
+  // Closes the list THROUGH Base UI. Setting `open` to false from outside
+  // leaves Base UI remembering the click that opened the list, and while it
+  // remembers a click it ignores hover, so the check never opened the list on
+  // hover again after "Remove your validation" (PR 1 area 5 step 6).
+  const listActionsRef = useRef<PopoverPrimitive.Root.Actions | null>(null)
   const [pendingValidation, setPendingValidation] = useState<{
     value: boolean
     authoritativeAtRequest: boolean
@@ -149,9 +166,18 @@ export function TargetValidationControl({
   const validationColorClass = state === "full-self" || state === "full-others" || state === "full" || state === "self"
     ? "text-green-500"
     : state === "others" ? "text-muted-foreground/60" : "text-muted-foreground/30"
+  // AQU-1571: a project rule about WHO validates reads like the role limit it
+  // is ("unavailable" — deliberately not naming the named-validator list, as
+  // audio does not); the reader's own latest change says so, since the way
+  // forward is someone else; scope comes last, as the rule nearest to hand
+  // is the one worth reading.
   const tooltip = canValidateThisCell
     ? t("editor.validation.notValidatedTooltip")
-    : canValidate ? t("editor.validation.outOfScopeTooltip") : t("editor.validation.unavailableTooltip")
+    : !canValidate || blockedReason === "policy"
+      ? t("editor.validation.unavailableTooltip")
+      : blockedReason === "self"
+        ? t("editor.validation.ownEditTooltip")
+        : t("editor.validation.outOfScopeTooltip")
   // Why the viewer cannot add a vote, at the foot of the "Text validated by" list —
   // the same place the audio control puts it, so a blocked reason is never
   // hidden just because somebody else voted first.
@@ -165,23 +191,18 @@ export function TargetValidationControl({
   }
 
   function handleOpenChange(nextOpen: boolean, details: { reason: string; cancel(): void }) {
-    if (!nextOpen) {
-      setPopoverOpen(false)
-      return
-    }
-    if (details.reason === "trigger-press" || details.reason === "keyboard") {
-      if (canValidateThisCell && !isSelfValidated) {
-        details.cancel()
-        return
-      }
-      setPopoverOpen(true)
-      return
-    }
-    if (details.reason === "trigger-hover" && !hasValidatorInfo) {
-      details.cancel()
-      return
-    }
-    setPopoverOpen(true)
+    const decision = nextValidatorsListState(
+      { open: nextOpen, reason: details.reason },
+      {
+        open: popoverOpen,
+        pinned: popoverPinned,
+        pressValidates: canValidateThisCell && !isSelfValidated,
+        hasValidatorInfo,
+      },
+    )
+    if (decision.cancel) details.cancel()
+    setPopoverOpen(decision.open)
+    setPopoverPinned(decision.pinned)
   }
 
   const renderButton = (onClick?: () => void) => (
@@ -192,8 +213,13 @@ export function TargetValidationControl({
       // No "click to…" when a click would do nothing — the audio control's
       // rule. A viewer outside the lane used to be told to click a dead button.
       aria-label={
+        // A press on your own validation pins the "Text validated by" list
+        // (8bdd4f1be); removing it is that list's "Remove your validation"
+        // button, which exists only while you may still validate here.
         isSelfValidated
-          ? t("editor.validation.ariaValidated", { ref: cellRef })
+          ? canValidate
+            ? t("editor.validation.ariaValidatedByYou", { ref: cellRef })
+            : t("editor.validation.ariaValidatedByYouNoAction", { ref: cellRef })
           : state === "full-others" || state === "others"
             ? canValidateThisCell
               ? t("editor.validation.ariaValidatedByOthers", { ref: cellRef })
@@ -239,7 +265,7 @@ export function TargetValidationControl({
     <div data-testid="validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
       {hasContent ? (
         hasValidatorInfo ? (
-          <Popover key="list" open={popoverOpen} onOpenChange={handleOpenChange}>
+          <Popover key="list" open={popoverOpen} onOpenChange={handleOpenChange} actionsRef={listActionsRef}>
             <PopoverTrigger
               openOnHover
               delay={400}
@@ -265,7 +291,13 @@ export function TargetValidationControl({
                             className="shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => {
                               changeValidation(false)
-                              setPopoverOpen(false)
+                              // Goes through handleOpenChange ("imperative-action"),
+                              // which closes and unpins the list.
+                              if (listActionsRef.current) listActionsRef.current.close()
+                              else {
+                                setPopoverOpen(false)
+                                setPopoverPinned(false)
+                              }
                             }}
                           >
                             <Trash2 className="h-3 w-3" />

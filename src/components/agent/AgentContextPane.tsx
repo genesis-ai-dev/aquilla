@@ -31,9 +31,11 @@ import {
 import { CellActionRail } from "@/components/CellActionRail"
 import { TargetDraftActions, TargetReferenceActions } from "@/components/cell/TargetCellActions"
 import { TargetValidationControl } from "@/components/cell/TargetValidationControl"
+import type { TextValidationBlock } from "@/lib/review/text-validation-policy"
 import { HealthRibbon } from "@/components/HealthRibbon"
 import { TranslatedEditor, type TranslatedEditorCommit } from "../TranslatedEditor"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { lockHolderForCell } from "@/hooks/useFocusLock"
 
 export interface AgentWorkbenchCell {
   cellId: string
@@ -54,6 +56,9 @@ export interface AgentWorkbenchCell {
   activeValidators?: string[]
   validationHistory?: EditValidationSummary[]
   canValidate?: boolean
+  /** AQU-1571: the project text rule refusing this viewer's vote here, if any
+   *  (already folded into `canValidate`); it chooses the tooltip's words. */
+  validationBlock?: TextValidationBlock | null
 }
 
 /**
@@ -105,6 +110,8 @@ export interface AgentContextPaneProps {
    *  the commit path auto-validated reaches it from here, on leaving the cell. */
   onCellValidated?: (cellId: string) => unknown
   cellLockHolders?: ReadonlyMap<string, string>
+  /** Active target lane. Lock leases are keyed `cellId@lane:<tag>`. */
+  lane?: string
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
   onViewCell?: (cellId: string | null) => void
@@ -183,6 +190,7 @@ export function AgentContextRows({
   onValidationChange,
   onCellValidated,
   cellLockHolders,
+  lane,
   onClaimCell,
   onReleaseCell,
   onViewCell,
@@ -282,7 +290,7 @@ export function AgentContextRows({
     <>
           {cells.map((cell) => {
             const text = isSource ? cell.source : cell.target
-            const heldByLabel = cellLockHolders?.get(cell.cellId) ?? null
+            const heldByLabel = lockHolderForCell(cellLockHolders, cell.cellId, lane)
             const editorLabel = `${cell.ref || "Cell"} — ${cell.status || "unvalidated"}`
             const canEditCell = targetEditable && !heldByLabel
             const targetHasRichFormatting = hasMeaningfulRichText(cell.targetHtml)
@@ -293,7 +301,7 @@ export function AgentContextRows({
               ? cell.idmlConfiguration.context.paragraphStyleId
               : undefined
             const completionState = completing?.get(cell.cellId)
-            const isLoading = completionState === "searching" || completionState === "generating"
+            const isLoading = completionState === "searching" || completionState === "generating" || completionState === "aligning"
             const actionsRevealed = !isSource
               && (actionCellId === cell.cellId
                 || activeEditingCellId === cell.cellId
@@ -309,6 +317,7 @@ export function AgentContextRows({
                 validationRequirement={validationRequirement}
                 canValidate={canValidate}
                 canValidateThisCell={Boolean(cell.canValidate)}
+                blockedReason={cell.validationBlock ?? null}
                 onValidationChange={(validated) => handleValidationChange(cell.cellId, validated)}
               />
             ) : null

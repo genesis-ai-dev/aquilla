@@ -64,7 +64,7 @@ describe("SourceSelectionToolbar", () => {
     // AQU-1271: case sensitivity moved into the collapsed "Matching options"
     // disclosure, stated positively — unchecked = the case-insensitive default.
     fireEvent.click(screen.getByRole("button", { name: /matching options/i }))
-    expect(screen.getByRole("checkbox", { name: /match case exactly/i })).not.toBeChecked()
+    expect(screen.getByRole("checkbox", { name: /match case/i })).not.toBeChecked()
     expect(document.querySelector('[data-slot="popover-content"]')).not.toBeNull()
   })
 

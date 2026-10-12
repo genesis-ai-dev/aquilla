@@ -24,6 +24,11 @@ interface Props {
   concept: Concept
   /** Cells to derive the surface forms from — the same list the page filters. */
   cells: ReadonlyArray<{ id: string; original: string }>
+  /**
+   * Surfaces already counted by the server scan. When present they replace
+   * the client tally, which would only see the loaded page.
+   */
+  forms?: ReadonlyArray<{ surface: string; count: number; excluded: boolean }>
   termMatching?: TermMatchingSettings
   /** False renders the section read-only (chips still show what matched). */
   canEdit: boolean
@@ -35,6 +40,7 @@ interface Props {
 export function TermFormsSection({
   concept,
   cells,
+  forms,
   termMatching,
   canEdit,
   onMatchChange,
@@ -43,8 +49,11 @@ export function TermFormsSection({
 }: Props) {
   const t = useT()
   const discovered = useMemo(
-    () => discoverForms(cells, concept, termMatching),
-    [cells, concept, termMatching],
+    () =>
+      forms
+        ? forms.map((form) => ({ ...form, sampleCellIds: [] as string[] }))
+        : discoverForms(cells, concept, termMatching),
+    [forms, cells, concept, termMatching],
   )
   const resolved = useMemo(
     () => resolveMatchOptions(concept, termMatching),

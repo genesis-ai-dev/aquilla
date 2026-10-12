@@ -46,3 +46,24 @@ describe("posthog credential redaction is wired in", () => {
     }
   })
 })
+
+// AQU-1572: the rest of the analytics entry point's wiring. The `$exception`
+// noise filter needs no check of its own here: it composes inside
+// `redactCaptureEvent`, which the scan above already pins.
+describe("AQU-1572: the noise guard and app_env are wired in", () => {
+  const source = fs.readFileSync(path.join(SRC, "lib/posthog.ts"), "utf8")
+
+  it("installs the ResizeObserver guard before posthog.init, so it runs ahead of PostHog's own handler", () => {
+    const guard = source.indexOf("installResizeObserverNoiseGuard(window)")
+    expect(guard).toBeGreaterThan(-1)
+    expect(guard).toBeLessThan(source.indexOf("posthog.init("))
+  })
+
+  it("keeps exception autocapture on — the ErrorBoundary window handlers rely on it", () => {
+    expect(source).toContain("capture_exceptions: true")
+  })
+
+  it("registers the app_env super-property at init", () => {
+    expect(source).toMatch(/posthog\.register\(\{\s*app_env: resolveAppEnv\(window\.location\)\s*\}\)/)
+  })
+})

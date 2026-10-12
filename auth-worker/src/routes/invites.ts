@@ -43,6 +43,7 @@ import {
   parseScopeLanes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
+import { resolveExplicitLaneChoice } from "../services/lane-choice"
 
 const invites = new Hono<AuthHonoEnv>()
 
@@ -77,14 +78,17 @@ const createMultiInviteSchema = z.object({
   roleLevel: z.number().int().min(100).max(700).optional(),
   expiresAt: z.string().datetime().optional(),
   /**
-   * AQU-528: optional lane (target-language) scopes auto-granted on join. The
-   * same lane set applies to every project sharing the token. Omitted/empty =
-   * unscoped invite (today's behavior).
+   * AQU-528: lane scopes auto-granted on join. The same set applies to every
+   * project on the token. AQU-1808: omitting this is not every current lane —
+   * send allCurrentLanes, or name the lanes, when any project has current
+   * target lanes.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
     .max(MAX_INVITE_SCOPE_LANES)
     .optional(),
+  /** AQU-1808: explicit every-current-lane choice for every project on the token. */
+  allCurrentLanes: z.literal(true).optional(),
 })
 
 invites.post(
@@ -124,8 +128,28 @@ invites.post(
     const expiresAt =
       body.expiresAt ?? new Date(Date.now() + DEFAULT_INVITE_TTL_MS).toISOString()
 
-    // AQU-528: same lane scopes on every row sharing the token; null = unscoped.
-    const scopeLanesJson = serializeScopeLanes(body.scopeLanes)
+    // AQU-1607: stored as lane ids, resolved against every project the token
+    // covers — accept picks out the ones belonging to the project joined.
+    // AQU-1808: a missing choice is refused when any of those projects has a
+    // current target lane. allCurrentLanes stores no scopes.
+    const laneChoice = await resolveExplicitLaneChoice(c.env, projectIds, {
+      role: grantedRole,
+      allCurrentLanes: body.allCurrentLanes,
+      scopeLanes: body.scopeLanes,
+      requireChoice: true,
+    })
+    if (!laneChoice.ok) {
+      return c.json(
+        {
+          error: laneChoice.error,
+          code: laneChoice.code,
+          ...(laneChoice.ambiguous ? { ambiguous: laneChoice.ambiguous } : {}),
+          ...(laneChoice.unmatched ? { unmatched: laneChoice.unmatched } : {}),
+        },
+        400,
+      )
+    }
+    const scopeLanesJson = serializeScopeLanes(laneChoice.kind === "lanes" ? laneChoice.laneIds : [])
 
     for (const pid of projectIds) {
       try {
@@ -474,8 +498,11 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
         continue
       }
 
+      // [Pen test 2026-10-06] Re-accept never raises a (possibly demoted) role.
       const finalRole = existing
-        ? Math.max(existing.role_level, invite.role_level)
+        ? invite.used_at
+          ? existing.role_level
+          : Math.max(existing.role_level, invite.role_level)
         : invite.role_level
 
       if (existing) {

@@ -1,0 +1,104 @@
+/**
+ * AQU-1634 — one violation rule card at a time.
+ *
+ * The card is a single bottom-right toast, but its open state used to live in
+ * each EditorRow's own `useState`, so clicking a second row's underline stacked
+ * a second card. These cover the store that now owns it.
+ */
+
+import { beforeEach, describe, expect, it } from "vitest"
+import { renderHook } from "@testing-library/react"
+import {
+  closeRuleCard,
+  openRuleCard,
+  resetRuleCardForTests,
+  useOpenRuleId,
+} from "./open-rule-card"
+
+beforeEach(() => resetRuleCardForTests())
+
+describe("open-rule-card", () => {
+  it("reports the open rule only to the cell that owns the card", () => {
+    const owner = renderHook(() => useOpenRuleId("cell-1"))
+    const other = renderHook(() => useOpenRuleId("cell-2"))
+
+    openRuleCard("cell-1", "r1")
+    owner.rerender()
+    other.rerender()
+
+    expect(owner.result.current).toBe("r1")
+    expect(other.result.current).toBeNull()
+  })
+
+  it("replaces the open card when another cell's underline opens one", () => {
+    const first = renderHook(() => useOpenRuleId("cell-1"))
+    const second = renderHook(() => useOpenRuleId("cell-2"))
+
+    openRuleCard("cell-1", "r1")
+    openRuleCard("cell-2", "r2")
+    first.rerender()
+    second.rerender()
+
+    // The first cell no longer renders a card — so nothing stacks.
+    expect(first.result.current).toBeNull()
+    expect(second.result.current).toBe("r2")
+  })
+
+  it("replaces the open card when a second rule on the SAME cell opens one", () => {
+    const hook = renderHook(() => useOpenRuleId("cell-1"))
+
+    openRuleCard("cell-1", "r1")
+    openRuleCard("cell-1", "r2")
+    hook.rerender()
+
+    expect(hook.result.current).toBe("r2")
+  })
+
+  it("closes the card", () => {
+    const hook = renderHook(() => useOpenRuleId("cell-1"))
+
+    openRuleCard("cell-1", "r1")
+    closeRuleCard()
+    hook.rerender()
+
+    expect(hook.result.current).toBeNull()
+  })
+
+  it("a row tearing down cannot close a card that has moved to another row", () => {
+    const second = renderHook(() => useOpenRuleId("cell-2"))
+
+    openRuleCard("cell-1", "r1")
+    openRuleCard("cell-2", "r2")
+    // cell-1's unmount cleanup fires after the card already moved.
+    closeRuleCard("cell-1")
+    second.rerender()
+
+    expect(second.result.current).toBe("r2")
+  })
+
+  it("re-opening the identical card keeps the same snapshot identity", () => {
+    const snapshots: (string | null)[] = []
+    const hook = renderHook(() => {
+      const value = useOpenRuleId("cell-1")
+      snapshots.push(value)
+      return value
+    })
+
+    openRuleCard("cell-1", "r1")
+    hook.rerender()
+    const rendersAfterOpen = snapshots.length
+
+    // A no-op open must not notify, so React does not re-render from the store.
+    openRuleCard("cell-1", "r1")
+    expect(snapshots.length).toBe(rendersAfterOpen)
+    expect(hook.result.current).toBe("r1")
+  })
+
+  it("closing when nothing is open is a no-op", () => {
+    const hook = renderHook(() => useOpenRuleId("cell-1"))
+    closeRuleCard()
+    closeRuleCard("cell-1")
+    hook.rerender()
+    expect(hook.result.current).toBeNull()
+  })
+})

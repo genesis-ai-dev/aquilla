@@ -16,6 +16,7 @@
 //   org.invite.create | org.invite.revoke
 //   project.invite.create | project.invite.revoke
 //   project.access_link.create | project.access_link.revoke
+//   project.create (org scope; projectId names the new project, AQU-1540)
 //
 // Invites have no user target: the row records the invite's role and email,
 // never its token. Access links target the bound user and never log the token
@@ -52,6 +53,7 @@ export type MembershipAuditAction =
   | "project.invite.revoke"
   | "project.access_link.create"
   | "project.access_link.revoke"
+  | "project.create"
 
 type MembershipScope =
   | { scope: "org"; orgId: number }
@@ -60,7 +62,7 @@ type MembershipScope =
 
 type ActingUser = Pick<AuthUser, "id" | "username" | "email">
 
-export const isAdminActor = (env: Env, actor: ActingUser): boolean =>
+export const isAdminActor = (env: Env, actor: ActingUser): Promise<boolean> =>
   isPlatformAdminEmail(env, actor.email)
 
 /**
@@ -74,7 +76,7 @@ export async function priorMembershipRole(
   where: Extract<MembershipScope, { scope: "org" | "project" }>,
   targetUserId: number,
 ): Promise<number | null> {
-  if (!isAdminActor(env, actor)) return null
+  if (!(await isAdminActor(env, actor))) return null
   const row =
     where.scope === "org"
       ? await env.AQUILLA_PG.prepare(
@@ -106,7 +108,7 @@ export async function auditMembershipChange(
     email?: string | null
   },
 ): Promise<void> {
-  if (!isAdminActor(env, actor)) return
+  if (!(await isAdminActor(env, actor))) return
   try {
     const target = entry.target ?? null
     const targetUsername = target

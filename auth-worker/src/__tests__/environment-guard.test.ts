@@ -38,6 +38,18 @@ function bindings(environment: keyof typeof DEPLOYMENTS, overrides: Partial<Env>
 }
 
 describe("identity deployment environment guard", () => {
+  it("rejects WRANGLER_LOCAL on a first-party API host", () => {
+    expect(
+      deploymentEnvironmentError(
+        DEPLOYMENTS.production.apiUrl,
+        bindings("production", { WRANGLER_LOCAL: "1" }),
+      ),
+    ).toMatch(/WRANGLER_LOCAL/)
+    expect(
+      deploymentEnvironmentError("http://localhost:8787/", bindings("production", { WRANGLER_LOCAL: "1" })),
+    ).toBeNull()
+  })
+
   it.each(["production", "development"] as const)(
     "accepts matching %s bindings",
     (environment) => {

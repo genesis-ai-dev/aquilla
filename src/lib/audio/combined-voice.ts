@@ -52,6 +52,10 @@ export interface CombinedVoiceArgs {
   settings?: ProjectTtsSettings
   session: FrontierSession | null
   username: string
+  /** AQU-1462/1591: the lane this generation performs. Stamped on every attach,
+   *  so the shared clip belongs to that lane rather than to the default one.
+   *  Omitted for the default lane, which is what an absent tag resolves to. */
+  targetLang?: string
   onProgress?: (msg: string) => void
 }
 
@@ -222,6 +226,14 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         mimeType: combinedMime,
         voiceId: voice.id,
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        // AQU-1591: a generated voice is a performance of ONE language, so it
+        // belongs to the lane it was generated in. Without the tag it landed in
+        // the default lane and was heard there instead.
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+        // AQU-1572: one event per cell the clip was attached to, matching the
+        // per-cell shape of every other audio event.
+        audioOrigin: "generate",
+        surface: "voice-together",
         author: username,
       })
     }

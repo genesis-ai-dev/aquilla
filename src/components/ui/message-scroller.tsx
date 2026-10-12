@@ -34,15 +34,40 @@ function MessageScroller({
   )
 }
 
+// Cmd/Ctrl+A inside a transcript selects the transcript, not the whole page
+// (which the app-chrome `user-select: none` would turn into an empty or
+// surprising selection). Typing fields keep their own select-all.
+function selectTranscriptOnSelectAll(event: React.KeyboardEvent<HTMLElement>) {
+  if (event.key.toLowerCase() !== "a" || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+  const target = event.target as HTMLElement
+  if (target.closest("input, textarea, [contenteditable='true']")) return
+  const content = event.currentTarget.querySelector("[data-slot='message-scroller-content']")
+  const selection = window.getSelection()
+  if (!content || !selection) return
+  event.preventDefault()
+  const range = document.createRange()
+  range.selectNodeContents(content)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
 function MessageScrollerViewport({
   className,
+  onKeyDown,
   ...props
 }: React.ComponentProps<typeof MessageScrollerPrimitive.Viewport>) {
   return (
     <MessageScrollerPrimitive.Viewport
       data-slot="message-scroller-viewport"
+      // Focusable by click (not Tab) so Cmd/Ctrl+A lands here after the user
+      // clicks into the conversation.
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        onKeyDown?.(event)
+        if (!event.defaultPrevented) selectTranscriptOnSelectAll(event)
+      }}
       className={cn(
-        "size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content data-autoscrolling:scrollbar-thumb-transparent data-autoscrolling:scrollbar-track-transparent",
+        "outline-none size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content data-autoscrolling:scrollbar-thumb-transparent data-autoscrolling:scrollbar-track-transparent",
         className
       )}
       {...props}

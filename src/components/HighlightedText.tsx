@@ -1,5 +1,14 @@
-import { useMemo } from "react"
-import { cn } from "@/lib/utils"
+import { useMemo, type ReactNode } from "react"
+import { HEALTH_SPAN_CLASS } from "@/lib/completion/draft-health-spans"
+import {
+  buildDisplayChunks, rangeSpanClass,
+  type DisplayChunk, type HealthDisplaySpan, type RangeHighlight,
+} from "@/lib/richtext/rule-ranges"
+
+// AQU-1757: the range model and its underline classes live in
+// lib/richtext/rule-ranges so the rich-text source path draws identically.
+// The #946 health wash rides the same chunking, so its type lives there too.
+export type { HealthDisplaySpan, RangeHighlight }
 
 export const EXAMPLE_COLORS = [
   "#3b82f6", "#f97316", "#22c55e", "#a855f7",
@@ -11,20 +20,6 @@ export interface TokenHighlight {
   colorIndex: number
 }
 
-export interface RangeHighlight {
-  start: number
-  end: number
-  kind: "violation-major" | "violation-minor" | "violation-waived"
-  ruleId: string
-}
-
-/** When two ranges start at the same offset, the more severe one owns the span. */
-const KIND_PRECEDENCE: Record<RangeHighlight["kind"], number> = {
-  "violation-major": 0,
-  "violation-minor": 1,
-  "violation-waived": 2,
-}
-
 interface HighlightedTextProps {
   text: string
   /** Token-level evidence highlights (examples). Rendered only when
@@ -32,6 +27,8 @@ interface HighlightedTextProps {
   highlights?: TokenHighlight[]
   /** Byte-range violation highlights. Always rendered. */
   ranges?: RangeHighlight[]
+  /** Display-only AI-draft provenance wash (#946). Layers under violations. */
+  healthSpans?: HealthDisplaySpan[]
   showEvidence?: boolean
   /** Called with the rule id and the span element itself, so callers can
    *  anchor popovers to the violation glyph. Matches `TranslatedEditor.onRuleClick`. */
@@ -40,6 +37,7 @@ interface HighlightedTextProps {
 
 export function HighlightedText({
   text, highlights = [], ranges = [],
+  healthSpans = [],
   showEvidence = false, onRangeClick,
 }: HighlightedTextProps) {
   const highlightMap = useMemo(() => {
@@ -48,84 +46,92 @@ export function HighlightedText({
     return map
   }, [highlights])
 
-  const displayRanges = useMemo(
-    () => normalizeDisplayRanges(text, ranges),
-    [ranges, text],
+  const chunks = useMemo(
+    () => buildDisplayChunks(text, ranges, healthSpans),
+    [healthSpans, ranges, text],
   )
+  const hasRanges = chunks.some((chunk) => chunk.ranges.length > 0)
+  const hasHealth = chunks.some((chunk) => chunk.health)
 
-  if (highlights.length === 0 && displayRanges.length === 0) return <span>{text}</span>
+  if (highlights.length === 0 && !hasRanges && !hasHealth) return <span>{text}</span>
 
-  // First split into chunks honoring ranges; then in non-ranged chunks apply
-  // token-level evidence highlights when showEvidence is true.
-  //
-  // Ranges from different rules can overlap (EditorTable concatenates spans
-  // from every rule without merging), so each range is clamped to the cursor:
-  // the first range by start (severity-tiebroken) owns the shared sub-span,
-  // later ranges keep only their uncovered tail. Without the clamp the
-  // overlapping characters were emitted twice.
-  const chunks: Array<{ text: string; start: number; range?: RangeHighlight }> = []
-  let cursor = 0
-  for (const r of displayRanges) {
-    if (r.start > cursor) chunks.push({ text: text.slice(cursor, r.start), start: cursor })
-    const start = Math.max(r.start, cursor)
-    if (r.end <= start) continue // fully covered by an earlier range
-    chunks.push({ text: text.slice(start, r.end), start, range: r })
-    cursor = r.end
+  // A health wash is one element even where violation boundaries split the
+  // text inside it, so the wash stays continuous under the stacked underlines.
+  const groups: Array<{ health?: HealthDisplaySpan; chunks: DisplayChunk[] }> = []
+  for (const chunk of chunks) {
+    const prev = groups[groups.length - 1]
+    if (prev && prev.health === chunk.health) prev.chunks.push(chunk)
+    else groups.push({ health: chunk.health, chunks: [chunk] })
   }
-  if (cursor < text.length) chunks.push({ text: text.slice(cursor), start: cursor })
 
   return (
     <span>
-      {chunks.map((chunk, i) => {
-        if (chunk.range) {
-          const isTerminologyRange = chunk.range.ruleId.startsWith("term:")
-          return (
-            <span
-              key={i}
-              role={onRangeClick ? "button" : undefined}
-              tabIndex={onRangeClick ? 0 : undefined}
-              onClick={onRangeClick ? (e) => {
-                // A terminology blot can sit inside the managed-term popover
-                // trigger. Keep this click owned by the blot so one gesture
-                // never opens both popovers (AQU-1006 review regression).
-                e.stopPropagation()
-                onRangeClick(chunk.range!.ruleId, e.currentTarget)
-              } : undefined}
-              className={cn(
-                isTerminologyRange && "terminology-highlight",
-                chunk.range.kind === "violation-major" && "decoration-wavy decoration-red-500 underline underline-offset-[3px]",
-                chunk.range.kind === "violation-minor" && "decoration-wavy decoration-amber-500 underline underline-offset-[3px]",
-                chunk.range.kind === "violation-waived" && "decoration-wavy decoration-muted-foreground/60 underline underline-offset-[3px] opacity-60",
-              )}
-              data-rule-id={chunk.range.ruleId}
-            >
-              {chunk.text}
-            </span>
-          )
-        }
-        if (!showEvidence || highlights.length === 0) return <span key={i}>{chunk.text}</span>
-        return <EvidenceTokens key={i} text={chunk.text} highlightMap={highlightMap} />
-      })}
+      {groups.map((group, i) => (
+        <HealthSpanWrap key={i} span={group.health}>
+          {group.chunks.map((chunk) => {
+            if (chunk.ranges.length > 0) {
+              return <RangeStack key={chunk.start} chunk={chunk} onRangeClick={onRangeClick} />
+            }
+            if (showEvidence && highlights.length > 0) {
+              return <EvidenceTokens key={chunk.start} text={chunk.text} highlightMap={highlightMap} />
+            }
+            return <span key={chunk.start}>{chunk.text}</span>
+          })}
+        </HealthSpanWrap>
+      ))}
     </span>
   )
 }
 
-function normalizeDisplayRanges(text: string, ranges: RangeHighlight[]): RangeHighlight[] {
-  const length = text.length
-  const out: RangeHighlight[] = []
-  for (const range of ranges) {
-    const start = Math.max(0, Math.min(length, range.start))
-    const end = Math.max(0, Math.min(length, range.end))
-    if (start >= end) continue
-    out.push({ ...range, start, end })
+/** Nests one span per finding over the same characters, most severe innermost.
+ *  A click is owned by the innermost span under the pointer, so the most
+ *  severe finding wins a fully shared span while a partially overlapping one
+ *  stays clickable on the characters only it covers. */
+function RangeStack({
+  chunk, onRangeClick,
+}: { chunk: DisplayChunk; onRangeClick?: HighlightedTextProps["onRangeClick"] }) {
+  let node: ReactNode = chunk.text
+  for (let depth = 0; depth < chunk.ranges.length; depth++) {
+    const range = chunk.ranges[chunk.ranges.length - 1 - depth]
+    node = (
+      <span
+        role={onRangeClick ? "button" : undefined}
+        tabIndex={onRangeClick ? 0 : undefined}
+        onClick={onRangeClick ? (e) => {
+          // A terminology blot can sit inside the managed-term popover
+          // trigger, and a stacked finding sits inside another blot. Keep
+          // this click owned by the innermost span so one gesture never
+          // opens two popovers (AQU-1006 review regression).
+          e.stopPropagation()
+          onRangeClick(range.ruleId, e.currentTarget)
+        } : undefined}
+        className={rangeSpanClass(range, depth)}
+        data-rule-id={range.ruleId}
+      >
+        {node}
+      </span>
+    )
   }
-  out.sort(
-    (a, b) =>
-      a.start - b.start ||
-      KIND_PRECEDENCE[a.kind] - KIND_PRECEDENCE[b.kind] ||
-      b.end - a.end,
+  return <>{node}</>
+}
+
+function HealthSpanWrap({
+  span,
+  children,
+}: {
+  span?: HealthDisplaySpan
+  children: ReactNode
+}) {
+  if (!span) return <>{children}</>
+  return (
+    <span
+      data-health-span={span.kind}
+      title={span.title}
+      className={HEALTH_SPAN_CLASS[span.kind]}
+    >
+      {children}
+    </span>
   )
-  return out
 }
 
 function EvidenceTokens({ text, highlightMap }: { text: string; highlightMap: Map<string, number> }) {

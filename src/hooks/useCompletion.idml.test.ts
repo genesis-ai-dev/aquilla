@@ -247,9 +247,105 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(result.current.completing.get(cell.id)).toBeUndefined()
     expect(result.current.errors.get(cell.id)).toBeUndefined()
   })
+
+  it("aligns styles by committing slot text without drafting a new translation", async () => {
+    const unit = await parsedUnit()
+    const cell = completionCell(unit)
+    cell.translated = "Bonjour MONDE"
+    cell.translatedHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bonjour MONDE" : "",
+      })),
+    })
+    const bodies: string[] = []
+    mockCompletion(JSON.stringify({
+      slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "MONDE" }],
+    }), bodies)
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const record = vi.fn()
+    const { result } = renderCompletion(cell, commit, record)
+    search.mockClear()
+
+    let saved = false
+    await act(async () => {
+      saved = await result.current.alignCellStyles(cell as never)
+    })
+
+    expect(saved).toBe(true)
+    expect(search).not.toHaveBeenCalled()
+    expect(commit).toHaveBeenCalledWith(
+      cell,
+      expect.stringContaining("MONDE"),
+      "test-model",
+      expect.objectContaining({ mode: "align-styles", promptVersion: "align-styles-v1" }),
+    )
+    const committedHtml = commit.mock.calls[0]![1] as string
+    const checked = validateIdmlTranslation(unit.sourceHtml, committedHtml, unit.metadata)
+    expect(checked.valid).toBe(true)
+    expect(checked.slots[1]).toBe("MONDE")
+    const request = JSON.parse(bodies[0]!) as {
+      temperature: number
+      messages: Array<{ content: string }>
+    }
+    expect(request.temperature).toBe(0)
+    expect(request.messages[0]?.content).toContain("Do not translate")
+    expect(request.messages.some((message) => message.content.includes("protected-anchor"))).toBe(false)
+    // AQU-1656: the align draft leaves its prompt and reply in the AI trail.
+    const provenance = commit.mock.calls[0]![3] as { interventionId?: string }
+    expect(provenance.interventionId).toBeTruthy()
+    expect(record).toHaveBeenCalledTimes(1)
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      callId: provenance.interventionId,
+      kind: "draft",
+      mode: "align-styles",
+      messages: request.messages,
+      rawOutput: JSON.stringify({ slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "MONDE" }] }),
+      cells: [expect.objectContaining({
+        interventionId: provenance.interventionId,
+        cellId: cell.id,
+        output: committedHtml,
+      })],
+    }))
+    expect(result.current.completing.get(cell.id)).toBeUndefined()
+  })
+
+  it("does not save an align-styles reply that changes the wording", async () => {
+    const unit = await parsedUnit()
+    const cell = completionCell(unit)
+    cell.translated = "Bonjour MONDE"
+    cell.translatedHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bonjour MONDE" : "",
+      })),
+    })
+    mockCompletion(JSON.stringify({
+      slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "LE MONDE" }],
+    }), [])
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const record = vi.fn()
+    const { result } = renderCompletion(cell, commit, record)
+
+    let saved = true
+    await act(async () => {
+      saved = await result.current.alignCellStyles(cell as never)
+    })
+
+    expect(saved).toBe(false)
+    expect(commit).not.toHaveBeenCalled()
+    expect(record).not.toHaveBeenCalled()
+    expect(result.current.errors.get(cell.id)).toMatch(/changed the wording/)
+  })
 })
 
-function renderCompletion(cell: ReturnType<typeof completionCell>, commit: ReturnType<typeof vi.fn>) {
+function renderCompletion(
+  cell: ReturnType<typeof completionCell>,
+  commit: ReturnType<typeof vi.fn>,
+  record?: ReturnType<typeof vi.fn>,
+) {
   return renderHook(() => useCompletion(
     SETTINGS,
     "English",
@@ -262,6 +358,10 @@ function renderCompletion(cell: ReturnType<typeof completionCell>, commit: Retur
     [cell] as never,
     undefined,
     DEFAULT_DRAFT_CONTEXT,
+    "",
+    undefined,
+    undefined,
+    record as never,
   ))
 }
 

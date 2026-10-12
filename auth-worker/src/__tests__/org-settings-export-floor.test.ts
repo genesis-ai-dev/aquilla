@@ -100,4 +100,16 @@ describe("org-settings PATCH exportMinRole validation (AQU-253)", () => {
     const res = await patchSettings(maintainerJwt, { someOtherKey: "value" })
     expect(res.status).toBe(200)
   })
+
+  it("keeps an owner-only policy key when a maintainer's write omits it (pen test 2026-10-06)", async () => {
+    await seed()
+    const ownerJwt = await jwtFor("alice")
+    expect((await patchSettings(ownerJwt, { exportMinRole: 700 })).status).toBe(200)
+    const maintainerJwt = await jwtFor("bob")
+    const res = await patchSettings(maintainerJwt, { someOtherKey: "value" }, 1)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { settings: Record<string, unknown> }
+    expect(body.settings.exportMinRole).toBe(700)
+    expect(body.settings.someOtherKey).toBe("value")
+  })
 })

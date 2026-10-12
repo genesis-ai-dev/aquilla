@@ -23,10 +23,11 @@ import { AUTH_HINT } from './discovery-route'
 import { handleParseArtifact } from './import-parse'
 import { assertCredentialMayWrite, assertCredentialScope } from './token-bridge'
 import { uuidv7 } from './uuid'
+import { resolveAuthorshipPolicy } from './pii'
 import { r2KeyPrefix, audioObjectKey } from '../audio'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
-import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -54,11 +55,6 @@ const AUDIO_CONTENT_TYPES: Record<string, string> = {
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/artifacts(?:\/([^/]+)(?:\/(content|inspect|parse))?)?$/
 
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
-}
-
 function artifactR2Key(env: ExternalEnv, projectId: string, artifactId: string): string {
   return `${r2KeyPrefix(env)}artifacts/${projectId}/${artifactId}`
 }
@@ -82,16 +78,19 @@ export async function authArtifact(
   env: ExternalEnv,
   projectId: string,
   minRole: number,
-  opts: { writes?: boolean } = {},
+  /** `action` names the refused operation in the read-only message, so a
+   *  sibling write surface sharing this gate (the knowledge-base upload,
+   *  AQU-1762) does not tell its caller it cannot "upload an artifact". */
+  opts: { writes?: boolean; action?: string } = {},
 ): Promise<AuthResult> {
   const db = env.AQUILLA_PG
   if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
 
-  const cred = await validateApiCredential(db, bearer(request) ?? '', request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
 
   try {
-    if (opts.writes === true) assertCredentialMayWrite(cred, 'upload an artifact')
+    if (opts.writes === true) assertCredentialMayWrite(cred, opts.action ?? 'upload an artifact')
     await assertCredentialScope(db, cred, projectId)
   } catch (err) {
     return { ok: false, response: toErrorResponse(err) }
@@ -121,12 +120,16 @@ export interface ArtifactRow {
   created_at: unknown
 }
 
-function rowToMeta(row: ArtifactRow): Record<string, unknown> {
+function rowToMeta(row: ArtifactRow, exposeIdentity = false): Record<string, unknown> {
   return {
     artifactId: row.id,
     projectId: row.project_id,
-    uploadedByUserId: row.uploaded_by_user_id,
-    credentialId: row.credential_id,
+    // Uploader identity follows the same PII policy as every other Agent API
+    // payload (external/pii.ts): absent unless the credential is `pii` and the
+    // project hasn't opted out.
+    ...(exposeIdentity
+      ? { uploadedByUserId: row.uploaded_by_user_id, credentialId: row.credential_id }
+      : {}),
     name: row.name,
     contentType: row.content_type,
     sizeBytes: Number(row.size_bytes),
@@ -336,7 +339,8 @@ async function handleGetMeta(
   if (limited) return limited
   const row = await loadArtifact(db, projectId, artifactId)
   if (!row) return errorResponse('not_found', `artifact ${artifactId} not found`)
-  return Response.json({ artifact: rowToMeta(row) })
+  const policy = await resolveAuthorshipPolicy(db, authed.cred, projectId)
+  return Response.json({ artifact: rowToMeta(row, policy === 'real') })
 }
 
 // [Pen test] API security & data exposure (2026-08-20): unlike the knowledge

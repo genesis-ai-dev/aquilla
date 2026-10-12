@@ -98,7 +98,10 @@ describe("TeamThreadDetail activity groups", () => {
     expect(trigger.closest(".select-text")).toBeNull()
     await user.click(trigger)
     expect(onInspect).toHaveBeenCalledWith(
-      expect.objectContaining({ id: first.id, raw: { kind: "phase", details: first.details } }),
+      expect.objectContaining({
+        id: first.id,
+        raw: expect.objectContaining({ kind: "phase", details: first.details, runId: first.runId }),
+      }),
       trigger,
     )
   })

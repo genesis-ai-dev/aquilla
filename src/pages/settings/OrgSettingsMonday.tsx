@@ -8,7 +8,7 @@
 // app has no global toast system).
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { Check, CheckCircle2, Copy, ExternalLink, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -34,12 +34,14 @@ import {
   startMondayConnect,
   type MondayConnectionStatus,
 } from "@/lib/monday/api"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { openExternal } from "@/lib/open-external"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsMonday() {
   const { locale, t } = useI18n()
-  const { activeOrg, activeOrgId } = useActiveOrg()
+  const { activeOrg, activeOrgId, accessibleProjects, accessibleProjectsLoading, accessibleProjectsError, refreshAccessibleProjects } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const canManage = (activeOrg?.role?.level ?? 0) >= ROLE.MAINTAINER
@@ -124,6 +126,9 @@ export function OrgSettingsMonday() {
       )
       if (popup && !popup.closed) {
         popup.location.href = url
+      } else if (isTauriRuntime()) {
+        // The desktop WebView has no popups; use the system browser.
+        await openExternal(url)
       } else {
         // Popup still blocked (or closed) — same-tab navigation as fallback.
         window.location.assign(url)
@@ -295,6 +300,34 @@ export function OrgSettingsMonday() {
           {error && <p className="text-sm text-destructive">{error}</p>}
         </CardContent>
       </Card>
+
+      {connected && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("projectSettings.monday.orgNextLinkProjectsTitle")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              {t("projectSettings.monday.orgNextLinkProjectsDescription")}
+            </p>
+            {accessibleProjectsLoading ? <p role="status">{t("projectSettings.monday.orgProjectsLoading")}</p> : accessibleProjectsError ? (
+              <div role="alert">
+                <p>{accessibleProjectsError}</p>
+                <Button variant="outline" onClick={() => void refreshAccessibleProjects()}>{t("projectSettings.monday.orgProjectsRetry")}</Button>
+              </div>
+            ) : accessibleProjects.filter(project => project.orgId === activeOrgId).length === 0 ? (
+              <p>{t("projectSettings.monday.orgNoAccessibleProjects")}</p>
+            ) : accessibleProjects.filter(project => project.orgId === activeOrgId).map(project => (
+              <div key={project.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                <span className="font-medium">{project.name}</span>
+                <Link to={`/project/${project.id}/settings/integrations#section-monday`} className="text-sm underline">
+                  {project.role.level >= ROLE.MAINTAINER ? t("projectSettings.monday.orgSetUpOrManageBoard") : t("projectSettings.monday.orgViewIntegration")}
+                </Link>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Two-step connect: the install needs a Monday WORKSPACE admin, and a
           non-admin who hits Monday's consent screen gets a dead-end "not

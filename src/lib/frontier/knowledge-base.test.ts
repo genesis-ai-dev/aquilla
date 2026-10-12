@@ -4,6 +4,7 @@ import {
   getKnowledgeDocumentContent,
   isKnowledgeIndexStalled,
   KB_INDEX_STALE_MS,
+  KnowledgeBaseApiError,
   listKnowledgeDocuments,
   uploadKnowledgeDocument,
 } from "./knowledge-base"
@@ -45,6 +46,41 @@ describe("Knowledge Base API client", () => {
     expect(init.method).toBe("POST")
     expect(init.body).toBe(file)
     expect(new Headers(init.headers).get("x-doc-name")).toBe("style%20guide.md")
+  })
+
+  // AQU-1499: the boundary used to keep only the status, so a rejection the
+  // server had explained — a .docx whose word/document.xml is too bloated to
+  // read — reached the UI as "Could not upload X. Try again." on a retry that
+  // can never succeed.
+  it("keeps the server's explanation on a rejected upload", async () => {
+    const message =
+      "could not extract text: the document is too complex to read: word/document.xml is 39.5 MB, " +
+      'over the 64 MB limit. Re-saving the file from Word ("Save As" a new .docx) usually shrinks it.'
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(response({ error: { code: "validation_failed", message } }, 422)),
+    )
+    const file = new File(["bytes"], "The Real God_Arabic (1).docx")
+
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file)
+      .then(() => null, (err: unknown) => err)
+
+    expect(thrown).toBeInstanceOf(KnowledgeBaseApiError)
+    const err = thrown as KnowledgeBaseApiError
+    expect(err.status).toBe(422)
+    expect(err.serverMessage).toBe(message)
+  })
+
+  it("falls back to the status alone when the error body is not JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>502</html>", { status: 502 })))
+    const file = new File(["bytes"], "notes.md")
+
+    const thrown = await uploadKnowledgeDocument({ kind: "project", id: "p-1" }, "jwt", file)
+      .then(() => null, (err: unknown) => err)
+
+    expect(thrown).toBeInstanceOf(KnowledgeBaseApiError)
+    expect((thrown as KnowledgeBaseApiError).serverMessage).toBeUndefined()
+    expect((thrown as KnowledgeBaseApiError).status).toBe(502)
   })
 
   it("addresses extracted content by document and node id", async () => {

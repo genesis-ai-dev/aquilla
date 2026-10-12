@@ -18,6 +18,7 @@ import {
   isDeadlineOverdue,
 } from "@/lib/frontier/portfolio"
 import { getBookName, isKnownBookCode, getBookOrdinal } from "@/lib/file-labeling/bible-book-names"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 /** One row of the plan: progress for the active lane plus the PM's marks. */
 export interface PlanUnit {
@@ -671,9 +672,18 @@ export function planSummary(units: readonly PlanUnit[], now: number): PlanSummar
   return { total: units.length, done, overdue, inFlight, nearlyComplete }
 }
 
-/** A whole-number percentage, floored at 0 while a denominator is still zero. */
+/**
+ * A whole-number percentage, floored at 0 while a denominator is still zero.
+ *
+ * NEVER 100 WHILE ANY WORK IS LEFT (AQU-1493). Plain rounding put Genesis at
+ * "100%" with six verses still untranslated — anything within half a percent
+ * of the whole rounds up, which on a 1,200-cell book is six cells — right
+ * beside a row saying "6 cells to translate". 100 is reserved for part ===
+ * whole and everything short of it stops at 99 — the app-wide rule in
+ * `progressPercent`, which the sidebar and the org tables follow too.
+ */
 export function planPct(part: number, whole: number): number {
-  return whole > 0 ? Math.round((part / whole) * 100) : 0
+  return progressPercent(part, whole)
 }
 
 /** What the reader has narrowed the board to. Both are ephemeral by design. */

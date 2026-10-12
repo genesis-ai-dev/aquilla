@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 import { readFile } from "node:fs/promises"
 import { jwtFor, readSeededFileEvents } from "../../helpers/seed-project"
 import path from "node:path"
@@ -8,6 +9,170 @@ import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+
+// AQU-1566 (Sam's option b): a "Link video only" import has a video and no
+// rows; the first captions attached become its OWN rows (no track-editing
+// switch needed), the same as a caption export imported with the video. A
+// second caption file, once the file has rows, stays a timeline-only track.
+test("YouTube picture imports without captions; its first captions become its rows", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const projectName = `Picture only ${Date.now()}`
+  await dash.createProject({ name: projectName, source: "en", target: "fr" })
+  await dash.openProject(projectName)
+  const ws = new Workspace(alice)
+  const url = "https://www.youtube.com/watch?v=M7lc1UVf-VE"
+  await ws.importYouTubePicture(url, "Linked picture")
+  await ws.openFileBySubstring("Linked picture")
+  await ws.openMediaView()
+  await expect(alice.getByTestId("video-pane-media"))
+    .toHaveAttribute("src", url, { timeout: 30_000 })
+  await alice.reload()
+  await ws.openMediaView()
+  await expect(alice.getByTestId("video-pane-media"))
+    .toHaveAttribute("src", url, { timeout: 30_000 })
+  const [, projectId, fileId] = alice.url().match(/\/project\/([^/]+).*\/file\/([^/]+)/) ?? []
+  expect(projectId).toBeTruthy()
+  expect(fileId).toBeTruthy()
+  const jwt = await jwtFor("alice")
+  const before = await readSeededFileEvents(jwt, projectId, fileId)
+  expect(before.filter(event => event.kind === "file.video.set"))
+    .toEqual([expect.objectContaining({ payload: expect.objectContaining({ coreMediaUrl: url }) })])
+  expect(before.filter(event => event.kind === "source.cell.create")).toHaveLength(0)
+
+  // Track editing is still OFF: adding captions as rows does not need it.
+  await ws.openTextView()
+  const srt = Buffer.from("1\n00:00:02,000 --> 00:00:03,000\nLater caption\n\n"
+    + "2\n00:00:00,500 --> 00:00:01,500\nEarlier caption\n")
+  await ws.attachCaptionsAsRows({ name: "later.srt", mimeType: "text/plain", buffer: srt })
+  await alice.reload()
+  await ws.openTextView()
+  await expect(ws.cellRow(0)).toContainText("Earlier caption", { timeout: 30_000 })
+  await expect(ws.cellRow(1)).toContainText("Later caption")
+  await expect(alice.locator("[data-cell-id]")).toHaveCount(2)
+  const promoted = await readSeededFileEvents(jwt, projectId, fileId)
+  // The file became a subtitle file through a re-genesis that kept its video.
+  // GET /events lists newest first, so the re-genesis is the FIRST file.create.
+  expect(promoted.find(event => event.kind === "file.create")?.payload)
+    .toMatchObject({ fileType: "srt", kind: "srt",
+      projectionMeta: expect.objectContaining({ coreMediaUrl: url }) })
+  expect(promoted.filter(event => event.kind === "source.cell.create")).toHaveLength(2)
+  const downloadPromise = alice.waitForEvent("download")
+  await ws.clickDownloadOriginal()
+  const downloadedPath = await (await downloadPromise).path()
+  expect(downloadedPath).not.toBeNull()
+  expect(await readFile(downloadedPath!)).toEqual(srt)
+
+  // A second caption file on a file with rows is a timeline-only track, and
+  // the file's rows do not change.
+  const settings = new ProjectSettings(alice)
+  await settings.enableTimelineTracks(projectId)
+  await settings.backToEditor()
+  await ws.openFileBySubstring("Linked picture")
+  await ws.openMediaView()
+  await ws.previewCaptionTrack({ name: "track.srt", mimeType: "text/plain",
+    buffer: Buffer.from("1\n00:00:04,000 --> 00:00:05,000\nTrack caption\n") })
+  await ws.confirmCaptionTrack()
+  await alice.reload()
+  await ws.openMediaView()
+  await ws.zoomTimelineIn()
+  await expect(alice.getByText("Track caption", { exact: true }).first()).toBeVisible({ timeout: 30_000 })
+  await ws.openTextView()
+  await expect(ws.cellRow(0)).toContainText("Earlier caption", { timeout: 30_000 })
+  await expect(alice.locator("[data-cell-id]")).toHaveCount(2)
+  expect((await readSeededFileEvents(jwt, projectId, fileId))
+    .filter(event => event.kind === "source.cell.create")).toHaveLength(2)
+})
+
+test("YouTube original media generates captions through ASR and preserves source audio", async ({ alice }) => {
+  // The external ASR response is a fixture; import, R2, events and reload run live.
+  const asrRequests: Array<{ projectId: string; input_audio: { data: string; format: string } }> = []
+  await alice.route("**/api/v1/audio/transcriptions", async route => {
+    asrRequests.push(route.request().postDataJSON())
+    await route.fulfill({ json: { text: "Generated source wording", chunks: [
+      { text: "Generated source wording", start: 0, end: 0.5 },
+    ] } })
+  })
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const projectName = `YouTube ASR ${Date.now()}`
+  await dash.createProject({ name: projectName, source: "en", target: "fr" })
+  await dash.openProject(projectName)
+  const ws = new Workspace(alice)
+  const url = "https://www.youtube.com/watch?v=M7lc1UVf-VE"
+  await ws.previewYouTubeOriginalMedia(url,
+    path.resolve(__dirname, "../../fixtures/tone-segments.mp3"))
+  await ws.confirmYouTubeOriginalMedia()
+  await ws.openFileBySubstring("tone-segments.mp3")
+  await ws.openMediaView()
+  await expect(alice.getByTestId("video-pane-media"))
+    .toHaveAttribute("src", url, { timeout: 30_000 })
+  const [, projectId, fileId] = alice.url().match(/\/project\/([^/]+).*\/file\/([^/]+)/) ?? []
+  expect(projectId).toBeTruthy()
+  expect(fileId).toBeTruthy()
+  const jwt = await jwtFor("alice")
+  await expect.poll(async () => {
+    const events = await readSeededFileEvents(jwt, projectId, fileId)
+    return events.filter(event => event.kind === "cell.audio.attach"
+      && (event.payload as Record<string, unknown>).transcription === "Generated source wording").length
+  }, { timeout: 30_000 }).toBeGreaterThan(0)
+  expect(asrRequests.length).toBeGreaterThan(0)
+  for (const request of asrRequests) {
+    expect(request.projectId).toBe(projectId)
+    expect(request.input_audio.format).toBe("wav")
+    expect(Buffer.from(request.input_audio.data, "base64").subarray(0, 4).toString()).toBe("RIFF")
+  }
+  await alice.reload()
+  await ws.openMediaView()
+  await expect(alice.getByTestId("video-pane-media"))
+    .toHaveAttribute("src", url, { timeout: 30_000 })
+  const events = await readSeededFileEvents(jwt, projectId, fileId)
+  expect(events.filter(event => event.kind === "file.video.set")).toHaveLength(1)
+  expect(events.filter(event => event.kind === "cell.audio.attach"
+    && (event.payload as Record<string, unknown>).url?.toString().startsWith("frontier-audio://")).length).toBeGreaterThan(0)
+})
+
+test("YouTube original media offers embedded captions before publication", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const projectName = `YouTube embedded ${Date.now()}`
+  await dash.createProject({ name: projectName, source: "en", target: "fr" })
+  await dash.openProject(projectName)
+  const ws = new Workspace(alice)
+  const url = "https://www.youtube.com/watch?v=M7lc1UVf-VE"
+  await ws.previewYouTubeOriginalMedia(url,
+    path.resolve(__dirname, "../../fixtures/embedded-captions.m4a"))
+  await expect(alice.getByTestId("media-preview-row").nth(0)).toContainText("Embedded first caption.")
+  await expect(alice.getByTestId("media-preview-row").nth(1)).toContainText("Embedded second caption.")
+  await ws.confirmYouTubeOriginalMedia()
+  await ws.openFileBySubstring("embedded-captions.m4a")
+  await ws.openMediaView()
+  await expect(alice.getByTestId("video-pane-media"))
+    .toHaveAttribute("src", url, { timeout: 30_000 })
+  const [, projectId, fileId] = alice.url().match(/\/project\/([^/]+).*\/file\/([^/]+)/) ?? []
+  expect(projectId).toBeTruthy()
+  expect(fileId).toBeTruthy()
+  const events = await readSeededFileEvents(await jwtFor("alice"), projectId, fileId)
+  const attachments = events.filter(event => event.kind === "cell.audio.attach")
+    .map(event => event.payload as {
+      transcription: string; trimStartMs: number; trimEndMs: number
+    }).sort((a, b) => a.trimStartMs - b.trimStartMs)
+  expect(attachments).toMatchObject([
+    { transcription: "Embedded first caption.", trimStartMs: 500, trimEndMs: 1500 },
+    { transcription: "Embedded second caption.", trimStartMs: 2000, trimEndMs: 3000 },
+  ])
+  await alice.reload()
+  await ws.openMediaView()
+  await expect(ws.cellRow(0)).toContainText("Embedded first caption.")
+  const downloadPromise = alice.waitForEvent("download")
+  await ws.clickDownloadOriginal()
+  const download = await downloadPromise
+  const originalPath = await download.path()
+  expect(originalPath).not.toBeNull()
+  expect(await readFile(originalPath!)).toEqual(await readFile(
+    path.resolve(__dirname, "../../fixtures/embedded-captions.m4a"),
+  ))
+})
 
 test("imported video keeps its authenticated picture and range seeking after reload", async ({ alice }) => {
   const dash = new Dashboard(alice)

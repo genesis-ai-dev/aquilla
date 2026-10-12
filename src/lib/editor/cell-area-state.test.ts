@@ -42,6 +42,15 @@ describe("deriveCellAreaState", () => {
     ).toBe("ready-empty")
   })
 
+  it("keeps a linked picture usable before any caption segments exist", () => {
+    expect(deriveCellAreaState({ ...open, cellCount: 0, hasLinkedPicture: true }).kind)
+      .toBe("ready")
+    expect(deriveCellAreaState({ ...open, cellCount: 0, hasLinkedPicture: true,
+      cellsLoading: true }).kind).toBe("syncing-empty")
+    expect(deriveCellAreaState({ ...open, cellCount: 0, hasLinkedPicture: true,
+      cellsError: true }).kind).toBe("load-error")
+  })
+
   it("returns load-error instead of ready-empty when the cells read failed", () => {
     expect(
       deriveCellAreaState({ ...open, cellCount: 0, cellsError: true }).kind

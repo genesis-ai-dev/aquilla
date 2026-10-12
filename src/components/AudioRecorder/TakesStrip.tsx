@@ -152,6 +152,7 @@ export function TakesStrip({
   const audioValidation = useAudioValidation({
     project, fileId, cellId, username: author, jwt: session?.jwt ?? null,
     ...(targetLang ? { targetLang } : {}),
+    surface: "recorder",
   })
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)

@@ -284,6 +284,7 @@ export interface ColumnMapping {
  */
 import type { TranslatableString } from "./types"
 import { v4 as uuid } from "uuid"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 export interface MappedRow {
   id: string
@@ -301,9 +302,10 @@ export interface MappedRow {
 
 /**
  * Convert a timestamp string (HH:MM:SS, HH:MM:SS.mmm, or bare number of seconds)
- * to seconds. Returns undefined when unparseable.
+ * to seconds. Returns undefined when unparseable. Exported for the target
+ * import's Start/End columns (AQU-1375), so both read timestamps alike.
  */
-function parseTimestamp(s: string): number | undefined {
+export function parseTimestamp(s: string): number | undefined {
   const trimmed = s.trim()
   if (!trimmed) return undefined
   // Bare number
@@ -554,7 +556,10 @@ export function matchPairedRowsToSourceCells(
     }
     matchedRefs.add(row.ref)
     const currentText = cell.translated ?? ""
-    const parentId = cell.targetEventId ?? cell.sourceEventId ?? ""
+    const parentId = resolveTargetCommitParent({
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    }) ?? ""
     matched.push({
       cellId: cell.cellId,
       fileId: cell.fileId,

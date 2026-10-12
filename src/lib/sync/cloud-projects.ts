@@ -9,6 +9,7 @@ import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
 import { UserError } from "@/lib/errors/user-error"
+import { throwIfElevationRequired } from "@/lib/frontier/elevation"
 
 export interface CloudFileSummary {
   id: string
@@ -26,8 +27,14 @@ export interface CloudFileSummary {
   hasScriptureContent?: boolean
   /** Sidebar folder. Absent when the file is ungrouped. */
   corpusMarker?: string | null
-  sourceLanguage?: string | null
-  targetLanguage?: string | null
+  /** AQU-1569: hand-placed position within the sidebar group; absent/null when
+   *  nobody has reordered that group. */
+  sortIndex?: number | null
+  /** AQU-1596: what the file's header claimed at import. Import information,
+   *  never a lane's language — it can disagree with the lane the rows live in.
+   *  A language shown to a user comes off the lane, not off here. */
+  declaredSourceLanguage?: string | null
+  declaredTargetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
   orderedBy?: string
   sourceTextDirection?: "ltr" | "rtl" | null
@@ -101,6 +108,11 @@ export interface CloudProjectSummary {
   sourceLinkConsumes?: "source" | "target" | null
   sourceLinkGate?: "head" | "validated" | null
   sourceLinkCursor?: number | null
+  /** AQU-1559: which of the upstream's files the link follows (null = all of
+   *  them, now and later) and how many files the upstream holds. Single-project
+   *  endpoint only, like the rest of this family. */
+  sourceLinkFileIds?: string[] | null
+  sourceLinkUpstreamFileCount?: number | null
   role: {
     level: number
     name: string
@@ -137,6 +149,8 @@ export async function createCloudProject(
     },
     body: JSON.stringify(body),
   })
+  // AQU-1540: a platform admin creating into an org they don't belong to needs the code.
+  await throwIfElevationRequired(res, "project")
   if (!res.ok) {
     const body = await res.text().catch(() => "")
     throw new UserError(res.status, body, "project")
@@ -445,8 +459,14 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.bookCode ? { bookCode: f.bookCode } : {}),
       ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(f.corpusMarker?.trim() ? { corpusMarker: f.corpusMarker.trim() } : {}),
-      ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
-      ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
+      // Shape-checked rather than truthiness-checked, twice over: 0 is an
+      // ordinary position (a renumber stamps it on the first file), and this is
+      // raw JSON off the wire, so a NaN would otherwise reach the comparator.
+      ...(typeof f.sortIndex === "number" && Number.isFinite(f.sortIndex)
+        ? { sortIndex: f.sortIndex }
+        : {}),
+      ...(f.declaredSourceLanguage ? { declaredSourceLanguage: f.declaredSourceLanguage } : {}),
+      ...(f.declaredTargetLanguage ? { declaredTargetLanguage: f.declaredTargetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
       ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),
@@ -503,6 +523,13 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   if (summary.sourceLinkConsumes !== undefined) record.sourceLinkConsumes = summary.sourceLinkConsumes
   if (summary.sourceLinkGate !== undefined) record.sourceLinkGate = summary.sourceLinkGate
   if (summary.sourceLinkCursor !== undefined) record.sourceLinkCursor = summary.sourceLinkCursor
+  // AQU-1559: same treatment for the link's file selection — absent (older
+  // server, or the list endpoint) leaves it undefined, which the Source link
+  // card reads as "follows the whole project", the pre-slice behaviour.
+  if (summary.sourceLinkFileIds !== undefined) record.sourceLinkFileIds = summary.sourceLinkFileIds
+  if (summary.sourceLinkUpstreamFileCount !== undefined) {
+    record.sourceLinkUpstreamFileCount = summary.sourceLinkUpstreamFileCount
+  }
   return record
 }
 

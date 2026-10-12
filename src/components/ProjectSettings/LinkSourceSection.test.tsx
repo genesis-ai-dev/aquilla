@@ -29,7 +29,11 @@ import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { UserError } from "@/lib/errors/user-error"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { isLinkSeedFailed, resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
+import { pickSelectOption } from "@/test-utils/select"
+import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
 import { LinkSourceSection } from "./LinkSourceSection"
+
+const inherit = { ...INHERIT_DEFAULTS }
 
 const linkProjectSource = vi.fn()
 const triggerLinkSync = vi.fn()
@@ -43,9 +47,33 @@ vi.mock("@/lib/sync/archive", () => ({
 // stay about the step's behaviour — the clash arithmetic itself is pinned in
 // `src/lib/sync/link-source-preview.test.ts`.
 const loadLinkSourcePreview = vi.fn()
+// AQU-1605: the chain case now also asks WHICH of the upstream's translations
+// becomes this project's source. Mocked at the loader, like the preview above:
+// which lanes a caller may see is the server's answer (the read wall), pinned in
+// auth-worker's source-linking-lane-choice.test.ts. One lane by default, because
+// a single lane is pre-filled — so every case that predates this slice reads
+// exactly as it did, with the lane simply carried on the request.
+const loadUpstreamLaneChoices = vi.fn()
 
 vi.mock("@/lib/sync/link-source-preview", () => ({
   loadLinkSourcePreview: (...args: unknown[]) => loadLinkSourcePreview(...args),
+  loadUpstreamLaneChoices: (...args: unknown[]) => loadUpstreamLaneChoices(...args),
+}))
+
+const ONE_LANE = [{ id: "lane-upstream-default", label: "French" }]
+const TWO_LANES = [
+  { id: "lane-quebec", label: "Quebec French" },
+  { id: "lane-france", label: "France French" },
+]
+
+// AQU-1679: the server's comparison of one of this project's files with the
+// upstream file it could follow. Mocked at the fetch so these tests stay about
+// what the step does with the answer — the pairing itself is pinned in
+// `db/shared/link-file-match.test.ts` and the route in auth-worker.
+const fetchLinkFileMatches = vi.fn()
+
+vi.mock("@/lib/sync/link-file-match", () => ({
+  fetchLinkFileMatches: (...args: unknown[]) => fetchLinkFileMatches(...args),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -65,6 +93,31 @@ vi.mock("@/hooks/useAccessibleProjects", () => ({
 }))
 
 const PROJECT_ID = "proj-established"
+
+// AQU-1559: the preview now carries one ROW per upstream file — the confirm
+// step's checkbox list — and the count the step prints follows what is still
+// checked. Built from names here so the cases that predate the list read exactly
+// as they did, with every file checked on arrival.
+function previewOf(upstreamName: string, names: string[], clashing: string[] = []) {
+  const clash = new Set(clashing.map((n) => n.toLowerCase()))
+  const files = names.map((name) => ({
+    id: `up-${name}`,
+    name,
+    clashes: clash.has(name.toLowerCase()),
+  }))
+  return {
+    upstreamName,
+    files,
+    fileCount: files.length,
+    clashingNames: files.filter((f) => f.clashes).map((f) => f.name),
+  }
+}
+
+const UPSTREAM_FILES = ["MAT", "MRK", "LUK"]
+// A clashing row's checkbox carries its "same name here" marker in its
+// accessible name, so match on the file name's start rather than the whole.
+const fileCheckbox = (name: string) =>
+  screen.getByRole("checkbox", { name: new RegExp(`^${name}\\b`) })
 
 function summary(id: string, name: string, extra: Partial<CloudProjectSummary> = {}): CloudProjectSummary {
   // Viewer-level role: the picker must still offer it — viewer access to the
@@ -106,6 +159,11 @@ async function pick(
   await user.click(screen.getByRole("combobox", { name: "Source project" }))
   await user.click(await screen.findByRole("option", { name }))
   await user.click(corpusRadio(corpus))
+  // AQU-1605: the chain case waits for the lane list — pre-filled at one lane,
+  // which is what the default mock returns.
+  if (corpus === "target") {
+    await screen.findByRole("combobox", { name: "Which of its translations?" })
+  }
   // AQU-1526: the pick alone links nothing — it opens the confirm step.
   await user.click(reviewButton())
   await waitFor(() => expect(screen.queryByRole("button", { name: "Review what will be added" })).toBeNull())
@@ -116,11 +174,10 @@ beforeEach(() => {
   triggerLinkSync.mockReset()
   resetLinkSeedStatusForTests()
   loadLinkSourcePreview.mockReset()
-  loadLinkSourcePreview.mockResolvedValue({
-    upstreamName: "English Source",
-    fileCount: 3,
-    clashingNames: [],
-  })
+  loadLinkSourcePreview.mockResolvedValue(previewOf("English Source", UPSTREAM_FILES))
+  loadUpstreamLaneChoices.mockReset()
+  loadUpstreamLaneChoices.mockResolvedValue(ONE_LANE)
+  fetchLinkFileMatches.mockReset()
   navigationError = null
   navigationProjects = [
     summary("proj-upstream", "English Source"),
@@ -157,6 +214,7 @@ describe("LinkSourceSection", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "source",
+      inherit,
     })
     // The server seeded inside the same call, so no client self-heal needed.
     expect(triggerLinkSync).not.toHaveBeenCalled()
@@ -282,11 +340,9 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
   // not "refuse".
   it("names the same-named files before linking and still allows the link", async () => {
     const user = userEvent.setup()
-    loadLinkSourcePreview.mockResolvedValue({
-      upstreamName: "English Source",
-      fileCount: 3,
-      clashingNames: ["MRK"],
-    })
+    loadLinkSourcePreview.mockResolvedValue(
+      previewOf("English Source", UPSTREAM_FILES, ["MRK"]),
+    )
     linkProjectSource.mockResolvedValue({
       projectId: PROJECT_ID,
       sourceProjectId: "proj-upstream",
@@ -320,11 +376,7 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
   // nothing to collide, the step is the count and nothing else.
   it("shows only the count when no upstream name matches", async () => {
     const user = userEvent.setup()
-    loadLinkSourcePreview.mockResolvedValue({
-      upstreamName: "English Source",
-      fileCount: 3,
-      clashingNames: [],
-    })
+    loadLinkSourcePreview.mockResolvedValue(previewOf("English Source", UPSTREAM_FILES))
     renderSection(700)
 
     await pick(user, "English Source")
@@ -340,11 +392,7 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
   // so this state gets its own sentence and keeps the confirm action live.
   it("says nothing will be added yet for an empty upstream, and still links", async () => {
     const user = userEvent.setup()
-    loadLinkSourcePreview.mockResolvedValue({
-      upstreamName: "Fresh Project",
-      fileCount: 0,
-      clashingNames: [],
-    })
+    loadLinkSourcePreview.mockResolvedValue(previewOf("Fresh Project", []))
     renderSection(700)
 
     await pick(user, "English Source")
@@ -371,11 +419,9 @@ describe("LinkSourceSection — pre-link preview (AQU-1526)", () => {
     expect(linkButton().hasAttribute("disabled")).toBe(true)
     expect(linkProjectSource).not.toHaveBeenCalled()
 
-    loadLinkSourcePreview.mockResolvedValue({
-      upstreamName: "English Source",
-      fileCount: 3,
-      clashingNames: ["MRK"],
-    })
+    loadLinkSourcePreview.mockResolvedValue(
+      previewOf("English Source", UPSTREAM_FILES, ["MRK"]),
+    )
     await user.click(screen.getByRole("button", { name: "Try again" }))
 
     expect(
@@ -433,7 +479,10 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
     expect(reviewButton().hasAttribute("disabled")).toBe(true)
 
     await user.click(corpusRadio("target"))
-    expect(reviewButton().hasAttribute("disabled")).toBe(false)
+    // AQU-1605: the chain case has a second question. With one lane it is
+    // pre-filled, so the step opens as soon as the list lands.
+    await screen.findByRole("combobox", { name: "Which of its translations?" })
+    await waitFor(() => expect(reviewButton().hasAttribute("disabled")).toBe(false))
     expect(linkProjectSource).not.toHaveBeenCalled()
   })
 
@@ -470,6 +519,10 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
       sourceProjectId: "proj-upstream",
       mode: "live",
       consumes: "target",
+      // AQU-1605: the upstream lane the chain link consumes — pre-filled here,
+      // since this upstream has one translation the caller may see.
+      laneId: "lane-upstream-default",
+      inherit,
     })
   })
 
@@ -503,6 +556,7 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
         sourceProjectId: "proj-upstream",
         mode: "live",
         consumes: "source",
+        inherit,
       }),
     )
   })
@@ -533,6 +587,104 @@ describe("LinkSourceSection — corpus choice (AQU-1528)", () => {
     expect(corpusRadio("source").getAttribute("aria-checked")).toBe("false")
     expect(corpusRadio("target").getAttribute("aria-checked")).toBe("false")
     expect(reviewButton().hasAttribute("disabled")).toBe(true)
+  })
+})
+
+// AQU-1605 — WHICH of the upstream's translations the chain case consumes.
+//
+// Why these tests exist: "One of its Targets" used to send no lane, and the
+// server read whichever of the upstream's lanes carried the empty legacy tag. An
+// upstream translating into several languages could only be chained from on one
+// of them, by accident of history. The flow now asks — and only about lanes this
+// caller may see, which is the server's answer, not the picker's.
+describe("LinkSourceSection — which upstream translation (AQU-1605)", () => {
+  it("asks only for the chain case", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(corpusRadio("source"))
+
+    expect(screen.queryByText("Which of its translations?")).toBeNull()
+    expect(loadUpstreamLaneChoices).not.toHaveBeenCalled()
+  })
+
+  it("will not go forward until one of several lanes is chosen, and sends it", async () => {
+    const user = userEvent.setup()
+    loadUpstreamLaneChoices.mockResolvedValue(TWO_LANES)
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "target",
+      gate: "validated",
+      laneId: "lane-france",
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(corpusRadio("target"))
+
+    await screen.findByRole("combobox", { name: "Which of its translations?" })
+    expect(reviewButton().hasAttribute("disabled")).toBe(true)
+
+    await pickSelectOption("Which of its translations?", "France French")
+    await waitFor(() => expect(reviewButton().hasAttribute("disabled")).toBe(false))
+
+    await user.click(reviewButton())
+    // The picker is off screen by now, so the confirm step names the lane
+    // itself — otherwise it reads identically for every lane of the upstream.
+    expect(await screen.findByText("translation: France French")).toBeTruthy()
+
+    await user.click(linkButton())
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "target",
+      laneId: "lane-france",
+      inherit,
+    })
+  })
+
+  it("offers exactly the lanes the server returned", async () => {
+    // A read-walled member gets back the one lane they are granted, of an
+    // upstream that has several. The flow must not add a default lane to that.
+    const user = userEvent.setup()
+    loadUpstreamLaneChoices.mockResolvedValue([{ id: "lane-granted", label: "Quebec French" }])
+    renderSection(700)
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(corpusRadio("target"))
+
+    const select = await screen.findByRole("combobox", { name: "Which of its translations?" })
+    await user.click(select)
+    const options = await screen.findAllByRole("option")
+    expect(options.map((o) => o.textContent)).toEqual(["Quebec French"])
+  })
+
+  it("says so, with a retry, when the lane list cannot be read", async () => {
+    const user = userEvent.setup()
+    loadUpstreamLaneChoices.mockRejectedValueOnce(new Error("boom"))
+    renderSection(700)
+
+    await user.click(screen.getByRole("combobox", { name: "Source project" }))
+    await user.click(await screen.findByRole("option", { name: "English Source" }))
+    await user.click(corpusRadio("target"))
+
+    expect(await screen.findByText("Couldn't load this project's translations.")).toBeTruthy()
+    expect(reviewButton().hasAttribute("disabled")).toBe(true)
+
+    loadUpstreamLaneChoices.mockResolvedValue(ONE_LANE)
+    await user.click(tryAgainButton())
+    expect(
+      await screen.findByRole("combobox", { name: "Which of its translations?" }),
+    ).toBeTruthy()
   })
 })
 
@@ -654,5 +806,416 @@ describe("LinkSourceSection — the first sync failed (AQU-1544)", () => {
     expect(triggerLinkSync).not.toHaveBeenCalled()
     expect(screen.queryByText(SEED_FAILED)).toBeNull()
     expect(isLinkSeedFailed(PROJECT_ID)).toBe(false)
+  })
+})
+
+// AQU-1559 — picking WHICH of the upstream's files to follow. The confirm step
+// used to state a count and offer no choice, so a team that wanted one book out
+// of a whole Bible got all 66 and had to delete the rest by hand — and the link
+// kept bringing the upstream's later files in as well. These tests pin the list,
+// that everything the step already said now follows the selection, and that the
+// request distinguishes the two outcomes: all files checked = follow the whole
+// project (unchanged), anything unchecked = follow exactly this list.
+describe("LinkSourceSection — picking upstream files (AQU-1559)", () => {
+  // WHY: the default has to stay the behaviour every existing link has. Arriving
+  // all-checked is what makes the stock press of "Link source project" the same
+  // whole-project link as before, with the list there for the lead who wants
+  // less.
+  it("lists every upstream file checked, with the count equal to the list", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+
+    expect(await screen.findByText("Link to English Source?")).toBeTruthy()
+    for (const name of UPSTREAM_FILES) {
+      expect((fileCheckbox(name) as HTMLElement).getAttribute("aria-checked")).toBe("true")
+    }
+    expect(screen.getByText("3 source files will be added to this project.")).toBeTruthy()
+    expect(
+      screen.getByText(/follows the whole project, so files the source project adds later/i),
+    ).toBeTruthy()
+  })
+
+  // WHY: the count is the promise the link keeps, so it has to be the number of
+  // files still checked rather than the size of the upstream — and it has to say
+  // out loud that a subset link stops following what the upstream gains later,
+  // because the checkboxes alone cannot show that.
+  it("follows the selection in the count and in what the link will keep receiving", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(await screen.findByRole("checkbox", { name: "LUK" }))
+
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+    expect(
+      screen.getByText(/only the files you picked.*will not arrive here on their own/i),
+    ).toBeTruthy()
+  })
+
+  // WHY: an upstream can hold 66 files or more, so flipping them one at a time
+  // is not a workflow. One control does all of them, both ways.
+  it("checks and unchecks every file with one control", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+    const all = await screen.findByRole("checkbox", { name: "All files" })
+
+    await user.click(all)
+    for (const name of UPSTREAM_FILES) {
+      expect(fileCheckbox(name).getAttribute("aria-checked")).toBe("false")
+    }
+
+    await user.click(all)
+    for (const name of UPSTREAM_FILES) {
+      expect(fileCheckbox(name).getAttribute("aria-checked")).toBe("true")
+    }
+  })
+
+  // WHY: a link that follows no files is a mistake rather than a link — it could
+  // never sync anything — so the step says what is missing and the action is
+  // unavailable until a file is picked.
+  it("refuses a link with nothing checked and says a file must be picked", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(await screen.findByRole("checkbox", { name: "All files" }))
+
+    expect(screen.getByText("Pick at least one file to link.")).toBeTruthy()
+    expect(screen.queryByText(/source files will be added/i)).toBeNull()
+    expect(linkButton().hasAttribute("disabled")).toBe(true)
+
+    await user.click(linkButton())
+    expect(linkProjectSource).not.toHaveBeenCalled()
+  })
+
+  // WHY: the two outcomes are different products. A subset has to reach the
+  // server as the picked UPSTREAM file ids — ids, so the selection survives a
+  // rename upstream — and nothing else may travel with it.
+  it("posts the picked upstream file ids for a subset link", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      fileIds: ["up-MAT", "up-MRK"],
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(await screen.findByRole("checkbox", { name: "LUK" }))
+    await user.click(linkButton())
+
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      fileIds: ["up-MAT", "up-MRK"],
+      inherit,
+    })
+  })
+
+  // WHY: the regression guard on the unchanged half. Every file left checked
+  // must post NO file list at all — that absence is what keeps the link
+  // following the whole project, so a file the upstream gains later still
+  // arrives. Sending the full list instead would silently pin the link.
+  it("sends no file list when every file is left checked", async () => {
+    const user = userEvent.setup()
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      fileIds: null,
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(linkButton())
+
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      inherit,
+    })
+  })
+
+  // WHY: an empty upstream has nothing to pick, so it must not fall into the
+  // "nothing checked" refusal — it is a legitimate whole-project link whose
+  // files arrive as the upstream gains them.
+  it("links an empty upstream with no list and no file ids", async () => {
+    const user = userEvent.setup()
+    loadLinkSourcePreview.mockResolvedValue(previewOf("Fresh Project", []))
+    linkProjectSource.mockResolvedValue({
+      projectId: PROJECT_ID,
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      gate: "validated",
+      fileIds: null,
+      previousSourceProjectId: null,
+      seeded: true,
+    })
+    const { onLinked } = renderSection(700)
+
+    await pick(user, "English Source")
+
+    expect(await screen.findByText(/no source files yet, so nothing will be added now/i)).toBeTruthy()
+    expect(screen.queryByRole("checkbox", { name: "All files" })).toBeNull()
+    expect(screen.queryByText("Pick at least one file to link.")).toBeNull()
+    expect(linkButton().hasAttribute("disabled")).toBe(false)
+
+    await user.click(linkButton())
+    await waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource).toHaveBeenCalledWith("tok", PROJECT_ID, {
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      inherit,
+    })
+  })
+
+  // WHY: the same-name warning is about what is COMING. Unchecking the clashing
+  // file takes it out of the warning, and with no checked clash left the warning
+  // goes entirely — otherwise the step would warn about a duplicate it is no
+  // longer going to create.
+  it("warns only about clashing files that are still checked", async () => {
+    const user = userEvent.setup()
+    loadLinkSourcePreview.mockResolvedValue(
+      previewOf("English Source", UPSTREAM_FILES, ["MRK"]),
+    )
+    renderSection(700)
+
+    await pick(user, "English Source")
+
+    const warning = await screen.findByRole("alert")
+    expect(warning.textContent).toContain("MRK")
+
+    await user.click(fileCheckbox("MRK"))
+
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+  })
+
+  // WHY: backing out must forget the pick, not carry it into the next review —
+  // the next upstream's files are different files, and a half-remembered
+  // selection would link the wrong set.
+  it("starts from all-checked again after cancelling back to the picker", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+
+    await pick(user, "English Source")
+    await user.click(await screen.findByRole("checkbox", { name: "LUK" }))
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(reviewButton())
+
+    expect(
+      await screen.findByText("3 source files will be added to this project."),
+    ).toBeTruthy()
+    expect(linkProjectSource).not.toHaveBeenCalled()
+  })
+})
+
+describe("LinkSourceSection — replacing the source of a file already here (AQU-1679)", () => {
+  // A preview where this project already has one MRK of its own.
+  function previewWithOwnMark() {
+    const preview = previewOf("English Source", UPSTREAM_FILES, ["MRK"])
+    return {
+      ...preview,
+      files: preview.files.map((f) => (f.name === "MRK" ? { ...f, clashFileId: "own-mrk" } : f)),
+    }
+  }
+  function matchOf(extra: Record<string, unknown> = {}) {
+    return {
+      upstreamFileId: "up-MRK",
+      fileId: "own-mrk",
+      missing: false,
+      upstreamLines: 678,
+      localLines: 678,
+      same: 678,
+      changed: 0,
+      added: 0,
+      kept: 0,
+      canReplace: true,
+      ...extra,
+    }
+  }
+  const replaceCheckbox = () =>
+    screen.getByRole("checkbox", {
+      name: "Replace the source in my existing MRK and keep its translations",
+    })
+
+  beforeEach(() => {
+    loadLinkSourcePreview.mockResolvedValue(previewWithOwnMark())
+    linkProjectSource.mockResolvedValue({ seeded: true })
+  })
+
+  // WHY: adding alongside is still what a link does unless the lead says
+  // otherwise. The option must arrive off, and an untouched confirm must send
+  // exactly the request it sent before this slice.
+  it("offers the option off by default, and links as before when it is left off", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+    await pick(user, "English Source")
+
+    expect((await screen.findByRole("alert")).textContent).toContain("MRK")
+    expect(replaceCheckbox().getAttribute("aria-checked")).toBe("false")
+    // Only the file with a counterpart here offers it.
+    expect(screen.getAllByRole("checkbox", { name: /^Replace the source/ })).toHaveLength(1)
+
+    await user.click(linkButton())
+
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).toEqual({
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      inherit,
+    })
+    expect(fetchLinkFileMatches).not.toHaveBeenCalled()
+  })
+
+  // WHY: the whole feature. Turning it on has to say what will happen first,
+  // stop warning about a duplicate that is no longer coming, and send the pair.
+  it("shows how the files compare, drops the duplicate warning, and posts the pair", async () => {
+    const user = userEvent.setup()
+    fetchLinkFileMatches.mockResolvedValue([matchOf({ same: 670, changed: 5, added: 3, kept: 2 })])
+    renderSection(700)
+    await pick(user, "English Source")
+    await screen.findByRole("alert")
+
+    await user.click(replaceCheckbox())
+
+    expect(await screen.findByText("670 of 678 lines are the same in both files.")).toBeTruthy()
+    expect(fetchLinkFileMatches).toHaveBeenCalledWith("tok", PROJECT_ID, "proj-upstream", [
+      { upstreamFileId: "up-MRK", fileId: "own-mrk" },
+    ])
+    expect(
+      screen.getByText(
+        "5 lines differ and will take the source project's text. Their translations will be flagged as source changed.",
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText("3 lines only the source project has will be added to your file.")).toBeTruthy()
+    expect(screen.getByText("2 lines only your file has will stay as they are.")).toBeTruthy()
+    // MRK no longer arrives as a copy: two files are added, one follows the link.
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.getByText("2 source files will be added to this project.")).toBeTruthy()
+    expect(
+      screen.getByText(
+        "1 file you already have will take its source from this link and keep its translations.",
+      ),
+    ).toBeTruthy()
+
+    await user.click(linkButton())
+
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).toEqual({
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      replaceFiles: [{ upstreamFileId: "up-MRK", fileId: "own-mrk" }],
+      inherit,
+    })
+  })
+
+  // WHY: sharing a name is not sharing content. A replace the server says makes
+  // no sense must not be confirmable — and turning it off must put the lead
+  // straight back on the path that always worked.
+  it("will not link while a replace is not possible, and links again once it is turned off", async () => {
+    const user = userEvent.setup()
+    fetchLinkFileMatches.mockResolvedValue([matchOf({ same: 12, changed: 666, canReplace: false })])
+    renderSection(700)
+    await pick(user, "English Source")
+    await screen.findByRole("alert")
+
+    await user.click(replaceCheckbox())
+
+    expect(
+      await screen.findByText(
+        "These two files are not the same material: only 12 of 678 lines match. " +
+          "Turn this off to add the file as a separate copy.",
+      ),
+    ).toBeTruthy()
+    expect(linkButton().hasAttribute("disabled")).toBe(true)
+
+    await user.click(replaceCheckbox())
+
+    expect(linkButton().hasAttribute("disabled")).toBe(false)
+    await user.click(linkButton())
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).not.toHaveProperty("replaceFiles")
+  })
+
+  // WHY: no answer is not a yes. If the comparison cannot be made the link must
+  // wait, and asking again has to be possible without leaving the step.
+  it("holds the link when the comparison fails, and compares again when asked", async () => {
+    const user = userEvent.setup()
+    fetchLinkFileMatches.mockRejectedValueOnce(new UserError(500, "", "project"))
+    fetchLinkFileMatches.mockResolvedValueOnce([matchOf()])
+    renderSection(700)
+    await pick(user, "English Source")
+    await screen.findByRole("alert")
+
+    await user.click(replaceCheckbox())
+    expect(await screen.findByText(/Couldn't compare the two files\./)).toBeTruthy()
+    expect(linkButton().hasAttribute("disabled")).toBe(true)
+
+    await user.click(replaceCheckbox())
+    await user.click(replaceCheckbox())
+
+    expect(await screen.findByText("678 of 678 lines are the same in both files.")).toBeTruthy()
+    expect(linkButton().hasAttribute("disabled")).toBe(false)
+  })
+
+  // WHY: an unchecked file is not coming at all, so it can replace nothing —
+  // the request must not carry a pair for a file outside its own selection
+  // (the server refuses that link outright).
+  it("sends no pair for a file that is then unchecked", async () => {
+    const user = userEvent.setup()
+    fetchLinkFileMatches.mockResolvedValue([matchOf()])
+    renderSection(700)
+    await pick(user, "English Source")
+    await screen.findByRole("alert")
+    await user.click(replaceCheckbox())
+    await screen.findByText("678 of 678 lines are the same in both files.")
+
+    await user.click(fileCheckbox("MRK"))
+
+    expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
+    await user.click(linkButton())
+    await waitFor(() => expect(linkProjectSource).toHaveBeenCalledTimes(1))
+    expect(linkProjectSource.mock.calls[0][2]).toEqual({
+      sourceProjectId: "proj-upstream",
+      mode: "live",
+      consumes: "source",
+      fileIds: ["up-MAT", "up-LUK"],
+      inherit,
+    })
+  })
+
+  // WHY: a chain link's source is the upstream's TRANSLATIONS. A file imported
+  // on its own cannot line up with those, and the server refuses the request.
+  it("does not offer the option on a chain link", async () => {
+    const user = userEvent.setup()
+    renderSection(700)
+    await pick(user, "English Source", "target")
+
+    await screen.findByRole("alert")
+    expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
   })
 })

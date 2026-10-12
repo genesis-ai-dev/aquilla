@@ -59,6 +59,7 @@ test("OAuth browser consent grants Act to selected current organizations only (A
     response_type: "code", client_id: "https://chatgpt.com/oauth/client.json",
     redirect_uri: callback, code_challenge: createHash("sha256").update(verifier).digest("base64url"),
     code_challenge_method: "S256", state: "browser-org-snapshot", scope: "ask",
+    resource: `${sync}/api/v1/external/mcp`,
   })
   // Capture the host callback without navigating to a real ChatGPT session.
   await alice.route(`${callback}**`, route => route.fulfill({ body: "OAuth callback received" }))
@@ -82,12 +83,22 @@ test("OAuth browser consent grants Act to selected current organizations only (A
   expect(credential.scope).toBe("act")
   const headers = { Authorization: `Bearer ${credential.access_token}` }
   const future = await createOrganization("OAuth future membership")
-  const response = await fetch(`${sync}/api/v1/external/orgs`, { headers })
-  expect(response.status).toBe(200)
-  const body = await response.json() as { data: { id: string }[] }
-  expect(body.data.map(org => String(org.id))).toContain(String(included.id))
-  expect(body.data.map(org => String(org.id))).not.toContain(String(excluded.id))
-  expect(body.data.map(org => String(org.id))).not.toContain(String(future.id))
-  const me = await fetch(`${sync}/api/v1/external/me`, { headers })
-  expect(await me.json()).toMatchObject({ mode: "act", orgIds: expect.arrayContaining([String(included.id)]) })
+  async function callMcp(name: string) {
+    const response = await fetch(`${sync}/api/v1/external/mcp`, {
+      method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } }),
+    })
+    expect(response.status).toBe(200)
+    const body = await response.json() as { result: { content: { text: string }[]; isError?: boolean } }
+    expect(body.result.isError).not.toBe(true)
+    return JSON.parse(body.result.content[0].text)
+  }
+  const body = await callMcp("list_orgs") as { orgs: { id: string }[] }
+  expect(body.orgs.map(org => String(org.id))).toContain(String(included.id))
+  expect(body.orgs.map(org => String(org.id))).not.toContain(String(excluded.id))
+  expect(body.orgs.map(org => String(org.id))).not.toContain(String(future.id))
+  expect(await callMcp("get_identity_and_scope"))
+    .toMatchObject({ mode: "act", orgIds: expect.arrayContaining([String(included.id)]) })
+  // OAuth resource scope is separate from the user's live permission ceiling.
+  expect((await fetch(`${sync}/api/v1/external/me`, { headers })).status).toBe(401)
 })

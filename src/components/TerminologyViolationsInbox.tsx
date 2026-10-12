@@ -16,6 +16,7 @@ import { ChevronDown, ChevronRight, FileText, ShieldAlert } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
+import type { TerminologyViolationRow } from "@/lib/terminology/project-scan"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
@@ -25,13 +26,22 @@ import {
   violationCellRef,
   type ConceptViolationGroup,
 } from "@/lib/terminology/violations-inbox"
+import type { RuleInfraction } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 interface Props {
   concepts: Concept[]
-  /** Loaded project cells (flattened across files). */
-  cells: CellData[]
+  /**
+   * Loaded project cells. Used when the caller already holds them. The
+   * glossary passes `rows` instead, so opening Violations does not download
+   * every verse.
+   */
+  cells?: CellData[]
+  /** Infringements already found by the server scan. */
+  rows?: TerminologyViolationRow[]
+  /** The scan stopped early or the response omitted further infringements. */
+  truncated?: boolean
   /** Jump back to the editor focused on the offending cell, when supported. */
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
   /** AQU-1271: project-level source-matching defaults, from `project.termMatching`. */
@@ -43,7 +53,9 @@ interface Props {
 
 export function TerminologyViolationsInbox({
   concepts,
-  cells,
+  cells = [],
+  rows,
+  truncated = false,
   onJumpToCell,
   termMatching,
   files,
@@ -51,8 +63,10 @@ export function TerminologyViolationsInbox({
   const t = useT()
   // Compile active concepts → rules and evaluate over the loaded cells. This is
   // the same derive-on-read path the editor uses; it only runs while mounted
-  // (the caller mounts this only on the active Violations tab).
+  // (the caller mounts this only on the active Violations tab). A `rows` list
+  // is already the result of that scan on the server.
   const groups = useMemo<ConceptViolationGroup[]>(() => {
+    if (rows) return groupsFromRows(rows)
     const termRules = compileConceptsToRules(concepts, termMatching)
     if (termRules.length === 0) return []
     const byFile = new Map<string, CellData[]>()
@@ -64,13 +78,25 @@ export function TerminologyViolationsInbox({
     const infractionMap = checkRules(byFile, termRules)
     const flat = [...infractionMap.values()].flat()
     return groupTerminologyInfractions(flat, concepts)
-  }, [concepts, cells, termMatching])
+  }, [concepts, cells, rows, termMatching])
 
   const cellById = useMemo(() => {
     const m = new Map<string, CellData>()
+    if (rows) {
+      for (const row of rows) {
+        m.set(row.cellId, {
+          id: row.cellId,
+          fileId: row.fileId,
+          original: row.original,
+          translated: row.translated,
+          context: row.context,
+        } as CellData)
+      }
+      return m
+    }
     for (const c of cells) m.set(c.id, c)
     return m
-  }, [cells])
+  }, [cells, rows])
 
   const fileNameById = useMemo(() => {
     const m = new Map<string, string>()
@@ -102,6 +128,9 @@ export function TerminologyViolationsInbox({
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">{t("terminology.violations.description")}</p>
+        {truncated && (
+          <p className="text-xs text-muted-foreground">{t("terminology.violations.truncated")}</p>
+        )}
 
         {groups.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-12 text-center text-muted-foreground">
@@ -241,5 +270,41 @@ function ConceptViolationRow({
         </ul>
       )}
     </li>
+  )
+}
+
+function groupsFromRows(rows: TerminologyViolationRow[]): ConceptViolationGroup[] {
+  const byConcept = new Map<string, ConceptViolationGroup>()
+  for (const row of rows) {
+    let group = byConcept.get(row.conceptId)
+    if (!group) {
+      group = {
+        conceptId: row.conceptId,
+        sourceTerm: row.sourceTerm,
+        count: 0,
+        missingApprovedCount: 0,
+        forbiddenPresentCount: 0,
+        infractions: [],
+      }
+      byConcept.set(row.conceptId, group)
+    }
+    group.count += 1
+    if (row.kind === "missing-approved") group.missingApprovedCount += 1
+    else group.forbiddenPresentCount += 1
+    const infraction: RuleInfraction & { kind: ConceptViolationGroup["infractions"][number]["kind"] } = {
+      ruleId:
+        row.kind === "missing-approved"
+          ? `term:${row.conceptId}:approved`
+          : `term:${row.conceptId}:forbidden:scan`,
+      cellId: row.cellId,
+      fileId: row.fileId,
+      reason: row.kind === "forbidden-present" ? "target-forbids" : "source-requires-target",
+      spans: [],
+      kind: row.kind,
+    }
+    group.infractions.push(infraction)
+  }
+  return [...byConcept.values()].sort(
+    (a, b) => b.count - a.count || a.sourceTerm.localeCompare(b.sourceTerm),
   )
 }

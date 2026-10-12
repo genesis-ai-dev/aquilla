@@ -16,6 +16,8 @@
 import type { SyncTokenClaims } from "../auth"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 import { notHiddenSql, visibleSourceSql } from "./hidden-cells-scope"
+import { inCountedFileSql } from "../../../db/shared/counted-files"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 
 // ---------------------------------------------------------------------------
 // Branded type — the permission gate
@@ -229,6 +231,11 @@ export async function queryScopedSearch(
     // matched row would let every target-side hit through. It also settles
     // Find & Replace, whose candidates are these results.
     `AND ${notHiddenSql("cells")}`,
+    // AQU-1626: and neither is a cell inside a deleted file or a hidden
+    // companion (a cue sheet, a caption track). A cue is timecode text, so
+    // searching a dubbed project returned pages of machine rows above the
+    // script the person was actually looking for.
+    `AND ${inCountedFileSql("cells")}`,
   ]
   const binds: unknown[] = [q, q, q, verifiedProjectId]
 
@@ -304,6 +311,10 @@ export async function queryScopedExact(
     // AQU-1424: as in queryScoped — parked cells leave the results, and with
     // them the Find & Replace candidate list built from those results.
     `AND ${notHiddenSql("cells")}`,
+    // AQU-1626: likewise deleted files and hidden companions. This one matters
+    // twice over: Find & Replace WRITES to what it finds, and a replace into a
+    // cue sheet corrupts a timecode nobody was editing.
+    `AND ${inCountedFileSql("cells")}`,
   ]
   const binds: unknown[] = [exactText, exactText, exactText, verifiedProjectId]
 
@@ -478,7 +489,7 @@ export async function querySimilarSourceCells(
 
   const parts: string[] = [
     "SELECT c.cell_id AS cell_id, c.file_id AS file_id, c.value AS source_value,",
-    "       t.value AS target_value, t.target_lang AS target_lang,",
+    "       t.value AS target_value, " + wireLegacyTagSql("t") + " AS target_lang,",
     "       ts_rank(c.value_tsv, to_tsquery('simple', ?)) AS rank",
     "FROM cells c",
     "JOIN cells t",

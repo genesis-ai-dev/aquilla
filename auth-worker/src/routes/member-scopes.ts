@@ -11,6 +11,11 @@
 //       An empty array clears all scopes (unscoped = today's behavior).
 //       Scoping a user whose effective role is >= 500 is rejected with 400 —
 //       leads/maintainers/owners must stay unscoped.
+//       AQU-1607: a 'lane' value is a `lanes.id`. A legacy tag that names
+//       exactly one of the project's target lanes is converted to that id on
+//       the way in, so an older client still sending `''` for the default
+//       lane keeps working; a tag that names two lanes (same language, two
+//       lanes) or none is refused rather than guessed.
 //
 // Registered in index.ts under the /api/v2/projects prefix. The scopes table
 // (project_member_scopes) is loaded at sync-token mint time into the token's
@@ -22,6 +27,15 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listEffectiveProjectMembers } from "../services/org-permissions"
+import {
+  loadCurrentTargetLanes,
+  loadLaneGrants,
+  loadTargetLaneIdentities,
+} from "../../../db/shared/lane-visibility"
+import { laneScopeIdsForStorage, type LaneScopeConversion } from "../../../src/lib/lanes/scope-ids"
+import { laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
+import type { MemberLaneGrant } from "../../../src/lib/lanes/grant-gap"
+import { syncMemberLaneGrants } from "../services/lane-grants"
 
 const memberScopes = new Hono<AuthHonoEnv>()
 
@@ -99,6 +113,97 @@ async function loadScopes(
 }
 
 /**
+ * AQU-1607: display names for the lanes the returned scopes name. A lane
+ * scope is a lane id, which is no use on a screen — the members matrix shows
+ * a chip per scope and would otherwise print the id. Only lanes the response
+ * already names are included, so this reveals nothing the caller was not
+ * about to be told.
+ */
+async function laneNamesForScopes(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  scopes: readonly MemberScope[],
+): Promise<Record<string, string> | undefined> {
+  const laneValues = new Set(scopes.filter((s) => s.kind === "lane").map((s) => s.value))
+  if (laneValues.size === 0) return undefined
+  const lanes = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  const names: Record<string, string> = {}
+  for (const lane of lanes) {
+    if (!laneValues.has(lane.id)) continue
+    const label = (lane.name ?? "").trim() || (lane.legacyTag ?? "").trim()
+    if (label !== "") names[lane.id] = label
+  }
+  return Object.keys(names).length > 0 ? names : undefined
+}
+
+/**
+ * AQU-1783: what the member inspector needs to tell the truth about a
+ * member's lane access.
+ *
+ * The inspector used to read the scopes above and print "Unscoped — full
+ * access" when they were empty. The read wall reads `project_member_lane_roles`
+ * instead, and the two drift apart whenever grants were never written or lag
+ * behind the lane set. So the inspector gets the GRANTS, plus the project's
+ * current target lanes, and computes the gap with `memberLaneAccess` — the
+ * wall's own rule, client-side (`src/lib/lanes/grant-gap.ts`).
+ *
+ * Only a project lead (500+) gets this block, matching the rule that already
+ * governs reading someone else's scopes. A member below that reading their own
+ * scopes must NOT learn the project's whole lane set: that is the sibling-lane
+ * leak AQU-1421 closes.
+ *
+ * `undefined` when the project has no target lane rows at all — there is then
+ * no lane set to diagnose against, and an older client simply sees the plain
+ * `{ scopes }` shape it always saw.
+ */
+interface MemberLaneAccessPayload {
+  /** The target member's EFFECTIVE project role — the one the wall resolves. */
+  memberRoleLevel: number
+  /** Whether THIS environment enforces the wall; local and e2e do not. */
+  readWallEnabled: boolean
+  grants: MemberLaneGrant[]
+  targetLanes: Array<{ id: string; name: string }>
+}
+
+async function loadLaneAccess(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  targetUserId: number,
+): Promise<MemberLaneAccessPayload | undefined> {
+  const targetLanes = await loadCurrentTargetLanes(env.AQUILLA_PG, projectId)
+  if (targetLanes.length === 0) return undefined
+  const projectRow = await env.AQUILLA_PG.prepare(
+    "SELECT created_by, org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ created_by: number; org_id: number | null }>()
+  if (!projectRow) return undefined
+  const effectiveMembers = await listEffectiveProjectMembers(
+    env,
+    projectId,
+    projectRow.org_id,
+    projectRow.created_by,
+  )
+  const member = effectiveMembers.find((m) => m.userId === targetUserId)
+  if (!member) return undefined
+  // A grant may still name an archived lane, so names come from the full lane
+  // list — a grant is reported with the name it has, never with its id.
+  const identities = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  const nameById = new Map(identities.map((lane) => [lane.id, lane.name] as const))
+  const grants = await loadLaneGrants(env.AQUILLA_PG, projectId, targetUserId)
+  return {
+    memberRoleLevel: member.roleLevel,
+    readWallEnabled: laneReadWallEnabled(env.LANE_READ_WALL),
+    grants: grants.map((grant): MemberLaneGrant => ({
+      laneId: grant.lane,
+      name: nameById.get(grant.lane) ?? "",
+      level: grant.level,
+    })),
+    targetLanes,
+  }
+}
+
+/**
  * GET /api/v2/projects/:projectId/members/:userId/scopes
  *
  * Own scopes: viewer (100+). Others' scopes: project_lead (500+).
@@ -125,12 +230,23 @@ memberScopes.get(
     }
 
     const scopes = await loadScopes(c.env, projectId, targetUserId)
+    const laneNames = await laneNamesForScopes(c.env, projectId, scopes)
+    // AQU-1783: the inspector's grant list. Lead-only — see loadLaneAccess.
+    const laneAccess =
+      callerRole.level >= ROLE.PROJECT_LEAD
+        ? await loadLaneAccess(c.env, projectId, targetUserId)
+        : undefined
     // A member asking about THEMSELVES also learns whether the org lets
     // lane-limited members assign work — see loadLaneAssignmentAllowed.
     if (rawUserId === "me") {
-      return c.json({ scopes, allowScopedLaneAssignment: await loadLaneAssignmentAllowed(c.env, projectId) })
+      return c.json({
+        scopes,
+        ...(laneNames ? { laneNames } : {}),
+        ...(laneAccess ? { laneAccess } : {}),
+        allowScopedLaneAssignment: await loadLaneAssignmentAllowed(c.env, projectId),
+      })
     }
-    return c.json({ scopes })
+    return c.json({ scopes, ...(laneNames ? { laneNames } : {}), ...(laneAccess ? { laneAccess } : {}) })
   },
 )
 
@@ -197,6 +313,40 @@ memberScopes.put(
       }
     }
 
+    // AQU-1607: lane scopes are stored as lane ids. Convert before writing so
+    // a scope names ONE lane even when two lanes share a language, and so no
+    // new `''` row is ever created. A value that names zero or two lanes is
+    // refused with the values named — the caller picks, we never guess.
+    const laneValues = scopes.filter((s) => s.kind === "lane").map((s) => s.value)
+    let laneIds: string[] = []
+    if (laneValues.length > 0) {
+      const lanes = await loadTargetLaneIdentities(c.env.AQUILLA_PG, projectId)
+      // A project with no lane rows yet has nothing to resolve against:
+      // store what the caller sent, as this did before lane ids. The
+      // AQU-1616 backfill converts those rows with the rest.
+      const converted: LaneScopeConversion =
+        lanes.length === 0
+          ? { laneIds: laneValues, rejected: [] }
+          : laneScopeIdsForStorage(laneValues, lanes)
+      if (converted.rejected.length > 0) {
+        const ambiguous = converted.rejected.filter((r) => r.reason === "ambiguous").map((r) => r.value)
+        const unmatched = converted.rejected.filter((r) => r.reason === "unmatched").map((r) => r.value)
+        return c.json(
+          {
+            error: "lane scopes must name one lane of this project",
+            ...(ambiguous.length > 0 ? { ambiguous } : {}),
+            ...(unmatched.length > 0 ? { unmatched } : {}),
+          },
+          400,
+        )
+      }
+      laneIds = converted.laneIds
+    }
+    const storedScopes: MemberScope[] = [
+      ...laneIds.map((value): MemberScope => ({ kind: "lane", value })),
+      ...scopes.filter((s) => s.kind === "file"),
+    ]
+
     // Replace-set: clear then re-insert. The scopes table has no other writers
     // for this (project, user), so a delete-then-insert pair is atomic enough
     // for the single-writer D1/Postgres model.
@@ -210,7 +360,7 @@ memberScopes.put(
     // send them; collapse so the insert loop doesn't error mid-batch.
     const seen = new Set<string>()
     const now = Date.now()
-    for (const s of scopes) {
+    for (const s of storedScopes) {
       const key = `${s.kind}\u0000${s.value}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -222,8 +372,23 @@ memberScopes.put(
         .run()
     }
 
+    // The write wall (on in dev and prod) reads lane grants, not scopes.
+    // Staffing only wrote scopes, so a person limited to one lane still saw
+    // every lane once the wall was on. Replace their grants to match the
+    // scopes just stored. No lane rows yet: leave grants alone (there is
+    // nothing to point at, and the backfill fills both later).
+    await syncMemberLaneGrants(c.env.AQUILLA_PG, projectId, targetUserId, laneIds, user.id)
+
     const saved = await loadScopes(c.env, projectId, targetUserId)
-    return c.json({ scopes: saved })
+    const savedLaneNames = await laneNamesForScopes(c.env, projectId, saved)
+    // AQU-1783: the grants this save just rewrote, so the inspector's "lanes
+    // they can read" list refreshes from the server without a page reload.
+    const savedLaneAccess = await loadLaneAccess(c.env, projectId, targetUserId)
+    return c.json({
+      scopes: saved,
+      ...(savedLaneNames ? { laneNames: savedLaneNames } : {}),
+      ...(savedLaneAccess ? { laneAccess: savedLaneAccess } : {}),
+    })
   },
 )
 

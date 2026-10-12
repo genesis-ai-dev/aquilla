@@ -59,6 +59,7 @@ const PROJECT_ID = "proj-submenu-ia"
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
     id: PROJECT_ID,
+    orgId: 7,
     name: "Sub-menu IA Test Project",
     files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
     sourceLanguage: "English",
@@ -99,7 +100,7 @@ vi.mock("@/hooks/useProjectSettings", () => ({
 }))
 
 vi.mock("@/hooks/useOrg", () => ({
-  useOrg: () => ({ org: null }),
+  useOrg: () => ({ org: { id: 99 } }),
 }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -451,8 +452,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
     expect(screen.getByText(/^health$/i)).toBeTruthy()
     // AQU-764: the decay panel is named "Health", not "Retrieval support".
-    // It sits under Validation + Harmonization on this pane.
-    const validationHeading = screen.getByText(/^validation$/i)
+    // It sits under the validation cards + Harmonization on this pane. The
+    // text and audio rules are two cards since 2026-10-03.
+    expect(screen.getByText(/^audio validation$/i)).toBeTruthy()
+    const validationHeading = screen.getByText(/^text validation$/i)
     const retrievalHeading = screen.getByText(/^health$/i)
     expect(
       validationHeading.compareDocumentPosition(retrievalHeading) &
@@ -540,4 +543,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByText(/roster hidden/i)).toBeNull()
     expect(screen.getByText("General")).toBeTruthy()
   })
+})
+
+vi.mock("./ProjectSettings/MondayIntegrationSection", () => ({
+  MondayIntegrationSection: ({ orgId }: { orgId: number | null }) => (
+    <div data-testid="monday-project-org">{orgId}</div>
+  ),
+}))
+it("AQU-1208: Monday setup uses the project's organization, not the personal organization", () => {
+  renderAt(`/project/${PROJECT_ID}/settings/integrations`)
+  expect(screen.getByTestId("monday-project-org")).toHaveTextContent("7")
 })

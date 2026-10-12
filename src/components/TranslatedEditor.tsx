@@ -23,14 +23,26 @@ import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
-import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "lucide-react"
+import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code, Sparkles } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
+import {
+  createHealthScoreDecorationExtension,
+  healthScorePluginKey,
+  type HealthScoreDecorationSpan,
+} from "@/lib/richtext/health-score-decoration-plugin"
+import { createSmartEditDecorationExtension, smartEditPluginKey, smartEditRange } from "@/lib/richtext/smart-edit-decoration-plugin"
+import { suggestionId } from "@/lib/smart-edits/store"
+import type { SmartEditSuggestion } from "@/lib/smart-edits/client"
+import { SmartEditPopover } from "@/components/SmartEditPopover"
+import { IntelligentProgress } from "@/components/IntelligentProgress"
+import type { AskLlmResult } from "@/hooks/useSmartEdits"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
+import { createSmartQuotesExtension } from "@/lib/richtext/smart-quotes"
 import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/richtext/terminology-chip-plugin"
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
@@ -94,6 +106,7 @@ export const PRESENCE_DRAFT_IDLE_MS = 650
 export const PRESENCE_WORD_BATCH_SIZE = 2
 /** Keep presence frames lightweight even if a malformed/imported cell is huge. */
 export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
+const EMPTY_HEALTH_SPANS: readonly HealthScoreDecorationSpan[] = []
 
 function placeDomCaretAtProseMirrorPosition(view: EditorView, position: number): void {
   const selection = view.dom.ownerDocument.getSelection()
@@ -391,6 +404,8 @@ interface TranslatedEditorProps {
   textDirection?: TextDirection
   directionMode?: DirectionMode
   lang?: string
+  /** Curly quotes as you type, in `lang`'s style. Read when the editor mounts. */
+  smartQuotes?: boolean
   /** Remote lock holder — when present, the editor is read-only. */
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
@@ -410,6 +425,13 @@ interface TranslatedEditorProps {
    * violations off the live buffer and surface the inline blot as-you-type.
    */
   onLiveTextChange?: (text: string) => void
+  /** Smart edits for this cell (flag `smartEdits`). Offsets are into the
+   *  committed plain text; see smart-edit-decoration-plugin.ts. */
+  smartEdits?: SmartEditSuggestion[]
+  onSmartEditFeedback?: (s: SmartEditSuggestion, action: "accept" | "dismiss") => void
+  /** Opt-in LLM tier (flag `smartEditsLlm`): offered only while the cell has
+   *  no smart edits of its own. Spends credits, so it always waits for a click. */
+  onAskLlmEdits?: () => Promise<AskLlmResult>
   audioTimings?: WordTiming[]
   /** Audio playback time in seconds. Drives the karaoke decoration. */
   audioCurrentTime?: number
@@ -466,6 +488,8 @@ interface TranslatedEditorProps {
    * the parent to return focus to the grid row wrapper.
    */
   onEscapeToGrid?: () => void
+  /** Display-only AI-draft provenance wash (#946). Empty when the toggle is off. */
+  healthSpans?: readonly HealthScoreDecorationSpan[]
 }
 
 export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEditorProps>(function TranslatedEditor({
@@ -490,6 +514,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   textDirection = "ltr",
   directionMode = "ltr",
   lang,
+  smartQuotes = false,
   heldByLabel,
   infractions,
   ruleSeverity,
@@ -497,6 +522,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onRuleClick,
   onRuleHover,
   onLiveTextChange,
+  smartEdits,
+  onSmartEditFeedback,
+  onAskLlmEdits,
   audioTimings,
   audioCurrentTime,
   onSeekToTime,
@@ -511,6 +539,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onFootnoteHover,
   ariaLabel,
   onEscapeToGrid,
+  healthSpans = EMPTY_HEALTH_SPANS,
 }, ref) {
   const t = useT()
   // Held in a ref so the editor's keydown handler — created once per cellId —
@@ -550,6 +579,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
     waivedRuleIds: waivedRuleIds ?? new Set<string>(),
   })
+  const latestHealthSpansRef = useRef(healthSpans)
+
+  const latestSmartEditsRef = useRef<readonly SmartEditSuggestion[]>(smartEdits ?? [])
+  const [openSmartEdit, setOpenSmartEdit] = useState<{ suggestion: SmartEditSuggestion; anchor: HTMLElement } | null>(null)
+  // LLM ask: `pending` drives the two-stage loader; the result is held until
+  // the loader has played through, then revealed (IntelligentProgress).
+  const [llmAsk, setLlmAsk] = useState<{ pending: boolean } | null>(null)
+  const llmResultRef = useRef<AskLlmResult | null>(null)
+  const [llmNote, setLlmNote] = useState<string | null>(null)
 
   const latestKaraokeStateRef = useRef<KaraokePluginState>({
     timings: audioTimings,
@@ -785,7 +823,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         () => showFootnoteTooltipsRef.current,
       ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
+      createHealthScoreDecorationExtension(() => latestHealthSpansRef.current),
+      createSmartEditDecorationExtension(() => latestSmartEditsRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
+      ...(smartQuotes ? [createSmartQuotesExtension(lang)] : []),
       ...(terminologyConcepts !== undefined
         ? [createTerminologyChipExtension(
             () => latestTerminologyConceptsRef.current,
@@ -1650,6 +1691,60 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [editor, infractions, ruleSeverity, waivedRuleIds])
 
   useEffect(() => {
+    latestHealthSpansRef.current = healthSpans
+    if (editor) {
+      editor.view.dispatch(editor.state.tr.setMeta(healthScorePluginKey, "rebuild"))
+    }
+  }, [editor, healthSpans])
+
+  useEffect(() => {
+    latestSmartEditsRef.current = smartEdits ?? []
+    if (editor) editor.view.dispatch(editor.state.tr.setMeta(smartEditPluginKey, "rebuild"))
+  }, [editor, smartEdits])
+
+  const startLlmAsk = useCallback(async () => {
+    if (!onAskLlmEdits) return
+    setLlmNote(null)
+    llmResultRef.current = null
+    setLlmAsk({ pending: true })
+    llmResultRef.current = await onAskLlmEdits()
+    setLlmAsk({ pending: false })
+  }, [onAskLlmEdits])
+
+  const settleLlmAsk = useCallback(() => {
+    const result = llmResultRef.current
+    setLlmAsk(null)
+    if (result?.ok && result.count > 0) {
+      result.reveal()
+      return
+    }
+    setLlmNote(
+      result?.ok
+        ? t("smartEdits.noLlmEdits")
+        : result?.reason === "allowance"
+          ? t("smartEdits.allowanceReached")
+          : t("smartEdits.llmFailed"),
+    )
+  }, [t])
+
+  useEffect(() => {
+    if (!llmNote) return
+    const timer = window.setTimeout(() => setLlmNote(null), 3500)
+    return () => window.clearTimeout(timer)
+  }, [llmNote])
+
+  const acceptSmartEdit = useCallback((s: SmartEditSuggestion) => {
+    setOpenSmartEdit(null)
+    if (!editor) return
+    const range = smartEditRange(editor.state.doc, s)
+    if (!range) return
+    // Plain text through the normal transaction path, so the edit commits on
+    // idle like typing would — the commit is the translator's own.
+    editor.view.dispatch(editor.state.tr.insertText(s.new, range.from, range.to))
+    onSmartEditFeedback?.(s, "accept")
+  }, [editor, onSmartEditFeedback])
+
+  useEffect(() => {
     latestKaraokeStateRef.current = {
       ...latestKaraokeStateRef.current,
       timings: audioTimings,
@@ -1862,9 +1957,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // TermLookupPopover. Precedence lives in `resolveEditorClickTarget`.
           const hit = resolveEditorClickTarget(e.target as HTMLElement, {
             rule: Boolean(onRuleClick),
+            smartEdit: Boolean(smartEdits?.length),
             term: Boolean(onTermChipClick),
           })
           if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element)
+          else if (hit?.kind === "smartEdit") {
+            const suggestion = smartEdits?.find((s) => suggestionId(s) === hit.id)
+            if (suggestion) setOpenSmartEdit({ suggestion, anchor: hit.element })
+          }
           else if (hit?.kind === "term") onTermChipClick?.(hit.term, hit.element)
         }}
       >
@@ -1878,6 +1978,41 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           className={cn(compactHeight ? "" : "h-full [&>.ProseMirror]:h-full")}
         />
       </div>
+      {onAskLlmEdits && !llmAsk && !llmNote && !smartEdits?.length && (
+        <button
+          type="button"
+          // Keep focus in the editor: a blur here would close the cell.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => { void startLlmAsk() }}
+          className="absolute bottom-1 right-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-violet-700 opacity-70 transition-opacity hover:bg-violet-500/10 hover:opacity-100 dark:text-violet-300"
+          data-testid="smart-edit-ask-ai"
+        >
+          <Sparkles className="size-3" aria-hidden />
+          {t("smartEdits.askAi")}
+        </button>
+      )}
+      {llmAsk && (
+        <div className="pointer-events-none absolute inset-x-1 bottom-0.5">
+          <IntelligentProgress pending={llmAsk.pending} label={t("smartEdits.askingAi")} onSettled={settleLlmAsk} />
+        </div>
+      )}
+      {llmNote && (
+        <div role="status" className="absolute bottom-1 right-1 rounded-md bg-background/90 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+          {llmNote}
+        </div>
+      )}
+      {openSmartEdit && (
+        <SmartEditPopover
+          suggestion={openSmartEdit.suggestion}
+          anchor={openSmartEdit.anchor}
+          onAccept={() => acceptSmartEdit(openSmartEdit.suggestion)}
+          onDismiss={() => {
+            onSmartEditFeedback?.(openSmartEdit.suggestion, "dismiss")
+            setOpenSmartEdit(null)
+          }}
+          onClose={() => setOpenSmartEdit(null)}
+        />
+      )}
     </div>
   )
 })

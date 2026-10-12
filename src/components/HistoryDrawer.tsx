@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
 import { RightSidebarPanel } from "./RightSidebarPanel"
+import { AiTracePanel } from "./AiTracePanel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -265,6 +266,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                     postEdit={postEditSeries[group.terminalIndex] ?? null}
                     refForFirstStale={isFirstStale ? firstStaleGroupRef : null}
                     onPromote={onPromote}
+                    projectId={projectId ?? null}
                   />
                 )
               })}
@@ -298,6 +300,7 @@ function GroupItem({
   postEdit,
   refForFirstStale,
   onPromote,
+  projectId,
 }: {
   group: EntryGroup
   isCurrent: boolean
@@ -308,6 +311,7 @@ function GroupItem({
    *  opens via the F6 banner. */
   refForFirstStale: React.RefObject<HTMLLIElement | null> | null
   onPromote?: (entry: CellHistoryEntry) => void
+  projectId: string | null
 }) {
   const t = useT()
   const [expanded, setExpanded] = useState(false)
@@ -429,6 +433,9 @@ function GroupItem({
           <BookOpen className="h-3 w-3" />
           {t("editor.history.examples", { count: terminal.examples.length })}
         </div>
+      )}
+      {projectId && terminal.interventionId && (
+        <AiTracePanel projectId={projectId} interventionId={terminal.interventionId} isCurrent={isCurrent} />
       )}
       {canRestore && !pendingPromote && (
         <button

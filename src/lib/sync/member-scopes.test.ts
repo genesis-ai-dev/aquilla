@@ -71,7 +71,7 @@ describe("putMemberScopes", () => {
     )
     const scopes: MemberScope[] = [{ kind: "file", value: "f1" }]
     const got = await putMemberScopes("jwt-123", "proj-1", 42, scopes, API)
-    expect(got).toEqual([{ kind: "file", value: "f1" }])
+    expect(got).toEqual({ scopes: [{ kind: "file", value: "f1" }], laneNames: {} })
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     const [url, init] = fetchSpy.mock.calls[0]
@@ -82,11 +82,46 @@ describe("putMemberScopes", () => {
     expect(JSON.parse(init?.body as string)).toEqual({ scopes })
   })
 
-  it("returns [] when the server omits scopes on success", async () => {
+  it("returns an empty view when the server omits scopes on success", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({}), { status: 200 }),
     )
-    expect(await putMemberScopes("jwt", "p1", 1, [], API)).toEqual([])
+    expect(await putMemberScopes("jwt", "p1", 1, [], API)).toEqual({ scopes: [], laneNames: {} })
+  })
+
+  // AQU-1607: the lanes a member holds AFTER a save are not the ones they
+  // held before it, so the save's own names are the only ones that can label
+  // a lane just granted. Dropping them printed the lane's id in the chip.
+  it("keeps the lane names the save answers with", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          scopes: [{ kind: "lane", value: "4b67177e" }],
+          laneNames: { "4b67177e": "Spanish B" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    )
+    const got = await putMemberScopes("jwt", "p1", 1, [{ kind: "lane", value: "4b67177e" }], API)
+    expect(got).toEqual({
+      scopes: [{ kind: "lane", value: "4b67177e" }],
+      laneNames: { "4b67177e": "Spanish B" },
+    })
+  })
+
+  it("surfaces the values a refused lane scope named", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "lane scopes must name one lane of this project",
+          ambiguous: ["Spanish"],
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      ),
+    )
+    await expect(
+      putMemberScopes("jwt", "p1", 1, [{ kind: "lane", value: "Spanish" }], API),
+    ).rejects.toThrow("lane scopes must name one lane of this project: Spanish")
   })
 
   it("throws with the server's error message on 400", async () => {

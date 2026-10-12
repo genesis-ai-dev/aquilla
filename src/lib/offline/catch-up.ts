@@ -26,25 +26,38 @@ import {
   fetchProjectFiles as fetchProjectFilesDefault,
   streamFileCells as streamFileCellsDefault,
 } from "@/lib/sync/cells-read"
-import { cellRowId, events, syncCursorId, tables, type schema } from "./schema"
+import { events, localLaneKey, syncCursorId, tables, type schema } from "./schema"
 
 type OfflineStore = Store<typeof schema>
 type CellSyncedArgs = Parameters<typeof events.cellSynced>[0]
 type LocalCell = typeof tables.cells.Type
 type Side = "source" | "target"
 
-const SIDES: readonly Side[] = ["source", "target"]
 const COMMIT_CHUNK = 500
 
 /**
- * The local `cells` table is keyed by side only, with no target-language
- * lane, so it holds the default lane ('') and nothing else — otherwise a
- * second language's row would overwrite the default translation. Shared by
- * every path that lands server rows (download, live frames, catch-up) so they
- * can never disagree about which row wins.
+ * AQU-1614: the lane tag a row or queued write belongs to. `''` is the former
+ * default lane — and what every pre-lane payload omits.
  */
-export function isLocalLaneRow(row: Pick<CellRow, "targetLang">): boolean {
-  return (row.targetLang ?? "") === ""
+function laneTagOf(row: Pick<CellRow, "targetLang">): string {
+  return row.targetLang ?? ""
+}
+
+/**
+ * AQU-1614: a cell's rows are protected per lane, not per cell — a queued edit
+ * in one lane must not stop a peer's commit in another lane from landing. The
+ * source row shares the `''` key with the former default lane's target row, so
+ * a queued default-lane edit still protects it, exactly as the pre-lane
+ * whole-cell rule did.
+ */
+function protectionKey(cellId: string, targetLang: string | null | undefined): string {
+  return `${cellId}|${targetLang ?? ""}`
+}
+
+/** The lane tag of a queued local write (event_queue.payload). */
+function queuedLaneTag(payload: unknown): string {
+  const tag = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  return typeof tag === "string" ? tag : ""
 }
 
 export function toCellSyncedArgs(projectId: string, fileId: string, row: CellRow): CellSyncedArgs {
@@ -53,6 +66,8 @@ export function toCellSyncedArgs(projectId: string, fileId: string, row: CellRow
     fileId,
     cellId: row.cellId,
     side: row.side,
+    targetLang: laneTagOf(row),
+    laneId: row.laneId ?? null,
     value: row.value,
     valueHtml: row.valueHtml,
     eventId: row.eventId,
@@ -66,6 +81,8 @@ export function toCellSyncedArgs(projectId: string, fileId: string, row: CellRow
 
 function sameAsLocal(local: LocalCell, args: CellSyncedArgs): boolean {
   return (
+    local.targetLang === args.targetLang &&
+    local.laneId === args.laneId &&
     local.value === args.value &&
     local.valueHtml === args.valueHtml &&
     local.eventId === args.eventId &&
@@ -96,7 +113,7 @@ export interface CatchUpResult {
 }
 
 type SyncedRow = Omit<CellSyncedArgs, "projectId" | "fileId">
-type RemovedCell = { cellId: string; side: Side }
+type RemovedCell = { cellId: string; side: Side; laneKey: string }
 
 /**
  * Lands rows as batched events — one per COMMIT_CHUNK rows, not one per row —
@@ -118,11 +135,12 @@ function commitBatched(
 }
 
 /**
- * Replaces each listed cell's local rows with the server's: upserts the
- * default-lane rows that differ, and removes local sides the server no longer
- * has (a cell listed with no server rows at all was deleted). Cells with a
- * queued local write are skipped. Returns how many rows changed and whether
- * anything was skipped.
+ * Replaces each listed cell's local rows with the server's: upserts the rows
+ * that differ — AQU-1614: in EVERY lane the response carries, not just the
+ * former default lane — and removes local (lane, side) rows the server no
+ * longer has (a cell listed with no server rows at all was deleted). A lane
+ * with a queued local write is skipped; its sibling lanes still land. Returns
+ * how many rows changed and whether anything was skipped.
  */
 function replaceCells(
   store: OfflineStore,
@@ -131,16 +149,26 @@ function replaceCells(
   cellIds: Iterable<string>,
   serverRows: readonly CellRow[],
 ): { rowsChanged: number; skipped: boolean } {
-  const queued = new Set(
-    store
-      .query(tables.eventQueue.select().where({ projectId, fileId }))
-      .map((r) => r.cellId)
-      .filter((id): id is string => id !== null),
+  const queuedRows = store.query(tables.eventQueue.select().where({ projectId, fileId }))
+  // Cells with a queued write in ANY lane: the delta cursor holds for these
+  // whether or not this response carried the protected lane's row, exactly as
+  // the pre-lane rule did — a cursor that advanced past a cell we only
+  // partially applied would drop the rest from every future delta.
+  const queuedCells = new Set(queuedRows.map((r) => r.cellId).filter((id): id is string => id !== null))
+  const protectedLanes = new Set(
+    queuedRows
+      .filter((r): r is typeof r & { cellId: string } => r.cellId !== null)
+      .map((r) => protectionKey(r.cellId, queuedLaneTag(r.payload))),
   )
-  const local = new Map(store.query(tables.cells.select().where({ projectId, fileId })).map((r) => [r.id, r]))
+
+  const localByCell = new Map<string, LocalCell[]>()
+  for (const row of store.query(tables.cells.select().where({ projectId, fileId }))) {
+    const group = localByCell.get(row.cellId)
+    if (group) group.push(row)
+    else localByCell.set(row.cellId, [row])
+  }
   const byCell = new Map<string, CellRow[]>()
   for (const row of serverRows) {
-    if (!isLocalLaneRow(row)) continue
     const group = byCell.get(row.cellId)
     if (group) group.push(row)
     else byCell.set(row.cellId, [row])
@@ -150,21 +178,24 @@ function replaceCells(
   const removals: RemovedCell[] = []
   let skipped = false
   for (const cellId of cellIds) {
-    if (queued.has(cellId)) {
-      skipped = true
-      continue
-    }
+    if (queuedCells.has(cellId)) skipped = true
     const rows = byCell.get(cellId) ?? []
+    const localRows = localByCell.get(cellId) ?? []
+    // (lane, side) pairs the server reports for this cell — anything local
+    // outside this set is gone upstream.
+    const onServer = new Set<string>()
     for (const row of rows) {
+      const laneKey = localLaneKey(row.laneId, row.targetLang)
+      onServer.add(`${laneKey}|${row.side}`)
+      if (protectedLanes.has(protectionKey(cellId, row.targetLang))) continue
       const { projectId: _p, fileId: _f, ...args } = toCellSyncedArgs(projectId, fileId, row)
-      const existing = local.get(cellRowId(projectId, fileId, cellId, row.side))
+      const existing = localRows.find((r) => r.laneKey === laneKey && r.side === row.side)
       if (!existing || !sameAsLocal(existing, { projectId, fileId, ...args })) upserts.push(args)
     }
-    for (const side of SIDES) {
-      if (rows.some((r) => r.side === side)) continue
-      if (local.has(cellRowId(projectId, fileId, cellId, side))) {
-        removals.push({ cellId, side })
-      }
+    for (const local of localRows) {
+      if (onServer.has(`${local.laneKey}|${local.side}`)) continue
+      if (protectedLanes.has(protectionKey(cellId, local.targetLang))) continue
+      removals.push({ cellId, side: local.side, laneKey: local.laneKey })
     }
   }
   commitBatched(store, projectId, fileId, upserts, removals)

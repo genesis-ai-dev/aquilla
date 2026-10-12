@@ -24,6 +24,8 @@ export interface CellAreaStateInput {
   /** The authoritative cells read finished unsuccessfully. This is distinct
    * from a successful empty projection and must never render empty-file copy. */
   cellsError: boolean
+  /** A timeline picture is usable even before the user adds caption segments. */
+  hasLinkedPicture?: boolean
 }
 
 export type CellAreaState =
@@ -52,7 +54,7 @@ export function deriveCellAreaState(input: CellAreaStateInput): CellAreaState {
     if (input.syncStatus === "connecting" || input.syncStatus === "reconnecting") {
       return { kind: "syncing-empty" }
     }
-    return { kind: "ready-empty" }
+    return { kind: input.hasLinkedPicture ? "ready" : "ready-empty" }
   }
   return { kind: "ready" }
 }

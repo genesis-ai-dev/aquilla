@@ -3,6 +3,7 @@ import { createStorePromise, type Store } from "@livestore/livestore"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { events, schema } from "./schema"
 import { isProjectOfflineReady, readOfflineFileCells, subscribeToOfflineFileCells } from "./offline-reads"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 let store: Store<typeof schema>
 
@@ -43,6 +44,8 @@ function seedCell(args: {
   aiDrafted?: boolean
   canonicalRef?: string | null
   valueHtml?: string | null
+  targetLang?: string
+  laneId?: string | null
 }) {
   store.commit(
     events.cellSynced({
@@ -50,6 +53,8 @@ function seedCell(args: {
       fileId: args.fileId,
       cellId: args.cellId,
       side: args.side,
+      targetLang: args.targetLang ?? "",
+      laneId: args.laneId ?? null,
       value: args.value,
       valueHtml: args.valueHtml ?? null,
       eventId: "eventId" in args ? args.eventId ?? null : `${args.cellId}-${args.side}-ev`,
@@ -65,6 +70,33 @@ function seedCell(args: {
 describe("readOfflineFileCells", () => {
   it("returns an empty array when the file has no rows", () => {
     expect(readOfflineFileCells(store, "proj1", "file1")).toEqual([])
+  })
+
+  it("returns every lane's rows carrying their lane, so the caller filters to the active one (AQU-1614)", () => {
+    seedCell({ fileId: "file1", cellId: "c1", side: "source", value: "In the beginning", sequenceIndex: 0 })
+    seedCell({ fileId: "file1", cellId: "c1", side: "target", value: "Au commencement", sequenceIndex: 0 })
+    seedCell({
+      fileId: "file1",
+      cellId: "c1",
+      side: "target",
+      value: "En el principio",
+      sequenceIndex: 0,
+      targetLang: "es",
+      laneId: "lane-es",
+    })
+
+    const rows = readOfflineFileCells(store, "proj1", "file1")
+    expect(rows).toHaveLength(3)
+    const targets = rows.filter((r) => r.side === "target")
+    expect(targets.map((r) => [r.targetLang, r.value])).toEqual(
+      expect.arrayContaining([
+        ["", "Au commencement"],
+        ["es", "En el principio"],
+      ]),
+    )
+    expect(targets.find((r) => r.targetLang === "es")?.laneId).toBe("lane-es")
+    // A source row is shared by every lane and carries the default lane tag.
+    expect(rows.find((r) => r.side === "source")?.targetLang).toBe("")
   })
 
   it("orders combined reads as every source row (by sequenceIndex) then every target row (by sequenceIndex)", () => {
@@ -150,7 +182,7 @@ describe("subscribeToOfflineFileCells", () => {
     onChange.mockClear() // LiveStore subscriptions fire once immediately with the initial value
 
     seedCell({ fileId: "file1", cellId: "c1", side: "source", value: "hi", sequenceIndex: 0 })
-    await vi.waitFor(() => expect(onChange).toHaveBeenCalled())
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
 
     unsubscribe()
     onChange.mockClear()

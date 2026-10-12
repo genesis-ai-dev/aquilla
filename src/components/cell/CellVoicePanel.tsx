@@ -266,6 +266,7 @@ export function CellVoicePanel({
     const ok = await generateCellVoice({
       project, cell, session: sess, username, voiceId: active.id,
       ...(targetLang ? { targetLang } : {}),
+      surface: "voice-panel",
     })
     if (ok) onAfterGenerate()
     else autoplayRef.current = false

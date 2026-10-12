@@ -165,6 +165,17 @@ export interface CellData {
    *  recency without re-fetching. Undefined for source-only cells or cells
    *  that have never been edited. */
   lastEditAt?: number
+  /** Who wrote the current target text in THIS lane: the active lane's target
+   *  row's `cells.last_editor`, never the source row's.
+   *  - AQU-1630: the server's self-validation refusal compares this against
+   *    the caller, so a client that wants to answer "may I validate this
+   *    line?" before enqueuing a `cell.validate` needs the same value.
+   *  - AQU-1571: the live store stamps the viewer while an unsynced edit of
+   *    theirs is shown. Display and validation policy only (`isOwnTextEdit`);
+   *    never sent anywhere.
+   *  Null when unknown (no target row projected yet; imported rows carry
+   *  none); undefined on a cell read without one. */
+  lastEditor?: string | null
 }
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
@@ -222,6 +233,7 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.validationStatus === b.validationStatus &&
     a.endorsementCount === b.endorsementCount &&
     a.lastEditAt === b.lastEditAt &&
+    a.lastEditor === b.lastEditor &&
     a.startTime === b.startTime &&
     a.endTime === b.endTime &&
     a.sequenceIndex === b.sequenceIndex &&
@@ -390,6 +402,9 @@ export function buildCellData(
     globalReferences: source?.canonicalRef ? [source.canonicalRef] : undefined,
     waivers: stats?.waivers ?? EMPTY_WAIVERS,
     lastEditAt: target?.lastEditAt ?? source?.lastEditAt,
+    // AQU-1571: the TARGET row only. The source row's editor wrote the source,
+    // and a line with no target yet has no text anyone could validate.
+    lastEditor: target?.lastEditor ?? null,
     startTime,
     endTime,
     sequenceIndex,

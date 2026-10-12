@@ -1,6 +1,9 @@
 #!/usr/bin/env tsx
 import { makePostgres } from '../db/shim/postgres'
-import { fullProgressRecomputeStmts } from '../sync-worker/src/events/progress-projection'
+import {
+  fullProgressRecomputeStmts,
+  UNREFERENCED_LINES_STALE_FILES_SQL,
+} from '../sync-worker/src/events/progress-projection'
 
 function connectionString(): string {
   const direct = process.env.AQUILLA_DATABASE_URL?.trim()
@@ -31,9 +34,30 @@ async function main(): Promise<void> {
     // every media project done while its audio counts sit at zero forever.
     // Lets the post-deploy backfill be resumed without redoing the whole DB.
     const missingBooks = process.argv.includes('--missing-books')
-    const scoped = missingOnly || missingBooks
+    // AQU-1493: `--unreferenced-lines` re-runs Scripture files whose stored
+    // line placements (`cell_plan_keys`, migration 0145) are not what the
+    // projection would place now. A line with no reference used to count in
+    // the file and in no chapter or book; an added line now counts in the
+    // chapter of the line above it (front matter at the top of the file), a
+    // heading in the chapter of the verse below it, and a book's title on its
+    // front matter. The full recompute writes those placements and every
+    // progress row counted from them together. The selector walks only files
+    // holding a line with no reference and compares the walk with the stored
+    // rows cell by cell, so before the first run it picks every such file and
+    // afterwards none: safe to re-run. Combines with --missing-books (the dev
+    // stack passes both at boot). It starts with WITH, hence the parentheses
+    // in the UNION below.
+    // Production: apply migration 0145, deploy, then
+    // `pnpm neon:backfill:progress:prod --unreferenced-lines` once (`:dev` for
+    // the preview database).
+    const unreferencedLines = process.argv.includes('--unreferenced-lines')
+    const scoped = missingOnly || missingBooks || unreferencedLines
+    const unreferencedSql = UNREFERENCED_LINES_STALE_FILES_SQL
     const { results: files } = await db
-      .prepare(missingBooks
+      .prepare(unreferencedLines && !missingBooks
+        ? `${unreferencedSql}
+            ORDER BY project_id, id`
+        : missingBooks
         ? `SELECT f.project_id, f.id
              FROM files f
             WHERE NOT EXISTS (
@@ -66,7 +90,8 @@ async function main(): Promise<void> {
                       AND p3.scope = 'file' AND p3.audio_count = 0
                  )
                )
-            ORDER BY f.project_id, f.id`
+            ${unreferencedLines ? `UNION (${unreferencedSql})` : ''}
+            ORDER BY 1, 2`
         : missingOnly
         ? `SELECT f.project_id, f.id
              FROM files f

@@ -126,6 +126,49 @@ describe("ViolationToast", () => {
     })
   })
 
+  it("closes the card when Escape is pressed (AQU-1634)", async () => {
+    const onOpenChange = vi.fn()
+    renderToast({ onOpenChange })
+
+    expect(await screen.findByText("No bad")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+    })
+    await waitFor(() => {
+      expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+    })
+  })
+
+  it("leaves the card open when Escape was already handled elsewhere (AQU-1634)", async () => {
+    const onOpenChange = vi.fn()
+    renderToast({ onOpenChange })
+
+    expect(await screen.findByText("No bad")).toBeInTheDocument()
+
+    // A nested surface (e.g. an open editor) that consumed the key keeps the card.
+    const consumed = new KeyboardEvent("keydown", { key: "Escape", cancelable: true })
+    consumed.preventDefault()
+    window.dispatchEvent(consumed)
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(document.querySelector('[data-slot="toast"]')).not.toBeNull()
+  })
+
+  it("ignores keys other than Escape (AQU-1634)", async () => {
+    const onOpenChange = vi.fn()
+    renderToast({ onOpenChange })
+
+    expect(await screen.findByText("No bad")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Enter}")
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(document.querySelector('[data-slot="toast"]')).not.toBeNull()
+  })
+
   it("opens the rule when its title is selected", async () => {
     const onOpenRule = vi.fn()
     renderToast({ onOpenRule })

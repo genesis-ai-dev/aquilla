@@ -127,7 +127,8 @@ describe("laying the tiles out", () => {
     // the name it was given.
     renderGrid([section("GEN 1"), section("GEN"), section("Scene 4")])
     const extras = screen.getByTestId("plan-chapter-extras")
-    expect(within(extras).getByTestId("plan-tile-GEN")).toHaveTextContent("front matter")
+    // Sentence case: a label standing alone, like the card it opens (AQU-1493).
+    expect(within(extras).getByTestId("plan-tile-GEN")).toHaveTextContent(/^Front matter/)
     expect(within(extras).getByTestId("plan-tile-Scene 4")).toHaveTextContent("Scene 4")
     expect(testids(screen.getByTestId("plan-chapter-grid"))).toEqual(["plan-tile-GEN 1"])
   })

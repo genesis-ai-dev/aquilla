@@ -13,6 +13,7 @@ export const dialog = defineNamespace({
     "dialog.assign.loadingSections": "Loading sections…",
     "dialog.assign.noChaptersFound": "No chapters found in this file.",
     "dialog.assign.noSectionsFound": "No sections found in this file.",
+    "dialog.assign.error.noSelection": "Select at least one line in the editor.",
     "dialog.assign.error.selectChapter": "Select at least one chapter.",
     "dialog.assign.error.selectSection": "Select at least one section.",
     "dialog.assign.laneLabel": "Language lane",
@@ -109,8 +110,9 @@ export const dialog = defineNamespace({
       },
       "dialog.assign.laneLabel": {
         description:
-          "Form label above the target-language lane selector, shown only on " +
-          "projects that have extra translation lanes beyond the default.",
+          "Form label above the target-language lane field on every assign " +
+          "surface. One lane is named in place; several lanes are a menu. " +
+          "Shown even when the project has only its default lane.",
         screenshot: "assign-modal",
       },
       "dialog.assign.defaultLaneFallback": {
@@ -311,6 +313,14 @@ export const dialog = defineNamespace({
         description:
           "Empty-state message when the active non-scripture file has no sections to pick " +
           "from.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.error.noSelection": {
+        description:
+          "Inline validation error when the 'current selection' scope is submitted " +
+          "with nothing selected in the editor (AQU-1628 guard; the scope option is " +
+          "disabled in that state, so a user should not normally reach it). Full " +
+          "sentence.",
         screenshot: "assign-modal",
       },
       "dialog.assign.error.selectChapter": {

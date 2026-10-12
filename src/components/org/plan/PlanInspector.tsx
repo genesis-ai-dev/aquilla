@@ -38,9 +38,9 @@ import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
 import { PLAN_TONE } from "./plan-tone"
-import { GO_TO_FIRST_KEY, usePlanReadoutTips, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
+import { GO_TO_FIRST_KEY, useFrontMatterLabel, usePlanReadoutTips, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
-import { shortVerses, verseChipLabel } from "./verse-chips"
+import { shortVerses, verseChipLabel, wordChipPlaces, type ShortVerse } from "./verse-chips"
 
 /**
  * Mounted with a `key` per unit by its caller, so stepping to another unit
@@ -49,7 +49,7 @@ import { shortVerses, verseChipLabel } from "./verse-chips"
  * it beats an effect that writes state during render.
  */
 export function PlanInspector({
-  unit, now, canPlan, showAudio, projectId, getToken, lane, languageLabel, laneCount,
+  unit, now, canPlan, showAudio, projectId, getToken, lane, dataVersion = 0, languageLabel, laneCount,
   assignments, audioFiles, textFiles, onPatch, onClose, onStep, onGoToFirstOpen, onOpenCell, onOpenUnit,
 }: {
   unit: PlanUnit
@@ -75,6 +75,14 @@ export function PlanInspector({
   /** Mints a project-scoped sync token, for the chapter breakdown. */
   getToken: (() => Promise<string | null>) | null
   lane: string
+  /**
+   * Bumped by the page when something outside this panel changed what its
+   * numbers mean — a project setting such as "Count headings as translatable
+   * content". The panel stays mounted under the settings modal, so without
+   * this its chapter tiles and an open chapter card would keep the old answer
+   * until the reader clicked another row (AQU-1493).
+   */
+  dataVersion?: number
   /** The language the numbers on screen belong to. */
   languageLabel: string | null
   /**
@@ -139,8 +147,12 @@ export function PlanInspector({
   // `usePlanStatusNote` is a hook and cannot be called conditionally.
   const noteKind = planUnitNote(unit, now, audioFiles, textFiles)?.kind ?? null
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
+  // AQU-1493: whether Mark done should pause to say the unit is short, judged
+  // on the COUNTS. A rounded percentage once read 100 on a book six cells short
+  // and let it through without a word. An empty unit still pauses, as it did.
+  const validatedShort = unit.totalCount === 0 || unit.validatedCount < unit.totalCount
   const readoutTips = usePlanReadoutTips()
-  const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane })
+  const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane, version: dataVersion })
 
   // AQU-1278. `audioFiles` comes from the board, which computes it over every
   // unit: whether audio is EXPECTED is a fact about the FILE, not about this
@@ -188,7 +200,9 @@ export function PlanInspector({
   // AQU-1278: that chapter's verses, fetched on the click that opened it and
   // never before — `cells.canonical_ref` is unindexed, so each of these is a
   // full-file scan and a grid that prefetched its fifty tiles would be fifty.
-  const sectionVerses = useSectionVerses({ projectId, fileId: unit.fileId, getToken, lane })
+  const sectionVerses = useSectionVerses({
+    projectId, fileId: unit.fileId, getToken, lane, version: dataVersion,
+  })
   /**
    * The open chapter's verses, fetched when a chapter is open and not before.
    *
@@ -207,9 +221,15 @@ export function PlanInspector({
   useEffect(() => {
     if (openSectionKey) loadVerses(openSectionKey)
   }, [openSectionKey, loadVerses])
+  // Which book codes own a numbered chapter in this unit: the context that
+  // tells a bare book code's front matter from a one-chapter book's chapter 1.
+  const numbered = numberedBookCodes(sections.map((s) => s.key))
+  const openSectionIsFrontMatter = openSection
+    ? classifyPlanSection(openSection.key, numbered).kind === "frontMatter"
+    : false
+  const frontMatterLabel = useFrontMatterLabel()
   const openSectionTitle = (() => {
     if (!openSection) return ""
-    const numbered = numberedBookCodes(sections.map((s) => s.key))
     const kind = classifyPlanSection(openSection.key, numbered)
     // A numbered chapter — and a one-chapter book, which IS chapter 1 — names
     // itself that way. Front matter gets the words the grid's own tile uses
@@ -217,13 +237,28 @@ export function PlanInspector({
     // recognise as "the bit before chapter 1". A document's own sections keep
     // the names they have; "Chapter Scene 4" would invent one that does not
     // exist.
+    // AQU-1493: the same sentence-case words as the tile, like "Chapter 3".
     return kind.kind === "chapter"
       ? t("org.projectOverview.plan.chapterTitle", { chapter: kind.n })
       : kind.kind === "frontMatter"
-        ? t("org.projectOverview.plan.frontMatter")
+        ? frontMatterLabel
         : openSection.key
   })()
-  const shortChapters = sections.filter(
+  // AQU-1493: front matter is not a chapter. It holds a book's title and
+  // introduction, and now any line added above its first verse, and counting
+  // it here read "5 chapters" and "3 chapters short" for four-chapter Ruth
+  // while the board row beside it said "front matter and chapters 1 and 2".
+  // Same judge as the grid's own tile (`classifyPlanSection`), so the count
+  // and the tiles never disagree about one section.
+  const chapterSections = sections.filter(
+    (s) => classifyPlanSection(s.key, numbered).kind !== "frontMatter",
+  )
+  const frontMatterShort = sections.some(
+    (s) =>
+      classifyPlanSection(s.key, numbered).kind === "frontMatter" &&
+      planSectionShortfall(s, hasAudio, hasText).worst > 0,
+  )
+  const shortChapters = chapterSections.filter(
     // `hasAudio`, not `showAudio`. showAudio is a PROJECT-wide question — does
     // this project track audio at all, and therefore should an audio bar be
     // drawn — and answering the per-chapter one with it counts every chapter of
@@ -267,7 +302,9 @@ export function PlanInspector({
   // numbers these are, on one line, so no reader mistakes one lane for another.
   const meta = [
     t("org.projectOverview.plan.cellCount", { count: unit.totalCount }),
-    sections.length > 0 ? t(sectionsCountKey as never, { count: sections.length }) : null,
+    chapterSections.length > 0
+      ? t(sectionsCountKey as never, { count: chapterSections.length })
+      : null,
     languageLabel,
   ].filter(Boolean).join(" · ")
 
@@ -506,15 +543,20 @@ export function PlanInspector({
                 The link used to share this line. It moved up under the bars,
                 where every unit can have one — see `plan-unit-shortfall`. */}
             <div className="text-[11.5px]" data-testid="plan-grid-summary">
-              {shortChapters > 0 ? (
+              {shortChapters > 0 || frontMatterShort ? (
                 <span className="font-medium text-foreground">
-                  {t("org.projectOverview.plan.chaptersShort", { count: shortChapters })}
+                  {/* AQU-1493: short front matter is named, not counted as a chapter. */}
+                  {shortChapters > 0 && frontMatterShort
+                    ? t("org.projectOverview.plan.frontMatterAndChaptersShort", { count: shortChapters })
+                    : frontMatterShort
+                      ? t("org.projectOverview.plan.frontMatterShort")
+                      : t("org.projectOverview.plan.chaptersShort", { count: shortChapters })}
                 </span>
               ) : (
                 <span className="text-muted-foreground">
                   {t("org.projectOverview.plan.chaptersComplete", {
-                    done: sections.length,
-                    total: sections.length,
+                    done: chapterSections.length,
+                    total: chapterSections.length,
                   })}
                 </span>
               )}
@@ -533,6 +575,7 @@ export function PlanInspector({
                 key={openSection.key}
                 section={openSection}
                 title={openSectionTitle}
+                frontMatter={openSectionIsFrontMatter}
                 hasAudio={hasAudio}
                 hasText={hasText}
                 verses={sectionVerses.get(openSection.key)}
@@ -603,6 +646,15 @@ export function PlanInspector({
                     user: unit.doneBy ?? t("org.projectOverview.plan.aMaintainer"),
                   })}
                 </p>
+                {/* AQU-1494 (Sam, 2026-10-03): the mark stands, but the work that
+                    came back since is said here, beside the button that would
+                    take the mark away — the same words as the board row. */}
+                {shortfallText !== null && (
+                  <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px]"
+                     data-testid="plan-done-with-work">
+                    {t("org.projectOverview.plan.markedDoneWithWork", { work: shortfallText })}
+                  </p>
+                )}
                 {canPlan && (
                   <div>
                     <Button variant="outline" size="sm" disabled={busy}
@@ -646,14 +698,16 @@ export function PlanInspector({
                     {t("org.projectOverview.plan.nothingLeft")}
                   </p>
                 )}
+                {/* AQU-1494: the reassurance that this can be reversed lives in
+                    a tooltip. Printed beside the button as "Undoable." it read
+                    as "cannot be undone" (Joel, 2026-09-29). */}
                 <div className="flex items-center gap-2">
-                  <Button size="sm" disabled={busy} data-testid="plan-mark-done"
-                    onClick={() => (validatedPct < 100 ? setConfirmingDone(true) : markDone())}>
-                    {t("org.projectOverview.plan.markDone")}
-                  </Button>
-                  <span className="text-[11.5px] text-muted-foreground">
-                    {t("org.projectOverview.plan.markDoneHint")}
-                  </span>
+                  <AppTooltip content={t("org.projectOverview.plan.markDoneTooltip")}>
+                    <Button size="sm" disabled={busy} data-testid="plan-mark-done"
+                      onClick={() => (validatedShort ? setConfirmingDone(true) : markDone())}>
+                      {t("org.projectOverview.plan.markDone")}
+                    </Button>
+                  </AppTooltip>
                 </div>
               </>
             )}
@@ -681,11 +735,17 @@ export function PlanInspector({
  * they arrive, or if they never do, the title is plain text.
  */
 function PlanChapterCard({
-  section, title, hasAudio, hasText = true, verses, onOpenCell,
+  section, title, frontMatter = false, hasAudio, hasText = true, verses, onOpenCell,
 }: {
   section: PlanSection
   /** "Chapter 12", or a named section's own label. */
   title: string
+  /**
+   * AQU-1493: the card is a book's front matter. Its structural lines are the
+   * book's title, header, contents and introduction, so their chips say
+   * "Title or intro" rather than "Heading".
+   */
+  frontMatter?: boolean
   hasAudio: boolean
   /** AQU-955: false on an audio-only file; the card drops its text bar. */
   hasText?: boolean
@@ -731,6 +791,58 @@ function PlanChapterCard({
     : []
   const fade = useScrollFade(rowRef, short.length)
   const firstCellId = verses?.status === "ready" ? verses.verses[0]?.cellId ?? null : null
+  // Lines added in the editor only. A heading is never one of them; the
+  // `structural` check also covers a worker mid-deploy that still flags it.
+  const unnumbered = verses?.status === "ready"
+    ? verses.verses.filter((v) => v.unnumbered && !v.structural).length
+    : 0
+
+  // AQU-1493: a chip with no number prints a word, and several can share it
+  // ("Heading", "Heading"). Each gets a name that says where its line sits —
+  // "Heading before 3:1" — as its accessible name and its tooltip, and where
+  // two lines still share a name (stacked headings, or a front-matter card
+  // with no numbered verse to place them by) a count among them: "(2 of 3)".
+  const wordOf = (v: ShortVerse): string | null => v.structural
+    ? t(frontMatter ? "org.projectOverview.plan.titleLine" : "org.projectOverview.plan.headingLine")
+    : v.unnumbered ? t("org.projectOverview.plan.unnumberedLine") : null
+  const allVerses = verses?.status === "ready" ? verses.verses : []
+  const places = wordChipPlaces(allVerses, section.key)
+  const placedName = (v: ShortVerse): string | null => {
+    const word = wordOf(v)
+    if (!word) return null
+    const place = v.cellId ? places.get(v.cellId) : undefined
+    if (!place || (v.structural && frontMatter)) return word
+    const key = v.structural
+      ? place.near === "before" ? "org.projectOverview.plan.headingBefore" : "org.projectOverview.plan.headingAfter"
+      : place.near === "before" ? "org.projectOverview.plan.unnumberedBefore" : "org.projectOverview.plan.unnumberedAfter"
+    return t(key, { verse: place.verse })
+  }
+  // AQU-1493 (Sam, 2026-10-03): a heading's chip says which verse it
+  // introduces — "Heading · 1:6" — so a strip of them reads as places rather
+  // than as one word repeated. Only a heading with a verse BELOW it: one at the
+  // end of a chapter introduces nothing, and a front-matter title has no verse
+  // to name, so both keep the bare word. An unnumbered line carries no ref of
+  // its own and keeps its word too; its tooltip still says where it sits.
+  const chipText = (v: ShortVerse & { cellId: string }): string => {
+    if (v.structural && !frontMatter) {
+      const place = places.get(v.cellId)
+      if (place?.near === "before") {
+        return t("org.projectOverview.plan.headingChipAt", { verse: place.verse })
+      }
+    }
+    return wordOf(v) ?? verseChipLabel(v.ref, section.key)
+  }
+  const wordChipName = (v: ShortVerse & { cellId: string }): string | undefined => {
+    const name = placedName(v)
+    if (!name) return undefined
+    const namesakes = allVerses.filter((o) => placedName(o) === name)
+    if (namesakes.length < 2) return name === wordOf(v) ? undefined : name
+    return t("org.projectOverview.plan.wordChipOrdinal", {
+      line: name,
+      index: namesakes.findIndex((o) => o.cellId === v.cellId) + 1,
+      count: namesakes.length,
+    })
+  }
 
   return (
     <div
@@ -811,20 +923,44 @@ function PlanChapterCard({
           style={{ maskImage: fadeMask(fade), WebkitMaskImage: fadeMask(fade) }}
           data-testid="plan-chapter-verses"
         >
-          {short.map((v) => (
-            <button
-              key={v.cellId}
-              type="button"
-              data-testid={`plan-verse-chip-${v.cellId}`}
-              // Text in the STATUS azure: `text-primary` is the pale accent
-              // tuned for button fills, and on a chip this small it washed out.
-              className={`h-6 w-[46px] shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${PLAN_TONE.nearly_complete.text}`}
-              onClick={() => onOpenCell?.(v.cellId)}
-            >
-              {verseChipLabel(v.ref, section.key)}
-            </button>
-          ))}
+          {short.map((v) => {
+            const name = wordChipName(v)
+            return (
+              <AppTooltip key={v.cellId} content={name}>
+                <button
+                  type="button"
+                  aria-label={name}
+                  data-testid={`plan-verse-chip-${v.cellId}`}
+                  // Text in the STATUS azure: `text-primary` is the pale accent
+                  // tuned for button fills, and on a chip this small it washed out.
+                  // AQU-1493: a line with no reference has no number to print, so
+                  // its chip says what it is in words and grows to fit them. So
+                  // does a heading, whose ref (if any) is a USFM id like "1:s1:1".
+                  className={`h-6 shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${v.structural || v.unnumbered ? "px-2" : "w-[46px]"} ${PLAN_TONE.nearly_complete.text}`}
+                  onClick={() => onOpenCell?.(v.cellId)}
+                >
+                  {chipText(v)}
+                </button>
+              </AppTooltip>
+            )
+          })}
         </div>
+      )}
+      {/* AQU-1493: only on the chapter that holds them (Sam, 2026-10-01). A
+          line added with no verse reference counts with the chapter of the
+          line above it; this says so here, where the number it changes is,
+          and nowhere else. */}
+      {unnumbered > 0 && (
+        <p className="text-[11px] text-muted-foreground" data-testid="plan-chapter-unnumbered">
+          {/* Front matter is not a chapter: a line added above a book's first
+              verse counts there, and the note says so in those words. */}
+          {t(
+            frontMatter
+              ? "org.projectOverview.plan.unnumberedInFrontMatter"
+              : "org.projectOverview.plan.unnumberedInChapter",
+            { count: unnumbered },
+          )}
+        </p>
       )}
     </div>
   )

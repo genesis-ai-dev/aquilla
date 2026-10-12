@@ -30,6 +30,20 @@ export type ClientResult =
 
 export type Fetcher = (input: string, init: RequestInit) => Promise<Response>
 
+/**
+ * A fetcher that answers for pinned metadata documents (a JSON array, matched
+ * on `client_id`) and fetches everything else. Local stacks only: chatgpt.com
+ * answers workerd's fetch with a bot challenge, so e2e cannot fetch it live.
+ * Pinned documents still go through every check in `resolveClient`.
+ */
+export function pinnedClientFetcher(pinnedJson: string, fallback: Fetcher = fetch): Fetcher {
+  const pinned = JSON.parse(pinnedJson) as Array<Record<string, unknown>>
+  return (input, init) => {
+    const doc = pinned.find((d) => d.client_id === input)
+    return doc ? Promise.resolve(Response.json(doc)) : fallback(input, init)
+  }
+}
+
 function fail(description: string): ClientResult {
   return { ok: false, error: "invalid_client", description }
 }

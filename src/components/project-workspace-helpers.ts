@@ -7,7 +7,11 @@ import type { ContextualDraftsScope } from "@/lib/contextual/drafts-store"
 import { btSeedsFromAlignmentSeeds, type BtSeed } from "@/lib/completion/bt-glosser"
 import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
+import type { FileSummary } from "@/lib/sync/cells-read-types"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { Concept } from "@/lib/terminology/types"
+import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
 
 /**
@@ -228,6 +232,7 @@ export function buildGlosserSeeds(args: {
       source: record.btText,
       target: record.forText || cell.translated,
       weight: record.polished === false ? 5 : 2,
+      originId: record.cellId,
     })
   }
 
@@ -383,4 +388,124 @@ export function runAfterPushedLinkSync(
   void targets.refreshAllFilesProgress().catch(() => {
     // The next normal sidebar refresh retries a transient failure.
   })
+}
+
+/**
+ * AQU-1721: which concepts each workspace surface reads. The editor surfaces
+ * (source highlights, the term-lookup popover, Check file) apply the termbases
+ * this project subscribes to ahead of its own concepts, in the order `useRules`
+ * compiles them. The glossary edits this project's own termbase, so it gets
+ * only those. A glossary edit is a `term.*` event keyed by concept id under
+ * this project's id: the server would drop one for an upstream concept while
+ * the glossary showed it saved.
+ *
+ * With no subscriptions, `editor` is `local` itself, so the editor record keeps
+ * its identity and the common case allocates nothing.
+ */
+export function workspaceTerminology(
+  local: Concept[],
+  subscribed: Concept[],
+): { editor: Concept[]; glossary: Concept[] } {
+  return {
+    editor: subscribed.length === 0 ? local : [...subscribed, ...local],
+    glossary: local,
+  }
+}
+
+/**
+ * The active lane's slice of the editor's concept list, for Check file and
+ * the term-lookup popover (AQU-1721, AQU-1508).
+ *
+ * One rule serves both lists: a subscribed rendering arrives from route #8
+ * already stamped with THIS project's lane id (mapped from its termbase lane
+ * by language, AQU-1777), so `conceptsForLaneTag` over this project's lane
+ * rows reads it exactly like a local one. With no subscriptions the editor
+ * list IS `local`, so the local slice is reused and keeps its identity.
+ */
+export function editorConceptsForLane(
+  editor: Concept[],
+  local: Concept[],
+  laneLocal: Concept[],
+  activeLane: string,
+  laneRows: readonly LaneLanguageRow[],
+): Concept[] {
+  return editor === local ? laneLocal : conceptsForLaneTag(editor, activeLane, laneRows)
+}
+
+/**
+ * AQU-1752: timeline Space and "Play from this cue" wait for the file's
+ * audio-attachment read.
+ *
+ * A media cell counts as file-timed only once its source clip is merged in.
+ * Until the timeline's `useFileAudioAttachments` reports `hasLoaded`, the
+ * picture or the virtual clock looks like it owns the file, and a press
+ * starts that engine. When the read lands, ownership can flip to the queue
+ * and the clock that already started is torn down, so nothing sounds.
+ *
+ * The press is dropped. Nothing is handed to the queue when the clip
+ * arrives; the next press goes to whichever engine the read says owns the
+ * file.
+ */
+export function timelinePlayReady(audioHasLoaded: boolean): boolean {
+  return audioHasLoaded
+}
+
+/**
+ * AQU-1805: how a reviewed rule fix may be committed to one cell.
+ *
+ * A rule fix rewrites target text, which on an IDML cell means rewriting
+ * protected runs. AQU-742 is what happens when that is done carelessly: the
+ * anchors InDesign needs are dropped and the file stops round-tripping. So
+ * only a fix carrying a literal find/replace pair may be re-applied inside
+ * protected HTML (`replaceProtectedIdmlText` needs that pair); a regex sweep
+ * has no such pair and would be committed as flattened text.
+ *
+ *  - `plain`     — commit `preview.after` as-is.
+ *  - `protected` — re-apply the literal pair inside the protected HTML.
+ *  - `refuse`    — cannot be applied safely; the whole sweep is abandoned so
+ *                  one bad cell cannot leave it half-written.
+ */
+export function ruleFixPreflight(
+  isIdmlCell: boolean,
+  preview: { find?: string; replace?: string },
+): "plain" | "protected" | "refuse" {
+  if (!isIdmlCell) return "plain"
+  if (preview.find === undefined || preview.replace === undefined) return "refuse"
+  return "protected"
+}
+
+/**
+ * The sentinel fileId a project-level sync-token mint rides.
+ * Must match PROJECT_SENTINEL_FILE_ID in sync-worker/src/events/authorize.ts.
+ */
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
+/**
+ * AQU-1894: reads the "Recently deleted" (trash) listing with a project SYNC
+ * token. The trash list used to hand sync-worker the identity SESSION jwt,
+ * which `verifyTokenForProject` rejects (it only accepts an `aud: "sync"`
+ * token), so `files?trash=1` answered 401 every single time and deleted files
+ * could never be listed or restored from the UI.
+ *
+ * The mint rides the `__project__` sentinel rather than the first live file's
+ * id — the established sentinel for project-level, non-file-scoped calls (see
+ * useComments / archive.ts / outbox-flush). `verifyTokenForProject` checks
+ * only the projectId claim, and the trash list is precisely the surface that
+ * can be non-empty while the project has NO live files left: deleting a
+ * project's only file is the shortest path to this screen, and keying the mint
+ * on `files[0]` would mint nothing in exactly that case.
+ *
+ * Returns `null` when no token could be minted (signed out, mid-session
+ * expiry), which the caller must treat as "leave the current list alone" —
+ * distinct from `[]`, which is a real empty trash and clears optimistic rows.
+ */
+export async function fetchDeletedFilesWithProjectToken(args: {
+  projectId: string
+  getTokenForFile: (fileId: string) => Promise<string | null>
+  fetchFiles: (projectId: string, token: string) => Promise<FileSummary[]>
+}): Promise<FileSummary[] | null> {
+  const { projectId, getTokenForFile, fetchFiles } = args
+  const token = await getTokenForFile(PROJECT_SENTINEL_FILE_ID)
+  if (!token) return null
+  return fetchFiles(projectId, token)
 }

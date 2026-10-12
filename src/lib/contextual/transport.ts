@@ -676,6 +676,72 @@ export async function fetchContextualRuns(
 /** Evidence bundle for one durable run. Historic deployments may know the
  * run but have no event log; an empty bundle keeps the durable summary usable
  * and lets the inspector explain that deeper history was not recorded. */
+/** One Autopilot model call: what the model was asked and what it said
+ *  (auth-worker lib/contextual/traces.ts). Kept 30 days server-side. */
+export interface ContextualRunTrace {
+  id: number
+  spanId: string
+  /** Pipeline node: "construe", "draft", "verify", … */
+  label: string
+  tier: string
+  model: string
+  system: string
+  user: string
+  output: string | null
+  error: string | null
+  generationId: string | null
+  promptTokens: number
+  completionTokens: number
+  costCents: number
+  latencyMs: number
+  attempts: number
+  truncated: boolean
+  createdAt: string
+}
+
+/** Model-call traces for a run, oldest first; narrowed to a span when given.
+ *  A run older than the retention window answers with an empty list. */
+export async function fetchContextualRunTraces(
+  projectId: string,
+  runId: string,
+  spanId?: string,
+): Promise<{ traces: ContextualRunTrace[]; truncated: boolean }> {
+  const jwt = await requireJwt()
+  const query = spanId ? `?${new URLSearchParams({ spanId }).toString()}` : ""
+  const { res, body: raw } = await conditionalGet(
+    `${runsBase(projectId)}/${encodeURIComponent(runId)}/traces${query}`,
+    jwt,
+  )
+  if (res.status === 404 || res.status === 501) return { traces: [], truncated: false }
+  if (!conditionalOk(res)) return throwFromResponse(res, "fetch autopilot traces failed")
+  const body = objectValue(raw) ?? {}
+  const rows = Array.isArray(body.traces) ? body.traces : []
+  const traces = rows.flatMap((row): ContextualRunTrace[] => {
+    const r = objectValue(row)
+    if (!r) return []
+    return [{
+      id: numberValue(r.id),
+      spanId: stringValue(r.spanId),
+      label: stringValue(r.label),
+      tier: stringValue(r.tier),
+      model: stringValue(r.model),
+      system: stringValue(r.system),
+      user: stringValue(r.user),
+      output: typeof r.output === "string" ? r.output : null,
+      error: typeof r.error === "string" ? r.error : null,
+      generationId: typeof r.generationId === "string" ? r.generationId : null,
+      promptTokens: numberValue(r.promptTokens),
+      completionTokens: numberValue(r.completionTokens),
+      costCents: numberValue(r.costCents),
+      latencyMs: numberValue(r.latencyMs),
+      attempts: numberValue(r.attempts),
+      truncated: r.truncated === true,
+      createdAt: stringValue(r.createdAt),
+    }]
+  })
+  return { traces, truncated: body.truncated === true }
+}
+
 export async function fetchContextualRunActivity(
   projectId: string,
   runId: string,

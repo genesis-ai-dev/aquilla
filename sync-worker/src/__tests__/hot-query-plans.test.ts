@@ -45,8 +45,7 @@ describe('hot query plan shapes (PGlite)', () => {
         [`ev-${i}`, PROJECT, FILE, `cell-${i % 50}`, i],
       )
       await t.pg.query(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at, word_count)
-         VALUES ($1, $2, $3, $4, '', 'word', $5, $6, 1)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count) VALUES ($1, $2, $3, $4, 'word', $5, $6, 1)`,
         [PROJECT, FILE, `cell-${i}`, i % 2 ? 'source' : 'target', `ev-${i}`, i],
       )
     }
@@ -95,6 +94,11 @@ describe('hot query plan shapes (PGlite)', () => {
     expect(plan).toContain('Index Only Scan using cells_pkey')
     expect(plan).toMatch(/Group Key: (\w+\.)?cell_id/)
     expect(plan).not.toContain('Sort')
+    // The cells it leaves out — hidden, and deleted by a live link's upstream —
+    // are collected through their partial indexes, not by walking every source
+    // row of the file on each recompute.
+    expect(plan).toContain('idx_cells_hidden')
+    expect(plan).toContain('idx_cells_tombstoned')
   })
 
 })

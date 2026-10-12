@@ -28,6 +28,7 @@ import type {
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { resolveVoice, resolveCastVoice } from "@/lib/audio/voices"
 import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider } from "@/lib/audio/tts-providers"
+import { categorizeAiError } from "@/lib/audio/ai-error"
 
 interface Props {
   cellId: string
@@ -238,6 +239,7 @@ export function CellTtsButton({
               session,
               username: session.username,
               onProgress,
+              surface: "cell", // AQU-1572
             })
             blob = gen.blob
             // The other heard lines performing this same subtitle. Sequential,
@@ -260,6 +262,7 @@ export function CellTtsButton({
                   geminiContext,
                   session,
                   username: session.username,
+                  surface: "cell", // AQU-1572: one event per line it voiced
                 })
                 alsoWritten += 1
               } catch (e) {
@@ -307,7 +310,11 @@ export function CellTtsButton({
             // instead of surfacing the internal server-only guard error.
             setTtsStatus(statusKey, {
               kind: "error",
-              message: "Generate audio on this line first to hear Inworld TTS.",
+              // AQU-510: named the engine in English prose before; now a
+              // localized sentence with the product name interpolated.
+              message: t("audio.tts.serverOnlyNeedsGenerate", {
+                engine: providerInfo(provider).shortTitle,
+              }),
             })
             return
           } else {
@@ -326,7 +333,12 @@ export function CellTtsButton({
           setTtsStatus(statusKey, { kind: "idle" })
           return
         }
-        setTtsStatus(statusKey, { kind: "error", message: e instanceof Error ? e.message : String(e) })
+        // AQU-510: AQU-891's categoriser turns a raw provider payload into a
+        // localized, actionable sentence.
+        setTtsStatus(statusKey, {
+          kind: "error",
+          message: categorizeAiError(e instanceof Error ? e.message : String(e)).body,
+        })
         return
       }
     }
@@ -336,7 +348,7 @@ export function CellTtsButton({
     audio.onended = () => { setIsPlaying(false); setTtsStatus(statusKey, { kind: "idle" }) }
     audio.onerror = () => {
       setIsPlaying(false)
-      setTtsStatus(statusKey, { kind: "error", message: "Audio failed to load" })
+      setTtsStatus(statusKey, { kind: "error", message: t("audio.tts.playbackFailed") })
     }
     audioRef.current = audio
     try { await audio.play() } catch (e) {
@@ -394,7 +406,7 @@ export function CellTtsButton({
   const tooltip = noText
     ? "Translate this line first to generate voice"
     : isError
-      ? `TTS failed — ${status.message}`
+      ? t("audio.tts.failedTooltip", { reason: status.message })
       : isLoadingModel
         ? pct != null ? `Downloading voice model (${pct}%)…` : "Loading voice model…"
         : isSynthesizing

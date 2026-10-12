@@ -19,6 +19,7 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 interface ProjectAssignedToMeProps {
   projectId: string
@@ -95,7 +96,7 @@ export function ProjectAssignedToMe({
             <p className="px-2 py-1 text-xs text-destructive">{error}</p>
           ) : (
             assignments.map((a) => {
-              const pct = a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
+              const pct = progressPercent(a.cellsDone, a.cellsTotal)
               return (
                 <AppTooltip
                   key={a.assignmentId}

@@ -18,6 +18,7 @@ vi.mock('partyserver', () => ({
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { handleEventsWriteRequest } from '../events/route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
+import { ensureProjectLanes } from '../../../db/shared/lanes'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
@@ -117,7 +118,7 @@ function commitReq(token: string, id: string, agentMeta?: unknown): Request {
 }
 
 async function prepare(env: ReturnType<typeof makeEnv>, token: string, commands: unknown, extra: Record<string, unknown> = {}) {
-  const res = (await handleExternalChangesetsRequest(prepareReq(token, { commands, ...extra }), env))!
+  const res = (await handleExternalChangesetsRequest(prepareReq(token, { commands: withLaneIds(commands), ...extra }), env))!
   return { res, body: (await res.json()) as any }
 }
 
@@ -138,10 +139,34 @@ async function insertConfirmation(
     .run()
 }
 
+const DEFAULT_LANE = 'deflane1'
+
 let tdb: TestDb
 beforeEach(async () => {
   tdb = await seedProject()
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
 })
+
+/** Tests that used to omit laneId were writing the former default lane.
+ *  That omission is now a 400. These tests pass that lane's id. */
+function withLaneIds(commands: unknown): unknown {
+  if (!Array.isArray(commands)) return commands
+  return commands.map((command) => {
+    if (
+      command &&
+      typeof command === 'object' &&
+      (command as { kind?: string }).kind === 'SetTranslation' &&
+      (command as { laneId?: string }).laneId === undefined
+    ) {
+      return { ...command, laneId: DEFAULT_LANE }
+    }
+    return command
+  })
+}
 
 // ── prepare → commit happy path ────────────────────────────────────────────
 
@@ -432,7 +457,7 @@ describe('changesets — credential scope', () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb, contributorCred({ projectId: 'other-project' }))
     const res = (await handleExternalChangesetsRequest(
-      prepareReq(token, { commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' }] }),
+      prepareReq(token, { commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: DEFAULT_LANE, value: 'x' }] }),
       env,
     ))!
     expect(res.status).toBe(403)
@@ -652,12 +677,42 @@ describe('changesets — commit replay (crash-retry idempotency)', () => {
 //   3. preconditions are lane-scoped — a sibling-lane write never stales a plan
 
 describe('changesets — target-language lanes', () => {
-  async function registerLanes(lanes: string[]): Promise<void> {
+  const laneRowId: Record<string, string> = { es: 'eslane01', fr: 'frlane01', pt: 'ptlane01', Spanish: 'splane01' }
+
+  /** `withRows: false` for tests that seed their own lane rows (fixed ids). */
+  async function registerLanes(lanes: string[], { withRows = true } = {}): Promise<void> {
+    const settings = { targetLanes: lanes }
     await tdb.pg.query(
-      `INSERT INTO project_settings (project_id, settings, version) VALUES ($1, $2::jsonb, 1)`,
-      [PROJECT, JSON.stringify({ targetLanes: lanes })],
+      `INSERT INTO project_settings (project_id, settings, version) VALUES ($1, $2::jsonb, 1)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+      [PROJECT, JSON.stringify(settings)],
     )
+    if (!withRows) return
+    for (const [index, tag] of lanes.entries()) {
+      await tdb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+         VALUES ($1, $2, 'target', $3, $3, $4)
+         ON CONFLICT (project_id, id) DO NOTHING`,
+        [laneRowId[tag], PROJECT, tag, index + 2],
+      )
+    }
   }
+
+  it('does not retarget a code onto a lane whose name is that language', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    await registerLanes(['Spanish'])
+
+    const { res, body } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+    ])
+    // AQU-1615: a code is not a lane id, so it names no lane at all, the Spanish
+    // one included.
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(body.error.message).toContain('lane does not exist')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
 
   it('rejects a SetTranslation naming an unregistered lane at prepare', async () => {
     const env = makeEnv(tdb.db)
@@ -665,18 +720,18 @@ describe('changesets — target-language lanes', () => {
     await registerLanes(['es'])
 
     const { res, body } = await prepare(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'pt' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'ptlane01' },
     ])
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')
-    expect(body.error.message).toContain('unregistered lane "pt"')
-    expect(body.error.message).toContain('UpdateProjectSettings')
+    expect(body.error.message).toContain('lane does not exist')
+    expect(body.error.details?.registeredLanes).toBeUndefined()
   })
 
   it('rejects a SetTranslation naming an archived lane, and still accepts a sibling (AQU-1462)', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb, contributorCred())
-    await registerLanes(['es', 'fr'])
+    await registerLanes(['es', 'fr'], { withRows: false })
     await tdb.pg.query(
       `INSERT INTO lanes (id, project_id, role, name, legacy_tag, archived_at)
        VALUES ('eslane01', $1, 'target', 'Spanish', 'es', now())`,
@@ -690,7 +745,7 @@ describe('changesets — target-language lanes', () => {
     )
 
     const archived = await prepare(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'eslane01' },
     ])
     expect(archived.res.status).toBe(400)
     expect(archived.body.error.code).toBe('validation_failed')
@@ -698,7 +753,7 @@ describe('changesets — target-language lanes', () => {
 
     const walled = { ...makeEnv(tdb.db), LANE_READ_WALL: '1' }
     const hidden = await prepare(walled, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hallo', laneId: 'es' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hallo', laneId: 'eslane01' },
     ])
     expect(hidden.res.status).toBe(400)
     expect(hidden.body.error.message).toContain('lane does not exist')
@@ -711,13 +766,18 @@ describe('changesets — target-language lanes', () => {
       [PROJECT],
     )
     const allowedToKnow = await prepare(walled, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'eslane01' },
     ])
     expect(allowedToKnow.res.status).toBe(400)
     expect(allowedToKnow.body.error.message).toContain("lane 'Spanish' is archived")
 
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, language, legacy_tag)
+       VALUES ('frlane01', $1, 'target', 'French', 'fr', 'fr')`,
+      [PROJECT],
+    )
     const sibling = await prepare(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'bonjour', laneId: 'fr' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'bonjour', laneId: 'frlane01' },
     ])
     expect(sibling.res.status).toBe(200)
   })
@@ -725,15 +785,19 @@ describe('changesets — target-language lanes', () => {
   it('refuses a changeset that was staged before the lane was archived (AQU-1462)', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb, contributorCred())
-    await registerLanes(['es'])
+    await registerLanes(['es'], { withRows: false })
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, name, language, legacy_tag)
+       VALUES ('eslane01', $1, 'target', 'Spanish', 'es', 'es')`,
+      [PROJECT],
+    )
     const { body: prep } = await prepare(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'eslane01' },
     ])
     expect(prep.changeset.id).toBeTruthy()
 
     await tdb.pg.query(
-      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, archived_at)
-       VALUES ('eslane01', $1, 'target', 'Spanish', 'es', now())`,
+      `UPDATE lanes SET archived_at = now() WHERE project_id = $1 AND id = 'eslane01'`,
       [PROJECT],
     )
     const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
@@ -746,7 +810,7 @@ describe('changesets — target-language lanes', () => {
   it('does not echo an ungranted lane in the unregistered-lane error', async () => {
     const env = { ...makeEnv(tdb.db), LANE_READ_WALL: '1' }
     const token = await credToken(tdb, contributorCred())
-    await registerLanes(['es', 'fr'])
+    await registerLanes(['es', 'fr'], { withRows: false })
     await tdb.pg.query(
       `INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES
         ('eslane01', $1, 'target', 'Spanish', 'es'),
@@ -760,10 +824,13 @@ describe('changesets — target-language lanes', () => {
     )
 
     const { res, body } = await prepare(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'pt' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'ptlane01' },
     ])
     expect(res.status).toBe(400)
-    expect(body.error.details.registeredLanes).toEqual(['es'])
+    expect(body.error.message).toContain('lane does not exist')
+    expect(body.error.details?.registeredLanes).toBeUndefined()
+    expect(body.error.message).not.toContain('French')
+    expect(body.error.message).not.toContain('Spanish')
   })
 
   it('two lanes on one cell in one changeset land two independent lane rows', async () => {
@@ -772,8 +839,8 @@ describe('changesets — target-language lanes', () => {
     await registerLanes(['es', 'pt'])
 
     const { body: prep } = await prepare(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'pt' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'eslane01' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'olá', laneId: 'ptlane01' },
     ])
     // Same cell, different lanes = two independent slots, not a duplicate.
     expect(prep.summary.warnings).toEqual([])
@@ -805,7 +872,7 @@ describe('changesets — target-language lanes', () => {
     await registerLanes(['es', 'pt'])
 
     const { body: prep } = await prepare(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'eslane01' },
     ])
 
     // Interleave a direct commit on the SAME cell in the pt lane.
@@ -841,7 +908,7 @@ describe('changesets — target-language lanes', () => {
     await registerLanes(['es'])
 
     const { body: prep } = await prepare(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'es' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola', laneId: 'eslane01' },
     ])
 
     const seedTok = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, userId: 1, username: 'alice', role: 400 })

@@ -21,13 +21,14 @@ import { proxyOrigin } from "./net/resource-proxy"
 // This module runs outside React (plain import-pipeline code, no hooks), so it
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
-import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
+import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
-import { detectSpeechSegments } from "./timeline/silence-split"
+import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
 import { createMediaCueSpecs } from "./import/media-cues"
+import { youTubeVideoId } from "./video/youtube"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
 import {
@@ -64,6 +65,7 @@ import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
   bindSourceArtifact,
+  isSourceUploadRoleRefusal,
   uploadSourceOriginal,
 } from "./sync/source-upload"
 import {
@@ -83,6 +85,7 @@ import { parseTnTsv } from "./parsers/translation-notes"
 import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
 import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
+import { reimportKeysFor } from "./import/reimport-keys"
 import { getBookName } from "./file-labeling/bible-book-names"
 import {
   aquillaImportMetadata,
@@ -107,6 +110,7 @@ import type {
 } from "../../shared/import-contract"
 import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
 import { assertImportCellsWithinSizeLimit } from "./import/cell-size"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -225,8 +229,13 @@ export function matchEBibleToSourceCells(
     const currentText = cell.translated ?? ""
     // AD-2 parentId: chain off existing targetEventId if present, else off the
     // source cell's sourceEventId (genesis target commit). Fallback to empty
-    // string only when neither is available (rare legacy cells with no event id).
-    const parentId = cell.targetEventId ?? cell.sourceEventId ?? ""
+    // string only when neither is available (rare legacy cells with no event id,
+    // or a lane whose cells have not finished loading). "" means "unchainable"
+    // and applyEBibleTargetImport refuses to apply such a cell (AQU-1669).
+    const parentId = resolveTargetCommitParent({
+      targetEventId: cell.targetEventId,
+      sourceEventId: cell.sourceEventId,
+    }) ?? ""
     matched.push({
       cellId: cell.cellId,
       fileId: cell.fileId,
@@ -292,7 +301,10 @@ export async function prepareEBibleTargetImport(
  * Cells with hasConflict=true and not in selectedCellIds are kept (skipped).
  *
  * parentId handling: each MatchedCell already carries the correct AD-2 parentId
- * (targetEventId ?? sourceEventId), so commits are always properly chained.
+ * (targetEventId ?? sourceEventId), so commits are always properly chained. A
+ * selected cell that resolved to neither (parentId "") cannot be chained at
+ * all, and AQU-1669 is what dropping those quietly cost: this throws instead,
+ * so the caller can roll its optimistic patch back and show the failure.
  */
 export async function applyEBibleTargetImport(
   matchResult: EBibleMatchResult,
@@ -315,56 +327,53 @@ export async function applyEBibleTargetImport(
     byFile.set(m.fileId, arr)
   }
 
+  // AQU-1669: a selected cell whose AD-2 parent never resolved (parentId "" —
+  // no targetEventId and no sourceEventId) used to be dropped right here, with
+  // the drop folded into `committedCount`. When that silently emptied the whole
+  // batch the caller still reported success: the artifact upload below was
+  // skipped (`groups.length > 0` was false), no commit was enqueued, and the
+  // dialog closed over an optimistic patch nobody ever undid — the translations
+  // sat in the editor looking saved and were gone on reopen, with no warning.
+  // A cell the user explicitly selected is never safe to drop quietly, so fail
+  // the whole apply loudly instead and let handleApply roll the patch back.
+  const unchainable = toCommit.filter((cell) => !cell.parentId)
+  if (unchainable.length > 0) {
+    throw new Error(
+      t("importExport.errors.unchainableTargetCells", {
+        count: unchainable.length,
+        total: toCommit.length,
+      }),
+    )
+  }
+
   const groups = [...byFile].map(([fileId, cells]) => ({
     fileId,
-    commits: cells
-      .filter((cell) => cell.parentId)
-      .map((cell) => ({
-        id: uuidv7(),
-        cellId: cell.cellId,
-        parentId: cell.parentId!,
-        value: cell.incomingText,
-      })),
+    commits: cells.map((cell) => ({
+      id: uuidv7(),
+      cellId: cell.cellId,
+      parentId: cell.parentId,
+      value: cell.incomingText,
+    })),
   })).filter((group) => group.commits.length > 0)
+  // Every selected cell is chainable by the guard above, so this is exactly the
+  // count the user approved — never a quietly reduced one (AQU-1669).
   const committedCount = groups.reduce((count, group) => count + group.commits.length, 0)
 
   // Preserve the exact target-side input before queuing any edits. One
   // immutable artifact can bind to several Aquilla files, and the active lane
   // is part of every binding so later audit/export never confuses languages.
+  //
+  // AQU-1365: the artifact routes sit at Project lead (500), but a target
+  // import only needs Contributor (400) for its commits, and the Import
+  // button now opens a translation import for Contributors. A role refusal
+  // (403) therefore skips the preserved copy and still imports the text;
+  // any other failure still stops the import before a commit is queued.
   const sourceArtifact = ctx.sourceArtifact ?? matchResult.sourceArtifact
   if (sourceArtifact && groups.length > 0) {
-    const [firstFileId, ...otherFileIds] = groups.map((group) => group.fileId)
-    const artifactId = uuidv7()
-    await uploadSourceOriginal({
-      projectId: ctx.projectId,
-      fileId: firstFileId,
-      artifactId,
-      bytes: sourceArtifact.bytes,
-      format: sourceArtifact.format,
-      artifactName: sourceArtifact.name,
-      bindingRole: "target",
-      targetLang: ctx.targetLang,
-      profileId: `builtin:target-${sourceArtifact.format}`,
-      profileVersion: "1",
-      fidelity: "preserved-only",
-      updateSourceSidecar: false,
-      getToken: ctx.getToken,
-      signal: ctx.signal,
-    })
-    for (const fileId of otherFileIds) {
-      await bindSourceArtifact({
-        projectId: ctx.projectId,
-        fileId,
-        artifactId,
-        memberPath: sourceArtifact.name,
-        profileId: `builtin:target-${sourceArtifact.format}`,
-        profileVersion: "1",
-        fidelity: "preserved-only",
-        bindingRole: "target",
-        targetLang: ctx.targetLang,
-        getToken: ctx.getToken,
-        signal: ctx.signal,
-      })
+    try {
+      await preserveTargetArtifact(sourceArtifact, groups.map((group) => group.fileId), ctx)
+    } catch (error) {
+      if (!isSourceUploadRoleRefusal(error)) throw error
     }
   }
 
@@ -383,6 +392,47 @@ export async function applyEBibleTargetImport(
 
   const skippedCount = matchResult.matched.length - committedCount
   return { committedCount, skippedCount }
+}
+
+/** Upload a target import's original once and bind it to every file it fills. */
+async function preserveTargetArtifact(
+  sourceArtifact: TargetImportArtifact,
+  fileIds: readonly string[],
+  ctx: Pick<ImportContext, "projectId" | "getToken" | "signal" | "targetLang">,
+): Promise<void> {
+  const [firstFileId, ...otherFileIds] = fileIds
+  const artifactId = uuidv7()
+  await uploadSourceOriginal({
+    projectId: ctx.projectId,
+    fileId: firstFileId,
+    artifactId,
+    bytes: sourceArtifact.bytes,
+    format: sourceArtifact.format,
+    artifactName: sourceArtifact.name,
+    bindingRole: "target",
+    targetLang: ctx.targetLang,
+    profileId: `builtin:target-${sourceArtifact.format}`,
+    profileVersion: "1",
+    fidelity: "preserved-only",
+    updateSourceSidecar: false,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
+  for (const fileId of otherFileIds) {
+    await bindSourceArtifact({
+      projectId: ctx.projectId,
+      fileId,
+      artifactId,
+      memberPath: sourceArtifact.name,
+      profileId: `builtin:target-${sourceArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      bindingRole: "target",
+      targetLang: ctx.targetLang,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+  }
 }
 
 export type MaculaImportPhase = "parse" | "save" | "morph"
@@ -465,6 +515,11 @@ export interface ImportContext {
   targetLang?: string
   /** Identity JWT used only for AI-assisted classification of unknown text. */
   identityToken?: string
+  /** AQU-1720: what one imported cell is for docx/txt/md. `paragraph` keeps a
+   *  paragraph whole (one dubbing clip per cell); absent/`sentence` segments it
+   *  as before. Forwarded to `prepareImportFile` when this context drives the
+   *  parse itself (no pre-`prepared` result from the dialog's preview). */
+  cellUnit?: CellUnit
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
@@ -493,6 +548,8 @@ export interface ImportContext {
    *  entry is stamped as `importManifest.origin` and projected verbatim to
    *  `files.meta.aquillaImport.origin` (linked-sync hook, e.g. Google Drive). */
   origins?: ReadonlyMap<string, Record<string, unknown>>
+  /** Optional YouTube picture paired with the user's uploaded source media. */
+  mediaPictureUrl?: string
   /** User-reviewed timed wording for this media file. */
   mediaTextSource?: {
     cues: readonly TranslatableString[]
@@ -502,7 +559,7 @@ export interface ImportContext {
 
 type PrepareImportContext = Pick<
   ImportContext,
-  "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal"
+  "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal" | "cellUnit"
 > & {
   onIdmlProgress?: (progress: IdmlProgress) => void
   /** AQU-634: USFM front-matter opt-out forwarded into parseFile. */
@@ -715,7 +772,7 @@ export async function prepareImportFile(
             extensionType,
             extensionType === "idml"
               ? { signal: ctx.signal, onIdmlProgress: ctx.onIdmlProgress }
-              : undefined,
+              : { cellUnit: ctx.cellUnit },
           ),
         )
       }
@@ -757,6 +814,7 @@ export async function prepareImportFile(
       }
       const prepared = preparedParsedFile(file, fileType, await parseFile(file, fileType, {
         excludeFrontMatter: ctx.excludeFrontMatter,
+        cellUnit: ctx.cellUnit,
       }))
       if (analysisError) {
         prepared.results = prepared.results.map((result) => ({
@@ -788,6 +846,7 @@ export async function prepareImportFile(
     if (sniffedType) {
       return preparedParsedFile(file, sniffedType, await parseFile(file, sniffedType, {
         excludeFrontMatter: ctx.excludeFrontMatter,
+        cellUnit: ctx.cellUnit,
       }))
     }
     if (!ctx.identityToken) {
@@ -1571,12 +1630,7 @@ export async function emitParsedFile(
   ctx: ImportContext,
   normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
-  const reimportKeys = [
-    result.bookCode?.trim().toUpperCase(),
-    result.name.trim().toLowerCase(),
-    result.originalName?.trim().toLowerCase(),
-  ].filter((key): key is string => Boolean(key))
-  const existingFileId = reimportKeys
+  const existingFileId = reimportKeysFor(result)
     .map((key) => ctx.reimportFileIds?.get(key))
     .find((id): id is string => Boolean(id))
   const fileId = existingFileId ?? uuidv7()
@@ -1722,9 +1776,15 @@ export interface MediaSegmentSpec {
 export async function computeMediaSegmentSpecs(
   file: File,
 ): Promise<{ durationMs: number | undefined; specs: MediaSegmentSpec[] }> {
-  const decoded = await decodeAudioFile(file).catch(() => null)
-  const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
-  const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
+  // AQU-1857: the analysis decode is sized to the recording — a 100-minute MP3
+  // is decoded a minute at a time instead of as one multi-gigabyte PCM buffer.
+  // `null` (platform can't decode) and an empty `segments` (too long to
+  // analyse at all) both land on the single whole-file fallback below.
+  const analysis = await analyseSpeechInFile(file, {
+    probeDurationMs: (blob) => probeMediaDurationMs(blob).catch(() => undefined),
+  }).catch(() => null)
+  const durationMs = analysis?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
+  const segments = analysis?.segments ?? []
 
   const timings = tileSegments(segments, durationMs)
   const specs: MediaSegmentSpec[] =
@@ -1740,174 +1800,175 @@ export async function computeMediaSegmentSpecs(
   return { durationMs, specs }
 }
 
-/**
- * Import an audio/video FILE as a single media segment on a time-ordered file.
- * Scope A "B-option": one clip spanning the whole file (silence-split into many
- * segments is Part B). Creates file.create (orderedBy='time') + one
- * source.cell.create (medium='media', timing = probed duration), uploads the
- * bytes to R2, and attaches them so the clip is playable in the media layer.
- */
+/** Import source media as timed segments, preserving the uploaded clip once. */
 export async function emitMediaFile(
   file: File,
   fileType: FileType,
   ctx: ImportContext,
 ): Promise<FileReference> {
-  if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
-  if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
-    throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
-  }
-  const fileId = uuidv7()
-  const suppliedDuration = ctx.mediaTextSource
-    ? await probeMediaDurationMs(file).catch(() => undefined) : undefined
-  const { durationMs, specs } = ctx.mediaTextSource
-    ? { durationMs: suppliedDuration, specs: createMediaCueSpecs(ctx.mediaTextSource.cues, suppliedDuration) }
-    : await computeMediaSegmentSpecs(file)
-
-  const cells: BulkImportCell[] = specs.map((s, i) => ({
-    id: uuidv7(),
-    cellId: s.cellId,
-    anchorCellId: i === 0 ? null : specs[i - 1].cellId,
-    value: file.name,
-    medium: "media",
-    sequenceIndex: i,
-    ...(s.metadata ? { metadata: s.metadata } : {}),
-    ...(s.startMs !== undefined && s.endMs !== undefined ? { startMs: s.startMs, endMs: s.endMs } : {}),
-  }))
-
-  await bulkUploadSource({
-    projectId: ctx.projectId,
-    fileId,
-    file: {
-      id: uuidv7(),
-      name: file.name,
-      fileType,
-      role: "source",
-      kind: importedFileKind(fileType),
-      importFormat: fileType,
-      parserVersion: "workspace-import-v1",
-      sourceLanguage: ctx.sourceLanguage,
-      targetLanguage: ctx.targetLanguage,
-      sourceTextDirection: ctx.sourceTextDirection,
-      targetTextDirection: ctx.targetTextDirection,
-      orderedBy: "time",
-    },
-    cells,
-    deferPublication: true,
-    getToken: ctx.getToken,
-    onProgress: ctx.onCellEnqueued,
-    signal: ctx.signal,
-  })
-
-  // Upload the media bytes ONCE, then attach the shared clip to each segment
-  // cell with its trim window. Slot 'recording' is reused for the source clip;
-  // a dedicated source-media slot is a later refinement.
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase()
-  const textArtifact = ctx.mediaTextSource?.artifact
-  if (textArtifact) {
-    await uploadSourceOriginal({
-      projectId: ctx.projectId, fileId, artifactId: uuidv7(),
-      bytes: textArtifact.bytes, format: textArtifact.format,
-      artifactName: textArtifact.name, memberPath: textArtifact.name,
-      bindingRole: "source", profileId: `builtin:media-cues-${textArtifact.format}`,
-      profileVersion: "1", fidelity: "preserved-only", updateSourceSidecar: false,
-      getToken: ctx.getToken, signal: ctx.signal,
-    })
-  }
-  const audioId = buildAudioId(fileId)
-  const artifactId = uuidv7()
-  const upload = await uploadCellAudio({
-    projectId: ctx.projectId,
-    fileId,
-    audioId,
-    ext,
-    blob: file,
-    artifactId,
-    artifactName: file.name,
-    getSyncToken: (_p, f) => ctx.getToken(f),
-    signal: ctx.signal,
-  })
-  // Persist every attachment and reveal the staged file in one worker
-  // transaction. If the response is lost after commit, publishStagedImport
-  // retries the same event ids; never delete the clip on an ambiguous publish
-  // failure because the server may already have made it live.
-  await publishStagedImport({
-    projectId: ctx.projectId,
-    fileId,
-    ...(fileType === "video" ? { coreMediaUrl: upload.url } : {}),
-    attachments: specs.map((s) => ({
-      cellId: s.cellId,
-      audioId: `${upload.audioId}.${upload.ext}`,
-      url: upload.url,
-      slot: "recording",
-      ...(s.transcription !== undefined ? { transcription: s.transcription } : {}),
-      ...(file.type ? { mimeType: file.type } : {}),
-      ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
-      ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
-        ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
-        : {}),
-    })),
-    getToken: ctx.getToken,
-    signal: ctx.signal,
-  })
-
-  // AQU-646: seed the post-import auto-transcribe — the workspace's
-  // import-completion handler consumes this (the cell store won't have these
-  // cells, let alone their attachments, until an unawaitable revalidate).
-  if (!ctx.mediaTextSource) recordMediaImportSeed({
-    fileId,
-    cells: buildMediaSeedCells({
-      fileId,
-      fileName: file.name,
-      specs,
-      audioId: `${upload.audioId}.${upload.ext}`,
-      url: upload.url,
-      ...(durationMs !== undefined ? { durationMs } : {}),
-    }),
-  })
-
-  return {
-    id: fileId,
-    name: file.name,
-    type: fileType,
-    createdAt: new Date().toISOString(),
-    cellCount: cells.length,
-    orderedBy: "time",
-    hasOriginalSource: true,
-  }
+  return createMediaFileCommit(file, fileType, ctx)()
 }
 
-/**
- * Decode an audio file to mono PCM for silence-splitting. Returns null when
- * the platform can't decode it (no AudioContext, or an undecodable container
- * such as most video) — callers then fall back to a single whole-file segment.
- */
-async function decodeAudioFile(
+/** Keep staging and blob identity through publication retries for one preview. */
+export function createMediaFileCommit(
   file: File,
-): Promise<{ channel: Float32Array; sampleRate: number; durationMs: number } | null> {
-  const AC: typeof AudioContext | undefined =
-    typeof window !== "undefined"
-      ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      : undefined
-  if (!AC) return null
-  const buf = await file.arrayBuffer()
-  const audioCtx = new AC()
-  try {
-    // decodeAudioData rejects with a cryptic DOMException ("EncodingError:
-    // Decoding failed") — rewrap so anything that surfaces or logs the message
-    // is user-actionable. The original error is preserved as `cause`.
-    const audio = await audioCtx.decodeAudioData(buf).catch((err: unknown) => {
-      throw new Error(
-        t("importExport.errors.couldNotDecodeAudio", { fileName: file.name }),
-        { cause: err },
-      )
-    })
-    return {
-      channel: audio.getChannelData(0),
-      sampleRate: audio.sampleRate,
-      durationMs: audio.duration * 1000,
+  fileType: FileType,
+  ctx: ImportContext,
+): () => Promise<FileReference> {
+  let fileId = uuidv7()
+  const publishEventId = uuidv7()
+  const videoEventId = uuidv7()
+  const videoId = ctx.mediaPictureUrl ? youTubeVideoId(ctx.mediaPictureUrl) : null
+  const pictureUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined
+  const prepare = async () => {
+    if (ctx.mediaPictureUrl && !videoId) throw new Error("Enter a YouTube video link.")
+    if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
+    if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
+      throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
     }
-  } finally {
-    void audioCtx.close?.()
+    ctx.signal?.throwIfAborted()
+    const suppliedDuration = ctx.mediaTextSource
+      ? await probeMediaDurationMs(file).catch(() => undefined) : undefined
+    const { durationMs, specs } = ctx.mediaTextSource
+      ? { durationMs: suppliedDuration, specs: createMediaCueSpecs(ctx.mediaTextSource.cues, suppliedDuration) }
+      : await computeMediaSegmentSpecs(file)
+
+    const cells: BulkImportCell[] = specs.map((s, i) => ({
+      id: uuidv7(),
+      cellId: s.cellId,
+      anchorCellId: i === 0 ? null : specs[i - 1].cellId,
+      value: file.name,
+      medium: "media",
+      sequenceIndex: i,
+      ...(s.metadata ? { metadata: s.metadata } : {}),
+      ...(s.startMs !== undefined && s.endMs !== undefined ? { startMs: s.startMs, endMs: s.endMs } : {}),
+    }))
+
+    await bulkUploadSource({
+      projectId: ctx.projectId,
+      fileId,
+      file: {
+        id: uuidv7(),
+        name: file.name,
+        fileType,
+        role: "source",
+        kind: importedFileKind(fileType),
+        importFormat: fileType,
+        parserVersion: "workspace-import-v1",
+        sourceLanguage: ctx.sourceLanguage,
+        targetLanguage: ctx.targetLanguage,
+        sourceTextDirection: ctx.sourceTextDirection,
+        targetTextDirection: ctx.targetTextDirection,
+        orderedBy: "time",
+      },
+      cells,
+      deferPublication: true,
+      getToken: ctx.getToken,
+      onProgress: ctx.onCellEnqueued,
+      signal: ctx.signal,
+    })
+
+    // Upload the media bytes ONCE, then attach the shared clip to each segment
+    // cell with its trim window. Slot 'recording' is reused for the source clip;
+    // a dedicated source-media slot is a later refinement.
+    const ext = (file.name.split(".").pop() || "bin").toLowerCase()
+    const textArtifact = ctx.mediaTextSource?.artifact
+    if (textArtifact) {
+      await uploadSourceOriginal({
+        projectId: ctx.projectId, fileId, artifactId: uuidv7(),
+        bytes: textArtifact.bytes, format: textArtifact.format,
+        artifactName: textArtifact.name, memberPath: textArtifact.name,
+        bindingRole: "source", profileId: `builtin:media-cues-${textArtifact.format}`,
+        profileVersion: "1", fidelity: "preserved-only", updateSourceSidecar: false,
+        getToken: ctx.getToken, signal: ctx.signal,
+      })
+    }
+    const audioId = buildAudioId(fileId)
+    const artifactId = uuidv7()
+    const upload = await uploadCellAudio({
+      projectId: ctx.projectId,
+      fileId,
+      audioId,
+      ext,
+      blob: file,
+      artifactId,
+      artifactName: file.name,
+      getSyncToken: (_p, f) => ctx.getToken(f),
+      signal: ctx.signal,
+    })
+    return { durationMs, specs, cells, upload }
+  }
+  let staged: ReturnType<typeof prepare> | null = null
+  let inFlight: Promise<FileReference> | null = null
+  let result: FileReference | null = null
+  return () => {
+    if (result) return Promise.resolve(result)
+    if (inFlight) return inFlight
+    inFlight = (async () => {
+      ctx.signal?.throwIfAborted()
+      if (!staged) staged = prepare().catch(error => {
+        staged = null
+        fileId = uuidv7()
+        throw error
+      })
+      const { durationMs, specs, cells, upload } = await staged
+      // Persist every attachment and reveal the staged file in one worker
+      // transaction. If the response is lost after commit, publishStagedImport
+      // retries the same event ids; never delete the clip on an ambiguous publish
+      // failure because the server may already have made it live.
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId,
+        ...(pictureUrl || fileType === "video"
+          ? { coreMediaUrl: pictureUrl ?? upload.url } : {}),
+        publishEventId, videoEventId,
+        attachments: specs.map((s) => ({
+          cellId: s.cellId,
+          audioId: `${upload.audioId}.${upload.ext}`,
+          url: upload.url,
+          slot: "recording",
+          // AQU-1565 follow-up: the imported recording is the file's shared
+          // programme audio, not a dub of each row (see attach-media.ts).
+          role: "source",
+          ...(s.transcription !== undefined ? { transcription: s.transcription } : {}),
+          ...(file.type ? { mimeType: file.type } : {}),
+          ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
+          ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
+            ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
+            : {}),
+        })),
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+
+      // AQU-646: seed the post-import auto-transcribe — the workspace's
+      // import-completion handler consumes this (the cell store won't have these
+      // cells, let alone their attachments, until an unawaitable revalidate).
+      if (!ctx.mediaTextSource) recordMediaImportSeed({
+        fileId,
+        cells: buildMediaSeedCells({
+          fileId,
+          fileName: file.name,
+          specs,
+          audioId: `${upload.audioId}.${upload.ext}`,
+          url: upload.url,
+          ...(durationMs !== undefined ? { durationMs } : {}),
+        }),
+      })
+      result = {
+        id: fileId,
+        name: file.name,
+        type: fileType,
+        createdAt: new Date().toISOString(),
+        cellCount: cells.length,
+        orderedBy: "time",
+        hasOriginalSource: true,
+        ...(pictureUrl || fileType === "video"
+          ? { coreMediaUrl: pictureUrl ?? upload.url } : {}),
+      }
+      return result
+    })().finally(() => { inFlight = null })
+    return inFlight
   }
 }
 
@@ -2470,6 +2531,12 @@ export interface ParseFileOptions {
    *  intro-block front matter from the imported cells (AQU-634). Default:
    *  false (import front matter). */
   excludeFrontMatter?: boolean
+  /** docx/txt/md: what one imported cell is (AQU-1720). `paragraph` emits one
+   *  cell per non-empty paragraph — no sentence split, no length cap — which is
+   *  the unit a dubbing project generates one voice clip for. Formats whose
+   *  cell identity is fixed by the format (USFM verses, subtitle cues,
+   *  key/value resources) ignore it. Default: `sentence`. */
+  cellUnit?: CellUnit
 }
 
 export async function parseFile(
@@ -2495,7 +2562,12 @@ export async function parseFile(
       // USFM split live in parse-text-formats.ts (worker-safe core).
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)
-      const parsed = await parseTextFormatOffMainThread({ fileType, text, name: file.name })
+      const parsed = await parseTextFormatOffMainThread({
+        fileType,
+        text,
+        name: file.name,
+        cellUnit: options?.cellUnit,
+      })
       return parsed.map((result) => ({
         ...result,
         rawBytes: bytes,
@@ -2541,7 +2613,7 @@ export async function parseFile(
     }
     case "docx": {
       const buffer = await file.arrayBuffer()
-      const strings = await extractDocxStrings(buffer)
+      const strings = await extractDocxStrings(buffer, { cellUnit: options?.cellUnit })
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "docx" }]
     }

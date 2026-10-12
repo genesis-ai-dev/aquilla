@@ -138,6 +138,21 @@ describe("events-emit", () => {
       expect("targetLang" in ev.payload).toBe(false)
     })
 
+    it("AQU-1578: enqueues under a caller-minted id so the editor can reserve it as the head first", async () => {
+      const id = await emitTargetCellCommit({
+        id: "0190a0b0-0000-7000-8000-000000000001",
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head",
+        value: "hello",
+        author: "alice",
+      })
+      expect(id).toBe("0190a0b0-0000-7000-8000-000000000001")
+      const peek = await peekOutboxBatch(10)
+      expect(peek[0].event.id).toBe("0190a0b0-0000-7000-8000-000000000001")
+    })
+
     it("AQU-538: includes targetLang in the payload for a non-default lane", async () => {
       await emitTargetCellCommit({
         projectId: "p",

@@ -27,6 +27,7 @@ import {
   planHasText,
   textFileIds,
   AUDIO_JUDGED_ON_RECORDED,
+  planPct,
 } from "./plan-status"
 
 function unit(over: Partial<PlanUnit> = {}): PlanUnit {
@@ -381,6 +382,30 @@ describe("planUnitShortfall", () => {
     // `worst`.
     expect(s.worst).toBe(100)
     expect(planUnitStatus(overRecorded, NOW, new Set(["f1"]))).toBe("in_progress")
+  })
+})
+
+describe("planPct — rounding never hides work (AQU-1493)", () => {
+  it("never reads 100% while a cell is outstanding", () => {
+    // Genesis-sized: six cells short is 99.5%, which rounds to 100 — beside a
+    // row that says "6 cells to translate".
+    expect(planPct(1194, 1200)).toBe(99)
+    expect(planPct(1199, 1200)).toBe(99)
+    expect(planPct(199, 200)).toBe(99)
+  })
+
+  it("reads 100% only when the part is the whole", () => {
+    expect(planPct(1200, 1200)).toBe(100)
+    // Takes can outrun a denominator (see the clamp test above); that is
+    // still complete, not "101%".
+    expect(planPct(112, 100)).toBe(100)
+  })
+
+  it("rounds everywhere else as before", () => {
+    expect(planPct(72, 100)).toBe(72)
+    expect(planPct(2, 3)).toBe(67)
+    expect(planPct(0, 40)).toBe(0)
+    expect(planPct(0, 0)).toBe(0)
   })
 })
 

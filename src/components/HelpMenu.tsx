@@ -1,5 +1,14 @@
 import { useCallback, useState } from "react"
-import { HelpCircle, ExternalLink, Mail, BookOpen, Map, Flag, ChevronDown, Home } from "lucide-react"
+import {
+  HelpCircle,
+  ExternalLink,
+  Mail,
+  BookOpen,
+  Map,
+  MessageSquarePlus,
+  ChevronDown,
+  Home,
+} from "lucide-react"
 import { Discord } from "@/components/icons/Discord"
 import { cn } from "@/lib/utils"
 import { useProductTourContext } from "@/context/ProductTourContext"
@@ -35,8 +44,15 @@ interface HelpMenuProps {
 }
 
 /**
- * Global help + community affordance. Docs, community, contact, and report
- * (AQU-307) live here so the left rail stays uncluttered.
+ * Global help + community affordance. Docs, community, contact, and feedback
+ * live here so the left rail stays uncluttered.
+ *
+ * AQU-1548: feedback is reachable only from this menu again. AQU-1028 had
+ * promoted it to a labelled footer button because testers did not find
+ * "Report" in here; the menu item is now labelled "Feedback" and carries that
+ * button's message-plus icon, so the one surviving entry point is the one
+ * people were looking for. The item kept its position (last) — it is a rename,
+ * not a second way to open the same dialog.
  */
 export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
   const t = useT()
@@ -49,7 +65,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
     openTour()
   }, [openTour])
 
-  const handleReport = useCallback(() => {
+  const handleFeedback = useCallback(() => {
     setOpen(false)
     setReportOpen(true)
   }, [])
@@ -152,9 +168,9 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               {t("nav.help.contactSupport")}
               <ExternalLink className="ms-auto opacity-60" />
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleReport} className={HELP_ITEM_CLASS}>
-              <Flag />
-              {t("nav.help.report")}
+            <DropdownMenuItem onClick={handleFeedback} className={HELP_ITEM_CLASS}>
+              <MessageSquarePlus />
+              {t("nav.feedback.buttonLabel")}
             </DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>

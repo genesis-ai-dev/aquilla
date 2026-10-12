@@ -145,7 +145,7 @@ it resolves the issue's current status and does the next right transition:
 - `/issue AQU-123` — act on a specific issue from wherever it currently sits.
 - `/issue debug "thing is broken"` — file a new bug, then start it.
 - `/issue improve "make X nicer"` — file a new improvement, then start it.
-- add `--deploy` to deploy for dev validation and advance to `Dev Verification Needed` after the fix.
+- add `--deploy` to open the PR to `dev` and drive it to `Ready for QA` → merge → `Awaiting Deployment` after the fix.
 
 The command (`.claude/commands/issue.md`) enforces the verification gate and the status
 rules below.
@@ -226,10 +226,10 @@ Status pipeline:
 | **Backlog** | Captured & agent-ready, but deferred | promote to `Todo` to release it |
 | **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria. Entered by human promotion, or at creation only as a `to-issues` AFK slice | the ONLY queue `/issue next` & `/swarm` pull from |
 | **Dispatched** | Dev/AI has **begun work** on the task | set when you pick the issue up |
-| **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed |
-| **Dev Verification Needed** | Fix deployed to the **dev branch**, awaiting dev-team validation | set after deploying to dev |
-| **Ready for QA** | Dev validation passed; QA can test the deployed `dev` environment and merge to main | dev→QA hand-off |
-| **Deployed** / **Done** | QA validated and **merged the ticket into `main`** | set by QA as part of the merge |
+| **Fixed** | Fix committed on the ticket branch and verified locally; **not on `dev` yet** | set the moment the fix is committed |
+| **Ready for QA** | PR open against **`dev`** with a bot walk **PASS** at its head sha | set when the walk passes |
+| **Awaiting Deployment** | PR **merged into `dev`**; rides the next `release/YYYY/MM/DD[-NN]` cut | set when you merge |
+| **Deployed** / **Done** | The commit is in a **production calver tag** (`YYYY.MM.DD.NN`) | set by whoever deploys the release, or after `/issue-audit` flags it |
 | **Canceled** / **Duplicate** | invalid / superseded | as needed |
 
 Rules:
@@ -238,20 +238,21 @@ Rules:
    assignee** — whoever held the issue in `Todo` owns it through the whole lifecycle; never
    reassign it to yourself/the runner. Only if it's unassigned, assign it to your name so
    the claim is visible.
-2. When the fix is committed but not yet deployed → **`Fixed`**.
-3. When the fix is deployed to the **dev branch** for dev-team validation → **`Dev Verification Needed`**.
-4. Once development validation passes and the functionality remains testable on
-   **`dev`** → **`Ready for QA`**. This is the dev→QA hand-off. **QA owns the merge to `main`** and advances the ticket to
-   `Deployed`/`Done` as part of that merge. Don't set `Deployed`/`Done` yourself unless you
-   are the one doing the QA merge.
+2. When the fix is committed on the ticket branch → **`Fixed`**.
+3. Open the PR against **`dev`** (`main` is retired — never target it). When the PR bot walk
+   is PASS at its head sha → **`Ready for QA`**.
+4. Merge into `dev` when the conditions in `e2e/journeys/QA-BOT-REGIMEN.md` §1 hold →
+   **`Awaiting Deployment`**. The deploy bot cuts `release/YYYY/MM/DD[-NN]` from `dev`; a
+   person (Kieran or Matthew) deploys it, and `scripts/tag-release.sh` tags it. Don't set
+   `Deployed`/`Done` until `git tag --contains <sha>` shows a calver tag. See
+   `docs/DEPLOYMENT-ENVIRONMENTS.md` → "Cutting a release".
 5. **Every commit must carry its `AQU-###`.** Linear auto-suggests a branch name, and the
    `prepare-commit-msg` hook auto-injects the ticket from a `…/aqu-###-…` branch (and warns
-   when it can't derive one). QA reviews a PR-to-main by scanning which tickets its commits
-   reference — a ticketless `fix`/`feat` commit is invisible to that process.
+   when it can't derive one). The release plan and `/issue-audit` map the commits on a
+   release branch back to tickets — a ticketless `fix`/`feat` commit is invisible to that process.
    `chore`/`docs`/`polish` commits may go ticketless.
-6. **Prototyping fast-path:** while prototyping we sometimes merge straight to `main` with
-   `--no-verify`, skipping the dev/QA gates. Allowed — but the commit **still needs its
-   `AQU-###`** so the ticket stays traceable to the merge.
+6. **Hotfixes** are cherry-picked onto the release branch that was deployed, then redeployed
+   (next `NN` in that date's tag series). The cherry-pick **still needs its `AQU-###`**.
 
 ### One ticket = one branch = one worktree
 
@@ -260,9 +261,19 @@ out, so a branch named for AQU-A ends up holding AQU-B commits **and** a junk dr
 uncommitted changes spanning five concerns. That destroys the QA PR→ticket mapping and
 makes the work impossible to review or revert cleanly.
 
-- **Each ticket gets its own git worktree off live `origin/main`**, on the Linear-suggested
-  branch (`ryder/aqu-###-…`). Never share the main checkout between tickets. Use
-  `git worktree add` (see `using-git-worktrees`); the main checkout is frequently dirty.
+- **Each ticket gets its own git worktree off live `origin/dev`** (PRs target `dev`), on the Linear-suggested
+  branch (`ryder/aqu-###-…`). Never share the main checkout between tickets; it is
+  frequently dirty. Create it with `pnpm worktree:new <branch> [dir]`
+  (`--base <ref>` overrides the start point, for example `--base origin/release/YYYY/MM/DD-NN` for a hotfix).
+  The default directory is a sibling named for the ticket (`../aquilla-aqu-1234`).
+- **Bare `git worktree add` plus a symlinked `node_modules` is not enough.**
+  `core.hooksPath` is the relative `.husky/_`, which husky writes and git ignores, so a
+  worktree that never ran `pnpm install` has no pre-commit, no prepare-commit-msg, and
+  no pre-push — a push finishes with nothing tested. A `node_modules` symlink at the
+  root, `sync-worker/`, or `auth-worker/` borrowed from another checkout tests that
+  checkout's versions, and Vite will not serve files from outside the worktree, so e2e
+  cannot load wa-sqlite. The Playwright chromium build for this lockfile may be missing
+  too. `pnpm worktree:new` does the frozen installs and `pnpm exec playwright install chromium`.
 - **Start clean.** Before picking up a ticket, the working tree should be clean (or your
   changes stashed). Don't start AQU-B on top of AQU-A's uncommitted spillover.
 - **Don't cross-commit.** A commit's `AQU-###` must match the branch's ticket. The
@@ -275,9 +286,9 @@ makes the work impossible to review or revert cleanly.
   an empty body. When opening a PR, structure the title and body per that template and fill
   in every section, including the Test Checklist.
 
-> **Reconcile drift:** run **`/issue-audit`** to cross-check the board against `main` — it
-> flags issues whose code shipped but whose status lagged, `Deployed`/`Done` issues with no
-> traceable merge, and commits that landed without a ticket. Read-only; never moves the board.
+> **Reconcile drift:** run **`/issue-audit`** to cross-check the board against `origin/dev` and the
+> newest production calver tag — it flags issues whose code shipped but whose status lagged,
+> `Deployed`/`Done` issues with no traceable commit in prod, and commits that landed without a ticket. Read-only; never moves the board.
 
 > **Pre-production** is `https://dev.aquilla.app` (API `api.dev.aquilla.app`), backed by
 > the Neon `dev` branch. A push does not deploy it; an operator must explicitly deploy

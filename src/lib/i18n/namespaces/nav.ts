@@ -49,12 +49,11 @@ export const nav = defineNamespace({
     "nav.help.docs": "Help",
     "nav.help.discord": "Discord server",
     "nav.help.contactSupport": "Contact support",
-    "nav.help.report": "Report",
 
-    // -- FeedbackButton (AQU-1028): the always-visible shell affordance that
-    // opens the same dialog as nav.help.report. --
+    // -- Feedback (AQU-1548): the Help menu's last item, which opens the
+    // report dialog. It replaced the "Report" label (nav.help.report, removed)
+    // when AQU-1028's standalone shell button was folded back into the menu. --
     "nav.feedback.buttonLabel": "Feedback",
-    "nav.feedback.buttonTooltip": "Send feedback to the Aquilla team",
 
     // -- LeftDock: tab rail + expand affordance --
     "nav.dock.filesTab": "Files",
@@ -133,30 +132,30 @@ export const nav = defineNamespace({
     "nav.workspaceActions.batchValidateAudio.description": plural({
       one: "Adds your validation to {takes} take that you have not signed off yet. Generated voices are skipped.",
       other: "Adds your validation to {takes} takes that you have not signed off yet. Generated voices are skipped.",
-    }),
+    }, "takes"),
     "nav.workspaceActions.batchValidate.title": "Batch validate text",
     // AQU-1507: the old `…batchValidate.description` promised the file's whole
-    // unvalidated count — untranslated cells, untouched AI drafts and cells
-    // already signed off by the reader included — while the run validates only
-    // what `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
-    // translated catalogs cannot keep serving the number that was wrong: these
-    // two keys state what THIS run will do, and the skipped cells are named by
-    // the shared `editor.batchValidate.skip.*` clauses after them.
+    // unvalidated count — untranslated cells and cells already signed off by
+    // the reader included — while the run validates only what
+    // `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
+    // translated catalogs cannot keep serving the number that was wrong: this
+    // key states what THIS run will do, and the skipped cells are named by the
+    // shared `editor.batchValidate.skip.*` clauses after it.
     "nav.workspaceActions.batchValidate.willValidate": plural(
       {
         one:
-          "This validates {count} eligible cell under your name — human-authored " +
-          "or human-edited text you have not signed off yet.",
+          "This validates {count} eligible cell under your name — committed " +
+          "text you have not signed off yet.",
         other:
-          "This validates {count} eligible cells under your name — human-authored " +
-          "or human-edited text you have not signed off yet.",
+          "This validates {count} eligible cells under your name — committed " +
+          "text you have not signed off yet.",
       },
       "count",
     ),
     "nav.workspaceActions.batchValidate.nothingToValidate":
       "Nothing in this file can be batch-validated right now.",
     // Optional trailing clause (AQU-586 per-run cap), concatenated last in the
-    // confirmation body built from the two keys above — same composition as
+    // confirmation body built from the keys above — same composition as
     // moreAfterThis.
     "nav.workspaceActions.batchValidate.capNote": plural(
       {
@@ -170,7 +169,6 @@ export const nav = defineNamespace({
       "cap",
     ),
     "nav.workspaceActions.export": "Export",
-    "nav.workspaceActions.importIntoFile": "Import target translations into this file",
     "nav.workspaceActions.transcribeAll.label": "Transcribe all audio",
     "nav.workspaceActions.transcribeAll.title": "Transcribe all audio in this file",
     "nav.workspaceActions.transcribeAll.description": plural(
@@ -212,6 +210,15 @@ export const nav = defineNamespace({
     "nav.workspaceActions.deleteFile.confirmLabel": "Move to Recently deleted",
 
     // -- ProjectWorkspace: fileMenuItems (chapter-row "File options" ⋯ menu) --
+    // AQU-358: headings naming each run of items in the chapter-row ⋯ menu.
+    // The menu absorbed what used to be a labelled chevron dropdown sitting
+    // beside it, so the groups say what they hold instead of being divided by
+    // anonymous lines.
+    "nav.fileMenu.section.editorTools": "Editor tools",
+    "nav.fileMenu.section.runs": "Run on this file",
+    "nav.fileMenu.section.view": "View & navigate",
+    "nav.fileMenu.section.file": "This file",
+
     "nav.fileMenu.diarizing": "Diarizing…",
     "nav.fileMenu.applying": "Applying…",
     "nav.fileMenu.diarizeFailed": "Diarize failed",
@@ -258,7 +265,7 @@ export const nav = defineNamespace({
     "nav.beta.title": "Heads up — we're in beta",
     "nav.beta.description":
       "Things might move around, break, or change without warning. That's the deal for now.",
-    "nav.beta.pointEvolving": "The UI is actively evolving",
+    "nav.beta.pointEvolving": "The UI is changing",
     "nav.beta.pointFeatures": "Features may appear or disappear",
     "nav.beta.pointFeedback": "Your feedback shapes what we build next",
     "nav.beta.joinDiscord": "Join our Discord",
@@ -309,6 +316,9 @@ export const nav = defineNamespace({
     "nav.fileRow.suggestionTooltip":
       "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
+    // AQU-1569: the keyboard/touch route to the same reorder the drag does.
+    "nav.fileRow.moveUp": "Move up",
+    "nav.fileRow.moveDown": "Move down",
     "nav.fileRow.notAssignedToYou": "Not assigned to you. You can still open it.",
     "nav.fileRow.notAssignedTooltip": "{name} — not assigned to you. You can still open it.",
 
@@ -323,6 +333,16 @@ export const nav = defineNamespace({
     "nav.fileList.renameGroup": "Rename {group}",
     "nav.fileList.ungroupedLabel": "Ungrouped",
     "nav.fileList.jumpToTestament": "Jump to Testament",
+
+    // -- ExpandableFileList: hand-placed file order (AQU-1569) --
+    "nav.fileList.reorderHandle": "Reorder {name}",
+    "nav.fileList.reorderWrongGroup": "A file can only be reordered inside its own group. Use \u201cMove to corpus\u2026\u201d to put it somewhere else.",
+    "nav.fileList.regroupHint": "Drop to move {name} into {group}.",
+    "nav.fileList.regroupStaysInGroup": "{name} is filed under {group} by its book code, so it cannot be moved out of it this way. Rename the group, or give the file a group of its own.",
+    "nav.fileList.resetOrder": "Reset the order of {group}",
+    "nav.fileList.resetOrderTitle": "Put {group} back in automatic order?",
+    "nav.fileList.resetOrderDescription": "The files in this group go back to the order Aquilla picks for them. Everyone on the project sees the change. Nothing else about the files is touched.",
+    "nav.fileList.resetOrderConfirm": "Reset order",
 
     // -- OutboxInspectorPopover --
     "nav.outbox.popoverAriaLabel": "Pending changes",
@@ -373,7 +393,7 @@ export const nav = defineNamespace({
     "nav.outbox.allCaughtUpTitle": "You’re all caught up",
     "nav.outbox.allCaughtUpDescription": "Every local change has been synced.",
     "nav.outbox.overflowMore": "+{count} more queued…",
-    "nav.outbox.footerPending": "Edits stay saved locally until they sync.",
+    "nav.outbox.footerPending": "Edits stay saved on this device until they sync.",
     "nav.outbox.footerSynced": "Local changes sync automatically.",
     "nav.outbox.statusPending": "Pending",
     "nav.outbox.statusRetrying": "Retrying",
@@ -602,23 +622,13 @@ export const nav = defineNamespace({
       "nav.help.contactSupport": {
         description: "Dropdown item that opens a mailto: link to the support address.",
       },
-      "nav.help.report": {
-        description:
-          "Dropdown item that opens the 'Report a problem' dialog (nav.report.*).",
-      },
-
-      // -- FeedbackButton (AQU-1028) --
+      // -- Feedback (AQU-1548) --
       "nav.feedback.buttonLabel": {
         description:
-          "Visible label of the always-present feedback button in the app shell's " +
-          "sidebar footer. It opens the same dialog as nav.help.report; this one is the " +
-          "discoverable entry point, so the word should read as an invitation rather " +
-          "than a fault report.",
+          "Last item in the app shell's Help ('?') dropdown; it opens the " +
+          "'Report a problem' dialog (nav.report.*). The word should read as an " +
+          "invitation to tell the team anything rather than as a fault report.",
         maxLength: 12,
-      },
-      "nav.feedback.buttonTooltip": {
-        description:
-          "Tooltip and accessible name for that button, naming who receives the message.",
       },
 
       // -- LeftDock --
@@ -851,15 +861,6 @@ export const nav = defineNamespace({
         description:
           "Primary file-scoped action that opens the export dialog. Imperative verb.",
       },
-      "nav.workspaceActions.importIntoFile": {
-        description:
-          "AQU-503: secondary action-menu item, distinct from " +
-          "nav.workspaceActions.import — this one is file-scoped and populates the " +
-          "open file's TARGET column from an already-translated document. Must keep " +
-          "a word equivalent to 'target' so it isn't confused with the primary " +
-          "source import.",
-        maxLength: 60,
-      },
       "nav.workspaceActions.transcribeAll.label": {
         description:
           "Secondary action-menu item (Audio lens) that runs Whisper transcription " +
@@ -937,6 +938,34 @@ export const nav = defineNamespace({
       },
 
       // -- ProjectWorkspace: fileMenuItems (chapter-row 'File options' ⋯ menu) --
+      "nav.fileMenu.section.editorTools": {
+        description:
+          "Heading over the first group of the chapter-row 'File options' ⋯ menu: " +
+          "the whole-view editor passes ('Draft as you read', 'Check file'). Not " +
+          "clickable — it names the items under it.",
+        maxLength: 20,
+      },
+      "nav.fileMenu.section.runs": {
+        description:
+          "Heading over the ⋯ menu group that runs a bulk job across the open " +
+          "file (AI drafting, batch validation, transcription, synthesis, " +
+          "diarization). Not clickable — it names the items under it.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.section.view": {
+        description:
+          "Heading over the ⋯ menu group that changes what the editor shows or " +
+          "jumps within the file ('View settings', 'Next unfinished'). Not " +
+          "clickable — it names the items under it.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.section.file": {
+        description:
+          "Heading over the ⋯ menu group that acts on the file itself (rename, " +
+          "move, assign, segment, analyze, export, delete). Not clickable — it " +
+          "names the items under it.",
+        maxLength: 20,
+      },
       "nav.fileMenu.diarizing": {
         description:
           "Transient state of the 'Diarize' action-menu item while speaker " +
@@ -1326,6 +1355,19 @@ export const nav = defineNamespace({
       "nav.fileRow.applyRenameSuggestion": {
         description: "Accessible name for the same sparkle 'apply suggestion' button.",
       },
+      "nav.fileRow.moveUp": {
+        description:
+          "Menu item on a sidebar file row that moves the file one position earlier " +
+          "within its own corpus group (AQU-1569) \u2014 the keyboard and touch route to " +
+          "the same reorder the drag handle does. Shown only to roles that may " +
+          "reorder, and disabled on the first file in the group. Keep it short: it " +
+          "sits in a narrow row menu beside Rename and Export.",
+      },
+      "nav.fileRow.moveDown": {
+        description:
+          "Mirrors nav.fileRow.moveUp for the other direction; disabled on the last " +
+          "file in the group.",
+      },
       "nav.fileRow.notAssignedToYou": {
         description:
           "Screen-reader-only text on a dimmed file row (AQU-894), carrying the same " +
@@ -1385,6 +1427,68 @@ export const nav = defineNamespace({
           "identity string 'Ungrouped' the code branches on (is-this-the-synthetic-" +
           "bucket, rename eligibility, …) is NOT this key and stays English — only this " +
           "display copy is translated.",
+      },
+      "nav.fileList.reorderHandle": {
+        description:
+          "Accessible name for the grip a Project Lead drags to move a file to a new " +
+          "position inside its own sidebar group (AQU-1569). Shown only to roles that " +
+          "may reorder. {name} is the file's own display name.",
+        placeholders: { name: "The file's display name." },
+      },
+      "nav.fileList.reorderWrongGroup": {
+        description:
+          "Live-region message shown when a file is dragged over a DIFFERENT corpus " +
+          "group than its own on a surface that cannot move it there (AQU-1569; since " +
+          "AQU-1702 the editor sidebar CAN, so this is the fallback for a file list " +
+          "wired without the move handler). \u201cMove to corpus\u2026\u201d names the " +
+          "separate menu action that does change a file's group \u2014 keep it worded " +
+          "identically to fileDetails.moveToCorpus in this locale.",
+      },
+      "nav.fileList.regroupHint": {
+        description:
+          "Live-region message while a file is held over a DIFFERENT corpus group that " +
+          "will accept it (AQU-1702). Releasing moves the file into that group at the " +
+          "marked slot. {name} is the dragged file, {group} the group under the pointer.",
+        placeholders: {
+          name: "The dragged file's display name.",
+          group: "The group under the pointer, as its header reads.",
+        },
+      },
+      "nav.fileList.regroupStaysInGroup": {
+        description:
+          "Live-region message refusing a cross-group drop that could not be written " +
+          "(AQU-1702): the file is a Bible book, so with no group of its own Aquilla " +
+          "files it under its testament \u2014 dropping it on Ungrouped would appear to " +
+          "do nothing. {name} is the dragged file, {group} the group it stays in.",
+        placeholders: {
+          name: "The dragged file's display name.",
+          group: "The group the file is filed under regardless (its testament).",
+        },
+      },
+      "nav.fileList.resetOrder": {
+        description:
+          "Tooltip and accessible name for the control on a corpus/group header that " +
+          "discards the hand-placed file order and returns the group to the order the " +
+          "app derives from the file names (AQU-1569). Offered only when some file in " +
+          "the group has actually been placed by hand.",
+        placeholders: { group: "The corpus/group's own label." },
+      },
+      "nav.fileList.resetOrderTitle": {
+        description:
+          "Title of the confirmation asked before discarding a group's hand-placed " +
+          "file order. Phrased as a question.",
+        placeholders: { group: "The corpus/group's own label." },
+      },
+      "nav.fileList.resetOrderDescription": {
+        description:
+          "Body of that confirmation. It has to say two things: the order becomes the " +
+          "automatic one again, and the reset is shared with the whole project rather " +
+          "than being this browser's own view.",
+      },
+      "nav.fileList.resetOrderConfirm": {
+        description:
+          "The confirming button of that dialog. The cancelling button reuses " +
+          "common.cancel.",
       },
       "nav.fileList.jumpToTestament": {
         description:

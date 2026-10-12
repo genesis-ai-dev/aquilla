@@ -198,9 +198,48 @@ function makeEmptyIdmlTargetStore(cellId: string): CellStore {
   return store
 }
 
+function makeStyledIdmlStore(cellId: string): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: project.id,
+    fileId: "file-1",
+    username: "tester",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  const metadata = {
+    idml: {
+      version: 2,
+      slotCount: 2,
+      editableSlotIndexes: [0, 1],
+      protectedTokenCount: 0,
+      anchorSequenceHash: "not-validated-here",
+    },
+  }
+  const rows = makeRows(cellId)
+  for (const row of rows) {
+    row.metadata = metadata
+    if (row.side === "source") {
+      row.value = "Hello WORLD"
+      row.valueHtml = "<p data-idml-version=\"2\">Hello WORLD</p>"
+    } else {
+      row.value = "bonjour monde"
+      row.valueHtml = "<p data-idml-version=\"2\">bonjour monde</p>"
+    }
+  }
+  store.replaceRows(rows, { full: true, maxServerSeq: 1 })
+  return store
+}
+
 function renderTable(
   actions: Partial<EditorActionsContextValue>,
   completing: Map<string, string> = new Map(),
+  options?: {
+    cellStore?: CellStore
+    onAlignStyles?: () => void | Promise<boolean>
+    isCompletionConfigured?: boolean
+    isCompletionAvailable?: boolean
+  },
 ) {
   const qc = new QueryClient()
   return render(
@@ -212,16 +251,17 @@ function renderTable(
       <EditorActionsProvider value={actions}>
         <EditorTable
           project={project}
-          cellStore={makeStore("cell-1")}
+          cellStore={options?.cellStore ?? makeStore("cell-1")}
           username="tester"
-          isCompletionConfigured={false}
-          isCompletionAvailable={false}
+          isCompletionConfigured={options?.isCompletionConfigured ?? false}
+          isCompletionAvailable={options?.isCompletionAvailable ?? false}
           completing={completing}
           examples={new Map()}
           errors={new Map()}
           previews={new Map()}
           onCompleteSingle={() => {}}
           onCompleteBatch={() => {}}
+          onAlignStyles={options?.onAlignStyles}
           healthMap={new Map()}
           lineNumbersEnabled={false}
           cellLabelsEnabled={false}
@@ -567,6 +607,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     expect(row).not.toBeNull()
     expect(row).toHaveAttribute("data-ai-translating", "true")
     expect(row?.className).toContain("animate-pulse")
+    expect(screen.getByRole("progressbar", { name: "Generating translation…" })).toHaveAttribute("data-pass", "1")
   })
 
   it("does not mark the row as AI-translating when no completion is running", async () => {
@@ -618,6 +659,32 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     const button = await screen.findByRole("button", { name: "Add comment" })
     fireEvent.click(button)
     expect(onMediaRowActivate).not.toHaveBeenCalled()
+  })
+
+  it("puts Align styles last in the overflow of a multi-run IDML cell and omits it elsewhere", async () => {
+    const onAlignStyles = vi.fn().mockResolvedValue(true)
+    const { unmount } = renderTable(
+      { onOpenComments: vi.fn(), onOpenHistory: vi.fn() },
+      new Map(),
+      {
+        cellStore: makeStyledIdmlStore("cell-1"),
+        onAlignStyles,
+        isCompletionConfigured: true,
+        isCompletionAvailable: true,
+      },
+    )
+    await openRailOverflow()
+    const popup = document.querySelector('[data-slot="popover-content"]') as HTMLElement
+    const names = within(popup).getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent ?? "")
+    expect(names.at(-1)).toBe("Align styles")
+    fireEvent.click(within(popup).getByRole("button", { name: "Align styles" }))
+    expect(onAlignStyles).toHaveBeenCalledTimes(1)
+
+    unmount()
+    renderTable({ onOpenComments: vi.fn(), onOpenHistory: vi.fn() })
+    await openRailOverflow()
+    const plainPopup = document.querySelector('[data-slot="popover-content"]') as HTMLElement
+    expect(within(plainPopup).queryByRole("button", { name: "Align styles" })).toBeNull()
   })
 })
 

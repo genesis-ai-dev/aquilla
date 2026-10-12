@@ -9,6 +9,7 @@ import { clearAuthHint } from "@/lib/frontier/session-store"
 import { useAccounts } from "@/hooks/useAccounts"
 import posthog from "@/lib/posthog"
 import { isAnalyticsEnabled } from "@/lib/analytics-consent"
+import { resolveAppEnv } from "@/lib/analytics-env"
 
 /** Returns the hex SHA-256 of a string using Web Crypto (available in all modern browsers). */
 async function sha256Hex(input: string): Promise<string> {
@@ -48,6 +49,11 @@ export function useFrontierSession() {
   const logout = useCallback(async () => {
     posthog.capture("user logged out")
     posthog.reset()
+    // AQU-1572: reset() clears every super-property along with the identity.
+    // The deployment marker describes the page, not the user, so it goes back
+    // on — otherwise everything after a logout lands with no app_env until the
+    // next full page load.
+    posthog.register({ app_env: resolveAppEnv(window.location) })
     // Denylist the token server-side before dropping it locally, so a
     // leaked copy elsewhere doesn't stay valid until its natural expiry.
     // Best-effort — doServerLogout never throws.

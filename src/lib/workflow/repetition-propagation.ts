@@ -17,6 +17,7 @@ import {
   type PropagationSegment,
 } from "./autopropagation"
 import { isVisibleCell } from "@/lib/cells/hidden"
+import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 
 /**
  * The slice of a cell view this planner reads. Structurally satisfied by
@@ -96,7 +97,12 @@ function parentIdFor(
   cell: RepetitionCell,
   resolve?: PlanRepetitionPropagationInput["resolveParentId"],
 ): string | null {
-  return resolve?.(cell) ?? cell.targetEventId ?? cell.sourceEventId ?? null
+  // AQU-1578: "" (an optimistic placeholder head) is never a parent.
+  return resolveTargetCommitParent({
+    pending: [resolve?.(cell)],
+    targetEventId: cell.targetEventId,
+    sourceEventId: cell.sourceEventId,
+  })
 }
 
 /**

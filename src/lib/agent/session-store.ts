@@ -213,10 +213,46 @@ export class AgentSessionStore {
     this.abortController?.abort()
   }
 
-  /** Drop the conversation and start a fresh server session. */
+  /**
+   * Drop the conversation and start a fresh server session.
+   *
+   * AQU-1653: safe to offer from the UI now that the chat being left is
+   * reachable again — the server has persisted it under its session id, and
+   * the "Previous chats" switcher lists it. Before that, this was a one-way
+   * door, which is why nothing called it.
+   */
   reset = (): void => {
     this.stop()
     this.set({ sessionId: crypto.randomUUID(), runs: [], isStreaming: false, queued: [], decided: new Map(), activity: [] })
+  }
+
+  /** `reset()` under the name the UI uses for it. */
+  startNewChat = (): void => {
+    this.reset()
+  }
+
+  /**
+   * AQU-1653: adopt a chat that already exists on the server.
+   *
+   * The timeline comes from the caller (runsFromTurns over the fetched
+   * transcript) because the fetch is the view's to own — this store stays
+   * free of network concerns. Per-row review decisions are NOT carried over:
+   * they key on proposals from the original runs, which a restored timeline
+   * does not contain, and a stale decision would suppress a later real one.
+   *
+   * An in-flight run is aborted first: its frames would otherwise land on the
+   * newly adopted timeline, splicing one chat's reply into another.
+   */
+  switchTo = (sessionId: string, runs: AgentRunUi[]): void => {
+    this.stop()
+    this.set({
+      sessionId,
+      runs,
+      isStreaming: false,
+      queued: [],
+      decided: new Map(),
+      activity: [],
+    })
   }
 
   /**
@@ -320,6 +356,8 @@ export function useAgentSession(projectId: string, ownerKey?: string | null): {
   send: (options: AgentSendOptions) => void
   stop: () => void
   reset: () => void
+  startNewChat: () => void
+  switchTo: (sessionId: string, runs: AgentRunUi[]) => void
   decide: (entries: Iterable<[string, RowDecision]>) => void
   noteActivity: (key: string, note: string) => void
 } {
@@ -328,6 +366,11 @@ export function useAgentSession(projectId: string, ownerKey?: string | null): {
   const send = useCallback((options: AgentSendOptions) => store.send(options), [store])
   const stop = useCallback(() => store.stop(), [store])
   const reset = useCallback(() => store.reset(), [store])
+  const startNewChat = useCallback(() => store.startNewChat(), [store])
+  const switchTo = useCallback(
+    (sessionId: string, runs: AgentRunUi[]) => store.switchTo(sessionId, runs),
+    [store],
+  )
   const decide = useCallback(
     (entries: Iterable<[string, RowDecision]>) => store.decide(entries),
     [store],
@@ -336,5 +379,5 @@ export function useAgentSession(projectId: string, ownerKey?: string | null): {
     (key: string, note: string) => store.noteActivity(key, note),
     [store],
   )
-  return { state, send, stop, reset, decide, noteActivity }
+  return { state, send, stop, reset, startNewChat, switchTo, decide, noteActivity }
 }

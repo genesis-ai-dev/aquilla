@@ -9,11 +9,12 @@
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
 import {
-  handleCellAttachmentRequest,
+  handleCellAttachmentRequest as handleWithEnv,
   attachmentObjectKey,
   normalizeAttachmentContentType,
   ALLOWED_ATTACHMENT_CONTENT_TYPES,
   MAX_ATTACHMENT_BYTES,
+  type CellAttachmentsEnv,
 } from "../cell-attachments"
 import type { SyncTokenClaims } from "../auth"
 
@@ -83,6 +84,10 @@ type StubEnv = {
 function makeEnv(overrides: Partial<StubEnv> = {}): StubEnv {
   return { SNAPSHOTS: makeStubBucket(), SYNC_SECRET_KEY: SECRET, ...overrides }
 }
+
+// The stub bucket implements only the R2 methods the route calls, not all of R2Bucket.
+const handleCellAttachmentRequest = (request: Request, env: StubEnv) =>
+  handleWithEnv(request, env as unknown as CellAttachmentsEnv)
 
 async function makeToken(partial: Partial<SyncTokenClaims> = {}): Promise<string> {
   const now = Math.floor(Date.now() / 1000)

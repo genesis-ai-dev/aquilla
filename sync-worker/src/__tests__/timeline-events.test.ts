@@ -125,6 +125,110 @@ describe("file.corpus.set projection (sidebar folder)", () => {
   })
 })
 
+// AQU-1569: hand-placed sidebar order. The regression this guards is the
+// rebuild/live split — the order has to survive replaying the event log, which
+// it only does because both paths go through buildFileSortIndexSetStmt.
+describe("file.reorder projection (hand-placed sidebar order)", () => {
+  it("is project-lead-gated and non-chain-mutating", async () => {
+    const { REQUIRED_ROLE } = await import("../events/role-policy")
+    const { isChainMutatingKind } = await import("../events/event-projection")
+    // NOT 400: a reorder relayouts the sidebar for every member, so it sits
+    // with file.video.set rather than with the contributor-level file.rename.
+    expect(REQUIRED_ROLE["file.reorder"]).toBe(500)
+    expect(isChainMutatingKind("file.reorder")).toBe(false)
+  })
+
+  it("merges sortIndex into files.meta and advances event_id", () => {
+    const { db, recorded } = makeRecordingDb()
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("file.reorder", { sortIndex: 1024 }, { cellId: null }),
+      [],
+    )
+    expect(touches).toEqual(["files"])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).toContain("UPDATE files")
+    expect(recorded[0].sql).toContain("jsonb_build_object('sortIndex'")
+    // double precision, not text: a midpoint is fractional, and a text cast
+    // would make the client's numeric read depend on how Postgres printed it.
+    expect(recorded[0].sql).toContain("double precision")
+    expect(recorded[0].args).toEqual([1024, "evt-1", "f1", "p1"])
+  })
+
+  it("keeps a fractional midpoint intact", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("file.reorder", { sortIndex: 512.5 }, { cellId: null }),
+      [],
+    )
+    expect(recorded[0].args[0]).toBe(512.5)
+  })
+
+  it("accepts a negative index — moving a file to the top of its group", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("file.reorder", { sortIndex: -1024 }, { cellId: null }),
+      [],
+    )
+    expect(recorded[0].sql).toContain("jsonb_build_object('sortIndex'")
+    expect(recorded[0].args[0]).toBe(-1024)
+  })
+
+  it("stores 0 rather than treating it as a clear", () => {
+    // 0 is what a renumber stamps on the first file in a group. A truthiness
+    // check anywhere on this path would silently unplace it.
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("file.reorder", { sortIndex: 0 }, { cellId: null }),
+      [],
+    )
+    expect(recorded[0].sql).toContain("jsonb_build_object('sortIndex'")
+    expect(recorded[0].args).toEqual([0, "evt-1", "f1", "p1"])
+  })
+
+  it("removes the sortIndex key when null — the file returns to the automatic order", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("file.reorder", { sortIndex: null }, { cellId: null }),
+      [],
+    )
+    expect(recorded[0].sql).toContain("- 'sortIndex'")
+    expect(recorded[0].args).toEqual(["evt-1", "f1", "p1"])
+  })
+
+  // The REBUILD path stays permissive where the live handler refuses: rebuild
+  // replays already-accepted history, so a value some older build let through
+  // must still project to something orderable rather than failing the rebuild.
+  it("degrades an unusable historical index to a clear instead of throwing", () => {
+    for (const sortIndex of [Number.NaN, Number.POSITIVE_INFINITY, "7", {}]) {
+      const { db, recorded } = makeRecordingDb()
+      expect(() =>
+        buildEventProjectionStmts(
+          db,
+          makeEvent("file.reorder", { sortIndex }, { cellId: null }),
+          [],
+        ),
+      ).not.toThrow()
+      expect(recorded[0].sql).toContain("- 'sortIndex'")
+    }
+  })
+
+  it("rejects an event with no fileId — the index has nothing to land on", () => {
+    const { db } = makeRecordingDb()
+    expect(() =>
+      buildEventProjectionStmts(
+        db,
+        makeEvent("file.reorder", { sortIndex: 0 }, { cellId: null, fileId: null }),
+        [],
+      ),
+    ).toThrow(/missing fileId/)
+  })
+})
+
 describe("file.timing.set projection (pre-merge round: file-level timing mode)", () => {
   it("is maintainer-gated and non-chain-mutating", async () => {
     const { REQUIRED_ROLE } = await import("../events/role-policy")

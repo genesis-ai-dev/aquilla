@@ -70,10 +70,36 @@ export function isKnowledgeIndexStalled(
 
 export class KnowledgeBaseApiError extends Error {
   readonly status: number
+  /**
+   * The server's own explanation, when it sent one (AQU-1499).
+   *
+   * This class used to carry nothing but the status, so a knowledge-base
+   * upload rejected for a knowable, fixable reason — a .docx whose
+   * `word/document.xml` is too bloated to read — surfaced as a bare "Could not
+   * upload X. Try again." The retry cannot succeed, and the uploader has no
+   * way to learn that re-saving the file fixes it. Server messages for these
+   * 4xx codes are authored to be shown (auth-worker/src/routes/knowledge.ts),
+   * so keep them instead of discarding them at the boundary.
+   */
+  readonly serverMessage: string | undefined
 
-  constructor(status: number) {
-    super(`Knowledge Base request failed (${status})`)
+  constructor(status: number, serverMessage?: string) {
+    super(serverMessage ?? `Knowledge Base request failed (${status})`)
     this.status = status
+    this.serverMessage = serverMessage
+  }
+}
+
+/** Pull `{ error: { message } }` off a non-OK response, if it has one. The body
+ *  may be empty or not JSON at all (a gateway error page), which is not itself
+ *  worth failing on — the status alone still produces a usable error. */
+async function readServerMessage(response: Response): Promise<string | undefined> {
+  try {
+    const body = (await response.clone().json()) as { error?: { message?: unknown } }
+    const message = body.error?.message
+    return typeof message === "string" && message.trim() ? message : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -91,7 +117,7 @@ async function request(scope: KnowledgeScope, jwt: string, suffix = "", init: Re
       ...init.headers,
     },
   })
-  if (!response.ok) throw new KnowledgeBaseApiError(response.status)
+  if (!response.ok) throw new KnowledgeBaseApiError(response.status, await readServerMessage(response))
   return response
 }
 

@@ -114,6 +114,8 @@ export interface OrgSummary {
   /** True when the org is visible only via the ADMIN_EMAILS allowlist
    *  (not a genuine membership). Server appends these after real orgs. */
   viaPlatformAdmin?: boolean
+  /** The caller's own personal workspace. Pinned first in the org switcher. */
+  personal?: boolean
 }
 
 export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {
@@ -166,6 +168,30 @@ export async function createOrg(jwt: string, name: string): Promise<OrgSummary> 
 
 export async function renameOrg(jwt: string, orgId: number, name: string): Promise<void> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}`, { method: "PATCH", headers: authHeaders(jwt), body: JSON.stringify({ name }) })
+  if (!res.ok) throw new UserError(res.status, "", "org")
+}
+
+/** 409 from DELETE /api/v2/orgs/:orgId — the org still has project rows. */
+export class OrgHasProjectsError extends Error {
+  readonly projectCount: number
+  constructor(projectCount: number) {
+    super("organization_has_projects")
+    this.name = "OrgHasProjectsError"
+    this.projectCount = projectCount
+  }
+}
+
+export async function deleteOrg(jwt: string, orgId: number): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (res.status === 409) {
+    const body = await res.json().catch(() => null) as { error?: string; projectCount?: number } | null
+    if (body?.error === "organization_has_projects") {
+      throw new OrgHasProjectsError(body.projectCount ?? 0)
+    }
+  }
   if (!res.ok) throw new UserError(res.status, "", "org")
 }
 

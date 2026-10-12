@@ -25,6 +25,7 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 
 export interface ProjectLaneSubRowsProps {
   projectId: string
+  projectName?: string | null
   lanes: PortfolioLane[]
   defaultLaneLabel: string
   colSpan: number
@@ -43,6 +44,7 @@ function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | n
 
 export function ProjectLaneSubRows({
   projectId,
+  projectName,
   lanes,
   defaultLaneLabel,
   colSpan,
@@ -65,7 +67,7 @@ export function ProjectLaneSubRows({
             const lastEdit = lane.lastEditAt
             return (
               <div
-                key={lane.lane || "__default__"}
+                key={lane.laneId || lane.lane || "__default__"}
                 data-testid={`project-lane-row-${projectId}-${lane.lane}`}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 text-sm"
               >
@@ -110,7 +112,9 @@ export function ProjectLaneSubRows({
                   <StaffLanePopover
                     projectId={projectId}
                     lane={lane.lane}
+                    laneId={lane.laneId}
                     laneLabel={label}
+                    projectName={projectName}
                     orgId={orgId}
                     onDone={onStaffed}
                     trigger={

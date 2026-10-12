@@ -11,6 +11,7 @@
  * outside the two project ids. Progress numbers come from the sync worker's
  * own recompute and are read back and checked against the fixture.
  */
+import { createHash } from "node:crypto"
 import { makePostgres, type AquillaDb } from "../db/shim/postgres"
 import { fullProgressRecomputeStmts } from "../sync-worker/src/events/progress-projection"
 import { readPlanUnitsSql, type PlanUnitRow } from "../db/shared/plan-units"
@@ -44,8 +45,12 @@ async function insertRows(
   }
 }
 
+function fixtureLaneId(projectId: string, role: "source" | "target", tag: string): string {
+  return createHash("md5").update(`${projectId}|${role}|${tag}`).digest("hex").slice(0, 8)
+}
+
 const CELL_COLUMNS = [
-  "project_id", "file_id", "cell_id", "side", "target_lang", "value", "type",
+  "project_id", "file_id", "cell_id", "side", "lane_id", "value", "type",
   "canonical_ref", "anchor_cell_id", "event_id", "last_editor", "last_edit_at",
   "validated", "endorsement_count", "word_count", "start_ms", "end_ms",
 ]
@@ -71,11 +76,21 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
   ]) {
     await db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).bind(p.id).run()
   }
+  await db.prepare("DELETE FROM lanes WHERE project_id = ?").bind(p.id).run()
   await db.prepare("DELETE FROM projects WHERE id = ?").bind(p.id).run()
 
   await db.prepare(
     "INSERT INTO projects (id, name, org_id, created_by, pm_user_id) VALUES (?, ?, ?, ?, ?)",
   ).bind(p.id, p.name, ORG, OWNER, OWNER).run()
+  const sourceLane = fixtureLaneId(p.id, "source", "")
+  const defaultLane = fixtureLaneId(p.id, "target", "")
+  const tpiLane = fixtureLaneId(p.id, "target", LANE2)
+  await db.prepare(
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+       (?, ?, 'source', 'English', NULL, 0),
+       (?, ?, 'target', ?, '', 0),
+       (?, ?, 'target', 'Tok Pisin', ?, 1)`,
+  ).bind(sourceLane, p.id, defaultLane, p.id, p.targetLanguage, tpiLane, p.id, LANE2).run()
   // Version 1, never 0: at 0 the client ignores the server's settings and the
   // UI loses the target language. See the Bible seeder's note.
   await db.prepare(
@@ -163,12 +178,12 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
       const start = isMedia ? i * CUE_MS : null
       const end = isMedia ? i * CUE_MS + CUE_MS - 1500 : null
       sourceRows.push([
-        p.id, fileId(f), c.cellId, "source", "", `Source ${f.name} ${i + 1}`, type, null,
+        p.id, fileId(f), c.cellId, "source", sourceLane, `Source ${f.name} ${i + 1}`, type, null,
         linkTo(`${f.id}|source|`, c.cellId), eventOf(f), "dev", NOW - 2 * DAY, 0, 0, 4, start, end,
       ])
       if (c.target !== "") {
         targetRows.push([
-          p.id, fileId(f), c.cellId, "target", "", c.target, null, null,
+          p.id, fileId(f), c.cellId, "target", defaultLane, c.target, null, null,
           linkTo(`${f.id}|target|`, c.cellId), eventOf(f), "dev", NOW - DAY,
           c.validated ? 1 : 0, c.validated ? VALIDATION_COUNT : 0, 4, null, null,
         ])
@@ -177,7 +192,7 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
         // Half the file, every third cell unvalidated: a lane visibly behind.
         const validated = i % 3 !== 0
         targetRows.push([
-          p.id, fileId(f), c.cellId, "target", LANE2, `Tok Pisin ${c.cellId}`, null, null,
+          p.id, fileId(f), c.cellId, "target", tpiLane, `Tok Pisin ${c.cellId}`, null, null,
           linkTo(`${f.id}|target|${LANE2}`, c.cellId), eventOf(f), "dev", NOW - DAY,
           validated ? 1 : 0, validated ? VALIDATION_COUNT : 0, 4, null, null,
         ])
@@ -192,7 +207,7 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
     for (const [i, cue] of cuesForFile(f).entries()) {
       const span = Math.round((f.cells / (f.cues ?? 1)) * CUE_MS)
       sourceRows.push([
-        p.id, sheetId(f), cue.cellId, "source", "", `Cue ${f.name} ${i + 1}`, "cue", null,
+        p.id, sheetId(f), cue.cellId, "source", sourceLane, `Cue ${f.name} ${i + 1}`, "cue", null,
         linkTo(`${f.id}|cues|`, cue.cellId), sheetEventOf(f), "dev", NOW - 2 * DAY,
         0, 0, 4, i * span, i * span + span - 1500,
       ])
@@ -243,13 +258,13 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
     const held = assignedCells(a, p.files)
     for (const cellId of held) assignmentCells.push([a.id, fileId(file), cellId])
     assignmentRows.push([
-      a.id, p.id, a.user, a.range ? "cells" : "files", a.label, a.lane, held.length,
+      a.id, p.id, a.user, a.range ? "cells" : "files", a.label, a.lane === LANE2 ? tpiLane : defaultLane, held.length,
       a.deadlineInDays === null ? null : dateIn(a.deadlineInDays), OWNER, NOW,
     ])
   }
   await insertRows(db, "assignments",
     ["assignment_id", "project_id", "assignee_user_id", "scope_kind", "scope_label",
-     "target_lang", "cells_total", "deadline", "created_by", "created_at"], assignmentRows)
+     "lane_id", "cells_total", "deadline", "created_by", "created_at"], assignmentRows)
   await insertRows(db, "assignment_cells",
     ["assignment_id", "file_id", "cell_id"], assignmentCells)
 

@@ -304,11 +304,13 @@ describe("AppShell main-content error containment", () => {
     expect(screen.queryByRole("menuitem", { name: /take the tour/i })).not.toBeInTheDocument()
   })
 
-  // AQU-1523: AQU-1028's labelled Feedback button and AQU-1023's build label
-  // shared one 224px row, and the build label lost — it truncated to zero
-  // width, so a support screenshot no longer carried the release it came from.
-  it("gives Feedback its own footer row above the build/Help/language row", async () => {
-    render(
+  // AQU-1548: the labelled Feedback button (AQU-1028) is gone from the footer —
+  // feedback is the Help menu's last item again. AQU-1523's rule has to survive
+  // that removal: the build label still owns a row alone, because when anything
+  // shared its 224px row the label truncated to zero width and a support
+  // screenshot no longer carried the release it came from.
+  it("drops the Feedback row and leaves the build label alone on its own row", async () => {
+    const { container } = render(
       <MemoryRouter>
         <I18nProvider>
           <AppShell
@@ -321,35 +323,34 @@ describe("AppShell main-content error containment", () => {
       </MemoryRouter>,
     )
 
-    const feedback = await screen.findByRole("button", { name: "Feedback" })
-    const version = screen.getByRole("button", { name: "Copy build info" })
+    const version = await screen.findByRole("button", { name: "Copy build info" })
     const help = screen.getByRole("button", { name: /help & community/i })
     const language = screen.getByRole("button", { name: "Quick language switch" })
 
-    const feedbackRow = feedback.closest('[data-slot="app-shell-sidebar-feedback-row"]')
+    // No standalone feedback control, and no row left behind holding nothing.
+    expect(screen.queryByRole("button", { name: "Feedback" })).not.toBeInTheDocument()
+    expect(
+      container.querySelector('[data-slot="app-shell-sidebar-feedback-row"]'),
+    ).toBeNull()
+
     const releaseRow = version.closest('[data-slot="app-shell-sidebar-release-row"]')
     const utilityRow = help.closest('[data-slot="app-shell-sidebar-utility-row"]')
-    expect(feedbackRow).not.toBeNull()
     expect(releaseRow).not.toBeNull()
     expect(utilityRow).not.toBeNull()
 
-    // The regression, stated as the invariant that failed the preview walk:
-    // NOTHING shares the build label's row. Feedback starved it first; with
-    // Feedback moved, the environment badge plus Help plus localization still
-    // left it 13px of fitted text. The label's row holds the label alone.
-    expect(releaseRow).not.toContainElement(feedback)
+    // The AQU-1523 invariant, unchanged: NOTHING shares the build label's row.
+    // Removing Feedback must not let Help or localization drift up into it.
     expect(releaseRow).not.toContainElement(help)
     expect(releaseRow).not.toContainElement(language)
     expect(releaseRow?.querySelectorAll("button")).toHaveLength(1)
-    // Help and localization keep each other's company one row down.
     expect(utilityRow).toContainElement(language)
 
-    // Order: account row (end of the sidebar content) → Feedback → build label
-    // → connectivity/Help/localization.
-    const footer = feedback.closest('[data-slot="app-shell-sidebar-footer"]')
-    expect(footer).toContainElement(version)
-    expect(feedbackRow?.nextElementSibling).toBe(releaseRow)
+    // Two rows now: account row (end of the sidebar content) → build label →
+    // connectivity/Help/localization.
+    const footer = version.closest('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer?.firstElementChild).toBe(releaseRow)
     expect(releaseRow?.nextElementSibling).toBe(utilityRow)
+    expect(utilityRow?.nextElementSibling).toBeNull()
     expect(footer?.previousElementSibling).toContainElement(screen.getByTestId("sidebar"))
   })
 
@@ -379,7 +380,9 @@ describe("AppShell main-content error containment", () => {
     expect(block).toHaveClass("flex-col", "w-full")
   })
 
-  it("keeps Feedback an icon-only control in the collapsed dock rail", async () => {
+  // AQU-1548: the 40px icon rail loses its feedback icon too — in both dock
+  // states the "?" trigger is the only way in, so nothing may survive there.
+  it("leaves no Feedback control in the collapsed dock rail", async () => {
     const { container } = render(
       <MemoryRouter>
         <I18nProvider>
@@ -395,14 +398,14 @@ describe("AppShell main-content error containment", () => {
       </MemoryRouter>,
     )
 
-    // Icon-only in a 40px rail, so the tooltip text carries the name.
-    const feedback = await screen.findByRole("button", {
-      name: "Send feedback to the Aquilla team",
-    })
+    const help = await screen.findByRole("button", { name: /help & community/i })
     const footer = container.querySelector('[data-slot="app-shell-sidebar-footer"]')
-    expect(footer).toContainElement(feedback)
+    expect(footer).toContainElement(help)
     expect(footer).toHaveClass("w-10", "flex-col")
-    expect(feedback.closest('[data-slot="app-shell-sidebar-release-row"]')).toBeNull()
+    expect(screen.queryByRole("button", { name: "Feedback" })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Send feedback to the Aquilla team" }),
+    ).not.toBeInTheDocument()
   })
 })
 

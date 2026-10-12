@@ -22,6 +22,7 @@ import {
   notifyProjectDoMemberRoleChanged,
 } from "./member-role-changed"
 import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
+import { handleMondayLinkChangedRequest } from "./monday-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
@@ -38,6 +39,7 @@ import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
 import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
+import { handleExternalKnowledgeRequest } from "./external/knowledge-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handlePlanRequest } from "./events/plan-route"
@@ -75,6 +77,8 @@ import { handleBranchingSearchPassagesRequest } from "./events/branching-search-
 import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleCellAttachmentsReadRequest } from "./events/cell-attachments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
+import { handleConceptOccurrencesRequest } from "./events/concept-occurrences-route"
+import { handleTerminologyScanRequest } from "./events/terminology-scan-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
@@ -93,8 +97,10 @@ export { ProjectSync } from "./project-do"
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
 import { setAccessGrantsMode } from "../../db/shared/project-roles"
+import { trackBackgroundWork } from "./lib/background-work"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 
@@ -210,6 +216,16 @@ declare global {
        * Tune once actual GPU billing is available.
        */
       TTS_COST_PER_AUDIO_SEC_CENTS?: string
+      /**
+       * Org credit caps, shared with auth-worker's llm/agent rails (spec
+       * § Config). The TTS pre-check reads these and is log-only unless
+       * CREDIT_ENFORCE === "true" or the org sets `credits.enforce`.
+       */
+      CREDIT_MARKUP?: string
+      CREDIT_AGENT_MARKUP?: string
+      CREDIT_DAILY_CAP?: string
+      CREDIT_WEEKLY_CAP?: string
+      CREDIT_ENFORCE?: string
     }
   }
 }
@@ -321,6 +337,15 @@ const worker = {
       AQUILLA_PG: pgShim as unknown as AquillaDb,
       LFS_SRC: rawLfsSrc ? asReadonlyR2(rawLfsSrc) : undefined,
     }
+    // AQU-1835: routes hand post-response work to ctx.waitUntil (comment
+    // notification emails, linked-project notify, import notifies) and keep
+    // querying on the connection above. Hand them a context that RECORDS those
+    // registrations, so the `finally` below can release the connection once
+    // they have settled instead of the moment the Response returns — which
+    // used to make those queries race `end()` and lose silently.
+    // See lib/background-work.ts.
+    const background = trackBackgroundWork(ctx)
+    const routeCtx = background.ctx
     try {
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
@@ -342,6 +367,9 @@ const worker = {
     if (memberRoleChangedResponse) return memberRoleChangedResponse
     const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
     if (projectSettingsChangedResponse) return projectSettingsChangedResponse
+    // AQU-1828: drop the DO's cached "project has no Monday link" answer.
+    const mondayLinkChangedResponse = await handleMondayLinkChangedRequest(request, env)
+    if (mondayLinkChangedResponse) return mondayLinkChangedResponse
     const contextualActivityResponse = await handleContextualActivityRequest(request, env)
     if (contextualActivityResponse) return contextualActivityResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)
@@ -409,6 +437,12 @@ const worker = {
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const attachmentsReadResponse = await handleCellAttachmentsReadRequest(request, env)
     if (attachmentsReadResponse) return withCors(attachmentsReadResponse, request)
+    // More specific than /concepts — that route is $-anchored, this one is the
+    // per-term occurrence page (AQU-1192).
+    const conceptOccurrencesResponse = await handleConceptOccurrencesRequest(request, env)
+    if (conceptOccurrencesResponse) return withCors(conceptOccurrencesResponse, request)
+    const terminologyScanResponse = await handleTerminologyScanRequest(request, env)
+    if (terminologyScanResponse) return withCors(terminologyScanResponse, request)
     const conceptsReadResponse = await handleConceptsReadRequest(request, env)
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
@@ -446,9 +480,9 @@ const worker = {
     if (branchingPassagesResponse) return withCors(branchingPassagesResponse, request)
     const branchingSearchResponse = await handleBranchingSearchRequest(request, env)
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
-    const bulkImportResponse = await handleBulkImportRequest(request, env, ctx)
+    const bulkImportResponse = await handleBulkImportRequest(request, env, routeCtx)
     if (bulkImportResponse) return bulkImportResponse
-    const importReconcileResponse = await handleImportReconcileRequest(request, env, ctx)
+    const importReconcileResponse = await handleImportReconcileRequest(request, env, routeCtx)
     if (importReconcileResponse) return importReconcileResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
@@ -461,7 +495,7 @@ const worker = {
     // AQU-1005/AQU-1007: identification fence over the whole /migrate/*
     // surface — blocks header-less runners (503 + source log) and gives every
     // allowed run an audit trail. See lib/migrate-fence.ts.
-    const migrateFence = migrateFenceResponse(request, env, ctx)
+    const migrateFence = migrateFenceResponse(request, env, routeCtx)
     if (migrateFence) return migrateFence
     const migrateIngestResponse = await handleMigrateIngestRequest(request, env)
     if (migrateIngestResponse) return migrateIngestResponse
@@ -499,30 +533,35 @@ const worker = {
     if (originalDownloadResponse) return originalDownloadResponse
     const originalsBundleResponse = await handleOriginalsBundleRequest(request, env)
     if (originalsBundleResponse) return originalsBundleResponse
-    const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
+    const eventsWriteResponse = await handleEventsWriteRequest(request, env, routeCtx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 
     // AQU-533: Agent API changeset engine (external command layer).
-    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
+    const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, routeCtx)
     if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
 
     // AQU-926: session-token changeset routes (/api/v1/changesets/*) — the
     // in-app agent harness + review card drive the same engine with the
     // browser's sync token. Disjoint from /api/v1/external/* and
     // /api/v1/projects/* so ordering here is not load-bearing.
-    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, ctx)
+    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, routeCtx)
     if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
     // The OAuth discovery document it points 401s at (RFC 9728) sits beside it.
     const mcpResourceMetadata = handleMcpProtectedResourceRequest(request, env, mountPrefix)
     if (mcpResourceMetadata) return withCors(mcpResourceMetadata, request)
-    const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx, mountPrefix)
+    const externalMcpResponse = await handleExternalMcpRequest(request, env, routeCtx, mountPrefix)
     if (externalMcpResponse) return withCors(externalMcpResponse, request)
 
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // AQU-1762: Agent API knowledge-base (reference document) upload / list.
+    // Bridged to auth-worker, which owns extraction + indexing.
+    const externalKnowledgeResponse = await handleExternalKnowledgeRequest(request, env)
+    if (externalKnowledgeResponse) return withCors(externalKnowledgeResponse, request)
 
     // AQU-1294: partner intake template + agent skills. Static text / pure
     // transforms, unauthenticated like the command docs below.
@@ -549,7 +588,7 @@ const worker = {
 
     return new Response("not found", { status: 404 })
     } finally {
-      ctx.waitUntil(pgShim.close())
+      ctx.waitUntil(background.closeWhenSettled(pgShim))
     }
   },
 }
@@ -573,11 +612,11 @@ export default {
     try {
       response = await worker.fetch(request, env, ctx)
     } catch (err) {
-      const url = new URL(request.url)
+      const path = redactLogPath(new URL(request.url).pathname)
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${url.pathname}`, {
+        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${path}`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.duration_ms": Date.now() - startedAt,
           "error.message": err instanceof Error ? err.message : String(err),
         }),
@@ -586,14 +625,17 @@ export default {
     }
     const durationMs = Date.now() - startedAt
     if (durationMs >= SLOW_REQUEST_MS) {
-      const url = new URL(request.url)
+      // OPS-42: `redactLogPath`, not `url.pathname` — [slow-request] fires on
+      // SUCCESSFUL requests too and lands in Cloudflare Workers Logs, so an
+      // access-link redeem that merely ran slowly would log a live token.
+      const path = redactLogPath(new URL(request.url).pathname)
       console.warn(
-        `[slow-request] ${request.method} ${url.pathname} took ${durationMs}ms (status ${response.status})`,
+        `[slow-request] ${request.method} ${path} took ${durationMs}ms (status ${response.status})`,
       )
       ctx.waitUntil(
-        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${url.pathname} (${durationMs}ms)`, {
+        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${path} (${durationMs}ms)`, {
           "http.method": request.method,
-          "http.path": url.pathname,
+          "http.path": path,
           "http.status": response.status,
           "http.duration_ms": durationMs,
         }),

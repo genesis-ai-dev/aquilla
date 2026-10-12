@@ -31,8 +31,11 @@ export interface FileSummary {
   kind?: string | null
   /** The text file an audio-cue sibling annotates. Null on ordinary files. */
   anchorFileId?: string | null
-  sourceLanguage: string | null
-  targetLanguage: string | null
+  /** AQU-1596: what the file's header claimed at import. Import information,
+   *  never a lane's language — it can disagree with the lane the rows live in.
+   *  A language shown to a user comes off the lane, not off here. */
+  declaredSourceLanguage: string | null
+  declaredTargetLanguage: string | null
   sourceTextDirection?: "ltr" | "rtl" | null
   targetTextDirection?: "ltr" | "rtl" | null
   cellCount: number
@@ -65,6 +68,13 @@ export interface CellRow {
    * is shared by all lanes. Optional so cached/older responses parse.
    */
   targetLang?: string
+  /**
+   * AQU-1240: the lane's opaque `lanes.id`. Null/absent until AQU-1616's
+   * backfill has populated `cells.lane_id` (and on a cached/older response),
+   * so a consumer that keys by lane must fall back to `targetLang` — see
+   * `localLaneKey` in src/lib/offline/schema.ts.
+   */
+  laneId?: string | null
   value: string
   /** Rich-text variant. Null for plain-text cells. */
   valueHtml: string | null

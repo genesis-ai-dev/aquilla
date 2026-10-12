@@ -6,13 +6,14 @@
 // the gutter's select box (20px), 8px, the notices column (20px), 2px, and the
 // number filling the rest; then, before the Target heading, the two 24px
 // validation checks — text, then audio, which a validated line shows as the
-// same green check.
+// same green check. The audio check is there only when the rows' is.
 
 import type { ReactNode } from "react"
 import { AudioLines, Flag, Hash, SquareCheck, Type } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { AudioColumn } from "@/lib/audio/file-has-audio"
 
 function Mark({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
@@ -51,8 +52,11 @@ export function GutterMarks({ numbers }: { numbers: "verse" | "cell" | null }) {
   )
 }
 
-/** Over the two validation checks, just before the Target heading. */
-export function CheckMarks() {
+/** Over the two validation checks, just before the Target heading. The audio
+ *  mark follows the rows' audio column (AQU-1495): a file with no audio has no
+ *  column, and a mark over nothing would push the heading off the rows'
+ *  target boxes. */
+export function CheckMarks({ audioColumn }: { audioColumn: AudioColumn }) {
   const t = useT()
   return (
     // -ms-3: the rows' two checks start 12px before the heading's text.
@@ -60,9 +64,11 @@ export function CheckMarks() {
       <Mark label={t("editor.gutter.textChecks")} className="w-6">
         <Type className="h-3 w-3" />
       </Mark>
-      <Mark label={t("editor.gutter.audioChecks")} className="w-6">
-        <AudioLines className="h-3 w-3" />
-      </Mark>
+      {audioColumn !== "off" && (
+        <Mark label={t("editor.gutter.audioChecks")} className="w-6">
+          <AudioLines className="h-3 w-3" />
+        </Mark>
+      )}
     </span>
   )
 }

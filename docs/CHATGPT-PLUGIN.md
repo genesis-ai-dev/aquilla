@@ -60,8 +60,14 @@ Design decisions:
 - **Organization selection is a snapshot.** New projects inside selected
   organizations can be accessed with current permissions. Later organization
   memberships require a new grant. Removed memberships cannot retain access.
-- **`resource`** (RFC 8707) must be an Aquilla MCP URL on the issuer's host.
-  Tokens are not audience-bound — every Agent API surface accepts them.
+- **`resource`** (RFC 8707) must match the configured canonical MCP URL exactly.
+  An omitted resource defaults to that URL. OAuth credentials are bound to MCP;
+  REST endpoints and alternate hosts reject replay. Device credentials and
+  manually created API tokens retain their existing REST and MCP access.
+- **The OAuth tool profile uses the same engine.** Each supported write has a
+  fixed, declared tool. The adapter delegates preparation and execution to
+  existing changesets, validators, permission checks and event producers.
+  Device and API-token connections retain generic commands and their cookbook.
 
 | Piece | Where |
 | --- | --- |
@@ -72,7 +78,10 @@ Design decisions:
 | Organization consent | `src/pages/OAuthConsent.tsx` |
 | Code storage | `0124_mcp_oauth_codes.sql`, `0125_mcp_oauth_org_scope.sql` |
 
-Configuration: `MCP_OAUTH_ISSUER` on the identity worker (production
+Configuration: `SYNC_WORKER_URL` on the identity worker sets the canonical
+resource base. It defaults to the issuer with `/identity` replaced by `/sync`.
+It must match the externally advertised MCP URL, including scheme and prefix.
+`MCP_OAUTH_ISSUER` on the identity worker (production
 `https://api.aquilla.app/identity`, development
 `https://api.dev.aquilla.app/identity`) must equal the sync worker's
 `AUTH_WORKER_URL`. Locally both fall back to `http://127.0.0.1:8788`. The
@@ -84,14 +93,15 @@ preview identity worker (see `docs/DEPLOYMENT-ENVIRONMENTS.md`).
 
 ## What ChatGPT reads from the MCP server
 
-- **`instructions`** in the `initialize` result
-  (`sync-worker/src/external/mcp-instructions.ts`): session order, the approval
-  contract, and how to report to a manager.
-- **Tool `annotations`** (`TOOL_KINDS` in `mcp-tools.ts`): reads are
-  `readOnlyHint`, staging tools are writes but not destructive, and
-  `confirm_changeset` is the only `destructiveHint` tool. ChatGPT's "ask before
-  changes" setting keys off these. A test fails if a new tool is not classified.
-- **`securitySchemes`** (`oauth2`) on every tool.
+- OAuth connections receive the static catalog and workflow in
+  `sync-worker/src/external/mcp-chatgpt-tools.ts`. Each tool has a declared
+  schema. Generic command dispatch and `describe_command` are unavailable.
+- Reads carry `readOnlyHint`. Staging tools are writes without destructive
+  effects. `confirm_changeset` and irreversible `discard_changeset` carry
+  `destructiveHint`. Act mode still respects host confirmation and user intent.
+- Every OAuth tool declares `securitySchemes` with the `act` scope.
+- Imports and media linking use artifacts that already exist in Aquilla.
+  OAuth clients cannot use the REST artifact endpoint as a workaround.
 
 ## The plugin package
 
@@ -110,7 +120,10 @@ production deployment manifest.
 
 ## Testing it in ChatGPT
 
-1. Deploy this branch to development (migrations `0124` and `0125` first).
+1. Deploy to development after migrations `0124`, `0125` and `0130`.
+   Migration `0130` binds identifiable OAuth credentials and revokes unknown
+   organization-snapshot OAuth grants. Those users must reconnect. Existing
+   device and manually created credentials remain unchanged.
 2. In ChatGPT, turn on Developer Mode (under Settings → Apps & Connectors →
    Advanced; the location varies by plan), then create an app with MCP URL
    `https://api.dev.aquilla.app/sync/api/v1/external/mcp` and OAuth
@@ -128,5 +141,6 @@ production deployment manifest.
 - **`outputSchema`** on read tools, which OpenAI recommends for structured
   results.
 - **UI cards** (MCP Apps): a project progress card and a changeset diff card.
-- **Directory submission**: screenshots, review test account, and the MCP
-  server review requirements.
+- **Directory submission**: dedicated reviewer access, verified ownership,
+  a walkthrough video, and real ChatGPT execution of the packaged test cases.
+  See `CHATGPT-SUBMISSION.md` for the launch checklist.

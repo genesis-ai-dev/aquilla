@@ -1,6 +1,16 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { createServerInvite, acceptServerInvite, previewServerInvite, previewMultiInvite, acceptMultiInvite } from "./invites"
+import {
+  createServerInvite,
+  acceptServerInvite,
+  previewServerInvite,
+  previewMultiInvite,
+  acceptMultiInvite,
+  listProjectInvites,
+  revokeProjectInvite,
+} from "./invites"
+import { UserError } from "@/lib/errors/user-error"
+import { clearElevationRequired, isElevationRequired } from "@/lib/errors/elevation-required-signal"
 
 const API = "https://api.example.test"
 const originalFetch = global.fetch
@@ -334,4 +344,41 @@ describe("acceptMultiInvite", () => {
     const result = await acceptMultiInvite("jwt", "tok", API)
     expect(result).toEqual({ ok: false, reason: "network" })
   })
+})
+
+// AQU-1541: the step-up 403 must reach the caller; every other failure is still swallowed.
+describe("project-invite helpers on an elevation-required 403", () => {
+  const ELEVATION_BODY = { error: "elevation required: verify with your admin code" }
+
+  afterEach(() => {
+    global.fetch = originalFetch
+    clearElevationRequired()
+  })
+
+  const cases: Array<[string, () => Promise<unknown>, unknown]> = [
+    ["createServerInvite", () => createServerInvite("jwt", "proj-1", 400, API), null],
+    ["listProjectInvites", () => listProjectInvites("jwt", "proj-1", API), null],
+    ["revokeProjectInvite", () => revokeProjectInvite("jwt", "proj-1", "tok", API), false],
+  ]
+
+  for (const [name, call, swallowed] of cases) {
+    it(`${name} rethrows the UserError and raises the step-up signal`, async () => {
+      global.fetch = mockFetch(403, ELEVATION_BODY) as unknown as typeof fetch
+      const err = await call().catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(UserError)
+      expect((err as UserError).status).toBe(403)
+      expect(isElevationRequired()).toBe(true)
+    })
+
+    it(`${name} still swallows an ordinary 403`, async () => {
+      global.fetch = mockFetch(403, { error: "forbidden" }) as unknown as typeof fetch
+      await expect(call()).resolves.toBe(swallowed)
+      expect(isElevationRequired()).toBe(false)
+    })
+
+    it(`${name} still swallows a network error`, async () => {
+      global.fetch = vi.fn(async () => { throw new Error("offline") }) as unknown as typeof fetch
+      await expect(call()).resolves.toBe(swallowed)
+    })
+  }
 })

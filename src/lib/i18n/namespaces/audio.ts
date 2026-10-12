@@ -87,6 +87,10 @@ export const audio = defineNamespace({
     "audio.newVoice.errorDesignPreviewRequired":
       "Generate previews and pick one before creating this voice.",
     "audio.newVoice.errorDesignNoProject": "Open a project file before designing a voice.",
+    "audio.newVoice.errorProviderFailed":
+      "The voice provider couldn't create this voice. Try again later, or close this and choose a built-in voice.",
+    "audio.newVoice.errorSignInRequired":
+      "Your sign-in didn't reach the voice service. Sign in again, then click Generate previews.",
     "audio.newVoice.inworldLanguageLabel": "Language",
     "audio.newVoice.inworldLanguagePlaceholder": "Choose a language",
     "audio.newVoice.inworldLanguageHint":
@@ -278,6 +282,10 @@ export const audio = defineNamespace({
     }),
     "audio.tts.siblingFailedDetail":
       "The clip you played was saved. Delete it and press the button again to retry the rest.",
+    "audio.tts.serverOnlyNeedsGenerate":
+      "Generate audio on this line first to hear {engine} TTS.",
+    "audio.tts.playbackFailed": "That voice clip couldn't be played.",
+    "audio.tts.failedTooltip": "Couldn't generate a voice — {reason}",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
     "audio.recordingModal.ttsSharedNotice": plural({
       one: "{count} heard line performs this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
@@ -308,7 +316,7 @@ export const audio = defineNamespace({
       "Recording at full WAV quality — about three times the file size. Click to record " +
       "compressed instead.",
     "audio.recordingModal.formatCompressedTooltip":
-      "Recording compressed — much smaller files, slightly less detail. Click to record at " +
+      "Recording compressed — much smaller files, a little less detail. Click to record at " +
       "full WAV quality.",
     "audio.recordingModal.formatWavAriaLabel": "Recording format: WAV — click to record compressed",
     "audio.recordingModal.formatCompressedAriaLabel":
@@ -411,6 +419,116 @@ export const audio = defineNamespace({
     // AudioBulkProgressBanner — batch transcribe-all / synth-all progress.
     "audio.bulkProgress.cancelTooltip": "Cancel batch",
 
+    // BatchVoiceDialog (AQU-1722) — "Generate voice" on the selection bar:
+    // speak every selected line in one chosen voice.
+    "audio.batchVoice.title": "Generate voice",
+    "audio.batchVoice.tooltip": "Generate a take for each of {count} selected lines, in one voice",
+    "audio.batchVoice.needTranslated": "Select at least one translated line",
+    "audio.batchVoice.rowName": "row {number}",
+    "audio.batchVoice.voiceLabel": "Voice to use",
+    "audio.batchVoice.existingLabel": "Lines that already have generated audio",
+    "audio.batchVoice.existingSkip": "Leave them as they are",
+    "audio.batchVoice.existingSkipHint": "Their current take is kept and no credits are spent on them.",
+    "audio.batchVoice.existingOverwrite": "Generate them again",
+    "audio.batchVoice.existingOverwriteHint":
+      "Adds a new take in the chosen voice and plays that instead. The earlier take stays in the line's history.",
+    "audio.batchVoice.estimate": plural(
+      {
+        one: "{count} line · about {words} words · about {credits}",
+        other: "{count} lines · about {words} words · about {credits}",
+      },
+      "count",
+    ),
+    "audio.batchVoice.allowanceExhausted":
+      "Your word allowance for this period is used up, so none of these lines can be generated yet.",
+    "audio.batchVoice.allowancePartial": plural(
+      {
+        one: "{count} line is past your remaining word allowance and will not be generated.",
+        other: "{count} lines are past your remaining word allowance and will not be generated.",
+      },
+      "count",
+    ),
+    "audio.batchVoice.skipParatext": plural(
+      { one: "{count} heading skipped", other: "{count} headings skipped" },
+      "count",
+    ),
+    "audio.batchVoice.skipNoText": plural(
+      {
+        one: "{count} line skipped — not translated yet",
+        other: "{count} lines skipped — not translated yet",
+      },
+      "count",
+    ),
+    "audio.batchVoice.skipHasAudio": plural(
+      {
+        one: "{count} line skipped — it already has generated audio",
+        other: "{count} lines skipped — they already have generated audio",
+      },
+      "count",
+    ),
+    "audio.batchVoice.skipInFlight": plural(
+      {
+        one: "{count} line skipped — already generating",
+        other: "{count} lines skipped — already generating",
+      },
+      "count",
+    ),
+    "audio.batchVoice.skipOverAllowance": plural(
+      {
+        one: "{count} line skipped — past your word allowance",
+        other: "{count} lines skipped — past your word allowance",
+      },
+      "count",
+    ),
+    "audio.batchVoice.skipDeclined": plural(
+      {
+        one: "{count} line skipped — the voice model download was declined",
+        other: "{count} lines skipped — the voice model download was declined",
+      },
+      "count",
+    ),
+    "audio.batchVoice.generate": plural(
+      {
+        one: "Generate {count} line in {voice}",
+        other: "Generate {count} lines in {voice}",
+      },
+      "count",
+    ),
+    "audio.batchVoice.doneTitle": plural(
+      { one: "Generated {count} line", other: "Generated {count} lines" },
+      "count",
+    ),
+    "audio.batchVoice.partialTitle": plural(
+      {
+        one: "Generated {count} line — some did not finish",
+        other: "Generated {count} lines — some did not finish",
+      },
+      "count",
+    ),
+    "audio.batchVoice.failedTitle": "Couldn't generate voice for these lines",
+    "audio.batchVoice.moreFailures": plural(
+      { one: "{count} more failure", other: "{count} more failures" },
+      "count",
+    ),
+    "audio.batchVoice.stoppedAtCap": plural(
+      {
+        one: "Stopped at your AI budget — {count} line was not attempted",
+        other: "Stopped at your AI budget — {count} lines were not attempted",
+      },
+      "count",
+    ),
+    "audio.batchVoice.cancelledRest": plural(
+      {
+        one: "Cancelled — {count} line was not attempted",
+        other: "Cancelled — {count} lines were not attempted",
+      },
+      "count",
+    ),
+    "audio.batchVoice.skippedTotal": plural(
+      { one: "{count} line skipped", other: "{count} lines skipped" },
+      "count",
+    ),
+
     // GEMINI_TTS_VOICES (tts-providers.ts) — tone/character description for
     // each named Gemini voice. Several voices share the same description
     // (Google's own catalog repeats these words across voices), so this is
@@ -501,6 +619,7 @@ export const audio = defineNamespace({
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
     "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
+    "audio.aiError.creditCapTitle": "AI credit allowance used up",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
     "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
@@ -517,6 +636,34 @@ export const audio = defineNamespace({
     "audio.aiError.providerUnavailableTitle": "The AI service is unavailable",
     "audio.aiError.providerRejectedTitle": "The AI provider rejected this request",
     "audio.aiError.unknownTitle": "Something went wrong",
+    // AQU-510: the BODY of each AI failure. The titles above were localized by
+    // AQU-891; the bodies stayed English literals, so the sentence a translator
+    // actually reads to decide what to do was the untranslated half.
+    "audio.aiError.dailyLimitBody":
+      "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
+    "audio.aiError.tooLargeBody":
+      "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
+    "audio.aiError.geminiKeyRequiredBody":
+      "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local MMS engine.",
+    "audio.aiError.geminiFailedBody":
+      "Gemini couldn't generate this line. Check the API key, or switch this voice to Inworld TTS.",
+    "audio.aiError.translationNotConfiguredBody":
+      "Set up a completion provider for this project before generating voice on untranslated cells.",
+    "audio.aiError.ttsNotConfiguredBody":
+      "Switch this project to a local MMS voice, which runs in the browser, or ask an administrator to configure the server voice service.",
+    "audio.aiError.networkBody":
+      "Check your connection and try again. Local voices keep working offline once their model is downloaded.",
+    "audio.aiError.audioFormatUnsupportedBody": "Try uploading a .wav, .mp3, or .ogg file.",
+    "audio.aiError.timedOutBody":
+      "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
+    "audio.aiError.rateLimitedBody":
+      "The AI provider is rate-limiting requests. Wait a moment and try again.",
+    "audio.aiError.providerUnavailableBody":
+      "The AI provider returned a server error. This is usually temporary — try again in a moment.",
+    "audio.aiError.providerRejectedBody":
+      "The request didn't reach a model. Open the technical detail below and copy it to support if this keeps happening.",
+    "audio.aiError.unknownBody":
+      "The AI request didn't finish. Open the technical detail below and copy it to support if this keeps happening.",
   },
   context: {
     _context: {
@@ -920,6 +1067,18 @@ export const audio = defineNamespace({
         description:
           "Inline error when Generate previews is clicked without a project and " +
           "file context (needed to mint a sync token for the worker).",
+      },
+      "audio.newVoice.errorProviderFailed": {
+        description:
+          "Inline error on Voice Design after the voice provider still fails once " +
+          "the worker has retried. Tells the user to try again later, or close " +
+          "the dialog and pick a built-in voice.",
+      },
+      "audio.newVoice.errorSignInRequired": {
+        description:
+          "Inline error on Voice Design when the saved sign-in cannot mint a " +
+          "sync token (missing session, or a 401 such as an invalid token). " +
+          "Tells the user to sign in again, then click Generate previews.",
       },
       "audio.newVoice.inworldLanguageLabel": {
         description:
@@ -1711,6 +1870,40 @@ export const audio = defineNamespace({
           "safe, and names the only recovery path — the button becomes a replay " +
           "button once the first clip lands, so retrying means removing it.",
       },
+      "audio.tts.serverOnlyNeedsGenerate": {
+        description:
+          "AQU-510: shown on the line's voice button when the project's voice " +
+          "engine runs only on the server, so there is nothing to synthesize in " +
+          "the browser for a preview. Guides the user to generate the audio " +
+          "first rather than reporting the internal server-only guard. States " +
+          "what to do, not what went wrong.",
+        placeholders: {
+          engine: "Short name of the configured voice engine, e.g. 'Inworld'. A product name — leave it untranslated.",
+        },
+      },
+      "audio.tts.playbackFailed": {
+        description:
+          "AQU-510: shown on the line's voice button when a clip that was " +
+          "generated successfully then fails to load in the browser's audio " +
+          "player (a dead blob URL or an unsupported codec). About playback, " +
+          "not about generation — the clip itself may be fine. Deliberately " +
+          "separate from audio.error.queueLoadFailed, which is the same class " +
+          "of failure on a different surface: that one is the multi-cell " +
+          "playback queue, rendered in the VoicePlaybackBar in place of the " +
+          "voice name, where this one is one line's own button. Keep the two " +
+          "wordings distinct — merging them would re-point a string translators " +
+          "were given a specific surface for.",
+      },
+      "audio.tts.failedTooltip": {
+        description:
+          "AQU-510: tooltip and accessible name of the line's voice button once " +
+          "generation has failed, so a translator who cannot read English still " +
+          "learns what the red button means. The reason is already a localized " +
+          "sentence; this key only frames it. Keep it short — it is a tooltip.",
+        placeholders: {
+          reason: "An already-localized one-sentence reason, produced by the app's error categoriser. Insert exactly as given; do not add punctuation before it.",
+        },
+      },
       "audio.recordingModal.ttsSharedNotice": {
         description:
           "Notice in the recorder, shown AFTER a voice has been generated, and " +
@@ -2295,6 +2488,183 @@ export const audio = defineNamespace({
           "Tooltip and accessible name for the small 'x' button on the bulk-progress " +
           "banner that cancels the running batch job.",
       },
+      "audio.batchVoice.title": {
+        description:
+          "Heading of the dialog that generates spoken audio for every line the " +
+          "reader has multi-selected, in one chosen voice. 'Voice' is a noun here.",
+        maxLength: 28,
+      },
+      "audio.batchVoice.tooltip": {
+        description:
+          "Tooltip on the enabled generate-voice button in the selection toolbar. " +
+          "It states the scope and, crucially, the difference from 'Voice together' " +
+          "beside it: one take PER line rather than one shared clip.",
+        placeholders: { count: "Number of selected lines that have a translation." },
+      },
+      "audio.batchVoice.needTranslated": {
+        description:
+          "Tooltip when the generate-voice button is disabled because none of the " +
+          "selected lines has a translation to speak. Imperative: tells the reader " +
+          "what to do.",
+      },
+      "audio.batchVoice.rowName": {
+        description:
+          "How a line with no scripture reference is named in the generate-voice " +
+          "plan and summary: by the number in the editor table's # column. Appears " +
+          "inside a list of such names, so keep it short and lowercase.",
+        maxLength: 12,
+        placeholders: { number: "The line's number in the editor table's # column." },
+      },
+      "audio.batchVoice.voiceLabel": {
+        description:
+          "Small heading over the searchable voice list in the generate-voice " +
+          "dialog: which voice every selected line will be spoken in.",
+        maxLength: 20,
+      },
+      "audio.batchVoice.existingLabel": {
+        description:
+          "Legend of the two-option choice in the generate-voice dialog, shown only " +
+          "when some selected line already carries generated audio. Names what the " +
+          "choice is about rather than asking a question.",
+      },
+      "audio.batchVoice.existingSkip": {
+        description:
+          "First of the two options: leave lines that already have generated audio " +
+          "untouched. Imperative, describing what the batch will do.",
+        maxLength: 30,
+      },
+      "audio.batchVoice.existingSkipHint": {
+        description:
+          "Secondary line under the 'leave them' option, stating its two " +
+          "consequences: the take survives and no budget is spent.",
+      },
+      "audio.batchVoice.existingOverwrite": {
+        description:
+          "Second of the two options: speak those lines again in the chosen voice. " +
+          "Imperative, describing what the batch will do.",
+        maxLength: 30,
+      },
+      "audio.batchVoice.existingOverwriteHint": {
+        description:
+          "Secondary line under the 'generate again' option. It must keep the " +
+          "reassurance that the earlier take is not destroyed — the new one simply " +
+          "becomes the one that plays.",
+      },
+      "audio.batchVoice.estimate": {
+        description:
+          "The up-front estimate in the generate-voice dialog: how many lines will " +
+          "be spoken, how many words that is, and roughly what it costs. 'about' " +
+          "must stay — the real cost is only known once the lines are spoken. The " +
+          "counted noun is lines, so the plural form follows {count}.",
+        placeholders: {
+          count: "Number of lines that will actually be generated.",
+          words: "Formatted word count across those lines.",
+          credits: "Formatted credit estimate, already carrying its unit.",
+        },
+      },
+      "audio.batchVoice.allowanceExhausted": {
+        description:
+          "Warning in the generate-voice dialog when the org's word allowance for " +
+          "the period is spent, so not one selected line can be generated. States " +
+          "the fact; the billing screen is where it gets resolved.",
+      },
+      "audio.batchVoice.allowancePartial": {
+        description:
+          "Warning in the generate-voice dialog when only part of the selection " +
+          "fits the remaining word allowance. Says plainly that those lines will " +
+          "not be generated, so a short run is never a surprise.",
+        placeholders: { count: "Number of lines that do not fit the remaining allowance." },
+      },
+      "audio.batchVoice.skipParatext": {
+        description:
+          "Clause in the generate-voice dialog's plan: this many selected rows are " +
+          "headings or notes, which carry no translation to speak.",
+        placeholders: { count: "Number of selected headings." },
+      },
+      "audio.batchVoice.skipNoText": {
+        description:
+          "Clause in the generate-voice dialog's plan: this many selected lines " +
+          "have no committed translation yet, so there is nothing to speak.",
+        placeholders: { count: "Number of selected lines this clause is about." },
+      },
+      "audio.batchVoice.skipHasAudio": {
+        description:
+          "Clause in the generate-voice dialog's plan: this many selected lines " +
+          "already have generated audio and the reader chose to leave them alone.",
+        placeholders: { count: "Number of selected lines this clause is about." },
+      },
+      "audio.batchVoice.skipInFlight": {
+        description:
+          "Clause in the generate-voice dialog's plan: this many selected lines are " +
+          "already being generated, so the batch will not queue them twice.",
+        placeholders: { count: "Number of selected lines this clause is about." },
+      },
+      "audio.batchVoice.skipOverAllowance": {
+        description:
+          "Clause in the generate-voice dialog's plan: this many selected lines sit " +
+          "past the remaining word allowance.",
+        placeholders: { count: "Number of selected lines this clause is about." },
+      },
+      "audio.batchVoice.skipDeclined": {
+        description:
+          "Clause in the run summary: this many lines were not spoken because the " +
+          "reader declined the on-device voice model download. A choice, not a " +
+          "fault — keep it neutral.",
+        placeholders: { count: "Number of selected lines this clause is about." },
+      },
+      "audio.batchVoice.generate": {
+        description:
+          "The confirm button of the generate-voice dialog. It names the scope and " +
+          "the voice so the click is unambiguous. 'Generate' is a verb.",
+        placeholders: {
+          count: "Number of lines that will be generated.",
+          voice: "Name of the chosen voice, as the reader named it.",
+        },
+      },
+      "audio.batchVoice.doneTitle": {
+        description:
+          "Heading of the success notice after a batch voice run where every " +
+          "attempted line got audio.",
+        placeholders: { count: "Number of lines that got a take." },
+      },
+      "audio.batchVoice.partialTitle": {
+        description:
+          "Heading of the notice after a batch voice run that produced some audio " +
+          "and also hit failures. States the success count; the body names the " +
+          "lines that failed and why.",
+        placeholders: { count: "Number of lines that got a take." },
+      },
+      "audio.batchVoice.failedTitle": {
+        description:
+          "Heading of the error notice when a batch voice run could not start at " +
+          "all — it fell over before any line was attempted.",
+      },
+      "audio.batchVoice.moreFailures": {
+        description:
+          "Tail clause of the run summary when more lines failed than the notice " +
+          "spells out by name.",
+        placeholders: { count: "Number of further failures not named individually." },
+      },
+      "audio.batchVoice.stoppedAtCap": {
+        description:
+          "Clause in the run summary when the AI budget stopped the run partway. " +
+          "Naming the unattempted lines is the point: a batch must never halt " +
+          "silently.",
+        placeholders: { count: "Number of planned lines the run never reached." },
+      },
+      "audio.batchVoice.cancelledRest": {
+        description:
+          "Clause in the run summary when the reader cancelled the batch from the " +
+          "progress banner, stating how much was left.",
+        placeholders: { count: "Number of planned lines the run never reached." },
+      },
+      "audio.batchVoice.skippedTotal": {
+        description:
+          "Clause in the run summary giving the total number of selected lines the " +
+          "batch did not speak, for whichever reason. The dialog's plan is where " +
+          "the reasons are itemised.",
+        placeholders: { count: "Number of selected lines this clause is about." },
+      },
       "audio.voice.bright": {
         description:
           "One of a fixed set of one-word tone/character descriptions for a named " +
@@ -2555,6 +2925,14 @@ export const audio = defineNamespace({
           "Popover heading when Inworld TTS was configured but the synthesize " +
           "call itself failed (upstream vendor error).",
       },
+      "audio.aiError.creditCapTitle": {
+        description:
+          "Popover heading when the sync-worker refused synthesis with 429 " +
+          "credit_cap_exceeded because the org has spent its credit allowance " +
+          "(AQU-1872). Distinct from inworldFailedTitle — the vendor was never " +
+          "called, so this must not be worded as an engine or Gemini-key fault; " +
+          "the body names the org admin who can raise the cap.",
+      },
       "audio.aiError.seedVcNotConfiguredTitle": {
         description:
           "Popover heading when a non-Inworld clone voice needs Seed-VC conversion " +
@@ -2640,6 +3018,106 @@ export const audio = defineNamespace({
           "full failure-screen title): this is an inline popover heading inside an " +
           "AI-feature affordance, the same register split already documented for " +
           "audio.recordingModal.genericError just above.",
+      },
+
+      // AQU-510 — the bodies. Each pairs with the *Title key of the same name
+      // and is the sentence that tells the user what to DO. They are rendered
+      // together as one block (InlineAiError, CellAiStatusPopover), so a body
+      // should follow its title rather than restate it, and must read as an
+      // instruction, not a diagnosis: the verbatim provider text is always
+      // available separately under "Technical detail", and these strings
+      // deliberately REPLACE it as the primary message.
+      "audio.aiError.dailyLimitBody": {
+        description:
+          "Body for the platform's own daily AI budget being spent (not a " +
+          "provider rate limit). Names both ways out: wait for the midnight-UTC " +
+          "reset, or move the project to its own AI provider so the platform " +
+          "budget stops applying. 'UTC' is a technical term the sentence needs — " +
+          "keep it recognizable rather than translating it to a local zone.",
+      },
+      "audio.aiError.tooLargeBody": {
+        description:
+          "Body for a prompt that exceeded the model's context window (HTTP 413 " +
+          "or a context-length error). Lists the three levers in the order a user " +
+          "can act on them: draft fewer cells, lower the example count in AI " +
+          "settings, or choose a bigger model. 'AI settings' is a UI location — " +
+          "match the translation used for that settings section.",
+      },
+      "audio.aiError.geminiKeyRequiredBody": {
+        description:
+          "Body shown when a Gemini voice is selected but no Gemini API key is " +
+          "configured. Offers the alternative engines by name so the user is not " +
+          "stuck behind an API key they may not be able to obtain. 'Gemini', " +
+          "'Inworld TTS' and 'MMS' are product names — leave them untranslated.",
+      },
+      "audio.aiError.geminiFailedBody": {
+        description:
+          "Body for a Gemini voice request that reached Gemini and failed there " +
+          "(as opposed to a missing key). Both remedies are the user's: check the " +
+          "key, or switch engine. 'Gemini' and 'Inworld TTS' are product names.",
+      },
+      "audio.aiError.translationNotConfiguredBody": {
+        description:
+          "Body shown when voice generation is attempted on an UNTRANSLATED cell " +
+          "and the project has no completion provider — the voice engine is fine; " +
+          "there is no text to speak and nothing configured to produce it. Points " +
+          "at the completion provider, not at the voice settings.",
+      },
+      "audio.aiError.ttsNotConfiguredBody": {
+        description:
+          "Body shown when the server's voice service is not wired up at all. " +
+          "Deliberately worded to continue its title rather than repeat it (the " +
+          "recorder renders title and body as one sentence). This is NOT a " +
+          "temporary outage, so the copy must not suggest retrying: it offers the " +
+          "local in-browser engine, or asking an administrator. 'MMS' is a " +
+          "product name.",
+      },
+      "audio.aiError.networkBody": {
+        description:
+          "Body for a request that never reached the provider (offline, DNS, " +
+          "failed fetch). The second sentence is the actionable part for a field " +
+          "team on poor connectivity: local voices keep working once downloaded. " +
+          "Worth keeping — it is often the only thing the user can still do.",
+      },
+      "audio.aiError.audioFormatUnsupportedBody": {
+        description:
+          "Body shown when an uploaded or recorded clip could not be decoded. " +
+          "Just the three formats known to work; the file extensions are literal " +
+          "and must not be translated or localized in punctuation.",
+      },
+      "audio.aiError.timedOutBody": {
+        description:
+          "Body for a provider that did not answer inside the request deadline. " +
+          "Retry first, because a timeout often is transient; the two fallbacks " +
+          "are a smaller request or a different model.",
+      },
+      "audio.aiError.rateLimitedBody": {
+        description:
+          "Body for the AI PROVIDER rate-limiting us (HTTP 429), as distinct from " +
+          "the platform's own daily budget above. Waiting is the whole remedy, so " +
+          "the sentence stays short and says only that.",
+      },
+      "audio.aiError.providerUnavailableBody": {
+        description:
+          "Body for a 5xx from the AI provider. Says the failure is on their side " +
+          "and usually temporary, so the user retries instead of hunting through " +
+          "their own settings for a cause that is not there.",
+      },
+      "audio.aiError.providerRejectedBody": {
+        description:
+          "Body for a 4xx from the AI provider with no more specific category — " +
+          "the request was refused before a model saw it. There is no user-side " +
+          "remedy to offer honestly, so it directs them to the technical detail " +
+          "and to support. 'Technical detail' names the disclosure control " +
+          "beneath it: use the same wording as that control's label.",
+      },
+      "audio.aiError.unknownBody": {
+        description:
+          "Body for the classifier's final fallback — a failure matching no " +
+          "category, whose raw text is a machine dump (JSON, a stack, a wall of " +
+          "text) and so is not shown as the primary message. Like " +
+          "providerRejectedBody it can only point at the technical detail and " +
+          "support. 'Technical detail' names the disclosure control beneath it.",
       },
     },
   },

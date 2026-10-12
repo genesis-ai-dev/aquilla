@@ -10,3 +10,8 @@ sync_install=$!
 wait "$auth_install"
 wait "$sync_install"
 pnpm exec tsc -b
+# Wrangler bundles the Workers with esbuild, which never type-checks, and the
+# root `tsc -b` does not cover them, so a Worker type error would otherwise
+# deploy (#1044 shipped a ReferenceError on every mirror sync that way).
+pnpm --dir auth-worker run type-check
+pnpm --dir sync-worker run type-check

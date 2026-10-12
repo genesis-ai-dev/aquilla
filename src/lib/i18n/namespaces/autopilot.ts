@@ -536,7 +536,7 @@ export const autopilot = defineNamespace({
     "autopilot.graph.title": "Process",
     "autopilot.graph.aria": "Autopilot process graph",
     "autopilot.graph.spanHelp":
-      "Autopilot works on a short piece of text, usually 8 to 12 cells. This lets it read the text around that piece.",
+      "Autopilot works on a short piece of text, about 8 to 12 cells. This lets it read the text around that piece.",
     "autopilot.graph.spanHelpAria": "What a span is",
     "autopilot.graph.liveSpans": "Now: {spans}",
     "autopilot.graph.noLiveSpan": "Autopilot is not working on a passage now.",
@@ -604,7 +604,7 @@ export const autopilot = defineNamespace({
     // — Staged proposal card: the human approval gate on agent writes ————
     "autopilot.proposal.unsupportedKind":
       "not supported yet — apply this kind in the app directly",
-    "autopilot.proposal.currentlyEmpty": "(currently empty)",
+    "autopilot.proposal.currentlyEmpty": "(empty)",
     "autopilot.proposal.newRow": "(new row)",
     "autopilot.proposal.discarded": "Discarded: {summary}",
     "autopilot.proposal.applyFailed": "Apply failed",
@@ -652,7 +652,7 @@ export const autopilot = defineNamespace({
     "autopilot.readiness.level.missing": "Missing",
     "autopilot.readiness.terminology.label": "Key terms",
     "autopilot.readiness.terminology.none":
-      "No key terms have an approved rendering yet. Autopilot will translate them ad hoc, and each passage may word them differently.",
+      "No key terms have an approved rendering yet. Autopilot will translate them ad hoc, and each passage may use different words for them.",
     "autopilot.readiness.terminology.some": plural({
       one: "{count} key term has an approved rendering. Autopilot is told the ones that appear in each passage and must use them.",
       other: "{count} key terms have an approved rendering. Autopilot is told the ones that appear in each passage and must use them.",

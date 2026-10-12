@@ -9,8 +9,7 @@
  */
 
 import { useState, type ReactNode } from "react"
-import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatNumber } from "@/lib/i18n/format"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   AlertTriangle,
@@ -19,7 +18,6 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatCredits } from "@/lib/credits"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
@@ -161,7 +159,7 @@ export function AgentRunView({
   fileChoiceEnabled = false,
   onSuggestionSend,
 }: AgentRunViewProps) {
-  const { locale, t } = useI18n()
+  const t = useT()
   const fileCandidates = onChooseFile ? latestFileCandidates(run) : []
   // Trailing NEXT: lines live in the LAST prose item; strip them from display
   // there (including mid-stream partials) and surface them as buttons once the
@@ -179,14 +177,21 @@ export function AgentRunView({
     run.status === "ok" && onSuggestionSend && parsed ? parsed.suggestions.slice(0, 2) : []
   return (
     <div className="flex flex-col gap-2">
-      {/* User prompt — right-aligned primary bubble. */}
-      <Message align="end">
-        <MessageContent>
-          <Bubble>
-            <BubbleContent>{run.prompt}</BubbleContent>
-          </Bubble>
-        </MessageContent>
-      </Message>
+      {/* User prompt — right-aligned primary bubble. Skipped when there is no
+          prompt: a run rebuilt from a reopened chat (AQU-1653) can carry
+          assistant prose whose user turn fell outside the stored transcript,
+          and an empty bubble would read as a message the user never sent. */}
+      {run.prompt.trim() !== "" && (
+        <Message align="end">
+          <MessageContent>
+            <Bubble>
+              {/* App chrome disables selection globally (index.css); the
+                  conversation itself opts back in so it can be copied. */}
+              <BubbleContent className="select-text">{run.prompt}</BubbleContent>
+            </Bubble>
+          </MessageContent>
+        </Message>
+      )}
 
       {run.items.map((item, index) => {
         switch (item.kind) {
@@ -213,7 +218,7 @@ export function AgentRunView({
                     </div>
                   )}
                   <Bubble variant="ghost">
-                    <BubbleContent>
+                    <BubbleContent className="select-text">
                       <ChatMarkdown content={displayText} />
                     </BubbleContent>
                   </Bubble>
@@ -310,18 +315,9 @@ export function AgentRunView({
         </Marker>
       )}
 
-      {run.usage && (
-        <div className="text-[10px] text-muted-foreground">
-          {t("agent.run.tokenUsage", {
-            promptTokens: formatNumber(run.usage.promptTokens, locale),
-            completionTokens: formatNumber(run.usage.completionTokens, locale),
-          })}
-          {" · "}
-          {formatCredits(run.usage.costCredits, locale)}
-        </div>
-      )}
-
-      {run.budget && <BudgetMeter budget={run.budget} />}
+      {/* Under-cap usage lives in the composer's AgentUsageRing; only the
+          "run stopped" alert stays inline, since it explains this run. */}
+      {run.budget?.exhausted && <BudgetMeter budget={run.budget} />}
     </div>
   )
 }

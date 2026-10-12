@@ -6,6 +6,10 @@
 //   GET  /:projectId/team/threads/:threadId/messages     one thread (VIEWER)
 //   POST /:projectId/team/messages                       post as a human (CONTRIBUTOR)
 //
+// The handoff half of this channel — the ask that runs the other way, when a
+// contributor needs a human expert — is the sibling router in
+// routes/team-handoffs.ts (AQU-1052), mounted at the same base.
+//
 // Ported from the AQU-1049→1053 `team-threads` router. Intentional
 // divergences from that donor:
 //
@@ -35,8 +39,12 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
-import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
-import type { AquillaDb } from "../../../db/shim/postgres"
+import {
+  errorJson,
+  projectIsActive,
+  requireAutopilotReleased,
+  requireRole,
+} from "./_contextual-helpers"
 import {
   appendMessage,
   getMessage,
@@ -68,16 +76,6 @@ const postMessageSchema = z
     text: z.string().trim().min(1).max(TEAM_MESSAGE_TEXT_MAX),
   })
   .strict()
-
-/** Writes stop on an archived/inactive project; reads keep working so the
- *  history stays auditable. Mirrors the donor's requireActiveProject. */
-async function projectIsActive(db: AquillaDb, projectId: string): Promise<boolean> {
-  const row = await db
-    .prepare("SELECT is_active, archived_at FROM projects WHERE id = ?")
-    .bind(projectId)
-    .first<{ is_active: boolean; archived_at: string | null }>()
-  return !!row && !!row.is_active && !row.archived_at
-}
 
 // GET /:projectId/team/messages — the main channel, newest-last (VIEWER).
 team.get(
@@ -215,5 +213,6 @@ team.post(
     return c.json(message, 201)
   },
 )
+
 
 export default team

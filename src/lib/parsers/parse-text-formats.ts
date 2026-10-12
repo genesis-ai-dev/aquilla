@@ -21,7 +21,7 @@ import { extractJsonStrings } from "./json-i18n"
 import { extractPoStrings } from "./po"
 import { extractPropertiesStrings } from "./properties"
 import { extractSbvStrings } from "./sbv"
-import type { ParsedTextFileResult, TranslatableString } from "./core-types"
+import type { CellUnit, ParsedTextFileResult, TranslatableString } from "./core-types"
 
 /** DOM-free file types handled by this module (and therefore the parse worker). */
 export type TextParseFileType = "txt" | "md" | "json" | "po" | "properties" | "obs" | "vtt" | "srt" | "sbv" | "csv" | "tsv" | "usfm"
@@ -54,6 +54,10 @@ export interface TextParseRequest {
    *  matter from the emitted cells (per-project opt-out, AQU-634). Default:
    *  false (import front matter). */
   excludeFrontMatter?: boolean
+  /** txt/md only: what one cell is (AQU-1720). `paragraph` emits one cell per
+   *  non-empty paragraph with no sentence split and no length cap — the unit a
+   *  dubbing project generates one voice clip for. Default: `sentence`. */
+  cellUnit?: CellUnit
 }
 
 /** Parse one USFM book section into translatable cells (verse bodies + heading/
@@ -119,12 +123,12 @@ export function usfmSectionToStrings(
  * run off the main thread, and inside the sync-worker's Agent API).
  */
 export function parseTextFormat(req: TextParseRequest): ParsedTextFileResult[] {
-  const { fileType, text, name, excludeFrontMatter } = req
+  const { fileType, text, name, excludeFrontMatter, cellUnit } = req
   switch (fileType) {
     case "txt":
-      return [{ name, strings: extractPlaintextStrings(text) }]
+      return [{ name, strings: extractPlaintextStrings(text, { cellUnit }) }]
     case "md":
-      return [{ name, strings: extractMarkdownStrings(text) }]
+      return [{ name, strings: extractMarkdownStrings(text, { cellUnit }) }]
     case "json":
       return [{ name, strings: extractJsonStrings(text) }]
     case "po":

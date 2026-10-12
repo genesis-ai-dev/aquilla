@@ -15,3 +15,12 @@ export async function throwIfElevationRequired(res: Response, context?: string):
   notifyElevationRequired()
   throw new UserError(403, raw, context)
 }
+
+/**
+ * AQU-1541: true for the UserError `throwIfElevationRequired` throws. Helpers
+ * that swallow their own errors rethrow this one so the caller can show the
+ * admin-code message instead of a generic failure.
+ */
+export function isElevationRequiredError(err: unknown): err is UserError {
+  return err instanceof UserError && err.status === 403 && isElevationRequiredBody(err.raw)
+}

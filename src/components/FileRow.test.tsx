@@ -111,6 +111,13 @@ describe("FileRow — AQU-341 truncation consistency", () => {
     expect(slot).toHaveAttribute("aria-label", "80% translated, 50% validated")
   })
 
+  it("never reads 100% while a cell is outstanding (AQU-1493)", () => {
+    // Genesis-sized: six short is 99.5%, which plain rounding called 100%.
+    const { container } = renderRow({ progress: { translated: 1194, validated: 1200, total: 1200 } })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')
+    expect(slot).toHaveAttribute("aria-label", "99% translated, 100% validated")
+  })
+
   it("exposes the full (untruncated) name so the user can recover it", () => {
     const { container } = renderRow()
     // The accessible name is the full string even though it renders truncated.

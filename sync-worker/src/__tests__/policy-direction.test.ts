@@ -53,13 +53,15 @@ describe('policyWriteDirection — per-key table', () => {
     })
   })
 
-  describe('allowSelfValidation (unset ⇒ true; only === false is off)', () => {
+  // AQU-1571: every validation-policy key has an audio twin that must read the
+  // same way, or an agent could loosen who validates recordings.
+  describe.each(['allowSelfValidation', 'allowSelfValidationAudio'])('%s (unset ⇒ true; only === false is off)', (key) => {
     it('unset → false tightens', () => {
-      expect(policyWriteDirection('allowSelfValidation', undefined, false).direction).toBe('tighten')
+      expect(policyWriteDirection(key, undefined, false).direction).toBe('tighten')
     })
     it('false → true loosens; false → null loosens', () => {
-      expect(policyWriteDirection('allowSelfValidation', false, true).direction).toBe('loosen')
-      expect(policyWriteDirection('allowSelfValidation', false, null).direction).toBe('loosen')
+      expect(policyWriteDirection(key, false, true).direction).toBe('loosen')
+      expect(policyWriteDirection(key, false, null).direction).toBe('loosen')
     })
   })
 
@@ -98,17 +100,17 @@ describe('policyWriteDirection — per-key table', () => {
     })
   })
 
-  describe('validationRoleFloor (reviewer < project_lead < maintainer; unset ⇒ reviewer)', () => {
+  describe.each(['validationRoleFloor', 'validationRoleFloorAudio'])('%s (reviewer < project_lead < maintainer; unset ⇒ reviewer)', (key) => {
     it('a higher rung tightens; unset → maintainer tightens', () => {
-      expect(policyWriteDirection('validationRoleFloor', 'reviewer', 'maintainer').direction).toBe('tighten')
-      expect(policyWriteDirection('validationRoleFloor', undefined, 'project_lead').direction).toBe('tighten')
+      expect(policyWriteDirection(key, 'reviewer', 'maintainer').direction).toBe('tighten')
+      expect(policyWriteDirection(key, undefined, 'project_lead').direction).toBe('tighten')
     })
     it('a lower rung loosens; maintainer → null (clear ⇒ reviewer) loosens', () => {
-      expect(policyWriteDirection('validationRoleFloor', 'maintainer', 'project_lead').direction).toBe('loosen')
-      expect(policyWriteDirection('validationRoleFloor', 'maintainer', null).direction).toBe('loosen')
+      expect(policyWriteDirection(key, 'maintainer', 'project_lead').direction).toBe('loosen')
+      expect(policyWriteDirection(key, 'maintainer', null).direction).toBe('loosen')
     })
     it('a rung outside the ladder is invalid', () => {
-      expect(policyWriteDirection('validationRoleFloor', 'reviewer', 'owner').direction).toBe('invalid')
+      expect(policyWriteDirection(key, 'reviewer', 'owner').direction).toBe('invalid')
     })
   })
 
@@ -140,24 +142,24 @@ describe('policyWriteDirection — per-key table', () => {
     })
   })
 
-  describe('validationNamedUsers (allowlist; empty ⇒ anyone above the floor)', () => {
+  describe.each(['validationNamedUsers', 'validationNamedUsersAudio'])('%s (allowlist; empty ⇒ anyone above the floor)', (key) => {
     it('empty → [a] tightens (only a may validate); [a, b] → [a] tightens (fewer validators)', () => {
-      expect(policyWriteDirection('validationNamedUsers', undefined, ['a']).direction).toBe('tighten')
-      expect(policyWriteDirection('validationNamedUsers', [], ['a']).direction).toBe('tighten')
-      expect(policyWriteDirection('validationNamedUsers', ['a', 'b'], ['a']).direction).toBe('tighten')
+      expect(policyWriteDirection(key, undefined, ['a']).direction).toBe('tighten')
+      expect(policyWriteDirection(key, [], ['a']).direction).toBe('tighten')
+      expect(policyWriteDirection(key, ['a', 'b'], ['a']).direction).toBe('tighten')
     })
     it('[a] → [a, b] loosens (b may now validate); [a] → [] and [a] → null loosen (anyone)', () => {
-      expect(policyWriteDirection('validationNamedUsers', ['a'], ['a', 'b']).direction).toBe('loosen')
-      expect(policyWriteDirection('validationNamedUsers', ['a'], []).direction).toBe('loosen')
-      expect(policyWriteDirection('validationNamedUsers', ['a'], null).direction).toBe('loosen')
+      expect(policyWriteDirection(key, ['a'], ['a', 'b']).direction).toBe('loosen')
+      expect(policyWriteDirection(key, ['a'], []).direction).toBe('loosen')
+      expect(policyWriteDirection(key, ['a'], null).direction).toBe('loosen')
     })
     it('[a] → [b] swaps a validator out — that admits someone new, so it loosens', () => {
-      expect(policyWriteDirection('validationNamedUsers', ['a'], ['b']).direction).toBe('loosen')
+      expect(policyWriteDirection(key, ['a'], ['b']).direction).toBe('loosen')
     })
     it('same set in a different order is a no-op; a non-string[] is invalid', () => {
-      expect(policyWriteDirection('validationNamedUsers', ['a', 'b'], ['b', 'a']).direction).toBe('tighten')
-      expect(policyWriteDirection('validationNamedUsers', ['a'], 'a').direction).toBe('invalid')
-      expect(policyWriteDirection('validationNamedUsers', ['a'], ['a', 1]).direction).toBe('invalid')
+      expect(policyWriteDirection(key, ['a', 'b'], ['b', 'a']).direction).toBe('tighten')
+      expect(policyWriteDirection(key, ['a'], 'a').direction).toBe('invalid')
+      expect(policyWriteDirection(key, ['a'], ['a', 1]).direction).toBe('invalid')
     })
   })
 })
@@ -179,6 +181,30 @@ describe('loosensPolicy — batch filter', () => {
     ])
     expect(verdicts[0]).toMatchObject({ current: 3, proposed: 1 })
     expect(verdicts[0].reason).toBeTruthy()
+  })
+
+  // AQU-1571: the two allowlists share one rule, so its verdict must name the
+  // key that was written — an agent told "validationNamedUsers" after writing
+  // the audio list would correct the wrong key.
+  it('refuses loosening the audio validation keys, naming each audio key', () => {
+    const verdicts = loosensPolicy(
+      [
+        { key: 'validationNamedUsersAudio', value: [] },
+        { key: 'validationRoleFloorAudio', value: 'reviewer' },
+        { key: 'allowSelfValidationAudio', value: true },
+      ],
+      {
+        validationNamedUsersAudio: ['a'],
+        validationRoleFloorAudio: 'maintainer',
+        allowSelfValidationAudio: false,
+      },
+    )
+    expect(verdicts.map((v) => [v.key, v.direction])).toEqual([
+      ['validationNamedUsersAudio', 'loosen'],
+      ['validationRoleFloorAudio', 'loosen'],
+      ['allowSelfValidationAudio', 'loosen'],
+    ])
+    expect(verdicts[0].reason).toMatch(/^validationNamedUsersAudio:/)
   })
 
   it('a fresh project (no settings) accepts contributeToGlobalTm:false + agentAuthorship:"none"', () => {

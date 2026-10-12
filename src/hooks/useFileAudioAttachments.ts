@@ -251,9 +251,22 @@ const EMPTY: Map<string, CellAudioEntry> = new Map()
 // settled fetch is a real read.
 const attachmentsCoalescer = createRequestCoalescer<FileAudioAttachmentsResponse | null>({ joinWindowMs: 250 })
 
+/**
+ * `lane` (AQU-1591) is the target-language lane whose takes to read: its own
+ * dubs plus the shared programme audio, which belongs to every lane the way
+ * source text does. Omitting it reads every lane's takes — the pre-lane wire —
+ * and `''` is the default lane, a real lane and a different request.
+ *
+ * It is part of the read key AND of the coalescer key. Those are the two places
+ * a lane can be dropped silently: a stale `settledKey` would report another
+ * lane's answer as loaded, and a coalescer keyed on project/file alone would
+ * hand the second lane to open a file the FIRST lane's takes, within the join
+ * window, with no request of its own to show for it.
+ */
 export function useFileAudioAttachments(
   projectId: string | null,
   fileId: string | null,
+  lane?: string,
 ): UseFileAudioAttachmentsResult {
   const { session, loading: sessionLoading } = useFrontierSession()
   const sessionRef = useRef(session)
@@ -276,7 +289,8 @@ export function useFileAudioAttachments(
   // The project/file whose read last came back. Keyed rather than a boolean so
   // a file switch reads as "not loaded" at once, with no reset to forget.
   const [settledKey, setSettledKey] = useState<string | null>(null)
-  const readKey = projectId && fileId ? `${projectId}/${fileId}` : null
+  const laneKey = lane ?? "\u0000all"
+  const readKey = projectId && fileId ? `${projectId}/${fileId}/${laneKey}` : null
   const hasLoaded = readKey === null || (!jwt && !sessionLoading) || settledKey === readKey
   const generationRef = useRef(0)
   // One-shot sweep so a settled overlay still prunes when nothing else pokes.
@@ -311,9 +325,9 @@ export function useFileAudioAttachments(
       // instances via the module-level coalescer, so the three mounts
       // ProjectWorkspace keeps for one file cost one request each time.
       const [res, outboxRecords] = await Promise.all([
-        attachmentsCoalescer.run(`${projectId}/${fileId}`, async () => {
+        attachmentsCoalescer.run(`${projectId}/${fileId}/${laneKey}`, async () => {
           const token = await getToken(projectId, fileId)
-          return token ? fetchFileAudioAttachments(projectId, fileId, token) : null
+          return token ? fetchFileAudioAttachments(projectId, fileId, token, lane) : null
         }),
         getOutboxRecords(queuedIds),
       ])
@@ -371,10 +385,10 @@ export function useFileAudioAttachments(
     } finally {
       if (gen === generationRef.current) {
         setIsLoading(false)
-        setSettledKey(`${projectId}/${fileId}`)
+        setSettledKey(`${projectId}/${fileId}/${laneKey}`)
       }
     }
-  }, [projectId, fileId, getToken, jwt])
+  }, [projectId, fileId, lane, laneKey, getToken, jwt])
 
   useEffect(() => {
     doFetchRef.current = doFetch

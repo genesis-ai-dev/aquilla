@@ -10,6 +10,7 @@
 // emit-events-engine.ts.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
+import { laneIdRequiredMessage } from './external-lane'
 
 /**
  * Event kinds an EmitEvents changeset may stage (registry §2 v1). Everything
@@ -226,6 +227,14 @@ const LANE_KINDS = new Set([
   'assignment.reassign',
 ])
 
+/** These address one target lane. Omitting laneId is not the former default lane. */
+const LANE_REQUIRED_KINDS = new Set([
+  'cell.validate',
+  'cell.unvalidate',
+  'cell.backtranslation.set',
+  'target.cell.repin',
+])
+
 /** Payload fields the server resolves from the live projection at prepare. A
  *  caller-supplied value would either be silently ignored or fork the plan
  *  from what commit re-checks — reject with a teaching message instead. */
@@ -288,6 +297,10 @@ export function validateEmitEventsCommand(
       issues.push({ index, message: `${where}.laneId is not applicable to ${kind}` })
       return null
     }
+    if (LANE_REQUIRED_KINDS.has(kind) && rawEvent.laneId === undefined) {
+      issues.push({ index, message: laneIdRequiredMessage(`${where}.laneId`) })
+      return null
+    }
     if (CELL_KINDS.has(kind) && (!isNonEmptyString(rawEvent.fileId) || !isNonEmptyString(rawEvent.cellId))) {
       issues.push({ index, message: `${where}: ${kind} requires fileId and cellId` })
       return null
@@ -346,6 +359,8 @@ export function validateEmitEventsCommand(
 interface TermRendering {
   rendering: string
   status: 'preferred' | 'admitted' | 'forbidden'
+  /** `lanes.id`. Empty is omitted; a non-string is rejected. */
+  laneId?: string
 }
 
 const RENDERING_STATUSES: ReadonlySet<string> = new Set(['preferred', 'admitted', 'forbidden'])
@@ -466,7 +481,16 @@ function validateRenderings(
       bad(`renderings[${i}].status must be 'preferred', 'admitted' or 'forbidden'`)
       return null
     }
-    out.push({ rendering: raw.rendering, status: raw.status as TermRendering['status'] })
+    const laneId = raw.laneId
+    if (laneId !== undefined && laneId !== '') {
+      if (typeof laneId !== 'string') {
+        bad(`renderings[${i}].laneId must be a string`)
+        return null
+      }
+      out.push({ rendering: raw.rendering, status: raw.status as TermRendering['status'], laneId })
+    } else {
+      out.push({ rendering: raw.rendering, status: raw.status as TermRendering['status'] })
+    }
   }
   return out
 }
@@ -555,9 +579,11 @@ function validatePayload(
       if (p.assignmentId !== undefined && !isNonEmptyString(p.assignmentId)) {
         return bad('assignmentId must be a non-empty string when present')
       }
-      if (p.scopeKind !== 'books' && p.scopeKind !== 'chapters') return bad("scopeKind must be 'books' or 'chapters'")
+      if (p.scopeKind !== 'books' && p.scopeKind !== 'chapters' && p.scopeKind !== 'cells') {
+        return bad("scopeKind must be 'books', 'chapters' or 'cells'")
+      }
       if (!Array.isArray(p.scope) || p.scope.length === 0) return bad('scope must be a non-empty array')
-      const scope: { fileId: string; chapter?: string }[] = []
+      const scope: { fileId: string; chapter?: string; cellIds?: string[] }[] = []
       for (const [entryIndex, rawEntry] of p.scope.entries()) {
         if (!isPlainObject(rawEntry) || !isNonEmptyString(rawEntry.fileId)) {
           return bad(`scope[${entryIndex}].fileId must be a non-empty string`)
@@ -565,9 +591,29 @@ function validatePayload(
         if (rawEntry.chapter !== undefined && !isNonEmptyString(rawEntry.chapter)) {
           return bad(`scope[${entryIndex}].chapter must be a non-empty string when present`)
         }
+        // AQU-1628: 'cells' means exactly these source lines. An empty or
+        // absent list is rejected rather than widened to the whole file —
+        // silently assigning everything is the bug this scope exists to fix.
+        let cellIds: string[] | undefined
+        if (rawEntry.cellIds !== undefined) {
+          if (!Array.isArray(rawEntry.cellIds) || rawEntry.cellIds.length === 0) {
+            return bad(`scope[${entryIndex}].cellIds must be a non-empty array of cell ids when present`)
+          }
+          if (!rawEntry.cellIds.every((id) => isNonEmptyString(id))) {
+            return bad(`scope[${entryIndex}].cellIds must contain only non-empty strings`)
+          }
+          cellIds = rawEntry.cellIds as string[]
+        }
+        if (p.scopeKind === 'cells' && cellIds === undefined) {
+          return bad(`scope[${entryIndex}].cellIds is required for scopeKind 'cells'`)
+        }
+        if (p.scopeKind !== 'cells' && cellIds !== undefined) {
+          return bad(`scope[${entryIndex}].cellIds is only valid for scopeKind 'cells'`)
+        }
         scope.push({
           fileId: rawEntry.fileId,
           ...(rawEntry.chapter !== undefined ? { chapter: rawEntry.chapter as string } : {}),
+          ...(cellIds !== undefined ? { cellIds } : {}),
         })
       }
       if (!isNonEmptyString(p.scopeLabel)) return bad('scopeLabel must be a non-empty string')

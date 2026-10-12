@@ -590,14 +590,17 @@ describe('mirrorSync fold head fenced on upstream pending allocation', () => {
 
       const result = await mirrorSync(t.db, LS_DOWNSTREAM)
       expect(result.ranSync).toBe(true)
-      // Both already-committed cells get folded/mirrored this run (loadDelta
-      // has no upper bound — everything above the OLD cursor is delivered).
       // The bug is what the STORED CURSOR becomes: unclamped, it would jump
       // to the raw head (4), and the next delta query (`server_seq > cursor`)
       // would then permanently skip the straggler's seqs 2..3 once it
       // finally commits. The clamp must stop the cursor at the pending floor
       // (first_seq - 1 = 1) instead.
-      expect(result.cellsMirrored).toBe(2)
+      //
+      // AQU-1563: and the fold stops there too. Every window is bounded above
+      // by the clamped head, so cell-2 (seq 4, above the floor) waits for the
+      // straggler instead of being read early — an unbounded read past the
+      // floor is the same whole-history read that ran the DO out of memory.
+      expect(result.cellsMirrored).toBe(1)
       expect(await getCursor(t)).toBe(1)
 
       // A second run while the straggler is still pending is a no-op — the
@@ -614,11 +617,10 @@ describe('mirrorSync fold head fenced on upstream pending allocation', () => {
       await emitUpstreamCellAtSeq(t, 'cell-4', 3)
 
       // No allocation pending any more — the fold can safely reach the real
-      // head (4): cell-3 and cell-4 are newly mirrored (cell-2's content is
-      // unchanged from the first run, so it hash-suppresses).
+      // head (4): cell-3, cell-4 and the held-back cell-2 are all mirrored.
       const result3 = await mirrorSync(t.db, LS_DOWNSTREAM)
       expect(result3.ranSync).toBe(true)
-      expect(result3.cellsMirrored).toBe(2)
+      expect(result3.cellsMirrored).toBe(3)
       expect(await getCursor(t)).toBe(4)
     } finally {
       await t.close()

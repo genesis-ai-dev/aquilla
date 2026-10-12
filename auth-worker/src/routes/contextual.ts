@@ -33,6 +33,7 @@ import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
+import { listRunTraces, makeTraceRecorder, TRACE_LIST_LIMIT } from "../lib/contextual/traces"
 import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled, backgroundUsageAllowed, paidCallAdmit, type PaidCallAdmit } from "../lib/billing/agent-usage"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
@@ -90,7 +91,9 @@ import {
   type AppendContextualRunEventInput,
 } from "../../../db/shared/contextual-runs"
 import { getSceneBrief, listSceneBriefsByRun } from "../../../db/shared/scene-briefs"
-import { isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
+import { isRegisteredLaneId, isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
+import { resolveLane, type LaneRef } from "../../../db/shared/lane-ref"
+import { callerMayReadLane } from "../../../db/shared/lane-visibility"
 import { computeContextReadiness, computeStartBlockers, type ContextReadiness } from "../lib/contextual/readiness"
 import {
   runOneTick,
@@ -372,6 +375,8 @@ async function selfTickLoop(
   // per wave. Buffered so the ledger write never lands inside the model hot
   // path and skews the latency it is recording.
   const meter = makeCostMeter(env, db)
+  // Prompt/reply per call for the Team step inspector; flushed with the meter.
+  const traces = makeTraceRecorder(env, db, { runId, projectId })
   try {
     const settings = await getPlatformSettingsCached(env)
     // AQU-837 weekly allowance: every graph call reserves before the provider
@@ -403,6 +408,7 @@ async function selfTickLoop(
           ok: u.ok,
           ...(u.tokensPerSecond !== undefined ? { tokensPerSecond: u.tokensPerSecond } : {}),
         }),
+      onTrace: (t) => traces.add(t),
     })
     for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
       const weight = Math.max(1, Math.min(
@@ -442,7 +448,7 @@ async function selfTickLoop(
         }
       }
       const result = await tick()
-      await meter.flush()
+      await Promise.all([meter.flush(), traces.flush()])
       if (!result.continueRun) return
       // The lease was released in tick()'s finally. Waiters poll at the
       // shorter retry interval, so a different file/isolate gets a chance to
@@ -660,7 +666,8 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
   const created = await createRun(env.AQUILLA_PG, {
     projectId: input.projectId,
     fileId: input.fileId,
-    targetLang: input.targetLang,
+    // AQU-1610: the lane id when the edit resolved to one, the tag otherwise.
+    ...(input.laneId ? { laneId: input.laneId } : { targetLang: input.targetLang }),
     initiatedBy: REACTION_INITIATOR,
     ...(input.anchorCellId ? { anchorCellId: input.anchorCellId } : {}),
   })
@@ -736,6 +743,7 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
     return startReactionRun(env, {
       projectId: input.projectId,
       fileId: input.fileId,
+      laneId: input.laneId,
       targetLang: input.targetLang,
       anchorCellId: input.anchorCellId,
       direction: input.direction,
@@ -793,6 +801,10 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
 const startSchema = z.object({
   // Optional only for a project-wide start, which derives its own file list.
   fileId: z.string().min(1).optional(),
+  /** AQU-1610: the lane's id — the identity a run is keyed on. */
+  laneId: z.string().max(64).optional(),
+  /** Legacy tag. Still accepted: the SPA deploys separately from the Worker
+   *  and switches to ids in AQU-1613. */
   targetLang: z.string().max(64).optional(),
   /** Cell the user was looking at — the first wave starts there. */
   anchorCellId: z.string().max(256).optional(),
@@ -831,8 +843,15 @@ contextual.post(
 
     const user = c.get("user")
     const body = c.req.valid("json")
-    const lane = (body.targetLang ?? "").trim()
-    if (!(await isRegisteredTargetLane(c.env.AQUILLA_PG, projectId, lane))) {
+    // AQU-1610: a lane id names exactly one lane and is checked against its
+    // own row; a tag is still accepted and checked the old way.
+    const laneIdParam = (body.laneId ?? "").trim()
+    const laneTag = (body.targetLang ?? "").trim()
+    const lane: LaneRef = laneIdParam ? { laneId: laneIdParam } : { targetLang: laneTag }
+    const registered = laneIdParam
+      ? await isRegisteredLaneId(c.env.AQUILLA_PG, projectId, laneIdParam)
+      : await isRegisteredTargetLane(c.env.AQUILLA_PG, projectId, laneTag)
+    if (!registered) {
       const { body: err, status } = errorJson(
         "validation_failed",
         "That target-language lane is not registered on this project.",
@@ -840,6 +859,8 @@ contextual.post(
       )
       return c.json(err, status)
     }
+    const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+    if (laneDenied) return laneDenied
 
     // Minimum steering context (AQU-827). Checked before the budget/credit
     // guards because it is a precondition, not a spend decision: a project
@@ -958,7 +979,7 @@ contextual.post(
             made = await createRun(c.env.AQUILLA_PG, {
               projectId,
               fileId: file.fileId,
-              targetLang: lane,
+              ...lane,
               initiatedBy: user.username,
               roleSnapshot,
               scopeGroup,
@@ -1019,7 +1040,7 @@ contextual.post(
     const created = await createRun(c.env.AQUILLA_PG, {
       projectId,
       fileId: body.fileId,
-      targetLang: lane,
+      ...lane,
       initiatedBy: user.username,
       roleSnapshot,
       ...(body.anchorCellId ? { anchorCellId: body.anchorCellId } : {}),
@@ -1054,6 +1075,60 @@ contextual.post(
  * last body per URL and replays it. `no-store` keeps the browser's own HTTP
  * cache out of the loop so the conditional round-trip is explicit.
  */
+/** 400 when a lane id is not a target lane; 403 when the read wall hides it. */
+async function laneAccessResponse(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  roleLevel: number,
+  lane: LaneRef,
+): Promise<Response | null> {
+  if (lane.laneId) {
+    const resolved = await resolveLane(c.env.AQUILLA_PG, projectId, lane)
+    if (!resolved.laneId) {
+      const { body, status } = errorJson(
+        "validation_failed",
+        "That lane is not a target lane on this project.",
+        400,
+      )
+      return c.json(body, status)
+    }
+  }
+  const user = c.get("user")
+  const allowed = await callerMayReadLane(
+    c.env.AQUILLA_PG,
+    c.env.LANE_READ_WALL,
+    projectId,
+    user.id,
+    roleLevel,
+    lane,
+  )
+  if (!allowed) {
+    const { body, status } = errorJson(
+      "permission_denied",
+      "you do not have access to that lane",
+      403,
+    )
+    return c.json(body, status)
+  }
+  return null
+}
+
+/**
+ * The lane a request is about (AQU-1610). `?laneId=` is the lane's identity
+ * and wins; `?targetLang=` is the legacy tag older clients still send, and
+ * goes away with AQU-1613. Absent means the project's former default lane
+ * (tag `''`), which is what every single-lane caller has always meant.
+ */
+function laneFromQuery(c: Context<AuthHonoEnv>): LaneRef {
+  const laneId = (c.req.query("laneId") ?? "").trim()
+  return laneId ? { laneId } : { targetLang: c.req.query("targetLang") ?? "" }
+}
+
+/** Cache-key spelling of a {@link LaneRef}: the two forms must not collide. */
+function laneCacheKey(lane: LaneRef): string {
+  return lane.laneId ? `id:${lane.laneId}` : `tag:${lane.targetLang ?? ""}`
+}
+
 async function cachedPollJson(
   c: Context<AuthHonoEnv>,
   projectId: string,
@@ -1067,13 +1142,26 @@ async function cachedPollJson(
   return c.body(cached.body, 200, { "Content-Type": "application/json" })
 }
 
-/** Readiness cell counts: a full-project `cells` self-join. Off the poll hot
- *  path — cached per project for CONTEXTUAL_READINESS_TTL_MS. */
+/**
+ * Readiness cell counts for ONE lane: a full-project `cells` self-join. Off
+ * the poll hot path — cached per (project, lane) for
+ * CONTEXTUAL_READINESS_TTL_MS.
+ *
+ * AQU-1610: the target side joins on `lane_id`, not on `target_lang = ''`, and
+ * the cache key carries the lane. Keyed on the tag, every lane was handed the
+ * former default lane's numbers: a second language with nothing translated
+ * read as "plenty of validated examples, little work left", which is exactly
+ * the wrong advice at the moment someone starts drafting it. The source side
+ * drops its `target_lang = ''` too — a source row is `side = 'source'`,
+ * whatever its lane.
+ */
 async function readinessCellCounts(
   db: AquillaDb,
   projectId: string,
+  lane: LaneRef,
 ): Promise<{ validated: number; untranslated: number }> {
-  return getCachedContextualReadiness(projectId, async () => {
+  const { laneId } = await resolveLane(db, projectId, lane)
+  return getCachedContextualReadiness(`${projectId}\u0000${laneId ?? ""}`, async () => {
     const counts = await db
       .prepare(
         `SELECT COUNT(*) FILTER (WHERE t.validated = 1 AND COALESCE(t.value,'') <> '') AS validated,
@@ -1081,13 +1169,13 @@ async function readinessCellCounts(
            FROM cells s
            LEFT JOIN cells t
              ON t.project_id = s.project_id AND t.file_id = s.file_id
-            AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ''
-          WHERE s.project_id = ? AND s.side = 'source' AND s.target_lang = ''
+            AND t.cell_id = s.cell_id AND t.side = 'target' AND t.lane_id = ?
+          WHERE s.project_id = ? AND s.side = 'source'
             -- AQU-1424: a parked cell is not untranslated work waiting for
             -- autopilot, so it leaves both of these counts.
             AND ${visibleSourceSql('s')}`,
       )
-      .bind(projectId)
+      .bind(laneId, projectId)
       .first<{ validated: number; untranslated: number }>()
     return {
       validated: Number(counts?.validated ?? 0),
@@ -1102,7 +1190,12 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
   if (!gate.ok) return gate.res
-  return cachedPollJson(c, projectId, "overview", async () => {
+  // The rollup itself spans every lane; readiness advises about ONE, so it
+  // reads the lane the caller asked about (AQU-1610).
+  const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
+  return cachedPollJson(c, projectId, `overview?lane=${laneCacheKey(lane)}`, async () => {
     const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
 
     // What autopilot actually KNOWS about this project. A run with no brief, no
@@ -1112,8 +1205,8 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
     // is the only way a PM finds out before spending the run.
     let readiness: ContextReadiness | null = null
     try {
-      const context = await loadProjectContext(c.env.AQUILLA_PG, projectId)
-      const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId)
+      const context = await loadProjectContext(c.env.AQUILLA_PG, projectId, lane)
+      const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId, lane)
       readiness = computeContextReadiness({
         context,
         validatedExamples: counts.validated,
@@ -1137,6 +1230,7 @@ function runSnapshot(
     runId: run.id,
     fileId: run.fileId,
     status: run.status,
+    laneId: run.laneId,
     targetLang: run.targetLang,
     initiatedBy: run.initiatedBy,
     scopeGroup: run.scopeGroup,
@@ -1218,18 +1312,20 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
       nextCursor: page.nextCursor,
     })
   }
-  const targetLang = c.req.query("targetLang") ?? ""
-  return cachedPollJson(c, projectId, `runs?fileId=${fileId}&targetLang=${targetLang}`, async () => {
-    const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, targetLang)
+  const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
+  return cachedPollJson(c, projectId, `runs?fileId=${fileId}&lane=${laneCacheKey(lane)}`, async () => {
+    const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, lane)
     const latest = active
       ? null
-      : (await listRuns(c.env.AQUILLA_PG, projectId, { fileId, targetLang, limit: 1 })).runs[0] ?? null
+      : (await listRuns(c.env.AQUILLA_PG, projectId, { fileId, ...lane, limit: 1 })).runs[0] ?? null
     const run = active ?? latest
     const steering = run
       ? await readUnconsumedSteering(c.env.AQUILLA_PG, { projectId, fileId, runId: run.id })
       : []
     const [draftCounts, runDraftCounts] = await Promise.all([
-      countDrafts(c.env.AQUILLA_PG, projectId, fileId, targetLang),
+      countDrafts(c.env.AQUILLA_PG, projectId, fileId, lane),
       run
         ? countDraftsByRun(c.env.AQUILLA_PG, projectId, run.id)
         : Promise.resolve({ proposed: 0, applied: 0, rejected: 0, superseded: 0 }),
@@ -1245,6 +1341,35 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
       draftCounts,
     }
   })
+})
+
+// GET /:projectId/contextual/runs/:runId/traces?spanId= — prompt and reply of
+// each model call (VIEWER), oldest first, for the Team step inspector. Rows
+// expire after 30 days, so an older run answers with an empty list.
+contextual.get("/:projectId/contextual/runs/:runId/traces", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const runId = c.req.param("runId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+
+  const run = await getRun(c.env.AQUILLA_PG, runId)
+  if (!run || run.projectId !== projectId) {
+    const { body, status } = errorJson("not_found", `run ${runId} not found`, 404)
+    return c.json(body, status)
+  }
+  const spanId = c.req.query("spanId") || undefined
+  const limitRaw = c.req.query("limit")
+  const limit = limitRaw === undefined ? TRACE_LIST_LIMIT : Number(limitRaw)
+  if (!Number.isInteger(limit) || limit < 1 || limit > TRACE_LIST_LIMIT) {
+    const { body, status } = errorJson(
+      "validation_failed",
+      `limit must be an integer from 1 to ${TRACE_LIST_LIMIT}`,
+      400,
+    )
+    return c.json(body, status)
+  }
+  const result = await listRunTraces(c.env.AQUILLA_PG, { projectId, runId, limit, ...(spanId ? { spanId } : {}) })
+  return c.json(result)
 })
 
 // GET /:projectId/contextual/runs/:runId/activity — durable inspector bundle
@@ -1516,7 +1641,7 @@ contextual.post(
         !brief ||
         brief.projectId !== projectId ||
         brief.fileId !== target.fileId ||
-        brief.targetLang !== target.targetLang
+        brief.laneId !== target.laneId
       ) {
         const { body: err, status } = errorJson(
           "validation_failed",
@@ -1608,7 +1733,8 @@ contextual.post("/:projectId/contextual/react-check", authMiddleware, async (c) 
   return c.json({ reactions: result.reactions, questions: result.questions, skipped: result.skipped })
 })
 
-// GET /:projectId/contextual/drafts?fileId=&status=&targetLang= — staged drafts (VIEWER).
+// GET /:projectId/contextual/drafts?fileId=&status=&laneId= — staged drafts
+// (VIEWER). `?targetLang=` is still accepted as the legacy tag (AQU-1610).
 contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
@@ -1623,12 +1749,15 @@ contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {
     const { body, status } = errorJson("validation_failed", `unknown status "${statusParam}"`, 400)
     return c.json(body, status)
   }
+  const lane = laneFromQuery(c)
+  const laneDenied = await laneAccessResponse(c, projectId, gate.level, lane)
+  if (laneDenied) return laneDenied
   const drafts = await listDrafts(
     c.env.AQUILLA_PG,
     projectId,
     fileId,
     statusParam as "proposed" | "applied" | "rejected" | "superseded" | undefined,
-    c.req.query("targetLang") ?? "",
+    lane,
   )
   return c.json({ drafts })
 })

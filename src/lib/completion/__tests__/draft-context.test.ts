@@ -77,14 +77,43 @@ describe("gatherPrecedingContext", () => {
     ])
   })
 
-  it("never uses an unapproved target as prompt context", () => {
-    const withDraft = [
-      cell("a", "f1", "draft source", "raw machine output", "unvalidated"),
-      cell("b", "f1", "live source", ""),
+  // John 6:26–27: Jesus's speech opens in v.26 and closes in v.27. Greek has no
+  // quotation marks, so the only record that a quote is open is v.26's draft.
+  // Dropping it (the old approved-only rule) let v.27 leave the quote unclosed.
+  it("includes an unvalidated preceding target, marked as a draft, so open discourse state carries over", () => {
+    const john6 = [
+      cell("v26", "f1", "ἀπεκρίθη αὐτοῖς ὁ Ἰησοῦς καὶ εἶπεν· ἀμὴν ἀμὴν λέγω ὑμῖν…", "Jesus answered them, “Truly, truly, I say to you…", "unvalidated"),
+      cell("v27", "f1", "ἐργάζεσθε μὴ τὴν βρῶσιν τὴν ἀπολλυμένην…", ""),
     ]
-    expect(gatherPrecedingContext(withDraft, "b", 3)).toEqual([])
-    expect(gatherPrecedingContext(withDraft, "b", 3, true)).toEqual([
-      { source: "draft source", target: "" },
+    expect(gatherPrecedingContext(john6, "v27", 3)).toEqual([
+      {
+        source: "ἀπεκρίθη αὐτοῖς ὁ Ἰησοῦς καὶ εἶπεν· ἀμὴν ἀμὴν λέγω ὑμῖν…",
+        target: "Jesus answered them, “Truly, truly, I say to you…",
+        draft: true,
+      },
+    ])
+  })
+
+  it("never presents an unvalidated target as approved — only validated rows lack the draft mark", () => {
+    const mixed = [
+      cell("a", "f1", "s1", "approved", "validated"),
+      cell("b", "f1", "s2", "machine output", "unvalidated"),
+      cell("c", "f1", "s3", ""),
+    ]
+    expect(gatherPrecedingContext(mixed, "c", 5)).toEqual([
+      { source: "s1", target: "approved" },
+      { source: "s2", target: "machine output", draft: true },
+    ])
+  })
+
+  it("skipIds drops cells whose text is about to be superseded, and keeps scanning past them", () => {
+    const run = [
+      cell("a", "f1", "s1", "approved", "validated"),
+      cell("b", "f1", "s2", "text this run is replacing", "validated"),
+      cell("c", "f1", "s3", ""),
+    ]
+    expect(gatherPrecedingContext(run, "c", 5, false, new Set(["b"]))).toEqual([
+      { source: "s1", target: "approved" },
     ])
   })
 

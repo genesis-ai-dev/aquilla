@@ -44,6 +44,10 @@ export const AGENT_REQUIRED_ROLE: Record<string, number> = {
   "file.rename": AGENT_ROLE.CONTRIBUTOR,
   "file.delete": AGENT_ROLE.PROJECT_LEAD,
   "file.restore": AGENT_ROLE.PROJECT_LEAD,
+  // AQU-1569: a reorder relayouts the sidebar for every member, which is why
+  // it carries the project-lead floor the sync-worker enforces rather than
+  // file.rename's contributor one.
+  "file.reorder": AGENT_ROLE.PROJECT_LEAD,
   "comment.create": AGENT_ROLE.COMMENTER,
   "comment.edit": AGENT_ROLE.COMMENTER,
   "comment.delete": AGENT_ROLE.COMMENTER,
@@ -91,6 +95,8 @@ const EVENT_LINES: Record<string, string> = {
   "file.create": "file.create {name, fileType, sourceLanguage?, targetLanguage?} — new file (structural; propose sparingly).",
   "file.rename": "file.rename {name} — rename a file's display label. Needs fileId.",
   "file.delete": "file.delete {} — soft-delete a file (structural).",
+  "file.reorder":
+    "file.reorder {sortIndex} — place a file in its sidebar group; lower sorts first, null clears it back to the automatic order. Needs fileId. Fractional: to drop a file between two neighbours use the midpoint of their sortIndex values; a file with no index sorts after every file that has one.",
   "file.restore": "file.restore {} — restore a soft-deleted file.",
   "comment.create":
     "comment.create {body, scope?, parentCommentId?} — leave a note. Markdown OK. Default scope: the event's fileId/cellId; server fills commentId.",
@@ -100,7 +106,7 @@ const EVENT_LINES: Record<string, string> = {
   "cell.backtranslation.set":
     "cell.backtranslation.set {btText, targetEventId, polished} — record a back-translation pinned to the target head event.",
   "assignment.create":
-    "assignment.create {assignmentId, scopeKind:'books'|'chapters', scope:[{fileId,chapter?}], scopeLabel, assigneeUserId, deadline?, note?} — assign work.",
+    "assignment.create {assignmentId, scopeKind:'books'|'chapters'|'cells', scope:[{fileId,chapter?,cellIds?}], scopeLabel, assigneeUserId, deadline?, note?} — assign work.",
   "assignment.reassign": "assignment.reassign {assignmentId, assigneeUserId} — hand an assignment to someone else.",
   "assignment.unassign": "assignment.unassign {assignmentId} — withdraw an assignment.",
   // project.link-source is auth-worker-internal; never offered to the agent.
@@ -113,7 +119,7 @@ All tables carry project_id; ALWAYS filter with :project.
   · cells.event_id = the current head event of that side's chain; cells.source_event_id = the source head a target commit was based on. Stale target ⇔ source.event_id <> target.source_event_id.
   · Full-text search: WHERE value_tsv @@ to_tsquery('simple', 'word & other'). Never SELECT value_tsv.
   · "Untranslated" ⇔ target side row with value = '' (or no target row).
-- files (id, project_id, name, kind, role, book_code, source_file_id, cell_count, filled_count, approved_count, ai_drafted_count, word_count, last_edit_at, deleted_at) — deleted_at IS NULL = active.
+- files (id, project_id, name, kind, role, book_code, source_file_id, cell_count, filled_count, approved_count, ai_drafted_count, word_count, last_edit_at, deleted_at) — deleted_at IS NULL = active. cell_count is distinct cells. filled_count, approved_count, ai_drafted_count, and word_count sum every target lane, so they are not one lane's progress.
 - events (id, project_id, file_id, cell_id, kind, author, payload TEXT json, client_ts, server_ts ms, parent_id, server_seq) — full append-only history; payload::jsonb to query inside. Timestamps are epoch ms — render them for humans (to_timestamp(server_ts/1000)::date or similar), never raw.
 - cell_validators (project_id, file_id, cell_id, event_id, username, decided_ts) — one row per validator per cell.
 - cell_waivers (project_id, file_id, cell_id, rule_id, reason, waived_by, waived_ts).
@@ -121,8 +127,10 @@ All tables carry project_id; ALWAYS filter with :project.
 - cell_audio (project_id, file_id, cell_id, audio_id, slot, url, duration_ms, selected 0/1, deleted 0/1).
 - cell_word_morph (project_id, file_id, cell_id, word_seq, surface, lemma, morph_code, strongs_h, strongs_g) — per-word morphology for original-language files.
 - comments (PK (project_id, comment_id) — comment_id is unique per project only; scope_kind 'cell'|'file'|'project', file_id, cell_id, parent_comment_id, body, resolved 0/1, author_id, created_at ms, deleted_at). Always filter by project_id.
-- assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id). cells_total is stamped once at creation and goes stale when a cell is removed — count assignment_cells joined to live source cells for a true total.
-- project_settings (project_id, settings TEXT json) — settings::jsonb ->> 'sourceLanguage' / ->> 'targetLanguage' = the project's language pair; -> 'terminology' the termbase concepts; -> 'validationCountThreshold' the N-of-M bar.
+- assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, deadline, note, created_at ms, unassigned_at, completed_at) + assignment_cells (assignment_id, file_id, cell_id). cells_total is stamped once at creation and goes stale when a cell is removed. assignment_cells is likewise the snapshot the scope resolved to at creation: for a book or chapter assignment it misses lines added to the file since, so joining it to live source cells gives a floor, not the true extent — say so if you report it.
+- lanes (project_id, id, role 'source'|'target', language, name, lang_code, legacy_tag, position) — language is what you translate from (role source) or into (role target). legacy_tag is the event key, never a language; an 8-hex legacy_tag is the lane id. The former default lane is legacy_tag ''.
+- project_settings (project_id, settings TEXT json, validation_count TEXT, validation_count_audio TEXT) — validation_count / validation_count_audio = the 'validationCount' / 'validationCountAudio' settings, the N-of-M bar for text / recorded takes (unset = 1, cap 15; docs('validation') has the clamped read). Do not read sourceLanguage or targetLanguage out of settings to decide what language a draft is in; that answer is the lane row.
+- concepts (concept_id, project_id, source_term, renderings jsonb [{rendering, status 'preferred'|'admitted'|'forbidden', laneId?}], notes, status 'active'|'draft'|'deprecated', case_sensitive 0/1, match_options jsonb, created_at ms, deleted_at) — the termbase, one row per concept; deleted_at IS NULL = live; only 'active' concepts bind. laneId is lanes.id; a rendering without it belongs to the target lane whose legacy_tag is ''. Written only by term.* events.
 - users (id, username, display_name, email), project_members (project_id, user_id, role_level).
 - information_schema is queryable WITHOUT :project — your escape hatch when a column/table is not documented here.`
 
@@ -205,8 +213,9 @@ export interface AgentPromptContext {
    *  "the next three", "segment 8" without the model having to guess. */
   fileName?: string
   fileKind?: string
-  /** Project language pair from project_settings (route looks them up) —
-   *  without it the model asks the user "what language?" mid-run. */
+  /** Languages of the source lane and the focused target lane. The route
+   *  resolves them through laneLanguage. Without them the model asks the user
+   *  "what language?" mid-run. */
   sourceLanguage?: string
   targetLanguage?: string
   /** project_settings.bibleResourcesEnabled — when on, the execute.aquifer

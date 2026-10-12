@@ -15,8 +15,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { createMenuHandle } from "@/components/ui/menu-parts"
-import { FileActionMenu } from "./FileActionMenu"
+import { FileActionMenu, type FileReorderActions } from "./FileActionMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -59,6 +60,9 @@ interface FileRowProps {
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
   onDelete?: () => void
   onApplySuggestion?: () => void
+  /** AQU-1569: Move up / Move down for this row. Omit below Project Lead —
+   *  the drag handle is withheld from those roles too. */
+  reorder?: FileReorderActions
 }
 
 export function FileRow(props: FileRowProps) {
@@ -66,7 +70,7 @@ export function FileRow(props: FileRowProps) {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
     onMove, onExport, onDownloadOriginal, onAssignWork, onSegmentation, onDelete,
-    onApplySuggestion, unassigned = false,
+    onApplySuggestion, unassigned = false, reorder,
   } = props
   const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -80,10 +84,9 @@ export function FileRow(props: FileRowProps) {
     }
   }, [editing, file.name])
 
-  const translatedPct = progress && progress.total > 0
-    ? Math.round((progress.translated / progress.total) * 100) : 0
-  const validatedPct = progress && progress.total > 0
-    ? Math.round((progress.validated / progress.total) * 100) : 0
+  // AQU-1493: never 100 while a cell is outstanding.
+  const translatedPct = progress ? progressPercent(progress.translated, progress.total) : 0
+  const validatedPct = progress ? progressPercent(progress.validated, progress.total) : 0
   const canExpand = props.expandable ?? fileHasSections(file)
   // Timeline-segment-model: a file is either time-true (timeline spine) or
   // sequence-true (intrinsic order). Sequence is the default, so only the
@@ -112,6 +115,7 @@ export function FileRow(props: FileRowProps) {
       onAssignWork={onAssignWork}
       onSegmentation={onSegmentation}
       onDelete={onDelete}
+      reorder={reorder}
     />
   )
 

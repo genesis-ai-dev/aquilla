@@ -78,6 +78,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
     'file.timing.set': { timingMode: 'audioFirst' },
     'file.corpus.set': { corpusMarker: 'Treasure Hunt Bible' },
+    'file.reorder': { sortIndex: 1024 },
     'file.track.set': { trackId: 'source-subtitles', patch: { name: 'Captions' } },
     'source.cell.mirror': {
       value: 'x',
@@ -98,7 +99,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     kind,
     projectId: 'proj-a',
     fileId: 'file-x',
-    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' || kind === 'file.corpus.set' ? undefined : 'cell-1',
+    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' || kind === 'file.corpus.set' || kind === 'file.reorder' ? undefined : 'cell-1',
     parentId: null,
     author: 'alice',
     payload: payloads[kind],
@@ -143,10 +144,13 @@ describe('dispatchEvent', () => {
     const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 1, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
-    // 1 events INSERT + 1 chain-claim INSERT (AD-2 atomic arbitration)
-    // + 1 cells UPSERT + 1 files-counter recompute = 4
+    // 1 events INSERT
+    // + 1 blank-target bridge (AQU-1615; inserts only when the project has no target lane)
+    // + 1 grant for that bridge (AQU-1781)
+    // + 1 chain-claim INSERT (AD-2 atomic arbitration)
+    // + 1 cells UPSERT + 1 files-counter recompute = 6
     // (Postgres auto-maintains FTS via the value_tsv generated column).
-    expect(outcome.result.stmts.length).toBe(4)
+    expect(outcome.result.stmts.length).toBe(6)
     expect(outcome.result.dirtyTables).toContain('events')
     expect(outcome.result.dirtyTables).toContain('cells')
     expect(outcome.result.dirtyTables).toContain('files')

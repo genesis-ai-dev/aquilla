@@ -28,7 +28,7 @@ import { encodeCursor, parsePageParams } from './pagination'
 import { assertCredentialScope } from './token-bridge'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv, StoredChangeset } from './types'
-import { credentialAllowsOrganization, validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { credentialAllowsOrganization, validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -55,11 +55,6 @@ async function checkChangesetLifecycleRateLimit(
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/changesets(?:\/([^/]+)(?:\/(commit|discard|wait))?)?$/
 
-function bearer(request: Request): string | null {
-  const h = request.headers.get('Authorization') ?? ''
-  return h.startsWith('Bearer ') ? h.slice(7) : null
-}
-
 async function handleGet(
   request: Request,
   env: ExternalEnv,
@@ -68,7 +63,7 @@ async function handleGet(
 ): Promise<Response> {
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
-  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
   const limited = await checkChangesetLifecycleRateLimit(db, cred.credentialId)
   if (limited) return limited
@@ -104,7 +99,7 @@ async function authorizeChangesetRead(
   db: AquillaDb,
   projectId: string,
 ): Promise<{ cred: ApiCredentialContext } | Response> {
-  const cred = await validateApiCredential(db, bearer(request) ?? '')
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) {
     return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
   }
@@ -217,7 +212,7 @@ async function handleDiscard(
 ): Promise<Response> {
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
-  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
+  const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
   const limited = await checkChangesetLifecycleRateLimit(db, cred.credentialId)
   if (limited) return limited

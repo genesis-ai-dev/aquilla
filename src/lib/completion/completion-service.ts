@@ -221,6 +221,92 @@ export function resolveEffectiveCompletionSettings(
 }
 
 /**
+ * Settings for a project that has never customized anything: the Frontier
+ * platform provider with the default system prompt and no custom endpoint.
+ *
+ * This is THE definition — `FALLBACK_COMPLETION_SETTINGS` in
+ * `@/hooks/useCompletion` is an alias of it. Every LLM call site applies the
+ * same precedence: the project's own `completionSettings` else this. A project
+ * record without `completionSettings` has therefore not opted out of AI, it has
+ * simply never been customized (AQU-1671).
+ */
+export const DEFAULT_COMPLETION_SETTINGS: CompletionSettings = {
+  provider: "frontier",
+  endpoint: "",
+  model: "",
+  maxTokens: DEFAULT_COMPLETION_MAX_TOKENS,
+  temperature: 0.3,
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  llmHealthPenalty: 0.1,
+  top_k: DEFAULT_APPROVED_EXAMPLE_COUNT,
+  contextSize: "medium",
+  useOnlyValidatedExamples: true,
+  main_chat_language: "",
+  fewShotExampleFormat: "source-and-target",
+}
+
+/** Why no provider resolved, for a message that names where to fix it. */
+export type CompletionTargetGap = "endpoint" | "apiKey"
+
+export interface CompletionTarget {
+  /** The settings to hand an LLM call. Never undefined — uncustomized
+   *  projects resolve to {@link DEFAULT_COMPLETION_SETTINGS}. */
+  settings: CompletionSettings
+  /** False only when a provider genuinely does not resolve. */
+  configured: boolean
+  /** What the user must still supply when `configured` is false. */
+  gap: CompletionTargetGap | null
+  /** Which settings the resolved provider came from, so a "fix it here"
+   *  message points at the screen that actually owns it: the project's AI
+   *  settings, or the user's device-local personal override. */
+  source: "project" | "personal-override"
+}
+
+/**
+ * Resolve the provider for a call site whose project may never have touched AI
+ * settings, and say whether one genuinely resolves.
+ *
+ * AQU-1671: the brief pane gated generation on `completionSettings` being
+ * *present* and reported "no AI provider configured" whenever it was not. That
+ * reads the wrong config source twice over — the object records whether the
+ * project was customized, not whether a provider is reachable, and it arrives
+ * asynchronously with the project record. So a fresh project on the platform
+ * default failed permanently, and any project failed intermittently when the
+ * user acted before the record hydrated. The platform default always resolves;
+ * the only genuinely unconfigured case is a project that opted into a custom
+ * provider and left it incomplete.
+ *
+ * Unlike {@link isCompletionConfigured} this does not require a session JWT:
+ * the platform provider is configured by the platform, not the user, so a
+ * still-hydrating session must not present as "nothing is configured". A
+ * genuinely absent credential surfaces as a failed request, which is the
+ * honest error.
+ */
+export function resolveCompletionTarget(
+  settings: CompletionSettings | undefined,
+  override?: UserProviderOverride | null,
+): CompletionTarget {
+  const base = settings ?? DEFAULT_COMPLETION_SETTINGS
+  const resolved = resolveEffectiveCompletionSettings(base, override)
+  // The override only wins for a project without its own provider, so
+  // "resolved differs from base" is exactly "the override supplied it".
+  const source = resolved === base ? "project" : "personal-override"
+  const ok = (gap: CompletionTargetGap | null): CompletionTarget => ({
+    settings: resolved,
+    configured: gap === null,
+    gap,
+    source,
+  })
+  if (resolveProvider(resolved) === "frontier") return ok(null)
+  const endpoint = (resolved.endpoint ?? "").trim()
+  if (!endpoint) return ok("endpoint")
+  if (customProviderNeedsKey(endpoint) && !resolveApiKey("completion", resolved.apiKey)) {
+    return ok("apiKey")
+  }
+  return ok(null)
+}
+
+/**
  * Whether the sparkle / draft path may run. A personal override or a saved
  * Custom endpoint is enough — do not also require a model (connecting to
  * OpenRouter lists models; picking one is optional until the request fires)
@@ -406,7 +492,7 @@ export function buildParagraphPrompt(options: {
   // gives real discourse flow — connectives and participant reference that follow what was
   // actually said in the target language. Falls back to source before anything is committed. (D4)
   /** Preceding committed target context (discourse window left side). */
-  precedingContext?: { source: string; target: string }[]
+  precedingContext?: PrecedingContextEntry[]
   /** Following source context (discourse window right side) — source only, no committed target. */
   followingSource?: { source: string }[]
 }): ChatMessage[] {
@@ -485,7 +571,7 @@ export function buildParagraphPrompt(options: {
   if (options.precedingContext?.length) {
     for (const ctx of options.precedingContext) {
       if (ctx.source.trim() && ctx.target.trim()) {
-        user += `Source: ${stripTrailingBareMarkers(ctx.source)}\nTranslation: ${stripTrailingBareMarkers(ctx.target)}\n\n`
+        user += `Source: ${stripTrailingBareMarkers(ctx.source)}\n${precedingContextLabel(ctx)}: ${stripTrailingBareMarkers(ctx.target)}\n\n`
       } else if (ctx.source.trim()) {
         // D4 source-fallback: no committed target yet — surface the preceding
         // source as discourse context WITHOUT a Source/Translation pair the model

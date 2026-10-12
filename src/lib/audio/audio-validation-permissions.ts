@@ -14,12 +14,8 @@ import {
   type AudioAttachmentOut,
   type CellAudioEntry,
 } from "@/lib/sync/cell-audio-read-types"
-
-const ROLE_FLOOR: Record<string, number> = {
-  reviewer: 300,
-  project_lead: 500,
-  maintainer: 600,
-}
+// AQU-1571: one floor table for text and audio, as the server keeps one.
+import { VALIDATION_ROLE_FLOOR } from "@/lib/review/text-validation-policy"
 
 /**
  * The shape every surface actually holds: a row of the editor's `CellData`,
@@ -105,7 +101,7 @@ export function audioValidationScope(
   // exactly as it is for text.
   if (policy.roleLevel !== null) {
     const floorName = project.validationRoleFloorAudio
-    const floor = floorName ? ROLE_FLOOR[floorName] : undefined
+    const floor = floorName ? VALIDATION_ROLE_FLOOR[floorName] : undefined
     if (floor !== undefined && policy.roleLevel < floor) {
       return { canValidate: false, reason: "role" }
     }

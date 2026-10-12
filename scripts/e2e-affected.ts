@@ -1,12 +1,16 @@
-import { execFileSync, spawnSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
+import { spawnSync } from "./lib/spawn-command"
 import { readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { selectAffectedE2E } from "./lib/e2e-impact"
 import { affectedRunMode } from "./lib/e2e-run-mode"
+import { refuseBorrowedNodeModules, refuseMissingPlaywrightChromium } from "./lib/worktree-install-guard"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const ZERO_SHA = /^0+$/
+
+refuseBorrowedNodeModules(REPO_ROOT)
 
 function git(args: string[]): string {
   return execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim()
@@ -74,6 +78,8 @@ if (impact.specs.length === 0) {
   process.exit(0)
 }
 
+refuseMissingPlaywrightChromium()
+
 const runMode = affectedRunMode(impact.specs.length)
 console.log(
   `[e2e-affected] execution mode: ${runMode.shards} isolated ${runMode.viteMode} stack(s)`,
@@ -89,4 +95,7 @@ const result = spawnSync(
     env: { ...process.env, E2E_VITE_MODE: runMode.viteMode },
   },
 )
+if (result.error) {
+  console.error(`[e2e-affected] failed to start the browser suite: ${result.error.message}`)
+}
 process.exit(result.status ?? 1)

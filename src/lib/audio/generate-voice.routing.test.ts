@@ -31,7 +31,14 @@ describe("generateAndAttachCellVoice routing", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       session: { jwt: "j", username: "u" } as any, username: "u",
       geminiContext: { targetLanguage: "es" },
+      surface: "voice-panel",
     })
+    // AQU-1572: one generation is ONE attach carrying the generate origin,
+    // which the emit seam reports as one `audio generated`.
+    expect(emitAttach).toHaveBeenCalledTimes(1)
+    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioOrigin: "generate", ttsProvider: "inworld", surface: "voice-panel",
+    }))
     expect(synthCellTts).toHaveBeenCalledTimes(1)
     expect(synthCellTts).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -54,23 +54,24 @@ export const projectSettings = defineNamespace({
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
     "projectSettings.create.namePlaceholder": "My Translation Project",
-    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
+    "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English…",
     "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
-    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
+    "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
     "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.bulkTargetLanguagesHint":
       "That's all {max} boxes. Add any remaining languages here, separated by commas.",
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
-      "Swahili, Yoruba, Hausa, zh-Hant…",
+      "Swahili, Yoruba, Hausa, Traditional Han…",
     "projectSettings.create.bulkTargetLanguagesCount": plural({
       one: "Adds {count} more lane.",
       other: "Adds {count} more lanes.",
     }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
-      "Any label works — a BCP-47 tag, a language name, or a register description " +
-      "(e.g. \"Grade 7 English\", \"conversational Swahili\").",
+      "Type a language name or a description (e.g. \"Grade 7 English\", " +
+      "\"conversational Swahili\"). The language code is filled in from the name, " +
+      "and you can edit that code if it is wrong.",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
     "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
     "projectSettings.create.shapeSelfContained": plural({
@@ -125,6 +126,54 @@ export const projectSettings = defineNamespace({
       "targets, e.g. French → Chaluba).",
     "projectSettings.create.validationLinkConsumesRequired":
       "Choose which corpus should become this project's source",
+    // ── AQU-1605: which of the upstream's lanes a chain link consumes. Only
+    // asked for "One of its Targets" — the sibling case consumes the upstream's
+    // one source lane, so there is nothing to choose. Offered only for the lanes
+    // the user may see, and pre-filled when that is a single lane.
+    "projectSettings.create.upstreamLaneLabel": "Which of its translations?",
+    "projectSettings.create.upstreamLanePlaceholder": "Choose a translation…",
+    "projectSettings.create.upstreamLaneUnnamed": "Untitled lane",
+    "projectSettings.create.upstreamLaneLoading": "Loading translations…",
+    "projectSettings.create.upstreamLaneNone":
+      "This project has no translation you can use as a source. Choose its source " +
+      "instead, or ask for access to one of its translations.",
+    "projectSettings.create.upstreamLaneLoadError":
+      "Couldn't load this project's translations.",
+    "projectSettings.create.upstreamLaneRetry": "Try again",
+    "projectSettings.create.validationUpstreamLaneRequired":
+      "Choose which of the upstream project's translations to use",
+    // ── AQU-1561: which of the upstream's files the new project brings in.
+    // Same question the Source & sync link flow asks, so the list itself reuses
+    // `projectSettings.linkSource.selectAllFiles` / `fileClashBadge` — only the
+    // sentences around it differ, because a clone's one-time copy and a live
+    // link's ongoing follow are different promises.
+    "projectSettings.create.upstreamFilesLabel": "Files to bring in",
+    "projectSettings.create.upstreamFilesLoading": "Loading that project's files…",
+    "projectSettings.create.upstreamFilesLoadError":
+      "Couldn't load that project's file list, so we can't say which files would " +
+      "be brought in. Nothing has been created.",
+    "projectSettings.create.upstreamFilesRetryButton": "Try again",
+    "projectSettings.create.upstreamFilesNoneSelected":
+      "Pick at least one file to bring in.",
+    "projectSettings.create.upstreamFilesEmptyUpstream":
+      "That project has no files yet, so none will be brought in now.",
+    "projectSettings.create.upstreamFilesCount": plural({
+      one: "{count} file will be brought into the new project.",
+      other: "{count} files will be brought into the new project.",
+    }),
+    // The live case follows the upstream from here on, so whether the link is
+    // whole-project or a fixed list decides what arrives LATER too.
+    "projectSettings.create.upstreamFilesLiveAllNote":
+      "The new project will follow the whole source project, so files it adds " +
+      "later will arrive too.",
+    "projectSettings.create.upstreamFilesLiveSubsetNote":
+      "The new project will follow only the files you picked. Files the source " +
+      "project adds later will not arrive on their own.",
+    // A clone never syncs again, so there is no "later" to describe — only what
+    // the one snapshot copies.
+    "projectSettings.create.upstreamFilesCloneNote":
+      "A copy is taken once, of the files you picked. The new project does not " +
+      "follow the source project afterwards.",
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
     "projectSettings.create.submitCreate": "Create Project",
@@ -136,9 +185,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.extraLanguagesDescription":
       "Optional — add more target languages for this project (e.g. dialect variants " +
       "or parallel drafts of the same source).",
-    "projectSettings.create.extraLanguagesPlaceholder": "e.g. fr-CA",
+    "projectSettings.create.extraLanguagesPlaceholder": "e.g. Traditional Han",
     "projectSettings.create.extraLanguagesRemoveAriaLabel": "Remove {lang}",
-    "projectSettings.create.extraLanguagesEmptyError": "Enter a language tag.",
+    "projectSettings.create.extraLanguagesEmptyError": "Enter a language name.",
     "projectSettings.create.extraLanguagesTooLongError": "Must be {max} characters or fewer.",
     "projectSettings.create.extraLanguagesDuplicatePrimaryError":
       "This is already the primary target language.",
@@ -181,6 +230,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.signInToInvite": "Sign in to create an invite link.",
     "projectSettings.share.createInviteFailed":
       "Couldn't create invite. You may not have permission, or the server is unreachable.",
+    "projectSettings.share.laneChoiceLegend": "Target lanes",
+    "projectSettings.share.laneChoiceAll": "Every current target lane",
+    "projectSettings.share.laneChoiceSome": "Only selected lanes",
+    "projectSettings.share.laneChoiceRequired": "Choose the lanes before adding this person.",
+    "projectSettings.share.laneChoiceLeadNote": "A project lead sees every target lane.",
+    "projectSettings.share.laneChoiceAdminHint":
+      "To limit someone to some lanes, use that project's share panel.",
     "projectSettings.share.inviteLinkReady": "Invite link ready. Send it to the recipient.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
     "projectSettings.share.copied": "Copied!",
@@ -256,6 +312,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.apiKeyNoAuth": "Leave blank for no auth",
     "projectSettings.advancedLlm.modelPlaceholder": "Type a model id",
     "projectSettings.shared.lastEdited": "Last edited by {name} · {date}",
+    "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
     "projectSettings.timeline.lockHint":
@@ -369,6 +426,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.info.lastEditedBy": "Last edited by {username} · {date}",
     "projectSettings.info.sourceLanguageLabel": "Source Language",
     "projectSettings.info.targetLanguageLabel": "Target Language",
+    "projectSettings.info.smartQuotesLabel": "Smart quotes",
+    "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
     // ── Bible resources card ──
     "projectSettings.bible.enableLabel": "Enable Bible resources",
@@ -383,6 +442,15 @@ export const projectSettings = defineNamespace({
       "When on, USFM imports drop the book name, running header, TOC, main title, and " +
       "introduction paragraphs. Section headings and Psalm titles still import. Off " +
       "(the default) imports front matter as translatable cells.",
+    "projectSettings.import.cellUnitLabel": "Import cell unit",
+    "projectSettings.import.cellUnitDescription":
+      "What one cell is when a Word, text, or Markdown file is imported. " +
+      "\u201cSentence\u201d splits long paragraphs into shorter cells \u2014 right for subtitles and " +
+      "documents. \u201cParagraph\u201d keeps each paragraph whole, with no sentence splitting and " +
+      "no length limit \u2014 right for dubbing, where one cell becomes one voice clip. " +
+      "Formats that define their own cells (USFM verses, subtitle cues) are unaffected.",
+    "projectSettings.import.cellUnitOptionSentence": "Sentence (split long paragraphs)",
+    "projectSettings.import.cellUnitOptionParagraph": "Paragraph (one cell per paragraph)",
 
     // ── User card ──
     "projectSettings.user.usernameLabel": "Username",
@@ -464,7 +532,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.apiKeyLabelOptional": "API key (optional)",
     "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Paste your API key",
     "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Leave blank for no auth",
-    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier.",
+    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Frontier.",
     "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Stays on this device — not shared with collaborators.",
     "projectSettings.advancedLlm.modelLabel": "Model",
     "projectSettings.advancedLlm.modelManualLabel": "Model (if not listed)",
@@ -475,7 +543,7 @@ export const projectSettings = defineNamespace({
       "that don't expose {modelsPath}).",
     "projectSettings.advancedLlm.modelOverrideLabel": "Model override (optional)",
     "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Frontier's default",
-    "projectSettings.advancedLlm.modelOverrideHelp": "Optionally specify an OpenRouter model (e.g. {example}).",
+    "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
     "projectSettings.advancedLlm.maxTokensLabel": "Max Tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
     "projectSettings.advancedLlm.healthPenaltyLabel": "LLM Health Penalty ({percent}%)",
@@ -521,8 +589,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.terminology.openButton": "Open Terminology Library",
 
     // ── ValidationSettingsSection.tsx ──
+    // Card headings: the text and audio rules each get their own card.
+    "projectSettings.validation.textGroup": "Text validation",
+    "projectSettings.validation.audioGroup": "Audio validation",
     "projectSettings.validation.requiredTextLabel": "Required validators (text)",
-    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as fully validated.",
+    "projectSettings.validation.requiredTextDescription": "Cells need this many distinct validators to count as validated.",
     "projectSettings.validation.requiredAudioLabel": "Required validators (audio)",
     "projectSettings.validation.requiredAudioAppliesNote": "Applies to audio translations, once recordings exist.",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
@@ -558,13 +629,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
-    "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
-    "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",
+    // AQU-1571: the server refuses the vote up front, for every role, and the
+    // editor greys the check out; "ignored" and "a contributor's" were both wrong.
+    "projectSettings.validation.allowSelfDescription":
+      "When off, nobody can validate a line whose latest change is their own, whatever " +
+      "their role. Someone else has to.",
+    "projectSettings.validation.namedValidatorsLabel": "Named validators",
     "projectSettings.validation.namedValidatorsPlaceholder": "alice, bob, carol",
+    // AQU-1571: people off the list cannot vote at all (the server refuses it),
+    // and the field is a member picker, not a comma-separated box.
     "projectSettings.validation.namedValidatorsDescription":
-      "Comma-separated usernames. When set, only these users' votes count toward the " +
-      "threshold (AND'd with the role floor). Leave empty to allow any " +
-      "sufficiently-privileged user.",
+      "When anyone is listed, only these people can validate text, and they still " +
+      "need the minimum role above. Leave empty to allow anyone who meets the " +
+      "minimum role.",
 
     // ── AQU-490: the audio policy, beside the text policy rather than folded
     // into it. Sam's ruling is that these are SEPARATE settings, so every
@@ -606,9 +683,9 @@ export const projectSettings = defineNamespace({
       "Decide when audio recordings are downloaded from storage to this device. You " +
       "can switch any time without re-recording — only future loads are affected.",
     "projectSettings.audioMedia.strategyStreamName": "Stream",
-    "projectSettings.audioMedia.strategyStreamDescription": "Play directly from the network. No local cache, no waveforms unless you opt in.",
+    "projectSettings.audioMedia.strategyStreamDescription": "Play from the network. No cache on this device, no waveforms unless you opt in.",
     "projectSettings.audioMedia.strategyLazyName": "Lazy (default)",
-    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Caches locally.",
+    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Keeps a copy on this device.",
     "projectSettings.audioMedia.strategyEagerName": "Eager",
     "projectSettings.audioMedia.strategyEagerDescription": "Prefetch every cell's waveform when the file opens. Best for offline review.",
     "projectSettings.audioMedia.strategyManualName": "Manual",
@@ -624,9 +701,123 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.consumesTranslations": "consumes translations",
     "projectSettings.sourceLink.consumesSource": "consumes source",
     "projectSettings.sourceLink.gateLabel": "gate: {value}",
+    // AQU-1605: which of the upstream's translations the link consumes.
+    "projectSettings.sourceLink.laneLabel": "translation: {value}",
     "projectSettings.sourceLink.gateValidatedOnly": "validated only",
     "projectSettings.sourceLink.gateEveryCommit": "every commit",
     "projectSettings.sourceLink.cursorLabel": "cursor: {value}",
+    // AQU-1559: how much of the upstream this link follows. A subset link is
+    // pinned to the files it was made with; a whole-project one keeps picking up
+    // the files the upstream gains.
+    "projectSettings.sourceLink.scopeAllFiles": "All files",
+    "projectSettings.sourceLink.scopeSomeFiles": plural(
+      {
+        one: "{count} of {total} file",
+        other: "{count} of {total} files",
+      },
+      "total",
+    ),
+    // AQU-1560: "Choose files" — add more of the upstream's files to a live
+    // link that follows a fixed list, without detaching and re-linking.
+    // Already-linked files are shown checked and locked (unlinking one is a
+    // later slice). The dialog reuses the link flow's count sentence, scope
+    // notes and same-name warning, so the two read the same.
+    "projectSettings.sourceLink.chooseFilesButton": "Choose files",
+    "projectSettings.sourceLink.chooseFilesTitle": "Choose which files this link follows",
+    "projectSettings.sourceLink.chooseFilesDescription":
+      "Files this link follows are checked. Check more of the source project's " +
+      "files to add them here: each arrives with its complete source, and " +
+      "receives the source project's changes from then on. Uncheck one to stop " +
+      "following it and keep it as this project's own copy.",
+    "projectSettings.sourceLink.chooseFilesLoading": "Loading the source project's files…",
+    "projectSettings.sourceLink.chooseFilesLoadError":
+      "Couldn't load the source project's file list. Nothing has been changed.",
+    "projectSettings.sourceLink.chooseFilesLinkedBadge": "already linked",
+    "projectSettings.sourceLink.chooseFilesAllLinked":
+      "This link follows every file in the source project, and files it adds " +
+      "later arrive here on their own. There is nothing to add — uncheck a file " +
+      "to stop following it.",
+    "projectSettings.sourceLink.chooseFilesNoneChecked":
+      "Check a file above to add it to this link, or uncheck one to stop " +
+      "following it.",
+    "projectSettings.sourceLink.chooseFilesAddButton": "Add files",
+    "projectSettings.sourceLink.chooseFilesAddingButton": "Adding files…",
+    "projectSettings.sourceLink.chooseFilesIncomplete":
+      "The files didn't finish arriving, so they haven't been added to the link " +
+      "yet. Try again to finish bringing them in.",
+    // AQU-1562: unchecking a file the link follows stops this project following
+    // that one file — a per-file detach. The file stays, with everything on it;
+    // only the flow of upstream changes ends. Checking a stopped file again
+    // resumes it in the same file, which is a different promise from adding a
+    // file this project never had, so the two are worded apart. Every one of
+    // these sentences is in the confirm step, before anything changes.
+    "projectSettings.sourceLink.chooseFilesStoppedBadge": "stopped following",
+    "projectSettings.sourceLink.chooseFilesReviewButton": "Review changes",
+    "projectSettings.sourceLink.chooseFilesConfirmTitle": "Confirm these changes to the link",
+    "projectSettings.sourceLink.chooseFilesApplyingButton": "Saving the link…",
+    "projectSettings.sourceLink.chooseFilesStopHeading": plural({
+      one: "Stop following this file:",
+      other: "Stop following these files:",
+    }),
+    "projectSettings.sourceLink.chooseFilesStopBody": plural({
+      one:
+        "It stays in this project with the source text it has now, and its " +
+        "translations, validations and comments are untouched. It will no longer " +
+        "receive the source project's changes.",
+      other:
+        "They stay in this project with the source text they have now, and their " +
+        "translations, validations and comments are untouched. They will no longer " +
+        "receive the source project's changes.",
+    }),
+    "projectSettings.sourceLink.chooseFilesStopOthersNote":
+      "Every other file this link follows keeps syncing as before.",
+    "projectSettings.sourceLink.chooseFilesStopWholeProjectWarning":
+      "This link follows the whole source project. Stopping a file pins it to the " +
+      "remaining files, so files the source project adds later will no longer " +
+      "arrive here on their own.",
+    "projectSettings.sourceLink.chooseFilesKeepOneError":
+      "At least one file must stay linked. To stop following the source project " +
+      "altogether, use \u201cDetach from source\u201d.",
+    "projectSettings.sourceLink.chooseFilesResumeHeading": plural({
+      one: "Follow this file again:",
+      other: "Follow these files again:",
+    }),
+    "projectSettings.sourceLink.chooseFilesResumeBody": plural({
+      one:
+        "Its source text will be replaced with the source project's current text. " +
+        "Its translations, validations and comments stay.",
+      other:
+        "Their source text will be replaced with the source project's current " +
+        "text. Their translations, validations and comments stay.",
+    }),
+    // AQU-1679: an added upstream file can instead follow INTO a file this
+    // project already has — the link flow's replace option, here too.
+    "projectSettings.sourceLink.chooseFilesReplaceHeading": plural({
+      one: "Replace the source in this file you already have:",
+      other: "Replace the source in these files you already have:",
+    }),
+    "projectSettings.sourceLink.chooseFilesReplaceBody": plural({
+      one:
+        "It stays the same file, with its translations, validations and comments " +
+        "on the same lines. Its source text becomes the source project's, and it " +
+        "receives the source project's changes from then on. No second copy is added.",
+      other:
+        "They stay the same files, with their translations, validations and comments " +
+        "on the same lines. Their source text becomes the source project's, and they " +
+        "receive the source project's changes from then on. No second copies are added.",
+    }),
+    "projectSettings.sourceLink.chooseFilesAddHeading": plural({
+      one: "Add this file:",
+      other: "Add these files:",
+    }),
+    "projectSettings.sourceLink.chooseFilesAddBody": plural({
+      one:
+        "It arrives with its complete source text, and receives the source " +
+        "project's changes from then on.",
+      other:
+        "They arrive with their complete source text, and receive the source " +
+        "project's changes from then on.",
+    }),
     // AQU-1544: a live link that has never brought anything through.
     "projectSettings.sourceLink.notSyncedBadge": "Not synced yet",
     "projectSettings.sourceLink.notSyncedNote":
@@ -672,6 +863,14 @@ export const projectSettings = defineNamespace({
       "everything this project already holds, and later upstream edits keep " +
       "flowing through. Existing files, translations and validations are left as " +
       "they are. Detach later to stop following the upstream.",
+    // AQU-1679: the same promise when the lead has chosen to replace the source
+    // of a file they already have — "existing files are left as they are" is
+    // no longer true of those.
+    "projectSettings.linkSource.additiveNoteReplacing":
+      "The link is live: later upstream edits keep flowing through, including " +
+      "into the files whose source you are replacing. Your other files, and every " +
+      "translation and validation, are left as they are. Detach later to stop " +
+      "following the upstream.",
     "projectSettings.linkSource.linkButton": "Link source project",
     "projectSettings.linkSource.linkingButton": "Linking…",
     "projectSettings.linkSource.roleGateNote":
@@ -691,6 +890,64 @@ export const projectSettings = defineNamespace({
       one: "{count} source file will be added to this project.",
       other: "{count} source files will be added to this project.",
     }),
+    // ── AQU-1559: the confirm step's file list. Every file arrives checked,
+    // so the stock outcome is the whole-project link; unchecking any of them
+    // pins the link to the rest.
+    "projectSettings.linkSource.selectAllFiles": "All files",
+    "projectSettings.linkSource.fileClashBadge": "same name here",
+    "projectSettings.linkSource.previewNoneSelected":
+      "Pick at least one file to link.",
+    // ── AQU-1679: a file this project already has can follow the link itself,
+    // instead of gaining a second copy. Offered per same-named file, off by
+    // default, and shown with what it will do before anything is linked.
+    "projectSettings.linkSource.replaceOption":
+      "Replace the source in my existing {name} and keep its translations",
+    "projectSettings.linkSource.replaceComparing": "Comparing the two files…",
+    "projectSettings.linkSource.replaceCompareFailed":
+      "Couldn't compare the two files. Turn this off and on to try again, or " +
+      "leave it off to add the file as a separate copy.",
+    "projectSettings.linkSource.replaceMatchSame": plural({
+      one: "{same} of {count} line is the same in both files.",
+      other: "{same} of {count} lines are the same in both files.",
+    }),
+    "projectSettings.linkSource.replaceMatchChanged": plural({
+      one:
+        "{count} line differs and will take the source project's text. Its " +
+        "translation will be flagged as source changed.",
+      other:
+        "{count} lines differ and will take the source project's text. Their " +
+        "translations will be flagged as source changed.",
+    }),
+    "projectSettings.linkSource.replaceMatchAdded": plural({
+      one: "{count} line only the source project has will be added to your file.",
+      other: "{count} lines only the source project has will be added to your file.",
+    }),
+    "projectSettings.linkSource.replaceMatchKept": plural({
+      one: "{count} line only your file has will stay as it is.",
+      other: "{count} lines only your file has will stay as they are.",
+    }),
+    "projectSettings.linkSource.replaceNoMatch": plural({
+      one:
+        "These two files are not the same material: {same} of {count} line matches. " +
+        "Turn this off to add the file as a separate copy.",
+      other:
+        "These two files are not the same material: only {same} of {count} lines " +
+        "match. Turn this off to add the file as a separate copy.",
+    }),
+    "projectSettings.linkSource.replaceCount": plural({
+      one:
+        "{count} file you already have will take its source from this link and " +
+        "keep its translations.",
+      other:
+        "{count} files you already have will take their source from this link and " +
+        "keep their translations.",
+    }),
+    "projectSettings.linkSource.scopeAllNote":
+      "This link follows the whole project, so files the source project adds " +
+      "later will arrive here too.",
+    "projectSettings.linkSource.scopeSubsetNote":
+      "This link follows only the files you picked. Files the source project " +
+      "adds later will not arrive here on their own.",
     "projectSettings.linkSource.previewEmptyUpstream":
       "That project has no source files yet, so nothing will be added now. Files " +
       "will arrive here as the upstream gains them.",
@@ -724,17 +981,39 @@ export const projectSettings = defineNamespace({
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.defaultTargetNote": "The default (unnamed) lane. Change it on Project Info, above.",
-    "projectSettings.languages.additionalLanesLabel": "Additional target lanes",
+    "projectSettings.languages.additionalLanesLabel": "Target lanes",
     "projectSettings.languages.additionalLanesDescription":
-      "Extra target-language lanes for this project — e.g. dialect variants or " +
+      "Target-language lanes for this project — e.g. dialect variants or " +
       "parallel drafts of the same source.",
     "projectSettings.languages.laneNameLabel": "Lane name",
     "projectSettings.languages.laneNamePlaceholder": "Name this lane",
+    // AQU-1592: a lane stores the language the user typed, an OPTIONAL display
+    // name, and an OPTIONAL code override. The name's placeholder is the
+    // language itself, because that is what the lane shows when no name is set.
+    "projectSettings.languages.laneLanguageLabel": "Lane language",
+    "projectSettings.languages.laneLanguagePlaceholder": "Language this lane translates into",
+    "projectSettings.languages.laneLanguageRequiredError":
+      "A lane needs a language. Type the language it translates into.",
+    "projectSettings.languages.laneAdvancedToggle": "Advanced",
+    "projectSettings.languages.laneCodeLabel": "Language code",
+    "projectSettings.languages.laneCodeNote":
+      "Leave blank to derive the code from the language. Set it only when the " +
+      "derived code is wrong.",
+    "projectSettings.languages.laneCodeDerivedPlaceholder": "Derived from the language",
+    "projectSettings.languages.laneCodeMalformedError":
+      "That is not a valid language code. Use a BCP 47 tag such as \"es\" or \"es-MX\".",
     "projectSettings.languages.duplicateNameError":
       "Another lane already has this name. Change one of them.",
+    // AQU-1784: adding a lane that reads the same as an active one is allowed —
+    // two teams may translate into one language — so this warns before the save
+    // rather than refusing it afterwards, and says how the pair will be told
+    // apart once both exist.
+    "projectSettings.languages.duplicateNameNotice":
+      "\"{lane}\" already reads the same as another active lane. You can still add " +
+      "it — the lane switcher will number them.",
+    "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
     "projectSettings.languages.nameTooLongError": "That name is too long.",
-    "projectSettings.languages.noAdditionalLanes": "No additional lanes yet.",
+    "projectSettings.languages.noAdditionalLanes": "No target lanes yet.",
     "projectSettings.languages.archiveConfirm":
       "Archive \"{lane}\"? It's hidden from the lane switcher by default but kept — " +
       "its cell data is preserved and you can restore it anytime.",
@@ -745,6 +1024,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.lastChangeUnknownEditor": "Last change in this lane: {date}",
     "projectSettings.languages.lastChangeNone": "No changes in this lane yet.",
     "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
+    // AQU-1600: every target lane is archivable, including the former default
+    // one — but a project must keep one active, so the last one's archive
+    // control is disabled with this reason.
+    "projectSettings.languages.lastActiveLaneTooltip":
+      "This is the project's only active lane. Add another target lane before archiving this one.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
@@ -757,7 +1041,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
     "projectSettings.languages.addLaneLabel": "Add a target lane",
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
-    // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
+    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
     "projectSettings.languages.addLaneButton": "Add lane",
     "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",
@@ -805,6 +1089,29 @@ export const projectSettings = defineNamespace({
     //    in MondayIntegrationSection.tsx scoped this trio to a dedicated later
     //    wave; this is that wave. "Monday"/"Monday.com" is the product's own
     //    name and stays as-is in every locale.
+    "projectSettings.monday.overviewConnectDescription": "Your organization is connected. Link a board to share this project's progress.",
+    "projectSettings.monday.overviewOpenBoard": "Open board in Monday",
+    "projectSettings.monday.overviewConfigureLink": "Configure link",
+    "projectSettings.monday.overviewLinkBoard": "Link a board",
+    "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
+    "projectSettings.monday.wizardDoneNeedsAttentionTitle": "Board linked — sync needs attention",
+    "projectSettings.monday.wizardRecommendation": plural({
+      one: "Recommended: one item per {granularity}, with {mappedCount} progress column.",
+      other: "Recommended: one item per {granularity}, with {mappedCount} progress columns.",
+    }, "mappedCount"),
+    "projectSettings.monday.wizardPreviewBoardLink": "Preview board in Monday",
+    "projectSettings.monday.wizardHideCustomization": "Hide customization",
+    "projectSettings.monday.wizardShowCustomization": "Customize data and columns",
+    "projectSettings.monday.wizardFindBoardManually": "Find {name} in Monday. The direct board link is unavailable.",
+    "projectSettings.monday.connectionCheckFailed": "Could not check the Monday connection. Try again.",
+    "projectSettings.monday.retryAction": "Retry",
+    "projectSettings.monday.orgNextLinkProjectsTitle": "Next: link your projects",
+    "projectSettings.monday.orgNextLinkProjectsDescription": "Your organization is connected. Choose a project to review its recommended board and progress columns. You only authorize Monday once for this organization.",
+    "projectSettings.monday.orgProjectsLoading": "Loading projects…",
+    "projectSettings.monday.orgProjectsRetry": "Retry projects",
+    "projectSettings.monday.orgNoAccessibleProjects": "No accessible projects in this organization.",
+    "projectSettings.monday.orgSetUpOrManageBoard": "Set up or manage board",
+    "projectSettings.monday.orgViewIntegration": "View Monday integration",
     "projectSettings.monday.boardSyncLabel": "Board sync",
     "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
@@ -895,6 +1202,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.termMatching.preset.arabic": "Arabic",
     "projectSettings.termMatching.preset.swahili": "Swahili",
     "projectSettings.termMatching.preset.turkish": "Turkish",
+
+    // ── AQU-1075: settings copied from the upstream project ──
+    "projectSettings.inherit.title": "Settings from {upstream}",
+    "projectSettings.inherit.description":
+      "This project keeps a copy of what you turn on. When {upstream} saves one of them, the copy updates, and so does the next project in the chain. Detach a field to keep your own.",
+    "projectSettings.inherit.linkTitle": "Copy these from the upstream project",
+    "projectSettings.inherit.linkDescription":
+      "Turn on what this project should receive. You can detach any of them later in its settings.",
+    "projectSettings.inherit.field.translationBrief": "Translation brief",
+    "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
+    "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
+    "projectSettings.inherit.field.workflowPolicyDetail":
+      "Validation count and role floors, self-validation, autopilot and agent mode, structural-cell counting, and check penalties.",
+    "projectSettings.inherit.field.livingMemory": "Living-memory notes",
+    "projectSettings.inherit.field.smartQuotes": "Smart quotes",
+    "projectSettings.inherit.field.systemPrompt": "AI instructions",
+    "projectSettings.inherit.fromUpstream": "from {upstream}",
+    "projectSettings.inherit.detach": "Detach",
   },
   context: {
     _context: {
@@ -912,6 +1237,14 @@ export const projectSettings = defineNamespace({
           "period. Separated by a middle dot.",
         placeholders: {
           name: "Username of the person who last saved the shared settings.",
+          date: "Date of that save, already formatted for the viewer's locale.",
+        },
+      },
+      "projectSettings.shared.lastEditedOn": {
+        description:
+          "The same provenance line as lastEdited, when the app does not know " +
+          "who saved the shared settings, only when. Not a sentence, no period.",
+        placeholders: {
           date: "Date of that save, already formatted for the viewer's locale.",
         },
       },
@@ -1111,6 +1444,13 @@ export const projectSettings = defineNamespace({
         description:
           "The emphasized mode word in projectSettings.create.cloneIntro — a one-time " +
           "snapshot copy, not a live link.",
+      },
+      "projectSettings.create.upstreamFilesCount": {
+        description:
+          "Sentence under the file list in the Create New Project dialog, saying how many of the upstream project's files the new project will bring in.",
+        placeholders: {
+          count: "How many files are checked (data, a plain integer), e.g. '3'.",
+        },
       },
       "projectSettings.create.cloneIntro": {
         description:
@@ -1454,6 +1794,25 @@ export const projectSettings = defineNamespace({
           value: "The rendered projectSettings.sourceLink.gateValidatedOnly or gateEveryCommit string — insert exactly as given.",
         },
       },
+      "projectSettings.sourceLink.laneLabel": {
+        description:
+          "Small badge naming WHICH of the upstream project's translations a chain " +
+          "(consumes-target) link reads — shown beside the corpus and gate badges on " +
+          "the confirm step of the linking flow. 'translation' here means one of the " +
+          "upstream's target languages, not the act of translating.",
+        placeholders: {
+          value: "The lane's own name as the upstream project set it (a language name such as 'Quebec French'), inserted as given and never translated.",
+        },
+      },
+      "projectSettings.sourceLink.scopeSomeFiles": {
+        description:
+          "Small badge on the Source link card saying how many of the upstream project's files this link follows, for a link made with only some of them picked.",
+        placeholders: {
+          count: "How many of the upstream's files this link follows (data, a plain integer), e.g. '2'.",
+          total:
+            "How many files the upstream project has in total (data, a plain integer), e.g. '3'. The plural form is chosen from THIS number.",
+        },
+      },
       "projectSettings.sourceLink.cursorLabel": {
         description: "Small badge on the Source link card naming the link's current sync cursor position, for a live (non-clone) link.",
         placeholders: {
@@ -1464,6 +1823,25 @@ export const projectSettings = defineNamespace({
         description: "Instruction above the detach-confirmation input, naming the exact word the user must type.",
         placeholders: {
           word: "The literal, untranslated confirmation word 'DETACH' the user must type verbatim — styled bold-monospace by the caller. Never translate this word: the input is validated against the exact English literal.",
+        },
+      },
+      "projectSettings.languages.duplicateNameNotice": {
+        description:
+          "Notice under the add-lane fields when the lane being added would read " +
+          "the same as a lane the project already has. Not an error — adding it is " +
+          "allowed, and the lane switcher then numbers the pair. Appears while the " +
+          "name is typed, before anything is saved.",
+        placeholders: {
+          lane: "The existing lane's display name, as the switcher shows it (data, not translated).",
+        },
+      },
+      "projectSettings.languages.laneShownAs": {
+        description:
+          "Small muted note on a lane row whose name another lane also uses, giving " +
+          "the label this lane is shown under elsewhere in the app — the name plus " +
+          "the suffix that tells the two apart. Not a sentence; no period.",
+        placeholders: {
+          label: "The lane's disambiguated display label, e.g. 'Tshangla · 2' (data, not translated).",
         },
       },
       "projectSettings.languages.archiveConfirm": {
@@ -1544,6 +1922,19 @@ export const projectSettings = defineNamespace({
         description: "Body text of the confirmation dialog before unlinking the project's Monday board.",
         placeholders: {
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
+        },
+      },
+      "projectSettings.monday.wizardRecommendation": {
+        description: "Summary line in the Monday setup wizard review step: the recommended item granularity and how many progress columns are mapped.",
+        placeholders: {
+          granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
+          mappedCount: "How many progress columns are mapped to project metrics.",
+        },
+      },
+      "projectSettings.monday.wizardFindBoardManually": {
+        description: "Fallback note in the Monday setup wizard when Monday returned no direct board URL, telling the user to find the board by name.",
+        placeholders: {
+          name: "The linked board's name (data, not translated), or the board id if no name is known.",
         },
       },
       "projectSettings.monday.oneItemPerLabel": {
@@ -1699,6 +2090,131 @@ export const projectSettings = defineNamespace({
           "Label of the \"Try again\" button beside seedFailedMessage while its retry " +
           "is running; the button is disabled meanwhile.",
       },
+      "projectSettings.sourceLink.chooseFilesButton": {
+        description:
+          "Button on the Source link card (Project Settings) that opens a list of the " +
+          "upstream project's files, to add more of them to this project's link. A " +
+          "verb phrase: 'choose' as in pick.",
+      },
+      "projectSettings.sourceLink.chooseFilesTitle": {
+        description:
+          "Title of the dialog listing the upstream project's files with checkboxes. " +
+          "Files already linked are checked and cannot be unchecked; the rest can be " +
+          "checked to add them.",
+      },
+      "projectSettings.sourceLink.chooseFilesLinkedBadge": {
+        description:
+          "Small label beside a file in that list that this project already receives " +
+          "from the upstream, explaining why its checkbox is checked and locked.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddButton": {
+        description:
+          "The dialog's confirm button: brings the checked files into this project. " +
+          "The sentence above it states how many.",
+      },
+      // AQU-1562: the confirm step shown before a link's file choice changes.
+      // Each heading introduces a bulleted list of file names; the body beneath
+      // it is the promise made about exactly those files. Headings and bodies
+      // are paired, so a translator should read each pair together.
+      "projectSettings.sourceLink.chooseFilesStopHeading": {
+        description:
+          "Heading over the list of files that will STOP being followed, in the confirm " +
+          "step of \"Choose files\" (Project Settings → Source link). Ends in a colon: the " +
+          "file names follow immediately beneath it. The number is never printed — it only " +
+          "chooses the form, so a language with more plural categories needs each of them.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopBody": {
+        description:
+          "Under the stop list: what stopping does to those files. The reassurance is the " +
+          "point — before this existed, the only ways to stop following a file were to " +
+          "delete it (losing its translations) or to detach the whole project. Say plainly " +
+          "that the file stays with everything on it and only stops receiving changes.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopOthersNote": {
+        description:
+          "One more sentence under the stop list: the link's OTHER files are unaffected. " +
+          "Stopping is per file, and a lead stopping one book needs to know the rest keeps " +
+          "arriving.",
+      },
+      "projectSettings.sourceLink.chooseFilesStopWholeProjectWarning": {
+        description:
+          "Warning in the same confirm, shown only when the link currently follows the whole " +
+          "source project. Stopping one file turns it into a fixed list of the rest, so files " +
+          "the source project adds later stop arriving on their own — a consequence nobody " +
+          "asked for, hence stating it before it happens. \"Pins\" as in fixes/locks to.",
+      },
+      "projectSettings.sourceLink.chooseFilesKeepOneError": {
+        description:
+          "Shown in place of the confirm when every followed file has been unchecked. A link " +
+          "following no files could never bring anything in; stopping everything is the " +
+          "separate \"Detach from source\" action on the same card, which the sentence names " +
+          "in quotes — translate that name the same way it is translated on the button.",
+      },
+      "projectSettings.sourceLink.chooseFilesResumeHeading": {
+        description:
+          "Heading over the list of previously-stopped files that will be followed AGAIN. " +
+          "Distinct from the add heading below because the file is already in the project: " +
+          "this resumes it rather than bringing a new one in. Ends in a colon; names follow.",
+      },
+      "projectSettings.sourceLink.chooseFilesResumeBody": {
+        description:
+          "Under the resume list: the one thing resuming costs. The file's source text is " +
+          "replaced with the source project's current text — the lead may have been editing " +
+          "it in the meantime — while the translations on it are kept. Both halves matter.",
+      },
+      "projectSettings.sourceLink.chooseFilesReplaceHeading": {
+        description:
+          "Heading in the Choose files confirm step over the list of files the project " +
+          "already has whose source the added upstream files will replace (AQU-1679). Ends " +
+          "in a colon; names follow. Kept apart from the add heading: these files are not " +
+          "arriving, they are being joined to the link.",
+      },
+      "projectSettings.sourceLink.chooseFilesReplaceBody": {
+        description:
+          "Under the replace list: the file keeps its identity and everything on it " +
+          "(translations, validations, comments) line by line; only its source text " +
+          "becomes the source project's, and it follows the source project afterwards. " +
+          "Says explicitly that no second copy is added \u2014 the thing a lead fears here.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddHeading": {
+        description:
+          "Heading over the list of files being added that this project never held. Ends in " +
+          "a colon; names follow. Kept apart from the resume heading above, which promises " +
+          "something different.",
+      },
+      "projectSettings.sourceLink.chooseFilesAddBody": {
+        description:
+          "Under the add list: an added file arrives with its WHOLE current source, not only " +
+          "the changes made from now on, and follows the source project afterwards like any " +
+          "other linked file.",
+      },
+      "projectSettings.sourceLink.chooseFilesStoppedBadge": {
+        description:
+          "Small label beside a file in the \"Choose files\" list that this project stopped " +
+          "following: it is here with its translations but no longer receives the source " +
+          "project's changes. Explains why its checkbox is clear when the file is plainly in " +
+          "the project, and warns that checking it replaces its source text.",
+      },
+      "projectSettings.sourceLink.chooseFilesReviewButton": {
+        description:
+          "The \"Choose files\" dialog's primary button when the lead has stopped or resumed a " +
+          "file: it opens the confirm step rather than acting, since those carry promises the " +
+          "checkboxes do not. A verb phrase.",
+      },
+      "projectSettings.sourceLink.chooseFilesConfirmTitle": {
+        description: "Title of that confirm step, replacing the file-list dialog's own title.",
+      },
+      "projectSettings.sourceLink.chooseFilesApplyingButton": {
+        description:
+          "Label of the confirm step's button while the changes are being saved; the button is " +
+          "disabled meanwhile.",
+      },
+      "projectSettings.sourceLink.chooseFilesIncomplete": {
+        description:
+          "Error under the list when the files could not all be brought in. Nothing " +
+          "is half-added: the files are not in the project yet, and pressing the " +
+          "button again resumes.",
+      },
       "projectSettings.sourceLink.notSyncedBadge": {
         description:
           "Badge on the Source link settings card, in the row with \"Live\", for a " +
@@ -1731,6 +2247,90 @@ export const projectSettings = defineNamespace({
           "Replaces notSyncedNote after \"Sync now\" worked but the source project is " +
           "empty, so there was nothing to copy. Reassuring, not an error: files will " +
           "appear once the source project has some.",
+      },
+      "projectSettings.linkSource.additiveNoteReplacing": {
+        description:
+          "Replaces additiveNote under the link confirm step once at least one " +
+          "existing file is set to have its source replaced. Same reassurance, minus " +
+          "the claim that existing files are untouched: the replaced files' source " +
+          "text changes and keeps following the upstream; translations and " +
+          "validations are still never touched.",
+      },
+      "projectSettings.linkSource.replaceOption": {
+        description:
+          "Checkbox under an upstream file in the link confirm step, shown when this " +
+          "project already has exactly one file of the same name. On: the link " +
+          "follows into that existing file \u2014 its source text is replaced by the " +
+          "source project's and its translations stay \u2014 instead of adding a second " +
+          "file of that name. Off by default.",
+        placeholders: {
+          name: "The file's name as the user named it \u2014 never translated.",
+        },
+      },
+      "projectSettings.linkSource.replaceComparing": {
+        description:
+          "Shown under replaceOption right after it is turned on, while the server " +
+          "compares the project's file with the source project's file.",
+      },
+      "projectSettings.linkSource.replaceCompareFailed": {
+        description:
+          "Shown under replaceOption when the comparison could not be made. The link " +
+          "cannot be confirmed with the option on until a comparison succeeds; the " +
+          "sentence gives both ways out. No error code.",
+      },
+      "projectSettings.linkSource.replaceMatchSame": {
+        description:
+          "First line of the comparison under replaceOption: how many lines of text " +
+          "are word-for-word identical in the project's file and the source project's " +
+          "file. \"Lines\" are the file's translation units (verses, paragraphs).",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchChanged": {
+        description:
+          "Comparison line, shown only when above zero: lines that correspond but " +
+          "whose source text differs. They take the source project's text, and their " +
+          "existing translations get the app's \"source changed\" flag for review.",
+        placeholders: {
+          count: "How many lines will take the source project's text; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchAdded": {
+        description:
+          "Comparison line, shown only when above zero: lines the source project's " +
+          "file has and the project's file does not. They are added to the project's file.",
+        placeholders: {
+          count: "How many lines will be added; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceMatchKept": {
+        description:
+          "Comparison line, shown only when above zero: lines the project's file has " +
+          "and the source project's file does not. Nothing happens to them.",
+        placeholders: {
+          count: "How many lines only this project's file has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceNoMatch": {
+        description:
+          "Replaces the comparison when fewer than half of the lines are identical: " +
+          "the two files share a name but are not the same text, so the source cannot " +
+          "be replaced. The link stays unconfirmable until the option is turned off.",
+        placeholders: {
+          same: "How many lines are identical in both files.",
+          count: "How many lines the longer of the two files has; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.replaceCount": {
+        description:
+          "Summary sentence in the link confirm step, beside the count of files that " +
+          "will be added: how many existing files will follow the link in place " +
+          "(source replaced, translations kept) rather than gaining a second copy.",
+        placeholders: {
+          count: "How many existing files will follow the link; governs the plural form.",
+        },
       },
       "projectSettings.linkSource.clashWarningHeading": {
         description:
@@ -1801,6 +2401,62 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.termMatching.preset.turkish": {
         description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.inherit.title": {
+        description:
+          "Heading of the inherited-settings card in Project Settings, shown only when this project is linked to an upstream. Names the upstream.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.description": {
+        description:
+          "Explanation under that heading: turned-on fields are copies that update when the upstream saves, including further down a chain, and Detach keeps a local copy.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.linkTitle": {
+        description:
+          "Heading of the same choice on the link confirm step, before the link exists. The checkboxes under it are what this new link will copy.",
+      },
+      "projectSettings.inherit.linkDescription": {
+        description:
+          "One sentence under that heading: the choice can be changed later, per field, from the downstream project's settings.",
+      },
+      "projectSettings.inherit.field.translationBrief": {
+        description: "Checkbox label. The translation brief is copied from the upstream when this is on.",
+      },
+      "projectSettings.inherit.field.knowledgeDocs": {
+        description: "Checkbox label. The upstream project's knowledge-base documents are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicy": {
+        description:
+          "Checkbox label. Validation counts, role floors, self-validation, autopilot, agent mode, structural-cell counting, and check penalties are copied when this is on.",
+      },
+      "projectSettings.inherit.field.workflowPolicyDetail": {
+        description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",
+      },
+      "projectSettings.inherit.field.livingMemory": {
+        description: "Checkbox label. Living-memory notes are copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.smartQuotes": {
+        description: "Checkbox label. The smart-quotes switch is copied when this is on. Off by default.",
+      },
+      "projectSettings.inherit.field.systemPrompt": {
+        description:
+          "Checkbox label. AI instructions (the system prompt) are copied when this is on. Off by default, because those instructions usually name the language pair.",
+      },
+      "projectSettings.inherit.fromUpstream": {
+        description:
+          "Shown beside a field that is still being copied, both in the inherited-settings card and next to the field itself.",
+        placeholders: {
+          upstream: "The upstream project's name, as its maintainers named it — never translated.",
+        },
+      },
+      "projectSettings.inherit.detach": {
+        description:
+          "Button beside a field that is still being copied. Stops future updates of that field and keeps the current copy.",
       },
     },
   },

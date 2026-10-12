@@ -46,6 +46,7 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/project-status"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 /** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PROJECTS_PANEL_MAX_H =
@@ -294,15 +295,15 @@ export function OrgOverview() {
                 />
                 <StatTile
                   label={t("org.orgHome.avgTranslated")}
-                  value={`${Math.round(portfolio.avgTranslatedPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgTranslatedPct)}%`}
                 />
                 <StatTile
                   label={t("org.orgHome.avgValidated")}
-                  value={`${Math.round(portfolio.avgValidatedPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgValidatedPct)}%`}
                 />
                 <StatTile
                   label={t("org.orgHome.avgAudio")}
-                  value={`${Math.round(portfolio.avgAudioPct * 100)}%`}
+                  value={`${progressPercentOfFraction(portfolio.avgAudioPct)}%`}
                 />
                 <StatTile label={t("org.orgHome.stalled")} value={portfolio.stalledCount} />
                 <StatTile

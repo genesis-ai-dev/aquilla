@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach, afterEach} from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { validateApiCredential } from "../../../db/shared/api-credentials"
@@ -428,5 +428,77 @@ describe("DELETE /api/v2/credentials/:id", () => {
       // different questions, and narrowing one must not quietly reset the other.
       expect(ctx).toMatchObject({ access: "read", projectId: "proj-1", pii: true })
     })
+  })
+})
+
+describe("credential scope: platform admin needs elevation (OPS-44)", () => {
+  // A PAT outlives the session that minted it, so minting one on bare
+  // platform-admin authority yields a PERMANENT cross-tenant credential that
+  // no later elevation check can reach. "root" is the test ADMIN_EMAILS entry
+  // (pg-test-env) and holds no grant on anything seeded here.
+  beforeEach(async () => {
+    await seedUser(1, "alice")
+    await seedUser(7, "root")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (50, 'Tenant', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (50, 1, 700, 1)",
+    ).run()
+    await seedProject("tenant-proj", 1, 50)
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+  })
+
+  afterEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = undefined
+  })
+
+  const elevate = async (jwt: string) => {
+    const req = await app.request("/api/v2/admin/elevation/request", { method: "POST", headers: authHeader(jwt) }, env)
+    const { devCode } = (await req.json()) as { devCode?: string }
+    const res = await app.request(
+      "/api/v2/admin/elevation/verify",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ code: devCode }) },
+      env,
+    )
+    expect(res.status).toBe(200)
+  }
+
+  it("un-elevated admin cannot scope a credential to a foreign project", async () => {
+    const res = await mint("root", { name: "k", mode: "ask", projectId: "tenant-proj" })
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { error: string }).error).toBe("scope_denied")
+  })
+
+  it("un-elevated admin cannot scope a credential to a foreign org", async () => {
+    const res = await mint("root", { name: "k", mode: "ask", orgId: "50" })
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { error: string }).error).toBe("scope_denied")
+  })
+
+  it("un-elevated admin cannot mint an ACT credential on a foreign project", async () => {
+    const res = await mint("root", { name: "k", mode: "act", projectId: "tenant-proj" })
+    expect(res.status).toBe(403)
+  })
+
+  it("un-elevated admin cannot mint a PII credential on a foreign project", async () => {
+    const res = await mint("root", { name: "k", mode: "ask", projectId: "tenant-proj", pii: true })
+    expect(res.status).toBe(403)
+  })
+
+  it("an elevated admin still can", async () => {
+    const jwt = await jwtFor("root")
+    await elevate(jwt)
+    const res = await app.request(
+      "/api/v2/credentials",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ name: "k", mode: "act", projectId: "tenant-proj" }) },
+      env,
+    )
+    expect(res.status).toBe(201)
+  })
+
+  it("a genuine member is unaffected while un-elevated", async () => {
+    const res = await mint("alice", { name: "k", mode: "act", projectId: "tenant-proj" })
+    expect(res.status).toBe(201)
   })
 })

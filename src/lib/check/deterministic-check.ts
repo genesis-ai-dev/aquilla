@@ -19,6 +19,16 @@
  *     The scan itself lives in `term-consistency-scan.ts` (re-exported below)
  *     so the Agent API's term-consistency read runs the same code — AQU-1231.
  *
+ *  3. Capitalization (AQU-1734) — mixed capitalization inside a word
+ *     (`tHe`), and headings that open with a lowercase letter. Corpus-scoped
+ *     on purpose: `tHe` and `kiSwahili` are structurally identical, so only
+ *     recurrence across the scoped cells tells a typo from the project's own
+ *     spelling. `learnCaseExceptions` derives those exceptions here and the
+ *     result reports them, so a reviewer can see what was let through. The
+ *     per-cell half of the same check (lowercase after sentence-final
+ *     punctuation or a paragraph/heading marker) needs no corpus and rides
+ *     the rule pass as the `capitalization` built-in instead.
+ *
  * Glosser drift is deferred (stretch goal in the spec): the bt-glosser builds
  * its alignment model from validated pairs at run time and a deterministic
  * "drift" verdict isn't specified yet.
@@ -30,6 +40,12 @@ import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import { semanticSourceText } from "@/lib/semantic-source-text"
+import {
+  findMixedCaseWords,
+  hasCasedLetters,
+  learnCaseExceptions,
+  type CaseExceptionProposal,
+} from "@/lib/qa/capitalization"
 import { buildConceptRegex, buildTermRegex } from "@/lib/terminology/match"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import type { CheckableCell, TermConsistencyFinding } from "@/lib/check/term-consistency-scan"
@@ -61,6 +77,15 @@ export interface RuleFindingGroup {
   infractions: RuleInfraction[]
 }
 
+/** One capitalization finding, grouped so a form is reported once, not per cell. */
+export interface CapitalizationFinding {
+  /** `mixed-case` groups by word form; `lowercase-heading-start` by nothing. */
+  code: "mixed-case" | "lowercase-heading-start"
+  /** The offending word form for `mixed-case` — raw content, never translated. */
+  form: string
+  cells: { cellId: string; cellLabel?: string }[]
+}
+
 export interface CheckRunResult {
   /** ISO timestamp of when the run finished. */
   ranAt: string
@@ -71,7 +96,11 @@ export interface CheckRunResult {
   checkedTermCount: number
   ruleFindings: RuleFindingGroup[]
   termFindings: TermConsistencyFinding[]
-  /** Total issue count: infraction rows + flagged term cells. */
+  /** AQU-1734: corpus-scoped capitalization findings (see `scanCapitalization`). */
+  capitalizationFindings: CapitalizationFinding[]
+  /** Forms the capitalization scan learned to allow, for a reviewer to confirm. */
+  caseExceptions: CaseExceptionProposal[]
+  /** Total issue count: infraction rows + flagged term cells + capitalization cells. */
   totalFindingCount: number
 }
 
@@ -161,6 +190,70 @@ export function scanTermConsistency(
 }
 
 // ---------------------------------------------------------------------------
+// Capitalization scan (pure, synchronous — AQU-1734)
+// ---------------------------------------------------------------------------
+
+/** Cells whose `type` says the text is a section heading rather than body. */
+const HEADING_TYPES = new Set(["heading"])
+
+export interface CapitalizationScanResult {
+  findings: CapitalizationFinding[]
+  exceptions: CaseExceptionProposal[]
+}
+
+/**
+ * Corpus-scoped capitalization scan over the checked cells.
+ *
+ * Exceptions are learned from the cells themselves — a form recurring across
+ * the scope, or a lowercase-prefix family (`kiSwahili` / `kiNgozi`), is the
+ * project's own spelling and is reported as an exception instead of being
+ * flagged in every cell that uses it. Forms the SOURCE already writes that way
+ * are excepted outright, and caseless-script cells never produce findings.
+ */
+export function scanCapitalization(
+  cells: readonly { id: string; cellLabel?: string; translated: string; original: string; status: string; type?: string }[],
+): CapitalizationScanResult {
+  const translated = cells.filter((c) => c.status !== "empty" && c.translated.trim().length > 0)
+  if (translated.length === 0) return { findings: [], exceptions: [] }
+
+  const { exceptions, proposals } = learnCaseExceptions(
+    translated.map((c) => c.translated),
+    translated.map((c) => c.original),
+  )
+
+  const byForm = new Map<string, CapitalizationFinding["cells"]>()
+  const headingCells: CapitalizationFinding["cells"] = []
+
+  for (const cell of translated) {
+    for (const span of findMixedCaseWords(cell.translated, exceptions)) {
+      const list = byForm.get(span.matchedText)
+      if (list) {
+        if (!list.some((c) => c.cellId === cell.id)) list.push({ cellId: cell.id, cellLabel: cell.cellLabel })
+      } else {
+        byForm.set(span.matchedText, [{ cellId: cell.id, cellLabel: cell.cellLabel }])
+      }
+    }
+    // A heading is its own cell, so "a lowercase letter at the start of a
+    // section heading" is only decidable here, where the cell's type is known
+    // — a body cell may legitimately continue the previous verse's sentence.
+    if (cell.type && HEADING_TYPES.has(cell.type) && hasCasedLetters(cell.translated)) {
+      const first = /\p{L}/u.exec(cell.translated)?.[0]
+      if (first && first === first.toLowerCase() && first !== first.toUpperCase()) {
+        headingCells.push({ cellId: cell.id, cellLabel: cell.cellLabel })
+      }
+    }
+  }
+
+  const findings: CapitalizationFinding[] = [...byForm.entries()]
+    .map(([form, cs]): CapitalizationFinding => ({ code: "mixed-case", form, cells: cs }))
+    .sort((a, b) => b.cells.length - a.cells.length || a.form.localeCompare(b.form))
+  if (headingCells.length > 0) {
+    findings.push({ code: "lowercase-heading-start", form: "", cells: headingCells })
+  }
+  return { findings, exceptions: proposals }
+}
+
+// ---------------------------------------------------------------------------
 // Rule pass (pure, synchronous per cell)
 // ---------------------------------------------------------------------------
 
@@ -235,10 +328,17 @@ export async function runDeterministicCheck(
   await nextTick()
   const termFindings = scanTermConsistency(input.cells, activeConcepts, input.termMatching)
 
+  // Capitalization pass (AQU-1734): two passes over the same short strings —
+  // one to learn exceptions, one to flag what is left.
+  await nextTick()
+  const capitalization = scanCapitalization(input.cells)
+
   const flaggedTermCells = termFindings.reduce(
     (n, f) => n + f.flaggedCells.length,
     0,
   )
+
+  const capitalizationCells = capitalization.findings.reduce((n, f) => n + f.cells.length, 0)
 
   return {
     ranAt: new Date().toISOString(),
@@ -248,6 +348,8 @@ export async function runDeterministicCheck(
     checkedTermCount: activeConcepts.length,
     ruleFindings: groupInfractionsByRule(infractions, enabledRules),
     termFindings,
-    totalFindingCount: infractions.length + flaggedTermCells,
+    capitalizationFindings: capitalization.findings,
+    caseExceptions: capitalization.exceptions,
+    totalFindingCount: infractions.length + flaggedTermCells + capitalizationCells,
   }
 }

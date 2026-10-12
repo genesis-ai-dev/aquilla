@@ -1,8 +1,9 @@
 // Atomic inline node for an AI-chat context chip. Pure-DOM NodeView (mirrors
-// footnote-node.ts): renders a compact Badge-styled pill showing the canonical
-// ref, with the full selection as a native hover tooltip and an × to delete.
+// footnote-node.ts): renders a compact Badge-styled pill showing the opening
+// words of the selection, with the full selection as a native hover tooltip and an × to delete.
 // renderText emits ⟦chip:<chipId>⟧ so the serializer can map it to a ctx token.
 import { Node, mergeAttributes } from "@tiptap/core"
+import { chipLabel } from "@/lib/agent/context-chip"
 
 export const CONTEXT_CHIP_NODE_NAME = "contextChip"
 
@@ -35,7 +36,7 @@ export const ContextChipNode = Node.create({
     return [
       "span",
       mergeAttributes(HTMLAttributes, data, { class: "context-chip" }),
-      (node.attrs.canonicalRef as string) || "source",
+      labelFor(node.attrs),
     ]
   },
 
@@ -51,7 +52,7 @@ export const ContextChipNode = Node.create({
         "context-chip inline-flex items-center gap-1 rounded-md border border-transparent " +
         "bg-muted px-1.5 py-0.5 align-baseline text-xs font-medium text-muted-foreground"
       dom.setAttribute("contenteditable", "false")
-      const label = (node.attrs.canonicalRef as string) || "source"
+      const label = labelFor(node.attrs)
       const full = (node.attrs.selection as string) || label
       dom.title = full // native hover tooltip
       dom.setAttribute("data-tooltip", full) // test hook
@@ -79,3 +80,10 @@ export const ContextChipNode = Node.create({
     }
   },
 })
+
+function labelFor(attrs: Record<string, unknown>): string {
+  return chipLabel({
+    selection: String(attrs.selection ?? ""),
+    canonicalRef: String(attrs.canonicalRef ?? ""),
+  })
+}

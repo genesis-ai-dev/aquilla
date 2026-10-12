@@ -926,7 +926,49 @@ describe("authorize() archived lanes (AQU-1462)", () => {
     }
   })
 
-  it("allows the default lane, an active sibling, and a source edit while Spanish is archived", async () => {
+  // AQU-1600: the former default lane is ordinary, so an archived one freezes
+  // writes too. The event that names it carries NO targetLang — the tag is the
+  // empty string, which is falsy, so the gate must test for null rather than
+  // truthiness or this check never runs.
+  it("refuses a target commit to the former default lane once its row is archived", async () => {
+    const db = makeDb({
+      lanes: [
+        { id: "default1", name: "English", legacy_tag: "", archived_at: "2026-10-03T00:00:00.000Z" },
+        { id: "frlane01", name: "French", legacy_tag: "fr", archived_at: null },
+      ],
+      projectSettings: { archivedLanes: [], targetLanes: ["fr"] },
+    })
+    // Every role, Maintainer included.
+    for (const role of [400, 600]) {
+      const result = await authorize(await makeToken({ role }), makeTargetCommit(), SECRET, db)
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.status).toBe(403)
+        expect(result.reason).toBe("lane 'English' is archived")
+      }
+    }
+    // A sibling lane and the shared source side are untouched by the freeze.
+    const french = await authorize(
+      await makeToken({ role: 400 }),
+      makeTargetCommit({ payload: { value: "bonjour", targetLang: "fr" } }),
+      SECRET,
+      db,
+    )
+    expect(french.ok).toBe(true)
+    const source = await authorize(await makeToken({ role: 600 }), makeSourceCommit(), SECRET, db)
+    expect(source.ok).toBe(true)
+  })
+
+  it("does not refuse the former default lane when no lane row records it archived", async () => {
+    const db = makeDb({
+      lanes: [{ id: "frlane01", name: "French", legacy_tag: "fr", archived_at: null }],
+      projectSettings: { archivedLanes: [], targetLanes: ["fr"] },
+    })
+    const result = await authorize(await makeToken({ role: 400 }), makeTargetCommit(), SECRET, db)
+    expect(result.ok).toBe(true)
+  })
+
+  it("allows an active default lane, an active sibling, and a source edit while Spanish is archived", async () => {
     const token = await makeToken({ role: 400 })
     const db = makeDb({
       lanes: [
@@ -1071,5 +1113,51 @@ describe("authorize() archived lanes (AQU-1462)", () => {
       expect(hidden.reason).toBe("lane does not exist")
       expect(hidden.reason).not.toContain("Spanish")
     }
+  })
+})
+
+describe("authorize() — source audio needs Project Lead (AQU-1565 follow-up)", () => {
+  // WHY: `role: 'source'` takes a clip out of "recorded" and out of review on
+  // every row it sits on. A take is a contributor's to attach; declaring the
+  // file's programme audio is setting the file up, so it sits with the import
+  // that would otherwise bring that recording in.
+  function attach(role?: "dub" | "source"): RawEvent<"cell.audio.attach"> {
+    return {
+      id: "00000000-0000-7000-0000-0000000000bb",
+      schemaVersion: 1,
+      kind: "cell.audio.attach",
+      projectId: "proj-a",
+      fileId: "file-x",
+      cellId: "cell-1",
+      parentId: null,
+      author: "alice",
+      payload: {
+        audioId: "file-x-clip.wav",
+        url: "frontier-audio://file-x-clip.wav",
+        slot: "recording",
+        ...(role ? { role } : {}),
+      },
+      clientTs: Date.now(),
+    }
+  }
+
+  it("refuses a contributor marking a clip as source audio", async () => {
+    const result = await authorize(await makeToken({ role: 400 }), attach("source"), SECRET)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(403)
+      expect(result.reason).toContain("source audio")
+    }
+  })
+
+  it("accepts a project lead marking a clip as source audio", async () => {
+    const result = await authorize(await makeToken({ role: 500 }), attach("source"), SECRET)
+    expect(result.ok).toBe(true)
+  })
+
+  it("still accepts a contributor's ordinary take, with or without role dub", async () => {
+    const token = await makeToken({ role: 400 })
+    expect((await authorize(token, attach(), SECRET)).ok).toBe(true)
+    expect((await authorize(token, attach("dub"), SECRET)).ok).toBe(true)
   })
 })

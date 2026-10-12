@@ -236,6 +236,10 @@ E2E_HEARTBEAT_MS=10000 E2E_TEST_TIMEOUT_MS=90000 pnpm test:e2e:smoke
 E2E_GLOBAL_TIMEOUT_MS=2400000 E2E_STALL_TIMEOUT_MS=180000 pnpm test:e2e:smoke
 ```
 
+`E2E_LOCK=off` skips the per-machine slot lock that stops two e2e runs from
+killing each other's stack (emergency only). `E2E_LOCK_WAIT_SECONDS` (default
+1800) is how long a second run waits for the first to finish.
+
 If a shard produces no output for 30 seconds, the parent prints its PID and last
 line. After `E2E_STALL_TIMEOUT_MS` (two minutes by default), it terminates the
 stalled stack instead of leaving pre-push blocked indefinitely. Failure traces,
@@ -258,10 +262,12 @@ screenshots, video, and service logs are retained.
 - **Mock LLM not connected** → `VITE_LLM_BASE_URL` isn't being passed to Vite. Check
   `.env.test.local` contents during a run; it should be regenerated each time
   `e2e-up.ts` boots.
-- **Port already in use** → `e2e-up.ts` force-kills only its own block
-  (6173/9787/9788 for shard 0) at startup and again on shutdown. A live
-  `pnpm dev` on 5173/8788/8789 is left alone. If an e2e port is still held,
-  a previous shard was killed mid-boot — rerun; shutdown reaps leftovers.
+- **Port already in use** → `e2e-up.ts` takes the per-slot lock
+  (`aquilla-e2e-slot-<K>.lock` in the system temp dir) before it force-kills
+  only its own block (6173/9787/9788 for shard 0) at startup and again on
+  shutdown. A live `pnpm dev` on 5173/8788/8789 is left alone. A second run
+  on the same slot waits for the first instead of killing it. If an e2e port
+  is still held after the lock is acquired, it is leftover from a dead run.
 - **Many specs fail in 0.0s with `ECONNREFUSED 127.0.0.1:9787`** → this is not
   a product bug in those specs. Identity (auth-worker) died mid-suite, so
   `resetBackend()` cannot reach `POST /__test__/reset`. `e2e-up` now aborts the

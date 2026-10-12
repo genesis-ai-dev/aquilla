@@ -7,6 +7,7 @@ import {
 } from "./lib/e2e-run-mode"
 
 const specs = [
+  "e2e/specs/agent/agent-connection.smoke.spec.ts",
   "e2e/specs/orgs/org-settings-billing.smoke.spec.ts",
   "e2e/specs/ai/completion.smoke.spec.ts",
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
@@ -32,6 +33,7 @@ describe("changed-file E2E impact selection", () => {
       "src/lib/sync/bulk-import.ts", "sync-worker/src/events/import-route.ts",
       "src/lib/import/timeline-text.ts", "shared/timeline-import.ts",
       "sync-worker/src/events/import-track-publication.ts",
+      "sync-worker/src/events/import-caption-promotion.ts",
       "src/hooks/useTimelineTextCells.ts", "src/components/timeline/TimelineEditor.tsx",
       "src/lib/audio/script-alignment.ts",
       "src/lib/audio/align-source-script.ts", "src/lib/audio/source-alignment.ts",
@@ -46,6 +48,8 @@ describe("changed-file E2E impact selection", () => {
     for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
       "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql", "db/postgres/migrations/0093_workspace_checkout_attempts.sql",
       "db/postgres/migrations/0095_workspace_subscription_state.sql",
+      "db/postgres/migrations/0148_weekly_allowance_overrides.sql",
+      "db/postgres/migrations/0149_live_workspace_checkout.sql",
       "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/transcription.ts", "auth-worker/src/routes/agent.ts", "auth-worker/src/routes/contextual.ts", "db/shared/workspace-access.ts",
       "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
       expect(selectAffectedE2E([file], specs).specs).toContain(
@@ -60,10 +64,19 @@ describe("changed-file E2E impact selection", () => {
   })
   it("maps imported video producers and picture resolution to the import journey", () => {
     for (const file of ["src/hooks/useMediaPictureUrl.ts", "src/lib/sync/bulk-import.ts",
-      "sync-worker/src/events/import-route.ts"]) {
+      "sync-worker/src/events/import-route.ts",
+      "sync-worker/src/events/import-caption-promotion.ts"]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-and-edit.smoke.spec.ts",
       )
+    }
+  })
+  it("maps flexible YouTube sources and empty-picture readiness to import coverage", () => {
+    for (const file of ["src/lib/import/youtube-captions.ts",
+      "src/lib/import/youtube-caption-commit.ts",
+      "src/components/import/YouTubeImportPanel.tsx", "src/lib/editor/cell-area-state.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs, file)
+        .toContain("e2e/specs/editor/import-and-edit.smoke.spec.ts")
     }
   })
   it("keeps comment coverage when its no-hover entry point changes", () => {
@@ -75,6 +88,22 @@ describe("changed-file E2E impact selection", () => {
     expect(selectAffectedE2E([specs[3]], specs).specs).toEqual([specs[3]])
   })
 
+  it("does not treat the word popover as a feature match", () => {
+    const withPresence = [
+      ...specs,
+      "e2e/specs/collab/member-presence-popover.smoke.spec.ts",
+    ]
+    const selected = selectAffectedE2E(
+      ["src/components/org/AddLanguagePopover.tsx"],
+      withPresence,
+    ).specs
+    expect(selected).not.toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
+    expect(selectAffectedE2E(
+      ["src/components/collab/MemberPresence.tsx"],
+      withPresence,
+    ).specs).toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
+  })
+
   it("maps domain code to a sentinel and close filename matches", () => {
     expect(selectAffectedE2E([
       "src/components/ProjectSettings/ProjectSettingsValidation.tsx",
@@ -82,6 +111,13 @@ describe("changed-file E2E impact selection", () => {
       "e2e/specs/projects/project-settings.smoke.spec.ts",
       "e2e/specs/projects/route-health.smoke.spec.ts",
     ])
+  })
+
+  it("selects browser authorization for plugin package, credential and OAuth changes", () => {
+    for (const file of ["plugins/aquilla/.codex-plugin/plugin.json", "sync-worker/src/external/mcp-chatgpt.ts",
+      "db/shared/api-credentials.ts", "db/postgres/migrations/0130_mcp_oauth_resource.sql"]) {
+      expect(selectAffectedE2E([file], specs).specs).toContain("e2e/specs/agent/agent-connection.smoke.spec.ts")
+    }
   })
 
   it("maps sync-worker changes to the collaboration boundary", () => {

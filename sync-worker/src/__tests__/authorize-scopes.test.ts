@@ -210,3 +210,115 @@ describe("AQU-553 authorize scopes — lane AND file composition", () => {
     if (!res.ok) expect(res.status).toBe(403)
   })
 })
+
+// ── AQU-1607: a lane scope is a lane id ────────────────────────────────────
+//
+// Two lanes can be the same language, so a scope holding the language could
+// not say which one was meant. A scope holding `lanes.id` can: the event's
+// tag is resolved through the project's lane rows and must land on a lane the
+// scope names. A value that is no lane's id — a row the AQU-1616 backfill has
+// not converted yet, or a lane since removed — is still compared to the tag,
+// which is what a scope meant before.
+
+/** Two Spanish lanes: the former default one, and a second with its own tag. */
+const SPANISH_LANES = [
+  { id: "ln-main", name: "Spanish", legacy_tag: "", archived_at: null },
+  { id: "ln-mx", name: "Spanish (Mexico)", legacy_tag: "es-MX", archived_at: null },
+]
+
+function makeLanesDb(
+  lanes: Array<{ id: string; name: string; legacy_tag: string | null; archived_at: string | null }>,
+): AquillaDb {
+  return {
+    prepare(sql: string) {
+      return {
+        bind(..._args: unknown[]) {
+          return {
+            async first() {
+              if (sql.includes("FROM projects")) return { org_id: null, created_by: 999, archived_at: null }
+              return null
+            },
+            async all() {
+              if (sql.includes("FROM lanes")) {
+                return {
+                  results: lanes.map((lane) => ({
+                    id: lane.id,
+                    project_id: "proj-a",
+                    role: "target",
+                    name: lane.name,
+                    lang_code: null,
+                    legacy_tag: lane.legacy_tag,
+                    position: 0,
+                    archived_at: lane.archived_at,
+                  })),
+                }
+              }
+              return { results: [] }
+            },
+          }
+        },
+      }
+    },
+  } as unknown as AquillaDb
+}
+
+function commitInLane(tag: string | undefined): RawEvent<"target.cell.commit"> {
+  return makeTargetCommit({
+    payload: {
+      value: "hola",
+      valueHtml: "<p>hola</p>",
+      ...(tag === undefined ? {} : { targetLang: tag }),
+    },
+  })
+}
+
+describe("AQU-1607 authorize scopes — lane ids", () => {
+  it("admits the lane the id names and refuses its same-language sibling", async () => {
+    const token = await makeToken({ scopes: [{ kind: "lane", value: "ln-mx" }] })
+    const db = makeLanesDb(SPANISH_LANES)
+
+    const allowed = await authorize(token, commitInLane("es-MX"), SECRET, db)
+    expect(allowed.ok).toBe(true)
+
+    // Both lanes are Spanish; only one is in scope. Before lane ids the two
+    // were the same scope, so this write passed.
+    const refused = await authorize(token, commitInLane(undefined), SECRET, db)
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) expect(refused.status).toBe(403)
+  })
+
+  it("admits the former default lane through its id", async () => {
+    const token = await makeToken({ scopes: [{ kind: "lane", value: "ln-main" }] })
+    const db = makeLanesDb(SPANISH_LANES)
+
+    const allowed = await authorize(token, commitInLane(undefined), SECRET, db)
+    expect(allowed.ok).toBe(true)
+
+    const refused = await authorize(token, commitInLane("es-MX"), SECRET, db)
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) expect(refused.status).toBe(403)
+  })
+
+  it("still enforces a scope row the backfill has not converted yet", async () => {
+    const token = await makeToken({ scopes: [{ kind: "lane", value: "es-MX" }] })
+    const db = makeLanesDb(SPANISH_LANES)
+
+    const allowed = await authorize(token, commitInLane("es-MX"), SECRET, db)
+    expect(allowed.ok).toBe(true)
+
+    const refused = await authorize(token, commitInLane(undefined), SECRET, db)
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) expect(refused.status).toBe(403)
+  })
+
+  it("refuses every lane when the scope names a lane that is gone", async () => {
+    const token = await makeToken({ scopes: [{ kind: "lane", value: "ln-deleted" }] })
+    const db = makeLanesDb(SPANISH_LANES)
+
+    for (const tag of [undefined, "es-MX"]) {
+      const res = await authorize(token, commitInLane(tag), SECRET, db)
+      expect(res.ok).toBe(false)
+      if (!res.ok) expect(res.status).toBe(403)
+    }
+  })
+})

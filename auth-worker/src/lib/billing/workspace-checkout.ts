@@ -1,3 +1,4 @@
+import { billingReturnOrigin, stripeLiveMode, validCheckoutSessionId, workspaceBillingMode, workspaceCheckoutEnabled } from './environment'
 import { z } from 'zod'
 import type { AquillaDb } from '../../../../db/shim/postgres'
 import type { Env } from '../../types'
@@ -22,42 +23,23 @@ interface Attempt {
   request_params: Record<string, string | number>
   expires_at: number
   session_id: string | null
+  sandbox: boolean
 }
 function readAttempt(db: AquillaDb, orgId: number) {
   return db.prepare(`SELECT id, account_id, fingerprint, request_params,
-    expires_at, session_id FROM workspace_checkout_attempts WHERE org_id = ? AND resolved_at IS NULL`)
+    expires_at, session_id, sandbox FROM workspace_checkout_attempts WHERE org_id = ? AND resolved_at IS NULL`)
     .bind(orgId).first<Attempt>()
 }
-const LOOPBACK = ['localhost', '127.0.0.1', '[::1]']
-const sandboxHosts = (env: Env) => (env.BILLING_SANDBOX_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean)
-/** Sandbox billing runs in exactly two places: wrangler-local loopback, or a
- * deployed non-production environment whose API host is allowlisted in
- * `BILLING_SANDBOX_HOSTS`. Both need the opt-in flag and a test-mode key, so a
- * production Worker (live key, ENVIRONMENT=production) can never satisfy it.
- */
 export function workspaceCheckoutRehearsalEnabled(env: Env, requestUrl: string) {
-  if (env.BILLING_WORKSPACE_CHECKOUT_REHEARSAL !== 'true') return false
-  if (!/^(sk|rk)_test_/.test(env.STRIPE_SECRET_KEY?.trim() ?? '')) return false
-  let host: string
-  try { host = new URL(requestUrl).hostname } catch { return false }
-  if (env.WRANGLER_LOCAL === '1' && LOOPBACK.includes(host)) return true
-  return env.ENVIRONMENT === 'development' && sandboxHosts(env).includes(host)
+  return workspaceBillingMode(env, requestUrl) === 'sandbox'
 }
-/** The app origin Stripe returns to: loopback locally, an allowlisted sandbox
- * host when deployed. Never a browser-provided URL. */
-export function sandboxReturnOrigin(env: Env) {
-  const target = new URL(env.BASE_URL ?? '')
-  const deployed = env.ENVIRONMENT === 'development' && target.protocol === 'https:' && sandboxHosts(env).includes(target.hostname)
-  const local = env.WRANGLER_LOCAL === '1' && ['http:', 'https:'].includes(target.protocol) && LOOPBACK.includes(target.hostname)
-  if ((!local && !deployed) || target.username || target.password) throw new Error('Sandbox requires an allowlisted app return origin')
-  return target.origin
-}
-/** Rehearsal only. No payment/entitlement mutation and no production entry point. */
+export const sandboxReturnOrigin = billingReturnOrigin
+/** Persist reviewed checkout before Stripe. Payment activation remains webhook-owned. */
 export async function startWorkspaceCheckoutRehearsal(
   env: Env, orgId: number, email: string | null | undefined,
   rawInput: unknown, requestUrl: string, now = new Date(),
 ) {
-  if (!workspaceCheckoutRehearsalEnabled(env, requestUrl)) throw new Error('Checkout disabled')
+  if (!workspaceCheckoutEnabled(env, requestUrl)) throw new Error('Checkout disabled')
   const input = workspaceCheckoutInput.parse(rawInput)
   const db = env.AQUILLA_PG
   if (!db.transaction) throw new Error('Checkout requires transactions')
@@ -89,21 +71,22 @@ export async function startWorkspaceCheckoutRehearsal(
     if (otherCohort) throw new WorkspaceCheckoutConflict('Existing pricing assignment requires review')
     const existing = await readAttempt(tx, orgId)
     if (existing) {
-      if (existing.account_id !== catalog.accountId || existing.fingerprint !== fingerprint) {
+      if (existing.account_id !== catalog.accountId || existing.fingerprint !== fingerprint
+        || existing.sandbox !== !stripeLiveMode(env)) {
         throw new WorkspaceCheckoutConflict('An unresolved checkout already exists. Reconcile it before changing plans')
       }
       return existing
     }
     const id = crypto.randomUUID()
     const expiresAt = nowSec + 23 * 60 * 60
-    // Rehearsal returns only to the sandbox app origin, never a browser-provided URL.
+    // Return only to the configured, allowlisted app origin.
     const origin = sandboxReturnOrigin(env)
-    const metadata = { orgId: String(orgId), kind: 'workspace_plan_rehearsal',
+    const metadata = { orgId: String(orgId), kind: stripeLiveMode(env) ? 'workspace_plan' : 'workspace_plan_rehearsal',
       checkoutAttemptId: id, offer: quote.offer, billingInterval: quote.interval,
       priceVersion: quote.priceVersion, entitlementVersion: quote.entitlementVersion }
     const params: Record<string, string | number> = {
       mode: 'subscription', client_reference_id: String(orgId),
-      success_url: `${origin}/orgs/${orgId}/settings/billing?checkout=rehearsal`,
+      success_url: `${origin}/orgs/${orgId}/settings/billing?checkout=success`,
       cancel_url: `${origin}/orgs/${orgId}/settings/billing?checkout=cancel`,
       expires_at: expiresAt,
     }
@@ -119,9 +102,9 @@ export async function startWorkspaceCheckoutRehearsal(
     // Bind serialized JSON as text first: postgres.js otherwise encodes it twice.
     await tx.prepare(`INSERT INTO workspace_checkout_attempts
       (id, org_id, account_id, fingerprint, catalog_json, prices_json, quote_json,
-       request_params, expires_at) VALUES (?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?)`)
+       request_params, expires_at, sandbox) VALUES (?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)`)
       .bind(id, orgId, catalog.accountId, fingerprint, JSON.stringify(catalog),
-        JSON.stringify(prices), JSON.stringify(quote), JSON.stringify(params), expiresAt).run()
+        JSON.stringify(prices), JSON.stringify(quote), JSON.stringify(params), expiresAt, !stripeLiveMode(env)).run()
     const saved = await readAttempt(tx, orgId)
     if (!saved) throw new Error('Checkout request was not persisted')
     return saved
@@ -135,8 +118,8 @@ export async function startWorkspaceCheckoutRehearsal(
     ? await stripeForm(env, 'GET', `/checkout/sessions/${encodeURIComponent(attempt.session_id)}`)
     : await stripeForm(env, 'POST', '/checkout/sessions', attempt.request_params,
       `aquilla-workspace-${attempt.id}`)
-  if (typeof session.id !== 'string' || !/^cs_test_[a-zA-Z0-9_]+$/.test(session.id)
-    || session.livemode !== false || session.mode !== 'subscription'
+  if (!validCheckoutSessionId(session.id, stripeLiveMode(env))
+    || session.livemode !== stripeLiveMode(env) || session.mode !== 'subscription'
     || session.client_reference_id !== String(orgId)
     || (session.metadata as Record<string, unknown> | undefined)?.checkoutAttemptId !== attempt.id
     || (attempt.session_id !== null && session.id !== attempt.session_id)) {
@@ -151,7 +134,7 @@ export async function startWorkspaceCheckoutRehearsal(
       AND (session_id IS NULL OR session_id = ?) RETURNING id`)
     .bind(session.id, attempt.id, session.id).first()
   if (!saved) throw new Error('Checkout session could not be persisted')
-  return { attemptId: attempt.id, sessionId: session.id, url: url.toString(), sandbox: true }
+  return { attemptId: attempt.id, sessionId: session.id, url: url.toString(), sandbox: !stripeLiveMode(env) }
 }
 
 
@@ -161,7 +144,7 @@ export async function startWorkspaceCheckoutRehearsal(
 export async function reconcileWorkspaceCheckoutRehearsal(
   env: Env, orgId: number, requestUrl: string, expireOpen = false,
 ): Promise<{ status: 'none' | 'open' | 'payment_pending' | 'expired' }> {
-  if (!workspaceCheckoutRehearsalEnabled(env, requestUrl)) throw new Error('Checkout disabled')
+  if (!workspaceBillingMode(env, requestUrl)) throw new Error('Checkout disabled')
   const db = env.AQUILLA_PG
   if (!db.transaction) throw new Error('Checkout requires transactions')
   const attempt = await readAttempt(db, orgId)
@@ -172,7 +155,7 @@ export async function reconcileWorkspaceCheckoutRehearsal(
   const account = await stripeForm(env, 'GET', '/account')
   if (account.id !== attempt.account_id) throw new Error('Checkout account mismatch')
   let session = await stripeForm(env, 'GET', `/checkout/sessions/${encodeURIComponent(attempt.session_id)}`)
-  if (session.id !== attempt.session_id || session.livemode !== false
+  if (attempt.sandbox !== !stripeLiveMode(env) || session.id !== attempt.session_id || session.livemode !== stripeLiveMode(env)
     || session.mode !== 'subscription' || session.client_reference_id !== String(orgId)
     || (session.metadata as Record<string, unknown> | undefined)?.checkoutAttemptId !== attempt.id) {
     throw new Error('Checkout session mismatch')
@@ -183,7 +166,7 @@ export async function reconcileWorkspaceCheckoutRehearsal(
     session = await stripeForm(env, 'POST',
       `/checkout/sessions/${encodeURIComponent(attempt.session_id)}/expire`, {},
       `aquilla-workspace-expire-${attempt.id}`)
-    if (session.id !== attempt.session_id || session.livemode !== false
+    if (session.id !== attempt.session_id || session.livemode !== stripeLiveMode(env)
       || session.mode !== 'subscription' || session.client_reference_id !== String(orgId)
       || (session.metadata as Record<string, unknown> | undefined)?.checkoutAttemptId !== attempt.id) {
       throw new Error('Expired checkout session mismatch')

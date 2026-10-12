@@ -4,6 +4,7 @@ import path from "node:path"
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
 import { isReleaseBranch } from "./release-plan.mjs"
+import { hostedPosthog } from "./hosted-posthog.mjs"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
 const deploymentManifest = JSON.parse(
@@ -277,6 +278,32 @@ describe("worker deployment environment contract", () => {
       expect(topLevel).not.toContain(`name = "${productionName}"`)
       expect(production).toContain(`name = "${productionName}"`)
       expect(productionBuild).toContain(`command = "${guardCommand}"`)
+    },
+  )
+
+  // Wrangler would inherit the top-level [observability] block, but each deployed
+  // env declares its own so a top-level edit can't switch Workers Logs off.
+  it.each(
+    ["sync-worker/wrangler.toml", "auth-worker/wrangler.toml", "agent-worker/wrangler.toml"]
+      .flatMap((file) => ["production", "development"].map((profile) => [file, profile])),
+  )("keeps Workers Logs enabled in %s [env.%s]", (file, profile) => {
+    const config = readRepoFile(...file.split("/"))
+    const observability = tomlBlock(config, `[env.${profile}.observability]`)
+
+    expect(observability).toContain("enabled = true")
+  })
+
+  // AQU-1166: the two DB-heavy Workers run near Hyperdrive→Neon rather than at the
+  // requester's edge PoP. [placement] is not inherited by env blocks either, so a
+  // deployed profile that omits its own copy silently loses co-location.
+  it.each(["sync-worker/wrangler.toml", "auth-worker/wrangler.toml"])(
+    "co-locates %s with Postgres via Smart Placement in every deployed profile",
+    (file) => {
+      const config = readRepoFile(...file.split("/"))
+
+      for (const marker of ["[placement]", "[env.production.placement]", "[env.development.placement]"]) {
+        expect(tomlBlock(config, marker)).toContain('mode = "smart"')
+      }
     },
   )
 
@@ -669,6 +696,9 @@ describe("worker deployment environment contract", () => {
       .toBe("bash scripts/ci-build.sh")
     expect(rootPackage.scripts["build:compile"]).toBe("tsc -b && vite build")
     expect(build).toContain("pnpm exec tsc -b")
+    // esbuild bundles the Workers without type-checking them.
+    expect(build).toContain("pnpm --dir auth-worker run type-check")
+    expect(build).toContain("pnpm --dir sync-worker run type-check")
     expect(build).not.toMatch(/pnpm (?:test|lint|run build\n)/)
     expect(build).not.toMatch(/scan:secrets|idml:gate|neon:check/)
     const hook = readRepoFile(".husky", "pre-push")
@@ -832,11 +862,17 @@ describe("worker deployment environment contract", () => {
 
   it("installs Chromium before running IDML browser conformance in CI", () => {
     const workflow = readRepoFile(".github", "workflows", "ci.yml")
-    const installBrowser = workflow.indexOf("pnpm exec playwright install --with-deps chromium")
+    const installBrowser = workflow.indexOf("uses: ./.github/actions/playwright-chromium")
     const runIdmlTests = workflow.indexOf("pnpm test:idml")
 
     expect(installBrowser).toBeGreaterThan(-1)
     expect(runIdmlTests).toBeGreaterThan(installBrowser)
+
+    // The shared action caches the browser and installs Chromium's system
+    // libraries only when it cannot start without them (apt is the slow step).
+    const action = readRepoFile(".github", "actions", "playwright-chromium", "action.yml")
+    expect(action).toContain("pnpm exec playwright install chromium")
+    expect(action).toContain("pnpm exec playwright install-deps chromium")
   })
 })
 
@@ -866,6 +902,8 @@ describe("PostHog EU region contract (AQU-854)", () => {
     ["sync-worker", "wrangler.toml"],
     ["agent-worker", "wrangler.toml"],
     ["config", "cloudflare-deployments.json"],
+    ["config", "posthog.json"],
+    ["scripts", "hosted-posthog.mjs"],
     [".env.example"],
     ["auth-worker", ".dev.vars.example"],
     ["sync-worker", ".dev.vars.example"],
@@ -928,11 +966,11 @@ describe("PostHog EU region contract (AQU-854)", () => {
     }
   })
 
-  it("retires the US project token in the deployment manifest without pinning the host", () => {
-    // Blank until the EU project token exists (account-side dependency); a
-    // blank key makes `shipLog` a no-op instead of posting a retired token.
-    // The plainText check above asserts this against the real wrangler section.
-    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY).toBe("")
+  it("pins the verified EU token in the deployment manifest without pinning the host", () => {
+    // The manifest must not restore the old blank key on the next deploy.
+    // The plainText check above also compares it with the real wrangler section.
+    expect(deploymentManifest.surfaces.sync.environments.production.plainText.POSTHOG_KEY)
+      .toBe(hostedPosthog.projectToken)
 
     // POSTHOG_HOST is deliberately NOT manifest-pinned. auth-worker's
     // environment-guard turns every identity plainText key into a hard runtime

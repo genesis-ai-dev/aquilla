@@ -1,15 +1,19 @@
 // Knowledge base HTTP surface (spec: docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
 // projectKnowledge mounts at /api/v2/projects, orgKnowledge at /api/v2/orgs.
 // Originals live in R2 (SNAPSHOTS) under kb/…; extracted text + tree in
-// knowledge_docs via db/shared/knowledge.ts. Indexing runs async (waitUntil).
+// knowledge_docs via db/shared/knowledge.ts. Indexing runs async (waitUntil) on
+// a connection of its own — see indexDocOnOwnConnection (AQU-1763).
 import { Hono, type Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { ROLE } from "../types"
+import { ROLE, type Env } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
-import { extractTextFromDocx, extractTextFromPdf } from "./parse-document"
+import { DocumentExtractionError, extractTextFromDocx, extractTextFromPdf } from "./parse-document"
+import { shipLog } from "../posthog-logs"
 import { indexKnowledgeDoc } from "../lib/knowledge/index-doc"
+import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
+import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
   createDoc,
   listProjectDocs,
@@ -75,7 +79,14 @@ function kbContentTypeForExtension(fileName: string): string {
 
 type ExtractResult =
   | { ok: true; text: string }
-  | { ok: false; code: ErrorCode; message: string; status: ContentfulStatusCode }
+  | {
+      ok: false
+      code: ErrorCode
+      message: string
+      status: ContentfulStatusCode
+      /** Inflated size of word/document.xml, when the failure was about it. */
+      documentXmlBytes?: number
+    }
 
 function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
   const ext = kbExtension(fileName)
@@ -93,7 +104,23 @@ function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
     }
     try {
       text = ext === ".docx" ? extractTextFromDocx(bytes) : extractTextFromPdf(bytes)
-    } catch {
+    } catch (err) {
+      // AQU-1499: this used to be a bare `catch` returning a flat "could not
+      // extract text", so an uploader whose file failed for a knowable,
+      // fixable reason had nothing to act on and no way to tell a bad file
+      // from a bad parser. DocumentExtractionError messages are authored in
+      // parse-document.ts for exactly this — they name no internals and are
+      // passed through verbatim. Anything else still reports generically.
+      if (err instanceof DocumentExtractionError) {
+        return {
+          ok: false,
+          code: "validation_failed",
+          message: `could not extract text: ${err.message}`,
+          status: 422,
+          ...(err.documentXmlBytes !== undefined ? { documentXmlBytes: err.documentXmlBytes } : {}),
+        }
+      }
+      console.error("[knowledge] text extraction failed:", err)
       return { ok: false, code: "validation_failed", message: "could not extract text", status: 422 }
     }
   } else {
@@ -111,12 +138,12 @@ function extractText(fileName: string, bytes: Uint8Array): ExtractResult {
   return { ok: true, text: text.slice(0, MAX_KB_TEXT_CHARS) }
 }
 
-/** Fire the indexing job off c.executionCtx.waitUntil when available; in the
- *  test harness there's no real ExecutionContext and the getter throws, so
- *  fall back to letting the promise settle on its own (matches the pattern
- *  used elsewhere in this worker, e.g. routes/project-members.ts). */
-function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
-  const task = indexKnowledgeDoc(c.env, c.env.AQUILLA_PG, docId)
+/** Fire-and-forget a background task off c.executionCtx.waitUntil when there
+ *  is one. Hono throws on `c.executionCtx` when the request was made without a
+ *  real ExecutionContext (the vitest harness calls app.fetch directly), so fall
+ *  back to letting the promise settle on its own — same pattern as
+ *  `runIndexing` below and the middleware in index.ts. */
+function runInBackground(c: Context<AuthHonoEnv>, task: Promise<void>): void {
   try {
     c.executionCtx.waitUntil(task)
   } catch {
@@ -124,7 +151,78 @@ function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
   }
 }
 
-async function handleUpload(
+/** A Postgres handle the indexing job owns, plus the release that hands it
+ *  back. The job always awaits `close`, so it runs exactly once per handle. */
+export interface IndexingConnection {
+  db: AquillaDb
+  close(): Promise<void>
+}
+
+/** Open a connection the indexing job owns, or null when this worker has no
+ *  connection string to open one from (the vitest harness injects AQUILLA_PG
+ *  directly and sets none). */
+export function openIndexingConnection(
+  env: Pick<Env, "PG_CONNECTION_STRING">,
+): IndexingConnection | null {
+  if (!env.PG_CONNECTION_STRING) return null
+  const shim = makePostgres(env.PG_CONNECTION_STRING)
+  return { db: shim as unknown as AquillaDb, close: () => shim.close() }
+}
+
+/** Index one doc on a connection that outlives the response, releasing it only
+ *  once the job has settled.
+ *
+ *  AQU-1763: this job must NOT run on the request-scoped `AQUILLA_PG` shim.
+ *  index.ts closes that shim in its `finally` the moment the Response returns,
+ *  and postgres.js `end({ timeout: 5 })` destroys the pool 5s later — while
+ *  indexing is still awaiting a model round-trip of up to
+ *  `KB_INDEX_FETCH_TIMEOUT_MS` (60s). Both the terminal `index_status='ready'`
+ *  write and the compensating `'failed'` write in its catch then landed on a
+ *  dead connection, so the row never left `pending`: every upload showed
+ *  "Indexing…" and then "Indexing stalled" (AQU-1376's read-side window) for a
+ *  document that was never indexed at all — whatever its size, format or
+ *  language. The job therefore owns its connection for its lifetime, the same
+ *  contract the other post-response writers use (routes/agent.ts's `runShim`,
+ *  routes/chat.ts's `afterResponse`).
+ *
+ *  `open` is injectable so the regression test can supply a live handle while
+ *  the request-scoped one is already dead. */
+export async function indexDocOnOwnConnection(
+  env: Env,
+  docId: string,
+  open: (env: Pick<Env, "PG_CONNECTION_STRING">) => IndexingConnection | null = openIndexingConnection,
+): Promise<void> {
+  const own = open(env)
+  try {
+    await indexKnowledgeDoc(env, own?.db ?? env.AQUILLA_PG, docId)
+  } finally {
+    // Releasing the connection must not mask the job's own outcome, and
+    // indexKnowledgeDoc never throws — so a close failure is logged, not raised.
+    await own?.close().catch((err: unknown) => {
+      console.error(`[knowledge] releasing the indexing connection for ${docId} failed:`, err)
+    })
+  }
+}
+
+/** Fire the indexing job off c.executionCtx.waitUntil when available; in the
+ *  test harness there's no real ExecutionContext and the getter throws, so
+ *  fall back to letting the promise settle on its own (matches the pattern
+ *  used elsewhere in this worker, e.g. routes/project-members.ts). */
+function runIndexing(c: Context<AuthHonoEnv>, docId: string): void {
+  runInBackground(
+    c,
+    indexDocOnOwnConnection(c.env, docId).catch((err: unknown) => {
+      console.error(`[knowledge] indexing job for ${docId} failed to start:`, err)
+    }),
+  )
+}
+
+/** The one upload implementation: extension allowlist → size cap → text
+ *  extraction → R2 put → row insert → async indexing. Exported so the
+ *  server-to-server route the Agent API bridges through (routes/
+ *  knowledge-internal.ts, AQU-1762) runs exactly this, rather than forking a
+ *  second uploader that would strand its docs at index_status 'pending'. */
+export async function handleUpload(
   c: Context<AuthHonoEnv>,
   scope: KnowledgeScopeRef,
   createdBy: string,
@@ -172,6 +270,21 @@ async function handleUpload(
 
   const extracted = extractText(fileName, bytes)
   if (!extracted.ok) {
+    // AQU-1499: count the rejections. Partners hit this on their first
+    // knowledge-base upload and work around it privately (re-saving the file),
+    // so without a queryable record of its own the failure stays invisible to
+    // us — the generic 4xx log the global middleware already ships cannot be
+    // counted by reason or by document.xml size.
+    runInBackground(
+      c,
+      shipLog(c.env, "aquilla-identity", "warn", `kb-extract-failed: ${extracted.code}`, {
+        "kb.extension": kbExtension(fileName) ?? "unknown",
+        "kb.size_bytes": bytes.byteLength,
+        "kb.document_xml_bytes": extracted.documentXmlBytes,
+        "kb.reason": extracted.message,
+        "http.status": extracted.status,
+      }),
+    )
     const { body, status } = errorJson(extracted.code, extracted.message, extracted.status)
     return c.json(body, status)
   }
@@ -211,7 +324,22 @@ async function handleUpload(
 
   runIndexing(c, id)
 
+  // Snapshot before the copy. Indexing is already in flight, and awaiting the
+  // downstream copy yields long enough for that job to finish — the response
+  // would then say "ready" for a document the client was told was still pending.
   const doc = await getDocMeta(c.env.AQUILLA_PG, id)
+  if ("projectId" in scope) {
+    try {
+      await propagateKnowledgeDocs(c.env.AQUILLA_PG, scope.projectId, {
+        updatedBy: createdBy,
+        blobs: bucket,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("[inherited-settings] knowledge propagate failed:", err)
+    }
+  }
+
   return c.json({ doc }, 201)
 }
 
@@ -231,6 +359,17 @@ async function handleDelete(
   await deleteDoc(c.env.AQUILLA_PG, docId)
   const bucket = c.env.SNAPSHOTS
   if (bucket) await bucket.delete(meta.r2Key).catch(() => {})
+  if (meta.projectId) {
+    try {
+      await propagateKnowledgeDocs(c.env.AQUILLA_PG, meta.projectId, {
+        updatedBy: meta.createdBy,
+        blobs: bucket ?? null,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("[inherited-settings] knowledge propagate failed:", err)
+    }
+  }
   return c.json({ ok: true })
 }
 

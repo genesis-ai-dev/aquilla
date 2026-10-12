@@ -215,6 +215,16 @@ describe("runSynthAll", () => {
     await runSynthAll({ cells, project: mockProject, session: mockSession, username: "user1" })
     expect(generateCellVoice).toHaveBeenCalledTimes(2)
   })
+
+  // AQU-1572: each line it voices reports its own `audio generated` from the
+  // attach; the run only says where they came from.
+  it("tells every generation it is part of Generate all", async () => {
+    const { generateCellVoice } = await import("./voice-generate-helpers")
+    vi.mocked(generateCellVoice).mockClear()
+    const cells = [makeCell({ id: "c1", translated: "Hola" }), makeCell({ id: "c2", translated: "Adios" })]
+    await runSynthAll({ cells, project: mockProject, session: mockSession, username: "user1" })
+    expect(vi.mocked(generateCellVoice).mock.calls.map(([a]) => a.surface)).toEqual(["generate-all", "generate-all"])
+  })
 })
 
 describe("cancel flags", () => {

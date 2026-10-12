@@ -515,6 +515,7 @@ export function UsernameTypeahead({
                         </span>
                         <span className="min-w-0 flex-1 truncate">
                           <UsernameWithAvatar
+                            userId={u.id}
                             username={u.username}
                             size="xs"
                             nameClassName="text-sm font-normal"
@@ -536,6 +537,7 @@ export function UsernameTypeahead({
                       }`}
                     >
                       <UsernameWithAvatar
+                        userId={u.id}
                         username={u.username}
                         size="xs"
                         nameClassName="text-sm font-normal"

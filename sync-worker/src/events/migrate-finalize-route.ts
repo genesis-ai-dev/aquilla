@@ -35,11 +35,13 @@ const PATH = '/migrate/finalize'
  *  recompute — same rows, one statement. */
 const MAX_SCOPED_FILE_IDS = 500
 
-/** Statements per pipelined batch. `fullProgressRecomputeStmts` emits 2 per
- *  file, and postgres.js keeps up to 100 statements in flight (see PgRunOpts
- *  in db/shim/postgres.ts), so this fills the pipeline without building an
- *  unbounded batch for a project with hundreds of files. */
-const PROGRESS_BATCH_STMTS = 100
+/** Statements per pipelined batch. `fullProgressRecomputeStmts` emits 3 per
+ *  file (AQU-1493 added the line placements ahead of the two progress
+ *  statements), and postgres.js keeps up to 100 statements in flight (see
+ *  PgRunOpts in db/shim/postgres.ts), so this fills the pipeline without
+ *  building an unbounded batch for a project with hundreds of files. A
+ *  multiple of 3, so one file's statements never straddle two batches. */
+const PROGRESS_BATCH_STMTS = 99
 
 /** Prefer the pipelined executor; test doubles and non-postgres.js shims only
  *  implement `batch()`. Same atomicity and ordering either way. */

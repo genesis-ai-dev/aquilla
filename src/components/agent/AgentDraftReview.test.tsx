@@ -61,6 +61,7 @@ let reviewStatus: number
 let activityStatus: number
 let writeOutcome: "applied" | "offline" | "stale" | "rejected" | "staleSource"
 let allowSelfValidation: boolean
+let moreSettings: Record<string, unknown>
 let activeRun: ContextualRunRecord
 
 function source(cellId: string, value = `Full source ${cellId}`): CellRow {
@@ -95,6 +96,7 @@ beforeEach(async () => {
   draftStatus = reviewStatus = activityStatus = 200
   writeOutcome = "applied"
   allowSelfValidation = false
+  moreSettings = {}
   requests = []
   posted = []
   rejectedPosts = []
@@ -106,7 +108,7 @@ beforeEach(async () => {
     if (url.pathname.endsWith("/sync-token")) return json({
       token: "sync-jwt", expiresIn: 900, role: { level: mocks.role, name: "role", source: "org" },
     })
-    if (url.pathname.endsWith("/settings")) return json({ version: 1, settings: { allowSelfValidation } })
+    if (url.pathname.endsWith("/settings")) return json({ version: 1, settings: { allowSelfValidation, ...moreSettings } })
     if (url.pathname.endsWith("/activity")) return json({
       run: { ...activeRun, id: activeRun.runId }, events: [], sceneBriefs: [], drafts: [],
       draftCounts: { proposed: drafts.filter((draft) => draft.runId === activeRun.runId).length, applied: 0, rejected: 0, superseded: 0 },
@@ -369,6 +371,24 @@ describe("AgentDraftReview", () => {
     await screen.findByText("Suggestion 2")
     expect(posted.map((event) => event.kind)).toEqual(["target.cell.commit", "cell.validate"])
     expect(posted[1].payload).toMatchObject({ editEventId: posted[0].id })
+  })
+
+  // AQU-1571: the project's minimum role and named-validator list refuse the
+  // vote server-side, after the text has already saved. Accepting must save
+  // the text and queue no vote, rather than end in "could not be confirmed".
+  it.each([
+    ["below the project's minimum role", { validationRoleFloor: "project_lead" }],
+    ["left off the named-validator list", { validationNamedUsers: ["bob"] }],
+  ])("queues no validation for a contributor %s", async (_label, rules) => {
+    allowSelfValidation = true
+    moreSettings = rules
+    mocks.role = 400
+    show()
+    await loaded()
+    fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
+    await screen.findByText("Suggestion 2")
+    expect(posted.map((event) => event.kind)).toEqual(["target.cell.commit"])
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
   it.each(["source", "target", "proposal"])("fails closed when the %s changed after review", async (changed) => {

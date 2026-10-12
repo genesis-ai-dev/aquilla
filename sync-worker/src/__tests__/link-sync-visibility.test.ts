@@ -24,6 +24,7 @@ import { mirrorSync, laneRelevantHeadSeq, deterministicDownstreamFileId } from "
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import type { AquillaStatement } from "../../../db/shim/postgres"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { headParentFor } from "./helpers/chain-parent"
 
 const UPSTREAM = "proj-upstream"
 const DOWNSTREAM = "proj-downstream"
@@ -65,10 +66,11 @@ async function emitUpstream(
     [UPSTREAM],
   )
   const seq = Number(seqRow.rows[0]?.next_seq ?? 1)
+  const parentId = await headParentFor(t, UPSTREAM, kind, args.fileId, args.cellId, args.payload)
   await t.pg.query(
     `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq)
-     VALUES ($1, 1, $2, $3, $4, NULL, $5, 'lead', $6, 1, $7, $8)`,
-    [id, UPSTREAM, args.fileId ?? null, args.cellId ?? null, kind, JSON.stringify(args.payload), seq, seq],
+     VALUES ($1, 1, $2, $3, $4, $9, $5, 'lead', $6, 1, $7, $8)`,
+    [id, UPSTREAM, args.fileId ?? null, args.cellId ?? null, kind, JSON.stringify(args.payload), seq, seq, parentId],
   )
   const event: PersistedEvent = {
     id,
@@ -76,7 +78,7 @@ async function emitUpstream(
     projectId: UPSTREAM,
     fileId: args.fileId ?? null,
     cellId: args.cellId ?? null,
-    parentId: null,
+    parentId,
     kind,
     author: "lead",
     payload: args.payload,
@@ -112,7 +114,7 @@ async function downstreamCell(
 ): Promise<{ value: string; hidden: boolean } | undefined> {
   const r = await t.pg.query<{ value: string; hidden_at: string | null }>(
     `SELECT value, hidden_at FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
     [DOWNSTREAM, DOWNSTREAM_FILE, cellId],
   )
   const row = r.rows[0]
@@ -261,7 +263,7 @@ describe("mirrorSync — upstream hide/show reaches the downstream (AQU-1453)", 
 
       const r = await t.pg.query<{ value: string; tombstoned_at: string | null }>(
         `SELECT value, tombstoned_at FROM cells
-          WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+          WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
         [DOWNSTREAM, DOWNSTREAM_FILE, "cell-2"],
       )
       expect(r.rows[0]?.tombstoned_at).not.toBeNull()
@@ -356,7 +358,7 @@ async function chainedCell(
 ): Promise<{ value: string; hidden: boolean } | undefined> {
   const r = await t.pg.query<{ value: string; hidden_at: string | null }>(
     `SELECT value, hidden_at FROM cells
-      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
     [CHAINED, CHAINED_FILE, cellId],
   )
   const row = r.rows[0]

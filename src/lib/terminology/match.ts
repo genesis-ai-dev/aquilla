@@ -1,4 +1,4 @@
-import type { Concept, TermMatchingSettings } from "./types"
+import type { ConceptMatchInput, TermMatchingSettings } from "./model"
 import { resolveMatchOptions } from "./match-options"
 
 /**
@@ -185,7 +185,7 @@ export function matchesTerm(
   return re !== null && re.test(haystack)
 }
 
-type ConceptLike = Pick<Concept, "sourceTerm" | "match"> & { caseSensitive?: boolean }
+type ConceptLike = ConceptMatchInput
 
 export interface ConceptRegexOpts {
   /** Skip the exclusion lookahead so excluded surface forms still match. */

@@ -137,6 +137,8 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # Support/help-menu contact links surfaced to the client.
 # CONTACT_EMAIL=""
 # DISCORD_INVITE_URL=""
+# In-app feedback goes to this Discord channel webhook (secret). Unset = accepted, not delivered.
+# DISCORD_FEEDBACK_WEBHOOK_URL=""
 # EMAIL_REPLY_TO=""
 
 # Model overrides for contextual (translation-assist) features and the

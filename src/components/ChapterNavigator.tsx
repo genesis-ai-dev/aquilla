@@ -38,6 +38,7 @@ import { useFormat } from "@/lib/i18n/format"
 import { useOverflowTitle } from "@/hooks/useOverflowTitle"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 export interface MilestoneNavigationItem {
   key: string
@@ -253,9 +254,8 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   return VOCABULARIES.milestone
 }
 
-function percent(part: number, total: number): number {
-  return total > 0 ? Math.round((part / total) * 100) : 0
-}
+// AQU-1493: never 100 while a cell is outstanding.
+const percent = progressPercent
 
 /**
  * One progress line: a marker icon, then the percentage right-aligned in the
@@ -295,7 +295,9 @@ function ProgressSummary({ translated, validated, total }: {
 }) {
   const t = useT()
   const f = useFormat()
-  const asPercent = (part: number) => f.percent(total > 0 ? part / total : 0)
+  // AQU-1493: the visible figure follows the same never-100-while-work-is-left
+  // rule as the label read out beside it (Jude 1 at 219/220 showed "100%").
+  const asPercent = (part: number) => f.percent(percent(part, total) / 100)
   return (
     <span className="w-14 shrink-0 text-xs tabular-nums text-muted-foreground">
       <ProgressLine

@@ -4,15 +4,27 @@
 // UI filters. Files whose R2 object is missing are skipped; 404 only when
 // nothing could be packed.
 //
+// AQU-1863: the archive is streamed. Originals run up to ~95 MB each, so
+// reading them all and then copying them into one zip buffer blew the Worker's
+// 128 MB memory limit at about two 50 MB files. Existence is settled up front
+// with R2 `head()` (metadata only) so the skip/404 contract above is unchanged,
+// then each original's bytes are piped straight into the response.
+//
 // Auth: same exportMinRole floor as export/bundle (AQU-253).
 
+import { attachmentDisposition } from "./content-disposition"
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
 import { resolveExportFloor } from "./export-floor"
 import { humanOriginalDownloadName, uniqueZipEntryName } from "../../../shared/import-contract"
-import { makeZip, type ZipEntry } from "../lib/zip"
-import { readOriginalSourceBytes } from "./original-source"
+import { makeZipStream, type StreamZipEntry } from "../lib/zip"
+import {
+  decodeInlineOriginal,
+  isBase64InlineFormat,
+  openOriginalSourceStream,
+} from "./original-source"
+import { countedFileSql } from "../../../db/shared/counted-files"
 
 export interface OriginalsBundleEnv {
   AQUILLA_PG?: AquillaDb
@@ -58,19 +70,26 @@ export async function handleOriginalsBundleRequest(
 
   const blobs = await db
     .prepare(
-      `SELECT b.file_id AS file_id, b.format AS format, b.raw_source AS raw_source,
+      // raw_source is deliberately NOT selected: a legacy inline blob is read
+      // one at a time while its zip entry is written (AQU-1863), so the result
+      // set stays metadata-sized however many originals the project has.
+      `SELECT b.file_id AS file_id, b.format AS format,
+              length(b.raw_source) AS raw_source_len,
               b.r2_key AS r2_key, f.name AS name
          FROM file_source_blobs b
          JOIN files f ON f.id = b.file_id AND f.project_id = b.project_id
         WHERE b.project_id = ?
-          AND f.deleted_at IS NULL
+          -- AQU-1566: a caption track keeps its original caption file too,
+          -- but the track is not a file of the project, so its original is
+          -- not one of the project's originals.
+          AND ${countedFileSql("f")}
         ORDER BY f.name ASC`,
     )
     .bind(projectId)
     .all<{
       file_id: string
       format: string
-      raw_source: string | null
+      raw_source_len: number | string | null
       r2_key: string | null
       name: string | null
     }>()
@@ -82,16 +101,54 @@ export async function handleOriginalsBundleRequest(
     )
   }
 
+  const readInlineSource = (fileId: string) =>
+    db
+      .prepare(`SELECT raw_source FROM file_source_blobs WHERE file_id = ? AND project_id = ?`)
+      .bind(fileId, projectId)
+      .first<{ raw_source: string | null }>()
+      .then((r) => r?.raw_source ?? null)
+
+  // Settle which originals are packable BEFORE the response starts, so the
+  // "skip what is missing, 404 only when nothing could be packed" contract is
+  // the same as when the whole archive was built in memory.
   const used = new Set<string>()
-  const entries: ZipEntry[] = []
+  const entries: StreamZipEntry[] = []
   for (const row of rows) {
-    const resolved = await readOriginalSourceBytes(row, env.SNAPSHOTS)
-    if (!resolved.ok) continue
+    const { file_id: fileId, format, r2_key: r2Key } = row
+    let inlineBytes: Uint8Array | null = null
+    if (r2Key) {
+      // Metadata-only existence check — the bytes are fetched later, while
+      // this entry is being written.
+      if (!(await env.SNAPSHOTS.head(r2Key))) continue
+    } else if (Number(row.raw_source_len ?? 0) <= 0) {
+      continue
+    } else if (isBase64InlineFormat(format)) {
+      // A base64 side-car is the one source that can be *corrupt* rather than
+      // just absent, and that is only knowable by decoding it. These are
+      // pre-R2 legacy rows, capped by the old D1 row limit, so decoding them
+      // up front stays far from the memory ceiling this route exists to respect.
+      const raw = await readInlineSource(fileId)
+      inlineBytes = raw ? decodeInlineOriginal(raw) : null
+      if (!inlineBytes) continue
+    }
     const name = uniqueZipEntryName(
       humanOriginalDownloadName(row.name, row.format),
       used,
     )
-    entries.push({ name, data: resolved.bytes })
+    entries.push({
+      name,
+      open: async () => {
+        if (inlineBytes) return inlineBytes
+        if (r2Key) {
+          return openOriginalSourceStream({ format, raw_source: null, r2_key: r2Key }, env.SNAPSHOTS)
+        }
+        // Legacy inline text, read only now so one row is resident at a time.
+        return openOriginalSourceStream(
+          { format, raw_source: await readInlineSource(fileId), r2_key: null },
+          env.SNAPSHOTS,
+        )
+      },
+    })
   }
   if (entries.length === 0) {
     return withCors(
@@ -100,7 +157,6 @@ export async function handleOriginalsBundleRequest(
     )
   }
 
-  const zip = makeZip(entries)
   const project = await db
     .prepare(`SELECT name FROM projects WHERE id = ?`)
     .bind(projectId)
@@ -109,11 +165,11 @@ export async function handleOriginalsBundleRequest(
   const zipName = `${safe || "project"}-originals.zip`
 
   return withCors(
-    new Response(zip, {
+    new Response(makeZipStream(entries), {
       status: 200,
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${zipName.replace(/"/g, "")}"`,
+        "Content-Disposition": attachmentDisposition(zipName),
         "X-Content-Type-Options": "nosniff",
       },
     }),

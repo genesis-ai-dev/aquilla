@@ -38,8 +38,9 @@ import { AdminPlatformSection } from "@/components/admin/AdminPlatformSection"
 import { AdminRetentionSection } from "@/components/admin/AdminRetentionSection"
 import { AdminMigrationSection } from "@/components/admin/AdminMigrationSection"
 import { AdminElevationGate } from "@/components/admin/AdminElevationGate"
+import { AdminInvitesSection } from "@/components/admin/AdminInvitesSection"
 
-type Tab = "overview" | "retention" | "migration" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform"
+type Tab = "overview" | "retention" | "migration" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform" | "invites"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "retention", label: "Retention" },
@@ -50,6 +51,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "projects", label: "Projects" },
   { key: "activity", label: "Activity" },
   { key: "platform", label: "Platform" },
+  { key: "invites", label: "Invites & links" },
 ]
 
 /**
@@ -73,6 +75,7 @@ export function AdminConsole() {
   const { setActiveOrg } = useActiveOrg()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>("overview")
+  const [selectedInvitesOrgId, setSelectedInvitesOrgId] = useState<number | null>(null)
 
   const [overview, setOverview] = useState<AdminOverview | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
@@ -215,6 +218,10 @@ export function AdminConsole() {
               teams={teams}
               onOpenOrg={openOrg}
               onOpenOrgPath={openOrgPath}
+              onOpenInvites={(orgId) => {
+                setSelectedInvitesOrgId(orgId)
+                setTab("invites")
+              }}
             />
           </TabsContent>
 
@@ -237,6 +244,18 @@ export function AdminConsole() {
           </TabsContent>
 
           <TabsContent value="platform">{jwt && <AdminPlatformSection jwt={jwt} />}</TabsContent>
+
+          <TabsContent value="invites">
+            {jwt && (
+              <AdminInvitesSection
+                jwt={jwt}
+                orgs={orgs}
+                projects={projects}
+                users={users}
+                initialOrgId={selectedInvitesOrgId ?? undefined}
+              />
+            )}
+          </TabsContent>
         </div>
       </Tabs>
     )

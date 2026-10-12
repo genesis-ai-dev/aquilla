@@ -1,3 +1,4 @@
+import { CATALOGS, unknownCatalogKeys } from "./messages"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { describe, it, expect } from "vitest"
@@ -36,6 +37,11 @@ import { SURFACE_DRIVER_IDS } from "../../../scripts/i18n-shots/index"
  * special-casing here.
  */
 describe("catalog context coverage (AQU-832)", () => {
+  it("rejects obsolete locale keys before catalog publication (AQU-1661)", () => {
+    expect(unknownCatalogKeys(CATALOGS)).toEqual([])
+    expect(unknownCatalogKeys({ fr: { "agent.chatOptions.resetItem": "Reset" } }))
+      .toEqual(["fr: agent.chatOptions.resetItem"])
+  })
   it("reports no coverage or consistency issues for the en catalog", () => {
     expect(catalogContextIssues()).toEqual([])
   })

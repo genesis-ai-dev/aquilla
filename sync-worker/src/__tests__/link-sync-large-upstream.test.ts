@@ -111,9 +111,7 @@ async function seedSourceCells(t: TestDb, fileId: string, count: number): Promis
     [UPSTREAM, fileId, base, count],
   )
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, 'cell-' || g, 'source', '', 'Verse ' || g, 'MAT 1:' || g, 'evt-src-' || $2::text || '-' || g, 'lead', 1
-       FROM generate_series(1, $3::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_editor, last_edit_at) SELECT $1, $2, 'cell-' || g, 'source', 'Verse ' || g, 'MAT 1:' || g, 'evt-src-' || $2::text || '-' || g, 'lead', 1 FROM generate_series(1, $3::int) g`,
     [UPSTREAM, fileId, count],
   )
 }
@@ -132,9 +130,7 @@ async function seedTargetCommits(t: TestDb, fileId: string, count: number): Prom
     [UPSTREAM, fileId, base, count],
   )
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, 'cell-' || g, 'target', '', 'Verset ' || g, 'evt-tgt-' || $2::text || '-' || g, 'translator', 1
-       FROM generate_series(1, $3::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at) SELECT $1, $2, 'cell-' || g, 'target', 'Verset ' || g, 'evt-tgt-' || $2::text || '-' || g, 'translator', 1 FROM generate_series(1, $3::int) g`,
     [UPSTREAM, fileId, count],
   )
 }
@@ -235,7 +231,10 @@ describe("mirrorSync — an upstream past what one statement can carry (AQU-1543
 
       const result = await mirrorSync(t.db, DOWNSTREAM)
 
-      expect(result).toMatchObject({ ranSync: true, cellsMirrored: 6_000, filesMirrored: 2, toSeq: head })
+      // 6,002, not 6,000 (AQU-1563): the sync folds in bounded windows, and the
+      // two hidden cells were created in the first window and hidden in the
+      // last, so each window mirrors its own state of them.
+      expect(result).toMatchObject({ ranSync: true, cellsMirrored: 6_002, filesMirrored: 2, toSeq: head, more: false })
       expect(await downstreamFiles(t)).toEqual([
         { file_id: deterministicDownstreamFileId(DOWNSTREAM, FILE_B), name: "Mark", cells: 2_500, hidden: 1 },
         { file_id: deterministicDownstreamFileId(DOWNSTREAM, FILE_A), name: "Matthew", cells: 3_500, hidden: 1 },
@@ -291,7 +290,13 @@ describe("mirrorSync — statement size does not grow with the upstream (AQU-154
       if (consumes === "target") await seedTargetCommits(t, FILE_A, cells)
 
       tracker.reset() // measure the sync, not the seeding
-      const result = await mirrorSync(t.db, DOWNSTREAM)
+      // Windows of 1,100 events, so that EVERY run spans more than one window
+      // and runs every statement shape a sync has: AQU-1567's look ahead
+      // (deletedByHead) only reads on a window that is not the run's last, and
+      // under the default 2,000 a 1,200-cell run is one window while a
+      // 2,400-cell one is two. A window still holds more cells than one lookup
+      // chunk and more events than one INSERT, so both bounds are exercised.
+      const result = await mirrorSync(t.db, DOWNSTREAM, { windowEvents: 1_100 })
       expect(result).toMatchObject({ ranSync: true, cellsMirrored: cells, filesMirrored: 1 })
       expect((await downstreamFiles(t))[0]).toMatchObject({ name: "Matthew", cells })
       return { ...tracker.sizes }
@@ -345,7 +350,13 @@ describe("mirrorSync — statement size does not grow with the upstream (AQU-154
         [DOWNSTREAM],
       )
       expect(blank.rows).toHaveLength(0)
-      expect(tracker.sizes).toEqual(firstSync)
+      // No statement bigger than the first sync's chunked ones. Not `toEqual`:
+      // the first sync also replays its creates' chains (AQU-1574 — two
+      // leading binds per chunk, so one value more than this window's lookups),
+      // and a window of hides has no chain event to replay.
+      expect(tracker.sizes.eventsInsert).toBe(firstSync.eventsInsert)
+      expect(tracker.sizes.cellKeyLookup).toBeGreaterThan(0)
+      expect(tracker.sizes.cellKeyLookup).toBeLessThanOrEqual(firstSync.cellKeyLookup)
     } finally {
       await t.close()
     }

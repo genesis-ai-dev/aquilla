@@ -12,6 +12,9 @@
  * hole — but drift defeats the point, so update both together.
  */
 
+import { laneScopeTags } from "@/lib/lanes/scope-ids"
+import { READ_WALL_MAINTAINER, type LaneIdentity } from "@/lib/lanes/read-wall"
+
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,
@@ -105,6 +108,11 @@ const REQUIRED_ROLE: Record<string, number> = {
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
   "file.corpus.set": ROLE.CONTRIBUTOR,
+  // AQU-1569: a reorder changes the sidebar for EVERY member of the project,
+  // so it sits with file.video.set ("project setup, not an edit") rather than
+  // with the contributor-level file.rename / file.corpus.set, which change one
+  // file's own label. Mirrored server-side in sync-worker role-policy.ts.
+  "file.reorder": ROLE.PROJECT_LEAD,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
 
@@ -191,6 +199,21 @@ export function canPerform(kind: string, roleLevel: number | null | undefined): 
   const required = requiredRoleFor(kind)
   if (required == null) return true
   return roleLevel >= required
+}
+
+/**
+ * AQU-1565 follow-up: marking a clip as the file's SOURCE audio (the shared
+ * programme recording every media row plays) is setting up the file, not
+ * recording a line, so it sits with the source-side import writes at Project
+ * Lead rather than with an ordinary take's CONTRIBUTOR floor. A payload
+ * condition the per-kind table above cannot express, so it has its own
+ * check. Mirrored server-side in sync-worker/src/events/authorize.ts.
+ */
+export const SOURCE_AUDIO_ATTACH_FLOOR: number = ROLE.PROJECT_LEAD
+
+/** Same fail-open contract as `canPerform`: an unknown role is let through. */
+export function canAttachSourceAudio(roleLevel: number | null | undefined): boolean {
+  return roleLevel == null || roleLevel >= SOURCE_AUDIO_ATTACH_FLOOR
 }
 
 /**
@@ -447,7 +470,7 @@ export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
 }
 
 /**
- * The lanes a member below MAINTAINER may open and switch between: their own
+ * The lanes a member below project lead may open and switch between: their own
  * lane scopes (AQU-553), in the project's lane order. AQU-608 kept the lane
  * switcher from everyone below MAINTAINER so a translator stays on the lane
  * their assignment opens — but a member the org has LIMITED to certain lanes
@@ -456,18 +479,31 @@ export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
  * Spanish chapters yet not open the Spanish lane to look at them.
  *
  * `null` when the AQU-608 rule stands unchanged: a MAINTAINER+ (every lane,
- * via `canSwitchLanes`) or a member with no lane scopes (their assigned lane).
- * A scope naming no lane the project has yields `[]`: nothing to move to.
+ * via `canSwitchLanes`), a project lead (every lane — the read wall stops at
+ * project lead, AQU-1795, and the server shows a lead every lane even when a
+ * scope row from before their promotion, or from a membership that was removed
+ * and re-added, is still stored), or a member with no lane scopes (their
+ * assigned lane). A scope naming no lane the project has yields `[]`: nothing
+ * to move to.
  */
 export function scopedLanesFor(
   roleLevel: number | null | undefined,
   scopes: ReadonlyArray<{ kind: string; value: string }> | null | undefined,
   lanes: readonly string[],
+  /**
+   * AQU-1607: the project's lane rows, which turn the lane ids a scope now
+   * holds into the tags `lanes` is written in. Omitted (a caller with no lane
+   * rows loaded yet) compares the stored value to the tag, which is what a
+   * scope meant before lane ids.
+   */
+  laneRows?: readonly LaneIdentity[] | null,
 ): string[] | null {
   if (canSwitchLanes(roleLevel)) return null
+  if (roleLevel != null && roleLevel >= READ_WALL_MAINTAINER) return null
   const laneScopes = (scopes ?? []).filter((s) => s.kind === "lane").map((s) => s.value)
   if (laneScopes.length === 0) return null
-  return lanes.filter((lane) => laneScopes.includes(lane))
+  const allowed = laneScopeTags(laneScopes, laneRows ?? [])
+  return lanes.filter((lane) => allowed.has(lane))
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -478,14 +514,13 @@ export function scopedLanesFor(
 // re-resolves the floor on every language write, so this is an affordance
 // value used to disable controls — never authority.
 //
-// The default is MAINTAINER, i.e. the behaviour before this issue: an org opts
-// in to project-lead language editing by lowering `languageEditMinRole` on
-// Org Settings → Security. Deliberately different from the termbase floor
-// (glossary-view.ts), which defaults to PROJECT_LEAD.
+// The default is PROJECT_LEAD when the org has not stored a floor (AQU-984).
+// A stored `languageEditMinRole`, including an explicit MAINTAINER, is kept.
+// Deliberately the same default as the termbase floor (glossary-view.ts).
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Floor for editing a project's languages when the org hasn't configured one. */
-export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /** Clamp an org-configured language floor to the role ladder, else the default. */
 export function resolveLanguageEditFloor(minRole?: number | null): number {

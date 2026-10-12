@@ -1,45 +1,29 @@
-export type TextDirection = "ltr" | "rtl"
-export type DirectionMode = "auto" | TextDirection
+// Text direction for the editor. The language→direction table, the
+// `ltr | rtl | auto` vocabulary and the project-settings resolution rule are
+// SHARED with the workers (db/shared/text-direction.ts) since AQU-1471 — the
+// Agent API has to report the same answer the editor renders. Everything below
+// is the browser-only half: detection from the text itself, and the per-lane
+// summaries the editor's direction controls read.
+
+export {
+  languageDefaultDirection,
+  normalizeDirectionMode,
+  normalizeLanguageToken,
+  normalizeTextDirection,
+  projectSettingTextDirection,
+  resolveProjectTextDirection,
+  TEXT_DIRECTION_SETTING_VALUES,
+} from "../../db/shared/text-direction"
+export type {
+  DirectionMode,
+  TextDirection,
+  TextDirectionSettings,
+  TextDirectionSide,
+} from "../../db/shared/text-direction"
+
+import type { TextDirection, DirectionMode } from "../../db/shared/text-direction"
+
 export type TextDirectionSummary = TextDirection | "mixed"
-
-const RTL_LANGUAGE_CODES = new Set([
-  "ar", "ara", "arb", "arz",
-  "arc", "aii", "syr", "syc",
-  "dv", "div",
-  "fa", "fas", "per", "prs",
-  "he", "heb", "iw",
-  "khw",
-  "ks", "kas",
-  "ku", "kur", "ckb",
-  "nqo",
-  "ps", "pus", "pbt",
-  "sd", "snd",
-  "ug", "uig",
-  "ur", "urd",
-  "yi", "yid",
-])
-
-const RTL_LANGUAGE_NAMES = new Set([
-  "arabic",
-  "aramaic",
-  "assyrian",
-  "dhivehi",
-  "divehi",
-  "farsi",
-  "hebrew",
-  "kashmiri",
-  "kurdish",
-  "nko",
-  "n'ko",
-  "pashto",
-  "persian",
-  "sindhi",
-  "syriac",
-  "urdu",
-  "uyghur",
-  "uighur",
-  "yiddish",
-])
 
 /** Strong RTL Unicode ranges: Hebrew, Arabic, Syriac, Thaana, NKo,
  * Samaritan, Arabic Extended, Arabic Presentation Forms. */
@@ -61,23 +45,6 @@ function decodeBasicEntities(value: string): string {
     .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
     .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/&amp;/gi, "&")
-}
-
-export function normalizeLanguageToken(language: string | undefined | null): string {
-  return (language ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/_/g, "-")
-}
-
-export function languageDefaultDirection(language: string | undefined | null): TextDirection {
-  const normalized = normalizeLanguageToken(language)
-  if (!normalized) return "ltr"
-  const code = normalized.split(/[-:\s]/)[0]
-  if (RTL_LANGUAGE_CODES.has(code)) return "rtl"
-  if (RTL_LANGUAGE_NAMES.has(normalized)) return "rtl"
-  if (normalized.split(/\s+/).some((part) => RTL_LANGUAGE_NAMES.has(part))) return "rtl"
-  return "ltr"
 }
 
 export function stripDirectionMarkup(value: string | undefined | null): string {

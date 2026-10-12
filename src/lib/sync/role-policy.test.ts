@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   ROLE,
+  canAttachSourceAudio,
   requiredRoleFor,
   canPerform,
   canOpenAssignUi,
@@ -126,6 +127,17 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("file.corpus.set")).toBe(ROLE.CONTRIBUTOR)
     expect(canPerform("file.corpus.set", ROLE.CONTRIBUTOR)).toBe(true)
     expect(canPerform("file.corpus.set", ROLE.REVIEWER)).toBe(false)
+  })
+
+  // AQU-1569: deliberately a rung ABOVE its file.corpus.set neighbour. Moving
+  // one file into a folder is that file's business; reordering a group rewrites
+  // the sidebar every member of the project reads. The client mirror has to
+  // agree with sync-worker/src/events/role-policy.ts or the drag handle shows
+  // for people whose drop the server will refuse.
+  it("keeps a hand-placed file order at the project-setup floor", () => {
+    expect(requiredRoleFor("file.reorder")).toBe(ROLE.PROJECT_LEAD)
+    expect(canPerform("file.reorder", ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canPerform("file.reorder", ROLE.CONTRIBUTOR)).toBe(false)
   })
 
   // ── The setup/handoff line (AQU-646, Sam 2026-08-18) ────────────────────
@@ -354,6 +366,14 @@ describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
     expect(scopedLanesFor(ROLE.OWNER, [lane("es")], lanes)).toBeNull()
   })
 
+  // AQU-1795 / AQU-1808: the read wall stops at project lead, and the server
+  // shows a lead every lane even when a scope row from before a promotion, or
+  // from a membership that was removed and re-added, is still stored. The
+  // client must not narrow them by it either.
+  it("leaves a project lead to every lane (null), whatever their scopes", () => {
+    expect(scopedLanesFor(ROLE.PROJECT_LEAD, [lane("es")], lanes)).toBeNull()
+  })
+
   it("leaves a member with no lane scopes on the AQU-608 rule (null)", () => {
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, [], lanes)).toBeNull()
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, null, lanes)).toBeNull()
@@ -371,5 +391,41 @@ describe("scopedLanesFor — the lanes a lane-limited member may open", () => {
 
   it("yields [] for a scope naming no lane the project has — nothing to move to", () => {
     expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("Spansih")], lanes)).toEqual([])
+  })
+
+  // AQU-1607: a lane scope is a lane id, which the lane rows turn back into
+  // the tag the switcher is written in.
+  it("resolves a lane id scope through the project's lane rows", () => {
+    const laneRows = [
+      { id: "ln-main", name: "German", legacyTag: "" },
+      { id: "ln-es", name: "Spanish", legacyTag: "es" },
+      { id: "ln-de", name: "Low German", legacyTag: "de" },
+    ]
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-es")], lanes, laneRows)).toEqual(["es"])
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-main")], lanes, laneRows)).toEqual([""])
+    // A tag-valued scope the backfill has not converted still resolves.
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("de")], lanes, laneRows)).toEqual(["de"])
+    // A lane that is gone offers nothing to switch to.
+    expect(scopedLanesFor(ROLE.CONTRIBUTOR, [lane("ln-gone")], lanes, laneRows)).toEqual([])
+  })
+})
+
+// AQU-1565 follow-up. WHY: marking a clip as the file's source audio takes it
+// out of "recorded" and out of review on every row. The workspace offers the
+// recording upload only where this says yes, and the server refuses the same
+// attach below Project Lead, so the two must agree rung for rung.
+describe("canAttachSourceAudio", () => {
+  it("is Project Lead and up", () => {
+    expect(canAttachSourceAudio(ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.REVIEWER)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.VIEWER)).toBe(false)
+    expect(canAttachSourceAudio(ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canAttachSourceAudio(ROLE.MAINTAINER)).toBe(true)
+    expect(canAttachSourceAudio(ROLE.OWNER)).toBe(true)
+  })
+
+  it("fails open on an unknown role, like canPerform", () => {
+    expect(canAttachSourceAudio(null)).toBe(true)
+    expect(canAttachSourceAudio(undefined)).toBe(true)
   })
 })

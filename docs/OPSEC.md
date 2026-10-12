@@ -209,6 +209,99 @@
 > controls the repo had already built for a different pipeline (production
 > deploys, IPv4 containment) rather than net-new surface — see "Reviewed, no new
 > finding" for what else this pass checked and found already solid.
+>
+> `docs/OPSEC-REVIEW-2026-10-05.md` returns to **auth & session management** (the
+> Monday slot) and spends it on the one authentication surface the series had never
+> read: the OAuth 2.1 authorization server for MCP hosts
+> (`auth-worker/src/routes/mcp-oauth.ts`, `lib/mcp-oauth/`, `src/pages/OAuthConsent.tsx`),
+> which landed 2026-10-01…10-05 in AQU-1584/1529/1641 — after 09-21's route-mount
+> sweep, the pass that would otherwise have caught it. It deliberately skips
+> `routes/auth.ts`, which a parallel pass (commit `87397102`, no review document,
+> so no OPS-n) rewrote hours earlier the same morning — the fourth concurrent-pass
+> collision this note is about. **OPS-42**: eight API routes carry a bearer
+> credential as a *path segment* (project/org invite tokens,
+> AQU-626 access-link tokens), and both workers copy `url.pathname` verbatim into
+> `shipErrorResponse` (every 4xx/5xx → PostHog Logs, a third party) and into
+> `console.warn("[slow-request] …")` (every request over 5s, **successes
+> included** → Cloudflare Workers Logs, `[observability] enabled = true`). The
+> triggering failures leave the credential *live*: a mistyped PIN on
+> `/access-links/:token/redeem` 401s without touching the link, and a lapsed
+> session on `/invites/:token/accept` 401s in `authMiddleware` before the route
+> reads the invite — and invite tokens are the one credential class still stored
+> in plaintext (OPS-26), so a logged one is a working project grant at its stated
+> role. This is OPS-29 on the server side: that pass redacted credential-bearing
+> URLs leaving the *browser* for PostHog and never touched the workers' own
+> shipping. The PostHog arm is latent (`POSTHOG_KEY = ""` in prod, armed by a
+> config edit); the Workers Logs arm is live now. Fixed with a shared path
+> redactor applied at all five sinks, plus a drift guard that re-derives every
+> route's mounted path — it found an eighth route the hand sweep had missed on its
+> first run. **OPS-43**: the AQU-1529 OAuth organization allowlist is re-filtered
+> against live authority on every call, but at `role_level >= 100` (VIEWER) while
+> both the consent screen and the mint-time re-check require 600 (MAINTAINER) — so
+> of the three places the grant floor is applied, the only one that runs *after*
+> the token exists was the one a demotion could not narrow. Bounded by the
+> per-project live-role gate every external route runs, hence drift rather than a
+> breach; now a named `OAUTH_ORG_ALLOWLIST_FLOOR` pinned to `ROLE.MAINTAINER`.
+>
+> `docs/OPSEC-REVIEW-2026-10-12.md` holds the **auth & session** Monday slot and
+> spends it on the authority chain AQU-1239 (`84edc274`, 2026-10-08) rebuilt: the
+> move of platform-admin identity out of a public `wrangler.toml` var into the
+> `platform_admins` table (migration 0157). It again skips `routes/auth.ts` and
+> `routes/monday.ts`, which a parallel pen-test pass (`b225cb40`, no review
+> document, so no OPS-n) rewrote at 09:10 the same morning — the **fifth**
+> concurrent-pass collision, and the second on that file in eight days. AQU-1239
+> itself checks out (per-request-only memoisation so a deleted row revokes on the
+> next request, fail-closed table read, no stale `ADMIN_EMAILS` consumer left
+> behind, and email shadowing closed off by `idx_users_email_ci` plus zod's
+> rejection of every whitespace variant that would trim into an admin address).
+> Reading it exposed the real problem. **OPS-44**: AQU-1322 wrote down the rule
+> *"admin power applies only while elevated"* and applied it to eleven
+> grant-management writes, but never to the four paths whose grant **escapes the
+> session** — `POST /sync-token` (a token carrying `src: "platform"`, the
+> sync-worker's one blanket exemption from its live membership re-check and lane
+> read wall, at six separate check sites), `POST /credentials` (an `aqk_` PAT
+> scoped to any tenant, `act` and `pii` included, that outlives the session
+> entirely), `GET /orgs/:orgId/settings` (the org's live Gemini/TTS vendor keys,
+> **unredacted**, because the redaction floor read `getEffectiveOrgRole`, which
+> hands every operator 700 on every org), and `merge-sibling` (an irreversible
+> cross-tenant fold). The attacker is the one OPS-35 was written for — a stolen
+> but non-elevated 30-day admin JWT — and against D2/D3/D7 that fix was moot,
+> because elevation was never needed: the enumeration half
+> (`GET /orgs`, `GET /projects` in picker mode, "one page of the tenancy") is
+> un-elevated too. Fixed by *de-escalating* rather than refusing — a flat 403 on
+> `source === "platform"` locks operators out of their own projects, since
+> platform's 700 outranks any genuine grant below owner and so that source does
+> **not** imply the absence of a genuine grant (a false premise stated in
+> `elevation-gate.ts`'s own header, now corrected, and the likely reason the gate
+> was never extended). The mint core now fails the platform path closed before
+> signing, so the guarantee is structural rather than per-route. **OPS-45**
+> records the measurement that found it: of the 44 route modules resolving a
+> platform-admin-winnable role, **8** make an elevation decision and **36** make
+> none — the cross-tenant directory reads among them deliberately, the rest
+> unexamined, with `changeset-approvals.ts` (the human gate in front of agent
+> writes) flagged as the one most likely to be wrong next. Reported, not fixed:
+> the right unit of work is one recorded decision per route, which the new
+> coverage test now makes possible. **OPS-46** came out of checking the pass's
+> own PR tick instead of trusting it: `adversarial-jev.yml` is the **only**
+> workflow in the repo with a `pull_request:` trigger, so the checks a PR
+> receives are that workflow's advisory `pr` job plus Cloudflare *compiling* the
+> bundle — `ci.yml`, which owns `lint`, `typecheck`, `unit`, `build`,
+> `schema-migrations` and all three worker suites, is `workflow_dispatch` only.
+> Half of that is a documented cost decision (AQU-564: Workers Builds owns PR
+> compilation); the half that is not is that `ci.yml:68` still labels three of
+> those jobs *"Required branch-protection checks"* inside a workflow that can
+> never report on a PR — and this pass's own PR settles which way it falls, since
+> GitHub called it `mergeable_state: "clean"` with only the Jev check present.
+> So no test, lint or typecheck gates a pull request, which is why this pass
+> found six red test files nothing had flagged and why the green tick on its own
+> PR meant nothing (that run reported *"HARNESS UNAVAILABLE … This run says
+> nothing about the change."*). This is OPS-21 two months on and worse: the
+> worker suites are no longer merely unreachable behind a failing first phase,
+> their workflow is not wired to pull requests at all. Reported, not fixed —
+> wiring the trigger spends the runner minutes AQU-564 set out to save and goes
+> red immediately on the six known-failing files, so the ordering, and whether
+> those contexts are meant to be required at all, is a maintainer's
+> control-plane call.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -237,11 +330,11 @@ Ranked by what it would cost us if it leaked, not by volume.
 |---|---|---|---|
 | D1 | **Signing keys** — `SECRET_KEY` (access tokens), `SYNC_SECRET_KEY` (sync tokens, and a plaintext admin bearer) | Worker secrets; `.dev.vars` locally | Holding either mints credentials for *any* user or project. Root of the whole trust tree. |
 | D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
-| D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. Comment `@mention` emails (D2 excerpt, routed by D3 username/email) are now scoped to actual project grants — OPS-39, `docs/OPSEC-REVIEW-2026-09-24.md`. |
+| D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. Comment `@mention` emails (D2 excerpt, routed by D3 username/email) are now scoped to actual project grants — OPS-39, `docs/OPSEC-REVIEW-2026-09-24.md`. Since OPS-44 (`docs/OPSEC-REVIEW-2026-10-12.md`) a platform admin's cross-tenant reach over D2/D3 is no longer available to an *un-elevated* session: the sync-token mint, PAT minting and the sibling fold de-escalate to the operator's genuine role unless the step-up code has been redeemed. Cross-tenant *metadata* reads (the org/project directories) remain open un-elevated by design — OPS-45. |
 | D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. `tauri-release.yml` now enters a `desktop-release-signing` GitHub Environment before touching these (OPS-40, `docs/OPSEC-REVIEW-2026-09-25.md`); the Environment still needs required reviewers configured in repo settings to actually hold the job. |
-| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, admin step-up elevation codes, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `admin_elevation_codes` (scrypt-hashed since 0094, OPS-36 — plaintext column retired nullable, drop pending); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
+| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, admin step-up elevation codes, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `admin_elevation_codes` (scrypt-hashed since 0094, OPS-36 — plaintext column retired nullable, drop pending); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). Since OPS-42 (`docs/OPSEC-REVIEW-2026-10-05.md`) the workers no longer copy those URL paths into PostHog Logs or Cloudflare Workers Logs on the ordinary 4xx (mistyped PIN, lapsed session) or on a slow success; Cloudflare's own edge request logs still record full URLs, as they do for any HTTP service, which is the standing reason this placement is poor. |
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
-| D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. |
+| D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. `GET /api/v2/orgs/:orgId/settings` redacts them below org MAINTAINER, and since OPS-44 (`docs/OPSEC-REVIEW-2026-10-12.md`) that floor is no longer satisfied by bare platform-admin authority — an un-elevated operator received every tenant's keys in plaintext. |
 | D8 | **Session replays** | PostHog (third party) | Inputs are masked, but the page body is deliberately visible — so D2 draft text leaves our infrastructure by design. |
 
 ---

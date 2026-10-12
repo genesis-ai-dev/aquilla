@@ -7,7 +7,6 @@ import { BrandContext } from "@/branding/use-brand"
 import { useI18nOptional } from "@/lib/i18n/I18nProvider"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
 import { HelpMenu } from "./HelpMenu"
-import { FeedbackButton } from "./ReportProblemButton/FeedbackButton"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
 import { ConnectivityStatusChip } from "./ConnectivityStatusChip"
@@ -342,16 +341,17 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {/* AQU-1523: three footer rows, not one. The labelled Feedback button
-          (AQU-1028) and the build label (AQU-1023) shared a single row, and in
-          a 224px sidebar the label lost — it fitted to 13px ("v0" and nothing
-          else), so support could no longer read a release off a screenshot.
-          Removing Feedback from that row was not enough: see the release row
-          below for the width arithmetic. So the rows are now
-          Feedback / build label / connectivity + Help + localization, under
-          the account row. Help stays compact beside localization; the org-only
-          Tour remains hidden in the project editor. Both sidebar layouts (org
-          chrome and the project dock) render this same footer. */}
+      {/* AQU-1548: two footer rows — build label (AQU-1023), then connectivity
+          + Help + localization — under the account row. The labelled Feedback
+          button (AQU-1028) that used to lead the footer is gone; feedback is
+          the last item in the Help menu again.
+          AQU-1523's width rule survives that removal and still binds: the
+          build label keeps a line to itself, because at the footer's 10px
+          monospace it needs ~190px of the sidebar's 224px and anything sharing
+          the row fits it down to "v0" (see the release row below). Help stays
+          compact beside localization; the org-only Tour remains hidden in the
+          project editor. Both sidebar layouts (org chrome and the project
+          dock) render this same footer. */}
       <div
         data-slot="app-shell-sidebar-footer"
         className={cn(
@@ -361,17 +361,6 @@ export function AppShell({
           chromeCollapsed && "w-10 items-center",
         )}
       >
-        <div
-          data-slot="app-shell-sidebar-feedback-row"
-          className={cn(
-            "flex min-w-0 items-center",
-            chromeCollapsed ? "justify-center" : "justify-start",
-          )}
-        >
-          {/* AQU-1028: feedback is a first-class control here, not a row inside
-              the Help dropdown — the stuck user has to be able to see it. */}
-          <FeedbackButton compact={chromeCollapsed} />
-        </div>
         {/* The build label gets a line to itself. Nothing else can share it:
             at the footer's 10px monospace the label needs ~190px, and the
             sidebar's 224px leaves ~208px once the footer's own padding is

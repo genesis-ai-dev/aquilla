@@ -1,0 +1,42 @@
+-- Migration 0137: index the target cells that still carry a machine draft
+-- (AQU-1626 follow-up; the count itself is AQU-1421's).
+--
+-- Behind the lane read wall, the org dashboard shows a below-Maintainer caller
+-- the machine-drafted count for the lanes they were granted only. The per-file
+-- counter (`files.ai_drafted_count`) cannot answer that, so `aiDraftedByLane`
+-- in auth-worker/src/services/org-permissions.ts counts it from `cells`:
+--
+--   SELECT c.project_id, COALESCE(c.target_lang, ''), COUNT(*)
+--     FROM cells c ...
+--    WHERE c.project_id = ANY(<the page's project ids>)
+--      AND c.side = 'target' AND c.ai_drafted = 1
+--    GROUP BY 1, 2
+--
+-- WHY AN INDEX: no index on `cells` knows about `ai_drafted`, so the best the
+-- planner could do was read every target cell of every listed project and
+-- check the flag on the heap (52 projects), and for a longer list (155) it
+-- gave up and read the whole table instead. On dev that was 2.28M pages to
+-- find 132 rows: 4.4s warm, 75s cold, on a request the SPA abandons at 15s.
+--
+-- WHY PARTIAL: the flag is set when a draft lands and cleared by the first
+-- human edit or validation, so at any moment very few rows carry it (7,660 of
+-- dev's 15.8M). The index holds those rows and no others, costs nothing on a
+-- write that does not touch a drafted target cell, and duplicate keys collapse:
+-- 145k drafted rows took 1.2 MB in a local build. Same shape as
+-- `idx_cells_hidden` (0116) and `idx_cells_tombstoned` (0126).
+--
+-- The predicate must stay exactly `side = 'target' AND ai_drafted = 1`: the
+-- query spells the same two literals, and Postgres uses a partial index only
+-- when the query implies its WHERE.
+--
+-- Performance only: the counts are the same with or without it, so the worker
+-- may deploy before or after this is applied. Until it is, the query is
+-- bounded to the listed projects' target cells but still has to read them:
+-- 255k pages for the same caller, 1.0s when cached and 23-29s when not.
+--
+-- Keep this file a SINGLE statement: CONCURRENTLY cannot run in a transaction
+-- block, and the migration runner sends each file as one query. Building it
+-- concurrently avoids blocking edits on the cells table while it is read once.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_cells_ai_drafted
+  ON cells(project_id, file_id)
+  WHERE side = 'target' AND ai_drafted = 1;

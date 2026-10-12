@@ -6,10 +6,13 @@
 // every event in `server_seq` order, applying the head compare-and-swap rule
 // (AQU-1154, invariant I1): walking the log in seq order, a chain-arbitrated
 // event applies iff its parent_id IS the cell's head (per side/lane) at that
-// point, or the row does not exist yet. That is exactly what the live path's
-// gated cells write enforces inside its transaction (commit order == seq
-// order under the per-project seq lock), so a rebuild reproduces the live
-// projection. chain_claims itself is NOT rewritten by rebuild.
+// point, or the row does not exist yet.
+//
+// AQU-1844: a sibling race is decided by the live `chain_claims` row, not by
+// seq order — since AQU-1005 the lower-seq sibling can be the one that
+// committed second, and live kept the other. The project's claims are read
+// alongside the log and handed to the replay. chain_claims itself is NOT
+// rewritten by rebuild: it IS the live record this replay defers to.
 //
 // ── Non-atomic failure mode ────────────────────────────────────────────
 // As before — DELETE + replay is not wrapped in a transaction. Re-running
@@ -17,12 +20,15 @@
 
 import {
   buildEventProjectionStmts,
-  isChainArbitrated,
-  isChainMutatingKind,
-  laneOfEvent,
   projectFileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
+import {
+  buildClaimWinners,
+  ChainHeadReplay,
+  type ChainClaimRow,
+} from './chain-head-replay'
+import { loadTargetLanes } from './lane-read-wall'
 import type { EventKind } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
@@ -103,27 +109,30 @@ export async function handleRebuildProjectionRequest(
     return new Response('failed to read events from DB', { status: 500 })
   }
 
-  // 3. Head compare-and-swap in-memory tracking: the current chain head per
-  //    (project, file, cell, side, lane) — the same row key `cells` uses.
-  //    Source and target sides, plus named target lanes, each have their own
-  //    head. A delete clears the head (the row is gone; the next event on
-  //    that key applies regardless of parent, exactly as the live INSERT
-  //    path does). `source.cell.mirror` is not chain-arbitrated but DOES
-  //    move the source head (under its monotonic upstream_seq guard), so a
-  //    later source event chained on a mirror id must see it as the head.
-  const headAt = new Map<string, string>()
-  const mirrorSeqAt = new Map<string, number>()
-  const parsedPayload = (row: EventRow): unknown => {
-    try {
-      return JSON.parse(row.payload)
-    } catch {
-      return null
-    }
-  }
-  const headKey = (row: EventRow, payload: unknown): string => {
-    const side = row.kind.startsWith('source.') ? 'source' : 'target'
-    return `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${side}\0${laneOfEvent(row.kind, payload)}`
-  }
+  // 3. Head compare-and-swap, tracked in memory per (file, cell, side, lane)
+  //    — the same row key `cells` uses. Shared with the live-link mirror fold
+  //    (AQU-1574); see chain-head-replay.ts.
+  //
+  //    AQU-1612: the project's target lane rows go in so replay resolves each
+  //    event's lane by `laneId` first and falls back to the `targetLang` tag.
+  //    Pre-1612 events carry only the tag and key exactly as they always did,
+  //    so a full replay still reproduces the live projection byte for byte.
+  //
+  //    AQU-1844: the project's chain_claims go in too, so a sibling race
+  //    replays to the event that actually won it live rather than to whichever
+  //    sibling holds the lower seq. Claims naming an event absent from the log
+  //    are dropped by buildClaimWinners (see there).
+  const { results: claimRows } = await db
+    .prepare(
+      `SELECT file_id, cell_id, parent_key, event_id
+       FROM chain_claims WHERE project_id = ?`,
+    )
+    .bind(projectId)
+    .all<ChainClaimRow>()
+  const replay = new ChainHeadReplay(
+    await loadTargetLanes(db, projectId),
+    buildClaimWinners(claimRows ?? [], new Set(eventRows.map((r) => r.id))),
+  )
 
   const stmts: AquillaStatement[] = []
   let eventsRead = 0
@@ -156,36 +165,29 @@ export async function handleRebuildProjectionRequest(
     // cell.validate (parent_id NULL) is not a chain step, and a parent-null
     // cell DELETE (a migration retraction, AQU-747/910) is a tombstone that
     // applies unconditionally (AQU-931).
-    let isWinner = true
-    if (row.cell_id && isChainMutatingKind(row.kind)) {
-      const key = headKey(row, parsedPayload(row))
-      if (isChainArbitrated(row.kind, row.parent_id)) {
-        const head = headAt.get(key)
-        isWinner = head === undefined || head === row.parent_id
-      }
-      if (isWinner) {
-        if (row.kind.endsWith('.delete')) headAt.delete(key)
-        else headAt.set(key, row.id)
-      }
-    } else if (row.kind === 'source.cell.mirror' && row.cell_id) {
-      const payload = parsedPayload(row) as { upstream?: { seq?: number } } | null
-      const seq = payload?.upstream?.seq
-      const key = headKey(row, payload)
-      const last = mirrorSeqAt.get(key)
-      if (typeof seq === 'number' && (last === undefined || seq > last)) {
-        mirrorSeqAt.set(key, seq)
-        headAt.set(key, row.id)
-      }
-    }
-
-    if (!isWinner) continue
-
-    let payload: unknown
+    //
+    // An unreadable payload replays with a null one (lane ''), and only fails
+    // the rebuild if the event won — a stale sibling is skipped either way.
+    let payload: unknown = null
+    let parseError: unknown = null
     try {
       payload = JSON.parse(row.payload)
     } catch (err) {
+      parseError = err
+    }
+    const isWinner = replay.apply({
+      id: row.id,
+      kind: row.kind,
+      fileId: row.file_id,
+      cellId: row.cell_id,
+      parentId: row.parent_id,
+      payload,
+    })
+    if (!isWinner) continue
+
+    if (parseError !== null) {
       return new Response(
-        `failed to parse payload for event ${row.id}: ${String(err)}`,
+        `failed to parse payload for event ${row.id}: ${String(parseError)}`,
         { status: 500 },
       )
     }

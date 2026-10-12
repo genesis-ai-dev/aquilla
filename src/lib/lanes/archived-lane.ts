@@ -2,8 +2,13 @@
  * AQU-1462: an archived lane refuses writes that name it.
  *
  * This is not the write wall. The freeze applies to every role, including
- * Maintainer, and it applies whether or not `LANE_READ_WALL` is on. The
- * default lane (`''`) cannot be archived.
+ * Maintainer, and it applies whether or not `LANE_READ_WALL` is on.
+ *
+ * AQU-1600: the former default lane (tag `''`) is an ordinary lane and can be
+ * archived, so a write that names it is frozen like any other. Its archived
+ * state lives ONLY on the lane row's `archivedAt` — the legacy
+ * `settings.archivedLanes` mirror is a list of tags and cannot name a lane
+ * whose tag is the empty string, so that mirror is not consulted for `''`.
  *
  * The wording does consult the read wall. A caller who is allowed to know the
  * lane exists (wall off, platform, Maintainer+, or a grant at Viewer or
@@ -63,6 +68,42 @@ export function archiveCheckApplies(kind: string): boolean {
 }
 
 /**
+ * AQU-1532: kinds whose projection writes a row keyed by `lane_id`
+ * (`cells`, `cell_validators`). Their lane tag must name an existing lane row,
+ * or the projection resolves a NULL `lane_id` and the write fails.
+ */
+export function writesLaneRow(kind: string): boolean {
+  return ALWAYS_LANE_KINDS.has(kind)
+}
+
+/**
+ * AQU-1884: kinds that mint the `''` bridge lane themselves.
+ *
+ * A lane-less `target.cell.*` write splices `ensureBlankTargetBridgeStmt` into
+ * its own batch (AQU-1594, sync-worker/src/events/handlers/cell-events.ts), so
+ * for those kinds the lane row may legitimately not exist yet. A validation
+ * endorses a commit that already ran that batch, so it never creates a lane and
+ * always needs the row up front.
+ */
+export function createsBlankLaneBridge(kind: string): boolean {
+  return kind.startsWith("target.cell.")
+}
+
+/**
+ * AQU-1532 / AQU-1884: why a lane-row write cannot resolve its lane.
+ *
+ * A named tag is simply unknown, and the caller's fix is to register it. An
+ * omitted tag asked for the DEFAULT lane, which projects created today do not
+ * have — every lane carries a real tag, such as its language — so there the
+ * fix is to name the lane, not to register one.
+ */
+export function missingLaneReason(tag: string): string {
+  return tag === ""
+    ? "no lane named: this project has no default lane; name the target lane with laneId (or targetLang)"
+    : `unknown lane "${tag}"; register it in settings.targetLanes`
+}
+
+/**
  * The lane tag this event is asking to write, or null when the event is not
  * a lane write. `''` is the default lane.
  */
@@ -99,7 +140,7 @@ export const LANE_DOES_NOT_EXIST_REASON = "lane does not exist"
 
 function rowIsArchived(lane: ArchiveLaneRow, archivedTags: readonly string[]): boolean {
   if (lane.archivedAt != null && lane.archivedAt !== "") return true
-  return listed(archivedTags, lane.legacyTag ?? "") || listed(archivedTags, lane.name)
+  return listed(archivedTags, lane.legacyTag ?? "") || listed(archivedTags, lane.name ?? "")
 }
 
 /**
@@ -115,21 +156,24 @@ export function archivedLaneReason(input: {
   archivedTags: readonly string[]
   visibleLaneIds?: ReadonlySet<string> | null
 }): string | null {
-  if (input.tag === "") return null
   const matches = lanesForRequestedTag(input.lanes, input.tag)
   const archivedMatch = matches.find((lane) => lane.archivedAt != null && lane.archivedAt !== "")
+  // AQU-1600: for the former default lane (tag '') the row is the only truth.
+  // `archivedTags` holds tags, and matching one against the '' lane's NAME
+  // would archive it because some unrelated lane shares that name.
   const inSettings =
-    listed(input.archivedTags, input.tag) ||
-    matches.some(
-      (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name),
-    )
+    input.tag !== "" &&
+    (listed(input.archivedTags, input.tag) ||
+      matches.some(
+        (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name ?? ""),
+      ))
   if (!archivedMatch && !inSettings) return null
 
   const visible = input.visibleLaneIds
   if (visible != null) {
     const knowable = matches.find((lane) => visible.has(lane.id) && rowIsArchived(lane, input.archivedTags))
     if (!knowable) return LANE_DOES_NOT_EXIST_REASON
-    const display = knowable.name.trim() || input.tag
+    const display = (knowable.name ?? "").trim() || input.tag
     return `lane '${display}' is archived`
   }
 

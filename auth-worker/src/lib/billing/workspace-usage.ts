@@ -1,7 +1,8 @@
+import { readWeeklyAllowance } from './allowance'
 import type { AquillaDb } from '../../../../db/shim/postgres'
 import { MICRO_UNITS_PER_UNIT, quoteProviderCost, type CostRail } from '../../../../db/shared/billing-cost'
 import { readBillingWorkspace } from './workspace'
-import { weeklyAllowance, weeklyUsagePeriod } from './pricing-model'
+import { weeklyUsagePeriod } from './pricing-model'
 
 export const OVERAGE_FACTOR = 1.05
 
@@ -87,7 +88,8 @@ export async function reserveWorkspaceUsage(db: AquillaDb, input: {
       return { created: false, request: prior }
     }
     const workspace = await readBillingWorkspace(tx, input.orgId, now)
-    if (!workspace || !['ready', 'already_subscribed'].includes(workspace.eligibility.reason)) {
+    const units = workspace ? await readWeeklyAllowance(tx, workspace) : null
+    if (!workspace || units === null) {
       throw new Error('Workspace usage requires an explicit supported entitlement')
     }
     if (workspace.entitlement && !workspace.entitlement.access) {
@@ -98,7 +100,7 @@ export async function reserveWorkspaceUsage(db: AquillaDb, input: {
     const period = workspace.entitlement ? {
       start: workspace.entitlement.usagePeriodStart, end: workspace.entitlement.usagePeriodEnd,
     } : weeklyUsagePeriod(org!.created_at, now.toISOString())
-    const allowance = weeklyAllowance(workspace.entitlement?.access?.offer ?? 'free') * MICRO_UNITS_PER_UNIT
+    const allowance = units * MICRO_UNITS_PER_UNIT
     const totals = await readUsageTotals(tx, input.orgId, period)
     // Decision 2026-09-16: nothing new starts at or past 100%, but a bounded
     // request may finish up to 5% over so a pessimistic bound does not strand
@@ -185,7 +187,9 @@ export async function listHeldUsage(db: AquillaDb, orgId: number, limit = 100) {
  */
 export async function readWorkspaceUsageSummary(db: AquillaDb, orgId: number, now = new Date()) {
   const workspace = await readBillingWorkspace(db, orgId, now)
-  if (!workspace || !['ready', 'already_subscribed'].includes(workspace.eligibility.reason)) return null
+  if (!workspace) return null
+  const units = await readWeeklyAllowance(db, workspace)
+  if (units === null) return null
   if (workspace.entitlement && !workspace.entitlement.access) return null
   const org = await db.prepare('SELECT created_at::text FROM organizations WHERE id = ?')
     .bind(orgId).first<{ created_at: string }>()
@@ -193,7 +197,7 @@ export async function readWorkspaceUsageSummary(db: AquillaDb, orgId: number, no
   const period = workspace.entitlement ? {
     start: workspace.entitlement.usagePeriodStart, end: workspace.entitlement.usagePeriodEnd,
   } : weeklyUsagePeriod(org.created_at, now.toISOString())
-  const allowance = weeklyAllowance(workspace.entitlement?.access?.offer ?? 'free') * MICRO_UNITS_PER_UNIT
+  const allowance = units * MICRO_UNITS_PER_UNIT
   const totals = await readUsageTotals(db, orgId, period)
-  return { percent: Math.min(100, Math.floor((totals.committed / allowance) * 100)), resetsAt: period.end }
+  return { percent: Math.min(100, (allowance === 0 ? 100 : Math.floor((totals.committed / allowance) * 100))), resetsAt: period.end }
 }

@@ -10,8 +10,9 @@
  */
 
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { RenderingStatus, TermMatchOptions, TermRendering } from "./model"
 
-export type RenderingStatus = "preferred" | "admitted" | "forbidden"
+export type { RenderingStatus, TermMatchOptions, TermMatchingSettings, TermRendering } from "./model"
 
 /**
  * `MessageKey` for a rendering status's display label — resolve with
@@ -41,41 +42,6 @@ export function renderingStatusLabelKey(status: RenderingStatus): MessageKey {
   }
 }
 
-export interface TermRendering {
-  rendering: string
-  status: RenderingStatus
-}
-
-/**
- * Per-concept matching options. Every field is optional; absent fields resolve
- * to script- and project-derived defaults in `resolveMatchOptions`
- * (match-options.ts). Stored verbatim in `concepts.match_options`.
- */
-export interface TermMatchOptions {
-  /** Ignore combining marks (vowel points, accents) on both sides. */
-  foldMarks?: boolean
-  /** Allow the project's configured prefixes/suffixes around the term. */
-  affixes?: boolean
-  /** Extra literal source forms treated as alternates of sourceTerm. */
-  forms?: string[]
-  /** Matched surface forms the user rejected; compared after folding. */
-  excludedForms?: string[]
-}
-
-/**
- * Project-level affix inventory for source-term matching. Plain data: the
- * matcher knows "prefix strings" and "suffix strings", nothing about any
- * language. Presets (affix-presets.ts) only pre-fill these lists.
- */
-export interface TermMatchingSettings {
-  prefixes: string[]
-  suffixes: string[]
-  /** Chained affixes allowed per side. Default 2. */
-  maxAffixes?: number
-  /** Overrides the script-derived foldMarks default for every concept. */
-  foldMarksDefault?: boolean
-}
-
 export interface Concept {
   id: string
   /** Headword / lemma. Normalized exact match is case-insensitive. */
@@ -93,6 +59,12 @@ export interface Concept {
   caseSensitive?: boolean
   /** Matching options; see TermMatchOptions. Absent = all defaults. */
   match?: TermMatchOptions
+  /**
+   * Set only on a concept read from a termbase this project subscribes to
+   * (useSubscribedConcepts, AQU-1721): the id of the project that owns it.
+   * Such a concept is read-only here, so no surface may offer to edit it.
+   */
+  termbaseProjectId?: string
 }
 
 /** Payload from the editor "Add to terminology" popover. */

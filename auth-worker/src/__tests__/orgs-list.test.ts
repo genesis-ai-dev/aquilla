@@ -35,6 +35,21 @@ describe("GET /api/v2/orgs", () => {
     expect(body.orgs[0].name).toBe("newbie's workspace")
   })
 
+  // The org switcher pins the personal workspace to the top with a Home tag;
+  // it can only do that if the server says which org is personal. Owning a
+  // team org must not count — only the findPersonalOrg resolution does.
+  it("tags only the caller's personal workspace as personal", async () => {
+    await seedUser(4, "pat")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id, billing_scope) VALUES (40, 'pats workspace', 4, 'personal'), (41, 'Pat Team', 4, 'team')",
+    ).run()
+    const res = await app.request("/api/v2/orgs", { headers: authHeader(await jwtFor("pat")) }, env)
+    const body = (await res.json()) as { orgs: Array<{ id: number; personal?: boolean }> }
+    const byId = Object.fromEntries(body.orgs.map((o) => [Number(o.id), o]))
+    expect(byId[40].personal).toBe(true)
+    expect(byId[41].personal).toBeUndefined()
+  })
+
   it("does not list an org the caller has no membership in", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")

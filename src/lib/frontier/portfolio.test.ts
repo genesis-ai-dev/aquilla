@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage, PORTFOLIO_ORG_IDS_MAX, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -85,18 +85,69 @@ describe("getPortfolioPage / getPortfoliosPage", () => {
     })
   })
 
-  it("omits orgIds when the membership list exceeds the batch cap (AQU-756)", async () => {
+  it("sends every org id with no length cap (AQU-756)", async () => {
     let calledBody: unknown
     global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
       calledBody = JSON.parse(String(init?.body))
       return new Response(JSON.stringify({ portfolios: [], nextCursor: null }), { status: 200 })
     }) as unknown as typeof fetch
 
-    const orgIds = Array.from({ length: PORTFOLIO_ORG_IDS_MAX + 1 }, (_, i) => i + 1)
+    const orgIds = Array.from({ length: 501 }, (_, i) => i + 1)
     await getPortfoliosPage("jwt", orgIds, { limit: 40 })
-    expect(calledBody).toEqual({ limit: 40 })
+    expect(calledBody).toEqual({ orgIds, limit: 40 })
     await getPortfolios("jwt", orgIds)
-    expect(calledBody).toEqual({})
+    expect(calledBody).toEqual({ orgIds })
+  })
+})
+
+describe("getPortfolioAggregates", () => {
+  it("POSTs the explicit org ids under the validation cap", async () => {
+    let calledUrl = ""
+    let calledBody: unknown
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({
+        projectCount: 2,
+        avgTranslatedPct: 0.5,
+        avgValidatedPct: 0.25,
+        avgAudioPct: 0,
+        stalledCount: 1,
+        overdueCount: 0,
+        attentionCount: 1,
+        orgs: [{ orgId: 1, projectCount: 2, avgTranslatedPct: 0.5, avgValidatedPct: 0.25, avgAudioPct: 0, stalledCount: 1, overdueCount: 0, attentionCount: 1 }],
+      }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const summary = await getPortfolioAggregates("jwt", [1, 1])
+    expect(calledUrl).toMatch(/\/api\/v2\/orgs\/portfolio\/summary$/)
+    expect(calledBody).toEqual({ orgIds: [1] })
+    expect(summary.projectCount).toBe(2)
+    expect(summary.avgTranslatedPct).toBe(0.5)
+    expect(summary.orgs).toEqual([
+      expect.objectContaining({ orgId: 1, projectCount: 2, stalledCount: 1 }),
+    ])
+  })
+
+  it("sends every org id on the summary request (AQU-756)", async () => {
+    let calledBody: unknown
+    global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({
+        projectCount: 0,
+        avgTranslatedPct: 0,
+        avgValidatedPct: 0,
+        avgAudioPct: 0,
+        stalledCount: 0,
+        overdueCount: 0,
+        attentionCount: 0,
+        orgs: [],
+      }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const orgIds = Array.from({ length: 501 }, (_, i) => i + 1)
+    await getPortfolioAggregates("jwt", orgIds)
+    expect(calledBody).toEqual({ orgIds })
   })
 })
 
@@ -164,6 +215,23 @@ describe("audioValidatedPct (AQU-508 / AQU-1093)", () => {
     // has no ceiling of its own, so without this the tile renders "140%".
     expect(audioValidatedPct(project({ totalCells: 10, audioCells: 14, validatedAudioCells: 14 }))).toBe(1)
     expect(audioPct(project({ totalCells: 10, audioCells: 14 }))).toBe(1)
+  })
+})
+
+describe("audio denominator (AQU-1566)", () => {
+  // A dubbing episode: 6 subtitle rows, a 40-cue sheet beside them, 7 cues
+  // recorded. The text total no longer carries the sheet, so dividing by it
+  // read 7/6 = 100% recorded while the plan board said 7/40.
+  it("measures recordings against the server's audio total, like the plan board", () => {
+    const p = project({ totalCells: 6, audioTotalCells: 40, audioCells: 7, validatedAudioCells: 4 })
+    expect(audioPct(p)).toBe(7 / 40)
+    expect(audioValidatedPct(p)).toBe(4 / 40)
+  })
+
+  it("falls back to the text total when an older server sends no audio total", () => {
+    const p = project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 })
+    expect(audioPct(p)).toBe(0.25)
+    expect(audioValidatedPct(p)).toBe(0.1)
   })
 })
 

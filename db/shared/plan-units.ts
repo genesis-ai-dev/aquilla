@@ -21,18 +21,25 @@
 // canonical_ref: the projection already decided which files are Scripture and
 // which books they hold, and asking twice invites the two answers to differ.
 
+import { countedFileSql } from "./counted-files"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
+import { laneIndependentProgressSql, targetLaneIdSql } from "./lane-sql"
 
 /**
  * Which files can hold plan units.
  *
- * Tombstoned files are out. So are audio-cue siblings: that role marks the
- * hidden companion file the audio workflow creates, which never appears in a
- * file list and is not something anyone plans. Every other live file is a
- * legitimate unit — `kind` is not a usable discriminator here because it falls
- * back through `role` and then to 'codex'.
+ * Tombstoned files are out. So are the hidden companion files — the cue sheet
+ * the audio workflow records against, a linked video's caption track — which
+ * never appear in a file list and are not something anyone plans. Every other
+ * live file is a legitimate unit; `kind` is not a usable discriminator here
+ * because it falls back through `role` and then to 'codex'.
+ *
+ * AQU-1626 moved the rule itself to db/shared/counted-files.ts, where every
+ * other surface that measures work now reads it from. This alias stays because
+ * the name reads better at the two call sites below, not because the plan board
+ * has a definition of its own.
  */
-export const PLAN_UNIT_FILE_PREDICATE = `f.deleted_at IS NULL AND COALESCE(f.role, '') NOT IN ('audio-cues', 'timeline-content')`
+export const PLAN_UNIT_FILE_PREDICATE = countedFileSql('f')
 
 /**
  * One row per planning unit, as a subquery.
@@ -135,14 +142,26 @@ export interface PlanUnitRow {
  *
  * Binds, in order: projectId (units), lane, then whatever `extraScope` adds.
  *
- * LANE FALLBACK, and the asymmetry is deliberate. Totals, audio counts and
- * activity are lane-independent facts about the unit, so when the requested
- * lane has no projection row yet they fall back to the default-lane row.
- * Filled and validated counts do NOT fall back: a lane with no target rows is
- * genuinely 0% translated, and borrowing another lane's progress would claim
- * work that does not exist. When no projection row exists at all — a file
- * imported before the projection, or mid-backfill — total falls back to
- * files.cell_count, the same last resort the progress read uses.
+ * LANE FALLBACK, and the asymmetry is deliberate. Totals and activity are
+ * facts about the source text, so when the requested lane has no projection
+ * row yet they fall back to the SOURCE lane's row (`pd`) — which is where
+ * AQU-1599 put them. Audio counts fall back the same way, but a lane that
+ * has a row reports its own. Filled and validated counts do NOT fall back: a
+ * lane with no target rows is genuinely 0% translated, and borrowing another
+ * lane's progress would claim work that does not exist. When no projection
+ * row exists at all — a file imported before the projection, or mid-backfill
+ * — total falls back to files.cell_count, the same last resort the progress
+ * read uses.
+ *
+ * `pd` and `ps` used to be pinned to `target_lang = ''`. Two things broke that
+ * pin: archiving the former default lane took the board's totals away with it,
+ * and the source lane's own row carries '' in `target_lang` as well (its
+ * `legacy_tag` is NULL), so the pin now matches two rows and would sum them.
+ * Both are now laterals that take the source lane's row and, until AQU-1616's
+ * batch recompute has given a file one, any lane's — see
+ * laneIndependentProgressSql. `pl` resolves the lane ID the caller asked for,
+ * so a request for the former default lane can no longer land on the source
+ * lane's row.
  *
  * THE CUE SHEET (AQU-1278). A dubbing project does not record against its
  * subtitles. The importer writes a hidden `role: 'audio-cues'` sibling
@@ -186,27 +205,23 @@ export function readPlanUnitsSql(extraScope = ""): string {
             -- there would put the subtitle file's (always zero) takes back on
             -- the board wearing the cue sheet's denominator.
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_count, 0)
-                 ELSE COALESCE(pd.audio_count, 0) END AS audio_count,
+                 ELSE COALESCE(pl.audio_count, pd.audio_count, 0) END AS audio_count,
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validated_count, 0)
-                 ELSE COALESCE(pd.audio_validated_count, 0) END AS audio_validated_count,
+                 ELSE COALESCE(pl.audio_validated_count, pd.audio_validated_count, 0) END AS audio_validated_count,
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_count, 0)
-                 ELSE COALESCE(pd.structural_audio_count, 0) END AS structural_audio_count,
+                 ELSE COALESCE(pl.structural_audio_count, pd.structural_audio_count, 0) END AS structural_audio_count,
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validated_count, 0)
-                 ELSE COALESCE(pd.structural_audio_validated_count, 0) END
+                 ELSE COALESCE(pl.structural_audio_validated_count, pd.structural_audio_validated_count, 0) END
               AS structural_audio_validated_count,
-            -- AQU-490. These are AUDIO columns, so they take the ps/pd shape of
-            -- the four above and NOT the pl that the text histogram beside
-            -- them uses. pl is the LANE row: right for text, wrong for audio,
-            -- because a recording is shared by every target language and a
-            -- dubbing project's takes live on the cue sheet rather than on the
-            -- unit's own file. Reaching for pl by reflex is the exact bug
-            -- AQU-1278 fixed for the counts -- a dubbed episode read zero
-            -- audio on the board while its cue sheet was fully recorded.
+            -- Audio counts come from the requested lane's row (pl). A lane
+            -- with no projection row yet falls back to the source-lane row
+            -- (pd). A cue sheet stays on ps: those takes live on the cue
+            -- file, and reading pl there is the zero-audio bug AQU-1278 fixed.
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.audio_validator_histogram, '{}'::jsonb)
-                 ELSE COALESCE(pd.audio_validator_histogram, '{}'::jsonb) END
+                 ELSE COALESCE(pl.audio_validator_histogram, pd.audio_validator_histogram, '{}'::jsonb) END
               AS audio_validator_histogram,
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(ps.structural_audio_validator_histogram, '{}'::jsonb)
-                 ELSE COALESCE(pd.structural_audio_validator_histogram, '{}'::jsonb) END
+                 ELSE COALESCE(pl.structural_audio_validator_histogram, pd.structural_audio_validator_histogram, '{}'::jsonb) END
               AS structural_audio_validator_histogram,
             -- NULL where there is no sheet: the reader's signal to measure
             -- audio against the text total, exactly as it always has.
@@ -231,16 +246,19 @@ export function readPlanUnitsSql(extraScope = ""): string {
             pu.target_date, pu.done_at, pu.done_by,
             pu.updated_at AS plan_updated_at, pu.updated_by AS plan_updated_by
        FROM units u
-       LEFT JOIN file_section_progress pd
-         ON pd.project_id = u.project_id AND pd.file_id = u.file_id
-        AND pd.scope = CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END
-        AND pd.section_key = u.section_key
-        AND pd.target_lang = ''
+       LEFT JOIN LATERAL (
+         ${laneIndependentProgressSql({
+           projectCol: "u.project_id",
+           fileCol: "u.file_id",
+           scopeSql: "CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END",
+           sectionKeySql: "u.section_key",
+         })}
+       ) pd ON TRUE
        LEFT JOIN file_section_progress pl
          ON pl.project_id = u.project_id AND pl.file_id = u.file_id
         AND pl.scope = CASE WHEN u.section_key = '' THEN 'file' ELSE 'book' END
         AND pl.section_key = u.section_key
-        AND pl.target_lang = ?
+        AND pl.lane_id = ${targetLaneIdSql("u.project_id")}
        LEFT JOIN LATERAL (
          SELECT s.id, s.cell_count
            FROM files s
@@ -278,11 +296,14 @@ export function readPlanUnitsSql(extraScope = ""): string {
             AND sc.anchor_file_id = u.file_id
             AND sc.role = 'audio-cues'
        ) cst ON TRUE
-       LEFT JOIN file_section_progress ps
-         ON ps.project_id = u.project_id AND ps.file_id = cs.id
-        AND ps.scope = 'file'
-        AND ps.section_key = ''
-        AND ps.target_lang = ''
+       LEFT JOIN LATERAL (
+         ${laneIndependentProgressSql({
+           projectCol: "u.project_id",
+           fileCol: "cs.id",
+           scopeSql: "'file'",
+           sectionKeySql: "''",
+         })}
+       ) ps ON TRUE
        LEFT JOIN plan_units pu
          ON pu.project_id = u.project_id AND pu.file_id = u.file_id
         AND pu.section_key = u.section_key

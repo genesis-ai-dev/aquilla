@@ -7,8 +7,11 @@ import { createStorePromise, type Adapter, type Store } from "@livestore/livesto
 import { unstable_batchedUpdates as batchUpdates } from "react-dom"
 import { schema } from "./schema"
 import { isTauriRuntime } from "./is-tauri"
+import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
+import { checkClientSessionHead } from "./head-check"
 
-const STORE_ID = "aquilla-offline"
+// Names the OPFS dir; changing it strands every device's data (pinned by eventlog-compat.test.ts).
+export const STORE_ID = "aquilla-offline"
 
 // Re-exported for backward compatibility — existing importers (e.g.
 // OfflineStoreContext.tsx) pull isTauriRuntime from here. New callers outside
@@ -26,9 +29,11 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
   ])
   const devBridge = import.meta.env.DEV ? await import("./leader-log-bridge") : null
   devBridge?.installLeaderLogCollector()
+  installBfcacheGuard()
   return makePersistedAdapter({
     worker: (options: WorkerOptions) => {
       const worker = new LiveStoreWorker(options)
+      trackLeaderWorker(worker)
       devBridge?.watchLeaderWorker(worker, options.name ?? "leader")
       return worker
     },
@@ -44,9 +49,14 @@ export function getOfflineStore(createAdapter: CreateOfflineAdapter = defaultCre
   if (!isTauriRuntime()) {
     return Promise.reject(new Error("getOfflineStore() is only available in the Tauri desktop app"))
   }
-  storePromise ??= Promise.resolve(createAdapter()).then((adapter) =>
-    createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }),
-  )
+  storePromise ??= Promise.resolve(createAdapter())
+    .then((adapter) => createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }))
+    .then(async (store) => {
+      // A stale client session must not take writes; hold the store back
+      // while the page reloads (see head-check.ts).
+      if ((await checkClientSessionHead(store)) === "reloading") return new Promise<never>(() => {})
+      return store
+    })
   return storePromise
 }
 

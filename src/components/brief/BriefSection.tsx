@@ -2,7 +2,8 @@
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useT } from "@/lib/i18n/I18nProvider"
-import type { TranslationBrief } from "@/lib/brief/types"
+import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { BriefStatus, TranslationBrief } from "@/lib/brief/types"
 import { briefStatus } from "@/lib/brief/brief"
 
 export interface BriefSectionProps {
@@ -16,6 +17,20 @@ export interface BriefSectionProps {
   busy?: boolean
 }
 
+/** Localized badge text per derived status — never the raw enum value. */
+const STATUS_LABEL_KEY = {
+  none: "terminology.livingMemory.section.brief.statusNone",
+  draft: "terminology.livingMemory.section.brief.statusDraft",
+  complete: "terminology.livingMemory.section.brief.statusComplete",
+} as const satisfies Record<BriefStatus, MessageKey>
+
+/** What each status means for the AI — see the explainer note below. */
+const STATUS_EXPLAINER_KEY = {
+  none: "terminology.livingMemory.section.brief.statusNoneExplainer",
+  draft: "terminology.livingMemory.section.brief.statusDraftExplainer",
+  complete: "terminology.livingMemory.section.brief.statusCompleteExplainer",
+} as const satisfies Record<BriefStatus, MessageKey>
+
 export function BriefSection(props: BriefSectionProps) {
   const t = useT()
   const { brief, canEdit, stale, onEdit, onGenerate, busy = false } = props
@@ -25,7 +40,9 @@ export function BriefSection(props: BriefSectionProps) {
     <section aria-label={t("autopilot.readiness.brief.label")}>
       <div className="flex items-center gap-2 mb-2">
         <h2 className="text-sm font-semibold">{t("autopilot.readiness.brief.label")}</h2>
-        <Badge variant="secondary" className="text-[10px] capitalize">{status}</Badge>
+        {/* AQU-1672: the raw enum rendered untranslated ("draft") and said
+            nothing about what the state meant. */}
+        <Badge variant="secondary" className="text-[10px]">{t(STATUS_LABEL_KEY[status])}</Badge>
         {/* AQU-912: two partner users read the brief as required and as the same
             thing as the AI instructions. The qualifier sits where the decision is
             made — the empty state, before anyone has invested in a brief. Reuses
@@ -41,10 +58,16 @@ export function BriefSection(props: BriefSectionProps) {
           <p className="mb-3">
             {t("agent.brief.capturePurpose")}
           </p>
+          <p className="mb-3 text-xs">{t(STATUS_EXPLAINER_KEY[status])}</p>
           {canEdit && <Button onClick={onEdit} disabled={busy}>{t("agent.brief.createBrief")}</Button>}
         </div>
       ) : (
         <div className="rounded-lg border border-border/50 p-4 space-y-3">
+          {/* AQU-1672: the status is derived and there is nothing to approve, so
+              the card says in words whether this brief is in force and what
+              would move it to Complete, instead of leaving a permanent "Draft"
+              badge reading as a blocked step. */}
+          <p className="text-xs text-muted-foreground">{t(STATUS_EXPLAINER_KEY[status])}</p>
           {brief?.l1Summary ? (
             <p className="text-sm leading-relaxed whitespace-pre-wrap">{brief.l1Summary}</p>
           ) : (

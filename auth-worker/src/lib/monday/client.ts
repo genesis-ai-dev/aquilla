@@ -4,12 +4,21 @@
 // mutations (daily-call budgets on Free/Basic Monday plans are tiny).
 
 import type { MondayBoardColumn, MondayBoardGroup } from "./types"
+import {
+  isAbortTimeout,
+  logVendorTimeout,
+  vendorTimeoutMessage,
+  VENDOR_TIMEOUT_MS,
+} from "../../../../shared/vendor-timeouts"
 
 export const MONDAY_API_URL = "https://api.monday.com/v2"
 export const MONDAY_API_VERSION = "2026-07"
 
 /** Max seconds we will actually sleep on a 429 before giving up. */
 const MAX_RETRY_SLEEP_SECONDS = 60
+
+/** How many column values one items_page_by_column_values query carries (AQU-1828). */
+const COLUMN_VALUE_LOOKUP_BATCH = 100
 
 export class MondayApiError extends Error {
   readonly status: number
@@ -54,15 +63,29 @@ export async function mondayGraphQL<T>(
   variables?: Record<string, unknown>,
   attempt = 0,
 ): Promise<T> {
-  const res = await fetch(MONDAY_API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: accessToken,
-      "Content-Type": "application/json",
-      "API-Version": MONDAY_API_VERSION,
-    },
-    body: JSON.stringify(variables ? { query, variables } : { query }),
-  })
+  let res: Response
+  try {
+    res = await fetch(MONDAY_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: accessToken,
+        "Content-Type": "application/json",
+        "API-Version": MONDAY_API_VERSION,
+      },
+      body: JSON.stringify(variables ? { query, variables } : { query }),
+      // AQU-1849: per ATTEMPT, not per call — the 429 retry below sleeps
+      // between attempts and each one gets its own deadline. A hung Monday
+      // used to hold the push engine (and the cron flush behind it) open with
+      // nothing in the logs; now it surfaces as a 504 MondayApiError.
+      signal: AbortSignal.timeout(VENDOR_TIMEOUT_MS.mondayGraphQL),
+    })
+  } catch (err) {
+    if (isAbortTimeout(err)) {
+      logVendorTimeout("mondayGraphQL", err)
+      throw new MondayApiError(vendorTimeoutMessage("mondayGraphQL"), 504)
+    }
+    throw err
+  }
 
   let body: GraphQLEnvelope<T> | null = null
   try {
@@ -170,6 +193,8 @@ export async function listBoards(accessToken: string): Promise<MondayBoardSummar
 }
 
 export interface BoardStructureResult {
+  url?: string | null
+  name?: string | null
   columns: MondayBoardColumn[]
   groups: MondayBoardGroup[]
 }
@@ -181,16 +206,18 @@ export async function fetchBoardStructure(
 ): Promise<BoardStructureResult> {
   const data = await mondayGraphQL<{
     boards: Array<{
+      url?: string
+      name?: string
       columns: Array<{ id: string; title: string; type: string; settings_str?: string }>
       groups: Array<{ id: string; title: string }>
     }> | null
   }>(
     accessToken,
-    `query { boards(ids: ${gqlString(boardId)}) { columns { id title type settings_str } groups { id title } } }`,
+    `query { boards(ids: ${gqlString(boardId)}) { name url columns { id title type settings_str } groups { id title } } }`,
   )
   const board = data.boards?.[0]
   if (!board) throw new MondayApiError(`board ${boardId} not found`, 404)
-  return { columns: board.columns ?? [], groups: board.groups ?? [] }
+  return { name: board.name ?? null, url: board.url ?? null, columns: board.columns ?? [], groups: board.groups ?? [] }
 }
 
 export interface MondayItemSample {
@@ -227,41 +254,72 @@ export async function fetchBoardItemsSample(
   }))
 }
 
-/** Find an item whose text column equals `value` (idempotent re-linking). */
-export async function findItemByColumnValue(
+/**
+ * Find the items whose text column equals one of `values` (idempotent
+ * re-linking). AQU-1828: resolves MANY values in one request —
+ * `items_page_by_column_values` takes a list for a column, so a 66-file first
+ * push costs one query instead of the 66 the per-value helper this replaced
+ * cost. Returns value → item id for the values that matched; values with no
+ * item are simply absent.
+ */
+export async function findItemsByColumnValues(
   accessToken: string,
   boardId: string,
   columnId: string,
-  value: string,
-): Promise<string | null> {
-  const data = await mondayGraphQL<{
-    items_page_by_column_values: { items: Array<{ id: string | number }> } | null
-  }>(
-    accessToken,
-    `query { items_page_by_column_values(board_id: ${gqlString(boardId)}, limit: 1, columns: [{column_id: ${gqlString(columnId)}, column_values: [${gqlString(value)}]}]) { items { id } } }`,
-  )
-  const id = data.items_page_by_column_values?.items?.[0]?.id
-  return id != null ? String(id) : null
+  values: string[],
+): Promise<Map<string, string>> {
+  const found = new Map<string, string>()
+  for (const batch of chunk([...new Set(values)], COLUMN_VALUE_LOOKUP_BATCH)) {
+    const data = await mondayGraphQL<{
+      items_page_by_column_values: {
+        items: Array<{
+          id: string | number
+          column_values: Array<{ id: string; text: string | null }>
+        }>
+      } | null
+    }>(
+      accessToken,
+      `query { items_page_by_column_values(board_id: ${gqlString(boardId)}, limit: ${batch.length}, columns: [{column_id: ${gqlString(columnId)}, column_values: [${batch.map(gqlString).join(", ")}]}]) { items { id column_values(ids: [${gqlString(columnId)}]) { id text } } } }`,
+    )
+    for (const item of data.items_page_by_column_values?.items ?? []) {
+      const text = item.column_values?.find((c) => c.id === columnId)?.text
+      if (text == null || text === "") continue
+      if (!found.has(text)) found.set(text, String(item.id))
+    }
+  }
+  return found
 }
 
-/** Case-insensitive name match against the first items page (v1 approximation). */
-export async function findItemByName(
+/**
+ * Case-insensitive name matching against the first items page (v1
+ * approximation). AQU-1828: one request, indexed by normalized name, so N
+ * entities share it — the per-entity helper this replaced fetched this same
+ * 500-item page once per entity.
+ */
+export async function fetchBoardItemNameIndex(
   accessToken: string,
   boardId: string,
-  name: string,
-): Promise<string | null> {
+  limit = 500,
+): Promise<Map<string, string>> {
   const data = await mondayGraphQL<{
     boards: Array<{
       items_page: { items: Array<{ id: string | number; name: string }> }
     }> | null
   }>(
     accessToken,
-    `query { boards(ids: ${gqlString(boardId)}) { items_page(limit: 500) { items { id name } } } }`,
+    `query { boards(ids: ${gqlString(boardId)}) { items_page(limit: ${limit}) { items { id name } } } }`,
   )
-  const items = data.boards?.[0]?.items_page?.items ?? []
-  const needle = name.trim().toLowerCase()
-  const hit = items.find((i) => i.name.trim().toLowerCase() === needle)
-  return hit ? String(hit.id) : null
+  const index = new Map<string, string>()
+  for (const item of data.boards?.[0]?.items_page?.items ?? []) {
+    const key = normalizeItemName(item.name)
+    if (!index.has(key)) index.set(key, String(item.id))
+  }
+  return index
+}
+
+/** The key `fetchBoardItemNameIndex` indexes on — match callers must use it too. */
+export function normalizeItemName(name: string): string {
+  return name.trim().toLowerCase()
 }
 
 // ── Webhooks ───────────────────────────────────────────────────────────────

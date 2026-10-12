@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { readLastLocation, writeLastLocation } from "./last-location-store"
+import { readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "./last-location-store"
 
 // jsdom provides localStorage; we reset it between tests.
 beforeEach(() => {
@@ -62,5 +62,35 @@ describe("last-location-store", () => {
       cellId: "cell-1",
       canonicalRef: "GEN 1:1",
     })
+  })
+})
+
+describe("per-file last cell", () => {
+  // The point of the per-file trace: going back to a file resumes where you
+  // were IN THAT FILE, not wherever you last were in the project.
+  it("remembers a cell for each file independently", () => {
+    writeLastCell("alice", "proj-1", "file-a", "a-7")
+    writeLastCell("alice", "proj-1", "file-b", "b-3")
+    expect(readLastCell("alice", "proj-1", "file-a")).toBe("a-7")
+    expect(readLastCell("alice", "proj-1", "file-b")).toBe("b-3")
+  })
+
+  it("keeps only the latest cell for a file", () => {
+    writeLastCell("alice", "proj-1", "file-a", "a-1")
+    writeLastCell("alice", "proj-1", "file-a", "a-9")
+    expect(readLastCell("alice", "proj-1", "file-a")).toBe("a-9")
+  })
+
+  it("does not leak across users or projects", () => {
+    writeLastCell("alice", "proj-1", "file-a", "a-1")
+    expect(readLastCell("bob", "proj-1", "file-a")).toBeNull()
+    expect(readLastCell("alice", "proj-2", "file-a")).toBeNull()
+  })
+
+  it("evicts the least-recently-used file past the cap", () => {
+    writeLastCell("alice", "proj-1", "oldest", "c")
+    for (let i = 0; i < 300; i++) writeLastCell("alice", "proj-1", `f-${i}`, "c")
+    expect(readLastCell("alice", "proj-1", "oldest")).toBeNull()
+    expect(readLastCell("alice", "proj-1", "f-299")).toBe("c")
   })
 })

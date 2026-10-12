@@ -6,9 +6,10 @@
  * row with `status: "ready"` — until this module runs, `sync-manager.ts`
  * (Phase 3) has nothing to react to and stays inert.
  *
- * Cell rows land through catch-up.ts's `fullSyncFile` — the same mapping and
- * lane filter as live frames (`sync-adapter.ts`) and later catch-ups, and it
- * records each file's first `?since=` cursor.
+ * Cell rows land through catch-up.ts's `fullSyncFile` — the same mapping as
+ * live frames (`sync-adapter.ts`) and later catch-ups (every lane the caller
+ * can see, keyed per lane since AQU-1614), and it records each file's first
+ * `?since=` cursor.
  */
 import { useEffect, useState, useSyncExternalStore } from "react"
 import type { Store } from "@livestore/livestore"
@@ -100,7 +101,15 @@ const defaultDeps: DownloadProjectDeps = {
  *  than leave a partial copy masquerading as complete. */
 function deleteProjectRows(store: Store<typeof schema>, projectId: string): void {
   for (const row of store.query(tables.cells.select().where({ projectId }))) {
-    store.commit(events.cellRemoved({ projectId, fileId: row.fileId, cellId: row.cellId, side: row.side }))
+    store.commit(
+      events.cellRemoved({
+        projectId,
+        fileId: row.fileId,
+        cellId: row.cellId,
+        side: row.side,
+        laneKey: row.laneKey,
+      }),
+    )
   }
   for (const row of store.query(tables.files.select().where({ projectId }))) {
     store.commit(events.fileRemoved({ id: row.id }))

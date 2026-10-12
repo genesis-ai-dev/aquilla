@@ -65,7 +65,7 @@ async function setReleased(released: boolean | undefined): Promise<void> {
     .run()
 }
 
-function ctx(method: string, path: string, body?: unknown): Promise<Response> {
+async function ctx(method: string, path: string, body?: unknown): Promise<Response> {
   return app.request(
     `/api/v2/projects/${PROJECT}/contextual${path}`,
     {
@@ -77,7 +77,7 @@ function ctx(method: string, path: string, body?: unknown): Promise<Response> {
   )
 }
 
-function teamReq(method: string, path: string, body?: unknown): Promise<Response> {
+async function teamReq(method: string, path: string, body?: unknown): Promise<Response> {
   return app.request(
     `/api/v2/projects/${PROJECT}/team${path}`,
     {
@@ -104,7 +104,6 @@ async function seedRun(): Promise<string> {
     runId: created.run.id,
     projectId: PROJECT,
     fileId: FILE,
-    targetLang: "",
     drafts: [{ cellId: "c1", text: "Hapo mwanzo" }],
   })
   return created.run.id
@@ -141,6 +140,15 @@ beforeEach(async () => {
     "INSERT INTO files (id, project_id, name, kind, event_id) VALUES (?, ?, 'Mark', 'usfm', 'ev-file')",
   )
     .bind(FILE, PROJECT)
+    .run()
+  // AQU-1595: the start gate reads both languages off the lane rows, not the
+  // settings blob. Seed them before the cells so the test trigger attaches the
+  // cells to these rows instead of minting language-less ones.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+     VALUES ('ctxg-src', ?, 'source', 'English', NULL, 0), ('ctxg-tgt', ?, 'target', 'Swahili', '', 1)`,
+  )
+    .bind(PROJECT, PROJECT)
     .run()
   for (const [cellId, ref, text] of [
     ["c1", "MRK 1:1", "In the beginning"],

@@ -21,13 +21,49 @@
 // second, divergent one.
 
 import { fetchProject } from "./projects-read"
+import { fetchProjectSettingsResult } from "./project-settings"
 import type { ProjectFileSummary } from "./projects-read-types"
+
+/**
+ * AQU-1559: one row of the confirm step's file list — an upstream file the lead
+ * can leave checked or uncheck.
+ *
+ * `id` is the UPSTREAM file id, which is what the link request carries and what
+ * the mirror matches on: the selection has to follow the file itself, so that
+ * renaming a picked file upstream keeps it linked and the new name still comes
+ * through. `clashes` is this row's own answer to the same-name question the
+ * warning asks, so the warning can list only the clashing files still checked.
+ */
+export interface LinkSourcePreviewFile {
+  id: string
+  name: string
+  clashes: boolean
+  /**
+   * AQU-1679: the one file in this project that this upstream file could
+   * replace the source of — the "same name here" file — when there is exactly
+   * one. Absent when nothing clashes, and absent when the name is shared by
+   * more than one file on either side: which of two `MRK`s is "the same file"
+   * is not something a name can answer, so the option is not offered and the
+   * upstream file arrives as its own copy.
+   */
+  clashFileId?: string
+}
 
 export interface LinkSourcePreview {
   /** The upstream project's display name, as the server knows it. */
   upstreamName: string
   /**
-   * How many files the link will add. Every non-deleted upstream file mirrors:
+   * AQU-1559: every file in the upstream, in the upstream's own order — the
+   * rows of the confirm step's checkbox list. Empty for an upstream with no
+   * files, which is a linkable situation with no list to show.
+   */
+  files: LinkSourcePreviewFile[]
+  /**
+   * How many files the upstream holds — `files.length`, and so the M of the
+   * "N of M files" the link ends up following. AQU-1559 made this the ceiling
+   * rather than the promise: the sentence the confirm step prints counts the
+   * files still CHECKED, which starts equal to this and falls as the lead
+   * unchecks. Every non-deleted upstream file mirrors:
    * `file.create` is itself a lane-relevant kind for a `consumes: 'source'`
    * link (sync-worker `events/link-sync.ts` → `LANE_KINDS_SOURCE`), so even an
    * upstream file with no source cells yet arrives. This is therefore the
@@ -64,19 +100,44 @@ export interface LinkSourcePreview {
  * names, not rows.
  */
 export function buildLinkSourcePreview(
-  upstream: { name: string; files: readonly Pick<ProjectFileSummary, "name">[] },
-  existingFiles: readonly Pick<ProjectFileSummary, "name">[],
+  upstream: { name: string; files: readonly Pick<ProjectFileSummary, "id" | "name">[] },
+  existingFiles: readonly (Pick<ProjectFileSummary, "name"> & { id?: string })[],
 ): LinkSourcePreview {
   const existing = new Set(existingFiles.map((f) => f.name.toLowerCase()))
+  // AQU-1679: names that identify exactly one file on each side.
+  const ownByName = new Map<string, Array<string | undefined>>()
+  for (const f of existingFiles) {
+    const key = f.name.toLowerCase()
+    ownByName.set(key, [...(ownByName.get(key) ?? []), f.id])
+  }
+  const upstreamNameCount = new Map<string, number>()
+  for (const f of upstream.files) {
+    const key = f.name.toLowerCase()
+    upstreamNameCount.set(key, (upstreamNameCount.get(key) ?? 0) + 1)
+  }
   const clashingNames: string[] = []
   const seen = new Set<string>()
+  // AQU-1559: one row per upstream file, each carrying its own clash answer.
+  // `clashingNames` stays the de-duplicated name list the warning prints — two
+  // upstream files spelled the same way are two rows to check but one line of
+  // warning — so both derive from this single pass.
+  const files: LinkSourcePreviewFile[] = []
   for (const file of upstream.files) {
     const key = file.name.toLowerCase()
-    if (!existing.has(key) || seen.has(key)) continue
+    const clashes = existing.has(key)
+    const own = ownByName.get(key) ?? []
+    const clashFileId = own.length === 1 && upstreamNameCount.get(key) === 1 ? own[0] : undefined
+    files.push({ id: file.id, name: file.name, clashes, ...(clashFileId ? { clashFileId } : {}) })
+    if (!clashes || seen.has(key)) continue
     seen.add(key)
     clashingNames.push(file.name)
   }
-  return { upstreamName: upstream.name, fileCount: upstream.files.length, clashingNames }
+  return {
+    upstreamName: upstream.name,
+    files,
+    fileCount: upstream.files.length,
+    clashingNames,
+  }
 }
 
 /**
@@ -99,4 +160,77 @@ export async function loadLinkSourcePreview(
     fetchProject(projectId, jwt, apiUrl),
   ])
   return buildLinkSourcePreview(upstream, self.files)
+}
+
+/**
+ * AQU-1561: the upstream's files alone, for a project that does not exist yet.
+ *
+ * Create New Project asks the same "which of these files?" question as the link
+ * flow above, but one read short of it: the project being created has no files,
+ * so there is nothing to clash with and nothing to compare against. Reusing
+ * `buildLinkSourcePreview` with an empty existing-file list is what keeps the
+ * two answers the same shape — every row comes back `clashes: false`, and the
+ * shared list component renders no clash badges for it — rather than the create
+ * dialog growing its own notion of an upstream file row.
+ *
+ * Throws what `fetchProject` throws. The caller shows the failure and offers a
+ * retry rather than rendering an empty list, which would read as "an upstream
+ * with no files" — a different situation, and one that still creates.
+ */
+export async function loadUpstreamFileChoices(
+  jwt: string,
+  upstreamProjectId: string,
+  apiUrl?: string,
+): Promise<LinkSourcePreviewFile[]> {
+  const upstream = await fetchProject(upstreamProjectId, jwt, apiUrl)
+  return buildLinkSourcePreview(upstream, []).files
+}
+
+
+/**
+ * AQU-1605: one of the upstream's lanes, as a choice the link flows can offer.
+ *
+ * `id` is `lanes.id` — what the link request carries and what the mirror resolves
+ * its fold against. It is globally unique (AQU-1606) and survives the lane being
+ * renamed or given another language, which the legacy tag the events use does
+ * not; that translation is the server's job, not the picker's.
+ */
+export interface UpstreamLaneChoice {
+  id: string
+  /** What to show: the lane's name, falling back to its legacy tag. */
+  label: string
+}
+
+/**
+ * The upstream's target lanes THIS caller may see, in lane order.
+ *
+ * Read from `GET /api/v2/projects/:id/settings`, which already applies the lane
+ * read wall to the lane rows it returns (`filterSettingsToVisibleLanes`), so a
+ * member granted one lane of the upstream is offered that one lane and the
+ * picker never has to know the wall exists. Linking requires viewer+ on the
+ * upstream, which is exactly the access this read needs.
+ *
+ * Archived lanes are left out: an archived lane is frozen, so a link to one
+ * could only ever mirror a corpus nobody may still edit, and the server refuses
+ * it. An empty list means the upstream has no target lane the caller may
+ * consume — the caller says so rather than linking to a lane it cannot name.
+ *
+ * Throws on a transport/server failure, like `loadUpstreamFileChoices`: the
+ * caller shows the failure and offers a retry rather than rendering an empty
+ * list, which reads as "no lanes" and is a different situation. A definitive
+ * 403/404 is not a failure — it is an upstream with nothing to offer.
+ */
+export async function loadUpstreamLaneChoices(
+  jwt: string,
+  upstreamProjectId: string,
+  apiUrl?: string,
+): Promise<UpstreamLaneChoice[]> {
+  const out = await fetchProjectSettingsResult(jwt, upstreamProjectId, apiUrl)
+  if (!out.ok) throw new Error(out.message || `lanes read failed (${out.status})`)
+  const lanes = out.value?.lanes ?? []
+  return lanes
+    .filter((lane) => lane.role === "target" && !lane.archivedAt)
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map((lane) => ({ id: lane.id, label: lane.name || lane.legacyTag || "" }))
 }

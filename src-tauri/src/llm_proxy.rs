@@ -1,14 +1,15 @@
 use axum::{
     body::Body,
-    extract::{Query, State},
-    http::StatusCode,
-    response::IntoResponse,
+    extract::{Query, Request, State},
+    http::{header, HeaderValue, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 #[derive(Clone)]
 pub struct LlmConfig {
@@ -129,18 +130,74 @@ pub async fn models_handler(
     (status, Body::from_stream(stream)).into_response()
 }
 
+/// Origins the app's own webview uses (Tauri 2 per-platform schemes + vite dev).
+/// Any other web page is a cross-site caller and must not reach this proxy.
+const ALLOWED_ORIGINS: &[&str] = &[
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://127.0.0.1:1420",
+    "http://localhost:1420",
+];
+
+const ALLOWED_HOSTS: &[&str] = &["127.0.0.1:49152", "localhost:49152"];
+
+fn origin_allowed(origin: &str) -> bool {
+    ALLOWED_ORIGINS.contains(&origin)
+}
+
+fn host_allowed(host: &str) -> bool {
+    ALLOWED_HOSTS.contains(&host)
+}
+
+/// Rejects requests from foreign web pages (Origin check) and DNS-rebinding
+/// attempts (Host check). The proxy forwards to a caller-chosen `?endpoint=`, so
+/// without this any site the user visits could use it as a browser-to-LAN pivot.
+async fn guard_origin(req: Request, next: Next) -> Response {
+    let headers = req.headers();
+    let host_ok = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(host_allowed);
+    let origin_ok = headers
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(origin_allowed);
+    if !host_ok || !origin_ok {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(req).await
+}
+
 pub fn build_router(config: LlmConfig) -> Router {
     let client = reqwest::Client::new();
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+            origin.to_str().is_ok_and(origin_allowed)
+        }))
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+        .allow_headers([header::CONTENT_TYPE]);
     Router::new()
         .route("/llm/chat", post(proxy_handler))
         .route("/llm/models", get(models_handler))
-        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn(guard_origin))
+        .layer(cors)
         .with_state((config, client))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_app_origins_and_loopback_hosts_are_allowed() {
+        assert!(origin_allowed("tauri://localhost"));
+        assert!(origin_allowed("http://127.0.0.1:1420"));
+        assert!(!origin_allowed("https://evil.example"));
+        assert!(!origin_allowed("null"));
+        assert!(host_allowed("127.0.0.1:49152"));
+        assert!(!host_allowed("evil.example:49152"));
+    }
 
     #[test]
     fn default_config_points_at_local_ollama() {

@@ -233,6 +233,26 @@ describe("buildSystemPrompt brief block", () => {
   })
 })
 
+// Since 2026-09-04 key terms live in the concepts table, the projection of
+// term.* events, and the concepts migration deletes the project_settings
+// `terminology` key. A card that names that key sends every termbase question
+// to a value that no longer exists (AQU-1723).
+describe("buildSystemPrompt — termbase", () => {
+  const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: AGENT_ROLE.OWNER })
+
+  it("documents the concepts table as the termbase, with its live and binding rules", () => {
+    const line = prompt.split("\n").find((l) => l.startsWith("- concepts ("))
+    expect(line, "the schema card has no '- concepts (' line").toBeDefined()
+    expect(line).toContain("deleted_at IS NULL")
+    expect(line).toContain("'active'")
+    expect(line).toContain("term.*")
+  })
+
+  it("never calls the retired terminology settings key the termbase", () => {
+    expect(prompt).not.toContain("-> 'terminology'")
+  })
+})
+
 // AQU-926 (COMMAND-REGISTRY §4): the changeset-command index has the same
 // absent-not-rejected property as the event card — a command a role cannot
 // stage must be missing from that role's prompt, and only the ONE-LINE index
@@ -291,9 +311,13 @@ describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {
     expect(AGENT_REQUIRED_ROLE["source.cell.commit"]).toBe(500)
     expect(AGENT_REQUIRED_ROLE["assignment.create"]).toBe(500)
     expect(AGENT_REQUIRED_ROLE["file.delete"]).toBe(500)
+    // AQU-1569: a reorder relayouts the sidebar for every member of the
+    // project, so it carries the project-lead floor rather than the
+    // contributor one its file.rename neighbour sits at.
+    expect(AGENT_REQUIRED_ROLE["file.reorder"]).toBe(500)
   })
 
-  it("covers all 28 event kinds from sync-worker/src/events/types.ts", () => {
-    expect(Object.keys(AGENT_REQUIRED_ROLE)).toHaveLength(28)
+  it("covers all 29 event kinds from sync-worker/src/events/types.ts", () => {
+    expect(Object.keys(AGENT_REQUIRED_ROLE)).toHaveLength(29)
   })
 })

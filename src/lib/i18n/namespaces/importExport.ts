@@ -1077,6 +1077,12 @@ export const importExport = defineNamespace({
     "importExport.dcs.loadingCatalog": "Loading catalog…",
     "importExport.dcs.noResults": "No released resources match these filters.",
     "importExport.dcs.noResultsHint": "Try a broader language, owner, or subject.",
+    "importExport.dcs.notAppliedError": plural({
+      one: "{count} change could not be applied — another edit moved that line " +
+        "first. Nothing else was affected; run it again to pick up the rest.",
+      other: "{count} changes could not be applied — other edits moved those lines " +
+        "first. Nothing else was affected; run it again to pick up the rest.",
+    }),
     "importExport.dcs.notYetSupportedBadge": "Not yet supported",
     "importExport.dcs.ownerFilterLabel": "Owner",
     "importExport.dcs.panelDescription": "This project mirrors a Door43 resource. Check for a newer published " +
@@ -2728,6 +2734,19 @@ export const importExport = defineNamespace({
           "Second, smaller line of the empty state in the Door43 catalog results " +
           "area, suggesting how to get results. An imperative sentence naming the " +
           "three filters above the list.",
+      },
+      "importExport.dcs.notAppliedError": {
+        description:
+          "Reason text appended after 'Import failed:' or 'Re-sync failed:' when " +
+          "some of the lines being brought in from the upstream resource were " +
+          "refused because somebody else changed those same lines first. States " +
+          "how many were affected, reassures the reader the rest is untouched, and " +
+          "tells them to repeat the action. Begins lower-case only if the count " +
+          "word does; here it begins with the substituted number.",
+        placeholders: {
+          count: "How many changes were not applied. Do not translate the " +
+            "substituted value.",
+        },
       },
       "importExport.dcs.notYetSupportedBadge": {
         description:

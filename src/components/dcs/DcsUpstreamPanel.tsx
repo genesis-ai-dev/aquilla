@@ -22,6 +22,7 @@
 // (stale-source-read + UpstreamChangesPanel). We do not touch those here.
 
 import { useCallback, useMemo, useRef, useState } from "react"
+import { v7 as uuidv7 } from "uuid"
 import { RefreshCw, DownloadCloud, CheckCircle2, AlertTriangle, Wrench, Unlink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
@@ -30,18 +31,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
-import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
-import { fetchProjectFiles, fetchAllFileCells } from "@/lib/sync/cells-read"
-import {
-  emitSourceCellCommit,
-  emitSourceCellDelete,
-  enqueueEvent,
-} from "@/lib/sync/events-emit"
+import { buildRawEvent } from "@/lib/sync/events-emit"
+import { bulkPostEvents } from "@/lib/sync/bulk-events"
+import type { CqrsRawEvent } from "@/lib/sync/outbox-types"
 import { ROLE } from "@/lib/sync/role-policy"
 import { DcsClient } from "@/lib/dcs/catalog"
-import { contentHash } from "@/lib/dcs/content-hash"
+import { buildCurrentCells } from "@/lib/dcs/current-cells"
 import { readCursor, buildCursor, DCS_UPSTREAM_KEY } from "@/lib/dcs/cursor"
 import {
   computeDelta,
@@ -182,10 +180,23 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     }
   }, [cursor, dcs])
 
-  // Shared apply path: bind the classified delta to the REAL typed source
-  // emitters and run applyDelta. Both "Import changes" (upstream advance) and
-  // "Re-sync content" (same-ref repair) apply through this identical wiring so
-  // outbox routing, idempotent event ids, and fileId resolution never diverge.
+  // Shared apply path: bind the classified delta to envelope builders and run
+  // applyDelta, then commit the whole batch through the bulk front door. Both
+  // "Import changes" (upstream advance) and "Re-sync content" (same-ref repair)
+  // apply through this identical wiring so chunking, idempotent event ids, and
+  // fileId resolution never diverge.
+  //
+  // AQU-1860: the emitters BUILD envelopes into a buffer rather than writing an
+  // outbox row each. The per-event path cost one IndexedDB transaction per
+  // changed cell and then uploaded them at MAX_BATCH (100) events per POST for
+  // one file at a time behind the flusher's 5 s tick, so a release touching
+  // several thousand verses trickled in. applyDelta still owns the
+  // deterministic, project-scoped event ids and the create's parsed fileId, so
+  // what lands is identical to what the outbox enqueued — only the transport
+  // changed. The trade is the outbox's durability: a failed commit is not
+  // retried in the background, so the panel surfaces the error and the user
+  // re-runs the action (deterministic ids make that a server-side no-op for
+  // everything that already landed).
   const runApply = useCallback(
     async (
       delta: DeltaResult,
@@ -195,56 +206,92 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       const fileIdByCellId = new Map<string, string>()
       for (const [cellId, cur] of currentCells) fileIdByCellId.set(cellId, cur.fileId)
 
+      const pending: CqrsRawEvent[] = []
       const emitters: DeltaEmitters = {
-        // Deterministic event id (from applyDelta) is threaded through as the
-        // outbox event `id` so a re-run dedupes idempotently (server /import is
-        // idempotent on event id). A new cell has no existing projection row, so
-        // its fileId comes from the parsed DcsFile via the delta (CreateArg.fileId)
-        // — NOT from currentCells (which would miss and fall back to a phantom id).
+        // A new cell has no existing projection row, so its fileId comes from
+        // the parsed DcsFile via the delta (CreateArg.fileId) — NOT from
+        // currentCells (which would miss and fall back to a phantom id).
         create: async ({ eventId, cell, fileId }) => {
-          const { eventId: id } = await enqueueEvent({
-            kind: "source.cell.create",
-            projectId,
-            fileId,
-            cellId: cell.cellId,
-            parentId: null,
-            author,
-            id: eventId,
-            payload: {
+          pending.push(
+            buildRawEvent({
+              kind: "source.cell.create",
+              projectId,
+              fileId,
               cellId: cell.cellId,
-              anchorCellId: null,
-              value: cell.value,
-              ...(cell.valueHtml !== undefined ? { valueHtml: cell.valueHtml } : {}),
-              ...(cell.type !== undefined ? { type: cell.type } : {}),
-              ...(cell.canonicalRef !== undefined ? { canonicalRef: cell.canonicalRef } : {}),
-              ...(cell.metadata !== undefined ? { metadata: cell.metadata } : {}),
-              ...(cell.sequenceIndex !== undefined ? { sequenceIndex: cell.sequenceIndex } : {}),
-            },
-          })
-          return id
+              parentId: null,
+              author,
+              id: eventId,
+              payload: {
+                cellId: cell.cellId,
+                anchorCellId: null,
+                value: cell.value,
+                ...(cell.valueHtml !== undefined ? { valueHtml: cell.valueHtml } : {}),
+                ...(cell.type !== undefined ? { type: cell.type } : {}),
+                ...(cell.canonicalRef !== undefined ? { canonicalRef: cell.canonicalRef } : {}),
+                ...(cell.metadata !== undefined ? { metadata: cell.metadata } : {}),
+                ...(cell.sequenceIndex !== undefined ? { sequenceIndex: cell.sequenceIndex } : {}),
+              },
+            }) as CqrsRawEvent,
+          )
+          return eventId
         },
         commit: async ({ eventId, parentEventId, cell }) => {
           const fileId = fileIdByCellId.get(cell.cellId) ?? cell.cellId
-          return emitSourceCellCommit({
-            projectId,
-            fileId,
-            cellId: cell.cellId,
-            parentId: parentEventId,
-            value: cell.value,
-            ...(cell.valueHtml !== undefined ? { valueHtml: cell.valueHtml } : {}),
-            id: eventId,
-            author,
-          })
+          pending.push(
+            buildRawEvent({
+              kind: "source.cell.commit",
+              projectId,
+              fileId,
+              cellId: cell.cellId,
+              parentId: parentEventId,
+              author,
+              id: eventId,
+              payload: {
+                value: cell.value,
+                ...(cell.valueHtml !== undefined ? { valueHtml: cell.valueHtml } : {}),
+              },
+            }) as CqrsRawEvent,
+          )
+          return eventId
         },
         delete: async ({ cellId }) => {
           const fileId = fileIdByCellId.get(cellId) ?? cellId
-          return emitSourceCellDelete({ projectId, fileId, cellId, author })
+          // Fresh UUIDv7, no parentId — exactly the envelope
+          // emitSourceCellDelete minted here before. A re-run of the same delta
+          // therefore logs a second (harmless) tombstone, as it always has;
+          // within one run the retried chunk carries these same ids, so the
+          // server's INSERT OR IGNORE dedupes it.
+          const id = uuidv7()
+          pending.push(
+            buildRawEvent({
+              kind: "source.cell.delete",
+              projectId,
+              fileId,
+              cellId,
+              parentId: null,
+              author,
+              id,
+              payload: {},
+            }) as CqrsRawEvent,
+          )
+          return id
         },
       }
 
       await applyDelta(delta, emitters, { projectId, repo: ctx.repo, sha: ctx.sha })
+
+      const outcome = await bulkPostEvents({ events: pending, getToken })
+      // `rejected` is a per-event refusal inside a 200 (role, scope,
+      // validation); `stale` is a chain-mutating event the server logged but did
+      // not project because its parent was no longer the cell's head. Either way
+      // part of the delta did not land, so this must not read as success — the
+      // old path surfaced the same outcome through the outbox's dead-letter.
+      const notApplied = outcome.rejected.length + outcome.stale.length
+      if (notApplied > 0) {
+        throw new Error(t("importExport.dcs.notAppliedError", { count: notApplied }))
+      }
     },
-    [projectId, author],
+    [projectId, author, getToken, t],
   )
 
   const handleImport = useCallback(async () => {
@@ -265,7 +312,11 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       //    unchanged cells are suppressed. Keyed by cellId; carries the chain
       //    head eventId (the parent for a commit) and the owning fileId (deletes
       //    are scoped by file).
-      const currentCells = await buildCurrentCells(projectId, getToken, t)
+      const currentCells = await buildCurrentCells({
+        projectId,
+        getToken,
+        tokenErrorMessage: t("importExport.dcs.syncTokenError"),
+      })
 
       // 3. Compute + apply the delta through the typed source emitters.
       const delta = await computeDelta({
@@ -319,7 +370,11 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     setRepairState({ kind: "scanning" })
     try {
       const entry = await dcs.getCatalogEntry(cursor.owner, cursor.repo, cursor.ref)
-      const currentCells = await buildCurrentCells(projectId, getToken, t)
+      const currentCells = await buildCurrentCells({
+        projectId,
+        getToken,
+        tokenErrorMessage: t("importExport.dcs.syncTokenError"),
+      })
       const delta = await computeRepairDelta({ client: dcs, entry, currentCells, excludeFrontMatter })
       const total = delta.creates.length + delta.commits.length + delta.deletes.length
       if (total === 0) {
@@ -625,36 +680,4 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       </CardContent>
     </Card>
   )
-}
-
-/**
- * Build the adapter project's current SOURCE cells keyed by cellId. Streams
- * every file's source rows and hashes each cell's plain value with the shared
- * djb2 (`@/lib/dcs/content-hash`) so no-op suppression matches the server.
- */
-async function buildCurrentCells(
-  projectId: string,
-  getToken: (fileId: string) => Promise<string | null>,
-  // Its failure message surfaces verbatim in the panel, so the caller's
-  // translate function is threaded in rather than resolved at module scope.
-  t: TFunction,
-): Promise<Map<string, CurrentCell>> {
-  const out = new Map<string, CurrentCell>()
-  // Any fileId mints a project-scoped token (the token's project claim, not the
-  // fileId, is what authorizes the reads).
-  const listToken = await getToken("__dcs_list__")
-  if (!listToken) throw new Error(t("importExport.dcs.syncTokenError"))
-  const files = await fetchProjectFiles(projectId, listToken)
-  for (const file of files) {
-    const fileToken = (await getToken(file.fileId)) ?? listToken
-    const rows = await fetchAllFileCells(projectId, file.fileId, fileToken, "source")
-    for (const row of rows) {
-      out.set(row.cellId, {
-        eventId: row.eventId,
-        contentHash: contentHash(row.value),
-        fileId: file.fileId,
-      })
-    }
-  }
-  return out
 }

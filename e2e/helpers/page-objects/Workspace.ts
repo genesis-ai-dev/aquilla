@@ -1370,7 +1370,8 @@ export class Workspace {
   async blurEditor(): Promise<void> {
     // The sidebar's center can land on Comments and navigate away. The source
     // metadata lane has inert padding and keeps the current editor mounted.
-    await this.page.getByTestId("source-context-line")
+    // `root`: the extension editor renders the same lane inside its frame.
+    await this.root.getByTestId("source-context-line")
       .filter({ visible: true }).first().click({ position: { x: 1, y: 1 } })
   }
 

@@ -101,6 +101,23 @@ interface InFlightCellsCacheWrite {
 const pendingWrites = new Map<string, PendingCellsCacheWrite>()
 const inFlightWrites = new Map<string, InFlightCellsCacheWrite>()
 
+/**
+ * LRU bumps in flight. A bump is deliberately not awaited by the reader, but an
+ * unawaited IndexedDB write that can land at any later moment is exactly the
+ * kind of thing that makes a suite flaky (it was: a bump queued by one test's
+ * read consumed the mocked failure another test had armed). Tracking them lets
+ * the test reset drain them without putting a second transaction on the file-open
+ * critical path in production.
+ */
+const pendingTouches = new Set<Promise<void>>()
+
+function trackTouch(promise: Promise<void>): void {
+  const tracked = promise.catch(() => undefined).then(() => {
+    pendingTouches.delete(tracked)
+  })
+  pendingTouches.add(tracked)
+}
+
 function cacheKey(projectId: string, fileId: string, grantsVersion = ""): string {
   const legacy = grantsVersion
     ? `${projectId}:${fileId}:gv:${grantsVersion}`
@@ -207,8 +224,9 @@ export async function resetCellsCacheConnectionForTests(): Promise<void> {
   }
   pendingWrites.clear()
   const writes = [...inFlightWrites.values()].map(({ promise }) => promise)
-  await Promise.allSettled(writes)
+  await Promise.allSettled([...writes, ...pendingTouches])
   inFlightWrites.clear()
+  pendingTouches.clear()
   if (!dbPromise) return
   try {
     const db = await dbPromise
@@ -287,7 +305,7 @@ export async function readCellsCache(
     }
     // LRU bump, deliberately not awaited: recency is a hint, and the file open
     // this read feeds must not wait on a second transaction to paint.
-    if (entry) void touchEntryAccess(db, entryKey).catch(() => undefined)
+    if (entry) trackTouch(touchEntryAccess(db, entryKey))
     return entry
   } catch {
     return null

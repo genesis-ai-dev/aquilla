@@ -987,9 +987,11 @@ export function useProjectSettings(
   // AQU-1767 phase 2: let a history step read and write this project's
   // settings through this hook, wherever the person presses Undo.
   const settingsForHistoryRef = useRef(settings)
-  settingsForHistoryRef.current = settings
   const patchForHistoryRef = useRef(patch)
-  patchForHistoryRef.current = patch
+  useEffect(() => {
+    settingsForHistoryRef.current = settings
+    patchForHistoryRef.current = patch
+  }, [settings, patch])
   useEffect(() => {
     if (!projectId) return
     return registerSettingsAccessor(projectId, {

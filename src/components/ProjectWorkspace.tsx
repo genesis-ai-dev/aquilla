@@ -2327,7 +2327,9 @@ export function ProjectWorkspace() {
   // another file can say which one to open. Read through a ref by the many
   // callbacks that record steps, so none of them re-creates on a rename.
   const activeFileNameRef = useRef<string | null>(null)
-  activeFileNameRef.current = activeFile?.name ?? null
+  useEffect(() => {
+    activeFileNameRef.current = activeFile?.name ?? null
+  }, [activeFile?.name])
   // AQU-848: the SOURCE language is the project setting, never the file's
   // import-time stamp — same rule the target side settled in AQU-583. A file
   // stamped at import (some importers stamp a literal, e.g. `"en"` for OBS)
@@ -12943,11 +12945,13 @@ export function ProjectWorkspace() {
   // timeline's hidden companions (audio cues, caption tracks) count as the
   // open file: their steps are made from it.
   const openFileIdsRef = useRef<Set<string>>(new Set())
-  openFileIdsRef.current = new Set(
-    [activeFileId, audioCueSibling?.id ?? null, ...serverTimelineTracks.map((tr) => tr.contentFileId ?? null)].filter(
-      (id): id is string => Boolean(id),
-    ),
-  )
+  useEffect(() => {
+    openFileIdsRef.current = new Set(
+      [activeFileId, audioCueSibling?.id ?? null, ...serverTimelineTracks.map((tr) => tr.contentFileId ?? null)].filter(
+        (id): id is string => Boolean(id),
+      ),
+    )
+  }, [activeFileId, audioCueSibling?.id, serverTimelineTracks])
   useEffect(() => {
     setOpenFileProbe((fileId) => openFileIdsRef.current.has(fileId))
     return () => setOpenFileProbe(null)

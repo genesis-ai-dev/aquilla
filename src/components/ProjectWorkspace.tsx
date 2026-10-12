@@ -313,8 +313,9 @@ import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subs
 import { createLiveApplier } from "@/lib/sync/live-apply"
 import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
-import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
+import { forbiddenBannerMessage, forbiddenReasonCopy } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
+import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
@@ -753,6 +754,9 @@ export function ProjectWorkspace() {
   // without this overlay a deleted file lingers until the outbox flushes and
   // a later refetch happens to run.
   const [optimisticDeletes, setOptimisticDeletes] = useState<Set<string>>(new Set())
+  // AQU-797: outbox record ids whose refused file.delete has already been
+  // reported, so re-deriving the refusal list doesn't re-toast the same death.
+  const refusedDeleteNoticedRef = useRef<Set<string>>(new Set())
   // FRO-272: soft-deleted ("Recently deleted") files — server list + optimistic
   // overlay so the trash dialog is not empty while file.delete is still flushing.
   const [deletedFiles, setDeletedFiles] = useState<FileSummary[]>([])
@@ -771,6 +775,7 @@ export function ProjectWorkspace() {
     setOptimisticRenames(new Map())
     setOptimisticSortIndexes(new Map())
     setOptimisticDeletes(new Set())
+    refusedDeleteNoticedRef.current = new Set()
     setOptimisticTrash([])
     setDeletedFiles([])
     setSuggestionsDismissed(false)
@@ -898,6 +903,57 @@ export function ProjectWorkspace() {
       return changed ? next : current
     })
   }, [hydratedProject, optimisticDeletes.size])
+
+  /**
+   * AQU-797: put the row BACK when the `file.delete` event died.
+   *
+   * The effect above can only retire an overlay the server agreed with: it
+   * waits for the file to leave the server list. A delete the server refused
+   * (role floor, file out of assigned scope, membership revoked since the
+   * token was minted) never leaves that list, so the overlay outlived the
+   * event — the row stayed hidden for the rest of the session, the user
+   * believed the file was deleted, and it reappeared on the next reload with
+   * no explanation. That is the "delete does not take effect" this ticket was
+   * filed as, and it is environment-independent: it looks different per
+   * account because it depends on the member's role, which is why it showed up
+   * for one person on the call and not another.
+   *
+   * Reverting on the event's death (not on a refetch) is the only signal that
+   * separates "refused" from "not flushed yet" — see useRefusedFileEvents.
+   */
+  const refusedFileDeletes = useRefusedFileEvents(projectId ?? null, "file.delete")
+  useEffect(() => {
+    if (refusedFileDeletes.length === 0) return
+    // Only a delete whose overlay is still live — i.e. one THIS session made.
+    // A quarantined record the user never discarded would otherwise announce
+    // itself on every project open, long after the row it hid came back.
+    const reverting = refusedFileDeletes.filter((e) => optimisticDeletes.has(e.fileId))
+    if (reverting.length === 0) return
+    const revertedIds = new Set(reverting.map((e) => e.fileId))
+    setOptimisticDeletes((current) => {
+      const next = new Set(current)
+      for (const id of revertedIds) next.delete(id)
+      return next
+    })
+    // …and out of "Recently deleted", which the same action optimistically
+    // filled. A file that is back in the list must not also sit in the trash.
+    setOptimisticTrash((current) => {
+      const kept = current.filter((f) => !revertedIds.has(f.fileId))
+      return kept.length === current.length ? current : kept
+    })
+    // One notice per refused event, not per re-derivation of the list.
+    for (const entry of reverting) {
+      if (refusedDeleteNoticedRef.current.has(entry.id)) continue
+      refusedDeleteNoticedRef.current.add(entry.id)
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: entry.reason
+          ? `That file wasn't deleted — ${forbiddenReasonCopy(entry.reason)}.`
+          : "That file wasn't deleted, so it's back in the file list.",
+      })
+    }
+  }, [refusedFileDeletes, optimisticDeletes])
 
   // Drop a pending reorder once the server read carries the same positions.
   useEffect(() => {

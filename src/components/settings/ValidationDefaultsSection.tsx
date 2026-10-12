@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { FieldError } from "@/components/ui/field"
 import { SettingsRow } from "@/components/ui/page"
+import { OverrideStatus } from "./OverrideStatus"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -109,7 +110,17 @@ function ThresholdDefaultRow({
     <>
       <SettingsRow
         label={<label htmlFor={id}>{label}</label>}
-        description={description}
+        description={
+          <>
+            {description}
+            <OverrideStatus
+              count={overrides}
+              kind="number"
+              onReset={canEdit ? () => setPendingOverrides(overrides) : undefined}
+              disabled={busy}
+            />
+          </>
+        }
         control={
           <div className="flex min-w-44 flex-col items-end gap-1">
             <Select

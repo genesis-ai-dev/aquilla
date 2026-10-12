@@ -90,6 +90,17 @@ export const settings = defineNamespace({
       one: "It will keep its own number and ignore this default. Reset it to follow the organization instead?",
       other: "They will keep their own number and ignore this default. Reset them to follow the organization instead?",
     }, "count"),
+    // ── OverrideStatus ── AQU-1771
+    "settings.overrideStatus.allFollow": "All projects follow this default.",
+    "settings.overrideStatus.someOwnNumber": plural({
+      one: "{count} project sets its own number",
+      other: "{count} projects set their own number",
+    }, "count"),
+    "settings.overrideStatus.someOwnSetting": plural({
+      one: "{count} project sets its own setting",
+      other: "{count} projects set their own setting",
+    }, "count"),
+    "settings.overrideStatus.reset": "Reset to default",
 
     // ── RepetitionPropagationSection (AQU-1391) ──
     "settings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
@@ -436,6 +447,32 @@ export const settings = defineNamespace({
         description:
           "Body of that dialog. The confirm button clears those projects' own " +
           "number so they follow the organization; the cancel button leaves them alone.",
+      },
+      "settings.overrideStatus.allFollow": {
+        description:
+          "Small status line under an organization default on the Project defaults page " +
+          "(validations needed, counting headings, timeline and recording settings). " +
+          "Shown when no project has set its own value, so every project uses this default " +
+          "and changing it asks no follow-up question.",
+      },
+      "settings.overrideStatus.someOwnNumber": {
+        description:
+          "Same status line when some projects set their own number for this default " +
+          "(e.g. how many validators are required) and so ignore it. A 'Reset to default' " +
+          "link follows it after a middle dot.",
+        placeholders: { count: "How many projects set their own number." },
+      },
+      "settings.overrideStatus.someOwnSetting": {
+        description:
+          "Same status line for on/off or choice defaults (counting headings, timing lock, " +
+          "who may add rows…) when some projects set their own value and ignore the default. " +
+          "A 'Reset to default' link follows it after a middle dot.",
+        placeholders: { count: "How many projects set their own setting." },
+      },
+      "settings.overrideStatus.reset": {
+        description:
+          "Link after that status line. It opens a confirmation asking whether those " +
+          "projects should go back to following the organization's default.",
       },
       "settings.personalProvider.trailingPathHint": {
         description:

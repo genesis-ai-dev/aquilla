@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { FieldError } from "@/components/ui/field"
 import { SettingsRow } from "@/components/ui/page"
+import { OverrideStatus } from "./OverrideStatus"
 import { Switch } from "@/components/ui/switch"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
@@ -77,7 +78,17 @@ export function StructuralCellsSection({ orgSettings, canEdit }: StructuralCells
     <>
     <SettingsRow
       label={t("settings.structuralCells.label")}
-      description={t("settings.structuralCells.description")}
+      description={
+        <>
+          {t("settings.structuralCells.description")}
+          <OverrideStatus
+            count={countStructuralOverrides}
+            kind="setting"
+            onReset={canEdit ? () => setPendingOverrides(countStructuralOverrides) : undefined}
+            disabled={busy}
+          />
+        </>
+      }
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Switch

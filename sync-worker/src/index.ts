@@ -66,6 +66,10 @@ import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleOriginalDownloadRequest } from "./events/original-download-route"
 import { handleOriginalsBundleRequest } from "./events/originals-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
+import {
+  PROJECTION_SNAPSHOT_CRON,
+  runProjectionSnapshotSweep,
+} from "./projection-snapshot-cron"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
@@ -234,6 +238,13 @@ declare global {
        * sweep can be stopped or shadowed without waiting on a release.
        */
       R2_GC_MODE?: string
+      /**
+       * AQU-1833 projection-snapshot sweep (projection-snapshot-cron.ts): `off`
+       * skips it, unset/anything else runs it. A var so the sweep can be
+       * stopped without waiting on a release — a skipped night only means the
+       * next rebuild replays further back.
+       */
+      PROJECTION_SNAPSHOT_MODE?: string
     }
   }
 }
@@ -659,24 +670,35 @@ export default {
     return response
   },
 
-  // AQU-1856: the only cron on this worker — the nightly R2 orphan sweep.
-  // Unlike `fetch` above it builds its own Postgres handle (r2-gc-cron.ts),
-  // since the scheduled entrypoint never passes through that wrapper.
+  // Two crons on this worker: the AQU-1856 nightly R2 orphan sweep and the
+  // AQU-1833 projection-snapshot sweep. Unlike `fetch` above, each builds its
+  // own Postgres handle (r2-gc-cron.ts / projection-snapshot-cron.ts), since
+  // the scheduled entrypoint never passes through that wrapper.
+  //
+  // Both are bounded and resumable, so a cron that throws is logged and
+  // swallowed: the runtime's retry would otherwise thrash on a bad night, and
+  // a missed night costs only progress, never correctness.
   async scheduled(
     controller: ScheduledController,
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
-    if (controller.cron !== R2_GC_CRON) {
-      console.warn(`[cron] unrecognized schedule ${controller.cron} — ignoring`)
+    if (controller.cron === R2_GC_CRON) {
+      try {
+        await runR2GcSweep(env)
+      } catch (err) {
+        console.error("[r2-gc] sweep failed:", err)
+      }
       return
     }
-    try {
-      await runR2GcSweep(env)
-    } catch (err) {
-      // A cron that throws is retried by the runtime; the sweep is bounded and
-      // resumable, so log and swallow rather than thrash on a bad night.
-      console.error("[r2-gc] sweep failed:", err)
+    if (controller.cron === PROJECTION_SNAPSHOT_CRON) {
+      try {
+        await runProjectionSnapshotSweep(env)
+      } catch (err) {
+        console.error("[projection-snapshot] sweep failed:", err)
+      }
+      return
     }
+    console.warn(`[cron] unrecognized schedule ${controller.cron} — ignoring`)
   },
 }

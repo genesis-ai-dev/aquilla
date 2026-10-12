@@ -14,6 +14,19 @@
 // alongside the log and handed to the replay. chain_claims itself is NOT
 // rewritten by rebuild: it IS the live record this replay defers to.
 //
+// AQU-1833: when the project has a usable projection snapshot in R2, the
+// wiped tables are seeded from it and only events with
+// `server_seq > snapshotSeq` are replayed — rebuild time stops growing with
+// the project's whole history. A snapshot is an optimization and never the
+// authority: anything doubtful about it (missing, corrupt, written against a
+// different column set, ahead of the log) re-wipes and replays in full. See
+// projection-snapshot.ts.
+//
+// `?fullReplay=1` forces the from-genesis replay. Because a snapshot is taken
+// from the LIVE projection, a seeded rebuild repairs the log's tail, not the
+// snapshot itself — so a projection suspected WRONG rather than merely stale
+// is repaired with that flag.
+//
 // ── Non-atomic failure mode ────────────────────────────────────────────
 // As before — DELETE + replay is not wrapped in a transaction. Re-running
 // the endpoint after a partial failure restarts from a clean slate.
@@ -33,6 +46,13 @@ import type { EventKind } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 import { withLongOperationTimeout } from '../../../db/shim/postgres'
+import {
+  readProjectionSnapshot,
+  restoreProjectionSnapshot,
+  SnapshotUnusableError,
+  type ProjectionSnapshotEnv,
+  type RestoredSnapshot,
+} from './projection-snapshot'
 
 const BATCH_LIMIT = 100
 
@@ -40,6 +60,21 @@ export interface RebuildEnv {
   AQUILLA_PG?: AquillaDb
   ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
+  /** AQU-1833: projection snapshots. Unbound simply means every rebuild is a
+   *  full replay, exactly as before snapshots existed. */
+  SNAPSHOTS?: R2Bucket
+  R2_KEY_PREFIX?: string
+}
+
+/** The three projection tables a rebuild owns, emptied before every replay.
+ *  A function, not a constant: the statements are consumed by `batch()` and
+ *  the snapshot fallback has to wipe a second time. */
+function wipeProjectionStmts(db: AquillaDb, projectId: string): AquillaStatement[] {
+  return [
+    db.prepare('DELETE FROM file_section_progress WHERE project_id = ?').bind(projectId),
+    db.prepare('DELETE FROM cell_validators WHERE project_id = ?').bind(projectId),
+    db.prepare('DELETE FROM cells WHERE project_id = ?').bind(projectId),
+  ]
 }
 
 interface EventRow {
@@ -92,54 +127,119 @@ export async function handleRebuildProjectionRequest(
   const db = withLongOperationTimeout(env.AQUILLA_PG, 'project-rebuild')
   const projectId = decodeURIComponent(match[1])
   const startedAt = Date.now()
+  // AQU-1833: `?fullReplay=1` refuses the snapshot and replays from the first
+  // event — the from-genesis repair for a projection believed WRONG, as
+  // opposed to merely stale (see the header note).
+  const fullReplay = url.searchParams.get('fullReplay') === '1'
+
+  // Head compare-and-swap, tracked in memory per (file, cell, side, lane) —
+  // the same row key `cells` uses. Shared with the live-link mirror fold
+  // (AQU-1574); see chain-head-replay.ts.
+  //
+  // AQU-1612: the project's target lane rows go in so replay resolves each
+  // event's lane by `laneId` first and falls back to the `targetLang` tag.
+  // Pre-1612 events carry only the tag and key exactly as they always did,
+  // so a full replay still reproduces the live projection byte for byte.
+  //
+  // AQU-1844: the project's chain_claims go in too, so a sibling race replays
+  // to the event that actually won it live rather than to whichever sibling
+  // holds the lower seq. A claim naming an event this project's log does not
+  // have is dropped (see buildClaimWinners) — AQU-1833 moved that existence
+  // test into the query, because a snapshot-seeded rebuild only reads the
+  // log's TAIL and so no longer holds every event id to test against. The
+  // predicate is the same one: the claim's winner is an event of this project.
+  const { results: claimRows } = await db
+    .prepare(
+      `SELECT c.file_id, c.cell_id, c.parent_key, c.event_id
+       FROM chain_claims c
+       WHERE c.project_id = ?
+         AND EXISTS (SELECT 1 FROM events e
+                      WHERE e.id = c.event_id AND e.project_id = c.project_id)`,
+    )
+    .bind(projectId)
+    .all<ChainClaimRow>()
+
+  // AQU-1833: the snapshot (if any) is tagged with a `server_seq`, so the log's
+  // high-water mark decides whether it still describes this project.
+  const maxSeqRow = await db
+    .prepare('SELECT COALESCE(MAX(server_seq), 0) AS seq FROM events WHERE project_id = ?')
+    .bind(projectId)
+    .first<{ seq: number | string | bigint }>()
+  const maxServerSeq = Number(maxSeqRow?.seq ?? 0)
 
   // 1. Wipe the projection for this project.
-  const deleteStmts: AquillaStatement[] = [
-    db.prepare('DELETE FROM file_section_progress WHERE project_id = ?').bind(projectId),
-    db.prepare('DELETE FROM cell_validators WHERE project_id = ?').bind(projectId),
-    db.prepare('DELETE FROM cells WHERE project_id = ?').bind(projectId),
-  ]
-  await db.batch(deleteStmts)
+  await db.batch(wipeProjectionStmts(db, projectId))
 
-  // 2. Load events in server_seq order.
+  // 1b. AQU-1833: seed from the latest projection snapshot, when there is one
+  //     worth trusting. Every failure arm ends in the same place — tables
+  //     empty, `replayFromSeq` back at 0 — so the full replay below is
+  //     byte-for-byte what it was before snapshots existed.
+  const replay = new ChainHeadReplay(
+    await loadTargetLanes(db, projectId),
+    buildClaimWinners(claimRows ?? [], new Set((claimRows ?? []).map((row) => row.event_id))),
+  )
+  let replayFromSeq = 0
+  let snapshot: RestoredSnapshot | null = null
+  let snapshotNote: string | null = null
+  if (!fullReplay && env.SNAPSHOTS) {
+    const snapshotEnv: ProjectionSnapshotEnv = {
+      SNAPSHOTS: env.SNAPSHOTS,
+      R2_KEY_PREFIX: env.R2_KEY_PREFIX,
+    }
+    const manifest = await readProjectionSnapshot(snapshotEnv, projectId)
+    if (manifest) {
+      try {
+        if (manifest.snapshotSeq > maxServerSeq) {
+          // The snapshot is ahead of the log it claims to summarize: the
+          // project was truncated, restored, or copied. Replaying its tail
+          // would keep rows no event accounts for.
+          throw new SnapshotUnusableError(
+            `snapshot seq ${manifest.snapshotSeq} is ahead of the log's ${maxServerSeq}`,
+          )
+        }
+        const restored = await restoreProjectionSnapshot(snapshotEnv, db, manifest)
+        if (!replay.seedFromCellRows(restored.cellRows)) {
+          throw new SnapshotUnusableError(
+            "snapshot cells name lanes this project's lane rows do not have",
+          )
+        }
+        snapshot = restored
+        replayFromSeq = manifest.snapshotSeq
+      } catch (err) {
+        // A restore can throw part-way through its inserts, so wipe again
+        // before replaying from the top. The seed itself is all-or-nothing
+        // (ChainHeadReplay.seedFromCellRows), so `replay` is untouched.
+        snapshotNote = `ignored projection snapshot: ${String(err)}`
+        console.warn(`[rebuild] ${projectId}: ${snapshotNote}`)
+        snapshot = null
+        replayFromSeq = 0
+        await db.batch(wipeProjectionStmts(db, projectId))
+      }
+    }
+  }
+
+  // 2. Load the events this replay has to cover, in server_seq order: the whole
+  //    log, or just the tail the snapshot does not already reflect.
+  //
+  //    The seq predicate is added only when a snapshot was seeded, so the
+  //    from-genesis query is the one it always was. `server_seq > 0` would
+  //    exclude a seq-0 event, and this replay is the last line of defence for
+  //    exactly the kind of log that has one (an event-level migration, a
+  //    project copy) — it must never silently skip a row it can see.
+  const tailOnly = replayFromSeq > 0
   const { results: eventRows } = await db
     .prepare(
       `SELECT id, schema_version, project_id, file_id, cell_id, parent_id, kind,
               author, payload, client_ts, server_ts, server_seq
-       FROM events WHERE project_id = ?
+       FROM events WHERE project_id = ?${tailOnly ? ' AND server_seq > ?' : ''}
        ORDER BY server_seq ASC, server_ts ASC, id ASC`,
     )
-    .bind(projectId)
+    .bind(...(tailOnly ? [projectId, replayFromSeq] : [projectId]))
     .all<EventRow>()
 
   if (!eventRows) {
     return new Response('failed to read events from DB', { status: 500 })
   }
-
-  // 3. Head compare-and-swap, tracked in memory per (file, cell, side, lane)
-  //    — the same row key `cells` uses. Shared with the live-link mirror fold
-  //    (AQU-1574); see chain-head-replay.ts.
-  //
-  //    AQU-1612: the project's target lane rows go in so replay resolves each
-  //    event's lane by `laneId` first and falls back to the `targetLang` tag.
-  //    Pre-1612 events carry only the tag and key exactly as they always did,
-  //    so a full replay still reproduces the live projection byte for byte.
-  //
-  //    AQU-1844: the project's chain_claims go in too, so a sibling race
-  //    replays to the event that actually won it live rather than to whichever
-  //    sibling holds the lower seq. Claims naming an event absent from the log
-  //    are dropped by buildClaimWinners (see there).
-  const { results: claimRows } = await db
-    .prepare(
-      `SELECT file_id, cell_id, parent_key, event_id
-       FROM chain_claims WHERE project_id = ?`,
-    )
-    .bind(projectId)
-    .all<ChainClaimRow>()
-  const replay = new ChainHeadReplay(
-    await loadTargetLanes(db, projectId),
-    buildClaimWinners(claimRows ?? [], new Set(eventRows.map((r) => r.id))),
-  )
 
   const stmts: AquillaStatement[] = []
   let eventsRead = 0
@@ -302,6 +402,15 @@ export async function handleRebuildProjectionRequest(
     cellsAfter: cellsResult?.cnt ?? 0,
     validatorsAfter: validatorsResult?.cnt ?? 0,
     rebuiltSeq,
+    // AQU-1833: what this rebuild actually had to replay. `replayFromSeq` 0 is
+    // a from-genesis replay; `snapshotNote` says why a snapshot that existed
+    // was not used, so a slow rebuild is never a mystery.
+    fromSnapshot: snapshot !== null,
+    snapshotSeq: snapshot?.manifest.snapshotSeq ?? null,
+    snapshotRowsRestored: snapshot?.rowsRestored ?? null,
+    replayFromSeq,
+    maxServerSeq,
+    ...(snapshotNote ? { snapshotNote } : {}),
     startedAt,
     completedAt,
     note: 'Rebuild is not atomic; if the worker died mid-rebuild, projection rows may be incomplete. Re-run this endpoint to recover.',

@@ -6,8 +6,13 @@
 import { adminBearerMatches } from "./lib/admin-secret"
 import { runR2GcSweep, type R2GcCronEnv } from "./r2-gc-cron"
 import { formatR2GcReport } from "./r2-gc"
+import {
+  formatProjectionSnapshotReport,
+  runProjectionSnapshotSweep,
+  type ProjectionSnapshotCronEnv,
+} from "./projection-snapshot-cron"
 
-export interface AdminEnv extends R2GcCronEnv {
+export interface AdminEnv extends R2GcCronEnv, ProjectionSnapshotCronEnv {
   SNAPSHOTS: R2Bucket
   /**
    * Dedicated admin bearer. Preferred over SYNC_SECRET_KEY — see the auth note
@@ -54,7 +59,10 @@ export async function handleAdminRequest(
   const inspectMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)\/inspect$/)
   const fileMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)$/)
   const gcMatch = url.pathname === "/admin/r2-gc"
-  if (!inspectMatch && !fileMatch && !gcMatch) return new Response("not found", { status: 404 })
+  const snapshotMatch = url.pathname === "/admin/projection-snapshot"
+  if (!inspectMatch && !fileMatch && !gcMatch && !snapshotMatch) {
+    return new Response("not found", { status: 404 })
+  }
 
   // Auth gate applies to every recognized admin route.
   const auth = request.headers.get("Authorization") ?? ""
@@ -88,6 +96,41 @@ export async function handleAdminRequest(
       )
     }
     return Response.json({ ok: true, report, summary: formatR2GcReport(report) })
+  }
+
+  // POST /admin/projection-snapshot — write projection snapshots now (AQU-1833)
+  // instead of waiting for the nightly sweep. `?projectId=` snapshots that one
+  // project and ignores both the cursor and the per-run caps, which is what an
+  // operator wants before an expensive rebuild. Without it, one bounded sweep
+  // runs exactly as the cron would; `?cursor=reset` restarts the walk from the
+  // top, and `?minNewEvents=0` forces a snapshot of a project that has barely
+  // moved. POST, not GET, because it writes.
+  if (snapshotMatch) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+    const projectId = url.searchParams.get("projectId")
+    const minNewEvents = Number(url.searchParams.get("minNewEvents"))
+    const maxSnapshots = Number(url.searchParams.get("maxSnapshots"))
+    const report = await runProjectionSnapshotSweep(env, {
+      ...(projectId ? { onlyProjectId: projectId } : {}),
+      ...(Number.isInteger(minNewEvents) && minNewEvents >= 0 ? { minNewEvents } : {}),
+      ...(Number.isInteger(maxSnapshots) && maxSnapshots > 0 ? { maxSnapshots } : {}),
+      ...(url.searchParams.get("cursor") === "reset" ? { cursor: "" } : {}),
+    })
+    if (!report) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            "snapshot sweep skipped — see worker logs (PROJECTION_SNAPSHOT_MODE=off, no HYPERDRIVE, or refused)",
+        },
+        { status: 503 },
+      )
+    }
+    return Response.json({
+      ok: true,
+      report,
+      summary: formatProjectionSnapshotReport(report),
+    })
   }
 
   // GET /admin/files/:projectId/:fileId/inspect — returns counts and sizes

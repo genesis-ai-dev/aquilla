@@ -144,14 +144,20 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 [placement]
 mode = "smart"
 
-# AQU-1856: the nightly R2 orphan sweep (src/r2-gc-cron.ts) — the only cron on
-# this worker. 03:17 UTC, deliberately off the hour so it does not pile onto
-# auth-worker's own schedules. Wrangler does NOT inherit the top-level
-# [triggers] into env blocks, so each deployed profile repeats it below.
-# Set R2_GC_MODE = "dry-run" (or "off") in the matching [vars] to shadow or
-# stop the sweep without a code change.
+# The crons on this worker. Both sit deliberately off the hour so they do not
+# pile onto auth-worker's own schedules, and apart from each other so the
+# snapshot sweep never overlaps the orphan sweep. Wrangler does NOT inherit the
+# top-level [triggers] into env blocks, so each deployed profile repeats them
+# below.
+#
+#  • 03:17 — AQU-1856 nightly R2 orphan sweep (src/r2-gc-cron.ts). Set
+#    R2_GC_MODE = "dry-run" (or "off") in the matching [vars] to shadow or stop
+#    it without a code change.
+#  • 04:41 — AQU-1833 projection-snapshot sweep
+#    (src/projection-snapshot-cron.ts). Set PROJECTION_SNAPSHOT_MODE = "off" to
+#    stop it; a skipped night only means the next rebuild replays further back.
 [triggers]
-crons = ["17 3 * * *"]
+crons = ["17 3 * * *", "41 4 * * *"]
 
 [observability]
 enabled = true
@@ -178,9 +184,10 @@ command = "bash ../scripts/verify-deploy-branch.sh release"
 mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either. AQU-1856
-# nightly R2 orphan sweep (src/r2-gc-cron.ts).
+# nightly R2 orphan sweep (src/r2-gc-cron.ts) + AQU-1833 projection-snapshot
+# sweep (src/projection-snapshot-cron.ts).
 [env.production.triggers]
-crons = ["17 3 * * *"]
+crons = ["17 3 * * *", "41 4 * * *"]
 
 # Wrangler (3.x and 4.x) does inherit the top-level [observability] block into
 # named envs, and `versions deploy` syncs the resolved value. It is declared per
@@ -262,9 +269,10 @@ routes = ["api.dev.aquilla.app/sync/*"]
 mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either. AQU-1856
-# nightly R2 orphan sweep (src/r2-gc-cron.ts).
+# nightly R2 orphan sweep (src/r2-gc-cron.ts) + AQU-1833 projection-snapshot
+# sweep (src/projection-snapshot-cron.ts).
 [env.development.triggers]
-crons = ["17 3 * * *"]
+crons = ["17 3 * * *", "41 4 * * *"]
 
 # See [env.production.observability] — declared per env so a top-level edit
 # can't change what dev logs.

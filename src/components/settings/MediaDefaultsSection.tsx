@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { FieldError } from "@/components/ui/field"
 import { SettingsRow } from "@/components/ui/page"
+import { OverrideStatus } from "./OverrideStatus"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -57,6 +58,7 @@ export function MediaDefaultsSection({ orgSettings, canEdit }: MediaDefaultsSect
     <MediaDefaultRow
       key={key}
       orgSettings={orgSettings}
+      canEdit={canEdit}
       settingKey={key}
       label={t(labelKey)}
       description={t(descriptionKey)}
@@ -84,6 +86,7 @@ export function MediaDefaultsSection({ orgSettings, canEdit }: MediaDefaultsSect
       <MediaDefaultRow
         key={key}
         orgSettings={orgSettings}
+        canEdit={canEdit}
         settingKey={key}
         label={t(labelKey)}
         description={t(descriptionKey)}
@@ -134,8 +137,8 @@ export function MediaDefaultsSection({ orgSettings, canEdit }: MediaDefaultsSect
 }
 
 function MediaDefaultRow({
-  orgSettings, settingKey, label, description, renderControl,
-}: Omit<MediaDefaultsSectionProps, "canEdit"> & {
+  orgSettings, canEdit, settingKey, label, description, renderControl,
+}: MediaDefaultsSectionProps & {
   settingKey: MediaDefaultKey
   label: string
   description: string
@@ -178,7 +181,17 @@ function MediaDefaultRow({
     <>
       <SettingsRow
         label={<label htmlFor={id}>{label}</label>}
-        description={description}
+        description={
+          <>
+            {description}
+            <OverrideStatus
+              count={overrides}
+              kind="setting"
+              onReset={canEdit ? () => setPendingOverrides(overrides) : undefined}
+              disabled={busy}
+            />
+          </>
+        }
         control={
           <div className="flex min-w-44 flex-col items-end gap-1" data-testid={id}>
             {renderControl({ id, busy, save })}

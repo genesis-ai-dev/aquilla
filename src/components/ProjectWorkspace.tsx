@@ -16332,7 +16332,7 @@ export function ProjectWorkspace() {
               ? t("editor.removeCell.milestoneWarning", { label: inv.milestoneLabel })
               : null,
           ].filter(Boolean)
-          return [lead, ...warnings, t("editor.removeCell.permanent")].join(" ")
+          return [lead, ...warnings, t("editor.removeCell.undoable")].join(" ")
         })()}
         confirmLabel={t("editor.removeCell.confirmLabel")}
         variant="destructive"

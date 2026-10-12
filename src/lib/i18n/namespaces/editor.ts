@@ -1304,6 +1304,8 @@ export const editor = defineNamespace({
     "editor.removeCell.milestoneWarning":
       "This cell carries the \u201c{label}\u201d heading, which will disappear from chapter navigation.",
     "editor.removeCell.permanent": "This cannot be undone.",
+    // AQU-1767 phase 2: removing a row can be undone now (source.cell.restore).
+    "editor.removeCell.undoable": "You can undo this with Undo or from History.",
     // AQU-1068: an insert/removal applies instantly and is corrected if the
     // server refuses it — the row comes back (or goes away again) on its own,
     // so the copy explains the reversal rather than asking for an action.
@@ -2726,6 +2728,12 @@ export const editor = defineNamespace({
         placeholders: {
           count: "The number of validations; it also selects which plural form is used.",
         },
+      },
+      "editor.removeCell.undoable": {
+        description:
+          "Last sentence of the 'Remove this cell?' confirmation. Removing a cell can now be " +
+          "undone (Cmd/Ctrl+Z, the timeline's Undo button, or the History panel), which brings " +
+          "back its translations, recordings, comments and validations.",
       },
       "editor.removeCell.milestoneWarning": {
         description:

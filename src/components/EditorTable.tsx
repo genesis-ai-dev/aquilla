@@ -97,7 +97,20 @@ import {
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { AlignStylesButton } from "./cell/AlignStylesButton"
+import { PassToStyleSegmentsButton } from "./cell/PassToStyleSegmentsButton"
+import { StyleAlignWarning } from "./cell/StyleAlignWarning"
 import { cellCanAlignStyles } from "@/lib/idml/align-styles"
+import {
+  emptyIdmlEditableHtml,
+  idmlTargetIsPreview,
+  placeIdmlPreviewInOnlySlot,
+  readIdmlMetadataV2,
+} from "@/lib/idml/preview-segment"
+import {
+  idmlMergedPlainGroupCollapsed,
+  rememberManualStyleAlignment,
+} from "@/lib/idml/merged-plain-align"
+import { useStyleAlignDirtyMatch } from "@/lib/store/style-align-dirty"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
@@ -180,6 +193,10 @@ import { compareAddresses, parseRef } from "@/lib/pericope/sections"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
 import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-highlight-pref"
+import {
+  applyVisibleStyleSegmentChrome,
+  useVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { AudioTrackColorPicker } from "./audio/AudioTrackColorPicker"
@@ -1144,6 +1161,33 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }),
     [switchableLanes, activeLane, laneLabels, laneCodes, defaultLaneLabel, archivedLanes, t],
   )
+  const visibleStyleSegments = useVisibleStyleSegments()
+  const styleSegmentRegular = t("editor.idml.segmentRegular")
+  const styleSegmentBold = t("editor.format.bold")
+  const styleSegmentItalic = t("editor.format.italic")
+  const styleSegmentBoldItalic = t("editor.idml.segmentBoldItalic")
+  useEffect(() => {
+    applyVisibleStyleSegmentChrome(visibleStyleSegments, {
+      regular: styleSegmentRegular,
+      bold: styleSegmentBold,
+      italic: styleSegmentItalic,
+      boldItalic: styleSegmentBoldItalic,
+    })
+  }, [
+    visibleStyleSegments,
+    styleSegmentRegular,
+    styleSegmentBold,
+    styleSegmentItalic,
+    styleSegmentBoldItalic,
+  ])
+  useEffect(() => () => {
+    applyVisibleStyleSegmentChrome(false, {
+      regular: "",
+      bold: "",
+      italic: "",
+      boldItalic: "",
+    })
+  }, [])
   // The switcher trigger and the closed pill name the lane the same way.
   // A renamed lane wins; otherwise the tag. The default lane falls back to
   // the project's target language, then to the "set a language" prompt — a
@@ -5447,6 +5491,8 @@ function EditorRow({
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
+  const storedTargetHtmlRef = useRef<string | undefined>(undefined)
+  const latestTargetRef = useRef({ value: "", valueHtml: "" })
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
   const pendingIdmlPointerSelectionRef = useRef<IdmlPointerSelection | null>(null)
   // AQU-746: activation is async (read view → TipTap mount → rAF focus), so a
@@ -5503,6 +5549,36 @@ function EditorRow({
   const idmlParagraphStyleId = idmlConfiguration?.kind === "ready"
     ? idmlConfiguration.context.paragraphStyleId
     : undefined
+  const visibleStyleSegments = useVisibleStyleSegments()
+  const styleAlignDirty = useStyleAlignDirtyMatch(cell.id, visibleTranslatedHtml)
+  const mergedPlainCollapsed = useMemo(() => {
+    if (!visibleStyleSegments || !styleAlignDirty || !visibleTranslatedHtml) return false
+    return idmlMergedPlainGroupCollapsed({
+      originalHtml: cell.originalHtml,
+      translatedHtml: visibleTranslatedHtml,
+      metadata: cell.metadata,
+    })
+  }, [visibleStyleSegments, styleAlignDirty, visibleTranslatedHtml, cell.originalHtml, cell.metadata])
+  const showStyleAlignWarning = Boolean(
+    onAlignStyles
+    && !isLoading
+    && visibleTranslated.trim()
+    && mergedPlainCollapsed
+    && cellCanAlignStyles(cell)
+  )
+  const idmlPreview = idmlConfiguration?.kind === "ready"
+    && idmlTargetIsPreview(visibleTranslatedHtml, cell.metadata)
+  const previewText = ((isEditorActive && liveTargetText !== null) ? liveTargetText : visibleTranslated) ?? ""
+  const previewNeedsModel = cellCanAlignStyles(cell)
+  const showPassToStyleSegments = Boolean(
+    idmlPreview
+    && previewText.trim()
+    && !isLoading
+    && editable
+    && (previewNeedsModel ? onAlignStyles : readIdmlMetadataV2(cell.metadata)?.editableSlotIndexes.length === 1)
+  )
+  storedTargetHtmlRef.current = visibleTranslatedHtml
+  latestTargetRef.current = { value: visibleTranslated ?? "", valueHtml: visibleTranslatedHtml ?? "" }
   const canEditSourceForCell = canEditSource && !idmlConfiguration
 
   /**
@@ -5914,6 +5990,7 @@ function EditorRow({
       setWriteError(idmlCommitError)
       return false
     }
+    latestTargetRef.current = { value, valueHtml }
     // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
     // signature (`status original translated`) shifts and `useHealth` re-runs
     // `checkRulesForCell` for this one cell on the next render — no other
@@ -5921,6 +5998,13 @@ function EditorRow({
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
     setLocalTargetDraft({ value, valueHtml })
     onOptimisticEdit?.(cell.id, { value, valueHtml })
+    if (idmlConfiguration) {
+      rememberManualStyleAlignment(cell.id, value, {
+        originalHtml: cell.originalHtml,
+        translatedHtml: valueHtml,
+        metadata: cell.metadata,
+      })
+    }
     setWriteError(null)
     // RACE-3/QW-2: use the last event id we enqueued for this cell as parentId
     // rather than the lagging projection value. The workspace-level getter
@@ -6039,6 +6123,13 @@ function EditorRow({
       const msg = err instanceof Error ? err.message : t("editor.write.saveFailed")
       setWriteError(msg)
       setLocalTargetDraft(null)
+      if (idmlConfiguration) {
+        rememberManualStyleAlignment(cell.id, cell.translated ?? "", {
+          originalHtml: cell.originalHtml,
+          translatedHtml: cell.translatedHtml,
+          metadata: cell.metadata,
+        })
+      }
       // Revert the optimistic patch to the last confirmed projection value.
       onOptimisticEdit?.(cell.id, {
         value: cell.translated ?? "",
@@ -6046,7 +6137,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -6074,10 +6165,10 @@ function EditorRow({
     }, 2400)
   }, [onCompleteSingle, cell, onActivateEditor, getEditorActivationVersion])
 
-  const alignStylesAndReturn = useCallback(async () => {
+  const alignStylesAndReturn = useCallback(async (target: CellData = cell) => {
     if (!onAlignStyles) return
     const activationVersion = getEditorActivationVersion()
-    const saved = await onAlignStyles(cell)
+    const saved = await onAlignStyles(target)
     onActivateEditor(cell.id, { ifActivationVersion: activationVersion })
     if (!saved) return
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
@@ -6087,6 +6178,60 @@ function EditorRow({
       savedTimerRef.current = null
     }, 2400)
   }, [onAlignStyles, cell, onActivateEditor, getEditorActivationVersion])
+
+  const noteSaved = useCallback(() => {
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setShowSaved(true)
+    savedTimerRef.current = setTimeout(() => {
+      setShowSaved(false)
+      savedTimerRef.current = null
+    }, 2400)
+  }, [])
+
+  /**
+   * Preview typing is a plain sentence. Persist it beside an empty copy of the
+   * source runs so the words are not a style run yet. A flush that arrives
+   * after a draft has already filled those runs is dropped.
+   */
+  const commitTranslated = useCallback((snapshot: { value: string; valueHtml: string; tmInsert?: true }) => {
+    const config = idmlConfiguration
+    if (config?.kind === "ready" && idmlTargetIsPreview(storedTargetHtmlRef.current, cell.metadata)) {
+      return handleEditorCommit({
+        ...snapshot,
+        valueHtml: emptyIdmlEditableHtml(config.context.sourceHtml, config.context.metadata),
+      })
+    }
+    if (config?.kind === "ready" && !snapshot.valueHtml.includes("data-idml-protected")) {
+      return false
+    }
+    return handleEditorCommit(snapshot)
+  }, [cell.metadata, handleEditorCommit, idmlConfiguration])
+
+  const passPreviewToSegments = useCallback(async () => {
+    translatedEditorRef.current?.flushPendingCommit()
+    const latest = latestTargetRef.current
+    const snapshot: CellData = {
+      ...cell,
+      translated: latest.value,
+      translatedHtml: latest.valueHtml || cell.translatedHtml,
+    }
+    if (!snapshot.translated.trim()) return
+    if (cellCanAlignStyles(snapshot)) {
+      await alignStylesAndReturn(snapshot)
+      return
+    }
+    if (readIdmlMetadataV2(snapshot.metadata)?.editableSlotIndexes.length !== 1) return
+    try {
+      const placed = placeIdmlPreviewInOnlySlot(snapshot, snapshot.translated)
+      const saved = await handleEditorCommit({
+        value: placed.value,
+        valueHtml: placed.valueHtml ?? "",
+      })
+      if (saved) noteSaved()
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : t("editor.idml.alignStylesFailed"))
+    }
+  }, [alignStylesAndReturn, cell, handleEditorCommit, noteSaved, t])
 
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
@@ -7970,10 +8115,11 @@ function EditorRow({
               {validationControl}
               {audioValidationControl}
             <EditorTargetCellWell
+              className={showStyleAlignWarning || showPassToStyleSegments ? "pb-5 pe-6" : undefined}
               onClick={(event) => {
                 if (isEditorActive) return
                 event.stopPropagation()
-                requestTargetEdit(idmlConfiguration
+                requestTargetEdit(idmlConfiguration && !idmlPreview
                   ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                   : null)
               }}
@@ -7985,8 +8131,8 @@ function EditorRow({
                     ref={translatedEditorRef}
                     cellId={cell.id}
                     initialPlain={visibleTranslated}
-                    initialHtml={visibleTranslatedHtml}
-                    idmlConfiguration={idmlConfiguration}
+                    initialHtml={idmlPreview ? undefined : visibleTranslatedHtml}
+                    idmlConfiguration={idmlPreview ? null : idmlConfiguration}
                     initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
                     onInitialIdmlSelectionApplied={() => {
                       pendingIdmlPointerSelectionRef.current = null
@@ -7995,7 +8141,7 @@ function EditorRow({
                     // AQU-667: only authoritative when we're not masking it with a
                     // local human draft — then `visibleTranslated` IS cell.translated.
                     aiDrafted={!localTargetDraft && cell.aiDrafted}
-                    onCommit={handleEditorCommit}
+                    onCommit={commitTranslated}
                     pendingInputRef={pendingActivationInputRef}
                     pendingReplaceRef={pendingExampleInsertRef}
                     onFocus={handleEditorFocus}
@@ -8063,7 +8209,7 @@ function EditorRow({
                     editable={editable && !isLoading && !lockHolderLabel}
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
-                    preserveWhitespace={Boolean(idmlConfiguration)}
+                    preserveWhitespace={Boolean(idmlConfiguration) && !idmlPreview}
                     onMouseDown={(event) => {
                       if (!targetIsPlainText) return
                       const generatedPlaying = generatedVoiceController.isPlaying
@@ -8082,7 +8228,7 @@ function EditorRow({
                       event.stopPropagation()
                       // Option/Alt+click seeks (onMouseDown); don't also enter edit.
                       if (isWordSeekClick(event)) return
-                      requestTargetEdit(idmlConfiguration
+                      requestTargetEdit(idmlConfiguration && !idmlPreview
                         ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                         : null)
                     }}
@@ -8105,7 +8251,7 @@ function EditorRow({
                         <span data-remote-presence-draft>
                           {overlayDraftText}
                         </span>
-                      ) : idmlConfiguration && visibleTranslatedHtml ? (
+                      ) : idmlConfiguration && visibleTranslatedHtml && !idmlPreview ? (
                         <TargetIdmlHtml
                           html={visibleTranslatedHtml}
                           idmlStyleCatalog={idmlStyleCatalog}
@@ -8227,6 +8373,33 @@ function EditorRow({
                 }
                 className="absolute inset-x-2 bottom-1 z-10"
               />
+              {showStyleAlignWarning && (
+                <StyleAlignWarning
+                  aligning={loadingPhase === "aligning"}
+                  busy={isLoading}
+                  editable={editable}
+                  hasText={Boolean(visibleTranslated.trim())}
+                  isAnonymous={Boolean(isAnonymous)}
+                  isCompletionConfigured={isCompletionConfigured}
+                  isCompletionAvailable={isCompletionAvailable}
+                  onAlign={alignStylesAndReturn}
+                  onAiSetupNeeded={onAiSetupNeeded}
+                />
+              )}
+              {showPassToStyleSegments && (
+                <PassToStyleSegmentsButton
+                  aligning={loadingPhase === "aligning"}
+                  busy={isLoading}
+                  editable={editable}
+                  hasText={Boolean(previewText.trim())}
+                  isAnonymous={Boolean(isAnonymous)}
+                  needsModel={previewNeedsModel}
+                  isCompletionConfigured={isCompletionConfigured}
+                  isCompletionAvailable={isCompletionAvailable}
+                  onPass={passPreviewToSegments}
+                  onAiSetupNeeded={onAiSetupNeeded}
+                />
+              )}
             </EditorTargetCellWell>
             </div>
             {hasInlineFootnotes && (

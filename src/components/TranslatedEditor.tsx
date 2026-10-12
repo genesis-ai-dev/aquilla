@@ -70,6 +70,8 @@ import {
   idmlPointerIsBelowEditableSlots,
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
+import { createIdmlActiveSegmentExtension, idmlSegmentCaretStep } from "@/lib/richtext/idml-segment-caret"
+import { getVisibleStyleSegments } from "@/lib/store/visible-style-segments-pref"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
@@ -350,6 +352,8 @@ export interface TranslatedEditorHandle {
    * flat text over it would drop the protected anchors the export depends on.
    */
   replacePlainText: (text: string) => boolean
+  /** Commit text still inside the idle window, without waiting for blur. */
+  flushPendingCommit: () => void
 }
 
 interface PendingFootnoteDelete {
@@ -661,6 +665,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // can flush it (navigate-away / reload during the idle window must not drop
   // the edit into the void — the commit has to reach the outbox to survive).
   const pendingCommitRef = useRef<TranslatedEditorCommit | null>(null)
+  const flushPendingCommitRef = useRef<() => void>(() => {})
   const onCommitRef = useRef(onCommit)
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
   // AQU-667: mirrors read by the blur handler / re-hydrate effect so both can
@@ -834,10 +839,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           )]
         : []),
       ...(idmlContext
-        ? idmlEditorExtensions({
-            context: idmlContext,
-            onRejected: (diagnostic) => reportIdmlError(idmlDiagnosticMessage(diagnostic)),
-          })
+        ? [
+            ...idmlEditorExtensions({
+              context: idmlContext,
+              onRejected: (diagnostic) => reportIdmlError(idmlDiagnosticMessage(diagnostic)),
+            }),
+            createIdmlActiveSegmentExtension(),
+          ]
         : []),
     ],
     editorProps: {
@@ -913,9 +921,6 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         // phantom trailing br), not for selecting text. A drag or Shift-click
         // range must not be collapsed on mouseup.
         const native = view.dom.ownerDocument.getSelection()
-        if (event.shiftKey || !view.state.selection.empty || (native && !native.isCollapsed)) {
-          return false
-        }
         const target = event.target instanceof HTMLElement
           ? event.target.closest<HTMLElement>("[data-idml-slot]")
           : null
@@ -923,6 +928,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         const requestedSlot = clickedSlot !== null && clickedSlot !== undefined
           ? Number(clickedSlot)
           : undefined
+        const hitEditableSlot = Boolean(
+          target
+          && target.getAttribute("contenteditable") !== "false"
+          && Number.isSafeInteger(requestedSlot)
+        )
+        const textDrag = view.state.selection instanceof TextSelection && !view.state.selection.empty
+        if (event.shiftKey || textDrag) return false
+        // A click that missed every slot must not collapse a browser drag
+        // ProseMirror has not adopted yet. A click on a slot always places the
+        // caret there: the first click otherwise selects the paragraph, which
+        // reads as selecting the whole cell, and a second click is required.
+        if (!hitEditableSlot && (
+          !view.state.selection.empty
+          || (native !== null && native !== undefined && !native.isCollapsed)
+        )) {
+          return false
+        }
         const resolvedClick = view.state.doc.resolve(pos)
         const position = (
           Number.isSafeInteger(requestedSlot)
@@ -957,6 +979,30 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           const target = event.target instanceof HTMLElement
             ? event.target.closest<HTMLElement>("[data-idml-slot]")
             : null
+          // An empty run (faint Regular, or an empty bold/italic box) has no
+          // text node. Leaving mousedown to the browser selects the paragraph
+          // — the whole cell — and the click never becomes a caret in the run.
+          if (
+            target
+            && target.getAttribute("contenteditable") !== "false"
+            && !(target.textContent ?? "").replace(/\u200b/g, "")
+          ) {
+            const requestedSlot = Number(target.getAttribute("data-idml-slot"))
+            const position = idmlEditableSlotPosition(
+              view.state.doc,
+              Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+            )
+            if (position === null) return false
+            event.preventDefault()
+            view.dispatch(
+              view.state.tr
+                .setSelection(TextSelection.create(view.state.doc, position))
+                .scrollIntoView(),
+            )
+            view.focus()
+            placeDomCaretAtProseMirrorPosition(view, position)
+            return true
+          }
           // Direct text/slot clicks retain their precise browser coordinates.
           if (target) return false
           // AQU-1031: the caret gap after the last letter is on the slot's
@@ -1224,6 +1270,42 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             reportIdmlError(t("editor.idml.caretOutsideSlot"))
           }
           return true
+        }
+        // Visible style segments: regular text arrows through like one sentence.
+        // Entering or leaving a bold or italic run stops in that block, including
+        // an empty one, so the next letters belong to it. Right is forward in
+        // LTR; left is forward in RTL.
+        if (
+          idmlContext
+          && getVisibleStyleSegments()
+          && !event.isComposing
+          && !event.shiftKey
+          && !event.metaKey
+          && !event.altKey
+          && !event.ctrlKey
+          && (event.key === "ArrowLeft" || event.key === "ArrowRight")
+        ) {
+          const rtl = view.dom.ownerDocument.defaultView?.getComputedStyle(view.dom).direction === "rtl"
+          const forward = rtl ? event.key === "ArrowLeft" : event.key === "ArrowRight"
+          const next = idmlSegmentCaretStep(
+            view.state.doc,
+            view.state.selection,
+            forward ? "forward" : "backward",
+            {
+              catalog: idmlContext.styleCatalog,
+              paragraphStyleId: idmlContext.paragraphStyleId,
+            },
+          )
+          if (next !== null) {
+            event.preventDefault()
+            view.dispatch(
+              view.state.tr
+                .setSelection(TextSelection.create(view.state.doc, next))
+                .scrollIntoView(),
+            )
+            placeDomCaretAtProseMirrorPosition(view, next)
+            return true
+          }
         }
         // AQU-584: plain Enter confirms the edit. Left to StarterKit's default,
         // Enter split the paragraph and left a trailing newline inside the cell
@@ -1582,6 +1664,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       commitEditorSnapshot.current("tm-insert")
       return true
     },
+    flushPendingCommit() {
+      flushPendingCommitRef.current()
+    },
   }), [editor, idmlContext, isReadOnly, t])
 
   // The committed baseline is the editor's OWN canonical text, never the raw
@@ -1802,6 +1887,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       onCommitRef.current(pending)
     }
   }, [])
+  flushPendingCommitRef.current = flushPendingCommit
   useEffect(() => flushPendingCommit, [flushPendingCommit])
   useEffect(() => {
     const onVisibilityChange = () => {

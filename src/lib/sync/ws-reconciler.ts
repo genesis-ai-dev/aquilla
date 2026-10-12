@@ -203,6 +203,13 @@ export type ProjectWsClientMessage =
   | { t: "focus.release"; cellId: string }
   /** Heartbeat; the DO answers `pong`. Sent by the reconciler itself. */
   | { t: "ping"; ts?: number }
+  /**
+   * AQU-1839: a freshly minted sync token for this open socket, sent by the
+   * reconciler itself shortly before the current one expires. The DO
+   * re-resolves the connection's role from it and pushes the expiry out, so
+   * the socket survives instead of being closed at expiry.
+   */
+  | { t: "token.refresh"; token: string }
   | {
       t: "presence.update"
       currentFileId?: string | null
@@ -266,6 +273,16 @@ export interface WsReconcilerOptions {
    * review and offline adapter sockets do not.
    */
   connIdStorageKey?: string
+  /**
+   * AQU-1839: how long before the connection's token expires to send a
+   * `token.refresh`. Override only for tests.
+   *
+   * The default is deliberately shorter than the token minter's own 30s
+   * refresh window (REFRESH_SAFETY_MS in sync-token.ts): at this point
+   * `getToken()` is guaranteed to mint a NEW token rather than hand back the
+   * cached one, and a replayed token would not move the expiry.
+   */
+  tokenRefreshLeadMs?: number
 }
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────
@@ -296,6 +313,58 @@ function isPongFrame(raw: string): boolean {
   } catch {
     return false
   }
+}
+
+// ── In-band token refresh (AQU-1839) ──────────────────────────────────
+//
+// A sync token lives 15 minutes, and the DO used to close every socket at its
+// token's expiry — so each open tab reconnected four times an hour whether or
+// not anyone touched it, and tabs opened together did it in lockstep. Instead
+// the DO now tells us when the connection's authorization lapses (`token.expiry`)
+// and accepts a fresh token in band, which keeps the socket and still lets the
+// server re-resolve the role.
+//
+// A worker that predates this sends no `token.expiry` frame, so no refresh is
+// ever scheduled and the old close-and-reconnect path stands unchanged.
+
+/** Default lead time before expiry at which a refresh is sent. */
+const TOKEN_REFRESH_LEAD_MS = 20_000
+/** Retry gap when a refresh went out but no new expiry came back. */
+const TOKEN_REFRESH_RETRY_MS = 5_000
+/** Never schedule a refresh closer than this, however the arithmetic lands. */
+const TOKEN_REFRESH_FLOOR_MS = 1_000
+/**
+ * Attempts per expiry value. A refused refresh is answered with silence by
+ * design (the DO keeps the expiry it had), and a client whose clock runs ahead
+ * of the server's would otherwise retry at the floor until expiry; after this
+ * many tries we stop and let the socket close and reconnect as it used to.
+ */
+const TOKEN_REFRESH_MAX_ATTEMPTS = 3
+
+/**
+ * When to send the next `token.refresh`, given the expiry the server reported.
+ * Exported for tests; the floor keeps an already-overdue expiry (clock skew, a
+ * refresh the server declined) from scheduling a zero-delay loop.
+ */
+export function tokenRefreshDelayMs(expiresAt: number, now: number, leadMs: number): number {
+  return Math.max(TOKEN_REFRESH_FLOOR_MS, expiresAt - now - leadMs)
+}
+
+/** Cheap pre-check before a JSON.parse: `token.expiry` frames are tiny too. */
+function parseTokenExpiryFrame(raw: string): { expiresAt: number | null } | null {
+  if (raw.length > 128 || !raw.includes('"token.expiry"')) return null
+  let obj: unknown
+  try {
+    obj = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!obj || typeof obj !== "object") return null
+  const m = obj as { t?: unknown; expiresAt?: unknown }
+  if (m.t !== "token.expiry") return null
+  if (m.expiresAt === null) return { expiresAt: null }
+  if (typeof m.expiresAt !== "number" || !Number.isFinite(m.expiresAt)) return null
+  return { expiresAt: m.expiresAt }
 }
 
 export interface WsReconciler {
@@ -457,12 +526,89 @@ export function createWsReconciler(
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
   let heartbeatDeadline: ReturnType<typeof setTimeout> | null = null
   let lastReceivedAt = 0
+  // AQU-1839 in-band token refresh. `refreshForExpiry` is the expiry the
+  // pending timer was scheduled against, so a later one (the server accepted a
+  // refresh) resets the attempt budget while a repeat of the same one does not.
+  let tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  let refreshForExpiry: number | null = null
+  let refreshAttempts = 0
 
   function stopHeartbeat(): void {
     if (heartbeatTimer !== null) clearInterval(heartbeatTimer)
     if (heartbeatDeadline !== null) clearTimeout(heartbeatDeadline)
     heartbeatTimer = null
     heartbeatDeadline = null
+  }
+
+  function stopTokenRefresh(): void {
+    if (tokenRefreshTimer !== null) clearTimeout(tokenRefreshTimer)
+    tokenRefreshTimer = null
+    refreshForExpiry = null
+    refreshAttempts = 0
+  }
+
+  /**
+   * Mint a token and hand it to the DO on the open socket. A failure is quiet:
+   * the server keeps the expiry it has, closes the socket on schedule, and the
+   * normal reconnect re-authenticates from scratch.
+   */
+  async function sendTokenRefresh(ws: WebSocket): Promise<void> {
+    if (closed || socket !== ws || ws.readyState !== host.Open) return
+    let token: string | null = null
+    try {
+      token = await options.getToken()
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err))
+      safeEmit(() => handlers.onError?.(e))
+    }
+    if (closed || socket !== ws || ws.readyState !== host.Open) return
+    if (token) {
+      try {
+        const payload = JSON.stringify({ t: "token.refresh", token } satisfies ProjectWsClientMessage)
+        ws.send(payload)
+        recordSyncBytes("upload", payload)
+      } catch {
+        /* a failing send surfaces through onerror/onclose */
+      }
+    }
+    // Retry until the server confirms a new expiry (which reschedules this from
+    // scratch) or the attempt budget runs out.
+    if (refreshForExpiry !== null && refreshAttempts < TOKEN_REFRESH_MAX_ATTEMPTS) {
+      armTokenRefresh(ws, TOKEN_REFRESH_RETRY_MS)
+    }
+  }
+
+  function armTokenRefresh(ws: WebSocket, delayMs: number): void {
+    if (tokenRefreshTimer !== null) clearTimeout(tokenRefreshTimer)
+    tokenRefreshTimer = setTimeout(() => {
+      tokenRefreshTimer = null
+      refreshAttempts++
+      void sendTokenRefresh(ws)
+    }, delayMs)
+  }
+
+  /**
+   * Apply a `token.expiry` frame. A null expiry means this connection has no
+   * token to refresh (the ALLOW_UNAUTHENTICATED dev bypass).
+   */
+  function onTokenExpiry(ws: WebSocket, expiresAt: number | null): void {
+    if (closed || socket !== ws) return
+    if (expiresAt === null) {
+      stopTokenRefresh()
+      return
+    }
+    if (refreshForExpiry === null || expiresAt > refreshForExpiry) {
+      refreshForExpiry = expiresAt
+      refreshAttempts = 0
+    } else if (refreshAttempts >= TOKEN_REFRESH_MAX_ATTEMPTS) {
+      // Same expiry back after a full budget of tries — stop asking and let the
+      // server's own expiry close land.
+      if (tokenRefreshTimer !== null) clearTimeout(tokenRefreshTimer)
+      tokenRefreshTimer = null
+      return
+    }
+    const leadMs = options.tokenRefreshLeadMs ?? TOKEN_REFRESH_LEAD_MS
+    armTokenRefresh(ws, tokenRefreshDelayMs(expiresAt, Date.now(), leadMs))
   }
 
   /**
@@ -472,6 +618,7 @@ export function createWsReconciler(
   function dropDeadSocket(ws: WebSocket): void {
     if (socket !== ws) return
     stopHeartbeat()
+    stopTokenRefresh()
     ws.onopen = null
     ws.onmessage = null
     ws.onerror = null
@@ -598,6 +745,14 @@ export function createWsReconciler(
           serverPongSeen = true
           return
         }
+        // AQU-1839: the refresh handshake is the reconciler's own business —
+        // consumers never see these frames, so the server message union and
+        // every onMessage handler stay as they were.
+        const expiry = parseTokenExpiryFrame(raw)
+        if (expiry) {
+          onTokenExpiry(ws, expiry.expiresAt)
+          return
+        }
         recordSyncBytes("download", raw)
         parsed = parseProjectWsMessage(raw)
       } catch (err) {
@@ -617,7 +772,10 @@ export function createWsReconciler(
       safeEmit(() => handlers.onError?.(new Error("ws: socket error")))
     }
     ws.onclose = (closeEvent: CloseEvent) => {
-      if (socket === ws) stopHeartbeat()
+      if (socket === ws) {
+        stopHeartbeat()
+        stopTokenRefresh()
+      }
       // AQU-1791: our presence identity was taken over by another connection
       // claiming to be this tab — give it up and reconnect under a fresh one.
       if (closeEvent.code === CONNECTION_SUPERSEDED_CLOSE_CODE && options.connIdStorageKey) {
@@ -655,6 +813,7 @@ export function createWsReconciler(
     },
     reconnect(): void {
       stopHeartbeat()
+      stopTokenRefresh()
       if (socket) {
         try {
           socket.close()
@@ -672,6 +831,7 @@ export function createWsReconciler(
     close(): void {
       closed = true
       stopHeartbeat()
+      stopTokenRefresh()
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null

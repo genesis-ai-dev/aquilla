@@ -60,6 +60,7 @@ function buildPrompt(args: AnalyzeArgs): string {
     "- NEVER map to read-only column types (formula, mirror, progress, auto_number, button, etc.).",
     "- itemGranularity 'project' = one board item for the whole project; 'file' = one item per file.",
     "- Map an 'external_id' text column when one exists (used for idempotent re-linking).",
+    "- 'deadline' is the project's due date (a date column such as Deadline or Due date); 'has_audio_pct' is the share of lines that have a recording, not how many recordings are approved ('audio_validated_pct').",
     "- Set notes to a short human rationale.",
     "",
     `Project: ${summary.projectName} (${summary.projectId})`,

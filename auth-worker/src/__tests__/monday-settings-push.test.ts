@@ -189,3 +189,60 @@ describe("Monday boards update right after a settings change (AQU-1771)", () => 
     expect(link!.next_retry_at).not.toBeNull()
   })
 })
+
+/** Every column_values object the push sent, decoded from the GraphQL bodies. */
+function pushedColumnValues(bodies: string[]): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = []
+  for (const body of bodies) {
+    const query = (JSON.parse(body) as { query?: string }).query ?? ""
+    for (const m of query.matchAll(/column_values: ("(?:[^"\\]|\\.)*")/g)) {
+      out.push(JSON.parse(JSON.parse(m[1]!) as string) as Record<string, unknown>)
+    }
+  }
+  return out
+}
+
+describe("the project deadline on a Monday board (AQU-1770)", () => {
+  async function seedDeadlineColumn() {
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET config = ? WHERE id = 'l-a'")
+      .bind(
+        JSON.stringify({
+          ...config,
+          columns: [...config.columns, { columnId: "date_1", columnType: "date", metric: "deadline" }],
+        }),
+      )
+      .run()
+  }
+  const patchDeadline = async (ctx: ExecutionContext, deadline: string | null) =>
+    app.request(
+      "/api/v2/projects/p-a/deadline",
+      { method: "PATCH", headers: authHeader(await jwtFor("olive")), body: JSON.stringify({ deadline }) },
+      env,
+      ctx,
+    )
+
+  it("setting a deadline pushes that board now, with the date", async () => {
+    await seed()
+    await seedDeadlineColumn()
+    const { mondayBodies } = mockMonday()
+    const { ctx, settle } = collectingCtx()
+    expect((await patchDeadline(ctx, "2026-10-16")).status).toBe(200)
+    await settle()
+    expect(pushedColumnValues(mondayBodies).map((v) => v.date_1)).toContainEqual({ date: "2026-10-16" })
+    expect((await linkState("l-a"))!.dirty_at).toBeNull()
+    expect((await linkState("l-b"))!.last_pushed_at).toBeNull()
+  })
+
+  it("clearing the deadline clears the board's cell", async () => {
+    await seed()
+    await seedDeadlineColumn()
+    await env.AQUILLA_PG.prepare("UPDATE projects SET deadline_at = '2026-10-16' WHERE id = 'p-a'").run()
+    const { mondayBodies } = mockMonday()
+    const { ctx, settle } = collectingCtx()
+    expect((await patchDeadline(ctx, null)).status).toBe(200)
+    await settle()
+    const values = pushedColumnValues(mondayBodies).filter((v) => "date_1" in v)
+    expect(values.length).toBeGreaterThan(0)
+    expect(values.every((v) => v.date_1 === "")).toBe(true)
+  })
+})

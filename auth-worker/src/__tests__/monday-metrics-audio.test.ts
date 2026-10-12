@@ -84,3 +84,40 @@ describe("Monday metrics — audio validated % (AQU-1771)", () => {
     expect(summary!.project.audio_validated_pct).toBe(37.5)
   })
 })
+
+describe("Monday metrics — has audio % and deadline (AQU-1770)", () => {
+  it("has audio % is the share of cells with a recording, whatever their votes", async () => {
+    await seed({})
+    await seedProgress({ text: {}, audio: { "0": 4, "1": 2 } })
+    await env.AQUILLA_PG.prepare("UPDATE file_section_progress SET audio_count = 6 WHERE file_id = 'f1'").run()
+
+    const summary = await computeProjectMetrics(env.AQUILLA_PG, "pa")
+
+    expect(summary!.project.has_audio_pct).toBe(60)
+    expect(summary!.project.audio_validated_pct).toBe(20)
+    expect(summary!.files[0]!.metrics.has_audio_pct).toBe(60)
+  })
+
+  it("takes recorded headings out of has audio % when headings don't count", async () => {
+    await seed({ countStructuralCells: false })
+    await seedProgress({ text: {}, audio: {}, structuralCount: 2 })
+    await env.AQUILLA_PG.prepare(
+      "UPDATE file_section_progress SET audio_count = 5, structural_audio_count = 1 WHERE file_id = 'f1'",
+    ).run()
+
+    const summary = await computeProjectMetrics(env.AQUILLA_PG, "pa")
+
+    expect(summary!.project.has_audio_pct).toBe(50)
+  })
+
+  it("carries the project deadline on the project and every file, and null when unset", async () => {
+    await seed({})
+    await seedProgress({ text: {}, audio: {} })
+    expect((await computeProjectMetrics(env.AQUILLA_PG, "pa"))!.project.deadline).toBeNull()
+
+    await env.AQUILLA_PG.prepare("UPDATE projects SET deadline_at = '2026-11-30' WHERE id = 'pa'").run()
+    const summary = await computeProjectMetrics(env.AQUILLA_PG, "pa")
+    expect(summary!.project.deadline).toBe("2026-11-30")
+    expect(summary!.files[0]!.metrics.deadline).toBe("2026-11-30")
+  })
+})

@@ -28,8 +28,16 @@ Defined twice, kept in lockstep: `auth-worker/src/lib/monday/types.ts` and
 
 - `itemGranularity`: one item for the project, or one per file.
 - `columns`: Monday column id → Aquilla metric (`completion_pct`,
-  `validated_pct`, `audio_validated_pct`, counts, `translators`,
-  `last_activity`, `status_auto`, `project_name`, `external_id`).
+  `validated_pct`, `audio_validated_pct`, `has_audio_pct`, counts,
+  `translators`, `last_activity`, `status_auto`, `deadline`, `project_name`,
+  `external_id`).
+  - `has_audio_pct`: share of cells with a recording (a selected dub take), the
+    dashboard's "Has audio", from `file_section_progress.audio_count`, less
+    recorded headings when headings don't count. Per file, the file's own.
+  - `deadline`: the project's deadline (`projects.deadline_at`, a calendar
+    date) on a date or text column; a project without one clears the cell (an
+    empty value). File rows carry the project's deadline. Setting or clearing
+    the deadline marks the project's links dirty and pushes them straight away.
 - `matchExisting`: how a push finds items Aquilla made before when it has no
   `integration_item_links` row for them (`{ columnId }` or `{ byName: true }`).
   Whenever the board has an Aquilla ID column (one mapped to `external_id`, or

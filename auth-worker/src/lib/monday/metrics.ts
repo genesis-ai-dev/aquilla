@@ -16,6 +16,10 @@
 //     approximation of "translators".
 //   * events.server_ts max — last activity (UTC date-only); now() if the
 //     events table is unreachable.
+//   * file_section_progress.audio_count — cells with a selected dub take, the
+//     dashboard's "Has audio" (db/shared/audio-progress.ts `has_dub`).
+//   * projects.deadline_at — the project's deadline, a calendar date; every
+//     file row carries the project's.
 
 import { ROLE } from "../../types"
 import { countedFileSql } from "../../../../db/shared/counted-files"
@@ -24,12 +28,15 @@ export interface MondayEntityMetrics {
   completion_pct: number
   validated_pct: number
   audio_validated_pct: number
+  has_audio_pct: number
   filled_count: number
   total_count: number
   validated_count: number
   translators: string
   last_activity: string // 'YYYY-MM-DD' UTC
   status_auto: "Not started" | "In progress" | "Complete"
+  /** 'YYYY-MM-DD', or null when the project has no deadline (the cell is cleared). */
+  deadline: string | null
 }
 
 export interface FileMetricsEntry {
@@ -66,6 +73,8 @@ interface ProgressRow {
   structural_validator_histogram: unknown
   audio_validator_histogram: unknown
   structural_audio_validator_histogram: unknown
+  audio_count: number
+  structural_audio_count: number
 }
 
 function parseHistogram(raw: unknown): Map<number, number> {
@@ -99,24 +108,43 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 
+interface EntityTotals {
+  total: number
+  filled: number
+  validated: number
+  audioValidated: number
+  hasAudio: number
+}
+
 function buildMetrics(
-  totals: { total: number; filled: number; validated: number; audioValidated: number },
+  totals: EntityTotals,
   translators: string,
   lastActivity: string,
+  deadline: string | null,
 ): MondayEntityMetrics {
-  const { total, filled, validated, audioValidated } = totals
+  const { total, filled, validated, audioValidated, hasAudio } = totals
   const completionPct = total > 0 ? round1((filled / total) * 100) : 0
   return {
     completion_pct: completionPct,
     validated_pct: total > 0 ? round1((validated / total) * 100) : 0,
     audio_validated_pct: total > 0 ? round1((audioValidated / total) * 100) : 0,
+    has_audio_pct: total > 0 ? round1((Math.min(hasAudio, total) / total) * 100) : 0,
     filled_count: filled,
     total_count: total,
     validated_count: validated,
     translators,
     last_activity: lastActivity,
     status_auto: filled <= 0 ? "Not started" : completionPct >= 100 ? "Complete" : "In progress",
+    deadline,
   }
+}
+
+/** projects.deadline_at is a calendar date string; anything unusable reads as no deadline. */
+function toDeadline(raw: unknown): string | null {
+  if (raw == null) return null
+  const text = raw instanceof Date ? raw.toISOString() : String(raw)
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(text.trim())
+  return match ? match[1]! : null
 }
 
 /** Same clamp as every other reader of these counts (progress read, portfolio): 1–15. */
@@ -142,10 +170,11 @@ export async function computeProjectMetrics(
   projectId: string,
 ): Promise<ProjectMetricsSummary | null> {
   const project = await db
-    .prepare("SELECT id, name FROM projects WHERE id = ?")
+    .prepare("SELECT id, name, deadline_at FROM projects WHERE id = ?")
     .bind(projectId)
-    .first<{ id: string; name: string }>()
+    .first<{ id: string; name: string; deadline_at: unknown }>()
   if (!project) return null
+  const deadline = toDeadline(project.deadline_at)
 
   // Validation thresholds. validation_count is a generated column (never read
   // the multi-MB settings blob inline for it); validationCountAudio has no
@@ -229,7 +258,9 @@ export async function computeProjectMetrics(
               fsp.structural_filled_count AS structural_filled_count,
               fsp.structural_validator_histogram AS structural_validator_histogram,
               fsp.audio_validator_histogram AS audio_validator_histogram,
-              fsp.structural_audio_validator_histogram AS structural_audio_validator_histogram
+              fsp.structural_audio_validator_histogram AS structural_audio_validator_histogram,
+              fsp.audio_count AS audio_count,
+              fsp.structural_audio_count AS structural_audio_count
          FROM file_section_progress fsp
          JOIN lanes l
            ON l.project_id = fsp.project_id AND l.id = fsp.lane_id AND l.role = 'target'
@@ -271,11 +302,11 @@ export async function computeProjectMetrics(
   }
 
   const fileEntries: FileMetricsEntry[] = []
-  const projectTotals = { total: 0, filled: 0, validated: 0, audioValidated: 0 }
+  const projectTotals: EntityTotals = { total: 0, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0 }
 
   for (const file of files) {
     const laneRows = progressByFile.get(file.id) ?? []
-    let totals: { total: number; filled: number; validated: number; audioValidated: number }
+    let totals: EntityTotals
     if (laneRows.length > 0) {
       const histogram = new Map<number, number>()
       // AQU-1771: audio has its own histogram (validator counts on the
@@ -285,14 +316,17 @@ export async function computeProjectMetrics(
       const audioHistogram = new Map<number, number>()
       let total = 0
       let filled = 0
+      let hasAudio = 0
       for (const lane of laneRows) {
         total += Number(lane.total_count) || 0
         filled += Number(lane.filled_count) || 0
+        hasAudio += Number(lane.audio_count) || 0
         const laneHistogram = parseHistogram(lane.validator_histogram)
         const laneAudio = parseHistogram(lane.audio_validator_histogram)
         if (!countStructural) {
           total -= Number(lane.structural_count) || 0
           filled -= Number(lane.structural_filled_count) || 0
+          hasAudio -= Number(lane.structural_audio_count) || 0
           subtractHistogram(laneHistogram, lane.structural_validator_histogram)
           subtractHistogram(laneAudio, lane.structural_audio_validator_histogram)
         }
@@ -308,6 +342,7 @@ export async function computeProjectMetrics(
         filled: Math.max(0, filled),
         validated: validatedAtThreshold(histogram, threshold),
         audioValidated: validatedAtThreshold(audioHistogram, audioThreshold),
+        hasAudio: Math.max(0, hasAudio),
       }
     } else {
       // Pre-backfill fallback: file counters (approved ≈ validated), and only
@@ -323,24 +358,26 @@ export async function computeProjectMetrics(
               (Number(file.approved_count) || 0) - less(file.structural_approved_count),
             ),
             audioValidated: 0,
+            hasAudio: 0,
           }
-        : { total, filled: 0, validated: 0, audioValidated: 0 }
+        : { total, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0 }
     }
     projectTotals.total += totals.total
     projectTotals.filled += totals.filled
     projectTotals.validated += totals.validated
     projectTotals.audioValidated += totals.audioValidated
+    projectTotals.hasAudio += totals.hasAudio
     fileEntries.push({
       fileId: file.id,
       fileName: file.name,
-      metrics: buildMetrics(totals, translators, lastActivity),
+      metrics: buildMetrics(totals, translators, lastActivity, deadline),
     })
   }
 
   return {
     projectId: project.id,
     projectName: project.name,
-    project: buildMetrics(projectTotals, translators, lastActivity),
+    project: buildMetrics(projectTotals, translators, lastActivity, deadline),
     files: fileEntries,
   }
 }

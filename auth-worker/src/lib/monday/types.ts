@@ -7,12 +7,14 @@ export type MondayMetricKey =
   | "completion_pct" // filled/total across project (or file) as number 0-100, 1dp
   | "validated_pct" // cells meeting text validation threshold %
   | "audio_validated_pct" // cells meeting audio validation threshold %
+  | "has_audio_pct" // cells with a recording (selected dub take) %, the dashboard's "Has audio"
   | "filled_count"
   | "total_count"
   | "validated_count"
   | "translators" // comma-joined display names of contributors (text col)
   | "last_activity" // date of last event (date col, UTC date-only)
   | "status_auto" // derived label: 'Not started' | 'In progress' | 'Complete'
+  | "deadline" // the project's deadline (date col, 'YYYY-MM-DD'); empty when unset
   | "project_name" // item name source when creating items
   | "external_id" // aquilla entity id (text col; used for idempotent re-linking)
 
@@ -118,12 +120,14 @@ export const METRIC_KEYS: readonly MondayMetricKey[] = [
   "completion_pct",
   "validated_pct",
   "audio_validated_pct",
+  "has_audio_pct",
   "filled_count",
   "total_count",
   "validated_count",
   "translators",
   "last_activity",
   "status_auto",
+  "deadline",
   "project_name",
   "external_id",
 ]
@@ -151,12 +155,14 @@ export const WRITABLE_TYPES_BY_METRIC: Record<MondayMetricKey, readonly string[]
   completion_pct: NUMERIC_TYPES,
   validated_pct: NUMERIC_TYPES,
   audio_validated_pct: NUMERIC_TYPES,
+  has_audio_pct: NUMERIC_TYPES,
   filled_count: NUMERIC_TYPES,
   total_count: NUMERIC_TYPES,
   validated_count: NUMERIC_TYPES,
   translators: TEXT_TYPES,
   last_activity: ["date", "text"],
   status_auto: ["status", "text"],
+  deadline: ["date", "text"],
   project_name: TEXT_TYPES,
   external_id: TEXT_TYPES,
 }

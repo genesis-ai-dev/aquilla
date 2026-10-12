@@ -8,12 +8,14 @@ export type MondayMetricKey =
   | "completion_pct" // filled/total across project (or file) as number 0-100, 1dp
   | "validated_pct" // cells meeting text validation threshold %
   | "audio_validated_pct" // cells meeting audio validation threshold %
+  | "has_audio_pct" // cells with a recording (selected dub take) %, the dashboard's "Has audio"
   | "filled_count"
   | "total_count"
   | "validated_count"
   | "translators" // comma-joined display names of contributors (text col)
   | "last_activity" // date of last event (date col, UTC date-only)
   | "status_auto" // derived label: 'Not started' | 'In progress' | 'Complete'
+  | "deadline" // the project's deadline (date col, 'YYYY-MM-DD'); empty when unset
   | "project_name" // item name source when creating items
   | "external_id" // aquilla entity id (text col; used for idempotent re-linking)
 
@@ -45,12 +47,14 @@ export const MONDAY_METRIC_KEYS: MondayMetricKey[] = [
   "completion_pct",
   "validated_pct",
   "audio_validated_pct",
+  "has_audio_pct",
   "filled_count",
   "total_count",
   "validated_count",
   "translators",
   "last_activity",
   "status_auto",
+  "deadline",
   "project_name",
   "external_id",
 ]
@@ -60,12 +64,14 @@ export const MONDAY_METRIC_LABELS: Record<MondayMetricKey, string> = {
   completion_pct: "Completion %",
   validated_pct: "Validated %",
   audio_validated_pct: "Audio validated %",
+  has_audio_pct: "Has audio %",
   filled_count: "Filled cells",
   total_count: "Total cells",
   validated_count: "Validated cells",
   translators: "Translators",
   last_activity: "Last activity",
   status_auto: "Status (auto)",
+  deadline: "Deadline",
   project_name: "Project name",
   external_id: "External ID",
 }

@@ -74,6 +74,7 @@ function columnValueFor(
     case "completion_pct":
     case "validated_pct":
     case "audio_validated_pct":
+    case "has_audio_pct":
     case "filled_count":
     case "total_count":
     case "validated_count":
@@ -85,6 +86,11 @@ function columnValueFor(
       return columnType === "date" ? { date: m.last_activity } : m.last_activity
     case "status_auto":
       return columnType === "status" ? { label: m.status_auto } : m.status_auto
+    case "deadline":
+      // No deadline clears the cell: Monday treats an empty string as "clear"
+      // for every column type, a date column included.
+      if (!m.deadline) return ""
+      return columnType === "date" ? { date: m.deadline } : m.deadline
     case "project_name":
       return entity.itemName
     case "external_id":

@@ -107,6 +107,8 @@ import { createProjectShared } from "../../../db/shared/projects"
 import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
+import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
+import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
 
 const projects = new Hono<AuthHonoEnv>()
@@ -1078,6 +1080,11 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
   )
     .bind(deadline, projectId)
     .run()
+  // AQU-1770: a linked Monday board can show the deadline. Mark the link dirty
+  // and push it straight after the response, like the settings that move the
+  // board's numbers.
+  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
   return c.json({ ok: true, deadlineAt: deadline })
 })
 

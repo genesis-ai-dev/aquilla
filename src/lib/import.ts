@@ -60,7 +60,8 @@ import { extractIdmlStrings } from "./parsers/idml"
 import type { PartnerImportEdition, PartnerImportProgress } from "./partners/types"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
-import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
+import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./sync/bulk-import"
+import { importCellEventId, releaseImportSession, resolveImportSession } from "./sync/import-session"
 import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
@@ -1610,6 +1611,21 @@ export function buildBulkCells(
   return buildBulkCellsWithSpeakers(strings, options).cells
 }
 
+/**
+ * How one parsed source file is recognised again across import attempts
+ * (`resolveImportSession`). Deliberately the same shape of identity
+ * `reimportKeysFor` uses — format, book, name — so retrying "Jonah.usfm" into
+ * a project resolves the session the failed attempt left, while a different
+ * file in the same project gets its own.
+ */
+export function importSessionKeyFor(
+  fileType: FileType,
+  result: { name: string; originalName?: string; bookCode?: string },
+): string {
+  const name = (result.originalName ?? result.name).trim().toLowerCase()
+  return `${fileType}:${result.bookCode?.trim().toUpperCase() ?? ""}:${name}`
+}
+
 export interface EmitParsedFileResult {
   ref: FileReference
   /** (cellId, speaker) pairs from the same `buildBulkCellsWithSpeakers` call
@@ -1633,7 +1649,6 @@ export async function emitParsedFile(
   const existingFileId = reimportKeysFor(result)
     .map((key) => ctx.reimportFileIds?.get(key))
     .find((id): id is string => Boolean(id))
-  const fileId = existingFileId ?? uuidv7()
 
   const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
     fileName: result.name,
@@ -1654,12 +1669,39 @@ export async function emitParsedFile(
   const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
     normalizedFile: normalized,
   })
+
+  // AQU-1859: a fresh import runs inside a resumable session, so a chunk that
+  // fails half-way through a Bible can be retried into the same file instead
+  // of leaving a hidden partial file behind and starting a second one. A
+  // re-import of an EXISTING file already has its own identity and goes
+  // through the reconcile path, which is not chunked.
+  const session = existingFileId
+    ? undefined
+    : await resolveImportSession({
+      projectId: ctx.projectId,
+      importKey: importSessionKeyFor(fileType, result),
+      fileName: result.name,
+      cellKeys: cells.map((cell) => cell.cellId),
+      chunkSize: BULK_IMPORT_CHUNK,
+    })
+  const fileId = existingFileId ?? session?.fileId ?? uuidv7()
+
+  // Inside a session the event ids are derived from the file id rather than
+  // minted per parse, so re-parsing the file to retry produces byte-identical
+  // chunks and the already-landed ones replay as no-ops. Mutated in place
+  // because `speakerPairs` is keyed to these same cell objects' `cellId`.
+  if (session) {
+    cells.forEach((cell, index) => {
+      cell.id = importCellEventId(fileId, index, cell.cellId)
+    })
+  }
+
   const targets: TargetCommit[] = cells.flatMap((cell, index) => {
     const value = result.strings[index]?.translated
     const valueHtml = result.strings[index]?.translatedHtml
     return value || valueHtml
       ? [{
-          id: uuidv7(),
+          id: session ? importCellEventId(fileId, index, cell.cellId, "target") : uuidv7(),
           cellId: cell.cellId,
           parentId: cell.id,
           value: value ?? "",
@@ -1677,14 +1719,23 @@ export async function emitParsedFile(
   // AQU-990: the bulk-import route rejects an oversized cell with a bare 413
   // after the whole payload has been chunked and uploaded. Check the same
   // ceiling here so an unsplittable section fails immediately, naming itself.
-  assertImportCellsWithinSizeLimit(result.name, cells, targets)
+  try {
+    assertImportCellsWithinSizeLimit(result.name, cells, targets)
+  } catch (error) {
+    // Nothing was uploaded, so hand the session key back here rather than
+    // leaving this file un-resumable for the rest of the tab's life;
+    // `bulkUploadSource` owns the release once the upload has started.
+    if (session) releaseImportSession(session.key)
+    throw error
+  }
 
   const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
   await upload({
     projectId: ctx.projectId,
     fileId,
+    ...(session ? { session } : {}),
     file: {
-      id: uuidv7(),
+      id: session?.fileEventId ?? uuidv7(),
       name: result.name,
       fileType,
       role: "source",

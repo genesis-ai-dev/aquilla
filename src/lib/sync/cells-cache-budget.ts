@@ -32,8 +32,9 @@ export { estimateCellsSnapshotBytes } from "./cells-cache-writer"
 // Budget resolution mirrors the audio byte cache: a floor the cache is always
 // allowed, a ceiling it never exceeds however roomy the disk, and a fraction of
 // whatever the browser actually granted in between. The cells cache is text, so
-// it is an order of magnitude smaller than the audio budget: 64 MB already holds
-// a dozen whole Bibles' projections.
+// it is an order of magnitude smaller than the audio budget — a snapshot is one
+// FILE (a book, not a Bible), which runs ~1-2 MB for Genesis-sized source+target,
+// so 64 MB already keeps dozens of books warm.
 const FLOOR_BYTES = 64 * 1024 * 1024
 const CEILING_BYTES = 512 * 1024 * 1024
 const QUOTA_FRACTION = 0.1

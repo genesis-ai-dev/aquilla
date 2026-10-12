@@ -24,10 +24,24 @@ import {
   CELLS_CACHE_DB as DB_NAME,
   CELLS_CACHE_VERSION as DB_VERSION,
   CELLS_CACHE_STORE as STORE,
+  CELLS_CACHE_META_STORE as META_STORE,
   CELLS_CACHE_BATCH_ROWS,
+  estimateCellsSnapshotBytes,
   putCellsCacheSnapshot,
 } from "./cells-cache-writer"
+import {
+  clearCellsCacheForQuota,
+  enforceCellsCacheBudget,
+  evictCellsCacheTo,
+  cellsCacheBudget,
+  touchEntryAccess,
+  __setCellsCacheBudgetForTests,
+} from "./cells-cache-budget"
 import { putCellsCacheInWorker } from "./cells-cache-worker-client"
+import {
+  isQuotaExceededError,
+  withStorageQuotaRecovery,
+} from "@/lib/storage/storage-pressure"
 export const CELLS_CACHE_WRITE_DEBOUNCE_MS = 500
 
 // The database is shared by every account on this browser origin. Prefixing
@@ -165,11 +179,18 @@ async function openDb(): Promise<IDBDatabase> {
       req.onupgradeneeded = (event) => {
         const db = req.result
         const oldVersion = event.oldVersion
-        if (oldVersion > 0 && oldVersion < DB_VERSION && db.objectStoreNames.contains(STORE)) {
-          db.deleteObjectStore(STORE)
+        if (oldVersion > 0 && oldVersion < DB_VERSION) {
+          // Snapshots and their meta rows are one unit: an upgrade that kept
+          // snapshots while recreating the meta store would leave every
+          // existing entry uncounted by the budget and unevictable.
+          if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE)
+          if (db.objectStoreNames.contains(META_STORE)) db.deleteObjectStore(META_STORE)
         }
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE, { keyPath: "key" })
+        }
+        if (!db.objectStoreNames.contains(META_STORE)) {
+          db.createObjectStore(META_STORE, { keyPath: "key" })
         }
       }
     })
@@ -180,6 +201,7 @@ async function openDb(): Promise<IDBDatabase> {
 /** Closes the singleton connection (tests only). */
 export async function resetCellsCacheConnectionForTests(): Promise<void> {
   activeOwnerKey = undefined
+  __setCellsCacheBudgetForTests(null)
   for (const pending of pendingWrites.values()) {
     if (pending.timer !== null) clearTimeout(pending.timer)
   }
@@ -205,8 +227,9 @@ export async function resetCellsCacheConnectionForTests(): Promise<void> {
 export async function claimLegacyCellsCache(ownerKey: string | null): Promise<void> {
   const db = await openDb()
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite")
+    const tx = db.transaction([STORE, META_STORE], "readwrite")
     const store = tx.objectStore(STORE)
+    const meta = tx.objectStore(META_STORE)
     const request = store.openCursor()
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error ?? new Error("legacy cells cache claim failed"))
@@ -216,12 +239,23 @@ export async function claimLegacyCellsCache(ownerKey: string | null): Promise<vo
       if (!cursor) return
       const entry = cursor.value as CellsCacheEntry
       if (!isScopedCacheKey(entry.key)) {
-        const targetKey = scopedCacheKey(ownerKey, entry.key)
+        const legacyKey = entry.key
+        const targetKey = scopedCacheKey(ownerKey, legacyKey)
         const existing = store.get(targetKey)
         existing.onsuccess = () => {
           // A scoped write can race the one-time upgrade. Keep that newer,
           // explicitly-owned snapshot and only discard the obsolete legacy key.
-          if (existing.result === undefined) store.put({ ...entry, key: targetKey })
+          if (existing.result === undefined) {
+            store.put({ ...entry, key: targetKey })
+            // The re-keyed snapshot carries its budget accounting with it;
+            // otherwise the claim would silently make it uncountable.
+            meta.put({
+              key: targetKey,
+              sizeBytes: estimateCellsSnapshotBytes(entry.rows),
+              lastAccessAt: Date.now(),
+            })
+          }
+          meta.delete(legacyKey)
           cursor.delete()
           cursor.continue()
         }
@@ -251,6 +285,9 @@ export async function readCellsCache(
     if (unversionedKey) {
       await deleteGrantSiblings(unversionedKey, entryKey).catch(() => undefined)
     }
+    // LRU bump, deliberately not awaited: recency is a hint, and the file open
+    // this read feeds must not wait on a second transaction to paint.
+    if (entry) void touchEntryAccess(db, entryKey).catch(() => undefined)
     return entry
   } catch {
     return null
@@ -311,15 +348,60 @@ async function putCellsCacheEntry(
       ? { projectEpoch: pending.projectEpoch }
       : {}),
   }
-  if (entry.rows.length > CELLS_CACHE_BATCH_ROWS && typeof Worker !== "undefined") {
-    // A worker failure leaves the previous honest cache intact. Do not retry
-    // a large clone on the input thread and recreate the typing pause.
-    await putCellsCacheInWorker(entry)
-  } else {
-    await putCellsCacheSnapshot(db, entry)
-  }
+  await writeSnapshotWithQuotaRecovery(db, entry)
   if (pending.unversionedKey) {
     await deleteGrantSiblings(pending.unversionedKey, pending.entryKey)
+  }
+  // AQU-1865: hold the cache to its byte budget, least-recently-accessed file
+  // first. The snapshot just written is exempt — it is the one the open that
+  // triggered this write is about to read back.
+  await enforceCellsCacheBudget(db, entry.key).catch(() => undefined)
+}
+
+/**
+ * Write a snapshot, yielding origin bytes rather than failing hard (AQU-1865).
+ *
+ * The cells cache and the CQRS outbox share one origin quota, and only one of
+ * them is best-effort. So a `QuotaExceededError` here is not just this write's
+ * problem: it is a warning that the next *outbox* write may fail too. The cache
+ * sheds half its budget and retries once; if there is still no room it drops
+ * itself entirely. Callers already treat a missing snapshot as a cache miss, so
+ * the worst outcome is a refetch — never a lost edit.
+ */
+async function writeSnapshotWithQuotaRecovery(
+  db: IDBDatabase,
+  entry: CellsCacheEntry,
+): Promise<void> {
+  // A worker failure leaves the previous honest cache intact. Do not retry
+  // a large clone on the input thread and recreate the typing pause.
+  const write = () =>
+    entry.rows.length > CELLS_CACHE_BATCH_ROWS && typeof Worker !== "undefined"
+      ? putCellsCacheInWorker(entry)
+      : putCellsCacheSnapshot(db, entry)
+  const shedHalfTheBudget = async () => {
+    const budget = await cellsCacheBudget()
+    await evictCellsCacheTo(db, Math.floor(budget / 2), entry.key).catch(() => undefined)
+  }
+  try {
+    await withStorageQuotaRecovery(write, shedHalfTheBudget)
+  } catch (error) {
+    if (!isQuotaExceededError(error)) throw error
+    // Shedding half was not enough. Drop the cache outright rather than keep a
+    // best-effort optimisation competing with the outbox for the last bytes.
+    await clearCellsCacheForQuota(db).catch(() => undefined)
+  }
+}
+
+/**
+ * Hand the origin every byte this cache holds. Called by the outbox when an
+ * enqueue hits the quota: the cache is a latency optimisation and a queued edit
+ * is not, so the cache goes first and without argument.
+ */
+export async function purgeCellsCacheForQuota(): Promise<void> {
+  try {
+    await clearCellsCacheForQuota(await openDb())
+  } catch {
+    /* nothing more to reclaim here */
   }
 }
 
@@ -328,15 +410,20 @@ async function deleteGrantSiblings(unversionedKey: string, keepKey: string): Pro
   const db = await openDb()
   const prefix = `${unversionedKey}:gv:`
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite")
+    const tx = db.transaction([STORE, META_STORE], "readwrite")
     const store = tx.objectStore(STORE)
+    const meta = tx.objectStore(META_STORE)
     store.delete(unversionedKey)
-    const request = store.openCursor()
+    meta.delete(unversionedKey)
+    const request = store.openKeyCursor()
     request.onsuccess = () => {
       const cursor = request.result
       if (!cursor) return
       const key = String(cursor.key)
-      if (key.startsWith(prefix) && key !== keepKey) cursor.delete()
+      if (key.startsWith(prefix) && key !== keepKey) {
+        store.delete(key)
+        meta.delete(key)
+      }
       cursor.continue()
     }
     tx.oncomplete = () => resolve()
@@ -579,8 +666,10 @@ export async function deleteCellsCache(
   try {
     const db = await openDb()
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite")
-      tx.objectStore(STORE).delete(cacheKey(projectId, fileId))
+      const key = cacheKey(projectId, fileId)
+      const tx = db.transaction([STORE, META_STORE], "readwrite")
+      tx.objectStore(STORE).delete(key)
+      tx.objectStore(META_STORE).delete(key)
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error ?? new Error("IDB delete failed"))
       tx.onabort = () => reject(tx.error ?? new Error("IDB delete aborted"))

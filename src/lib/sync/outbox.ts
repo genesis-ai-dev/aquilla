@@ -17,6 +17,8 @@
 import type { CqrsRawEvent, OutboxEventKind } from "./outbox-types"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { journalTargetCommit, clearJournalRecord, recoverJournal } from "./outbox-recovery"
+import { purgeCellsCacheForQuota } from "./cells-cache"
+import { withStorageQuotaRecovery } from "@/lib/storage/storage-pressure"
 
 const DB_NAME = "aquilla-cqrs-outbox"
 /** v3: new records carry the account that created them. */
@@ -282,6 +284,24 @@ async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boole
   return true
 }
 
+/**
+ * Run an outbox write, reclaiming origin bytes once if the browser says there is
+ * no room (AQU-1865).
+ *
+ * Every durable store in this app shares one origin quota, and the caches —
+ * cells snapshots above all — are far the biggest tenants. They are also the
+ * only disposable ones: re-reading a projection costs a round trip, while a
+ * dropped outbox record costs a contributor their edit. So a `QuotaExceededError`
+ * on an enqueue buys itself room by emptying the cells cache and tries again,
+ * instead of handing the caller a failure it cannot do anything about.
+ */
+function withOutboxQuotaRecovery(write: () => Promise<void>): Promise<void> {
+  // A second failure is a genuinely full disk with nothing left to reclaim, and
+  // `withStorageQuotaRecovery` lets it propagate — the journal and the caller's
+  // error handling are what keep the edit recoverable from there.
+  return withStorageQuotaRecovery(write, purgeCellsCacheForQuota)
+}
+
 export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
   // Tauri desktop offline routing (Phase 4): eligible kinds on a
   // ready-for-offline project bypass IndexedDB entirely — LiveStore's
@@ -307,12 +327,12 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
   // synchronously first, preserving the account that initiated this write.
   if (ownerKey !== undefined) journalTargetCommit(rec)
   const db = await openDb()
-  await new Promise<void>((resolve, reject) => {
+  await withOutboxQuotaRecovery(() => new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.onerror = () => reject(tx.error ?? new Error("enqueue tx failed"))
     tx.oncomplete = () => resolve()
     tx.objectStore(STORE).put(rec)
-  })
+  }))
   clearJournalRecord(event.id)
   notifyOutboxChanged()
 }
@@ -343,7 +363,7 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
   const ownerKey = activeOwnerKey
   const db = await openDb()
   const now = Date.now()
-  await new Promise<void>((resolve, reject) => {
+  await withOutboxQuotaRecovery(() => new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.onerror = () => reject(tx.error ?? new Error("bulk enqueue tx failed"))
     tx.oncomplete = () => resolve()
@@ -361,7 +381,7 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
       }
       store.put(rec)
     }
-  })
+  }))
   notifyOutboxChanged()
 }
 

@@ -22,7 +22,9 @@ export function useHistoryView(): HistoryView {
  */
 export function useHistoryShortcuts(onResult: (which: "undo" | "redo", result: HistoryResult) => void): void {
   const onResultRef = useRef(onResult)
-  onResultRef.current = onResult
+  useEffect(() => {
+    onResultRef.current = onResult
+  }, [onResult])
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.repeat || event.altKey) return

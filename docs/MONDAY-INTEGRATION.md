@@ -67,6 +67,13 @@ contract beyond "maintainer can, member can view":
 - `POST /internal/push` is sync-worker's nudge after an edit. A push runs at
   once if the last one was over 2 minutes ago, otherwise the link is marked
   dirty and the 5-minute cron flushes it.
+- Settings that change the pushed numbers mark links dirty too (AQU-1771,
+  `db/shared/monday-dirty.ts`): a project's `countStructuralCells`,
+  `validationCount` or `validationCountAudio`; the org's headings rule (every
+  link in the org); and clearing project overrides.
+- `audio_validated_pct` is audio validation: the audio histogram (selected dub
+  takes, weakest track deciding) at `validationCountAudio`, default 1, capped
+  at 15, the same reading as the project dashboard.
 
 ## Deploying
 

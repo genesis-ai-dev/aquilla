@@ -79,8 +79,7 @@ export async function seedFixture(
     cellId,
     parentId: sources.find((row) => row.cellId === cellId)?.eventId ?? null,
     author: owner.username,
-    // TEMPORARY (AQU-1899): lane dropped on purpose to prove a dead canary fails the check. Reverted next commit.
-    payload: { value: `Tafsiri ya mstari wa ${index + 1}.`, ...(process.env.CI ? {} : lane) },
+    payload: { value: `Tafsiri ya mstari wa ${index + 1}.`, ...lane },
     clientTs: Date.now(),
   }))
   const result = await json<{ rejected: unknown[] }>(await fetch(`${sync()}/events`, {

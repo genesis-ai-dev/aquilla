@@ -19,7 +19,7 @@ import { platformAdminEmailsParam } from "../middleware/platform-admin"
 import {
   canViewRoster,
   getEffectiveOrgRole,
-  getProjectRosterViewMinRole,
+  getProjectRosterListFloor,
   getRosterViewMinRole,
 } from "./org-permissions"
 
@@ -161,7 +161,9 @@ function originOf(g: NamedGrant): GrantOrigin {
 export class ViewerScope {
   private orgRoles = new Map<number, number | null>()
   private rosterFloors = new Map<number, number>()
-  private projectFloors = new Map<number, number>()
+  // Keyed by PROJECT: a project may make its member list stricter than its
+  // org's (AQU-1771), so two projects in one org can have different floors.
+  private projectFloors = new Map<string, number | null>()
   private projectRoles = new Map<string, number | null>()
 
   constructor(private env: Env, readonly viewer: AuthUser) {}
@@ -174,9 +176,12 @@ export class ViewerScope {
     if (!this.rosterFloors.has(orgId)) this.rosterFloors.set(orgId, await getRosterViewMinRole(this.env, orgId))
     return this.rosterFloors.get(orgId) as number
   }
-  private async projectFloor(orgId: number): Promise<number> {
-    if (!this.projectFloors.has(orgId)) this.projectFloors.set(orgId, await getProjectRosterViewMinRole(this.env, orgId))
-    return this.projectFloors.get(orgId) as number
+  /** The project's member-list floor (null = ungated), as GET …/members applies it. */
+  private async projectFloor(projectId: string, orgId: number | null): Promise<number | null> {
+    if (!this.projectFloors.has(projectId)) {
+      this.projectFloors.set(projectId, await getProjectRosterListFloor(this.env, projectId, orgId))
+    }
+    return this.projectFloors.get(projectId) ?? null
   }
   async projectRole(projectId: string): Promise<number | null> {
     if (!this.projectRoles.has(projectId)) {
@@ -192,12 +197,13 @@ export class ViewerScope {
     return (role ?? 0) >= 600 || canViewRoster(role, await this.rosterFloor(orgId))
   }
 
-  /** A project the viewer can open AND whose roster the org lets them list. */
+  /** A project the viewer can open AND whose roster its policy lets them list. */
   async canSeeProject(projectId: string, orgId: number | null): Promise<boolean> {
     if (orgId != null && ((await this.orgRole(orgId)) ?? 0) >= 600) return true
     const role = await this.projectRole(projectId)
     if (role == null) return false
-    return orgId == null || canViewRoster(role, await this.projectFloor(orgId))
+    const floor = await this.projectFloor(projectId, orgId)
+    return floor == null || canViewRoster(role, floor)
   }
 }
 

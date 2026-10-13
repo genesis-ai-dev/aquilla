@@ -15,7 +15,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import {
   canViewNamedProgress,
   getEffectiveOrgRole,
-  getProjectVisibilityFloors,
+  getOrgVisibilityFloors,
 } from "../services/org-permissions"
 import { isPlatformAdmin } from "../middleware/platform-admin"
 import { ROLE } from "../types"
@@ -244,7 +244,7 @@ usage.get("/org/:orgId", async (c) => {
 
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
-  if (!canViewNamedProgress(role, await getProjectVisibilityFloors(c.env, orgId))) {
+  if (!canViewNamedProgress(role, await getOrgVisibilityFloors(c.env, orgId))) {
     return c.json({ error: "member progress hidden by org policy" }, 403)
   }
 

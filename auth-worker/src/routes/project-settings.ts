@@ -46,6 +46,11 @@
 // Everything else keeps the maintainer gate, unchanged. Each carve-out is
 // scoped to a write that changes NOTHING ELSE, so none widens access to any
 // other key.
+//
+// AQU-1771: `rosterViewMinRole` and `memberProgressViewMinRole` are this
+// project's own, stricter-only copies of the org's visibility floors. They
+// keep the maintainer gate (org owners reach it through their org role) and
+// are refused below the org's floor — see visibilityFloorWriteProblem.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -59,7 +64,15 @@ import {
   getOrgCountStructuralCellsForProject,
   getOrgAllowBulkValidateAiDraftsForProject,
   getLanguageEditMinRoleForProject,
+  getProjectOrgPolicy,
+  type ProjectOrgPolicy,
 } from "../services/org-permissions"
+import {
+  parseProjectVisibilityFloor,
+  VISIBILITY_FLOOR_KEYS,
+  VISIBILITY_FLOOR_LEVELS,
+  type VisibilityFloorKey,
+} from "../../../db/shared/visibility-floors"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import {
   loadProjectSettings,
@@ -210,22 +223,82 @@ async function withOrgDefaults(
   orgAllowBulkValidateAiDrafts: boolean | null
   orgValidationCount: number | null
   orgValidationCountAudio: number | null
+  orgPolicy: ProjectOrgPolicy
+  visibilityFloors: VisibilityFloorsView
 }> {
-  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds] = await Promise.all([
+  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
     getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
     // AQU-1771: the org's validation defaults, null when it set none. Read
     // here for the same reason as the two above: a project member who is not
     // in the org cannot read the org settings route.
     loadOrgValidationDefaults(env.AQUILLA_PG, projectId),
+    // AQU-1771: and the rest of the org policy the project's own surfaces
+    // need, for the same reason — plus the visibility floors this project
+    // actually enforces, its own stricter values included.
+    getProjectOrgPolicy(env, projectId, response.settings),
   ])
+  const { visibility } = policy
   return {
     ...response,
     orgCountStructuralCells,
     orgAllowBulkValidateAiDrafts,
     orgValidationCount: orgThresholds.validationCount,
     orgValidationCountAudio: orgThresholds.validationCountAudio,
+    orgPolicy: policy.orgPolicy,
+    visibilityFloors: {
+      rosterViewMinRole: {
+        org: visibility.org.rosterViewMinRole,
+        project: visibility.project.rosterViewMinRole,
+        effective: visibility.rosterViewMinRole,
+      },
+      memberProgressViewMinRole: {
+        org: visibility.org.memberProgressViewMinRole,
+        project: visibility.project.memberProgressViewMinRole,
+        effective: visibility.memberProgressViewMinRole,
+      },
+    },
   }
+}
+
+/**
+ * AQU-1771: each visibility floor as the org sets it, as this project sets it
+ * (null when the project follows the org, including a stored value that is
+ * not stricter), and the floor the project enforces — the higher of the two.
+ */
+type VisibilityFloorsView = Record<VisibilityFloorKey, { org: number; project: number | null; effective: number }>
+
+/**
+ * AQU-1771: a write that changes a project's own visibility floor must name a
+ * role-ladder level at or above the org's floor — a project can make who sees
+ * its member list or each member's progress stricter, never looser. Judged on
+ * the CHANGE, so a stored value the org has since overtaken (inert: the
+ * floor is the higher of the two) still rides along on an unrelated save.
+ * Returns the refusal message, or null.
+ */
+async function visibilityFloorWriteProblem(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  stored: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Promise<string | null> {
+  const changed = VISIBILITY_FLOOR_KEYS.filter(
+    (key) => next[key] != null && JSON.stringify(stored[key]) !== JSON.stringify(next[key]),
+  )
+  if (changed.length === 0) return null
+  const { orgPolicy } = await getProjectOrgPolicy(env, projectId, next)
+  for (const key of changed) {
+    const level = parseProjectVisibilityFloor(next[key])
+    if (level == null) {
+      return `${key} must be a role level: one of ${VISIBILITY_FLOOR_LEVELS.join(", ")}`
+    }
+    const orgFloor = orgPolicy[key]
+    if (level < orgFloor) {
+      const what = key === "rosterViewMinRole" ? "the member list" : "each member's progress"
+      return `${key} ${level} is below the organization's setting (${orgFloor}). A project can only make who sees ${what} stricter than its organization does: choose ${orgFloor} or higher, or remove ${key} to follow the organization.`
+    }
+  }
+  return null
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -478,6 +551,10 @@ projectSettings.on(
         }
       }
     }
+
+    // AQU-1771: a project's own visibility floors can only be stricter.
+    const floorProblem = await visibilityFloorWriteProblem(c.env, projectId, stored.settings, settings)
+    if (floorProblem) return c.json({ error: floorProblem }, 400)
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
     const headerVersion = parseIntOrNull(c.req.header("If-Match-Version"))

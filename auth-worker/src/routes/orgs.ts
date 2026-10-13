@@ -25,7 +25,8 @@ import {
   getOrgGroupDetail,
   getOrgDeletedFiles,
   getOrgMemberRole,
-  getProjectVisibilityFloors,
+  combineVisibilityFloors,
+  getOrgVisibilityFloors,
   getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
@@ -61,6 +62,7 @@ import { countTargetLanesByOrg } from "../lib/billing/words"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
+import { loadProjectVisibilityOverrides } from "../../../db/shared/visibility-floors"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
 import { applyTeamMemberLaneGrants, applyTeamProjectLaneGrants } from "../services/lane-grants"
@@ -515,19 +517,26 @@ orgs.get("/:orgId/assignments/workload", async (c) => {
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
-  const orgFloors = await getProjectVisibilityFloors(c.env, orgId)
+  const orgFloors = await getOrgVisibilityFloors(c.env, orgId)
   if (!canViewNamedProgress(role, orgFloors)) {
     return c.json({ error: "member progress hidden by org policy" }, 403)
   }
   const assignments = await getOrgAssignmentWorkload(c.env, orgId)
-  // An owner meets every floor and reaches every project in the org.
+  // An owner meets every floor (a project can raise one to Owner at most) and
+  // reaches every project in the org.
   if (role >= ROLE.OWNER) return c.json({ assignments })
-  const projectRoles = await resolveProjectRoles(
-    c.env, user, assignments.map((a) => a.projectId),
-  )
-  const visible = assignments.filter((a) =>
-    canViewNamedProgress(projectRoles.get(a.projectId)?.level ?? null, orgFloors),
-  )
+  // A project may be stricter than the org (AQU-1771), so each row answers to
+  // its own project's floors, read for the projects on the list only.
+  const projectIds = [...new Set(assignments.map((a) => a.projectId))]
+  const [projectRoles, overrides] = await Promise.all([
+    resolveProjectRoles(c.env, user, projectIds),
+    loadProjectVisibilityOverrides(c.env.AQUILLA_PG, projectIds),
+  ])
+  const visible = assignments.filter((a) => {
+    const own = overrides.get(a.projectId)
+    const floors = own ? combineVisibilityFloors(orgFloors, own) : orgFloors
+    return canViewNamedProgress(projectRoles.get(a.projectId)?.level ?? null, floors)
+  })
   return c.json({ assignments: visible })
 })
 

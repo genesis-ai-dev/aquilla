@@ -69,9 +69,9 @@ import {
   attachGroupProject,
   getOrgMemberRole,
   getOrCreateUserOrg,
-  getProjectRosterViewMinRole,
+  getProjectRosterListFloor,
   getProjectVisibilityFloors,
-  type ProjectVisibilityFloors,
+  type VisibilityFloors,
   getTermbaseEditMinRole,
   getLanguageEditMinRole,
   listEffectiveProjectMembers,
@@ -1239,7 +1239,7 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   if (!project) return c.json({ error: "project not found" }, 404)
   const denial = namedProgressDenial(
     role.level,
-    await getProjectVisibilityFloors(c.env, project.org_id),
+    await getProjectVisibilityFloors(c.env, projectId, project.org_id),
   )
   if (denial) return c.json(denial, 403)
 
@@ -1254,7 +1254,7 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
  */
 function namedProgressDenial(
   roleLevel: number,
-  floors: ProjectVisibilityFloors,
+  floors: VisibilityFloors,
 ): { error: string; rosterHidden?: true } | null {
   if (!canViewMemberProgress(roleLevel, floors.memberProgressViewMinRole)) {
     return { error: "member progress hidden by org policy" }
@@ -1330,7 +1330,7 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
   // it is printed, so this asks both questions and the stricter one wins.
   const denial = namedProgressDenial(
     role.level,
-    await getProjectVisibilityFloors(c.env, project.org_id),
+    await getProjectVisibilityFloors(c.env, projectId, project.org_id),
   )
   if (denial) return c.json(denial, 403)
 
@@ -1368,7 +1368,7 @@ projects.get("/:projectId/assignments/units", authMiddleware, async (c) => {
   // Both floors, as on the per-unit read: names are roster information.
   const denial = namedProgressDenial(
     role.level,
-    await getProjectVisibilityFloors(c.env, project.org_id),
+    await getProjectVisibilityFloors(c.env, projectId, project.org_id),
   )
   if (denial) return c.json(denial, 403)
 
@@ -1422,6 +1422,10 @@ function parsePrivilegedMinRole(raw: string | undefined): number | null {
  * assignee picker is built from. Under the shipped defaults (roster 600,
  * assignment 500) a project lead was authorized to assign but 403'd on the
  * roster, emptying every Assignee dropdown.
+ *
+ * AQU-1771: a project may make its member list stricter than the org's, and
+ * that value is applied on top (it is never undercut by the AQU-1308
+ * carve-out). It also gates a project with no org.
  */
 projects.get("/:projectId/members", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -1438,9 +1442,9 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
 
   const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
 
-  if (project.org_id != null && privilegedMinRole == null) {
-    const rosterMinRole = await getProjectRosterViewMinRole(c.env, project.org_id)
-    if (!canViewRoster(role.level, rosterMinRole)) {
+  if (privilegedMinRole == null) {
+    const rosterMinRole = await getProjectRosterListFloor(c.env, projectId, project.org_id)
+    if (rosterMinRole != null && !canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
     }
   }
@@ -1528,9 +1532,8 @@ projects.get("/:projectId/mention-candidates", authMiddleware, async (c) => {
     .first<{ created_by: number; org_id: number | null }>()
   if (!project) return c.json({ error: "project not found" }, 404)
 
-  const callerCanViewRoster =
-    project.org_id == null ||
-    canViewRoster(role.level, await getProjectRosterViewMinRole(c.env, project.org_id))
+  const rosterMinRole = await getProjectRosterListFloor(c.env, projectId, project.org_id)
+  const callerCanViewRoster = rosterMinRole == null || canViewRoster(role.level, rosterMinRole)
 
   const [members, laneMateIds] = await Promise.all([
     listEffectiveProjectMembers(c.env, projectId, project.org_id, project.created_by),

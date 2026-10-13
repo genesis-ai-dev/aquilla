@@ -133,6 +133,33 @@ describe("GET /api/v1/projects/:projectId/members/:author/activity", () => {
     expect(res.status).toBe(403)
   })
 
+  // AQU-1771: a project can make the floor stricter than its org's, never looser.
+  async function statusFor(projectSettings: Record<string, unknown>, role: number): Promise<number> {
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: "Org A" }],
+      projects: [{ id: "proj-a", org_id: 1, name: "Proj A" }],
+      org_settings: [{ org_id: 1, settings: JSON.stringify({ memberProgressViewMinRole: 600 }) }],
+      project_settings: [{ project_id: "proj-a", settings: JSON.stringify(projectSettings), version: 1 }],
+      events: [makeEvent({ id: "e1", kind: "target.cell.commit", parent_id: null, server_seq: 1, author: "alice" })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", role })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/members/alice/activity",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    return (await handleMemberActivityReadRequest(req, envWith(db)))!.status
+  }
+
+  it("refuses a maintainer when the project raised the floor to owners (AQU-1771)", async () => {
+    expect(await statusFor({ memberProgressViewMinRole: 700 }, 600)).toBe(403)
+    expect(await statusFor({ memberProgressViewMinRole: 700 }, 700)).toBe(200)
+  })
+
+  it("ignores a project value below the org's floor (AQU-1771)", async () => {
+    expect(await statusFor({ memberProgressViewMinRole: 400 }, 400)).toBe(403)
+    expect(await statusFor({ memberProgressViewMinRole: 400 }, 600)).toBe(200)
+  })
+
   it("allows a caller meeting the default MAINTAINER floor when the org has not configured one", async () => {
     const { db } = await makeTestDb({
       events: [makeEvent({ id: "e1", kind: "target.cell.commit", parent_id: null, server_seq: 1, author: "alice" })],

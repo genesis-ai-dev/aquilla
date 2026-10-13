@@ -654,6 +654,19 @@ export function ProjectOverview() {
   // The lowest Team value that can show: never below the org's progress
   // setting, and never below the member list (the card names people).
   const teamOrgShown = Math.max(progressFloor.org, rosterFloor.effective)
+  // Sam, 2026-10-13: when a Members change moves the Team card's level, say so
+  // in amber under the Team badge. Holds the level it moved to; cleared when
+  // the Team level next moves on its own (its badge, or the org's progress
+  // setting). Any Members change counts, this tab's or a teammate's.
+  const [teamMovedByMembers, setTeamMovedByMembers] = useState<number | null>(null)
+  const lastVisibilityRef = useRef<{ roster: number; team: number } | null>(null)
+  useEffect(() => {
+    if (!projectPolicy.ready) return
+    const last = lastVisibilityRef.current
+    lastVisibilityRef.current = { roster: rosterFloor.effective, team: teamNamesFloor }
+    if (!last || last.team === teamNamesFloor) return
+    setTeamMovedByMembers(last.roster !== rosterFloor.effective ? teamNamesFloor : null)
+  }, [projectPolicy.ready, rosterFloor.effective, teamNamesFloor])
   // The badges write THIS project's own values, so they follow the project
   // settings write gate — Maintainer and up on the project, which every org
   // owner is — not the org-owner gate that guards the org's own setting.
@@ -2540,7 +2553,7 @@ export function ProjectOverview() {
                     data-testid="overview-team-card"
                     data-expanded={teamOpen ? "true" : "false"}
                   >
-                    <div className={cn("flex items-center justify-between gap-2", teamOpen && "mb-3")}>
+                    <div className={cn("flex items-center justify-between gap-2", teamOpen && teamMovedByMembers == null && "mb-3")}>
                       {/* Heading wraps the button: a button may only contain
                           phrasing content, and an h2 inside it is invalid.
                           Same header treatment as the Members card (AQU-1171). */}
@@ -2606,6 +2619,17 @@ export function ProjectOverview() {
                         }
                       />
                     </div>
+                    {teamMovedByMembers != null && (
+                      <p
+                        role="status"
+                        data-testid="overview-team-visibility-moved"
+                        className={cn("mt-1 text-end text-xs text-amber-700 dark:text-amber-400", teamOpen && "mb-3")}
+                      >
+                        {t("org.projectOverview.teamVisibilityMovedByMembers", {
+                          level: t(visibilityRolePickerLabelKey(teamMovedByMembers)),
+                        })}
+                      </p>
+                    )}
                     {teamOpen && (
                       <div id="overview-team-panel">
                         {workload.length === 0 ? (

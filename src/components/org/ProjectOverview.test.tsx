@@ -394,8 +394,8 @@ function SettingsLocationProbe() {
   )
 }
 
-function renderOverview() {
-  return render(
+function overviewTree() {
+  return (
     <MemoryRouter initialEntries={["/projects/p1"]}>
       <OrgProvider>
         <Routes>
@@ -403,8 +403,12 @@ function renderOverview() {
           <Route path="/project/:id/settings" element={<SettingsLocationProbe />} />
         </Routes>
       </OrgProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
+}
+
+function renderOverview() {
+  return render(overviewTree())
 }
 
 beforeEach(async () => {
@@ -1554,6 +1558,42 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     expect(await screen.findByTestId("section-visibility-origin")).toHaveTextContent(
       "Stricter than your org (Maintainers and owners). Pick “Maintainers and owners (org default)” to undo.",
     )
+  })
+
+  // Sam, 2026-10-13: a Members change that moves the Team card's level is
+  // called out in amber under the Team badge; a Team change of its own is not.
+  it("says in amber under the Team badge when a Members change moved it", async () => {
+    const owner = (settings: ReturnType<typeof projectSettingsMock>) => ({
+      project: projectRecord({ level: ROLE.OWNER }),
+      status: "ready",
+      refresh,
+      projectSettings: settings,
+    })
+    useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.MAINTAINER })))
+    const view = renderOverview()
+    await screen.findByTestId("overview-team-card")
+    expect(screen.queryByTestId("overview-team-visibility-moved")).toBeNull()
+
+    // Members raised to owners only: the Team card follows it up.
+    useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, rosterOwn: ROLE.OWNER, progressOrg: ROLE.MAINTAINER })))
+    view.rerender(overviewTree())
+    expect(await screen.findByTestId("overview-team-visibility-moved")).toHaveTextContent(
+      "Changed to “Owners only” because Members changed.",
+    )
+
+    // Members back to the org's: the Team card drops back to its own setting.
+    useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.MAINTAINER })))
+    view.rerender(overviewTree())
+    await waitFor(() =>
+      expect(screen.getByTestId("overview-team-visibility-moved")).toHaveTextContent(
+        "Changed to “Maintainers and owners” because Members changed.",
+      ),
+    )
+
+    // A Team change of its own clears the note.
+    useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })))
+    view.rerender(overviewTree())
+    await waitFor(() => expect(screen.queryByTestId("overview-team-visibility-moved")).toBeNull())
   })
 
   it("choosing the org's setting clears the project's own value, so the project follows the org again", async () => {

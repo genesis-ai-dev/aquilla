@@ -1160,12 +1160,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
     "projectSettings.monday.wizardDoneNeedsAttentionTitle": "Board linked — sync needs attention",
     "projectSettings.monday.wizardLinkWarningsTitle": "The board is linked, but Monday reported a problem:",
-    "projectSettings.monday.wizardMatchByColumn":
-      "Items Aquilla already made on this board are reused, found by their {column} column, so setting up again won't add copies.",
-    "projectSettings.monday.wizardMatchByName":
-      "Items already on this board are reused when their name matches.",
-    "projectSettings.monday.wizardMatchNone":
-      "Aquilla adds new items to this board. To have a later setup reuse them, add a text column named \"Aquilla ID\" to the board first.",
     "projectSettings.monday.wizardRecommendation": plural({
       one: "Recommended: one item per {granularity}, with {mappedCount} progress column.",
       other: "Recommended: one item per {granularity}, with {mappedCount} progress columns.",
@@ -1266,13 +1260,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
     "projectSettings.monday.granularityFileLabel": "One item per file",
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
-    "projectSettings.monday.columnPickerTitle": "Columns Aquilla can fill",
-    "projectSettings.monday.columnPickerIntro": "Tick the ones to add to your board. Aquilla creates them and fills them in.",
-    "projectSettings.monday.columnPickerAllOnBoard": "Every column Aquilla can fill is on your board.",
     "projectSettings.monday.columnPickerOnBoard": "On your board",
-    "projectSettings.monday.columnPickerRequired": "Required",
-    "projectSettings.monday.addSelectedColumnsButton": "Add selected to my board",
-    "projectSettings.monday.addAllColumnsButton": "Add all",
     "projectSettings.monday.columnInfo.completion_pct": "How much of the project or file is translated, as a percentage.",
     "projectSettings.monday.columnInfo.validated_pct": "How much is translated and approved by enough reviewers, as a percentage.",
     "projectSettings.monday.columnInfo.has_audio_pct": "How many lines have a recording, as a percentage.",
@@ -1295,15 +1283,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.columnInfo.books_in_progress": "The books (or files) that have been started and aren't marked Done.",
     "projectSettings.monday.columnInfo.recorded_minutes": "Minutes of recorded audio in the project.",
     "projectSettings.monday.columnInfo.external_id": "Aquilla's own ID for each item. Needed so a later setup finds and reuses the items Aquilla made.",
-    "projectSettings.monday.addMissingColumnsDone": plural({
-      one: "Added {count} column to the board and matched it.",
-      other: "Added {count} columns to the board and matched them.",
-    }, "count"),
-    "projectSettings.monday.addMissingColumnsMatchedOnly": plural({
-      one: "Matched {count} column that was already on the board.",
-      other: "Matched {count} columns that were already on the board.",
-    }, "count"),
-    "projectSettings.monday.addMissingColumnsFailed": "Couldn't add: {columns}. Monday said: {reason}",
     "projectSettings.monday.reviewRowsCaption": "What gets pushed — change any row before applying",
     "projectSettings.monday.applyingStatus": "Linking the board and pushing your progress…",
     "projectSettings.monday.progressPushesAutomatically": "Progress pushes automatically as translators work.",
@@ -2091,33 +2070,10 @@ export const projectSettings = defineNamespace({
           boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
         },
       },
-      "projectSettings.monday.columnPickerTitle": {
-        description:
-          "Heading of the column picker in a project's Monday.com setup: a list of every " +
-          "column Aquilla can create on the user's Monday board and keep filled in with " +
-          "the project's progress.",
-      },
-      "projectSettings.monday.columnPickerIntro": {
-        description: "Line under the column picker heading, telling the user to tick the columns to add to their Monday board.",
-      },
-      "projectSettings.monday.columnPickerAllOnBoard": {
-        description: "Line under the column picker heading when every column Aquilla can fill already exists on the Monday board.",
-      },
       "projectSettings.monday.columnPickerOnBoard": {
         description:
           "Small badge beside a column in the picker when that column already exists on the " +
           "user's Monday board (so it can't be ticked to add again).",
-      },
-      "projectSettings.monday.columnPickerRequired": {
-        description:
-          "Small badge beside the \"Aquilla ID\" column in the picker: it must be added, " +
-          "because a later setup uses it to find the items Aquilla already made.",
-      },
-      "projectSettings.monday.addSelectedColumnsButton": {
-        description: "Button under the column picker: create the ticked columns on the user's Monday board and connect them to the project's numbers.",
-      },
-      "projectSettings.monday.addAllColumnsButton": {
-        description: "Button under the column picker: create every listed column that isn't on the Monday board yet.",
       },
       "projectSettings.monday.columnInfo.completion_pct": {
         description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
@@ -2184,18 +2140,6 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.columnInfo.external_id": {
         description: "One-line description, in the Monday.com column picker, of what the column will show on the user's Monday board.",
-      },
-      "projectSettings.monday.addMissingColumnsDone": {
-        description:
-          "Confirmation after adding columns from the column picker: how many columns Aquilla " +
-          "created on the Monday board. They are already connected to the progress numbers.",
-        placeholders: { count: "How many columns were created." },
-      },
-      "projectSettings.monday.addMissingColumnsMatchedOnly": {
-        description:
-          "Confirmation after adding columns from the column picker when the board already had " +
-          "columns with the right names: nothing was created, those columns were connected instead.",
-        placeholders: { count: "How many existing columns were connected." },
       },
       "projectSettings.monday.wizardIntroLine": {
         description: "One-sentence description at the start of the Monday.com setup dialog in project settings.",
@@ -2346,15 +2290,6 @@ export const projectSettings = defineNamespace({
         description: "Confirm button of that dialog: create the ticked new columns on the Monday board.",
         placeholders: { count: "How many columns will be created." },
       },
-      "projectSettings.monday.addMissingColumnsFailed": {
-        description:
-          "Error after adding columns from the column picker when Monday refused to create " +
-          "some columns. The others were still created.",
-        placeholders: {
-          columns: "Comma-separated titles of the columns Monday refused (Monday data, untranslated).",
-          reason: "Monday's own error message, in English, shown as received.",
-        },
-      },
       "projectSettings.monday.wizardRecommendation": {
         description: "Summary line in the Monday setup wizard review step: the recommended item granularity and how many progress columns are mapped.",
         placeholders: {
@@ -2367,26 +2302,6 @@ export const projectSettings = defineNamespace({
           "Heading of a warning box on the last step of the Monday setup wizard, above " +
           "a list of server messages (shown in English) about the link that was just " +
           "saved, for example that Monday's change notifications could not be set up.",
-      },
-      "projectSettings.monday.wizardMatchByColumn": {
-        description:
-          "Line on the review step of the Monday setup wizard saying that board items " +
-          "Aquilla created earlier will be found again (by an ID Aquilla wrote into a " +
-          "board column) and updated, instead of duplicated.",
-        placeholders: {
-          column: "The Monday board column's own title (data, not translated), e.g. 'Aquilla ID'.",
-        },
-      },
-      "projectSettings.monday.wizardMatchByName": {
-        description:
-          "Line on the review step of the Monday setup wizard saying that existing board " +
-          "items whose name matches will be updated instead of new ones being added.",
-      },
-      "projectSettings.monday.wizardMatchNone": {
-        description:
-          "Line on the review step of the Monday setup wizard when nothing will match " +
-          "existing board items. \"Aquilla ID\" is the literal column title the user should " +
-          "create on Monday; keep it in English so it matches what the app looks for.",
       },
       "projectSettings.monday.wizardFindBoardManually": {
         description: "Fallback note in the Monday setup wizard when Monday returned no direct board URL, telling the user to find the board by name.",

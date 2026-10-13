@@ -69,8 +69,9 @@ describe("BuiltinChecksList — Bible data checks", () => {
     render(<BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} />)
     const group = screen.getByTestId("builtin-bible-checks")
     expect(within(group).getByText("Bible data checks")).toBeInTheDocument()
-    expect(within(group).getAllByTestId("builtin-row")).toHaveLength(8)
+    expect(within(group).getAllByTestId("builtin-row")).toHaveLength(16)
     expect(within(group).getByText("Question kept")).toBeInTheDocument()
+    expect(within(group).getByText("Negation kept")).toBeInTheDocument()
   })
 
   const needsOf = (name: string) => {
@@ -81,19 +82,29 @@ describe("BuiltinChecksList — Bible data checks", () => {
   it("says which slot each check waits for while the Language profile is empty", () => {
     render(<BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} languageProfile={{}} />)
     const needs = within(screen.getByTestId("builtin-bible-checks")).getAllByTestId("builtin-row-needs")
-    expect(needs).toHaveLength(8)
+    // Every check but S8 (verse numbering needs nothing from the profile).
+    expect(needs).toHaveLength(15)
     expect(needsOf("Quotation closes")).toEqual(["Needs: quotation marks in Language profile"])
     // AQU-1691: M1 has its own slot. Naming quotation marks here would send the
     // maintainer to fill in the wrong part of the profile.
     expect(needsOf("Question kept")).toEqual(["Needs: question markers in Language profile"])
+    // AQU-1697: each pack-A check names the one slot that switches it on.
+    expect(needsOf("Number kept")).toEqual(["Needs: number words in Language profile"])
+    expect(needsOf("Ordinal number kept")).toEqual(["Needs: number words in Language profile"])
+    expect(needsOf("Negation kept")).toEqual(["Needs: negative words in Language profile"])
+    expect(needsOf("Heading for each passage")).toEqual(["Needs: section headings in Language profile"])
+    expect(needsOf("Sentence runs on")).toEqual(["Needs: question markers in Language profile"])
+    expect(needsOf("Verses the oldest manuscripts lack")).toEqual(["Needs: textual variants in Language profile"])
+    expect(needsOf("Disputed passages")).toEqual(["Needs: textual variants in Language profile"])
+    expect(needsOf("Verse numbering")).toEqual([])
   })
 
   it("keeps the question check dormant until question markers are saved, even with quotation marks set", () => {
     const { unmount } = render(
       <BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} languageProfile={{ quoteMarks }} />,
     )
-    expect(screen.getAllByTestId("builtin-row-needs")).toHaveLength(1)
     expect(needsOf("Question kept")).toEqual(["Needs: question markers in Language profile"])
+    expect(needsOf("Quotation closes")).toEqual([])
     unmount()
     // An empty slot is a real answer: questions are marked with "?" only.
     render(
@@ -104,7 +115,9 @@ describe("BuiltinChecksList — Bible data checks", () => {
         languageProfile={{ quoteMarks, questionMarkers: {} }}
       />,
     )
-    expect(screen.queryByTestId("builtin-row-needs")).toBeNull()
+    expect(needsOf("Question kept")).toEqual([])
+    // AQU-1697: S3 waits for the same slot.
+    expect(needsOf("Sentence runs on")).toEqual([])
   })
 
   it("drops the reason once the marks are set, and keeps the switch and severity", () => {

@@ -6630,6 +6630,7 @@ export function ProjectWorkspace() {
   // a Bible book.
   const bibleChecks = useBibleChecks(project, cellSummaries, activeFile)
   const bibleCheckContextFor = bibleChecks.contextFor
+  const bibleFileScan = bibleChecks.fileScan
   const healthCellCheckContext = useCallback(
     (cell: { id: string }) => bibleCheckContextFor(cell.id),
     [bibleCheckContextFor],
@@ -6986,6 +6987,8 @@ export function ProjectWorkspace() {
         termMatching: project?.termMatching,
         // AQU-1688: the same per-cell Bible data inputs the live check uses.
         contextFor: healthCellCheckContext,
+        // AQU-1697: the Bible data scans over the whole file (headings, verse numbering).
+        bibleScan: await bibleFileScan(),
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -6994,7 +6997,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching, healthCellCheckContext])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching, healthCellCheckContext, bibleFileScan])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {

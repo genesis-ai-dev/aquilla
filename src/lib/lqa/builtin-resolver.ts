@@ -45,6 +45,15 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "usfm-structure": "rules.builtin.usfmStructure.name",
   "capitalization": "rules.builtin.capitalization.name",
   "footnote-quote-mismatch": "rules.builtin.footnoteQuoteMismatch.name",
+  "bkp:N1": "bibleChecks.n1.name",
+  "bkp:N2": "bibleChecks.n2.name",
+  // AQU-1697: the name autopilot already shows for this check.
+  "bkp:M3": "agent.finding.bibleCheck.negation",
+  "bkp:S1": "bibleChecks.s1.name",
+  "bkp:S3": "bibleChecks.s3.name",
+  "bkp:S6": "bibleChecks.s6.name",
+  "bkp:S7": "bibleChecks.s7.name",
+  "bkp:S8": "bibleChecks.s8.name",
 }
 
 const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
@@ -70,6 +79,14 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "usfm-structure": "rules.builtin.usfmStructure.description",
   "capitalization": "rules.builtin.capitalization.description",
   "footnote-quote-mismatch": "rules.builtin.footnoteQuoteMismatch.description",
+  "bkp:N1": "bibleChecks.n1.description",
+  "bkp:N2": "bibleChecks.n2.description",
+  "bkp:M3": "bibleChecks.m3.description",
+  "bkp:S1": "bibleChecks.s1.description",
+  "bkp:S3": "bibleChecks.s3.description",
+  "bkp:S6": "bibleChecks.s6.description",
+  "bkp:S7": "bibleChecks.s7.description",
+  "bkp:S8": "bibleChecks.s8.description",
 }
 
 /**

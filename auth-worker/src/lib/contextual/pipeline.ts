@@ -21,6 +21,8 @@ import {
   type TranslationBriefParameters,
 } from "./project-context"
 import { projectDecisionLines } from "./project-decisions"
+import { checkSpanBible, newBibleMetrics, recordBible, type SpanBible } from "./bible-span"
+import { repairExpectations, type RepairCell } from "./bible-repair"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { ProjectFact } from "../../../../db/shared/project-facts"
 import type { TermMatchingSettings } from "../../../../src/lib/terminology/model"
@@ -76,6 +78,8 @@ export interface RunSpanDeps {
   languageProfile?: LanguageProfile
   /** The project's affix inventory, so terms are found as the editor finds them. */
   termMatching?: TermMatchingSettings
+  /** AQU-1690: Bible data for this span, when autopilot uses it. */
+  bible?: SpanBible
   steeringDirections?: string[]
   rules?: LintRule[]
   sourceLanguage?: string
@@ -95,7 +99,7 @@ export interface RunSpanDeps {
   onPhase?: (phase: SpanPhase) => void
 }
 
-function spanPairs(seed: SpanSeed, pairs: CellPair[]): CellPair[] {
+export function spanPairs(seed: SpanSeed, pairs: CellPair[]): CellPair[] {
   const start = pairs.findIndex((p) => p.cellId === seed.startCellId)
   const end = pairs.findIndex((p) => p.cellId === seed.endCellId)
   if (start === -1 || end === -1 || end < start) return []
@@ -141,7 +145,14 @@ async function runVerifiers(
 ): Promise<VerifyPhaseResult> {
   const settled = await Promise.all(
     verifiers.map(async (key) => {
-      const args = { sceneBrief: brief, draft, pairs, llm: deps.llm, budget }
+      const args = {
+        sceneBrief: brief,
+        draft,
+        pairs,
+        ...(deps.bible ? { facts: deps.bible.draftFacts } : {}),
+        llm: deps.llm,
+        budget,
+      }
       let result = await verifySpan(key, args)
       // Barrier on_partial: retry, retries: 1.
       if (!result.ok) result = await verifySpan(key, args)
@@ -166,6 +177,9 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   const notes: string[] = []
   const incompleteReasons: string[] = []
   let decisionRequired: SpanReport["decisionRequired"]
+  // AQU-1690 metrics, reported per span.
+  let closureInfo: SpanReport["closure"] = undefined
+  const bibleMetrics = newBibleMetrics()
   /** Progress is decoration: a broken reporter must never fail a span. */
   const phase = (p: SpanPhase): void => {
     try {
@@ -187,6 +201,8 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     notes,
     unitsUsed: budget.unitsUsed,
     callsUsed: budget.callsUsed,
+    ...(closureInfo ? { closure: closureInfo } : {}),
+    ...(deps.bible ? { bible: bibleMetrics } : {}),
   })
 
   const inSpan = spanPairs(deps.seed, deps.pairs)
@@ -204,6 +220,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     orderedPairs: deps.pairs,
     neighborBriefs: deps.neighborBriefs,
     layerAbove: deps.layerAbove,
+    ...(deps.bible ? { facts: deps.bible.construeFacts } : {}),
   }
   const closure: ClosureResult = await construeScene({
     seed: deps.seed,
@@ -213,6 +230,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     ...(deps.priorConstrual ? { priorConstrual: deps.priorConstrual } : {}),
     ...(deps.steeringDirections ? { steeringDirections: deps.steeringDirections } : {}),
   })
+  closureInfo = { rounds: closure.rounds, exit: closure.exit }
   if (!closure.closed) {
     // Budget/iteration exhaustion — the OTHER exit. Drafting from an
     // unconverged construal would ship confident nonsense; every cell is
@@ -266,6 +284,9 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   let attemptPairs = work
   let carriedConstraints: { cellId: string; constraints: string[] }[] = []
   let stagePromptVersion = ""
+  // AQU-1690: cells the panel accepted whose only problem is a Bible data
+  // expectation. Attempt 2 gives them the cheap repair (bible-repair.ts).
+  let repairCells: RepairCell[] = []
 
   // Key terms are scoped to the SPAN, not the project: a 900-entry termbase in
   // the prompt buries the eight entries that matter for this passage. Computed
@@ -291,11 +312,10 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   }
   const sourcesByCellId = new Map(deps.pairs.map((p) => [p.cellId, p.source]))
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    phase("drafting")
-    const drafted: PerformSpanResult = await performSpan({
+  const draftCells = (pairs: CellPair[], constraints: { cellId: string; constraints: string[] }[]) =>
+    performSpan({
       sceneBrief: brief,
-      pairs: attemptPairs,
+      pairs,
       examples: deps.examples,
       precedingValidated: preceding,
       ...(deps.steeringDirections ? { steeringDirections: deps.steeringDirections } : {}),
@@ -304,12 +324,30 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
       ...(spanTerms.length > 0 ? { terms: spanTerms } : {}),
       ...(spanDecisions.length > 0 ? { decisions: spanDecisions } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),
-      ...(carriedConstraints.length > 0 ? { constraints: carriedConstraints } : {}),
+      ...(constraints.length > 0 ? { constraints } : {}),
+      ...(deps.bible ? { facts: deps.bible.draftFacts } : {}),
       ...(deps.sourceLanguage ? { sourceLanguage: deps.sourceLanguage } : {}),
       ...(deps.targetLanguage ? { targetLanguage: deps.targetLanguage } : {}),
       llm: deps.llm,
       budget,
     })
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    if (repairCells.length > 0 && deps.bible) {
+      // Attempt 2's cheap path for expectation-only failures: a mid-tier
+      // redraft and a re-check by code and Jev, no deep panel.
+      phase("drafting")
+      const repaired = await repairExpectations(repairCells, { pairs: deps.pairs, bible: deps.bible, draft: draftCells, lint: deps.lint })
+      accepted.push(...repaired.accepted)
+      notes.push(...repaired.notes)
+      recordBible(bibleMetrics, repaired.flags, repaired.judged)
+      bibleMetrics.repaired += repairCells.length
+      if (repaired.promptVersion) stagePromptVersion = repaired.promptVersion
+      repairCells = []
+    }
+    if (attemptPairs.length === 0) break
+    phase("drafting")
+    const drafted: PerformSpanResult = await draftCells(attemptPairs, carriedConstraints)
     if (!drafted.ok) {
       incompleteReasons.push(`draft attempt ${attempt} failed: ${drafted.error}`)
       for (const p of attemptPairs) skipped.push({ cellId: p.cellId, reason: `draft failed (${drafted.error})` })
@@ -323,6 +361,10 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
 
     phase("checking")
     const flags = await deps.lint(drafted.draft)
+    // AQU-1690 judgeExpectations: the Bible data questions code cannot settle,
+    // one batched Jev call for the span. Shadow answers are only recorded.
+    const bibleCheck = await checkSpanBible(deps.bible, drafted.draft, flags)
+    recordBible(bibleMetrics, flags, bibleCheck.judged)
 
     // Support: code first (free), the fast model only on what code flagged.
     // Both tiers are reported — a routing decision nobody can inspect is a
@@ -377,7 +419,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     const tally = tallyVotes(verified.votes, drafted.draft)
     const textById = new Map(drafted.draft.cells.map((c) => [c.cellId, c.text]))
     for (const cellId of tally.accepted) {
-      accepted.push({
+      const entry = {
         cellId,
         text: textById.get(cellId) ?? "",
         // What the reviewer should know about a cell that passed: kept as
@@ -387,8 +429,14 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
           flags,
           ...(supportSignal ? { support: supportSignal } : {}),
           redrafted: attempt === 2,
+          bible: bibleCheck.activeCodes.get(cellId) ?? [],
         }),
-      })
+      }
+      // AQU-1690: a first draft the panel passed, with a Bible data
+      // expectation to fix, takes the cheap repair on attempt 2.
+      const fix = attempt === 1 ? bibleCheck.constraints.get(cellId) : undefined
+      if (fix) repairCells.push({ ...entry, constraints: fix })
+      else accepted.push(entry)
     }
 
     if (tally.rejected.length === 0 || attempt === 2) {
@@ -397,11 +445,19 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
       for (const r of tally.rejected) {
         skipped.push({ cellId: r.cellId, reason: `rejected by quorum twice: ${r.constraints.join("; ")}` })
       }
-      break
+      attemptPairs = []
+      // Attempt 2 still runs, for the cheap repair alone.
+      if (repairCells.length === 0) break
+      continue
     }
     const rejectedIds = new Set(tally.rejected.map((r) => r.cellId))
     attemptPairs = attemptPairs.filter((p) => rejectedIds.has(p.cellId))
-    carriedConstraints = tally.rejected
+    // The redraft carries the verifiers' reasons and, AQU-1690, the cell's
+    // Bible data constraints: one redraft fixes both.
+    carriedConstraints = tally.rejected.map((r) => ({
+      cellId: r.cellId,
+      constraints: [...r.constraints, ...(bibleCheck.constraints.get(r.cellId) ?? [])],
+    }))
     notes.push(`redrafting ${tally.rejected.length} rejected cell(s) with verifier constraints`)
   }
 

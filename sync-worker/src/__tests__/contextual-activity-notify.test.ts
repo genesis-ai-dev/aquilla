@@ -200,6 +200,15 @@ describe('parseContextualFrame', () => {
       draftCount: 1, drafts: [], truncated: true,
     })).toMatchObject({ type: 'contextual.drafts', drafts: [], truncated: true })
 
+    // AQU-1690: a span that ran without Bible data because the pack did not
+    // load says why; the live frame must not be dropped for it.
+    for (const reason of ['bible_data_offline', 'bible_data_not_found', 'bible_data_invalid']) {
+      expect(parseContextualFrame({
+        type: 'contextual.span', runId: 'r', spanId: 's1', spanLabel: 'JHN 4',
+        staged: 4, skipped: 0, verdictSummary: 'complete', outcome: 'complete', reasons: [reason],
+      })).toMatchObject({ type: 'contextual.span', reasons: [reason] })
+    }
+
     // Free-form/model prose cannot masquerade as a durable reason code.
     expect(parseContextualFrame({
       type: 'contextual.span', runId: 'r', spanLabel: 's', staged: 0, skipped: 1,

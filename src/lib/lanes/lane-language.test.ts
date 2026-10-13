@@ -4,6 +4,7 @@ import {
   laneLabelForTag,
   laneLabelsByTag,
   laneLabelSuffixesById,
+  laneLanguageCodeForTag,
   laneLanguageForTag,
   laneOptionLabel,
   laneRowLabel,
@@ -275,5 +276,46 @@ describe("laneLabelSuffixesById (AQU-1784)", () => {
         row({ id: "bbbb0002", language: "Tshangla", name: "Tshangla East", legacyTag: "bbbb0002" }),
       ]),
     ).toEqual({})
+  })
+})
+
+describe("laneLanguageCodeForTag (AQU-1908)", () => {
+  const lanes = [
+    row({ id: "aaaa0001", language: "Spanish", legacyTag: "" }),
+    row({ id: "bbbb0002", language: "French", legacyTag: "bbbb0002" }),
+    row({ id: "cccc0003", language: "Grade 7 English", legacyTag: "cccc0003" }),
+    row({ id: "dddd0004", language: "Tshangla", langCode: "tsj", legacyTag: "dddd0004" }),
+  ]
+
+  it("derives each lane's own code, so two target lanes get two dictionaries", () => {
+    expect(laneLanguageCodeForTag("", lanes)).toBe("es")
+    expect(laneLanguageCodeForTag("bbbb0002", lanes)).toBe("fr")
+  })
+
+  it("is null for a freeform label no catalog entry matches", () => {
+    expect(laneLanguageCodeForTag("cccc0003", lanes)).toBeNull()
+  })
+
+  it("prefers the row's code override over the derived code", () => {
+    expect(laneLanguageCodeForTag("dddd0004", lanes)).toBe("tsj")
+  })
+
+  it("is null for a lane that records no language at all", () => {
+    expect(laneLanguageCodeForTag("eeee0005", [row({ id: "eeee0005", legacyTag: "eeee0005" })])).toBeNull()
+  })
+
+  it("does not read project settings — a blank default lane stays blank", () => {
+    expect(
+      laneLanguageCodeForTag("", [row({ id: "aaaa0001", legacyTag: "" })], { targetLanguage: "Spanish" }),
+    ).toBeNull()
+  })
+
+  it("falls back to the tag itself when no row matches (a pre-lane-rows server)", () => {
+    expect(laneLanguageCodeForTag("Spanish", null)).toBe("es")
+    expect(laneLanguageCodeForTag("fr", null)).toBe("fr")
+  })
+
+  it("never answers an opaque lane id, which is an event key and not a language", () => {
+    expect(laneLanguageCodeForTag("a3f09c1e", null)).toBeNull()
   })
 })

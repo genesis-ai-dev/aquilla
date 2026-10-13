@@ -46,8 +46,11 @@ export const BIBLE_CHECK_DEFAULT_SEVERITY: Readonly<Record<BibleCheckId, BibleCh
   'bkp:M1': 'warning',
 }
 
+/** The Language-profile slots a check in this slice can wait for. */
+export type BibleCheckSlot = Extract<LanguageProfileSlot, 'quoteMarks' | 'questionMarkers'>
+
 /** The Language-profile slots each check needs. A check stays dormant while one of them is empty. */
-export const BIBLE_CHECK_NEEDS: Readonly<Record<BibleCheckId, readonly LanguageProfileSlot[]>> = {
+export const BIBLE_CHECK_NEEDS: Readonly<Record<BibleCheckId, readonly BibleCheckSlot[]>> = {
   'bkp:V1': ['quoteMarks'],
   'bkp:V2': ['quoteMarks'],
   'bkp:V3': ['quoteMarks'],
@@ -55,10 +58,9 @@ export const BIBLE_CHECK_NEEDS: Readonly<Record<BibleCheckId, readonly LanguageP
   'bkp:V7': ['quoteMarks'],
   'bkp:V8': ['quoteMarks'],
   'bkp:V9': ['quoteMarks'],
-  // TODO(AQU-1691): M1's own slot is the question markers. Until that slot
-  // exists, M1 waits for the quotation marks like the rest of this family, so
-  // a project that has not set up its Language profile sees none of them.
-  'bkp:M1': ['quoteMarks'],
+  // AQU-1691: M1's own slot. A language that marks questions only with a
+  // question mark saves the slot empty, which switches M1 on.
+  'bkp:M1': ['questionMarkers'],
 }
 
 // ── Structural pack inputs ──────────────────────────────────────────────────

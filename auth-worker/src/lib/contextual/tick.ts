@@ -1048,6 +1048,9 @@ async function processSpan(
       // the concepts get scoped to this span's source text inside runSpan.
       briefParameters: shared.ctx.briefParameters,
       ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
+      // AQU-1691: durable decisions, re-read every wave (never consumed).
+      projectFacts: shared.ctx.projectFacts,
+      languageProfile: shared.ctx.languageProfile,
       ...(shared.ctx.termMatching ? { termMatching: shared.ctx.termMatching } : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,

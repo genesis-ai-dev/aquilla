@@ -52,10 +52,13 @@ export class ContextualApiError extends Error {
    *  need to render a SPECIFIC localized explanation (AQU-1847's start
    *  throttle) branch on this instead of matching on prose. */
   public code: string | null
-  constructor(message: string, status: number, code: string | null = null) {
+  /** AQU-1691: the server's reason code (`error.details.reason`), when it sent one. */
+  public reason: string | null
+  constructor(message: string, status: number, code: string | null = null, reason: string | null = null) {
     super(message)
     this.status = status
     this.code = code
+    this.reason = reason
   }
 }
 
@@ -68,7 +71,7 @@ export class ContextualAuthError extends ContextualApiError {
 }
 
 interface ErrorEnvelope {
-  error?: { code?: string; message?: string }
+  error?: { code?: string; message?: string; details?: { reason?: unknown } }
 }
 
 async function throwFromResponse(res: Response, fallback: string): Promise<never> {
@@ -79,10 +82,12 @@ async function throwFromResponse(res: Response, fallback: string): Promise<never
     // non-JSON error body — fall through to generic error
   }
   const message = body?.error?.message ?? fallback
+  const reason = typeof body?.error?.details?.reason === "string" ? body.error.details.reason : null
   throw new ContextualApiError(
     `${fallback}: HTTP ${res.status} — ${message}`,
     res.status,
     body?.error?.code ?? null,
+    reason,
   )
 }
 
@@ -1021,7 +1026,8 @@ export async function sendContextualSteering(
 
 export interface ContextualDecisionView {
   id: string
-  fileId: string
+  /** AQU-1691: null for a project-wide question, such as most fact questions. */
+  fileId: string | null
   /** The span the run raised this question on. The server has always sent it;
    *  it is typed here so the pending surface can file the decision under its
    *  passage rather than into an undifferentiated pile (AQU-1301). Optional
@@ -1029,10 +1035,14 @@ export interface ContextualDecisionView {
   spanId?: string | null
   cellIds: string[]
   reason: string
-  readinessItem: "terminology" | "brief" | "examples" | "rules" | "languages" | null
+  readinessItem: "terminology" | "brief" | "examples" | "rules" | "languages" | "bible-fact" | null
   blastRadius: number
   status: "open" | "researching" | "resolved" | "dismissed" | "superseded" | "expired"
   assignedUserId: number | null
+  /** AQU-1691: the project fact the answer is stored under. Optional: older backends omit it. */
+  factKey?: string | null
+  /** AQU-1691: one-click answers. `label` is data from the raiser, like `reason`. */
+  options?: { value: string; label?: string }[] | null
 }
 
 export interface ContextualDecisionsPage {

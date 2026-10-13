@@ -73,11 +73,38 @@ describe("BuiltinChecksList — Bible data checks", () => {
     expect(within(group).getByText("Question kept")).toBeInTheDocument()
   })
 
-  it("says each check needs quotation marks while the Language profile has none", () => {
+  const needsOf = (name: string) => {
+    const row = screen.getByText(name).closest("[data-testid='builtin-row']") as HTMLElement
+    return within(row).queryAllByTestId("builtin-row-needs").map((line) => line.textContent)
+  }
+
+  it("says which slot each check waits for while the Language profile is empty", () => {
     render(<BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} languageProfile={{}} />)
     const needs = within(screen.getByTestId("builtin-bible-checks")).getAllByTestId("builtin-row-needs")
     expect(needs).toHaveLength(8)
-    expect(needs[0]).toHaveTextContent("Needs: quotation marks in Language profile")
+    expect(needsOf("Quotation closes")).toEqual(["Needs: quotation marks in Language profile"])
+    // AQU-1691: M1 has its own slot. Naming quotation marks here would send the
+    // maintainer to fill in the wrong part of the profile.
+    expect(needsOf("Question kept")).toEqual(["Needs: question markers in Language profile"])
+  })
+
+  it("keeps the question check dormant until question markers are saved, even with quotation marks set", () => {
+    const { unmount } = render(
+      <BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} languageProfile={{ quoteMarks }} />,
+    )
+    expect(screen.getAllByTestId("builtin-row-needs")).toHaveLength(1)
+    expect(needsOf("Question kept")).toEqual(["Needs: question markers in Language profile"])
+    unmount()
+    // An empty slot is a real answer: questions are marked with "?" only.
+    render(
+      <BuiltinChecksList
+        builtinRules={withBible}
+        infractions={new Map()}
+        onSetOverride={() => {}}
+        languageProfile={{ quoteMarks, questionMarkers: {} }}
+      />,
+    )
+    expect(screen.queryByTestId("builtin-row-needs")).toBeNull()
   })
 
   it("drops the reason once the marks are set, and keeps the switch and severity", () => {
@@ -85,7 +112,7 @@ describe("BuiltinChecksList — Bible data checks", () => {
     render(
       <BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={spy} languageProfile={{ quoteMarks }} />,
     )
-    expect(screen.queryByTestId("builtin-row-needs")).toBeNull()
+    expect(needsOf("Quotation closes")).toEqual([])
     const row = screen.getByText("Quotation closes").closest("[data-testid='builtin-row']") as HTMLElement
     fireEvent.click(within(row).getByRole("switch"))
     expect(spy).toHaveBeenCalledWith("bkp:V2", expect.objectContaining({ enabled: false }))

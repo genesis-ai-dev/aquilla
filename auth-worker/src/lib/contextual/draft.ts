@@ -17,7 +17,8 @@ import {
 } from "./project-context"
 import { chargeBudget, type AmbiguityEntry, type LlmCall, type RunBudget, type SpanDraft } from "./types"
 
-export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v2"
+// v3 (AQU-1691): the "Project decisions" block.
+export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v3"
 
 export interface ExamplePair {
   cellId?: string
@@ -44,6 +45,8 @@ export interface PerformSpanDeps {
   briefParameters?: TranslationBriefParameters
   /** Approved/forbidden renderings for the key terms that appear in THIS span. */
   terms?: TermGuidance[]
+  /** AQU-1691: the Language profile and the decision-log facts in scope for THIS span, one line each (./project-decisions.ts). */
+  decisions?: string[]
   rules?: LintRule[]
   /** Per-cell constraints from a previous quorum rejection (redraft loop —
    *  losing verdicts, never "improve this"). */
@@ -105,6 +108,14 @@ function performerSystemPrompt(deps: PerformSpanDeps): string {
           .join("\n")}\n`
       : ""
 
+  // AQU-1691: what the team has decided — the Language profile and the facts
+  // in scope for this span. HARD, like the key terms: an answer given once
+  // must hold in every later draft. Steering, by contrast, lasts one wave.
+  const decisionsBlock =
+    deps.decisions && deps.decisions.length > 0
+      ? `\nProject decisions — HARD constraints. The team decided these; follow each one:\n${deps.decisions.join("\n")}\n`
+      : ""
+
   // Rules carry a description that states what they REQUIRE. Sending only the
   // name ("Term: grace") told the model a label and expected it to infer the
   // requirement.
@@ -140,7 +151,7 @@ function performerSystemPrompt(deps: PerformSpanDeps): string {
   return `[[ctx:draft]] ${pair} You are the PERFORMER in a two-role translation pipeline: an analyzer has already construed the scene below. Work from the scene brief — translate the scene's moves, not word by word. Target-language idioms are explicitly licensed where they carry the same move with the same social force.
 ${deps.projectBriefL1 ? `\nProject brief (honour it): ${deps.projectBriefL1}\n` : briefFallbackBlock}
 Scene brief: ${deps.sceneBrief.l1Summary}
-${registerBlock}${termsBlock}${rulesBlock}${steeringBlock}
+${registerBlock}${termsBlock}${decisionsBlock}${rulesBlock}${steeringBlock}
 Rules:
 1. Translate segment by segment; do not merge, split, or reorder segments.
 2. Keep names, numbers, and punctuation conventions consistent with the example pairs.

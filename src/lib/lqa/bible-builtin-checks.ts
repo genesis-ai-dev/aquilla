@@ -50,7 +50,7 @@ const COPY: Readonly<Record<BibleCheckId, { name: string; description: string }>
   },
   "bkp:M1": {
     name: "Question kept",
-    description: "Where the source asks a question, the translation has a question mark.",
+    description: "Where the source asks a question, the translation has a question mark or a question marker.",
   },
 }
 

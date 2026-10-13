@@ -1,8 +1,9 @@
 // "Language profile for checks" card (AQU-1688), under Settings → General →
 // Languages, where the rest of the project's language settings live.
 //
-// It records facts about the target language that Bible data checks need.
-// Today that is one slot, the quotation marks by level; AQU-1691 adds more.
+// It records facts about the target language that Bible data checks need:
+// the quotation marks by level here, and (AQU-1691) one collapsible row for
+// each further slot below them (./language-profile/LanguageProfileSlots.tsx).
 // A check whose slot is empty is dormant, and Rules → Built-in checks says so.
 //
 // Like LanguagesSection, it saves through the page's shared-settings `patch`
@@ -24,7 +25,7 @@ import {
 } from "@/components/ui/select"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { defaultQuoteMarks } from "@/lib/bible-data/quote-mark-defaults"
@@ -36,6 +37,8 @@ import {
   type QuoteContinuationStyle,
 } from "../../../db/shared/language-profile"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
+import { LanguageProfileSlots } from "./language-profile/LanguageProfileSlots"
+import { profileSaveError } from "./language-profile/save-error"
 
 const LEVEL_KEYS: readonly MessageKey[] = [
   "bibleData.profile.quoteMarks.level1",
@@ -59,15 +62,6 @@ export interface LanguageProfileSectionProps {
   /** Why the controls are locked (role or offline), or null. */
   disabledTooltip: ReactNode
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
-}
-
-function outcomeError(outcome: PatchOutcome, t: TFunction): string | null {
-  if (outcome.kind === "ok") return null
-  if (outcome.kind === "conflict") return t("bibleData.profile.error.conflict")
-  if (outcome.kind === "blocked") {
-    return outcome.reason === "offline" ? t("bibleData.profile.error.offline") : t("bibleData.profile.error.permission")
-  }
-  return t("bibleData.profile.error.failed")
 }
 
 export function LanguageProfileSection({ value, targetLanguage, canEdit, disabledTooltip, patch }: LanguageProfileSectionProps) {
@@ -99,7 +93,7 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
   async function save(next: LanguageProfile) {
     setSaving(true)
     try {
-      const error = outcomeError(await patch({ languageProfile: next }), t)
+      const error = profileSaveError(await patch({ languageProfile: next }), t)
       setStatus(error ? { kind: "error", message: error } : { kind: "saved" })
     } finally {
       setSaving(false)
@@ -229,6 +223,7 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
                 : null}
         </p>
       </SettingsBlock>
+      <LanguageProfileSlots value={value} canEdit={canEdit} disabledTooltip={disabledTooltip} patch={patch} />
     </SettingsGroup>
   )
 }

@@ -39,6 +39,8 @@ const ENGLISH: LanguageProfile = {
     ],
     continuation: "reopen-each-paragraph",
   },
+  // AQU-1691: M1 has its own slot; English asks with "?" alone, so it is saved empty.
+  questionMarkers: {},
 }
 
 function arg(name: string): string | undefined {

@@ -20,6 +20,8 @@
 // violations inbox point at the same concept rather than at two definitions
 // that drift.
 
+import { readLanguageProfile, type LanguageProfile } from "../../../../db/shared/language-profile"
+import { readProjectFacts, type ProjectFact } from "../../../../db/shared/project-facts"
 import {
   compileRulePattern,
   countMatches,
@@ -125,6 +127,14 @@ export interface ProjectContext {
   termMatching?: TermMatchingSettings
   /** Hand-authored project rules. */
   authoredRules: LintRule[]
+  /**
+   * AQU-1691: the decision log — answers to one-off questions, each with the
+   * scope it applies to. Loaded every wave, never consumed: a fact decided in
+   * one run reaches every later run and file.
+   */
+  projectFacts: ProjectFact[]
+  /** AQU-1691: the Language profile, read slot by slot (a damaged slot is left out). */
+  languageProfile: LanguageProfile
 }
 
 // ── Parsing ─────────────────────────────────────────────────────────────────
@@ -384,6 +394,8 @@ export async function loadProjectContext(
     briefParameters: {},
     concepts: [],
     authoredRules: [],
+    projectFacts: [],
+    languageProfile: {},
   }
   let row: SettingsRow | null = null
   try {
@@ -425,6 +437,8 @@ export async function loadProjectContext(
     concepts,
     ...(termMatching ? { termMatching } : {}),
     authoredRules: parseAuthoredRules(settings.rules),
+    projectFacts: readProjectFacts(settings.projectFacts),
+    languageProfile: readLanguageProfile(settings.languageProfile),
   }
 }
 

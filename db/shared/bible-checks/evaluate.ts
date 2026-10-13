@@ -10,7 +10,12 @@
 //
 // Relative imports only, no DOM: shared with the workers.
 
-import { filledLanguageProfileSlots, type LanguageProfile, type QuoteMarksProfile } from '../language-profile'
+import {
+  filledLanguageProfileSlots,
+  type LanguageProfile,
+  type QuestionMarkersProfile,
+  type QuoteMarksProfile,
+} from '../language-profile'
 import { isMarkedSpeech } from './compile'
 import { scanQuotes, type QuoteToken } from './quote-scan'
 import { wordNumber, wordRef } from './refs'
@@ -28,11 +33,38 @@ import {
 /**
  * Question marks across scripts: ? ¿ ; (Greek) ՞ (Armenian) ؟ (Arabic)
  * ፧ (Ethiopic) ‽ ⁇ ⁈ ⁉ ⸮ and the full-width and small forms.
- * TODO(AQU-1691): add the profile's question markers (particles such as 吗)
- * once that slot exists; until then a language that marks questions only with
- * a particle should switch M1 off in Rules.
  */
 const QUESTION_MARK = /[?¿;՞؟፧‽⁇-⁉⸮︖﹖？]/u
+
+/** Scripts written without spaces between words, where a particle sits against its neighbours. */
+const UNSPACED_SCRIPT =
+  /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}\p{Script=Tibetan}]+$/u
+
+/** A character that belongs to a word, for the whole-word and word-end tests below. */
+const WORD_PART = '[\\p{L}\\p{M}\\p{N}]'
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * The cell marks a question: with a question mark, or with one of the
+ * Language profile's question markers (AQU-1691). A particle counts as a whole
+ * word, except in a script written without spaces (吗), where it counts
+ * anywhere. A suffix counts at the end of a word (Finnish "onko").
+ */
+function marksQuestion(text: string, markers: QuestionMarkersProfile | undefined): boolean {
+  if (QUESTION_MARK.test(text)) return true
+  for (const particle of markers?.particles ?? []) {
+    const word = escapeRegExp(particle)
+    const pattern = UNSPACED_SCRIPT.test(particle) ? word : `(?<!${WORD_PART})${word}(?!${WORD_PART})`
+    if (new RegExp(pattern, 'iu').test(text)) return true
+  }
+  for (const suffix of markers?.suffix ?? []) {
+    if (new RegExp(`(?<=${WORD_PART})${escapeRegExp(suffix)}(?!${WORD_PART})`, 'iu').test(text)) return true
+  }
+  return false
+}
 
 /**
  * In a cell with no speech, a quoted stretch this short is taken as a title,
@@ -58,6 +90,7 @@ interface Evaluation {
   text: string
   expectation: CellExpectation
   marks: QuoteMarksProfile | null
+  questionMarkers: QuestionMarkersProfile | undefined
   tokens: QuoteToken[]
   /** Opening marks by the level they opened. */
   opens: Map<number, QuoteToken[]>
@@ -313,7 +346,7 @@ function checkSelfProjection(e: Evaluation): BibleCheckFinding | null {
 
 function checkQuestion(e: Evaluation): BibleCheckFinding | null {
   const question = e.expectation.question
-  if (!question.expected || QUESTION_MARK.test(e.text)) return null
+  if (!question.expected || marksQuestion(e.text, e.questionMarkers)) return null
   const found = finding(e, 'bkp:M1', 'question-mark-missing', {}, { kind: 'question', refs: e.expectation.refs })
   // The hook for Translation Notes: a rhetorical question may become a statement.
   return question.rhetorical ? { ...found, severity: 'info' } : found
@@ -356,6 +389,7 @@ export function evaluateCell(
     text: targetText,
     expectation,
     marks,
+    questionMarkers: languageProfile?.questionMarkers,
     tokens,
     opens: byDepth(tokens, ['open']),
     closes: byDepth(tokens, ['close', 'stray-close']),

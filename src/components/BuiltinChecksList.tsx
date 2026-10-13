@@ -21,17 +21,17 @@ import type {
 import { translateRuleName, translateRuleDescription } from "@/lib/lqa/builtin-resolver"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { BIBLE_CHECK_NEEDS, isBibleCheckId } from "../../db/shared/bible-checks/types"
+import { BIBLE_CHECK_NEEDS, isBibleCheckId, type BibleCheckSlot } from "../../db/shared/bible-checks/types"
 import {
   filledLanguageProfileSlots,
   readLanguageProfile,
   type LanguageProfile,
-  type LanguageProfileSlot,
 } from "../../db/shared/language-profile"
 
 /** AQU-1688: why a Bible data check is dormant, by the Language-profile slot it waits for. */
-const NEEDS_KEY: Readonly<Record<LanguageProfileSlot, MessageKey>> = {
+const NEEDS_KEY: Readonly<Record<BibleCheckSlot, MessageKey>> = {
   quoteMarks: "bibleData.check.needs.quoteMarks",
+  questionMarkers: "bibleData.check.needs.questionMarkers",
 }
 
 interface Props {

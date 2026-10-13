@@ -36,9 +36,9 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
     })
   }
   const undoToHere = (id: string) => {
-    void undoTo(id).then((results) => {
-      for (const r of results) onResult("undo", r)
-    })
+    // Each step reports as it finishes: walking back five slow steps took
+    // twenty seconds with nothing said until the end.
+    void undoTo(id, (r) => onResult("undo", r))
   }
 
   const undoSteps = [...view.undoSteps].reverse()
@@ -122,7 +122,9 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
               </div>
             )}
             {undoSteps.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-muted-foreground">{t("editor.history.empty")}</p>
+              <p className="px-3 py-3 text-xs text-muted-foreground">
+                {redoSteps.length > 0 ? t("editor.history.emptyAllUndone") : t("editor.history.empty")}
+              </p>
             ) : (
               <ul data-testid="history-panel-steps">
                 {undoSteps.map((s, i) => (
@@ -154,7 +156,9 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
               <ul data-testid="history-panel-skipped">
                 {[...view.skipped].reverse().map((s) => (
                   <li key={`${s.id}-${s.at}`} className="px-3 py-1 text-xs">
-                    <span className="block truncate">{name(s)}</span>
+                    <span className="block truncate">
+                      {s.which === "redo" ? t("editor.history.notRedone", { step: name(s) }) : name(s)}
+                    </span>
                     <span className="block text-[11px] text-muted-foreground">{reasonText(s.reason)}</span>
                   </li>
                 ))}

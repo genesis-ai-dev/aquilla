@@ -99,6 +99,26 @@ describe("edit history", () => {
     expect(log).toEqual([])
   })
 
+  it("a step recorded while its action saves: undo waits for it, and a refused action drops the step", async () => {
+    const log: string[] = []
+    registerStepKinds({ "test.log": logKind(log) })
+    recordStep(step("a"))
+    let landed: (ok: boolean) => void = () => {}
+    recordStep(step("hide"), undefined, { pending: new Promise<boolean>((r) => { landed = r }) })
+    const press = undoLast()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(log).toEqual([]) // waits for the hide to land
+    landed(true)
+    expect((await press)?.step.labelKey).toBe("hide")
+    expect(log).toEqual(["undo hide"])
+
+    let refused: (ok: boolean) => void = () => {}
+    recordStep(step("remove"), undefined, { pending: new Promise<boolean>((r) => { refused = r }) })
+    refused(false)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(historyView().nextUndo?.labelKey).toBe("a")
+  })
+
   it("a step being undone is saved as undone already, so a reload doesn't offer it again", async () => {
     let release: () => void = () => {}
     registerStepKinds({

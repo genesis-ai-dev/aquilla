@@ -110,4 +110,18 @@ describe("take.select / take.remove / take.rename", () => {
     expect(await handlers["take.rename"].undo(data)).toEqual({ kind: "done" })
     expect(ctx.rename).toHaveBeenCalledWith("c", "a", "Take 3")
   })
+
+  it("a rename undone before the new name has shown still goes back", async () => {
+    const { ctx, handlers } = ctxFor({ a: { label: "Take 3" } })
+    const data = { cellId: "c", audioId: "a", before: "Take 3", after: "Hero line" }
+    expect(await handlers["take.rename"].undo(data)).toEqual({ kind: "done" })
+    expect(ctx.rename).toHaveBeenCalledWith("c", "a", "Take 3")
+  })
+
+  it("a rename someone else renamed again is left alone", async () => {
+    const { ctx, handlers } = ctxFor({ a: { label: "Narrator" } })
+    const data = { cellId: "c", audioId: "a", before: "Take 3", after: "Hero line" }
+    expect(await handlers["take.rename"].undo(data)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.rename).not.toHaveBeenCalled()
+  })
 })

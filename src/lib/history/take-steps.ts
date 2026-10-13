@@ -159,18 +159,25 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         return DONE
       },
     } as StepHandler<never>,
+    // A name is set, not changed by a delta, and renames are sent in order:
+    // so the name the step is going BACK to is as good as the one it left
+    // (that read just hasn't caught up with the rename yet — a Cmd+Z right
+    // after Enter was skipped as "changed since", slow-network pass
+    // 2026-10-13). Any third name is someone else's change.
     "take.rename": {
       async undo(d: TakeRenameData) {
         const att = ctx.readTake(d.cellId, d.audioId)
         if (!att) return GONE
-        if ((att.label ?? null) !== d.after) return CHANGED
+        const label = att.label ?? null
+        if (label !== d.after && label !== d.before) return CHANGED
         await ctx.rename(d.cellId, d.audioId, d.before)
         return DONE
       },
       async redo(d: TakeRenameData) {
         const att = ctx.readTake(d.cellId, d.audioId)
         if (!att) return GONE
-        if ((att.label ?? null) !== d.before) return CHANGED
+        const label = att.label ?? null
+        if (label !== d.before && label !== d.after) return CHANGED
         await ctx.rename(d.cellId, d.audioId, d.after)
         return DONE
       },

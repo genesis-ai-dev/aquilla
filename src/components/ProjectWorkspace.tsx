@@ -3128,17 +3128,30 @@ export function ProjectWorkspace() {
   const handleRemoveLine = useCallback(
     async (cellId: string) => {
       const fileId = activeFileId
-      const removed = await removeLineCore(cellId)
-      if (removed === false) return
-      recordStep({
-        kind: "row.remove",
-        data: { cellId, successor: removed.successor },
-        labelKey: "editor.history.stepRemoveRow",
-        fileId,
-        fileName: activeFileNameRef.current,
-      })
+      // The step is recorded as the removal STARTS (its successor comes from
+      // the same plan removeLineCore uses), so an Undo pressed while it saves
+      // undoes this removal; a refused removal drops the step.
+      const plan = cellStore.getRemovalPlan(cellId)
+      const removing = removeLineCore(cellId)
+      if (plan) {
+        recordStep(
+          {
+            kind: "row.remove",
+            data: {
+              cellId,
+              successor: plan.successor ? { cellId: plan.successor.cellId, anchorAfter: plan.anchorCellId } : null,
+            },
+            labelKey: "editor.history.stepRemoveRow",
+            fileId,
+            fileName: activeFileNameRef.current,
+          },
+          undefined,
+          { pending: removing.then((removed) => removed !== false) },
+        )
+      }
+      await removing
     },
-    [removeLineCore, activeFileId],
+    [removeLineCore, activeFileId, cellStore],
   )
 
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
@@ -3300,16 +3313,22 @@ export function ProjectWorkspace() {
     async (cellId: string, startSec: number, endSec: number) => {
       const was = readRowTiming(cellId)
       const after = { startMs: Math.round(startSec * 1000), endMs: Math.round(endSec * 1000) }
-      const applied = await applyRetimeSubtitle(cellId, startSec, endSec)
-      if (applied && was?.timing && (was.timing.startMs !== after.startMs || was.timing.endMs !== after.endMs)) {
-        recordStep({
-          kind: "row.retime",
-          data: { cellId, mode: was.mode, before: was.timing, after },
-          labelKey: "editor.history.stepRetimeRow",
-          fileId: activeFileId,
-          fileName: activeFileNameRef.current,
-        })
+      const applying = applyRetimeSubtitle(cellId, startSec, endSec)
+      // Recorded as it starts; dropped if the retime is refused.
+      if (was?.timing && (was.timing.startMs !== after.startMs || was.timing.endMs !== after.endMs)) {
+        recordStep(
+          {
+            kind: "row.retime",
+            data: { cellId, mode: was.mode, before: was.timing, after },
+            labelKey: "editor.history.stepRetimeRow",
+            fileId: activeFileId,
+            fileName: activeFileNameRef.current,
+          },
+          undefined,
+          { pending: applying.then(Boolean) },
+        )
       }
+      await applying
     },
     [readRowTiming, applyRetimeSubtitle, activeFileId],
   )
@@ -3385,14 +3404,20 @@ export function ProjectWorkspace() {
   const handleSetCellHidden = useCallback(
     async (cellId: string, hidden: boolean) => {
       const fileId = activeFileId
-      if (!(await applyCellHidden(cellId, hidden))) return
-      recordStep({
-        kind: "row.hidden",
-        data: { cellId, hidden },
-        labelKey: hidden ? "editor.history.stepHideRow" : "editor.history.stepShowRow",
-        fileId,
-        fileName: activeFileNameRef.current,
-      })
+      const applying = applyCellHidden(cellId, hidden)
+      // Recorded as it starts; dropped if the change is refused.
+      recordStep(
+        {
+          kind: "row.hidden",
+          data: { cellId, hidden },
+          labelKey: hidden ? "editor.history.stepHideRow" : "editor.history.stepShowRow",
+          fileId,
+          fileName: activeFileNameRef.current,
+        },
+        undefined,
+        { pending: applying.then(Boolean) },
+      )
+      await applying
     },
     [applyCellHidden, activeFileId],
   )
@@ -12824,11 +12849,39 @@ export function ProjectWorkspace() {
         targetLang: activeLane,
       })
       rememberPendingTargetCommit(cell.id, eventId, parentId)
+      // Undo and redo put text back as YOUR edit, so the same rule as any
+      // edit of yours applies: it approves itself where the project allows.
+      // A redone edit used to come back unapproved.
+      if (shouldAutoValidateHumanEdit({
+        value: text.value,
+        canValidate: !laneWriteFrozen && canPerform("cell.validate", project.syncRole?.level ?? null),
+        allowSelfValidation: project.allowSelfValidation,
+        roleLevel: project.syncRole?.level ?? null,
+        scopeCanValidate: textValidationScope(project, {
+          roleLevel: project.syncRole?.level ?? null,
+          username: currentUsername,
+        }).canValidate,
+      })) {
+        try {
+          await emitCellValidate({
+            projectId: project.id,
+            fileId: cell.fileId,
+            cellId: cell.id,
+            editEventId: eventId,
+            author: currentUsername,
+            targetLang: activeLane,
+            auto: true,
+            surface: "cell",
+          })
+        } catch (error) {
+          console.warn("[history-text-auto-validate] emit failed:", error)
+        }
+      }
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
       confirmCommitted(cell.id, eventId)
     },
-    [project?.id, getActiveCell, applyOptimisticTargetEdit, resolveTargetCommitParentId, currentUsername, activeLane, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, confirmCommitted],
+    [project, getActiveCell, applyOptimisticTargetEdit, resolveTargetCommitParentId, currentUsername, activeLane, laneWriteFrozen, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, confirmCommitted],
   )
 
   useEffect(() => {

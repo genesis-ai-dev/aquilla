@@ -221,16 +221,55 @@ export function setOpenFileProbe(probe: ((fileId: string) => boolean) | null): v
  * redo stack, as everywhere: redoing past a fresh edit would replay a branch
  * that no longer exists. Inside `withGroup`, the step joins the group instead.
  */
-export function recordStep<D>(input: StepInput<D>, scope?: { projectId: string; username: string }): void {
+// Steps recorded when their action STARTED, with the action's own write still
+// out: an undo waits for it before running, and a step whose write was refused
+// is dropped. Never saved (a promise can't be); after a reload the write has
+// long settled.
+const pendingWrites = new Map<string, Promise<boolean>>()
+
+/**
+ * Record a step. Pass `opts.pending` (resolving true when the action took
+ * effect, false when it was refused) to record it the moment the action
+ * starts: an Undo pressed while the action is still saving must undo THAT
+ * action, not the step before it (slow-network pass, 2026-10-13).
+ */
+export function recordStep<D>(
+  input: StepInput<D>,
+  scope?: { projectId: string; username: string },
+  opts?: { pending?: Promise<boolean> },
+): void {
   const key = scope ? scopeKey(scope.projectId, scope.username) : activeScope
   if (!key) return
   const record: StepRecord<D> = { ...input, id: newId(), at: input.at ?? Date.now() }
+  if (opts?.pending) {
+    const pending = opts.pending.catch(() => false)
+    pendingWrites.set(record.id, pending)
+    void pending.then((ok) => {
+      pendingWrites.delete(record.id)
+      if (!ok) dropRecord(key, record.id)
+    })
+  }
   const buffer = groupBuffers[groupBuffers.length - 1]
   if (buffer && key === activeScope) {
     buffer.push(record as StepRecord)
     return
   }
   pushRecord(record as StepRecord, key)
+}
+
+/** A recorded step whose action was refused: take it off whichever stack holds it. */
+function dropRecord(key: string, id: string): void {
+  const s = stacks.get(key)
+  if (!s) return
+  for (const list of [s.undo, s.redo]) {
+    const at = list.findIndex((r) => r.id === id)
+    if (at >= 0) {
+      list.splice(at, 1)
+      scheduleSave(key)
+      emit()
+      return
+    }
+  }
 }
 
 function pushRecord(record: StepRecord, key: string): void {
@@ -302,6 +341,10 @@ export function recordGroup(
 // ── Running ─────────────────────────────────────────────────────────────────
 
 async function runRecord(record: StepRecord, which: "undo" | "redo"): Promise<StepOutcome> {
+  // The action is still saving: let it land first, so the undo compensates
+  // what really happened (and nothing, if it was refused).
+  const pending = pendingWrites.get(record.id)
+  if (pending && !(await pending)) return { kind: "skipped", reason: "gone" }
   if (record.kind === GROUP_KIND) return runGroup(record as StepRecord<{ steps: StepRecord[] }>, which)
   const handler = handlers.get(record.kind) as StepHandler<unknown> | undefined
   if (!handler) return { kind: "skipped", reason: "unavailable" }
@@ -422,7 +465,11 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
  * first — the History panel's "undo to here". Stops early at a blocked or
  * failed step; skipped steps are logged and passed. Returns every result.
  */
-export async function undoTo(id: string): Promise<HistoryResult[]> {
+export async function undoTo(
+  id: string,
+  /** Called as each step finishes, so a long walk can report as it goes. */
+  onStep?: (result: HistoryResult) => void,
+): Promise<HistoryResult[]> {
   const results: HistoryResult[] = []
   if (!activeScope) return results
   const s = stacksFor(activeScope)
@@ -433,6 +480,7 @@ export async function undoTo(id: string): Promise<HistoryResult[]> {
     const r = await run("undo")
     if (!r) break
     results.push(r)
+    onStep?.(r)
     if (r.outcome.kind === "blocked" || r.outcome.kind === "failed") break
     if (top.id === id) break
   }
@@ -514,6 +562,7 @@ export function resetHistoryForTests(): void {
   activeUser = null
   busy = false
   queue = Promise.resolve()
+  pendingWrites.clear()
   openFileProbe = null
   emit()
 }

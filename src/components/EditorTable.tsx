@@ -7633,6 +7633,20 @@ function EditorRow({
     // performs it (dubbing). The scope asked above stays THIS row's — an
     // assignment is to the subtitle file, never to its hidden cue sibling.
     const owner = audioValidationLine.ownerOf.get(audioId) ?? { fileId: cell.fileId, cellId: cell.id }
+    // Recorded as the vote starts (AQU-1767 slow-network pass): an Undo
+    // pressed while it saves undoes this vote, not the step before it. The
+    // step waits for the vote to land, and is dropped if it fails.
+    let settle: (ok: boolean) => void = () => {}
+    recordStep(
+      {
+        kind: "vote.audio",
+        data: { cellId: owner.cellId, audioId, voted: validated },
+        labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
+        fileId: cell.fileId,
+      },
+      undefined,
+      { pending: new Promise<boolean>((resolve) => { settle = resolve }) },
+    )
     try {
       const emit = validated ? emitCellAudioValidate : emitCellAudioUnvalidate
       await emit({
@@ -7650,15 +7664,11 @@ function EditorRow({
       // until the row recycled. Now the vote is flushed and every reader of
       // this file refetches, including a timeline open beside the text view.
       await commitAudioValidation([owner.fileId])
-      recordStep({
-        kind: "vote.audio",
-        data: { cellId: owner.cellId, audioId, voted: validated },
-        labelKey: validated ? "editor.history.stepValidateAudio" : "editor.history.stepUnvalidateAudio",
-        fileId: cell.fileId,
-      })
+      settle(true)
       return true
     } catch (error) {
       console.error("[audio-validate] emit failed", error)
+      settle(false)
       return false
     }
   }

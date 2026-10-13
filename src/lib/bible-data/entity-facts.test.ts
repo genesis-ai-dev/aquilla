@@ -9,7 +9,9 @@
 import { describe, expect, it } from "vitest"
 import { JESUS, SAMARITAN_WOMAN, jhn4People, jhn4Text } from "./__fixtures__/jhn4"
 import { JESUS_AND_FOUR, mrk1People, mrk1Text } from "./__fixtures__/mrk1"
-import { entityNumber, entityRole, genderClass, isNamedEntity, subjectPronoun } from "./entity-facts"
+import { ISRAEL, JOSEPH_10, LEVI_3, jhn4People11 } from "./__fixtures__/jhn4-pack11"
+import { entityKin, entityNumber, entityRole, genderClass, isNamedEntity, subjectPronoun } from "./entity-facts"
+import type { BkpEntity } from "./pack-types"
 
 describe("subjectPronoun", () => {
   const text = jhn4Text()
@@ -55,5 +57,29 @@ describe("roles, gender and number", () => {
     expect(entityNumber(mrk1People().entities[JESUS_AND_FOUR])).toBe("plural")
     expect(entityRole(undefined)).toBe("other")
     expect(entityRole({ type: "place", labels: {}, labelSource: "acai" })).toBe("place")
+  })
+})
+
+// AQU-1695: pack 1.1's `kin`, on real data for John.
+describe("entityKin", () => {
+  const people = jhn4People11()
+
+  it("lists Jacob's sons and Jesus's parents, relation by relation, in the pack's order", () => {
+    expect(entityKin(people.entities[ISRAEL], people.entities)).toEqual([
+      { relation: "offspring", ids: [JOSEPH_10, LEVI_3] },
+    ])
+    expect(entityKin(people.entities[JESUS], people.entities)).toEqual([
+      { relation: "father", ids: ["person:Joseph.4"] },
+      { relation: "mother", ids: ["person:Mary"] },
+    ])
+    // A local participant has no ACAI family.
+    expect(entityKin(people.entities[SAMARITAN_WOMAN], people.entities)).toEqual([])
+  })
+
+  it("leaves out a relative the entity map lacks and anything that is not an id", () => {
+    const israel = { ...people.entities[ISRAEL], kin: { offspring: [JOSEPH_10, "person:Nobody", 7], siblings: "x" } }
+    expect(entityKin(israel as unknown as BkpEntity, people.entities)).toEqual([
+      { relation: "offspring", ids: [JOSEPH_10] },
+    ])
   })
 })

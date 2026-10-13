@@ -216,3 +216,36 @@ export function resolveVoiceLabel(
   if (english) return { label: english, source: generated ? "generated" : "english" }
   return null
 }
+
+// ── Other text per language (AQU-1695) ──────────────────────────────────────
+
+export interface LabelText {
+  text: string
+  /** The pack's language code of `text`: the interface language, or "eng". */
+  language: string
+}
+
+/**
+ * Pack text kept per language code, other than names: an entity's
+ * description, a key term's title, a deity mention's form. In the interface
+ * language unless the person reads labels in English only, else in English.
+ * There is no project step: the termbase agrees names, not these. Null when
+ * neither language has text; a value that is not a non-empty string is none.
+ */
+export function pickLabelText(
+  byLanguage: Readonly<Record<string, unknown>> | undefined,
+  mode: VoiceLabelMode,
+  interfaceLanguage: InterfaceLabelLanguage | null,
+): LabelText | null {
+  if (!byLanguage) return null
+  const textIn = (language: string): string | null => {
+    const value = Object.hasOwn(byLanguage, language) ? byLanguage[language] : undefined
+    return typeof value === "string" && value.trim() !== "" ? value : null
+  }
+  if (mode !== "english" && interfaceLanguage) {
+    const own = textIn(interfaceLanguage.language)
+    if (own) return { text: own, language: interfaceLanguage.language }
+  }
+  const english = textIn("eng")
+  return english ? { text: english, language: "eng" } : null
+}

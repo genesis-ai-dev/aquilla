@@ -14,10 +14,14 @@
 // AQU-1694: while Who's Who highlights are on, it also loads the file's
 // stored word alignment (Bridge 1, for a source that is not the pack's own
 // words) and runs Bridge 2 (source → target) for the target column's tints.
+//
+// AQU-1695: it names each mention (a deity's form at that word, when the pack
+// gives one) and tells the Context tab whether to show Translation helps and
+// key terms; the tab loads those layers itself, when it first opens.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { BkpEntityId, BkpRef } from "@/lib/bible-data/pack-types"
-import { peopleIndexFor, type PeopleIndex } from "@/lib/bible-data/people-index"
+import { entityOf, peopleIndexFor, type MentionAt, type PeopleIndex } from "@/lib/bible-data/people-index"
 import { cellVerses, firstVerseBook, type VoiceCellInput } from "@/lib/bible-data/voice-index"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
@@ -25,11 +29,11 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { useBibleDataViewPrefs } from "@/lib/store/bible-data-view-prefs"
 import { onMentionJumpRequest } from "./bible-data-bus"
 import { createMentionHighlightStore } from "./mention-highlight-store"
-import { participantName } from "./people-text"
+import { deityFormName, participantName } from "./people-text"
 import { usePeoplePack } from "./people-pack"
 import { ensureSourceAlignment, useSourceAlignment } from "./source-alignment-store"
 import { createTargetBridge, type TargetBridge, type TargetCorpusCell } from "./target-bridge"
-import { useEntityLabels, type EntityLabeler } from "./useEntityLabels"
+import { useEntityLabels, useLabelText, type EntityLabeler } from "./useEntityLabels"
 import type { WhosWhoContextValue } from "./whos-who-context"
 
 export interface WhosWhoOptions {
@@ -43,6 +47,10 @@ export interface WhosWhoOptions {
   whosWhoOn: boolean
   /** The project's Original-language context enrichment (the Context tab) is on. */
   contextOn: boolean
+  /** AQU-1695: Translation helps is on (notes and questions in the Context tab). */
+  helpsOn: boolean
+  /** AQU-1695: Key terms is on (term chips in the Context tab). */
+  termsOn: boolean
   /** Scroll the editor to a cell. */
   jumpToCell: (cellId: string) => void
   showMentionsOf: (entity: BkpEntityId) => void
@@ -66,6 +74,8 @@ export function useWhosWho({
   fileId,
   whosWhoOn,
   contextOn,
+  helpsOn,
+  termsOn,
   jumpToCell,
   showMentionsOf,
   getTokenForFile,
@@ -90,6 +100,12 @@ export function useWhosWho({
     return (entityId: BkpEntityId): string =>
       participantName(entityId, index.entities, labelFor, (items) => fmt.list(items, { type: "conjunction" })) ?? unnamed
   }, [index, labelFor, fmt, t])
+  const pickText = useLabelText()
+  const mentionName = useMemo(() => {
+    if (!index || !nameOf) return null
+    return (at: MentionAt): string =>
+      deityFormName(at.mention, entityOf(index, at.mention.entity), pickText) ?? nameOf(at.mention.entity)
+  }, [index, nameOf, pickText])
 
   const [store] = useState(createMentionHighlightStore)
 
@@ -140,16 +156,19 @@ export function useWhosWho({
 
   const context = useMemo<WhosWhoContextValue | null>(
     () =>
-      index && labelFor && nameOf
+      index && labelFor && nameOf && mentionName
         ? {
             index,
             text: loaded?.text ?? null,
             labelFor,
             nameOf,
+            mentionName,
             store,
             highlights: whosWhoOn ? prefs.whosWhoHighlights : "off",
             hints: whosWhoOn ? prefs.impliedSubjectHints : "off",
             contextTab: contextOn,
+            helps: contextOn && helpsOn,
+            terms: contextOn && termsOn,
             shared,
             jumpTo,
             showMentionsOf: whosWhoOn ? showMentionsOf : null,
@@ -160,10 +179,13 @@ export function useWhosWho({
       index,
       labelFor,
       nameOf,
+      mentionName,
       loaded,
       store,
       whosWhoOn,
       contextOn,
+      helpsOn,
+      termsOn,
       prefs.whosWhoHighlights,
       prefs.impliedSubjectHints,
       shared,

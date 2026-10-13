@@ -48,6 +48,11 @@ export interface WhosWhoContextValue {
   labelFor: EntityLabeler
   /** A participant's name, a group by its members, or the "unnamed" text. */
   nameOf: (entityId: BkpEntityId) => string
+  /**
+   * AQU-1695: the name one mention shows: a deity's form at that word when
+   * the pack gives one (slice 3: θεός → "God"), else `nameOf` its entity.
+   */
+  mentionName: (at: MentionAt) => string
   store: MentionHighlightStore
   /** Marks in the source text. "off" when Who's Who is off, or the person hides them. */
   highlights: WhosWhoHighlightMode
@@ -55,6 +60,13 @@ export interface WhosWhoContextValue {
   hints: ImpliedSubjectHintMode
   /** The project offers the Context tab (Original-language context on). */
   contextTab: boolean
+  /**
+   * AQU-1695: the Context tab shows Translation Notes and Questions
+   * (Translation helps on). Their layer loads when the tab first opens.
+   */
+  helps: boolean
+  /** AQU-1695: the Context tab shows key-term chips (Key terms on). */
+  terms: boolean
   /** Verses that more than one cell of the file covers. */
   shared: ReadonlySet<BkpRef>
   /** Scroll to the first cell of a verse; with `focus`, put keyboard focus on that participant's word there. */

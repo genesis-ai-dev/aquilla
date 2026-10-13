@@ -4,9 +4,11 @@
 // the kind of speech, its delivery and quote level, how sure the data is and
 // which datasets say so, a "Show every line by …" action per speaker, and
 // where each name came from. Shown in the chip's popover on hover and on
-// keyboard focus.
+// keyboard focus. AQU-1695: a "Boundary disputed" badge on a speech the pack
+// marks disputed (slice 3).
 
 import { Fragment } from "react"
+import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PopoverTitle } from "@/components/ui/popover"
 import type { BkpEntityId, BkpSpeech } from "@/lib/bible-data/pack-types"
@@ -104,6 +106,18 @@ function voiceListKey(voice: Voice): string {
   return voice.kind === "narrator" ? "narrator" : voice.speech.id
 }
 
+/**
+ * Pack slice 3 marks a speech whose boundary scholars dispute (John 3:16–21).
+ * Any object there means disputed; its reason, English data, shows when it is
+ * text.
+ */
+function speechDispute(speech: BkpSpeech): { reason: string | null } | null {
+  const disputed: unknown = speech.disputed
+  if (typeof disputed !== "object" || disputed === null || Array.isArray(disputed)) return null
+  const reason: unknown = (disputed as Record<string, unknown>).reason
+  return { reason: typeof reason === "string" && reason.trim() !== "" ? reason : null }
+}
+
 function SpeechDetails({
   speech,
   nameOf,
@@ -119,6 +133,7 @@ function SpeechDetails({
   const fmt = useFormat()
   const speaker = nameOf(speech.speaker)
   const addressee = hasAddresseeName ? nameOf(speech.addressee) : null
+  const dispute = speechDispute(speech)
   const typeKey = speechTypeKey(speech.type)
   const facts = [
     typeKey ? t(typeKey) : speech.type,
@@ -155,6 +170,22 @@ function SpeechDetails({
         </span>
       </span>
       <span className="text-muted-foreground">{facts.join(" · ")}</span>
+      {dispute && (
+        <>
+          <span
+            data-testid="speech-disputed"
+            className="inline-flex items-center gap-1 self-start rounded-sm border border-amber-600/50 px-1.5 py-px text-[10px] font-medium text-amber-800 dark:border-amber-400/50 dark:text-amber-300"
+          >
+            <AlertTriangle className="size-3" aria-hidden="true" />
+            {t("bibleHelps.voices.disputed")}
+          </span>
+          {dispute.reason && (
+            <span lang="en" dir="auto" className="text-muted-foreground">
+              {dispute.reason}
+            </span>
+          )}
+        </>
+      )}
       <span className="text-muted-foreground">
         {t("bibleData.voices.speakerEvidence", {
           confidence: fmt.isolate(fmt.percent(speech.speakerConf)),

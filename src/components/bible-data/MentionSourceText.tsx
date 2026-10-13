@@ -53,7 +53,7 @@ export function MentionSourceText({ view, cellId, text, renderSlice }: MentionSo
           at: word.at,
           word: context.text?.words[word.wordId],
           entities: context.index.entities,
-          name: context.nameOf(word.at.mention.entity),
+          name: context.mentionName(word.at),
           namesOnly: context.hints === "names",
           // At rest, only where the verb's own form says who: "[he = Jesus]".
           pronounOnly: true,

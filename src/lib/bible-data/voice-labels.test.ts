@@ -16,6 +16,7 @@ import {
   acaiLanguageFor,
   acaiLanguageForLocale,
   agreedRendering,
+  pickLabelText,
   resolveVoiceLabel,
   type ProjectNameSource,
   type VoiceLabelOptions,
@@ -215,5 +216,37 @@ describe("language codes", () => {
     expect(acaiLanguageFor("grc")).toBeNull()
     expect(acaiLanguageFor("ms")).toBeNull()
     expect(acaiLanguageFor(undefined)).toBeNull()
+  })
+})
+
+// AQU-1695: descriptions, key-term titles and deity forms follow the person's
+// label language, as names do, but without a project step.
+describe("pickLabelText", () => {
+  const french = acaiLanguageForLocale("fr")
+
+  it("falls back to English when the interface language has no text", () => {
+    // Pack 1.1's descriptions are English only in practice.
+    expect(pickLabelText({ eng: "Originally named Jacob …" }, "project", french)).toEqual({
+      text: "Originally named Jacob …",
+      language: "eng",
+    })
+    // Malay has no pack language at all.
+    expect(pickLabelText({ eng: "Samaria", fra: "Samarie" }, "interface", acaiLanguageForLocale("ms"))).toEqual({
+      text: "Samaria",
+      language: "eng",
+    })
+  })
+
+  it("uses the interface language when it has text, unless the person reads English only", () => {
+    const titles = { eng: "Samaria", fra: "Samarie" }
+    expect(pickLabelText(titles, "project", french)).toEqual({ text: "Samarie", language: "fra" })
+    expect(pickLabelText(titles, "interface", french)).toEqual({ text: "Samarie", language: "fra" })
+    expect(pickLabelText(titles, "english", french)).toEqual({ text: "Samaria", language: "eng" })
+  })
+
+  it("has nothing for empty or malformed text", () => {
+    expect(pickLabelText(undefined, "project", french)).toBeNull()
+    expect(pickLabelText({ fra: "  ", eng: 3 }, "project", french)).toBeNull()
+    expect(pickLabelText({ spa: "Samaria" }, "project", french)).toBeNull()
   })
 })

@@ -9,14 +9,15 @@
 // design doc §6 and the pack contract (bible-wiki pipeline/src/bkp/README.md,
 // "people").
 
-import type { BkpEntity, BkpEntityId, BkpWord } from "./pack-types"
+import type { BkpEntity, BkpEntityId, BkpKin, BkpWord } from "./pack-types"
 
 /**
  * How the cast treats an entity:
  *   participant — a person, a deity or a group: who a passage is about;
  *   place       — a place, which the Places enrichment covers;
- *   other       — anything else: pack slice 2's `local-thing`, or a type this
- *                 build does not know yet. Listed apart and never flagged.
+ *   other       — anything else: pack 1.1's `local-thing` ("water"), or a
+ *                 type this build does not know yet. Listed apart and never
+ *                 flagged.
  */
 export type EntityRole = "participant" | "place" | "other"
 
@@ -79,6 +80,39 @@ export function entityNumber(entity: BkpEntity | undefined): EntityNumber | null
 /** A group's members, in the pack's order. Never the group itself, and never collapsed. */
 export function entityMembers(entity: BkpEntity | undefined): readonly BkpEntityId[] {
   return entity?.members ?? []
+}
+
+export type KinRelation = keyof BkpKin
+
+/** In the order a family is listed. */
+export const KIN_RELATIONS: readonly KinRelation[] = ["father", "mother", "siblings", "partners", "offspring"]
+
+export interface KinGroup {
+  relation: KinRelation
+  /** Each once, in the pack's order. */
+  ids: readonly BkpEntityId[]
+}
+
+/**
+ * A person's family from ACAI (pack 1.1), relation by relation. The pack
+ * keeps only relatives in the same book's entity map; an id that is not
+ * there anyway, or is not a string, is left out.
+ */
+export function entityKin(
+  entity: BkpEntity | undefined,
+  entities: Readonly<Record<BkpEntityId, BkpEntity>>,
+): KinGroup[] {
+  const kin: unknown = entity?.kin
+  if (typeof kin !== "object" || kin === null || Array.isArray(kin)) return []
+  const byRelation = kin as Record<string, unknown>
+  return KIN_RELATIONS.flatMap((relation) => {
+    const value = Object.hasOwn(byRelation, relation) ? byRelation[relation] : undefined
+    if (!Array.isArray(value)) return []
+    const ids = [
+      ...new Set(value.filter((id): id is BkpEntityId => typeof id === "string" && Object.hasOwn(entities, id))),
+    ]
+    return ids.length > 0 ? [{ relation, ids }] : []
+  })
 }
 
 /**

@@ -52,6 +52,7 @@ import { languageProfile } from "../namespaces/languageProfile"
 import { projectDecisions } from "../namespaces/projectDecisions"
 import { bibleAlignment } from "../namespaces/bibleAlignment"
 import { bibleChecks } from "../namespaces/bibleChecks"
+import { bibleHelps } from "../namespaces/bibleHelps"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -88,6 +89,7 @@ export const en = {
   ...projectDecisions.keys,
   ...bibleAlignment.keys,
   ...bibleChecks.keys,
+  ...bibleHelps.keys,
 } as const
 
 export type MessageKey = keyof typeof en

@@ -61,7 +61,7 @@ export function MentionToken({ view, word, text, children }: MentionTokenProps) 
         aria-label={t(word.approximate ? "bibleAlignment.mentionApproximateAria" : "bibleData.whosWho.mentionAria", {
           word: text,
           kind: kindKey ? t(kindKey) : kind,
-          name: fmt.isolate(context.nameOf(entity)),
+          name: fmt.isolate(context.mentionName(word.at)),
         })}
         className={cn(
           "mention-mark inline cursor-help appearance-none border-0 bg-transparent p-0 text-start [color:inherit] [font:inherit]",

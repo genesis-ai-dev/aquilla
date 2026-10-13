@@ -17,8 +17,10 @@
  *    `editEventId` from the payload as `lastEditEventId` if a later commit
  *    didn't already overwrite it. Idempotent (set semantics).
  *  - cell.unvalidate: removes the author from `activeValidators`.
- *  - cell.waive: upserts a RuleWaiver for the payload `ruleId` (set semantics
- *    keyed by ruleId). cell.unwaive removes it. Unlike validators, a waiver is
+ *  - cell.waive: upserts a RuleWaiver (set semantics keyed by
+ *    (ruleId, matchHash) — AQU-1740, matching the projection's primary key, so
+ *    waiving a second finding of the same rule does not replace the first).
+ *    cell.unwaive removes the one with that key. Unlike validators, a waiver is
  *    NOT cleared by a new commit — it stays until explicitly unwaived.
  *
  * Events are applied in `enqueuedAt` order so out-of-order user actions resolve
@@ -28,6 +30,7 @@
 
 import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import type { RuleWaiver } from "@/lib/parsers/types"
+import { waiverKey } from "@/lib/rules/waivers"
 import type { OutboxRecord } from "./outbox"
 import type { CqrsEventKind, CqrsPayloadFor } from "./outbox-types"
 
@@ -127,17 +130,27 @@ export function applyOutboxOverlay(
       }
     } else if (ev.kind === "cell.waive") {
       const p = ev.payload as CqrsPayloadFor<"cell.waive">
-      // Set semantics by ruleId: a re-waive replaces the prior entry.
+      // Set semantics by (ruleId, matchHash): a re-waive of the SAME finding
+      // replaces its entry; a waive of another finding of the same rule adds a
+      // second one, exactly as the projection's primary key does.
+      const key = waiverKey(p.ruleId, p.matchHash)
       const next: RuleWaiver = {
         ruleId: p.ruleId,
+        ...(p.matchHash ? { matchHash: p.matchHash } : {}),
         waivedAt: new Date(ev.clientTs).toISOString(),
         waivedBy: ev.author,
         ...(p.reason ? { reason: p.reason } : {}),
       }
-      stats.waivers = [...stats.waivers.filter((w) => w.ruleId !== p.ruleId), next]
+      stats.waivers = [
+        ...stats.waivers.filter((w) => waiverKey(w.ruleId, w.matchHash) !== key),
+        next,
+      ]
     } else if (ev.kind === "cell.unwaive") {
       const p = ev.payload as CqrsPayloadFor<"cell.unwaive">
-      stats.waivers = stats.waivers.filter((w) => w.ruleId !== p.ruleId)
+      const key = waiverKey(p.ruleId, p.matchHash)
+      stats.waivers = stats.waivers.filter(
+        (w) => waiverKey(w.ruleId, w.matchHash) !== key,
+      )
     }
   }
 

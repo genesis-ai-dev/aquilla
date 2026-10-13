@@ -76,6 +76,10 @@ import {
   type ProposeCommandArgs,
   type DescribeCommandArgs,
 } from "../lib/agent/command-tools"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+} from "../../../shared/vendor-timeouts"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -1018,6 +1022,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       }
       const turnStartedAt = Date.now()
       const promptChars = JSON.stringify(convo).length
+      // AQU-1849: FIRST-BYTE deadline, not a total one — an agent turn
+      // legitimately streams for minutes, but a provider that never sends the
+      // first frame is a hang. Disarmed the moment the headers land, so the
+      // stream below runs unbounded. Linked to the run's own signal so a
+      // cancelled run still aborts upstream.
+      const firstByte = vendorDeadline("openRouterStreamFirstByte", signal)
       let upstream: Response
       try {
         upstream = await fetch(resolveOpenRouterUrl(env), {
@@ -1035,12 +1045,15 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             ...streamUsageOptions(env.OPENROUTER_BASE_URL),
             ...(usage ? { max_tokens: usage.maxOutputTokens } : {}),
           }),
-          signal,
+          signal: firstByte.signal,
         })
       } catch (error) {
         // Uncertain charge: the reservation stays held for reconciliation.
         if (usage && stepRequestId) await usage.holdStep(stepRequestId, undefined)
+        if (firstByte.timedOut()) logVendorTimeout("openRouterStreamFirstByte", error)
         throw error
+      } finally {
+        firstByte.clear()
       }
 
       if (!upstream.ok) {

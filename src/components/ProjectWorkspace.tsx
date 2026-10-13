@@ -35,6 +35,15 @@ import { importLanguageDecision } from "@/lib/import-language"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { laneCodesByTag, laneLabelsByTag, laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
+import {
+  acknowledgeLaneArchive,
+  laneArchiveToAnnounce,
+  laneArchiveWatchInit,
+  laneLockFor,
+  observeLaneArchive,
+  type LaneArchiveWatch,
+} from "@/lib/lanes/lane-lock"
+import { LaneArchivedDialog } from "./LaneArchivedDialog"
 // AQU-1613: the open lane is resolved by lane id — stored choice, `?lane=` deep
 // link and the first-position fallback that replaces the old `''` one.
 import {
@@ -48,6 +57,7 @@ import {
   writePersistedActiveLane,
 } from "@/lib/lanes/active-lane-choice"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
+import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
 import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
@@ -101,8 +111,9 @@ import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCac
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
-import { isBibleOpen } from "@/lib/bible-data/experiment"
+import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
+import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
 import { isAudioCueFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -167,6 +178,7 @@ import {
   workspaceTerminology,
   timelinePlayReady,
   ruleFixPreflight,
+  fetchDeletedFilesWithProjectToken,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -235,7 +247,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -304,8 +316,9 @@ import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subs
 import { createLiveApplier } from "@/lib/sync/live-apply"
 import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
-import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
+import { forbiddenBannerMessage, forbiddenReasonCopy } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
+import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
@@ -316,7 +329,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3 } from "lucide-react"
+import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Loader2 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -327,6 +340,7 @@ import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
 import { FileChapterToolbar } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
+import { useBibleChecks } from "@/hooks/useBibleChecks"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock } from "./LeftDock"
@@ -340,6 +354,10 @@ import {
 } from "@/lib/editor/right-rail-panels"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
+import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
+import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
+import { useVoiceOverrideWriter, voiceOverrideFailureKey } from "./bible-data/use-voice-override-writer"
+import { useBiblePackStatus } from "./bible-data/bible-data-bus"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { LinkSeedFailedBanner } from "./LinkSeedFailedNotice"
@@ -473,6 +491,7 @@ import { useSubscribedConcepts } from "@/hooks/useSubscribedConcepts"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import type { ConceptDraft } from "@/lib/terminology/types"
+import type { EntityLinkRequest } from "@/components/bible-data/entity-term-context"
 import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
@@ -744,6 +763,9 @@ export function ProjectWorkspace() {
   // without this overlay a deleted file lingers until the outbox flushes and
   // a later refetch happens to run.
   const [optimisticDeletes, setOptimisticDeletes] = useState<Set<string>>(new Set())
+  // AQU-797: outbox record ids whose refused file.delete has already been
+  // reported, so re-deriving the refusal list doesn't re-toast the same death.
+  const refusedDeleteNoticedRef = useRef<Set<string>>(new Set())
   // FRO-272: soft-deleted ("Recently deleted") files — server list + optimistic
   // overlay so the trash dialog is not empty while file.delete is still flushing.
   const [deletedFiles, setDeletedFiles] = useState<FileSummary[]>([])
@@ -762,6 +784,7 @@ export function ProjectWorkspace() {
     setOptimisticRenames(new Map())
     setOptimisticSortIndexes(new Map())
     setOptimisticDeletes(new Set())
+    refusedDeleteNoticedRef.current = new Set()
     setOptimisticTrash([])
     setDeletedFiles([])
     setSuggestionsDismissed(false)
@@ -889,6 +912,57 @@ export function ProjectWorkspace() {
       return changed ? next : current
     })
   }, [hydratedProject, optimisticDeletes.size])
+
+  /**
+   * AQU-797: put the row BACK when the `file.delete` event died.
+   *
+   * The effect above can only retire an overlay the server agreed with: it
+   * waits for the file to leave the server list. A delete the server refused
+   * (role floor, file out of assigned scope, membership revoked since the
+   * token was minted) never leaves that list, so the overlay outlived the
+   * event — the row stayed hidden for the rest of the session, the user
+   * believed the file was deleted, and it reappeared on the next reload with
+   * no explanation. That is the "delete does not take effect" this ticket was
+   * filed as, and it is environment-independent: it looks different per
+   * account because it depends on the member's role, which is why it showed up
+   * for one person on the call and not another.
+   *
+   * Reverting on the event's death (not on a refetch) is the only signal that
+   * separates "refused" from "not flushed yet" — see useRefusedFileEvents.
+   */
+  const refusedFileDeletes = useRefusedFileEvents(projectId ?? null, "file.delete")
+  useEffect(() => {
+    if (refusedFileDeletes.length === 0) return
+    // Only a delete whose overlay is still live — i.e. one THIS session made.
+    // A quarantined record the user never discarded would otherwise announce
+    // itself on every project open, long after the row it hid came back.
+    const reverting = refusedFileDeletes.filter((e) => optimisticDeletes.has(e.fileId))
+    if (reverting.length === 0) return
+    const revertedIds = new Set(reverting.map((e) => e.fileId))
+    setOptimisticDeletes((current) => {
+      const next = new Set(current)
+      for (const id of revertedIds) next.delete(id)
+      return next
+    })
+    // …and out of "Recently deleted", which the same action optimistically
+    // filled. A file that is back in the list must not also sit in the trash.
+    setOptimisticTrash((current) => {
+      const kept = current.filter((f) => !revertedIds.has(f.fileId))
+      return kept.length === current.length ? current : kept
+    })
+    // One notice per refused event, not per re-derivation of the list.
+    for (const entry of reverting) {
+      if (refusedDeleteNoticedRef.current.has(entry.id)) continue
+      refusedDeleteNoticedRef.current.add(entry.id)
+      toast.add({
+        type: "error",
+        priority: "high",
+        title: entry.reason
+          ? `That file wasn't deleted — ${forbiddenReasonCopy(entry.reason)}.`
+          : "That file wasn't deleted, so it's back in the file list.",
+      })
+    }
+  }, [refusedFileDeletes, optimisticDeletes])
 
   // Drop a pending reorder once the server read carries the same positions.
   useEffect(() => {
@@ -1725,14 +1799,6 @@ export function ProjectWorkspace() {
     [mayParkCellsInProject, hiddenCellCount, showHiddenCellsPref],
   )
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
-  const mentionCellText = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const cell of cellSummaries) {
-      const text = cell.original.trim() || cell.translated.trim()
-      if (text) map.set(cell.id, text)
-    }
-    return map
-  }, [cellSummaries])
   // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
   // cell page reaching the store — but a file that legitimately has no cells,
   // a load that failed, and the no-file-open case must all release the gate
@@ -2307,6 +2373,35 @@ export function ProjectWorkspace() {
     if (laneRows.length === 0) return project?.archivedLanes
     return laneRows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? "")
   }, [laneRows, project?.archivedLanes])
+  // AQU-1463: the lane the editor is pointed at, frozen. Derived rather than
+  // stored, so the PM's archive reaches this member the moment the
+  // `project.settings.updated` frame re-reads the lane rows — no reload, no
+  // polling. Null means the active lane is open for business.
+  const activeLaneLock = useMemo(
+    () =>
+      laneLockFor({
+        activeLane,
+        archivedLanes: archivedLaneTags,
+        // Named the way the switcher names it, so the modal and banner call the
+        // lane what the member just saw it called.
+        label: laneLabels[activeLane] || (activeLane === "" ? activeTargetLanguage || "Target" : activeLane),
+      }),
+    [activeLane, archivedLaneTags, laneLabels, activeTargetLanguage],
+  )
+  // AQU-1463: the must-dismiss modal is for the member who was WORKING in the
+  // lane, not for anyone who opens an archived one. The watch is what tells
+  // those apart; see src/lib/lanes/lane-lock.ts.
+  const [laneArchiveWatch, setLaneArchiveWatch] = useState<LaneArchiveWatch>(laneArchiveWatchInit)
+  useEffect(() => {
+    setLaneArchiveWatch((watch) =>
+      observeLaneArchive(watch, { activeLane, locked: activeLaneLock !== null }),
+    )
+  }, [activeLane, activeLaneLock])
+  const laneArchiveAnnouncement = laneArchiveToAnnounce(laneArchiveWatch, activeLaneLock)
+  const acknowledgeLaneArchived = useCallback(() => {
+    if (!activeLaneLock) return
+    setLaneArchiveWatch((watch) => acknowledgeLaneArchive(watch, activeLaneLock.tag))
+  }, [activeLaneLock])
   // AQU-1613: the lane in first position — where the editor lands when nothing
   // else names a lane. It replaces the hardcoded `''` fallback: that one was
   // the former default lane, which AQU-1600 makes archivable, so falling back
@@ -2354,6 +2449,17 @@ export function ProjectWorkspace() {
     const hadStoredChoice = stored.laneId !== null || stored.legacyTag !== null
     if (hadStoredChoice && laneId) writePersistedActiveLane(projectId, laneId, lane)
   }, [projectId, project?.lanes, laneRows, fallbackLaneId])
+  // AQU-1902: the lane row target writes go to. Null while it cannot be named
+  // (lane rows still loading and no remembered lane id for this tag): the
+  // editor is then read-only, so no edit is queued onto a lane the server will
+  // refuse — or onto a lane the reader is not looking at.
+  const activeTargetLane = useActiveTargetLane(
+    projectId,
+    project?.lanes != null ? laneRows : null,
+    settingsFetched,
+    activeLane,
+  )
+  const lanesPending = activeTargetLane === null
   // A member the org limited to certain lanes opens in one of them, never on
   // the default lane when that lies outside their limit, and may switch among
   // them (`scopedLanesFor`). Null keeps the AQU-608 rule for everyone else.
@@ -4288,6 +4394,24 @@ export function ProjectWorkspace() {
     ],
   )
 
+  // AQU-1692: "Adopt voices as cast" in the Bible voice details. The same
+  // write as a character sheet's: the names, then one voice per character so
+  // the cast gutter draws them.
+  const adoptVoicesAsCast = useCallback(
+    (assignments: readonly { cellId: string; castName: string }[]) => {
+      void handleImportCharacters({
+        assignments: assignments.map((a, i) => ({ ...a, cameraState: undefined, rowNumber: i + 1 })),
+        blankRows: 0,
+        unmatchedRows: [],
+        cellsWithoutRow: 0,
+        cameraDisagreements: 0,
+        filledByPosition: 0,
+        distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
+      })
+    },
+    [handleImportCharacters],
+  )
+
   /**
    * The same import, for the sheet keyed to the HEARD lines.
    *
@@ -5314,6 +5438,13 @@ export function ProjectWorkspace() {
     // (applyOptimisticTargetEdit) of a write the server will refuse, matching
     // the same mirror-check used by handleEditorCommit/commitTrayFootnoteText.
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
+    // AQU-1463: and not into an archived lane, which is frozen for every role.
+    // `activeLaneLock` rather than `laneWriteFrozen` because that one is
+    // declared further down and a deps array is evaluated at render — the same
+    // temporal-dead-zone trap the note over handleToggleCueLink describes.
+    if (activeLaneLock !== null) return
+    // AQU-1902: nor before the active lane's row is known.
+    if (lanesPending) return
     // TOCTOU guard: `cell` is the row snapshot captured when the sparkle was
     // clicked. A rapid second draft can arrive after the FIRST draft's
     // projection confirmed (which clears its pending-head entry) but before
@@ -5493,13 +5624,19 @@ export function ProjectWorkspace() {
     // only that row's stats and cell data back (its authoritative event_id
     // becomes the next commit's parent) instead of re-fetching the file.
     confirmCommitted(cell.id, eventId)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, cellStore, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, cellStore, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted, lanesPending])
 
   const commitCompletedCells = useCallback(async (
     drafts: CompletedCellDraft[],
   ): Promise<CommitCompletedCellsResult> => {
     if (!project?.id || !canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       const error = new Error("You do not have permission to commit target cells")
+      return drafts.map(() => ({ status: "rejected", reason: error }))
+    }
+    // AQU-1463: a batch into a frozen lane is refused whole rather than
+    // per-draft — every draft in it names the same archived lane.
+    if (activeLaneLock !== null) {
+      const error = new Error(`${activeLaneLock.label} is archived and is read-only.`)
       return drafts.map(() => ({ status: "rejected", reason: error }))
     }
     if (drafts.length === 0) return []
@@ -6289,6 +6426,8 @@ export function ProjectWorkspace() {
         // overrides) are part of the term, not popover-local UI state — drop
         // them here and the chips the user just clicked would do nothing.
         ...(draft.match ? { match: draft.match } : {}),
+        // AQU-1693: from a Voices or Who's Who popover, the Bible entity it names.
+        ...(draft.externalIds?.acai ? { externalIds: draft.externalIds } : {}),
         author: currentUsername,
       })
       const created = { id: conceptId }
@@ -6314,6 +6453,33 @@ export function ProjectWorkspace() {
       })
     }
   }, [project, currentUsername, refreshConcepts, t, navigate])
+
+  // AQU-1693: "Link “Jesus” to Jesus" from a Voices or Who's Who popover: one
+  // term.update naming the Bible entity. Binding (the server gates every
+  // term.update at the termbase floor), so the popover offers it only to
+  // someone who can approve terms.
+  const handleLinkConceptToEntity = useCallback(async (link: EntityLinkRequest) => {
+    if (!project) return
+    try {
+      await emitTermUpdate({
+        projectId: project.id,
+        conceptId: link.conceptId,
+        externalIds: link.externalIds,
+        author: currentUsername,
+      })
+      await refreshConcepts()
+      toast.add({
+        type: "success",
+        title: t("bibleData.terms.linkedToast", { term: link.term, name: link.name }),
+        timeout: 8000,
+      })
+    } catch (err) {
+      toast.add({
+        type: "error",
+        title: err instanceof Error ? err.message : t("terminology.addConcept.saveFailed"),
+      })
+    }
+  }, [project, currentUsername, refreshConcepts, t])
 
   // AQU-1006 follow-up: terminology now has TWO authority levels, so this is
   // two questions rather than one.
@@ -6507,6 +6673,20 @@ export function ProjectWorkspace() {
     return map
   }, [activeFileId, cellSummaries])
 
+  // AQU-1688: Bible data checks read each cell's compiled pack facts. They are
+  // compiled once per file (by pack version, refs and Language profile) and
+  // looked up by cell id, so typing still re-checks only the edited cell.
+  // AQU-1685: off unless the Bible data experiment is on and the open file is
+  // a Bible book.
+  // AQU-1699: the terminology gives names their agreed renderings (check pack B).
+  const bibleChecks = useBibleChecks(project, cellSummaries, activeFile, localConcepts)
+  const bibleCheckContextFor = bibleChecks.contextFor
+  const bibleFileScan = bibleChecks.fileScan
+  const healthCellCheckContext = useCallback(
+    (cell: { id: string }) => bibleCheckContextFor(cell.id),
+    [bibleCheckContextFor],
+  )
+
   // AD-14: health derives from decay (endorsement_count). The legacy
   // four-sub-score "composite-health" path is retired.
   // Per-browser off switch (lib/health/kill-switch.ts), exposed in the
@@ -6520,6 +6700,8 @@ export function ProjectWorkspace() {
       enabled: healthCalculationsEnabled,
       rulesForCell: libraryLint.rulesForCell,
       rulesForCellSig: libraryLint.signature,
+      cellCheckContext: healthCellCheckContext,
+      cellCheckContextSig: bibleChecks.signature,
     },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
@@ -6854,6 +7036,10 @@ export function ProjectWorkspace() {
         // subscribed termbases come in here as well.
         concepts: laneEditorConcepts,
         termMatching: project?.termMatching,
+        // AQU-1688: the same per-cell Bible data inputs the live check uses.
+        contextFor: healthCellCheckContext,
+        // AQU-1697: the Bible data scans over the whole file (headings, verse numbering).
+        bibleScan: await bibleFileScan(),
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -6862,7 +7048,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching, healthCellCheckContext, bibleFileScan])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -7126,7 +7312,7 @@ export function ProjectWorkspace() {
       // applies them; the click handler below asks the same question.
       const vote = textVoteGate(cell, project, { username: currentUsername, myScopes, activeLane })
       const hasMajorHealthIssue = activeInfractions.some(
-        (infraction) => ruleById.get(infraction.ruleId)?.severity === "major",
+        (infraction) => infractionSeverity(infraction, ruleById.get(infraction.ruleId)?.severity) === "major",
       )
       const needsHealthAttention = Boolean(
         cell.translated.trim()
@@ -7232,6 +7418,10 @@ export function ProjectWorkspace() {
   const [verseResourcesOpen, setVerseResourcesOpen] = useState<boolean>(() =>
     projectId ? readVerseResourcesOpen(projectId) : false,
   )
+  // AQU-1689: the Who's Who panel (Bible data), same tracked ref, its own open state.
+  const [whosWhoOpen, setWhosWhoOpen] = useState<boolean>(() =>
+    projectId ? readWhosWhoOpen(projectId) : false,
+  )
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
@@ -7241,6 +7431,26 @@ export function ProjectWorkspace() {
   // The AQU-461 verse-resources panel renders under a subset of that gate,
   // so the same subscription serves both.
   const parallelBiblesPanelActive = isBibleOpen(centerSurface, activeFile)
+  // AQU-1692: a maintainer's voice corrections, saved against the latest map
+  // (see use-voice-override-writer.ts). EditorTable gets the writer only while
+  // Bible data shows (AQU-1685), and offers "Correct…" only to a maintainer.
+  const saveVoiceOverride = useVoiceOverrideWriter(
+    projectSettings.refresh,
+    patchSettings,
+    project?.bibleVoiceOverrides,
+    currentUsername,
+  )
+  const bibleDataShown = !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+  // AQU-1692: how the open book's Bible data loaded, for View settings → Bible data.
+  const biblePackStatus = useBiblePackStatus(bibleDataShown ? (activeFile?.id ?? null) : null)
+  const removeVoiceCorrection = useCallback(
+    (speechId: string) => {
+      void saveVoiceOverride(speechId, null).then((outcome) => {
+        if (outcome.kind !== "ok") toast.add({ type: "error", title: t(voiceOverrideFailureKey(outcome)) })
+      })
+    },
+    [saveVoiceOverride, t],
+  )
   const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
@@ -8389,6 +8599,19 @@ export function ProjectWorkspace() {
 
   const perms = useProjectPermissions(project)
   const isReadOnly = !perms.canEditContent
+  /**
+   * AQU-1463: target-side writes are off right now — either the whole project
+   * is read-only (git/local permissions) or the lane the editor is pointed at
+   * has been archived.
+   *
+   * Every `isReadOnly` gate below guards a write into the ACTIVE lane, so one
+   * derived flag covers them all and re-evaluates on a lane switch: the member
+   * moves to an active lane and the editor is fully live again. The one place
+   * that keeps asking `isReadOnly` on its own is the "imported from git"
+   * banner, which would otherwise blame git for a lane a PM archived.
+   */
+  // AQU-1902: …and, briefly, while the active lane's row is not yet known.
+  const laneWriteFrozen = isReadOnly || activeLaneLock !== null || lanesPending
 
   /**
    * AQU-646: give a cell a TARGET ROW when it gains a recording, so that a line
@@ -8411,7 +8634,7 @@ export function ProjectWorkspace() {
    * empty commit on a cell that has text would erase it.
    */
   const ensureTargetRowForTake = useCallback(async (cellId: string) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     const cell = getActiveCell(cellId)
     if (!cell) return
@@ -8436,7 +8659,7 @@ export function ProjectWorkspace() {
   }, [
     project?.id,
     project?.syncRole?.level,
-    isReadOnly,
+    laneWriteFrozen,
     getActiveCell,
     getPendingTargetEventId,
     activeLane,
@@ -8466,7 +8689,7 @@ export function ProjectWorkspace() {
    * theirs and the recording was never what made it count.
    */
   const resetTargetRowAfterLastTake = useCallback(async (cellId: string) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     const cell = getActiveCell(cellId)
     if (!cell || cell.translated?.trim()) return
@@ -8492,7 +8715,7 @@ export function ProjectWorkspace() {
   }, [
     project?.id,
     project?.syncRole?.level,
-    isReadOnly,
+    laneWriteFrozen,
     getActiveCell,
     activeLane,
     resolveTargetCommitParentId,
@@ -8505,7 +8728,7 @@ export function ProjectWorkspace() {
 
   const translateAsReadAvailable = translateAsReadEnabled
     && lens === "text"
-    && !isReadOnly
+    && !laneWriteFrozen
     && isConfigured
     && isCompletionAvailable
     && Boolean(activeFileId)
@@ -8647,7 +8870,7 @@ export function ProjectWorkspace() {
     activeLane,
     isCompletionAvailable,
     isConfigured,
-    isReadOnly,
+    laneWriteFrozen,
     lens,
     project?.id,
     translateAsReadEnabled,
@@ -8658,7 +8881,7 @@ export function ProjectWorkspace() {
   ])
 
   const commitTrayFootnoteText = useCallback(async (cellId: string, updatedText: string) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     const cell = getActiveCell(cellId)
     if (!cell) return
@@ -8684,7 +8907,7 @@ export function ProjectWorkspace() {
   }, [
     project?.id,
     project?.syncRole?.level,
-    isReadOnly,
+    laneWriteFrozen,
     getActiveCell,
     applyOptimisticTargetEditWithCapture,
     activeLane,
@@ -8877,7 +9100,15 @@ export function ProjectWorkspace() {
     try {
       // Flush first so a just-enqueued file.delete is projected before we read.
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      const files = await fetchDeletedFiles(project.id, frontierSession.jwt)
+      // AQU-1894: sync-worker only accepts a project sync token here — the
+      // session jwt this used to send was rejected 401 every time.
+      const files = await fetchDeletedFilesWithProjectToken({
+        projectId: project.id,
+        getTokenForFile,
+        fetchFiles: fetchDeletedFiles,
+      })
+      // null = no token could be minted; keep whatever the list already shows.
+      if (!files) return
       setDeletedFiles(files)
       // Drop optimistic rows the server now knows about.
       const serverIds = new Set(files.map((f) => f.fileId))
@@ -8889,7 +9120,7 @@ export function ProjectWorkspace() {
     } catch {
       // Non-fatal — trash section shows optimistic entries / empty on error.
     }
-  }, [project?.id, frontierSession?.jwt, getTokenForProjectFile])
+  }, [project?.id, frontierSession?.jwt, getTokenForFile, getTokenForProjectFile])
   useEffect(() => {
     if (trashOpen) void refreshDeletedFiles()
   }, [trashOpen, refreshDeletedFiles])
@@ -9325,7 +9556,7 @@ export function ProjectWorkspace() {
   // target-commit path — optimistic patch first for visible rows (write-clock
   // keeps own writes authoritative), then one outbox flush for the batch.
   const handleReplaceAll = useCallback(async (payload: ReplaceAllPayload) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     const prepared: Array<{
       cell: CellData
       value: string
@@ -9388,7 +9619,7 @@ export function ProjectWorkspace() {
       if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
     }
     rebuildSearchIndex()
-  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
+  }, [project?.id, laneWriteFrozen, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   /**
    * AQU-1805: commit a rule fix the user reviewed in the rule drawer.
@@ -9408,7 +9639,7 @@ export function ProjectWorkspace() {
     proposalKind: ProposalKind,
     ruleId: string,
   ) => {
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     // Preflight every IDML cell before emitting anything, so one protected-run
     // failure cannot leave the sweep half-applied (AQU-742: a fix that rewrites
     // a protected run drops the anchors InDesign needs).
@@ -9469,7 +9700,7 @@ export function ProjectWorkspace() {
       if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
     }
     rebuildSearchIndex()
-  }, [project?.id, project?.harmonize_min_role, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex, t])
+  }, [project?.id, project?.harmonize_min_role, laneWriteFrozen, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex, t])
 
   const openProjectSettings = useCallback(() => {
     if (!projectId) return
@@ -9933,6 +10164,8 @@ export function ProjectWorkspace() {
     runBatchValidateAudio: () => {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.audio.validate", project.syncRole?.level ?? null)) return
+      // AQU-1463: audio validation names the lane it was recorded in.
+      if (laneWriteFrozen) return
       const scope = audioValidationScope(project, {
         roleLevel: project.syncRole?.level ?? null,
         username: currentUsername,
@@ -10872,7 +11105,7 @@ export function ProjectWorkspace() {
   const handleRetimeTextTrack = useCallback(async (
     contentFileId: string, cellId: string, startSec: number, endSec: number,
   ) => {
-    if (!project?.id || isReadOnly || timingLocked
+    if (!project?.id || laneWriteFrozen || timingLocked
       || !timelineText.cellsByFile[contentFileId]?.some(cell => cell.id === cellId)) return
     timelineText.patchTiming(contentFileId, cellId, startSec, endSec)
     try {
@@ -10895,7 +11128,7 @@ export function ProjectWorkspace() {
     } finally {
       timelineText.refresh(contentFileId)
     }
-  }, [project?.id, isReadOnly, timingLocked, currentUsername, getTokenForProjectFile,
+  }, [project?.id, laneWriteFrozen, timingLocked, currentUsername, getTokenForProjectFile,
     timelineText.cellsByFile, timelineText.patchTiming, timelineText.refresh])
   /**
    * A drag the server has not confirmed yet, as `trackId → new order`.
@@ -12241,7 +12474,7 @@ export function ProjectWorkspace() {
    */
   const handleCellValidated = useCallback(async (cellId: string) => {
     if (!autoPropagateRepetitions) return
-    if (!project?.id || isReadOnly) return
+    if (!project?.id || laneWriteFrozen) return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
 
     const planned = planRepetitionPropagation({
@@ -12341,7 +12574,7 @@ export function ProjectWorkspace() {
     checkLockHolder,
     currentUsername,
     handleCellCommitted,
-    isReadOnly,
+    laneWriteFrozen,
     myScopes,
     project,
     rememberPendingTargetCommit,
@@ -12361,7 +12594,7 @@ export function ProjectWorkspace() {
     cellId: string,
     snapshot: { value: string; valueHtml: string },
   ): Promise<{ autoValidated: boolean }> => {
-    if (!project?.id || isReadOnly) throw new Error("This project is read-only.")
+    if (!project?.id || laneWriteFrozen) throw new Error("This project is read-only.")
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
       throw new Error("Your project role cannot edit translations.")
     }
@@ -12401,7 +12634,7 @@ export function ProjectWorkspace() {
     let autoValidated = false
     if (shouldAutoValidateHumanEdit({
       value: snapshot.value,
-      canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
+      canValidate: !laneWriteFrozen && canPerform("cell.validate", project.syncRole?.level ?? null),
       allowSelfValidation: project.allowSelfValidation,
       roleLevel: project.syncRole?.level ?? null,
       scopeCanValidate: textValidationScope(project, {
@@ -12436,7 +12669,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getActiveCell,
     handleCellCommitted,
-    isReadOnly,
+    laneWriteFrozen,
     project,
     rememberPendingTargetCommit,
     resolveTargetCommitParentId,
@@ -12570,8 +12803,42 @@ export function ProjectWorkspace() {
         onClick: () => handleWorkspaceAction(a),
       }))
 
-    const items: OverflowMenuItem[] = [...actionItems]
-    if (actionItems.length > 0) items.push({ id: "sep-actions", type: "separator" })
+    // AQU-358: this one menu absorbed what used to be a chevron dropdown and a
+    // ⋯ sitting side by side, so each run of items carries a heading saying
+    // what it is for. The headings also decide where an item belongs: the
+    // diarize/adopt-voice pair are bulk passes over the file's audio, so they
+    // sit with the other runs rather than next to View settings, and the
+    // file-name suggestions sit with Rename, which is what they change.
+    const items: OverflowMenuItem[] = []
+    const fileRuns: OverflowMenuItem[] = [...actionItems]
+
+    if (lens === "audio" && canDiarize) {
+      fileRuns.push({
+        id: "diarize",
+        label: diarizeLabel,
+        icon: Users,
+        disabled: diarizeBusy,
+        onClick: handleDiarize,
+      })
+      fileRuns.push({
+        id: "adopt-speaker-voice",
+        label: adoptingSpeaker
+          ? t("nav.fileMenu.extractingVoice")
+          : t("nav.fileMenu.useFileSpeakerAsVoice"),
+        icon: Mic,
+        disabled: adoptingSpeaker || diarizeBusy,
+        onClick: () => void handleAdoptSpeakerVoice(),
+      })
+    }
+
+    if (fileRuns.length > 0) {
+      items.push({ id: "sep-actions-heading", type: "separator" })
+      items.push({ id: "runs-section", type: "label", label: t("nav.fileMenu.section.runs") })
+      items.push(...fileRuns)
+    }
+
+    items.push({ id: "sep-view-heading", type: "separator" })
+    items.push({ id: "view-section", type: "label", label: t("nav.fileMenu.section.view") })
     items.push(
       {
         id: "view-settings",
@@ -12591,42 +12858,16 @@ export function ProjectWorkspace() {
       },
     )
 
-    if (lens === "audio" && canDiarize) {
-      items.push({
-        id: "diarize",
-        label: diarizeLabel,
-        icon: Users,
-        disabled: diarizeBusy,
-        onClick: handleDiarize,
-      })
-      items.push({
-        id: "adopt-speaker-voice",
-        label: adoptingSpeaker
-          ? t("nav.fileMenu.extractingVoice")
-          : t("nav.fileMenu.useFileSpeakerAsVoice"),
-        icon: Mic,
-        disabled: adoptingSpeaker || diarizeBusy,
-        onClick: () => void handleAdoptSpeakerVoice(),
-      })
-    }
-
-    const contextual: OverflowMenuItem[] = [
-      ...(suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)
-        ? [{
-            id: "redetect-suggestions",
-            label: t("nav.fileMenu.showFileNameSuggestions", { count: suggestions.length }),
-            icon: Sparkles,
-            onClick: handleReinviteSuggestions,
-          }]
-        : []),
-    ]
-
-    if (contextual.length > 0) {
-      items.push({ id: "sep-contextual", type: "separator" })
-      items.push(...contextual)
-    }
-
     items.push({ id: "sep-file-actions", type: "separator" })
+    items.push({ id: "file-section", type: "label", label: t("nav.fileMenu.section.file") })
+    if (suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)) {
+      items.push({
+        id: "redetect-suggestions",
+        label: t("nav.fileMenu.showFileNameSuggestions", { count: suggestions.length }),
+        icon: Sparkles,
+        onClick: handleReinviteSuggestions,
+      })
+    }
     items.push(
       {
         id: "file-rename",
@@ -13110,6 +13351,21 @@ export function ProjectWorkspace() {
           onFootnoteViewModeChange={setFootnoteViewMode}
           targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
+          bibleDataVoicesEnabled={
+            // AQU-1685: only with the Bible data experiment on and a Bible open.
+            !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+            && resolveBibleEnrichment(project, "voices", projectHasScriptureFiles(project.files))
+          }
+          bibleDataWhosWhoEnabled={
+            // AQU-1685: only with the Bible data experiment on and a Bible open.
+            !!project && parallelBiblesPanelActive && isBibleDataExperimentOn(project)
+            && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files))
+          }
+          bibleDataStatus={biblePackStatus}
+          bibleVoiceCorrections={project?.bibleVoiceOverrides}
+          onRemoveVoiceCorrection={
+            (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER ? removeVoiceCorrection : undefined
+          }
           tnSidebarEnabled={tnSidebarVisible}
           healthCalculationsEnabled={healthCalculationsEnabled}
           onHealthCalculationsChange={setHealthCalculationsEnabled}
@@ -13133,7 +13389,7 @@ export function ProjectWorkspace() {
       )}
       translateAsReadEnabled={translateAsReadEnabled}
       translateAsReadDisabled={!translateAsReadEnabled && (
-        lens !== "text" || isReadOnly || !isConfigured || !isCompletionAvailable
+        lens !== "text" || laneWriteFrozen || !isConfigured || !isCompletionAvailable
       )}
       translateAsReadActive={translateAsReadActiveCellId !== null}
       onTranslateAsReadChange={setTranslateAsReadEnabled}
@@ -13156,8 +13412,15 @@ export function ProjectWorkspace() {
         project.bibleResourcesEnabled,
         projectHasScriptureFiles(project.files),
       ),
+    // AQU-1689: Who's Who rides the same editor condition plus its own
+    // enrichment, which is off whenever Bible data is, and (AQU-1685) this
+    // device's Bible data experiment.
+    whosWhoAvailable:
+      !!project && isBibleDataExperimentOn(project)
+      && resolveBibleEnrichment(project, "whos-who", projectHasScriptureFiles(project.files)),
     parallelBiblesOpen,
     verseResourcesOpen,
+    whosWhoOpen,
   })
 
   return (
@@ -13359,7 +13622,7 @@ export function ProjectWorkspace() {
                 onSearchPassages={runSearchPassages}
                 onClearResults={clearSearchResults}
                 onSelect={handleSearchSelect}
-                isReadOnly={isReadOnly}
+                isReadOnly={laneWriteFrozen}
                 onAfterReplace={rebuildSearchIndex}
                 onReplaceAll={handleReplaceAll}
                 onOpenFullPanel={() => {
@@ -13395,7 +13658,6 @@ export function ProjectWorkspace() {
                 readerUsername={currentUsername}
                 comments={allProjectComments}
                 files={project.files.map((file) => ({ id: file.id, name: file.name }))}
-                cellTextById={mentionCellText}
               />
             )}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
@@ -13479,6 +13741,16 @@ export function ProjectWorkspace() {
               <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
                 <Lock className="h-3.5 w-3.5" />
                 {t("workspace.readOnlyGitBanner")}
+              </div>
+            )}
+            {!isReadOnly && lanesPending && (
+              <div
+                role="status"
+                data-testid="lanes-loading-banner"
+                className="flex items-center gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {t("workspace.loadingLanguagesBanner")}
               </div>
             )}
             {project && (
@@ -13745,7 +14017,7 @@ export function ProjectWorkspace() {
             }
             workspace={{
               ...agentWorkbenchWorkspace,
-              editable: !isReadOnly,
+              editable: !laneWriteFrozen,
               onCommitTarget: handleAgentTargetCommit,
               isAnonymous: !frontierSession,
               isCompletionConfigured: sparkleReady,
@@ -13758,7 +14030,8 @@ export function ProjectWorkspace() {
               onOpenHistory: handleOpenHistory,
               currentUsername,
               validationRequirement: readValidationCount(project),
-              canValidate: canPerform("cell.validate", project.syncRole?.level ?? null),
+              // AQU-1463: an archived lane takes no validations from anyone.
+              canValidate: !laneWriteFrozen && canPerform("cell.validate", project.syncRole?.level ?? null),
               onValidationChange: handleAgentValidationChange,
               onCellValidated: handleCellValidated,
               cellLockHolders,
@@ -13897,7 +14170,7 @@ export function ProjectWorkspace() {
                     // thing playing would ignore a dub's trims — and the
                     // virtual transport honours them, exactly as the film does.
                     virtualIsTransport={virtualIsTransport}
-                    editable={!isReadOnly}
+                    editable={!laneWriteFrozen}
                     fileId={activeFile.id}
                     onRetimeSubtitle={handleRetimeSubtitle}
                     // AQU-646: a maintainer sees the handles too only once the
@@ -14025,7 +14298,7 @@ export function ProjectWorkspace() {
                     // AQU-928: transcription emits contributor-level events, so
                     // a viewer/reviewer must not be offered the row at all —
                     // the same gate `legacyMeasure` uses below.
-                    onTranscribeSections={isReadOnly ? undefined : handleTranscribeSections}
+                    onTranscribeSections={laneWriteFrozen ? undefined : handleTranscribeSections}
                     // The SAME function the run reads, so what the button
                     // enables and what the run touches can never disagree.
                     takeCellsFor={takeCellsFor}
@@ -14036,7 +14309,7 @@ export function ProjectWorkspace() {
                       // or reviewer must not even be offered it — the emit
                       // would reject per take and the run would report a
                       // success that saved nothing.
-                      legacyMeasureCount > 0 && !isReadOnly
+                      legacyMeasureCount > 0 && !laneWriteFrozen
                         ? { count: legacyMeasureCount, onMeasure: handleMeasureLegacy }
                         : undefined
                     }
@@ -14238,6 +14511,9 @@ export function ProjectWorkspace() {
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
+            bibleOpen={parallelBiblesPanelActive}
+            onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
+            onAdoptVoicesAsCast={bibleDataShown ? adoptVoicesAsCast : undefined}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}
@@ -14248,6 +14524,10 @@ export function ProjectWorkspace() {
             lanes={availableLanes}
             scopedLanes={scopedLanes}
             archivedLanes={archivedLaneTags}
+            // AQU-1463: non-null turns the table read-only and banners which
+            // lane was archived, whatever the reader's role.
+            archivedLaneLabel={activeLaneLock?.label ?? null}
+            languagesLoading={lanesPending}
             onLaneChange={setActiveLane}
             defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
             laneLabels={laneLabels}
@@ -14326,6 +14606,7 @@ export function ProjectWorkspace() {
             onOpenAudioSetup={openAudioSetup}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            onLinkConceptToEntity={handleLinkConceptToEntity}
             addConceptBlockedReason={addConceptBlockedReason}
             canApproveConcept={canApproveConcept}
             onAskAiFromSelection={handleAskAiFromSelection}
@@ -14397,7 +14678,7 @@ export function ProjectWorkspace() {
             {footnoteViewMode === "tray" && (
               <FootnotesTray
                 entries={visibleFootnotes}
-                editable={!isReadOnly}
+                editable={!laneWriteFrozen}
                 onSave={handleTrayFootnoteSave}
                 onDelete={handleTrayFootnoteDelete}
                 onClose={() => setFootnoteViewMode("off")}
@@ -14460,6 +14741,23 @@ export function ProjectWorkspace() {
                     const next = !verseResourcesOpen
                     setVerseResourcesOpen(next)
                     if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {/* AQU-1689: Who's Who, the passage's cast — open panel only;
+                  its "People" edge tab rides in asideEdge. */}
+              {rightRail.peoplePanel && (
+                <WhosWhoSidebar
+                  project={project!}
+                  fileId={activeFile?.id ?? null}
+                  trackedRef={trackedCellRef}
+                  sourceLanguage={activeSourceLanguage}
+                  getTokenForFile={getTokenForFile}
+                  open
+                  onToggle={() => {
+                    const next = !whosWhoOpen
+                    setWhosWhoOpen(next)
+                    if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
               )}
@@ -14567,7 +14865,7 @@ export function ProjectWorkspace() {
                 // Absent while read-only or below the harmonize floor, which
                 // renders the fix affordances disabled with the reason.
                 onApplyFix={
-                  !isReadOnly && drawerRuleId && canHarmonize(project?.harmonize_min_role)
+                  !laneWriteFrozen && drawerRuleId && canHarmonize(project?.harmonize_min_role)
                     ? (previews, proposalKind) =>
                         handleApplyRuleFix(previews, proposalKind, drawerRuleId)
                     : undefined
@@ -14632,8 +14930,8 @@ export function ProjectWorkspace() {
           )
         })()}
         asideEdge={(() => {
-          // AQU-461: two collapsed tabs can stack here — bibles and verse
-          // resources — each shown only while its own panel is closed.
+          // AQU-461: collapsed tabs stack here — bibles, verse resources and
+          // (AQU-1689) Who's Who — each shown only while its own panel is closed.
           // AQU-1316: both flags come from `rightRail`, the same value `aside`
           // reads, so a tab can never sit beside its own open panel.
           if (!hasRightRailEdge(rightRail)) return null
@@ -14662,6 +14960,20 @@ export function ProjectWorkspace() {
                     const next = !verseResourcesOpen
                     setVerseResourcesOpen(next)
                     if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {rightRail.peopleEdge && (
+                <WhosWhoSidebar
+                  project={project!}
+                  fileId={activeFile?.id ?? null}
+                  trackedRef={trackedCellRef}
+                  sourceLanguage={activeSourceLanguage}
+                  open={false}
+                  onToggle={() => {
+                    const next = !whosWhoOpen
+                    setWhosWhoOpen(next)
+                    if (projectId) writeWhosWhoOpen(projectId, next)
                   }}
                 />
               )}
@@ -14945,9 +15257,15 @@ export function ProjectWorkspace() {
             openFile: workspaceTabs.openFile,
             retryActiveFile: retryCells,
             applyOptimisticTargetEdits,
-            disabledReason: canImportTranslation
-              ? null
-              : denialMessage(t, ROLE.CONTRIBUTOR, project.syncRole?.level ?? null),
+            // AQU-1463: the translation import fills the lane the editor is in,
+            // so a frozen lane disables it and says which lane is the problem —
+            // the role denial would be a lie here, and the member can fix this
+            // one by switching lanes.
+            disabledReason: activeLaneLock
+              ? t("importExport.intent.translation.laneArchived", { lane: activeLaneLock.label })
+              : canImportTranslation
+                ? null
+                : denialMessage(t, ROLE.CONTRIBUTOR, project.syncRole?.level ?? null),
             languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
             // One entry per lane, so the check can tell a file in this lane's
             // language (offer the translation import) from one in another
@@ -14960,6 +15278,18 @@ export function ProjectWorkspace() {
             // against those, into that lane (the dialog's targetLang follows).
             laneOptions: fileImportLaneOptions,
             onLaneChange: setActiveLane,
+            // AQU-1673: "Stage as proposals for review" writes nothing, so
+            // there is nothing to revalidate — the only job here is telling
+            // the user where the proposals went.
+            onProposalsStaged: ({ stagedCount, skippedUnchangedCount }) => {
+              toast.add({
+                title: t("importExport.proposals.staged", { count: stagedCount }),
+                description:
+                  skippedUnchangedCount > 0
+                    ? t("importExport.proposals.skippedUnchanged", { count: skippedUnchangedCount })
+                    : undefined,
+              })
+            },
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs
@@ -15046,6 +15376,16 @@ export function ProjectWorkspace() {
           outstandingInfractionCount={activeFileInfractionCount}
         />
       </Suspense>
+      {/* AQU-1463: the archive interrupts the member who was working in the
+          lane. Rendered at workspace level, beside the other modals, so it
+          survives a lens or file change while it is up. */}
+      {laneArchiveAnnouncement && (
+        <LaneArchivedDialog
+          laneLabel={laneArchiveAnnouncement.label}
+          open
+          onAcknowledge={acknowledgeLaneArchived}
+        />
+      )}
       <ParallelPassagesPanel
         open={parallelOpen}
         onOpenChange={setParallelOpen}
@@ -15065,7 +15405,7 @@ export function ProjectWorkspace() {
         onClearResults={clearSearchResults}
         onSelect={handleSearchSelect}
         username={currentUsername}
-        isReadOnly={isReadOnly}
+        isReadOnly={laneWriteFrozen}
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
       />

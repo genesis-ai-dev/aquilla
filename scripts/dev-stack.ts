@@ -72,6 +72,7 @@ import {
 import { parsePgSchema } from "./dev-stack-schema-parser"
 import { reconcilePgViews } from "./dev-stack-schema-views"
 import { finalizeProgressSchema } from "./dev-stack-progress-schema"
+import { finalizeDecisionSchema } from "./dev-stack-decision-schema"
 import {
   resolveConfiguredAgentSandbox,
   type AgentSandboxConnection,
@@ -445,6 +446,7 @@ async function reconcilePgSchema(
   patched.push(...await finalizeSourceBlobSchema(client, run))
   patched.push(...await finalizeChangesetSchema(client, run))
   patched.push(...await finalizeAuthTokenSchema(client, run))
+  patched.push(...await finalizeDecisionSchema(client, run))
 
   if (tables.has("artifact_bindings")) {
     patched.push(...await finalizeArtifactBindingSchema(client, run))

@@ -178,6 +178,10 @@ export interface Env {
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string
+  /** AQU-1690 kill switch for autopilot's Bible-data Jev questions
+   *  (lib/contextual/judge-expectations.ts): "off" leaves every question the
+   *  code cannot settle unanswered. Unset = on. */
+  JEV_BIBLE_QA?: string
   /** Kill switch for smart edits (routes/ai-smart-edits.ts): "off" answers
    *  every suggest request with no suggestions. Unset = on. */
   SMART_EDITS?: string
@@ -239,6 +243,16 @@ export interface Env {
   /** Spans a project-wide autopilot start may drive at once. Lower it for a
    *  self-hosted upstream with few slots (see routes/contextual.ts). */
   CONTEXTUAL_MAX_CONCURRENCY?: string
+  /** AQU-1847 — aggregate autopilot span width one billing workspace may hold
+   *  across ALL its projects. Default 24. The per-project ceiling above
+   *  multiplies by project count without this; with it, two heavy projects in
+   *  one workspace share capacity instead of adding up. */
+  CONTEXTUAL_MAX_ORG_CONCURRENCY?: string
+  /** AQU-1847 — aggregate autopilot span width across the whole platform.
+   *  Default 96. Set BELOW the provider's real rate limit: autopilot takes a
+   *  lease and interactive chat/suggestions do not, so the gap is the headroom
+   *  that keeps user-facing calls responsive while autopilot runs hot. */
+  CONTEXTUAL_MAX_GLOBAL_CONCURRENCY?: string
   /** Hard cap on autopilot model requests in flight at once. Unset = uncapped.
    *  Set to the upstream's slot count when it has a fixed one; span concurrency
    *  bursts ~3x wider than it looks (verifier fan-out). */
@@ -284,6 +298,9 @@ export interface Env {
   /** User-Agent sent to the Aquifer API — the live site 403s generic UAs.
    *  Default: "Aquilla/1.0 (+https://aquilla.app)". */
   AQUIFER_USER_AGENT?: string
+  /** AQU-1690: base URL of the Bible Knowledge Pack that autopilot reads
+   *  (lib/bkp/pack-loader.ts). Default https://bibletranslation.org/bkp/v1. */
+  BKP_BASE?: string
 
   // ── Org credit accounting (WS-AUTH-CREDITS) ──────────────────────────────
   // Platform-level defaults; per-org overrides live in org_settings.credits.

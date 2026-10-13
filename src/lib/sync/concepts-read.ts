@@ -10,7 +10,7 @@
 // function needs to know terminology moved off the settings blob.
 
 import { syncWorkerHttpOrigin } from './sync-worker-url'
-import type { Concept, TermRendering, TermMatchOptions } from '@/lib/terminology/types'
+import type { Concept, ConceptExternalIds, TermRendering, TermMatchOptions } from '@/lib/terminology/types'
 
 export class ConceptsReadError extends Error {
   status: number
@@ -32,6 +32,8 @@ interface ConceptRowWire {
   status: 'active' | 'draft' | 'deprecated'
   caseSensitive: boolean
   matchOptions: TermMatchOptions | null
+  /** AQU-1693. Absent from a sync-worker older than the column. */
+  externalIds?: ConceptExternalIds | null
   createdBy: string | null
   createdAt: number
   updatedAt: number
@@ -60,6 +62,7 @@ function toConcept(row: ConceptRowWire): Concept {
     ...(row.updatedAt != null ? { updatedAt: new Date(row.updatedAt).toISOString() } : {}),
     ...(row.caseSensitive ? { caseSensitive: true } : {}),
     ...(row.matchOptions ? { match: row.matchOptions } : {}),
+    ...(row.externalIds?.acai ? { externalIds: { acai: row.externalIds.acai } } : {}),
   }
 }
 

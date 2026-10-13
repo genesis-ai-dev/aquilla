@@ -30,8 +30,11 @@
   "include": ["vite.config.ts", "scripts/**/*.ts"],
   /* Worker-package imports need auth-worker/sync-worker installs. Cloudflare
    * SPA builds only `pnpm install` at the repo root, so typechecking these
-   * one-off tools here fails with TS2307 (e.g. bcryptjs / @noble/hashes). */
+   * one-off tools here fails with TS2307 (e.g. bcryptjs / @noble/hashes).
+   * AQU-1701: jev-shadow-eval.ts imports worker modules, whose Env needs the
+   * Workers types; its pure libs stay typechecked here. */
   "exclude": [
+    "scripts/jev-shadow-eval.ts",
     "scripts/migrate-users.ts",
     "scripts/mock-legacy-migration.ts",
     "scripts/neon-backfill-progress.ts",

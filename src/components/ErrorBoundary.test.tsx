@@ -63,6 +63,41 @@ describe("ErrorBoundary", () => {
     expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument()
   })
 
+  // AQU-642: the e2e Workspace page object races this hook against the first
+  // cell row so a render throw in the editor fails as "editor crashed at
+  // mount" instead of a bare 30-second `[data-cell-id]` locator timeout.
+  // Changing either attribute silently blinds that guard, so pin both here.
+  it("marks the fallback with the data-slot hook the e2e page object matches", () => {
+    const { container } = render(
+      <ErrorBoundary>
+        <AlwaysThrows />
+      </ErrorBoundary>,
+    )
+    const fallback = container.querySelector('[data-slot="error-boundary-fallback"]')
+    expect(fallback).not.toBeNull()
+    // Unlabelled boundaries report the same name crash telemetry uses.
+    expect(fallback).toHaveAttribute("data-boundary", "root")
+  })
+
+  it("names the boundary in data-boundary so a crash says which surface threw", () => {
+    const { container } = render(
+      <ErrorBoundary label="project-workspace">
+        <AlwaysThrows />
+      </ErrorBoundary>,
+    )
+    expect(container.querySelector('[data-slot="error-boundary-fallback"]'))
+      .toHaveAttribute("data-boundary", "project-workspace")
+  })
+
+  it("does not mark a healthy subtree with the crash hook", () => {
+    const { container } = render(
+      <ErrorBoundary>
+        <div data-testid="child">hello</div>
+      </ErrorBoundary>,
+    )
+    expect(container.querySelector('[data-slot="error-boundary-fallback"]')).toBeNull()
+  })
+
   it("calls posthog.captureException once when a child throws", () => {
     render(
       <ErrorBoundary label="reference-panel">

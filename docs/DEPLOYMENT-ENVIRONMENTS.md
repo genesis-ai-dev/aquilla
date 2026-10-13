@@ -51,6 +51,19 @@ then does any deploy command get past its guard. Migrations are never applied
 automatically by a deploy path or by an agent — that is a deliberate human step
 (`npm run neon:status:dev` / `:prod` is the read-only check the guard runs).
 
+Each file commits together with its `schema_migrations` row, so a migration is
+either applied and recorded or neither; a file needing `CREATE INDEX
+CONCURRENTLY` takes an explicit non-transactional path and must stay idempotent
+(AQU-1877, `scripts/neon-migration-file.ts`). Both paths run under
+`lock_timeout` — 5 s by default, `AQUILLA_MIGRATION_LOCK_TIMEOUT` to widen it
+for a window where blocking every write to `events`/`cells` is acceptable — so a
+migration queued behind a long transaction fails fast instead of holding the
+write queue open. **`neon:apply:prod` refuses without a snapshot decision:**
+pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
+production first (instant and copy-on-write, and what you restore from if the
+apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
+are ungated — they are refreshable by design (`pnpm neon:refresh:dev`).
+
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
 `wrangler deploy` therefore cannot target a production Worker. Production named

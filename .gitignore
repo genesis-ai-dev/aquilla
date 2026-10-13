@@ -115,3 +115,7 @@ i18n-todo/
 # Google OAuth credential downloads — never commit
 client_secret*.json
 .harmonizer-eval-cache/
+
+# AQU-1868 — Big Bible perf harness: local fixture handle + run reports
+.perf/
+perf-report/

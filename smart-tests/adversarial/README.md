@@ -51,16 +51,31 @@ reach them. The local target falls back to the e2e seed users.
 
 ## In GitHub Actions
 
-`.github/workflows/adversarial-jev.yml` has one job, **nightly**. It
-attacks deployed dev at 09:00 UTC, or on dispatch, and files Linear tickets.
-It does not run on pull requests. A release preview is not a target: that
-preview writes to the shared dev database, and a preview sync worker cannot
-call a preview auth worker.
+`.github/workflows/adversarial-jev.yml` has two jobs.
+
+- **pr** runs on every non-draft pull request into `dev` from this
+  repository. It waits for the commit's Cloudflare preview build check,
+  attacks that preview, and keeps one sticky comment on the PR up to
+  date. It files no tickets: a PR's findings belong to its author. A
+  failed preview build or a preview that never serves the head commit
+  gives a **NOT RUN** comment instead of a verdict. Fork and Dependabot
+  PRs are skipped because they get no secrets. Product findings stay
+  advisory: the job is green whenever the harness actually tested the
+  commit, failures or not. It goes **red** when the run said nothing
+  about the commit: **HARNESS UNAVAILABLE**, **NOT RUN**, or **NOT
+  VERIFIED** (`runStatus` in `comment.ts`). A dead canary once read green
+  on every PR for days (AQU-1899).
+- **nightly** attacks deployed dev at 09:00 UTC, or on dispatch, and files
+  Linear tickets.
+
+A release preview is not a target for either job: that preview writes to the
+shared dev database, and a preview sync worker cannot call a preview auth
+worker.
 
 Secrets: `ADVERSARIAL_USER_1..3`, `TYPESAFE_API_KEY`, and
 `TEXT_MODEL_API_KEY` as repository secrets. `LINEAR_API_KEY` goes only in
 the `adversarial-nightly` environment, restricted to the `dev` branch, so
-a pull-request workflow cannot read it. Logs and artifacts are public in this repository;
+no PR run can read it. Logs and artifacts are public in this repository;
 evidence carries goals, actions, and fixture ids, never tokens.
 
 ## How a run works

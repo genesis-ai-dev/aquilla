@@ -116,11 +116,13 @@ The plan's rules:
   to `refs/heads/release/YYYY/MM/DD-NN`. See
   [smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
 - **Adversarial Jev does not affect the cut or the deploy.** Once a day, at
-  09:00 UTC, it attacks deployed `dev` and files Linear tickets. It does not
-  run on pull requests, on a release preview, or on production. A release
-  preview writes to the shared dev database, and a preview sync worker cannot
-  call a preview auth worker. Smart Jev is the release run because the
-  Hetzner stack boots app, auth, and sync with a fresh database.
+  09:00 UTC, it attacks deployed `dev` and files Linear tickets. Its advisory
+  `pr` job attacks each pull request's own preview and keeps one comment on
+  the PR (red only when the harness said nothing about the commit, AQU-1899).
+  Neither job runs on a release preview or on production. A release preview
+  writes to the shared dev database, and a preview sync worker cannot call a
+  preview auth worker. Smart Jev is the release run because the Hetzner stack
+  boots app, auth, and sync with a fresh database.
 
 ### Release notes template
 

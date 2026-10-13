@@ -107,6 +107,18 @@ describe('command catalog — invariants', () => {
     expect(describeCommand('Bogus')).toBeNull()
   })
 
+  it('PatchSettings no longer offers `terminology` and tells the agent where terms go (AQU-1724)', () => {
+    // An agent reads this doc to decide how to write a term. If it still lists
+    // the key, the agent stages a write prepare refuses; if it does not name
+    // term.* events, the agent has no way to land the term at all.
+    const doc = describeCommand('PatchSettings')!.paramsDoc
+    expect(doc).not.toContain('terminology: object[]')
+    expect(doc).not.toContain('termbase-edit floor')
+    expect(doc).toContain('term.create')
+    expect(doc).toContain('term.update')
+    expect(doc).toContain('EmitEvents')
+  })
+
   it('the structure commands publish the floor their engine enforces (AQU-1234)', () => {
     for (const kind of ['InsertCell', 'DeleteCell', 'SplitCell']) {
       const entry = describeCommand(kind)

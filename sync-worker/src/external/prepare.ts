@@ -15,6 +15,7 @@ import {
   laneCellKey,
   requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
+  SET_TRANSLATION_MAX_COMMANDS,
   type Command,
   type CreateOrgCommand,
   type StructureCommand,
@@ -33,7 +34,12 @@ import {
 } from './commands'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { prepareOrgMember } from './org-members-engine'
-import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import {
+  changedPolicyKeys,
+  preparePatchSettings,
+  previewSettingValue,
+  retiredTerminologyBlobDenial,
+} from './commands-patch-settings'
 import { assertWithinBatchCap, requestDrafts } from './commands-draft-cells'
 import { completionBatchSizeFromSettings } from '../../../db/shared/completion-batch'
 import {
@@ -604,6 +610,18 @@ export async function prepareChangesetCore(
   let setCommands = pending.filter(
     (c): c is SetTranslationCommand => c.kind === 'SetTranslation',
   )
+
+  // AQU-1852: refuse an over-cap plan HERE, before the lane resolution, the
+  // precondition read and the id ledger. Staging a plan the apply path cannot
+  // land put the failure in front of a human approver instead of the caller
+  // that built it, so the cap is named at prepare and costs nothing.
+  if (setCommands.length > SET_TRANSLATION_MAX_COMMANDS) {
+    return errorResponse(
+      'validation_failed',
+      `too many SetTranslation commands in one changeset (${setCommands.length} > ${SET_TRANSLATION_MAX_COMMANDS}) — split the work into several changesets`,
+      { maxCommands: SET_TRANSLATION_MAX_COMMANDS, requested: setCommands.length },
+    )
+  }
 
   // AQU-1615: laneId is lanes.id. A tag is not a lane, and omitting it is not
   // the former default lane. A lane the caller cannot see is "lane does not
@@ -1284,6 +1302,9 @@ async function prepareUpdateProjectSettings(
       { policyKeys: changedPolicy },
     )
   }
+  // AQU-1724: nor the retired `terminology` key (an unchanged echo passes).
+  const retired = retiredTerminologyBlobDenial(cmd.settings, current.settings)
+  if (retired) return retired
 
   const plannedIds: PlannedEventIds = {
     updateProjectSettings: { version: cmd.ifMatchVersion },

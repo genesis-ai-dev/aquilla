@@ -180,6 +180,10 @@ export interface ContextualDraft {
 export interface ContextualProjectLease {
   id: string
   projectId: string
+  /** Billing workspace the project belongs to; 0 for an unowned project.
+   *  Carried on the lease so the org ceiling can be summed without joining
+   *  back to `projects` inside the acquire statement (AQU-1847). */
+  orgId: number
   runId: string
   weight: number
   expiresAt: string
@@ -223,6 +227,11 @@ export type ContextualSpanReason =
   | "rejected_by_quorum"
   | "target_already_filled"
   | "span_failed"
+  // AQU-1690: autopilot uses Bible data, but the pack did not load, so the
+  // span ran without it. One code per typed loader failure.
+  | "bible_data_offline"
+  | "bible_data_not_found"
+  | "bible_data_invalid"
 
 /** Union of every ALLOWED details field. `appendContextualRunEvent` applies a
  * per-kind allowlist again at runtime, so excess properties from untyped JS or
@@ -556,6 +565,9 @@ const SPAN_REASONS = new Set<ContextualSpanReason>([
   "rejected_by_quorum",
   "target_already_filled",
   "span_failed",
+  "bible_data_offline",
+  "bible_data_not_found",
+  "bible_data_invalid",
 ])
 
 function truncateUtf8(value: string, maxBytes: number): string {
@@ -728,6 +740,10 @@ function eventSummary(input: AppendContextualRunEventInput, details: ContextualR
         pausing: "Pause requested",
         paused: "Autopilot paused",
         parked: "Autopilot is idle",
+        // AQU-1847: the run holds its place in line for model capacity. It is
+        // NOT paused, idle or failed, and saying so is the whole point — a run
+        // waiting behind another tenant's work used to look stalled.
+        queued: "Autopilot is waiting for model capacity",
         done: "Autopilot completed",
         failed: "Autopilot stopped after an error",
         terminated: "Autopilot terminated",
@@ -1950,12 +1966,53 @@ export async function findProposedCellsFromOtherRuns(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Per-user start throttle
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Window the per-user autopilot start throttle counts over (AQU-1847). */
+export const CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS = 300
+/** Starts one user may make inside that window, across every project they can
+ *  reach. Sized for real use — a translator starting one project, noticing a
+ *  brief is wrong, stopping and restarting a few times stays well under it —
+ *  while refusing the loop that turns one account into platform-wide load.
+ *
+ *  This throttles STARTS, not runs: one project-wide start creates up to
+ *  MAX_PROJECT_FILES runs and must count once. */
+export const CONTEXTUAL_MAX_STARTS_PER_USER = 10
+
+/** Starts this user made in the throttle window. A project-wide start shares
+ *  one `scope_group` across its runs and so counts once; a single-file start
+ *  has no scope group and is counted by its own run id.
+ *
+ *  Counted from the durable run rows rather than a side table so a restarted
+ *  isolate, a second Worker, or a run started through any other surface is
+ *  still visible to the throttle. */
+export async function countRecentContextualStarts(
+  db: AquillaDb,
+  userId: number,
+  windowSeconds = CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS,
+): Promise<number> {
+  const seconds = Math.max(1, Math.min(86_400, Math.floor(windowSeconds)))
+  const row = await db
+    .prepare(
+      `SELECT COUNT(DISTINCT COALESCE(NULLIF(scope_group, ''), id)) AS starts
+         FROM contextual_runs
+        WHERE role_snapshot->>'userId' = ?
+          AND created_at > now() - make_interval(secs => ?)`,
+    )
+    .bind(String(Math.floor(userId)), seconds)
+    .first<{ starts: number | string | null }>()
+  return Number(row?.starts ?? 0)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Cross-isolate project concurrency leases
 // ──────────────────────────────────────────────────────────────────────────
 
 interface ProjectLeaseRow {
   id: string
   project_id: string
+  org_id: number | string | null
   run_id: string
   weight: number
   expires_at: unknown
@@ -1965,6 +2022,7 @@ function rowToProjectLease(row: ProjectLeaseRow): ContextualProjectLease {
   return {
     id: row.id,
     projectId: row.project_id,
+    orgId: Number(row.org_id ?? 0),
     runId: row.run_id,
     weight: Number(row.weight),
     expiresAt: toIso(row.expires_at),
@@ -1974,16 +2032,42 @@ function rowToProjectLease(row: ProjectLeaseRow): ContextualProjectLease {
 export interface TryAcquireContextualProjectLeaseInput {
   projectId: string
   runId: string
+  /** Billing workspace this project belongs to; 0 when it has none. Every
+   *  unowned project shares the org-0 bucket on purpose — nothing should be
+   *  able to opt out of the org ceiling by having no billing workspace. */
+  orgId: number
   /** Maximum aggregate wave width permitted for this project. */
   limit: number
+  /** Maximum aggregate wave width permitted across every project in this org
+   *  (AQU-1847). One tenant with ten projects must not be able to consume the
+   *  shared provider key by multiplying per-project ceilings. */
+  orgLimit: number
+  /** Maximum aggregate wave width permitted platform-wide (AQU-1847). Sized
+   *  BELOW the provider's real ceiling so interactive, user-facing calls —
+   *  which take no lease — always have headroom behind background autopilot. */
+  globalLimit: number
   /** Maximum span width this runOneTick call may execute. */
   weight: number
   leaseSeconds?: number
 }
 
-/** Atomically reserve weighted project capacity across Worker isolates.
- * Locking the canonical project row serializes the sum-and-insert decision;
- * a module-local semaphore alone cannot protect two Cloudflare isolates. */
+/** Serialization point for the capacity decision. A per-project row lock was
+ * enough while the only ceiling was per-project; the org and platform ceilings
+ * (AQU-1847) sum across projects, so two acquirers in different projects would
+ * otherwise both read the same global total and both insert over it. One fixed
+ * advisory key is held for a single statement + commit, so it costs no more
+ * lock wait than the old project row did — and it is taken in the same round
+ * trip as the project existence check, so the statement count is unchanged. */
+const CONTEXTUAL_CAPACITY_ADVISORY_KEY = 18470001
+
+/** Autopilot capacity has three ceilings, checked together: this project, this
+ * project's billing workspace, and the whole platform. Weight is span width,
+ * which is NOT request count — a high-risk span fans its verifier panel out
+ * three-wide, so in-flight requests run ~3x these numbers.
+ *
+ * Atomically reserve all three across Worker isolates: a module-local
+ * semaphore cannot protect two Cloudflare isolates, and nothing below the
+ * database can see another tenant's in-flight work at all. */
 export async function tryAcquireContextualProjectLease(
   db: AquillaDb,
   input: TryAcquireContextualProjectLeaseInput,
@@ -1992,53 +2076,80 @@ export async function tryAcquireContextualProjectLease(
     throw new Error("contextual_project_lease_transaction_unavailable")
   }
   const limit = Math.max(1, Math.min(1000, Math.floor(input.limit)))
+  // Each ceiling is at least as wide as the one inside it: a project limit
+  // above its org's (or an org's above the platform's) is a misconfiguration
+  // that would make the outer ceiling unreachable rather than binding.
+  const orgLimit = Math.max(limit, Math.min(100_000, Math.floor(input.orgLimit)))
+  const globalLimit = Math.max(orgLimit, Math.min(1_000_000, Math.floor(input.globalLimit)))
   const weight = Math.max(1, Math.min(limit, Math.floor(input.weight)))
+  const orgId = Number.isFinite(input.orgId) ? Math.max(0, Math.floor(input.orgId)) : 0
   const leaseSeconds = Math.max(
     30,
     Math.min(3600, Math.floor(input.leaseSeconds ?? CONTEXTUAL_PROJECT_LEASE_SECONDS)),
   )
   return db.transaction(async (tx) => {
     const project = await tx
-      .prepare("SELECT id FROM projects WHERE id = ? FOR UPDATE")
-      .bind(input.projectId)
+      .prepare(
+        // Cast explicitly: pg_advisory_xact_lock is overloaded (bigint, and
+        // int+int), and an untyped bind parameter leaves the resolution to the
+        // driver's parameter typing rather than to this statement.
+        `SELECT id, pg_advisory_xact_lock(?::bigint) AS capacity_lock
+           FROM projects WHERE id = ?`,
+      )
+      .bind(CONTEXTUAL_CAPACITY_ADVISORY_KEY, input.projectId)
       .first<{ id: string }>()
     if (!project) return null
 
     // AQU-1005: GC + capacity check + conditional insert in ONE statement, so
-    // the project row lock above spans a single round trip + commit instead of
-    // three sequential Hyperdrive round trips (the old span queued lease
-    // acquirers for 2.5s mean of pure lock wait). `used` excludes expired rows
-    // by predicate — same-snapshot CTEs don't see gc's deletes and don't need
-    // to; gc (a data-modifying CTE) always executes, even when the insert arm
-    // returns nothing.
+    // the lock above spans a single round trip + commit instead of three
+    // sequential Hyperdrive round trips (the old span queued lease acquirers
+    // for 2.5s mean of pure lock wait). `live` excludes expired rows by
+    // predicate — same-snapshot CTEs don't see gc's deletes and don't need to;
+    // gc (a data-modifying CTE) always executes, even when the insert arm
+    // returns nothing. GC is platform-wide now rather than project-scoped: the
+    // global ceiling is only honest if every expired row anywhere is gone
+    // before the sums are taken.
     const row = await tx
       .prepare(
         `WITH gc AS (
            DELETE FROM contextual_project_leases
-            WHERE project_id = ? AND expires_at <= now()
-         ), used AS (
-           SELECT COALESCE(SUM(weight), 0) AS weight
+            WHERE expires_at <= now()
+         ), live AS (
+           SELECT project_id, org_id, weight
              FROM contextual_project_leases
-            WHERE project_id = ? AND expires_at > now()
+            WHERE expires_at > now()
+         ), used AS (
+           SELECT
+             COALESCE(SUM(weight) FILTER (WHERE project_id = ?), 0) AS project_weight,
+             COALESCE(SUM(weight) FILTER (WHERE org_id = ?), 0)     AS org_weight,
+             COALESCE(SUM(weight), 0)                               AS global_weight
+             FROM live
          )
          INSERT INTO contextual_project_leases
-            (id, project_id, run_id, weight, expires_at)
-         SELECT ?, ?, ?, ?, now() + make_interval(secs => ?)
+            (id, project_id, org_id, run_id, weight, expires_at)
+         SELECT ?, ?, ?, ?, ?, now() + make_interval(secs => ?)
            FROM used
-          WHERE used.weight + ? <= ?
+          WHERE used.project_weight + ? <= ?
+            AND used.org_weight + ? <= ?
+            AND used.global_weight + ? <= ?
          ON CONFLICT (run_id) DO NOTHING
-         RETURNING id, project_id, run_id, weight, expires_at`,
+         RETURNING id, project_id, org_id, run_id, weight, expires_at`,
       )
       .bind(
         input.projectId,
-        input.projectId,
+        orgId,
         uuidv7(),
         input.projectId,
+        orgId,
         input.runId,
         weight,
         leaseSeconds,
         weight,
         limit,
+        weight,
+        orgLimit,
+        weight,
+        globalLimit,
       )
       .first<ProjectLeaseRow>()
     return row ? rowToProjectLease(row) : null

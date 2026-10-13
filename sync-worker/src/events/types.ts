@@ -41,6 +41,11 @@ export interface TermMatchOptionsPayload {
   excludedForms?: string[]
 }
 
+/** Mirrors `ConceptExternalIds` in src/lib/terminology/model.ts (AQU-1693). */
+export interface ConceptExternalIdsPayload {
+  acai?: string
+}
+
 export type EventKind =
   // Source-side cell events (importer / admin only).
   | 'source.cell.create'
@@ -248,6 +253,19 @@ export interface AiDraftProvenance {
   }
 }
 
+/** AQU-1673: where an imported proposal's text came from. Stamped on the
+ *  `target.cell.commit` a staged import compiles to (see `imported_origin`). */
+export interface ImportedOriginProvenance {
+  /** Display name of the uploaded file the value was read out of. */
+  fileName: string
+  /** Epoch ms at which the import was staged. */
+  importedAt: number
+}
+
+/** Longest `fileName` accepted on import provenance. Generous enough for real
+ *  upload names, bounded so provenance can never carry a payload. */
+export const IMPORTED_ORIGIN_FILENAME_MAX = 256
+
 // Payload shape per event kind. Using an interface (not Record) so that
 // EventPayloads[K] gives type-safe lookups without `as` casts.
 export interface EventPayloads {
@@ -390,6 +408,20 @@ export interface EventPayloads {
      * uses this field to enforce harmonize_min_role and to trigger the AD-14
      * endorsement-revocation cascade. Only set by the harmonize sweep path.
      */
+    /**
+     * AQU-1673 / import provenance: set when this commit came from a
+     * translation set the user brought in as PROPOSALS (through the changeset
+     * approval gate) instead of the direct-commit importer. It records WHERE
+     * the text came from so a reviewer can tell an imported proposal from an
+     * AI draft (which carries `ai_suggestion` + `ai_draft`) and from a
+     * hand-typed edit (which carries neither).
+     *
+     * Deliberately NOT paired with `ai_suggestion`: imported text is somebody
+     * else's human translation, so the cell must not read back as an AI draft.
+     * Purely descriptive — it gates nothing and shifts no role floor, which is
+     * why (unlike `ai_draft`) the caller may set it.
+     */
+    imported_origin?: ImportedOriginProvenance
     harmonize_origin?: {
       /** Stable id of the built-in check or custom rule that drove the sweep. */
       rule_or_check_id: string
@@ -448,12 +480,21 @@ export interface EventPayloads {
   }
 
   // ── QA rule waivers ────────────────────────────────────────────────────
-  // `waive` dismisses a single QA rule infraction on a cell; `unwaive`
-  // restores it. Keyed by `ruleId` (one row per (cell, rule)). The DELETE-on-
-  // unwaive shape mirrors validators: a row exists iff the rule is waived.
+  // `waive` dismisses a QA rule finding on a cell; `unwaive` restores it.
+  // Keyed by (cell, rule, matchHash) — one row per waived finding, or one row
+  // with an empty hash for a rule-wide waiver. The DELETE-on-unwaive shape
+  // mirrors validators: a row exists iff that finding is waived.
   'cell.waive': {
     /** Stable id of the QA rule whose infraction is being dismissed. */
     ruleId: string
+    /**
+     * AQU-1740: hash of the matched text identifying ONE finding of this rule
+     * on this cell (`spanMatchHash`, src/lib/rules/match-hash.ts). Omitted
+     * waives the rule across the cell — the only shape that existed before
+     * AQU-1740, and what every stored row predating it means. The projection
+     * stores the absent case as `''` so it fits the primary key.
+     */
+    matchHash?: string
     /** Optional human-entered justification. */
     reason?: string
     /**
@@ -467,6 +508,9 @@ export interface EventPayloads {
   }
   'cell.unwaive': {
     ruleId: string
+    /** AQU-1740: see `cell.waive`. The DELETE is key-exact, so omitting this
+     *  lifts the rule-wide waiver and leaves per-finding ones standing. */
+    matchHash?: string
     /** AQU-1462: see `cell.waive`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -788,6 +832,8 @@ export interface EventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptionsPayload
+    /** AQU-1693: the Bible entity the concept names. */
+    externalIds?: ConceptExternalIdsPayload
   }
   // Partial patch. Only the keys present are written — absent keys keep their
   // projected value, so two people editing DIFFERENT fields of the same
@@ -800,6 +846,8 @@ export interface EventPayloads {
     notes?: string
     caseSensitive?: boolean
     match?: TermMatchOptionsPayload
+    /** AQU-1693: replaces the links wholesale when present; `{}` unlinks. */
+    externalIds?: ConceptExternalIdsPayload
   }
   'term.delete': {
     conceptId: string // soft-delete: stamps deleted_at

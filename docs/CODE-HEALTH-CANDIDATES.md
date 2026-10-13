@@ -1637,3 +1637,115 @@ pattern. It presents as a run that produces no output and leaves the previous lo
 which looks exactly like the command silently failing. Use `kill -9` on PIDs collected via
 `ps -eo pid,args | grep -E "[w]orkerd serve"` (bracket the first letter), never a bare
 `pkill -f`.
+
+## 2026-10-12 — `planLaneBatch`'s duplicated report row shipped; the rest of that file deferred
+
+- **Done this run** (theme 2, complexity reduction inside one file):
+  `src/lib/lanes/lane-batch-backfill.ts`. All 15 `unresolvable.push({ … })` sites inside
+  `planLaneBatch`'s per-project loop spelled out `projectId: project.id` and
+  `projectName: project.name` verbatim; a local `unresolved(rule, key, reason)` closure
+  declared once at the top of that loop replaced them. Net −55 lines, one file, no public
+  surface change (`UnresolvableRow` property order is preserved by the helper's object
+  literal, which matters because `scripts/neon-backfill-lane-batch.ts` serializes the report
+  to JSON).
+- **Deferred — `planLaneBatch` is still ~440 lines in a 1,201-line file.** Two seams exist
+  and neither fits this run's theme or budget:
+  - The report renderer (`cell`, `countLines`, `renderLaneBatchReport`, ~105 lines at the
+    end of the file) shares no closure state with the planner and would move cleanly to a
+    `lane-batch-report.ts` re-exported from the original path — but that is theme 5, and on
+    its own it only takes the file from 1,201 to ~1,100 lines, so it buys little.
+  - Splitting `planLaneBatch`'s nine per-entity passes (lanes, scopes, invites, links,
+    audio, audio validators, backtranslations, concepts, progress) into functions would need
+    all of `counts`, `writes`, `unresolvable`, `scopeZero`, `scopeTwo`, `takeLane` and
+    `progressFiles` threaded through as parameters — a real refactor whose proof would want
+    a characterization test this routine cannot add.
+  - **Proof it would need**: the existing `lane-batch-backfill.test.ts` (15 tests) plus a
+    byte-diff of `renderLaneBatchReport(planLaneBatch(snapshot))` over a real snapshot
+    before and after, since the markdown report and the JSON sidecar are both consumed by
+    the ops script.
+- **Deliberately NOT touched in the same file**: the two 4-branch `assigned.rule === …`
+  ladders that increment `counts.audio.byRule.*` (926-929) and
+  `counts.backtranslations.byRule.*` (999-1002). They look like the
+  if/else-ladder-to-lookup-table smell, but each ladder's `else` is a catch-all onto
+  `emptyTag` over a *wider* union than its own `byRule` record carries (`AssignmentRule`
+  includes `targetEvent`, which `assignAudio` cannot return but the type permits), so a
+  lookup rewrite needs a `rule in byRule ? rule : "emptyTag"` guard that is cleverer than
+  the eight lines it replaces. Left as-is on purpose.
+
+### Baseline 2026-10-12: three red test files on `dev` (all reproduce in isolation)
+
+Clean tree at `origin/dev` `68679349`. `pnpm lint` fails (1 error) and `pnpm test` fails
+(3 files / 5 tests); `pnpm build` is green. None are full-suite ordering flakes — each was
+re-run on its own and failed the same way, so future runs should expect them:
+
+- **`pnpm lint`** — exit 1, 1 error + 993 warnings:
+  `auth-worker/src/routes/monday.ts:801:55` `no-control-regex` ("Unexpected control
+  character(s) in regular expression: \x00, \x1f"). `monday.ts` is the in-flight Monday.com
+  nudge work CLAUDE.md calls out, so it is frozen for this routine twice over.
+- **`src/lib/i18n/namespaces/no-duplicates.test.ts`** — `does not let one exception excuse a
+  second unrelated collision`: `"Draft"` now collides across
+  `editor.batchFile.confirmDraft` and `autopilot.graph.node.draft` with only one documented
+  exception between them. This is a real catalog regression on trunk, not an inert orphan —
+  and per the 2026-09-21 entry above, a red whole-catalog invariant test freezes every
+  `src/lib/i18n/namespaces/*.ts` file for this routine. **Worth a ticket.**
+- **`src/partner-integrations/biblica/__tests__/idml.biblica-scripture.test.ts`** — 3 of 4
+  tests fail with `Missing imported cell for "In the beginning God created the heavens and
+  the earth."` at the shared `cellFor` helper, i.e. the import step produced no cell for the
+  fixture's first verse. Reproduced alone after a green `pnpm build` (so a missing
+  `packages/idml-roundtrip/dist` is not the cause). Partner-owned path. **Worth a ticket.**
+- **`src/lib/egress/zip-core.test.ts`** — `packZip > survives output larger than one flush
+  window` times out at the 60s `testTimeout` (62.4s in-suite, 79.3s alone). Reproduces in
+  isolation, but it is a wall-clock budget failure on a shared container rather than a
+  logic failure, so it may well be green on CI hardware. Lower confidence than the two
+  above; check against a CI run before filing.
+
+### Container setup 2026-10-12: the `--ignore-scripts` dance is no longer needed
+
+`ONNXRUNTIME_NODE_INSTALL=skip pnpm i` installs cleanly (exit 0, 20s) and needs no
+`pnpm rebuild` follow-up and no edit to `pnpm-workspace.yaml`. The env var is the
+`onnxruntime-node` install script's own documented skip flag (`script/install.js`), so it
+suppresses exactly the CUDA-EP download that `ECONNRESET`s on the proxy and nothing else.
+Prefer this over both earlier recipes.
+
+### Smoke 2026-10-12: 92/99, and a NEW full-suite-only flake worth a ledger line
+
+`npx tsx scripts/e2e-shard.ts 1 -- smoke.spec` (one shard, per the 2026-10-09 recipe):
+**92 passed, 7 failed, 18.7m.** Six of the seven are the documented Chromium-revision-gap
+media set from the 2026-10-02 run, at their current line numbers after intervening churn:
+`import-and-edit.smoke.spec.ts:177` (imported video keeps its authenticated picture — was
+`:138`), `import-and-edit.smoke.spec.ts:333` × 3 (the YouTube srt/vtt/sbv caption exports —
+was `:294`), and `import-media-captions.smoke.spec.ts:132` × 2 (embedded m4a/mp4). That
+entry's standing advice holds: do not read them as an import regression without a machine
+carrying the real rev-1243 Chromium.
+
+**The seventh is new to this ledger**: `collab/bt-edit-locked-for-reviewer.smoke.spec.ts:79`
+("BT Edit is locked with Contributor+ tooltip for reviewer") failed at line 136 —
+`expect.poll(() => hasPersistedBacktranslation(…, "fr"), { timeout: 30_000 }).toBe(true)`
+never became true, i.e. alice's backtranslation never showed up server-side within 30s,
+before the test even reaches the reviewer-lock assertion the spec is named for.
+
+It is a **full-suite-only flake, A/B'd rather than assumed**. Both arms were re-run as a
+single-spec shard in the same container:
+
+| arm | result |
+| --- | --- |
+| `lane-batch-backfill.ts` reverted to `HEAD~1` (pristine `dev`) | 1 passed, 19.0s |
+| the shipped change in place | 1 passed, 17.7s |
+
+Same spec, same stack, passes either way — so it is ordering/timing under the full 99-test
+run, not this diff (which cannot reach the SPA at all: a grep of all 192 `dist/assets/*.js`
+chunks for `planLaneBatch`/`unresolvable` after a green `pnpm build` returns nothing, because
+the module's only non-test importer is the `scripts/neon-backfill-lane-batch.ts` ops script).
+Same family as the `AssignedToMe`/`TeamsList`/`ArchivedProjects` full-suite flakes under
+issue [#410](https://github.com/genesis-ai-dev/aquilla/issues/410), but on the Playwright
+side rather than vitest's. **So the expected smoke baseline in this container is 92/99, not
+88/96** — the four-test delta from the 2026-10-02 figure is spec growth plus
+`project-trash` and `agent-connection` having since been fixed; neither appeared this run.
+
+**And one more re-confirmation of the stale-wrangler rule, because it bit again and cost a
+whole arm**: killing `wrangler`/`workerd` and *immediately* launching the next shard is not
+enough. The first attempt at arm B died at `[e2e-up] fatal: Error: [sync] timed out waiting
+for :9788` / `exit 143` — the previous stack's processes were gone from `ps` but the port was
+still held. Poll until **both** `ps -eo pid,comm | grep -E "workerd|wrangler"` and
+`ss -ltn | grep -E "9787|9788|6173"` come back empty before re-launching; the retry then
+booted and passed in 18.8s.

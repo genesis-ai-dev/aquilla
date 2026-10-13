@@ -72,4 +72,31 @@ describe("PeerPresence", () => {
     })
     expect(screen.queryByRole("button", { name: /alice/i })).toBeNull()
   })
+
+  // AQU-1791: the field reports were one colleague appearing 2–3× as
+  // "viewing" from a single tab. The roster is per person: extra connections
+  // read as a count on the one row, never as extra rows.
+  it("renders one row per user with a connection count, not a row per connection", () => {
+    const store = createProjectPresenceStore("me")
+    store.setSelfConnId("my-tab")
+    render(<PeerPresence store={store} />)
+
+    act(() => {
+      store.applyPresenceFrame([
+        { connId: "ghost-1", userId: "pmbah", currentFileId: "file-1", viewingCell: "cell-1", ts: 1 },
+        { connId: "ghost-2", userId: "pmbah", currentFileId: "file-1", viewingCell: "cell-1", ts: 2 },
+        { connId: "live-3", userId: "pmbah", currentFileId: "file-1", focusedCell: "cell-4", ts: 3 },
+      ])
+    })
+
+    // One person online, not three.
+    fireEvent.click(screen.getByRole("button", { name: /pmbah/i }))
+    const popover = screen.getByLabelText("1 online")
+    const rows = within(popover).getAllByRole("button")
+    expect(rows).toHaveLength(1)
+    // Strongest state wins, and the other two connections show as a count.
+    expect(rows[0]).toHaveAccessibleName(/pmbah/i)
+    expect(rows[0]).toHaveAccessibleName(/×3/)
+    expect(rows[0]).toHaveAccessibleName(/editing/i)
+  })
 })

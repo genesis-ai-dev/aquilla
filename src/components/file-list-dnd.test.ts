@@ -67,14 +67,29 @@ describe("resolveSidebarFileDrop", () => {
       .toEqual({ kind: "cancel" })
   })
 
-  it("refuses a row in another group", () => {
+  // AQU-1702: another group is a move into it, not a refusal. Whether the
+  // move can be written is planFileRegroup's call — geometry only reports
+  // which group and which slot the pointer chose.
+  it("takes the hovered row's slot in another group", () => {
     expect(resolveSidebarFileDrop(active("episode-2", "Season 1", 1), fileOver("pilot", "Season 2", 0)))
-      .toEqual({ kind: "refuse", group: "Season 2" })
+      .toEqual({
+        kind: "regroup",
+        fileId: "episode-2",
+        fromGroup: "Season 1",
+        group: "Season 2",
+        toPosition: 0,
+      })
   })
 
-  it("refuses the other group's header, where there is no row", () => {
+  it("has no slot on the other group's header, where there is no row", () => {
     expect(resolveSidebarFileDrop(active("episode-2", "Season 1", 1), groupOver("Season 2")))
-      .toEqual({ kind: "refuse", group: "Season 2" })
+      .toEqual({
+        kind: "regroup",
+        fileId: "episode-2",
+        fromGroup: "Season 1",
+        group: "Season 2",
+        toPosition: null,
+      })
   })
 
   it("cancels a drop on the dragged file's own group header", () => {
@@ -144,7 +159,7 @@ describe("sidebarFileCollision", () => {
     expect(hits.map((hit) => hit.id)).toEqual(["episode-2"])
   })
 
-  it("refuses from the other group's header instead of snapping back", () => {
+  it("targets the other group's header instead of snapping back", () => {
     const other = droppable("sidebar-drop:Season 2", { group: "Season 2" }, box(200, 80))
     const hits = sidebarFileCollision({
       active: active("episode-1", "Season 1"),

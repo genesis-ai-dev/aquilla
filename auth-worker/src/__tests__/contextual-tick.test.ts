@@ -831,3 +831,38 @@ describe("runOneTick", () => {
     expect(result.continueRun).toBe(true) // span 2 still gets its chance
   })
 })
+
+describe("runOneTick — lane language in the draft prompt", () => {
+  it("names the lane's language, never the hex id its tag was set to", async () => {
+    const laneId = "a3f09c1e"
+    await db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+         VALUES ('span0001', ?, 'target', 'Spanish', 'es', 'Spanish', 1),
+                (?, ?, 'target', 'Spanish team', 'Spanish', ?, 2)`,
+      )
+      .bind(PROJECT, laneId, PROJECT, laneId)
+      .run()
+    await db
+      .prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+      .bind(PROJECT, JSON.stringify({ sourceLanguage: "English", targetLanguage: "Swahili" }))
+      .run()
+    await seedFile()
+    const created = await createRun(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      laneId,
+      initiatedBy: "tester",
+      roleSnapshot: { userId: 1, username: "tester", level: 400 },
+      spanAllowance: null,
+    })
+    if (created.status !== "ok") throw new Error("run not created")
+
+    await runOneTick({ db, runId: created.run.id, llm: llm() })
+
+    const draft = captured.find((call) => call.system.includes("[[ctx:draft]]"))
+    expect(draft?.system).toContain("into Spanish")
+    expect(draft?.system).not.toContain(laneId)
+    expect(draft?.system).not.toContain("Swahili")
+  })
+})

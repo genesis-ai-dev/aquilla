@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   laneScopeAdmitsTag,
+  lanesForScopeVisibility,
   laneScopesAsTags,
   laneScopeIds,
   laneScopeIdsForStorage,
@@ -129,5 +130,19 @@ describe('laneScopesAsTags', () => {
     expect(laneScopesAsTags([{ kind: 'lane', value: 'fr' }], [])).toEqual([
       { kind: 'lane', value: 'fr' },
     ])
+  })
+})
+
+describe('lanesForScopeVisibility', () => {
+  it('treats each stored value as its own lane when no rows exist yet', () => {
+    const limited = lanesForScopeVisibility(['es'], [])
+    expect([...limited.visible]).toEqual(['es'])
+    expect(limited.lanes).toEqual([{ id: 'es', name: 'es', legacyTag: 'es' }])
+  })
+
+  it('keeps the one lane a stored id names, and ignores language', () => {
+    const limited = lanesForScopeVisibility(['lane-fr'], lanes)
+    expect([...limited.visible]).toEqual(['lane-fr'])
+    expect(limited.lanes).toBe(lanes)
   })
 })

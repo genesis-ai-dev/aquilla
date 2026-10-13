@@ -18,6 +18,27 @@ describe("parseWalkComment", () => {
     })
   })
 
+  it("accepts the abbreviated, backticked, and re-walk heading shapes the bot also posts", () => {
+    const short = HEAD_SHA.slice(0, 7)
+    for (const heading of [
+      `## Bot walk — PR 771 @ ${short}`,
+      `## Bot walk — PR 771 @ \`${HEAD_SHA}\``,
+      `## Bot walk — PR 771 @ \`${short}\` (claim 2 rewalk)`,
+      `## Bot walk — PR #771 @ ${short} (rewalk after Manager fixture)`,
+    ]) {
+      expect(parseWalkComment(`${heading}\n\n**PASS** · walk 4/4`)).toEqual({
+        prNumber: 771,
+        sha: heading.includes(HEAD_SHA) ? HEAD_SHA : short,
+        verdict: "PASS",
+      })
+    }
+  })
+
+  it("returns null for a heading with no sha or one too short to identify a commit", () => {
+    expect(parseWalkComment("## Bot walk — PR 771\n\n**PASS**")).toBeNull()
+    expect(parseWalkComment("## Bot walk — PR 771 @ aaaaaa\n\n**PASS**")).toBeNull()
+  })
+
   it("returns null for a comment with no walk heading", () => {
     expect(parseWalkComment("Looks good to me!")).toBeNull()
   })
@@ -87,6 +108,25 @@ describe("lookupWalk", () => {
       comments: [{ body: walkComment(771, OTHER_SHA, "PASS") }],
     })
     expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("unknown")
+  })
+
+  it("matches an abbreviated sha against the PR's full head sha", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      comments: [{ body: walkComment(771, `\`${HEAD_SHA.slice(0, 8)}\``, "PASS") }],
+    })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("PASS")
+  })
+
+  it("lets the newest walk of the head sha win over an earlier one", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      comments: [
+        { body: walkComment(771, HEAD_SHA, "PASS") },
+        { body: walkComment(771, `${HEAD_SHA.slice(0, 7)} (rewalk)`, "FAIL") },
+      ],
+    })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("fail")
   })
 
   it("normalizes FLAKY through the same path as a direct verdict check", async () => {

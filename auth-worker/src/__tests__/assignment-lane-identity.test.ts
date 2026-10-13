@@ -75,23 +75,14 @@ async function seedTwoSameLanguageLanes(): Promise<void> {
   ).run()
 
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at, canonical_ref) VALUES
-      ('pb','f1','c1','source','','ln-src','s','e-pb',1,'ACT 1:1'),
-      ('pb','f1','c2','source','','ln-src','s','e-pb',1,'ACT 1:2')`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at, canonical_ref) VALUES ('pb', 'f1', 'c1', 'source', 'ln-src', 's', 'e-pb', 1, 'ACT 1:1'), ('pb', 'f1', 'c2', 'source', 'ln-src', 's', 'e-pb', 1, 'ACT 1:2')`,
   ).run()
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at, endorsement_count, validated) VALUES
-      ('pb','f1','c1','target','Spanish','ln-es1','uno','e-pb',1,1,1),
-      ('pb','f1','c2','target','Spanish','ln-es1','dos','e-pb',1,0,0),
-      ('pb','f1','c1','target','ln-es2','ln-es2','uno mx','e-pb',1,1,1),
-      ('pb','f1','c2','target','ln-es2','ln-es2','dos mx','e-pb',1,1,1)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at, endorsement_count, validated) VALUES ('pb', 'f1', 'c1', 'target', 'ln-es1', 'uno', 'e-pb', 1, 1, 1), ('pb', 'f1', 'c2', 'target', 'ln-es1', 'dos', 'e-pb', 1, 0, 0), ('pb', 'f1', 'c1', 'target', 'ln-es2', 'uno mx', 'e-pb', 1, 1, 1), ('pb', 'f1', 'c2', 'target', 'ln-es2', 'dos mx', 'e-pb', 1, 1, 1)`,
   ).run()
 
   await env.AQUILLA_PG.prepare(
-    `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, lane_id, cells_total, created_by, created_at) VALUES
-      ('as-one',   'pb', 2, 'books', 'Acts', 'Spanish', 'ln-es1', 2, 1, 1000),
-      ('as-two',   'pb', 3, 'books', 'Acts', 'ln-es2',  'ln-es2', 2, 1, 1100),
-      ('as-drift', 'pb', 2, 'books', 'Acts', 'es-MX',   'ln-es1', 2, 1, 1200)`,
+    `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, lane_id, cells_total, created_by, created_at) VALUES ('as-one', 'pb', 2, 'books', 'Acts', 'ln-es1', 2, 1, 1000), ('as-two', 'pb', 3, 'books', 'Acts', 'ln-es2', 2, 1, 1100), ('as-drift', 'pb', 2, 'books', 'Acts', 'ln-es1', 2, 1, 1200)`,
   ).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
@@ -256,13 +247,10 @@ describe("AQU-1493: an assignee's progress without headings matches lines by lan
     // headings left out it counts on neither side — which is how the test knows
     // the read took the headings-excluded copy.
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, type, event_id, last_edit_at, canonical_ref) VALUES
-        ('pb','f1','h1','source','','ln-src','Acts','heading','e-pb',1,'ACT 1:0')`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, type, event_id, last_edit_at, canonical_ref) VALUES ('pb', 'f1', 'h1', 'source', 'ln-src', 'Acts', 'heading', 'e-pb', 1, 'ACT 1:0')`,
     ).run()
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, lane_id, value, event_id, last_edit_at, endorsement_count, validated) VALUES
-        ('pb','f1','h1','target','Spanish','ln-es1','Hechos','e-pb',1,1,1),
-        ('pb','f1','h1','target','ln-es2','ln-es2','Hechos','e-pb',1,1,1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, event_id, last_edit_at, endorsement_count, validated) VALUES ('pb', 'f1', 'h1', 'target', 'ln-es1', 'Hechos', 'e-pb', 1, 1, 1), ('pb', 'f1', 'h1', 'target', 'ln-es2', 'Hechos', 'e-pb', 1, 1, 1)`,
     ).run()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES

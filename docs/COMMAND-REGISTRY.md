@@ -89,12 +89,16 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   `patchProjectSettingsShared` in `db/shared/projects.ts`). One op per key — a duplicate key is
   `validation_failed` (a settings op is authored intent, not a loop batch; last-wins would hide a bug).
 - Per-key floors: `terminology` → org `termbaseEditMinRole` (read `org_settings`, default 500);
-  `sourceLanguage` / `targetLanguage` / `targetLanes` / `archivedLanes` → org
-  `languageEditMinRole` (read `org_settings`, default 600 — AQU-1086); everything else 600
-  (MAINTAINER). A batch takes the MAX floor across its ops, so lowering one floor never widens
-  another key. Both org floors are resolved at prepare **and** re-resolved at commit; the
-  catalog's static floor advertises each key's *default*, so an org that lowers
-  `languageEditMinRole` makes the catalog conservative rather than permissive.
+  everything else 600 (MAINTAINER). A batch takes the MAX floor across its ops, so lowering
+  one floor never widens another key. The org floor is resolved at prepare **and**
+  re-resolved at commit; the catalog's static floor advertises the key's *default*, so an
+  org that lowers `termbaseEditMinRole` makes the catalog conservative rather than permissive.
+- `sourceLanguage`, `targetLanguage`, `targetLanes`, and `archivedLanes` are not settings
+  (AQU-1615). `PatchSettings` and `UpdateProjectSettings` reject them at validation, before
+  any lane row would be created, with a message that points at `CreateProject` /
+  `ProjectSetup` `lanes: [{ role, language, name?, code? }]`. The in-app
+  `languageEditMinRole` floor still applies to the app's own settings write; it does not
+  reopen these keys on the external API.
 - **POLICY_SETTINGS_KEYS** (exported const) — `agentMemoryAutonomy`, `validationRoleFloor`,
   `validationNamedUsers`, `validationCount`, `validationCountAudio`, `allowSelfValidation`,
   their audio twins `validationRoleFloorAudio`, `validationNamedUsersAudio` and
@@ -122,7 +126,7 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
 
 ```ts
 { kind: 'EmitEvents',
-  events: { kind: string; fileId?: string; cellId?: string; laneId?: string;
+  events: { kind: string; fileId?: string; cellId?: string; laneId?: string; // required lanes.id on cell.validate, cell.unvalidate, cell.backtranslation.set, target.cell.repin
             payload?: Record<string, unknown> }[] }
 ```
 

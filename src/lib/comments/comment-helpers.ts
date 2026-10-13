@@ -39,14 +39,45 @@ export function stripAgentCommentMarker(label: string): string {
     : label
 }
 
+/**
+ * A confirmed mention. Typed `@name` is ordinary text and does not notify
+ * anyone. Enter (or a click on the suggestion) stores this token instead.
+ *
+ * The brackets delimit the username, so the capture takes anything a roster
+ * username can hold. Registration accepts any 3–50 characters, and live
+ * usernames carry hyphens, dots and digits (`qa-bot-2`); a class limited to
+ * `[a-zA-Z0-9_]` left those mentions as raw text with no chip and no notice.
+ * Only brackets and line breaks are excluded, so a stray `[` cannot swallow
+ * the next token.
+ * KEEP IN SYNC with sync-worker/src/notification-email.ts MENTION_TOKEN_SOURCE.
+ */
+export const MENTION_TOKEN_SOURCE = String.raw`@\[([^\[\]\r\n]+)\]`
+
+/** A fresh global matcher. `exec` loops need their own `lastIndex`. */
+export function mentionTokenRegex(): RegExp {
+  return new RegExp(MENTION_TOKEN_SOURCE, "g")
+}
+
+/**
+ * A confirmed mention, matching Linear's rendered user tag: an inline
+ * medium-weight `@Name` with no pill. The composer marks the same node
+ * `contenteditable=false` so it deletes as one object.
+ */
+export const MENTION_CHIP_CLASS = "mention font-medium text-foreground"
+
 export function extractMentions(text: string): string[] {
   const mentions = new Set<string>()
-  const re = /(?:^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g
+  const re = mentionTokenRegex()
   let match: RegExpExecArray | null
   while ((match = re.exec(text)) !== null) {
     mentions.add(match[1])
   }
   return Array.from(mentions)
+}
+
+/** Show a confirmed mention as `@name` in plain text (inbox excerpts). */
+export function mentionDisplayText(text: string): string {
+  return text.replace(mentionTokenRegex(), "@$1")
 }
 
 function escapeHtml(text: string): string {
@@ -63,7 +94,7 @@ export function renderCommentHtml(text: string): string {
   html = html.replace(/\*\*([^*]+?)\*\*/g, "<b>$1</b>")
   html = html.replace(/\*([^*]+?)\*/g, "<i>$1</i>")
   html = html.replace(/`([^`]+?)`/g, "<code>$1</code>")
-  html = html.replace(/(^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g, '$1<span class="mention">@$2</span>')
+  html = html.replace(mentionTokenRegex(), `<span class="${MENTION_CHIP_CLASS}">@$1</span>`)
   html = html.replace(/\n/g, "<br>")
   return html
 }

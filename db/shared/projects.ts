@@ -16,10 +16,14 @@
 // either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
+import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import {
+  askedLanesFromSpecs,
   ensureProjectLaneStmts,
   listProjectLanes,
   retryingLaneIdCollision,
+  type AskedLane,
+  type ExternalLaneSpec,
   type ProjectLaneRecord,
 } from "./lanes"
 
@@ -49,26 +53,27 @@ export interface CreateProjectInput {
    */
   writeCreatorMembership?: boolean
   /**
-   * AQU-1223: seed `settings.sourceLanguage` / `settings.targetLanguage` at
-   * creation, atomically with the project row.
+   * AQU-1594: the language pair becomes lane rows in the same batch as the
+   * project. It is NOT written into `project_settings` — new projects have no
+   * project-level language keys. Omit both and the project still gets its
+   * source lane (every project has one) and no target lane.
    *
-   * This is the same end state the UI's create flow reaches by calling
-   * `patchProjectSettings(..., version 0)` immediately after the create — the
-   * seeded row lands at **version 1**, so a client that reads the version back
-   * and patches on top of it behaves identically either way. Omit both (the
-   * auth-worker route does) and no settings row is written at all, leaving the
-   * lazy first-write path in `updateProjectSettingsShared` exactly as it was.
-   *
-   * Only the language pair is seedable here. Every other settings key needs the
-   * version guard and per-key role floors that PatchSettings owns, which a
-   * create — writing before any project role exists to resolve — cannot honor.
+   * The first target lane's `legacy_tag` is the language string, not `''`.
    */
   settingsSeed?: { sourceLanguage?: string; targetLanguage?: string }
+  /**
+   * Target lanes beyond the single `settingsSeed.targetLanguage`, each with
+   * the language the user typed and an optional display name. Same batch.
+   */
+  targetLanes?: ReadonlyArray<{ language: string; name?: string | null }>
+  /**
+   * AQU-1615: explicit lanes from the external API (role, language, optional
+   * name, optional code). When set, these are the lanes — `settingsSeed` and
+   * `targetLanes` are not also applied, and no project-level language key is
+   * written. The app create path leaves this unset.
+   */
+  lanes?: readonly ExternalLaneSpec[]
 }
-
-/** Version a seeded settings row lands at, matching the UI's create-then-patch
- *  (`patchProjectSettings(..., 0)` → version 1). */
-const SEEDED_SETTINGS_VERSION = 1
 
 /**
  * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and,
@@ -78,12 +83,14 @@ const SEEDED_SETTINGS_VERSION = 1
  *
  * Throws on any DB error; the caller owns the error → HTTP-status mapping (the
  * auth-worker route wraps this in try/catch and returns 500 unchanged).
+ *
+ * AQU-1594: the same batch writes the source lane and each requested target
+ * lane. No project-level language keys are written.
  */
 export async function createProjectShared(
   db: AquillaDb,
   input: CreateProjectInput,
 ): Promise<{ inserted: boolean }> {
-  const seed = seededSettings(input.settingsSeed)
   // Lane ids are minted inside the attempt. A uq_lanes_id collision rolls the
   // whole batch back, so repeating it does not insert the project twice.
   return retryingLaneIdCollision(async () => {
@@ -112,52 +119,48 @@ export async function createProjectShared(
       )
     }
 
-    if (seed != null) {
-      // Same batch as the project insert: a create that reported the languages
-      // back to its caller must never leave a project without them (AQU-1223).
-      // DO NOTHING on conflict so an idempotent retry — or a settings row that
-      // somehow already exists for this id — never rolls a live blob backwards.
-      stmts.push(
-        db
-          .prepare(
-            `INSERT INTO project_settings (project_id, settings, version, updated_by)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(project_id) DO NOTHING`,
-          )
-          .bind(input.projectId, JSON.stringify(seed), SEEDED_SETTINGS_VERSION, input.createdBy),
-      )
-    }
-
-    // AQU-1240 slice 6: every new project gets a source lane + a default target
-    // lane in the same batch as the project row, so the first cell write can
-    // resolve lane_id. Languages from settingsSeed name the rows; otherwise they
-    // land as placeholders and a later settings PATCH promotes the names.
+    const lanes = lanesForNewProject(input)
     stmts.push(
-      ...ensureProjectLaneStmts(db, input.projectId, { settings: seed }),
+      ...ensureProjectLaneStmts(db, input.projectId, { lanes }),
     )
 
-    if (stmts.length > 1) {
-      const [projectResult] = await db.batch(stmts)
-      return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
-    }
-
-    const result = await projectStmt.run()
-    return { inserted: (result.meta?.changes ?? 0) > 0 }
+    const [projectResult] = await db.batch(stmts)
+    return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
   })
 }
 
-/** Build the seeded settings blob, or null when there is nothing to seed.
- *  Absent keys stay absent — a caller that sends neither language gets no
- *  settings row at all, which is the pre-AQU-1223 behavior for every caller. */
-function seededSettings(
-  seed: CreateProjectInput["settingsSeed"],
-): Record<string, unknown> | null {
-  if (seed == null) return null
-  const settings: Record<string, unknown> = {}
-  if (seed.sourceLanguage !== undefined) settings.sourceLanguage = seed.sourceLanguage
-  if (seed.targetLanguage !== undefined) settings.targetLanguage = seed.targetLanguage
-  if (Object.keys(settings).length === 0) return null
-  return normalizeSettings(settings)
+/** Source lane plus each requested target. The first target's tag is its language. */
+function lanesForNewProject(input: CreateProjectInput): AskedLane[] {
+  if (input.lanes) {
+    const asked = askedLanesFromSpecs(input.lanes)
+    if (!asked.ok) throw new Error(asked.message)
+    // A project always has a source lane. An explicit list that names only
+    // targets still gets one, with no language, the same as an empty seed.
+    if (!asked.lanes.some((lane) => lane.role === "source")) {
+      return [{ role: "source", language: "" }, ...asked.lanes]
+    }
+    return asked.lanes
+  }
+  const source = typeof input.settingsSeed?.sourceLanguage === "string"
+    ? input.settingsSeed.sourceLanguage.trim()
+    : ""
+  const lanes: AskedLane[] = [{ role: "source", language: source }]
+  const addTarget = (language: string, name?: string | null) => {
+    const trimmed = language.trim()
+    if (!trimmed) return
+    if (lanes.some((lane) => lane.role === "target" && isPrimaryRegistryLane(trimmed, lane.language))) return
+    lanes.push({
+      role: "target",
+      language: trimmed,
+      name: name?.trim() ? name.trim() : null,
+      legacyTag: trimmed,
+    })
+  }
+  if (typeof input.settingsSeed?.targetLanguage === "string") {
+    addTarget(input.settingsSeed.targetLanguage)
+  }
+  for (const target of input.targetLanes ?? []) addTarget(target.language, target.name)
+  return lanes
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -248,7 +251,7 @@ function validationProjectionStmts(
              WHERE v.project_id = c.project_id
                AND v.file_id = c.file_id
                AND v.cell_id = c.cell_id
-               AND v.target_lang = c.target_lang
+               AND v.lane_id = c.lane_id
                AND v.event_id = c.event_id
           ) >= ? THEN 1 ELSE 0 END
         WHERE c.project_id = ? AND c.side = 'target' AND ${guard}`,
@@ -330,6 +333,33 @@ export interface UpdateProjectSettingsInput {
   ifMatchVersion: number
   /** Writer's user id (numeric, or its string form). */
   updatedBy: number | string
+  /**
+   * AQU-1615: the in-app settings write still registers lanes from the blob
+   * (AQU-1585). An external settings write passes false so a blob that still
+   * holds sourceLanguage / targetLanguage / targetLanes / archivedLanes cannot
+   * mint a lane. Default true.
+   */
+  registerLanes?: boolean
+  /**
+   * AQU-1075: this write is the link copying a field into a downstream.
+   * Skip the inherit prepare (it would detach the field being copied) and
+   * skip a further cascade from this write — the caller walks the chain.
+   */
+  inheritPropagation?: boolean
+  /** Originals for knowledge documents copied with a newly enabled field. */
+  blobs?: {
+    get(key: string): Promise<{
+      arrayBuffer(): Promise<ArrayBuffer>
+      httpMetadata?: { contentType?: string }
+    } | null>
+    put(
+      key: string,
+      value: ArrayBuffer | Uint8Array,
+      options?: { httpMetadata?: { contentType?: string } },
+    ): Promise<unknown>
+    delete(key: string): Promise<unknown>
+  } | null
+  r2KeyPrefix?: string
 }
 
 /**
@@ -346,7 +376,12 @@ export interface UpdateProjectSettingsInput {
  * `error` to its own 500, matching the internal route's original behavior.
  */
 export type UpdateProjectSettingsResult =
-  | { status: "ok"; settings: ProjectSettingsResponse }
+  | {
+      status: "ok"
+      settings: ProjectSettingsResponse
+      /** Live downstreams this save copied into, with the version now stored. */
+      propagated?: { projectId: string; version: number }[]
+    }
   | { status: "conflict"; current: ProjectSettingsResponse }
   | { status: "error"; message: string }
 
@@ -360,6 +395,8 @@ export interface PatchProjectSettingsInput {
   ifMatchVersion: number
   /** Writer's user id (numeric, or its string form). */
   updatedBy: number | string
+  /** See {@link UpdateProjectSettingsInput.registerLanes}. Default true. */
+  registerLanes?: boolean
 }
 
 /**
@@ -386,6 +423,7 @@ export async function patchProjectSettingsShared(
     settings: merged,
     ifMatchVersion: input.ifMatchVersion,
     updatedBy: input.updatedBy,
+    registerLanes: input.registerLanes,
   })
 }
 
@@ -408,7 +446,29 @@ export async function updateProjectSettingsShared(
     return { status: "conflict", current }
   }
 
-  const normalizedSettings = normalizeSettings(input.settings)
+  // AQU-1075: a normal save keeps the link's choice, detaches a field the
+  // maintainer just edited, and pulls a field they just turned on. A copy
+  // the link itself is writing skips this — otherwise the copy would detach
+  // the field it is delivering. A failure here must not refuse the save.
+  let settingsToStore = input.settings
+  let pullKnowledge = false
+  if (!input.inheritPropagation) {
+    try {
+      const inherited = await import("./inherited-settings")
+      const prepared = await inherited.prepareInheritedSettingsWrite(
+        db,
+        input.projectId,
+        current.settings,
+        input.settings,
+      )
+      settingsToStore = prepared.settings
+      pullKnowledge = prepared.pullKnowledge
+    } catch (err) {
+      console.error("[inherited-settings] prepare failed:", err)
+    }
+  }
+
+  const normalizedSettings = normalizeSettings(settingsToStore)
   const newSettingsJson = JSON.stringify(normalizedSettings)
   const newVersion = current.version + 1
   const oldThreshold = validationThreshold(current.settings)
@@ -416,15 +476,21 @@ export async function updateProjectSettingsShared(
   const thresholdChanged = oldThreshold !== newThreshold
   // Lane ids are minted inside the attempt. The settings write is in the same
   // transaction, so a uq_lanes_id collision rolls the version change back too.
-  // The existing lane rows stop a stale targetLanes entry minting a lane (AQU-1585).
+  // Passing the existing lane rows stops a stale targetLanes entry minting a
+  // second lane for one that already exists (AQU-1585). The in-app path still
+  // registers lanes from the blob. External settings writes pass
+  // registerLanes: false (AQU-1615) so they never mint a lane.
+  const registerLanes = input.registerLanes !== false
   const batchWithLanes = (head: AquillaStatement[]) =>
     retryingLaneIdCollision(() =>
       db.batch([
         ...head,
-        ...ensureProjectLaneStmts(db, input.projectId, {
-          settings: normalizedSettings,
-          existingLanes: current.lanes ?? [],
-        }),
+        ...(registerLanes
+          ? ensureProjectLaneStmts(db, input.projectId, {
+              settings: normalizedSettings,
+              existingLanes: current.lanes ?? [],
+            })
+          : []),
       ]),
     )
 
@@ -497,5 +563,29 @@ export async function updateProjectSettingsShared(
   }
 
   const fresh = await loadProjectSettings(db, input.projectId)
-  return { status: "ok", settings: fresh }
+  let propagated: { projectId: string; version: number }[] = []
+  if (!input.inheritPropagation) {
+    try {
+      const inherited = await import("./inherited-settings")
+      propagated = await inherited.afterInheritedSettingsWrite(db, {
+        projectId: input.projectId,
+        before: current.settings,
+        after: normalizedSettings,
+        updatedBy: input.updatedBy,
+        pullKnowledge,
+        blobs: input.blobs,
+        r2KeyPrefix: input.r2KeyPrefix,
+      })
+    } catch (err) {
+      console.error("[inherited-settings] propagate failed:", err)
+    }
+  }
+  const settings = propagated.length > 0 || pullKnowledge
+    ? await loadProjectSettings(db, input.projectId)
+    : fresh
+  return {
+    status: "ok",
+    settings,
+    ...(propagated.length > 0 ? { propagated } : {}),
+  }
 }

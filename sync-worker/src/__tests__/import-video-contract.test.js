@@ -68,4 +68,50 @@ describe('video publication producer/consumer contract', () => {
     }
   })
 
+  // AQU-1565 follow-up: the role the media import (createMediaFileCommit,
+  // pinned client-side in youtube-media-commit.test.ts) puts on every
+  // attachment must survive the real client body into the projection.
+  // Without it the shared recording was stored as a dub on every row.
+  it('stores the import\'s shared recording as source audio, not a dub', async () => {
+    const token = await leadToken()
+    const testDb = await makeTestDb()
+    const { db, rows } = testDb
+    const fetchImpl = async (input, init) => {
+      const response = await handleBulkImportRequest(new Request(input, init), makeEnv(db))
+      if (!response) throw new Error('import route did not handle client request')
+      return response
+    }
+    try {
+      await bulkUploadSource({
+        projectId: PROJECT_ID, fileId: FILE_ID,
+        file: { id: 'client-audio-create', name: 'episode.wav', fileType: 'audio', orderedBy: 'time' },
+        cells: [
+          { id: 'client-cell-create-1', cellId: 'client-cell-1', anchorCellId: null, value: 'episode.wav', medium: 'media' },
+          { id: 'client-cell-create-2', cellId: 'client-cell-2', anchorCellId: 'client-cell-1', value: 'episode.wav', medium: 'media' },
+        ],
+        deferPublication: true, getToken: async () => token, fetchImpl,
+      })
+      await db.prepare(`INSERT INTO artifacts (
+        id, project_id, uploaded_by_user_id, name, content_type,
+        size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+      ) VALUES (?::uuid, ?, '1', 'episode.wav', 'audio/wav', 4, ?, ?, ?, 'audio', 'episode.wav', '{}'::jsonb)`)
+        .bind('01900000-0000-7000-8000-000000000103', PROJECT_ID,
+          'b'.repeat(64), 'episode.wav', FILE_ID).run()
+      await publishStagedImport({
+        projectId: PROJECT_ID, fileId: FILE_ID,
+        coreMediaUrl: 'https://www.youtube.com/watch?v=M7lc1UVf-VE',
+        attachments: ['client-cell-1', 'client-cell-2'].map((cellId, i) => ({
+          cellId, audioId: 'episode.wav', url: 'frontier-audio://episode.wav',
+          slot: 'recording', role: 'source', mimeType: 'audio/wav',
+          trimStartMs: i * 1000, trimEndMs: (i + 1) * 1000,
+        })),
+        getToken: async () => token, fetchImpl,
+      })
+      const audio = await rows('cell_audio')
+      expect(audio).toHaveLength(2)
+      expect(audio.map(row => row.role)).toEqual(['source', 'source'])
+    } finally {
+      await testDb.close()
+    }
+  })
 })

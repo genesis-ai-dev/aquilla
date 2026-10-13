@@ -158,6 +158,34 @@ describe("createAssignment", () => {
     expect(bodies[4].targetLang).toBe("Swahili")
   })
 
+  it("stamps laneId beside the tag, and still omits the tag for the default lane (AQU-1601)", async () => {
+    mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const parsed = JSON.parse(init.body as string)
+        bodies.push(parsed.events[0].payload)
+        return jsonRes({ accepted: [{ id: parsed.events[0].id }], rejected: [] })
+      }),
+    )
+
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis",
+      targetLang: "es", laneId: "lane-es",
+    })
+    await createAssignment({
+      jwt: "jwt", projectId: "p1", fileId: "f1", author: "wendi", assigneeUserId: 2,
+      scope: [{ fileId: "f1" }], scopeKind: "books", scopeLabel: "Genesis",
+      targetLang: "", laneId: "lane-default",
+    })
+
+    expect(bodies[0]).toMatchObject({ targetLang: "es", laneId: "lane-es" })
+    expect(bodies[1].laneId).toBe("lane-default")
+    expect("targetLang" in bodies[1]).toBe(false)
+  })
+
   it("throws AssignmentEmitError when the server rejects (e.g. role too low → 403)", async () => {
     mockFetchSyncToken.mockResolvedValue({ token: "synctoken" } as Awaited<ReturnType<typeof fetchSyncToken>>)
     vi.stubGlobal(

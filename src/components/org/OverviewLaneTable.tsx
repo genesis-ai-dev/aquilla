@@ -38,8 +38,7 @@ import {
 import { MenuItem } from "@/components/ui/menu-parts"
 import { Section } from "@/components/ui/page"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { UserChip } from "@/components/UserChip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
@@ -55,6 +54,8 @@ import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 export interface OverviewLaneTableProps {
   projectId: string
+  /** Display name for the staffing grant sentence. */
+  projectName?: string | null
   /** Org that owns the project — for StaffLanePopover's roster + AssignModal. */
   orgId: number | null
   jwt: string | null
@@ -85,6 +86,11 @@ function laneTagId(lane: string): string {
   return lane === "" ? "default" : lane
 }
 
+/** Staff opens one popover. Two rows can share a tag (`""`); the lane id cannot. */
+function laneStaffKey(lane: PortfolioLane): string {
+  return lane.laneId ?? laneTagId(lane.lane)
+}
+
 function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | null }): string {
   const key = lane.laneId || lane.lane
   if (!key) return `/project/${projectId}/editor?lane=`
@@ -102,9 +108,7 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
   return (
     <AvatarGroup data-size="sm">
       {shown.map((m) => (
-        <AppTooltip key={m.userId} content={m.username}>
-          <InitialsAvatar name={m.username} size="sm" />
-        </AppTooltip>
+        <UserChip key={m.userId} userId={m.userId} username={m.username} size="sm" avatarOnly />
       ))}
       {extra > 0 && <AvatarGroupCount>+{extra}</AvatarGroupCount>}
     </AvatarGroup>
@@ -126,6 +130,7 @@ function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string })
 
 export function OverviewLaneTable({
   projectId,
+  projectName,
   orgId,
   jwt,
   lanes,
@@ -284,11 +289,12 @@ export function OverviewLaneTable({
                     lane={row.original.lane}
                     laneId={row.original.laneId}
                     laneLabel={label}
+                    projectName={projectName}
                     orgId={orgId}
                     anchorOnly
-                    open={staffLane === row.original.lane}
+                    open={staffLane === laneStaffKey(row.original)}
                     onOpenChange={(next) => {
-                      setStaffLane(next ? row.original.lane : null)
+                      setStaffLane(next ? laneStaffKey(row.original) : null)
                     }}
                     trigger={
                       <span
@@ -347,8 +353,8 @@ export function OverviewLaneTable({
     >
       <DataTable
         columns={columns}
-        data={lanes}
-        getRowId={(l) => laneTagId(l.lane)}
+        data={lanes.filter((lane) => lane.role !== "source")}
+        getRowId={(l) => l.laneId ?? laneTagId(l.lane)}
         getRowAttributes={(l) => ({
           "data-testid": `overview-lane-row-${laneTagId(l.lane)}`,
         })}
@@ -370,7 +376,7 @@ export function OverviewLaneTable({
               </MenuItem>
               <MenuItem
                 data-testid={`overview-lane-staff-menu-${tagId}`}
-                onClick={() => setStaffLane(l.lane)}
+                onClick={() => setStaffLane(laneStaffKey(l))}
               >
                 <UserPlus className="size-4" />
                 {t("org.overviewLaneTable.staffAction")}

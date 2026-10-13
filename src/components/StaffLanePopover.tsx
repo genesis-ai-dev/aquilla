@@ -39,7 +39,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Spinner } from "@/components/ui/spinner"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { RoleSelect } from "@/components/RoleSelect"
-import { ROLE, roleName, roleDisplayLabel, roleDescription } from "@/lib/frontier/roles"
+import { ROLE, roleName, roleDescription } from "@/lib/frontier/roles"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -48,6 +48,9 @@ import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
+import { toast } from "@/components/ui/toast"
+import { describeGrant, grantButtonLabel, grantProjectName } from "@/lib/access/grant-scope-sentence"
 
 /** Pinned contract — wave-B agents import this exactly. */
 export interface StaffLanePopoverProps {
@@ -61,6 +64,8 @@ export interface StaffLanePopoverProps {
    */
   laneId?: string | null
   laneLabel: string
+  /** Project display name for the grant sentence. Omitted → "this project". */
+  projectName?: string | null
   orgId: number | null
   trigger?: ReactNode
   onDone?: () => void
@@ -100,6 +105,7 @@ export function StaffLanePopover({
   lane,
   laneId,
   laneLabel,
+  projectName,
   orgId,
   trigger,
   onDone,
@@ -107,7 +113,7 @@ export function StaffLanePopover({
   onOpenChange,
   anchorOnly = false,
 }: StaffLanePopoverProps) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const location = useLocation()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -130,16 +136,14 @@ export function StaffLanePopover({
   const [message, setMessage] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const pool = q ? orgMembers.filter((m) => m.username.toLowerCase().includes(q)) : orgMembers
-    return pool.slice(0, MAX_RESULTS)
-  }, [orgMembers, query])
-
   /**
-   * Why the roster can't be searched, or null when it can. Ordered most
+   * Why the org roster can't be searched, or null when it can. Ordered most
    * specific first: a missing org id means the fetch never even fired, so it
    * outranks the loading flag (which stays false in that case).
+   *
+   * AQU-1798: a hidden or failed org roster does not hide people who are
+   * already on this project. A direct invite is staffed onto this lane from
+   * here; the project-members page is only for someone on neither list.
    */
   const rosterBlocked: RosterBlocked | null =
     orgId == null
@@ -153,6 +157,26 @@ export function StaffLanePopover({
             : rosterError !== null
               ? "error"
               : null
+
+  const searchPool = useMemo(() => {
+    const orgIds = new Set(orgMembers.map((m) => m.userId))
+    const onProjectOnly = projectMembers
+      .filter((m) => !orgIds.has(m.userId))
+      .map((m) => ({ userId: m.userId, username: m.username }))
+    if (rosterBlocked !== null) return onProjectOnly
+    return [
+      ...orgMembers.map((m) => ({ userId: m.userId, username: m.username })),
+      ...onProjectOnly,
+    ]
+  }, [orgMembers, projectMembers, rosterBlocked])
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const pool = q ? searchPool.filter((m) => m.username.toLowerCase().includes(q)) : searchPool
+    return pool.slice(0, MAX_RESULTS)
+  }, [searchPool, query])
+
+  const blockSearch = rosterBlocked !== null && searchPool.length === 0
 
   function reset() {
     setQuery("")
@@ -175,7 +199,16 @@ export function StaffLanePopover({
     const existing = projectMembers.find((m) => m.userId === userId)
     if (existing && existing.role.level >= targetRole) return
     if (!jwt) throw new Error("Sign in to manage membership.")
-    await addProjectMember(jwt, projectId, username, targetRole)
+    // A new member below project lead has to name this lane on the add.
+    // Sending it afterwards, only as a scope, used to grant every lane first.
+    // A lead stays unscoped: the role already sees every lane.
+    if (targetRole < ROLE.PROJECT_LEAD) {
+      await addProjectMember(jwt, projectId, username, targetRole, {
+        scopeLanes: [laneId || lane],
+      })
+    } else {
+      await addProjectMember(jwt, projectId, username, targetRole)
+    }
   }
 
   function mergeLaneScope(existing: MemberScope[]): MemberScope[] {
@@ -215,7 +248,18 @@ export function StaffLanePopover({
       }
       await refreshProjectMembers()
       setPhase("done")
-      setMessage(`${selected.username} is now ${roleDisplayLabel(role)} on ${laneLabel}.`)
+      const sentence = describeGrant(t, {
+        names: [selected.username],
+        roleLevel: role,
+        scope: {
+          kind: "project",
+          projectName: grantProjectName(t, projectName),
+          lanes: [laneLabel],
+        },
+        locale,
+      }).sentence
+      setMessage(sentence)
+      toast.add({ type: "success", title: sentence })
       onDone?.()
     } catch (err) {
       setPhase("error")
@@ -233,7 +277,18 @@ export function StaffLanePopover({
       await ensureMembership(selected.userId, selected.username, ROLE.PROJECT_LEAD)
       await refreshProjectMembers()
       setPhase("done")
-      setMessage(`${selected.username} is now a lead — leads see every language, unscoped.`)
+      const sentence = describeGrant(t, {
+        names: [selected.username],
+        roleLevel: ROLE.PROJECT_LEAD,
+        scope: {
+          kind: "project",
+          projectName: grantProjectName(t, projectName),
+          lanes: "all",
+        },
+        locale,
+      }).sentence
+      setMessage(sentence)
+      toast.add({ type: "success", title: sentence })
       onDone?.()
     } catch (err) {
       setPhase("error")
@@ -311,11 +366,20 @@ export function StaffLanePopover({
                 placeholder={t("org.staffLanePopover.searchPlaceholder")}
                 aria-label={t("org.teamDetail.searchOrgMembersAriaLabel")}
                 className="h-8 ps-7 text-xs"
-                disabled={rosterBlocked !== null}
+                disabled={blockSearch}
               />
             </div>
+            {(rosterBlocked === "hidden" || rosterBlocked === "no-access") && !blockSearch && (
+              <p
+                data-testid="staff-lane-roster-note"
+                data-reason={rosterBlocked}
+                className="text-[11px] text-muted-foreground"
+              >
+                {t(ROSTER_BLOCKED_KEY[rosterBlocked])}
+              </p>
+            )}
             <ul className="max-h-40 divide-y overflow-y-auto rounded border">
-              {rosterBlocked !== null ? (
+              {blockSearch && rosterBlocked !== null ? (
                 <li
                   data-testid="staff-lane-roster-blocked"
                   data-reason={rosterBlocked}
@@ -328,7 +392,7 @@ export function StaffLanePopover({
                 </li>
               ) : results.length === 0 ? (
                 <li className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-                  {orgMembers.length === 0
+                  {searchPool.length === 0
                     ? t("org.staffLanePopover.rosterEmpty")
                     : t("org.staffLanePopover.rosterNoMatch")}
                 </li>
@@ -340,7 +404,7 @@ export function StaffLanePopover({
                       className="flex w-full items-center gap-2 px-2 py-1.5 text-start text-xs hover:bg-muted"
                       onClick={() => setSelected({ userId: m.userId, username: m.username })}
                     >
-                      <UsernameWithAvatar username={m.username} size="xs" nameClassName="text-xs" />
+                      <UsernameWithAvatar userId={m.userId} username={m.username} size="xs" nameClassName="text-xs" />
                     </button>
                   </li>
                 ))
@@ -368,7 +432,7 @@ export function StaffLanePopover({
         ) : (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <UsernameWithAvatar username={selected.username} size="xs" nameClassName="text-xs" />
+              <UsernameWithAvatar userId={selected.userId} username={selected.username} size="xs" nameClassName="text-xs" />
               <Button
                 variant="ghost"
                 className="h-6 px-1.5 text-[11px]"
@@ -392,9 +456,34 @@ export function StaffLanePopover({
               aria-label={t("common.roleLabel")}
             />
 
+            <GrantScopeNotice
+              sentence={describeGrant(t, {
+                names: [selected.username],
+                roleLevel: role,
+                scope: {
+                  kind: "project",
+                  projectName: grantProjectName(t, projectName),
+                  lanes: [laneLabel],
+                },
+                locale,
+              }).sentence}
+            />
             <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt}>
               {busy && <Spinner className="me-1.5 size-3.5" />}
-              {t("org.staffLanePopover.addToLaneButton", { lane: laneLabel })}
+              {grantButtonLabel(
+                t,
+                t("common.add"),
+                describeGrant(t, {
+                  names: [selected.username],
+                  roleLevel: role,
+                  scope: {
+                    kind: "project",
+                    projectName: grantProjectName(t, projectName),
+                    lanes: [laneLabel],
+                  },
+                  locale,
+                }).scopeEcho,
+              )}
             </Button>
 
             <div className="rounded border border-dashed p-2 text-[11px] text-muted-foreground">
@@ -405,12 +494,25 @@ export function StaffLanePopover({
                 onClick={handleAddAsLead}
                 disabled={busy || !jwt}
               >
-                {t("org.staffLanePopover.addAsLeadButton")}
+                {grantButtonLabel(
+                  t,
+                  t("org.grantScope.action.addAsLead"),
+                  describeGrant(t, {
+                    names: [selected.username],
+                    roleLevel: ROLE.PROJECT_LEAD,
+                    scope: {
+                      kind: "project",
+                      projectName: grantProjectName(t, projectName),
+                      lanes: "all",
+                    },
+                    locale,
+                  }).scopeEcho,
+                )}
               </button>
             </div>
 
             {phase === "done" && message && (
-              <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{message}</p>
+              <p data-testid="grant-scope-result" className="text-[11px] text-emerald-600 dark:text-emerald-400">{message}</p>
             )}
             {phase === "error" && errorMsg && (
               <p className="text-[11px] text-destructive">{errorMsg}</p>

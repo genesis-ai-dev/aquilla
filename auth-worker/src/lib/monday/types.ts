@@ -46,6 +46,8 @@ export interface MondayBoardGroup {
 
 /** Cached board structure stored on monday_board_links.board_structure. */
 export interface MondayBoardStructure {
+  url?: string | null
+  name?: string | null
   fetchedAt: string
   columns: MondayBoardColumn[]
   groups: MondayBoardGroup[]
@@ -103,6 +105,10 @@ export interface IntegrationLinkRow {
   last_pushed_at: string | null
   last_push_status: string | null
   last_push_error: string | null
+  /** Consecutive failed push attempts; 0 after a success (AQU-1828). */
+  push_attempts: number
+  /** Earliest the cron flush may retry this link; null = no backoff pending. */
+  next_retry_at: string | null
   created_by: string
   created_at: string
   updated_at: string

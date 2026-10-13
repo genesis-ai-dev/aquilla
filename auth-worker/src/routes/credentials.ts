@@ -33,6 +33,10 @@ import type { AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
+import {
+  orgLevelWithoutUnelevatedAdmin,
+  roleWithoutUnelevatedAdmin,
+} from "../services/elevation-gate"
 import { isPlatformAdmin } from "../middleware/platform-admin"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import { countRecentEvents, recordAuthEvent, userIdentifier, CREDENTIAL_MINT_MAX_PER_USER } from "../utils/rate-limit"
@@ -132,9 +136,20 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
   // Resolve the caller's live authority on the requested scope. A credential
   // can only be scoped where the user holds >= CONTRIBUTOR; 'act' needs
   // >= MAINTAINER. scopeLevel === null means "unscoped" (user-global).
+  //
+  // OPS-44: the scope level is taken from the caller's authority with
+  // UN-ELEVATED platform-admin power stripped out. A PAT outlives the session
+  // that minted it, so an admin who could mint one on bare admin authority
+  // would hold a permanent cross-tenant credential that no later elevation
+  // check can reach — routing around the step-up gate rather than passing it.
+  // An elevated admin keeps the cross-tenant path; a genuine member of the
+  // scope is unaffected, because for them the two answers are identical.
   let scopeLevel: number | null = null
   if (projectId) {
-    const role = await resolveProjectRole(c.env, user, projectId)
+    const resolved = await resolveProjectRole(c.env, user, projectId)
+    const role = resolved
+      ? await roleWithoutUnelevatedAdmin(c, user, projectId, resolved)
+      : null
     if (!role || role.level < ROLE.CONTRIBUTOR) {
       return c.json({ error: "scope_denied", message: "You need contributor access on this project to scope a credential to it." }, 403)
     }
@@ -142,7 +157,12 @@ credentials.post("/", authMiddleware, zValidator("json", createSchema), async (c
   } else if (orgId) {
     const numericOrgId = Number(orgId)
     const level = Number.isInteger(numericOrgId)
-      ? await getEffectiveOrgRole(c.env, numericOrgId, user)
+      ? await orgLevelWithoutUnelevatedAdmin(
+          c,
+          numericOrgId,
+          user,
+          await getEffectiveOrgRole(c.env, numericOrgId, user),
+        )
       : null
     if (level == null || level < ROLE.CONTRIBUTOR) {
       return c.json({ error: "scope_denied", message: "You need contributor access on this org to scope a credential to it." }, 403)
@@ -260,7 +280,7 @@ credentials.delete("/:id", authMiddleware, async (c) => {
   // credential gets the same 404 whether the id exists or not, rather than a
   // distinguishing 403 — collapsing an existence oracle on an otherwise-opaque
   // resource id. Only the real owner (or a platform admin) sees past this.
-  if (!row || (row.user_id !== String(user.id) && !isPlatformAdmin(c))) {
+  if (!row || (row.user_id !== String(user.id) && !(await isPlatformAdmin(c)))) {
     return c.json({ error: "not_found", message: "Credential not found." }, 404)
   }
 

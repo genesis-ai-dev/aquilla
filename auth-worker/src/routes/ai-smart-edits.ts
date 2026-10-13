@@ -62,6 +62,11 @@ import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import type { Observation } from "../../../src/lib/smart-edits/suggest"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 type AppEnv = { Bindings: Env; Variables: Variables }
 const aiSmartEdits = new Hono<AppEnv>()
@@ -359,6 +364,9 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
     }
   }
 
+  // AQU-1849: total deadline (`stream: false`), linked to the client's signal
+  // so a user who navigates away still cancels upstream.
+  const deadline = vendorDeadline("openRouterNonStreaming", c.req.raw.signal)
   try {
     const upstream = await fetch(resolveOpenRouterUrl(c.env), {
       method: "POST",
@@ -372,7 +380,7 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
         ...openRouterExtras(c.env.OPENROUTER_BASE_URL),
         response_format: { type: "json_object" },
       }),
-      signal: c.req.raw.signal,
+      signal: deadline.signal,
     })
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => "")
@@ -408,8 +416,14 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
     }))
     return c.json({ suggestions })
   } catch (error) {
+    if (deadline.timedOut()) {
+      logVendorTimeout("openRouterNonStreaming", error)
+      return c.json({ error: "llm_timeout", message: vendorTimeoutMessage("openRouterNonStreaming") }, 504)
+    }
     console.error("[smart-edits] llm failed:", error)
-    return c.json({ error: "llm_unavailable", message: error instanceof Error ? error.message : String(error) }, 502)
+    return c.json({ error: "llm_unavailable", message: "Smart edits are temporarily unavailable" }, 502)
+  } finally {
+    deadline.clear()
   }
 })
 

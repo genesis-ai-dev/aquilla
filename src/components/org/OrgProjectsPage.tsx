@@ -275,7 +275,6 @@ export function OrgProjectsPage() {
                 projects={visibleProjects}
                 now={portfolio.now}
                 roleByProjectId={portfolio.roleByProjectId}
-                defaultLaneLabelByProjectId={portfolio.defaultLaneLabelByProjectId}
                 filesByProjectId={portfolio.filesByProjectId}
                 orgId={activeOrgId}
                 jwt={jwt}

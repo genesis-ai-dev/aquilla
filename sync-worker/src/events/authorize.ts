@@ -16,7 +16,11 @@ import { loadTargetLanes } from './lane-read-wall'
 import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/write-wall'
 import { visibleLaneTags, type LaneIdentity } from '../../../src/lib/lanes/read-wall'
 import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
-import { laneTagForArchiveCheck, writesLaneRow } from '../../../src/lib/lanes/archived-lane'
+import {
+  laneTagForArchiveCheck,
+  missingLaneReason,
+  writesLaneRow,
+} from '../../../src/lib/lanes/archived-lane'
 import { loadLaneGrants } from '../../../db/shared/lane-visibility'
 import { refusalForArchivedLane, targetLaneRowExists, targetLaneRowsFor } from './archived-lane'
 import { eventLaneIdOf, resolveEventLane } from '../../../src/lib/lanes/event-lane'
@@ -474,15 +478,19 @@ export async function authorize<K extends EventKind>(
     // AQU-1532: a cell or validator write whose lane tag has no lane row
     // would project a NULL lane_id and fail the whole batch as a 500. Refuse
     // it here with a reason the caller can act on.
+    //
+    // AQU-1884 / AQU-1900: that includes a validation or a target.cell.* write
+    // with NO lane at all. It asks for the default lane, and a project created
+    // today has none — every lane carries a real tag — so it is this 4xx
+    // rather than the per-event 500 it used to project as. Only a project with
+    // no target lane at all may name `''` before the row exists: there the
+    // write mints the '' bridge itself (or a sibling in this batch does), and
+    // since AQU-1615 that is the only project the bridge is ever minted on.
     if (
       writesLaneRow(raw.kind) &&
       !(await targetLaneRowExists(db, raw.projectId, archiveTag, settings))
     ) {
-      return {
-        ok: false,
-        status: 422,
-        reason: `unknown lane "${archiveTag}"; register it in settings.targetLanes`,
-      }
+      return { ok: false, status: 422, reason: missingLaneReason(archiveTag) }
     }
   }
 
@@ -641,6 +649,21 @@ export async function authorize<K extends EventKind>(
         }
       }
     }
+  }
+
+  // AQU-1565 follow-up: marking a clip as the file's SOURCE audio needs
+  // PROJECT_LEAD. `cell.audio.attach` sits at CONTRIBUTOR for takes, but a
+  // `role: 'source'` clip is the shared programme recording every media row
+  // plays: it is never counted as recorded and never waits on validation. A
+  // contributor able to stamp that on their own take would take it out of
+  // review. Project Lead is the floor the import route already holds for the
+  // same audio. Unconditional on `db`: it reads nothing but the payload.
+  if (
+    raw.kind === 'cell.audio.attach' &&
+    (raw.payload as { role?: unknown } | null)?.role === 'source' &&
+    tokenClaims.role < ROLE.PROJECT_LEAD
+  ) {
+    return { ok: false, status: 403, reason: 'marking a clip as source audio requires project lead' }
   }
 
   // AQU-1068: removing an IMPORTED cell needs MAINTAINER. This is the one rule

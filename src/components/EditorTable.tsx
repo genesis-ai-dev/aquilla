@@ -11,6 +11,7 @@ import {
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
   Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
+  Plus,
   Pilcrow,
   PilcrowRight,
   X,
@@ -29,9 +30,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
-import { laneComboboxOptions } from "@/components/lane-options"
+import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
+import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
+import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
   type CellFootnoteDetails,
   type CellStore,
@@ -48,7 +51,9 @@ import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { formatCellIssueLine, summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
+import { CellIssueLines } from "@/components/cell/CellIssueLines"
 import { isPartnerScriptureCell } from "@/lib/partners/registry"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { hasTiming } from "@/lib/timeline/derive"
@@ -62,7 +67,13 @@ import { firstEventId, resolveTargetCommitParent } from "@/lib/sync/target-commi
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel, type ExampleOrigin } from "./ExamplePanel"
-import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
+import { HighlightedText, buildHighlightsFromExamples, type HealthDisplaySpan } from "./HighlightedText"
+import {
+  buildDraftHealthSpans,
+  clipDraftHealthExcerpt,
+  resolveDraftHealthExamples,
+} from "@/lib/completion/draft-health-spans"
+import { useHealthScoreColorCoding } from "@/lib/store/health-score-color-coding-pref"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
@@ -86,6 +97,21 @@ import {
 } from "@/lib/completion/bt-record"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
+import { AlignStylesButton } from "./cell/AlignStylesButton"
+import { PassToStyleSegmentsButton } from "./cell/PassToStyleSegmentsButton"
+import { StyleAlignWarning } from "./cell/StyleAlignWarning"
+import { cellCanAlignStyles } from "@/lib/idml/align-styles"
+import {
+  emptyIdmlEditableHtml,
+  idmlTargetIsPreview,
+  placeIdmlPreviewInOnlySlot,
+  readIdmlMetadataV2,
+} from "@/lib/idml/preview-segment"
+import {
+  idmlMergedPlainGroupCollapsed,
+  rememberManualStyleAlignment,
+} from "@/lib/idml/merged-plain-align"
+import { useStyleAlignDirtyMatch } from "@/lib/store/style-align-dirty"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
@@ -168,6 +194,10 @@ import { compareAddresses, parseRef } from "@/lib/pericope/sections"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
 import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-highlight-pref"
+import {
+  applyVisibleStyleSegmentChrome,
+  useVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { AudioTrackColorPicker } from "./audio/AudioTrackColorPicker"
@@ -206,13 +236,19 @@ import {
   type TextDirection,
   resolveTextDirection,
 } from "@/lib/text-direction"
-import { partitionInfractions } from "@/lib/rules/waivers"
-import { closeRuleCard, openRuleCard, useOpenRuleId } from "@/lib/rules/open-rule-card"
+import {
+  partitionInfractions,
+  isSpanWaived,
+  spanMatchHash,
+  waivedKeys as waivedKeysOf,
+} from "@/lib/rules/waivers"
+import { closeRuleCard, openRuleCard, useOpenRuleCard } from "@/lib/rules/open-rule-card"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationToast } from "./ViolationToast"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { findConceptMatches } from "@/lib/terminology/match"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
@@ -282,6 +318,8 @@ import {
 //   window.__perfDumpRowRenders()   → console.table of the same
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
+/** How long focus must rest on an empty cell before its draft retrieval starts (AQU-617). */
+const COMPLETION_PREFETCH_DWELL_MS = 300
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
@@ -734,10 +772,10 @@ interface EditorTableProps {
   activeLane?: string
   /**
    * AQU-602: all selectable target lanes, default lane FIRST as `''` (callers
-   * build `['', ...targetLanes]`). When more than one is offered AND
+   * build `['', ...targetLanes]`). When at least one is offered AND
    * `onLaneChange` is provided, the TARGET language tag in the column header
-   * becomes a dropdown that switches the active lane. With one lane (or no
-   * handler) the tag stays a static pill — byte-identical to the N=1 header.
+   * is a dropdown that switches the active lane (AQU-1601: one lane is named,
+   * not hidden). With no lanes (or no handler) the tag stays a static pill.
    */
   lanes?: string[]
   /** AQU-601: archived lane tags (a subset of `lanes`). Archived lanes are
@@ -745,12 +783,24 @@ interface EditorTableProps {
    *  toggle, so a mistaken/retired lane stops cluttering the picker while
    *  staying reachable. Absent/empty ⇒ every lane shows (pre-archive behavior). */
   archivedLanes?: string[]
+  /** AQU-1463: set to the active lane's label when that lane is itself
+   *  archived, null otherwise. A frozen lane is read-only for every role
+   *  (AQU-1462 refuses its writes server-side), so this overrides the role
+   *  ladder: it turns off editing and validation and puts a banner naming the
+   *  lane above the table. The host derives it with `laneLockFor`. */
+  archivedLaneLabel?: string | null
+  /** AQU-1902: true while the active lane's row is not yet known (the
+   *  project's languages are still loading). Editing and validation are off
+   *  until then, so no write is queued that names no lane — the host shows a
+   *  "Loading languages…" banner. */
+  languagesLoading?: boolean
   /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
    *  is used. Omit to keep the tag non-interactive. */
   onLaneChange?: (lane: string) => void
   /** The lanes a lane-limited member below MAINTAINER may switch between
-   *  (`scopedLanesFor`). With two or more, they get the switcher — offering
-   *  only those lanes — which AQU-608 otherwise keeps from their role. */
+   *  (`scopedLanesFor`): only the lanes the read wall left them. One is
+   *  enough for the switcher (AQU-1601) — a single non-default lane used to
+   *  be reachable only by typing `?lane=`. They never get "Add lane". */
   scopedLanes?: string[] | null
   /** Human label for the default (`''`) lane in the TARGET tag dropdown — the
    *  project/file's default target-language name. Non-default lanes label
@@ -761,6 +811,13 @@ interface EditorTableProps {
    * Falls back to the tag (or `defaultLaneLabel` for `''`) when a row has no name.
    */
   laneLabels?: Readonly<Record<string, string>>
+  /**
+   * AQU-1784: code OVERRIDES by lane tag (`laneCodesByTag`). Two lanes that
+   * display the same string are told apart by a suffix — the lane's code when
+   * it has one, otherwise its position among the colliding lanes — so the
+   * switcher and the TARGET pill name them differently.
+   */
+  laneCodes?: Readonly<Record<string, string>>
   /** AQU-583: opens the project's language settings so the target language is
    *  changeable from the TARGET column header. When provided, the target-language
    *  tag is always actionable — a single-lane project shows a clickable pill, a
@@ -769,6 +826,12 @@ interface EditorTableProps {
    *  language" affordance. Omit to keep the tag a static pill (the pre-AQU-583
    *  behaviour). */
   onEditTargetLanguage?: () => void
+  /**
+   * AQU-1601: opens Languages settings to add a lane. Rendered in the
+   * switcher only for a maintainer (`canSwitchLanes`). A lane-scoped member
+   * does not get this entry even if a caller passes it.
+   */
+  onAddLane?: () => void
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /**
@@ -804,9 +867,20 @@ interface EditorTableProps {
    *  direct-media-URL field that cannot take a watch page.
    *  See `deriveLinkedVideoEmptyState`. */
   linkedVideoEmptyState?: LinkedVideoEmptyState | null
+  /** Sam's D3 (2026-10-05): "media" when this table is the Media view's Text
+   *  pane, where that empty state shrinks to one line pointing at the
+   *  timeline's Source text lane. "text" (the default) everywhere else. */
+  linkedVideoEmptyPlacement?: "text" | "media"
   /** Switch this file to the Media view from that empty state. Absent when the
    *  table is already rendering under the timeline. */
   onOpenMediaView?: () => void
+  /** AQU-1566: on that empty state, attach a caption file that becomes this
+   *  file's rows. The workspace passes it only to maintainers, and only once
+   *  the rows have loaded and there are none. */
+  onAttachCaptions?: () => void
+  /** AQU-1566: on that empty state, turn a caption track already on the
+   *  timeline into this file's rows (the workspace confirms first). Same gate. */
+  onUseCaptionTrackAsRows?: (trackId: string) => void
   /** Called after a successful `target.cell.commit` enqueue so the parent
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
@@ -877,11 +951,17 @@ interface EditorTableProps {
    *  user around the file. Omit to keep errors sticky (legacy callers). */
   onClearCellErrors?: (cellId: string) => void
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
+  /** AQU-617: start a draft's few-shot retrieval early, when an empty cell is
+   *  focused, so a Draft click goes straight to generation. */
+  onPrefetchCompletion?: (cell: CellData) => void
   onCompleteBatch: (cells: CellData[]) => void
   /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
    *  `cellId` as one model call. Omit to keep the rail button hidden
    *  (legacy/prop-less callers render unchanged). */
   onCompleteParagraph?: (cellId: string) => void
+  /** Move this cell's existing translation into the source style runs.
+   *  Omit to hide the overflow action (callers that are not the editor). */
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
   rules?: TranslationRule[]
@@ -916,6 +996,11 @@ interface EditorTableProps {
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
   onSeekToCue?: (cellId: string) => void
+  /** AQU-1118: the row whose line is playing right now (the bottom bar's
+   *  current line), so its "Play from this cue" button shows Pause. */
+  playingCueCellId?: string | null
+  /** AQU-1118: what that Pause does — stops whatever is playing this file. */
+  onPauseCue?: () => void
   /**
    * AQU-646 round 8: add and remove lines from the TABLE, mirroring the
    * gestures the timeline already offers. Undefined in every arrangement but
@@ -1036,11 +1121,11 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels,
-  onEditTargetLanguage,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
+  onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
-  onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
+  onCompleteSingle, onPrefetchCompletion, onCompleteBatch, onCompleteParagraph, onAlignStyles, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
@@ -1049,12 +1134,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
+  playingCueCellId = null,
+  onPauseCue,
   sourceLineEditing,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   audioTrackColor, onSetAudioTrackColor,
-  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, onOpenMediaView,
+  onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
+  onAttachCaptions, onUseCaptionTrackAsRows,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted,
@@ -1084,16 +1172,67 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   bibleOpen = false,
 }, ref) {
   const t = useT()
+  // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
+  // lane-limited member over the lanes the read wall left them (`scopedLanes`).
+  // One lane is enough (AQU-1601). "Add lane" is maintainer-only.
+  const canManageLanes = canSwitchLanes(project.syncRole?.level)
+  const switchableLanes = canManageLanes ? lanes : scopedLanes
+  // AQU-1784: one label list for the switcher AND the closed pill, computed
+  // over the lanes THIS reader can see. Two lanes that resolve to the same
+  // string get a suffix here; a member with no lane scope sees only the lane
+  // they are in, so a lone lane never collides and never hints at a sibling
+  // the read wall hides (AQU-1421).
+  const laneOptionList = useMemo(
+    () =>
+      laneOptionLabels({
+        lanes: switchableLanes ?? [activeLane],
+        laneLabels,
+        laneCodes,
+        defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
+        archivedLanes,
+      }),
+    [switchableLanes, activeLane, laneLabels, laneCodes, defaultLaneLabel, archivedLanes, t],
+  )
+  const visibleStyleSegments = useVisibleStyleSegments()
+  const styleSegmentRegular = t("editor.idml.segmentRegular")
+  const styleSegmentBold = t("editor.format.bold")
+  const styleSegmentItalic = t("editor.format.italic")
+  const styleSegmentBoldItalic = t("editor.idml.segmentBoldItalic")
+  useEffect(() => {
+    applyVisibleStyleSegmentChrome(visibleStyleSegments, {
+      regular: styleSegmentRegular,
+      bold: styleSegmentBold,
+      italic: styleSegmentItalic,
+      boldItalic: styleSegmentBoldItalic,
+    })
+  }, [
+    visibleStyleSegments,
+    styleSegmentRegular,
+    styleSegmentBold,
+    styleSegmentItalic,
+    styleSegmentBoldItalic,
+  ])
+  useEffect(() => () => {
+    applyVisibleStyleSegmentChrome(false, {
+      regular: "",
+      bold: "",
+      italic: "",
+      boldItalic: "",
+    })
+  }, [])
   // The switcher trigger and the closed pill name the lane the same way.
   // A renamed lane wins; otherwise the tag. The default lane falls back to
-  // the project's target language, then to the "set a language" prompt.
-  const activeLaneLabel =
+  // the project's target language, then to the "set a language" prompt — a
+  // base the option list does not share, so the pill keeps its own and
+  // borrows only the collision suffix.
+  const activeLaneLabel = withLaneLabelSuffix(
     (laneLabels?.[activeLane]
       ?? (activeLane ? activeLane : project.targetLanguage))
-    || t("editor.lane.setTargetLanguage")
-  // Who gets the lane switcher: MAINTAINER+ over every lane (AQU-608), and a
-  // lane-limited member over their own lanes only (`scopedLanesFor`).
-  const switchableLanes = canSwitchLanes(project.syncRole?.level) ? lanes : scopedLanes
+    || t("editor.lane.setTargetLanguage"),
+    laneOptionList.find((option) => option.value === activeLane)?.suffix ?? null,
+  )
+  const showLaneSwitcher = Boolean(onLaneChange && switchableLanes && switchableLanes.length >= 1)
+  const showAddLane = canManageLanes && !!onAddLane
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
   // repair path treats any hand-edited source cell as damage and overwrites
   // it, so the "Edit source" affordance must stay off. Loading counts as
@@ -1102,9 +1241,20 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     project.id,
     project.syncRole?.level ?? null,
   )
-  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel: roleReadOnlyLabel } = useEditorCapabilities(project, {
+  const {
+    canEdit: roleCanEdit,
+    canValidate: roleCanValidate,
+    canEditSource,
+    sourceReadOnlyReason,
+    readOnlyLabel: roleReadOnlyLabel,
+  } = useEditorCapabilities(project, {
     hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
+    // AQU-1463: a frozen lane outranks the role ladder — see the prop's note.
+    archivedLaneLabel,
   })
+  // AQU-1902: no target write or validation until the active lane's row is known.
+  const canEdit = roleCanEdit && !languagesLoading
+  const canValidate = roleCanValidate && !languagesLoading
   // AQU-1571: the reviewer banner promised "you can validate" even where the
   // project's minimum role or named-validator list shuts this reader out of
   // text validation, while every check below it said "unavailable" (walk
@@ -1474,6 +1624,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
     setActiveEditorCellId(null)
   }, [activeEditorCellId, displayCellIds])
+
+  // AQU-617: once focus settles on an empty cell, start its draft retrieval.
+  // The dwell keeps arrowing through rows from firing a search per row.
+  useEffect(() => {
+    if (!activeEditorCellId || !onPrefetchCompletion || !isCompletionAvailable) return
+    const timer = setTimeout(() => {
+      const cell = cellStore.getCellView(activeEditorCellId)
+      if (cell && !cell.translated.trim()) onPrefetchCompletion(cell)
+    }, COMPLETION_PREFETCH_DWELL_MS)
+    return () => clearTimeout(timer)
+  }, [activeEditorCellId, cellStore, onPrefetchCompletion, isCompletionAvailable])
 
   // AQU-669: drop the focus pin if its cell scrolls out of the list / lane —
   // a pin can't belong to a row that no longer renders.
@@ -2520,7 +2681,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // `MemoizedRowProps.paragraphGroupInFlight`.
           const paragraphGroupInFlight = paragraphGroupInfo?.memberIds?.some((id) => {
             const state = completing.get(id)
-            return state === "searching" || state === "generating"
+            return state === "searching" || state === "generating" || state === "aligning"
           }) ?? false
           // AQU-646 / AQU-1068: the row's STRUCTURAL controls — add a cell
           // here, take one back. One map lookup and one predicate call per
@@ -2570,10 +2731,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // per row would re-render every rendered row on every store bump,
           // which is the whole-file churn round 6 went into removing.
           const neighbourTimes = timestampNeighbours(index, displayCellIds, cellStore, isTimeOrdered && hasTiming(cell))
+          // AQU-1118 (Sam, Oct 7): the line that is playing is marked on the
+          // row itself, and the mark moves from row to row with playback. The
+          // Pause icon alone sat in a closed ⋯ menu, so the move was invisible.
+          const cuePlayingRow = playingCueCellId != null && playingCueCellId === cell.id
           return (
       <div
         data-cell-id={cell.id}
         data-index={index}
+        data-cue-playing={cuePlayingRow ? "true" : undefined}
+        aria-current={cuePlayingRow ? "time" : undefined}
         data-untimed={untimedInTimeLens ? "true" : undefined}
         data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
@@ -2586,6 +2753,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           isScriptureRow && "border-s-2 border-sky-400/70",
           showParagraphBoundary && "mt-3",
+          // A bar drawn OVER the row's start edge rather than a border, so the
+          // row's content never shifts as the mark moves from row to row.
+          cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
         {isScriptureRow && (
@@ -2647,7 +2817,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getPendingTargetEventId={getPendingTargetEventId}
           reservePendingTargetCommit={reservePendingTargetCommit}
           onOptimisticEdit={onOptimisticEdit}
-          lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          lockHolderLabel={lockHolderForCell(cellLockHolders, cell.id, activeLane)}
           presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
           onClaimCell={onClaimCell}
@@ -2666,6 +2836,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ruleMap={ruleMap}
           onCompleteSingle={onCompleteSingle}
           onCompleteParagraph={onCompleteParagraph}
+          onAlignStyles={onAlignStyles}
           paragraphGroupSize={paragraphGroupInfo?.size}
           paragraphDraftableCount={paragraphGroupInfo?.draftableCount}
           paragraphGroupInFlight={paragraphGroupInFlight}
@@ -2690,6 +2861,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
           onSeekToCue={onSeekToCue}
+          cuePlaying={playingCueCellId != null && playingCueCellId === cell.id}
+          onPauseCue={onPauseCue}
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
@@ -2809,6 +2982,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onClaimCell,
     onCompleteSingle,
     onCompleteParagraph,
+    onAlignStyles,
     paragraphGroupInfoByCellId,
     onFootnoteCreated,
     onJumpToCell,
@@ -2820,6 +2994,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onReleaseCell,
     onSaveBacktranslation,
     onSeekToCue,
+    playingCueCellId,
+    onPauseCue,
     previews,
     project,
     ruleMap,
@@ -2896,6 +3072,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     )
   }
 
+  const hideColumnHeaders = displayCellIds.length === 0 && isTimeOrdered && Boolean(linkedVideoEmptyState)
+
   // Smart edits (flag `smartEdits`): one passage request around the active
   // cell; rows read their own suggestions through SmartEditsProvider.
   const smartEditsContext = useSmartEditsPassage({
@@ -2941,15 +3119,26 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           )
         : null}
       <div className="shrink-0 bg-background">
-        {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer) */}
+        {/* FRO-273: role badge — shown for read-only roles (viewer/commenter/reviewer).
+            AQU-1463: and for an archived lane, which freezes the lane for every
+            role. The testid carries which of the two it is, so a test can tell a
+            lane that went read-only from a reader who always was. */}
         {readOnlyLabel && (
-          <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+          <div
+            data-testid={archivedLaneLabel !== null ? "lane-archived-banner" : "role-read-only-banner"}
+            className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+          >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             {readOnlyLabel}
           </div>
         )}
         {renderChapterNavigation()}
-        <div className={cn(
+        {/* Sam's D1 (2026-10-05): an empty linked video has no rows for the
+            column headings to describe — select-all, #, Source, Target — so
+            the bar goes until it has some, in the Text view and the Media
+            view's Text pane alike. */}
+        {!hideColumnHeaders && (
+        <div data-testid="table-column-headers" className={cn(
             "grid grid-cols-2 gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground",
             castGutter
               ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
@@ -2996,26 +3185,27 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
-                • >1 lane (+ change handler) → a dropdown that switches the active
-                  lane; with `onEditTargetLanguage` it also gets a "Change target
-                  language…" item so the language is reachable here, not buried in
-                  Settings. The switcher does NOT require a default target to be
-                  set — with extra lanes registered but no default language yet the
-                  dropdown still opens (trigger reads "Set target language"), so the
-                  named lanes stay reachable and the default can be set from here.
+                • ≥1 lane (+ change handler) → a dropdown that switches the active
+                  lane (AQU-1601: one lane is named, plus "Add lane…" for a
+                  maintainer). With `onEditTargetLanguage` it also gets a "Change
+                  target language…" item so the language is reachable here, not
+                  buried in Settings. The switcher does NOT require a default
+                  target to be set — with extra lanes registered but no default
+                  language yet the dropdown still opens (trigger reads "Set target
+                  language"), so the named lanes stay reachable and the default
+                  can be set from here.
                 • otherwise, with `onEditTargetLanguage` → a clickable pill (or a
                   "Set target language" prompt when none is set yet) opening the
                   language settings.
                 • with neither handler → the original static pill (byte-identical
                   to the pre-AQU-583 header for callers that pass no handlers).
                 AQU-608: lane switching is a maintainer-and-above affordance —
-                below maintainer the control stays a static pill so translators
-                keep to their assigned lane (a lane-limited member switches among
-                their own lanes only). The pill uses the same lane name as the
-                switcher. */}
-            {switchableLanes &&
-            switchableLanes.length > 1 &&
-            onLaneChange ? (
+                below maintainer, a member with no lane scope keeps a static pill
+                so translators stay on their assigned lane. A lane-limited member
+                gets the switcher over only the lanes the read wall left them,
+                including when that list has one lane (AQU-1601), and no "Add
+                lane". The pill uses the same lane name as the switcher. */}
+            {showLaneSwitcher && switchableLanes && onLaneChange ? (
               /* AQU-609: the switcher is a searchable combobox — client
                  projects carry 150+ lanes, and lane switching is a combobox
                  by explicit client request. Archived-lane semantics (AQU-601)
@@ -3023,12 +3213,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                  searchable always, auto-revealed when the active lane is
                  archived. */
               <LaneCombobox
-                options={laneComboboxOptions({
-                  lanes: switchableLanes,
-                  laneLabels,
-                  defaultLaneLabel: defaultLaneLabel || t("editor.column.target"),
-                  archivedLanes,
-                })}
+                options={toLaneComboboxOptions(laneOptionList)}
                 value={activeLane}
                 onValueChange={onLaneChange}
                 searchPlaceholder={t("editor.lane.searchPlaceholder")}
@@ -3051,22 +3236,42 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   </button>
                 }
                 footer={
-                  onEditTargetLanguage
+                  onEditTargetLanguage || showAddLane
                     ? (close) => (
-                        /* AQU-583: manage the default target language from the
-                           switcher. */
-                        <button
-                          type="button"
-                          data-testid="edit-target-language"
-                          onClick={() => {
-                            close()
-                            onEditTargetLanguage()
-                          }}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-                        >
-                          <Languages className="h-3.5 w-3.5" />
-                          {t("editor.lane.changeTargetLanguageItem")}
-                        </button>
+                        <>
+                          {onEditTargetLanguage ? (
+                            /* AQU-583: manage the default target language from the
+                               switcher. */
+                            <button
+                              type="button"
+                              data-testid="edit-target-language"
+                              onClick={() => {
+                                close()
+                                onEditTargetLanguage()
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                            >
+                              <Languages className="h-3.5 w-3.5" />
+                              {t("editor.lane.changeTargetLanguageItem")}
+                            </button>
+                          ) : null}
+                          {showAddLane ? (
+                            /* AQU-1601: one lane still offers a way to add another.
+                               Lane-scoped members do not get this. */
+                            <button
+                              type="button"
+                              data-testid="add-lane"
+                              onClick={() => {
+                                close()
+                                onAddLane?.()
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              {t("editor.lane.addLaneItem")}
+                            </button>
+                          ) : null}
+                        </>
                       )
                     : undefined
                 }
@@ -3089,6 +3294,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* AQU-1687: outside the list conditional, so the way back stays on
@@ -3144,9 +3350,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex-1">
             <TimelineLinkedVideoEmpty
               isYouTube={linkedVideoEmptyState.isYouTube}
-              captionTrackNames={linkedVideoEmptyState.captionTrackNames}
+              captionTracks={linkedVideoEmptyState.captionTracks}
+              placement={linkedVideoEmptyPlacement}
               onAttachFile={canEdit ? onAttachMediaFile : undefined}
               onOpenMediaView={onOpenMediaView}
+              onAttachCaptions={canEdit ? onAttachCaptions : undefined}
+              onUseCaptionTrackAsRows={canEdit ? onUseCaptionTrackAsRows : undefined}
             />
           </div>
         ) : canEdit && onAttachMediaFile && onAttachMediaUrl ? (
@@ -3160,7 +3369,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               className="h-full py-10"
               icon={Music}
               title={t("editor.empty.noMediaSegments")}
-              description={t("editor.empty.mediaLayerHint")}
+              // AQU-1565 follow-up: this branch is reached only by someone
+              // with no upload (below Project Lead, or read-only), and a file
+              // with no rows has nothing to record a take on, so "import or
+              // record" would send them nowhere.
+              description={t("editor.empty.mediaLayerWaiting")}
             />
           </div>
         )
@@ -3764,6 +3977,7 @@ interface MemoizedRowProps {
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
    *  `cell.paragraphStart === true` (computed by the parent from the ordered
    *  cell list). undefined ⇒ not a paragraph start, or a 1-cell group. */
@@ -3814,6 +4028,9 @@ interface MemoizedRowProps {
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
   onSeekToCue?: (cellId: string) => void
+  /** AQU-1118: this row's line is the one playing. */
+  cuePlaying?: boolean
+  onPauseCue?: () => void
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
   contentNumber: number
@@ -3906,7 +4123,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getEditorActivationVersion,
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
-    ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
+    ruleMap, onCompleteSingle, onCompleteParagraph, onAlignStyles, paragraphGroupSize,
     paragraphDraftableCount, paragraphGroupInFlight,
     insertAboveReason, insertBelowReason, removeReason,
     structuralEditing, untimedInserts,
@@ -3914,7 +4131,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     prevStartSec, nextStartSec, timedFile,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
-    onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
+    onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     audioLens, onOpenAudioSetup,
@@ -3947,7 +4164,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     [cellInfractions, cell.waivers],
   )
 
-  const isLoading = completingState === "searching" || completingState === "generating"
+  const isLoading = completingState === "searching" || completingState === "generating" || completingState === "aligning"
   // p1-paragraph-ui-wiring (coordinator follow-up): `paragraphGroupInFlight`
   // is true while ANY cell in this row's paragraph group is ACTIVELY
   // completing — not just this row's own (a validated start cell never gets
@@ -3960,12 +4177,14 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   // tokens arrive in real time instead of waiting for the LLM to finish
   // AND the commit-to-outbox chain to land (which adds a network hop).
   const completionPreview = previewText
-  const loadingPhase: "searching" | "generating" | null =
+  const loadingPhase: "searching" | "generating" | "aligning" | null =
     completingState === "searching"
       ? "searching"
       : completingState === "generating"
         ? "generating"
-        : null
+        : completingState === "aligning"
+          ? "aligning"
+          : null
   const error = cellError
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
@@ -4037,6 +4256,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         ruleMap={ruleMap}
         onCompleteSingle={onCompleteSingle}
         onCompleteParagraph={onCompleteParagraph}
+        onAlignStyles={onAlignStyles}
         paragraphGroupSize={paragraphGroupSize}
         paragraphDraftableCount={paragraphDraftableCount}
         paragraphGroupInFlight={paragraphGroupInFlight}
@@ -4061,6 +4281,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
         onSeekToCue={onSeekToCue}
+        cuePlaying={cuePlaying}
+        onPauseCue={onPauseCue}
         rowIndex={rowIndex}
         contentNumber={contentNumber}
         lineNumbersEnabled={lineNumbersEnabled}
@@ -4192,7 +4414,7 @@ interface EditorRowProps {
   completionPreview: string | undefined
   /** Which phase of the completion is currently running, if any. Drives the
    *  placeholder copy ("Looking up examples…" vs "Generating…"). */
-  loadingPhase: "searching" | "generating" | null
+  loadingPhase: "searching" | "generating" | "aligning" | null
   cellExamples: ScoredPair[]
   exampleOriginFor?: (fileId: string) => ExampleOrigin | undefined
   highlights: ReturnType<typeof buildHighlightsFromExamples>
@@ -4205,6 +4427,7 @@ interface EditorRowProps {
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
+  onAlignStyles?: (cell: CellData) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
    *  `cell.paragraphStart === true`. undefined ⇒ not a start, or a 1-cell group. */
   paragraphGroupSize?: number
@@ -4243,6 +4466,10 @@ interface EditorRowProps {
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
   onSeekToCue?: (cellId: string) => void
+  /** AQU-1118: this row's line is the one playing, so its "Play from this
+   *  cue" button shows Pause and stops playback. */
+  cuePlaying?: boolean
+  onPauseCue?: () => void
   onDragStart: () => void
   onDragEnter: () => void
   onSelectionPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
@@ -4801,6 +5028,7 @@ function textNodePositionForOffset(
 function TargetReadText({
   text,
   ranges,
+  healthSpans = [],
   concepts,
   onRangeClick,
   onTermChipClick,
@@ -4810,6 +5038,7 @@ function TargetReadText({
 }: {
   text: string
   ranges: RangeHighlight[]
+  healthSpans?: HealthDisplaySpan[]
   concepts: Concept[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
@@ -4825,6 +5054,7 @@ function TargetReadText({
         text={text}
         concepts={concepts}
         ranges={ranges}
+        healthSpans={healthSpans}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
         showKeyTermHighlights={showKeyTermHighlights}
@@ -4864,6 +5094,7 @@ function TargetReadText({
           text={seg.text}
           concepts={concepts}
           ranges={clipRangesToSegment(ranges, seg)}
+          healthSpans={clipRangesToSegment(healthSpans, seg)}
           onRangeClick={onRangeClick}
           onTermChipClick={onTermChipClick}
           showKeyTermHighlights={showKeyTermHighlights}
@@ -4879,6 +5110,7 @@ export function TargetDecoratedText({
   text,
   concepts,
   ranges,
+  healthSpans = [],
   onRangeClick,
   onTermChipClick,
   showKeyTermHighlights = false,
@@ -4886,6 +5118,7 @@ export function TargetDecoratedText({
   text: string
   concepts: Concept[]
   ranges: RangeHighlight[]
+  healthSpans?: HealthDisplaySpan[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   showKeyTermHighlights?: boolean
@@ -4924,6 +5157,7 @@ export function TargetDecoratedText({
         text={text}
         highlights={EMPTY_HIGHLIGHTS}
         ranges={ranges}
+        healthSpans={healthSpans}
         showEvidence={false}
         onRangeClick={onRangeClick}
       />
@@ -4941,6 +5175,7 @@ export function TargetDecoratedText({
           text={before}
           highlights={EMPTY_HIGHLIGHTS}
           ranges={clipRangesToTextSlice(ranges, cursor, match.start)}
+          healthSpans={clipRangesToTextSlice(healthSpans, cursor, match.start)}
           showEvidence={false}
           onRangeClick={onRangeClick}
         />,
@@ -4974,6 +5209,7 @@ export function TargetDecoratedText({
             text={matchedText}
             highlights={EMPTY_HIGHLIGHTS}
             ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
+            healthSpans={clipRangesToTextSlice(healthSpans, match.start, match.end)}
             showEvidence={false}
             onRangeClick={onRangeClick}
           />
@@ -4985,26 +5221,27 @@ export function TargetDecoratedText({
 
   if (cursor < text.length) {
     parts.push(
-      <HighlightedText
-        key="t-tail"
-        text={text.slice(cursor)}
-        highlights={EMPTY_HIGHLIGHTS}
-        ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
-        showEvidence={false}
-        onRangeClick={onRangeClick}
-      />,
+        <HighlightedText
+          key="t-tail"
+          text={text.slice(cursor)}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
+          healthSpans={clipRangesToTextSlice(healthSpans, cursor, text.length)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />,
     )
   }
 
   return <span>{parts}</span>
 }
 
-function clipRangesToTextSlice(
-  ranges: readonly RangeHighlight[],
+function clipRangesToTextSlice<T extends { start: number; end: number }>(
+  ranges: readonly T[],
   sliceStart: number,
   sliceEnd: number,
-): RangeHighlight[] {
-  const out: RangeHighlight[] = []
+): T[] {
+  const out: T[] = []
   for (const range of ranges) {
     const start = Math.max(range.start, sliceStart)
     const end = Math.min(range.end, sliceEnd)
@@ -5135,7 +5372,7 @@ function EditorRow({
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
-  onCompleteParagraph, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
+  onCompleteParagraph, onAlignStyles, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
   insertAboveReason = null, insertBelowReason = null, removeReason = null,
   structuralEditing, untimedInserts,
   insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
@@ -5145,6 +5382,8 @@ function EditorRow({
   getFootnoteDetails,
   openCommentCount,
   onSeekToCue,
+  cuePlaying = false,
+  onPauseCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
@@ -5177,6 +5416,7 @@ function EditorRow({
   // preference is on, the same rows also carry a solid leading-edge accent.
   // Per-row subscription, like the media-cursor and presence hooks above it.
   const highlightUnresolvedComments = useUnresolvedCommentHighlight()
+  const healthScoreColorCoding = useHealthScoreColorCoding()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -5274,7 +5514,8 @@ function EditorRow({
   // AQU-1634: the rule card is one app-wide surface, so its open state lives in
   // a shared store rather than per-row state — opening another row's underline
   // replaces the open card instead of stacking a second one.
-  const openRuleId = useOpenRuleId(cell.id)
+  const openCard = useOpenRuleCard(cell.id)
+  const openRuleId = openCard?.ruleId ?? null
   // Teardown (virtualisation, lane switch, file change) closes this row's card,
   // matching the per-row lifetime the card had before the store.
   useEffect(() => () => closeRuleCard(cell.id), [cell.id])
@@ -5360,6 +5601,8 @@ function EditorRow({
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
+  const storedTargetHtmlRef = useRef<string | undefined>(undefined)
+  const latestTargetRef = useRef({ value: "", valueHtml: "" })
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
   const pendingIdmlPointerSelectionRef = useRef<IdmlPointerSelection | null>(null)
   // AQU-746: activation is async (read view → TipTap mount → rAF focus), so a
@@ -5416,6 +5659,36 @@ function EditorRow({
   const idmlParagraphStyleId = idmlConfiguration?.kind === "ready"
     ? idmlConfiguration.context.paragraphStyleId
     : undefined
+  const visibleStyleSegments = useVisibleStyleSegments()
+  const styleAlignDirty = useStyleAlignDirtyMatch(cell.id, visibleTranslatedHtml)
+  const mergedPlainCollapsed = useMemo(() => {
+    if (!visibleStyleSegments || !styleAlignDirty || !visibleTranslatedHtml) return false
+    return idmlMergedPlainGroupCollapsed({
+      originalHtml: cell.originalHtml,
+      translatedHtml: visibleTranslatedHtml,
+      metadata: cell.metadata,
+    })
+  }, [visibleStyleSegments, styleAlignDirty, visibleTranslatedHtml, cell.originalHtml, cell.metadata])
+  const showStyleAlignWarning = Boolean(
+    onAlignStyles
+    && !isLoading
+    && visibleTranslated.trim()
+    && mergedPlainCollapsed
+    && cellCanAlignStyles(cell)
+  )
+  const idmlPreview = idmlConfiguration?.kind === "ready"
+    && idmlTargetIsPreview(visibleTranslatedHtml, cell.metadata)
+  const previewText = ((isEditorActive && liveTargetText !== null) ? liveTargetText : visibleTranslated) ?? ""
+  const previewNeedsModel = cellCanAlignStyles(cell)
+  const showPassToStyleSegments = Boolean(
+    idmlPreview
+    && previewText.trim()
+    && !isLoading
+    && editable
+    && (previewNeedsModel ? onAlignStyles : readIdmlMetadataV2(cell.metadata)?.editableSlotIndexes.length === 1)
+  )
+  storedTargetHtmlRef.current = visibleTranslatedHtml
+  latestTargetRef.current = { value: visibleTranslated ?? "", valueHtml: visibleTranslatedHtml ?? "" }
   const canEditSourceForCell = canEditSource && !idmlConfiguration
 
   /**
@@ -5513,7 +5786,7 @@ function EditorRow({
     ? t("editor.source.idmlProtected")
     : sourceReadOnlyReason
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
-  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const showCompletionOverlay = isLoading && (!hasTranslatedText || loadingPhase === "aligning")
   const sourceCellDirection = useMemo(
     () =>
       resolveTextDirection(
@@ -5567,7 +5840,11 @@ function EditorRow({
   const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
-  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+  const terminologyConcepts = conceptsForLaneTag(
+    project.terminology ?? EMPTY_CONCEPTS,
+    activeLane,
+    project.lanes ?? [],
+  )
   const showTargetKeyTermHighlights =
     targetKeyTermHighlightMode === "always" ||
     (targetKeyTermHighlightMode === "focused" && isRowFocused)
@@ -5617,10 +5894,9 @@ function EditorRow({
     return m
   }, [ruleMap])
 
-  const waivedRuleIds = useMemo(
-    () => new Set((cell.waivers ?? []).map((w) => w.ruleId)),
-    [cell.waivers],
-  )
+  // AQU-1740: keyed by (ruleId, matchHash) so a waiver on ONE finding only
+  // greys that finding's blot/highlight — see `waivedKeys` / `isSpanWaived`.
+  const waivedKeys = useMemo(() => waivedKeysOf(cell.waivers), [cell.waivers])
 
   // Stable identity across renders (cellInfractions/waivedInfractions are
   // themselves memoized in MemoizedRow) so TranslatedEditor's violation-
@@ -5655,7 +5931,7 @@ function EditorRow({
     [mergedInfractions, liveTermInfractions],
   )
 
-  const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
+  const handleWaive = useCallback((input: { ruleId: string; matchHash?: string; reason?: string }) => {
     closeRuleCard(cell.id)
     if (!project.id) return
     // Emits a `cell.waive` event into the outbox. The pending-outbox overlay
@@ -5667,6 +5943,7 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       ruleId: input.ruleId,
+      ...(input.matchHash ? { matchHash: input.matchHash } : {}),
       ...(input.reason ? { reason: input.reason } : {}),
       ...(activeLane ? { targetLang: activeLane } : {}),
       author: username,
@@ -5680,7 +5957,7 @@ function EditorRow({
     })
   }, [project.id, cell.fileId, cell.id, username, onCellCommitted, activeLane])
 
-  const handleUnwaive = useCallback((ruleId: string) => {
+  const handleUnwaive = useCallback((ruleId: string, matchHash?: string) => {
     closeRuleCard(cell.id)
     if (!project.id) return
     void emitCellUnwaive({
@@ -5688,6 +5965,7 @@ function EditorRow({
       fileId: cell.fileId,
       cellId: cell.id,
       ruleId,
+      ...(matchHash ? { matchHash } : {}),
       ...(activeLane ? { targetLang: activeLane } : {}),
       author: username,
     }).then(() => {
@@ -5703,35 +5981,73 @@ function EditorRow({
     const out: RangeHighlight[] = []
     const all = [...cellInfractions, ...waivedInfractions]
     for (const inf of all) {
-      const waived = waivedRuleIds.has(inf.ruleId)
       const severity = ruleSeverity.get(inf.ruleId) ?? "major"
       for (const span of inf.spans) {
         if (span.side !== "source") continue
+        const waived = isSpanWaived(waivedKeys, inf.ruleId, span)
+        const matchHash = spanMatchHash(span)
         out.push({
           start: span.start, end: span.end, ruleId: inf.ruleId,
+          ...(matchHash ? { matchHash } : {}),
           kind: waived ? "violation-waived" : (severity === "major" ? "violation-major" : "violation-minor"),
         })
       }
     }
     return out
-  }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+  }, [cellInfractions, waivedInfractions, waivedKeys, ruleSeverity])
 
   const targetRanges = useMemo<RangeHighlight[]>(() => {
     const out: RangeHighlight[] = []
     const all = [...cellInfractions, ...waivedInfractions]
     for (const inf of all) {
-      const waived = waivedRuleIds.has(inf.ruleId)
       const severity = ruleSeverity.get(inf.ruleId) ?? "major"
       for (const span of inf.spans) {
         if (span.side !== "target") continue
+        const waived = isSpanWaived(waivedKeys, inf.ruleId, span)
+        const matchHash = spanMatchHash(span)
         out.push({
           start: span.start, end: span.end, ruleId: inf.ruleId,
+          ...(matchHash ? { matchHash } : {}),
           kind: waived ? "violation-waived" : (severity === "major" ? "violation-major" : "violation-minor"),
         })
       }
     }
     return out
-  }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
+  }, [cellInfractions, waivedInfractions, waivedKeys, ruleSeverity])
+  const healthDisplaySpans = useMemo<HealthDisplaySpan[]>(() => {
+    if (!healthScoreColorCoding || !cell.aiDrafted) return []
+    const draftText = liveTargetText ?? visibleTranslated
+    if (!draftText?.trim()) return []
+    const examples = resolveDraftHealthExamples({
+      live: cellExamples,
+      persisted: cell.aiDraft?.exampleTexts,
+      exampleIds: cell.aiDraft?.exampleIds,
+      lookup: (id) => {
+        const view = previewCellStore?.getCellView(id)
+        if (!view?.translated.trim()) return undefined
+        return { source: view.original, target: view.translated }
+      },
+    })
+    return buildDraftHealthSpans(draftText, examples).map((span) => ({
+      ...span,
+      title: span.kind === "supported" && span.exampleSource != null && span.exampleTarget != null
+        ? t("editor.health.citedExample", {
+            source: clipDraftHealthExcerpt(span.exampleSource),
+            target: clipDraftHealthExcerpt(span.exampleTarget),
+          })
+        : undefined,
+    }))
+  }, [
+    healthScoreColorCoding,
+    cell.aiDrafted,
+    cell.aiDraft?.exampleIds,
+    cell.aiDraft?.exampleTexts,
+    cellExamples,
+    liveTargetText,
+    visibleTranslated,
+    previewCellStore,
+    t,
+  ])
   const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // AQU-1484: the commit path below validates a human edit by itself, and that
@@ -5789,6 +6105,7 @@ function EditorRow({
       setWriteError(idmlCommitError)
       return false
     }
+    latestTargetRef.current = { value, valueHtml }
     // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
     // signature (`status original translated`) shifts and `useHealth` re-runs
     // `checkRulesForCell` for this one cell on the next render — no other
@@ -5796,6 +6113,13 @@ function EditorRow({
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
     setLocalTargetDraft({ value, valueHtml })
     onOptimisticEdit?.(cell.id, { value, valueHtml })
+    if (idmlConfiguration) {
+      rememberManualStyleAlignment(cell.id, value, {
+        originalHtml: cell.originalHtml,
+        translatedHtml: valueHtml,
+        metadata: cell.metadata,
+      })
+    }
     setWriteError(null)
     // RACE-3/QW-2: use the last event id we enqueued for this cell as parentId
     // rather than the lagging projection value. The workspace-level getter
@@ -5914,6 +6238,13 @@ function EditorRow({
       const msg = err instanceof Error ? err.message : t("editor.write.saveFailed")
       setWriteError(msg)
       setLocalTargetDraft(null)
+      if (idmlConfiguration) {
+        rememberManualStyleAlignment(cell.id, cell.translated ?? "", {
+          originalHtml: cell.originalHtml,
+          translatedHtml: cell.translatedHtml,
+          metadata: cell.metadata,
+        })
+      }
       // Revert the optimistic patch to the last confirmed projection value.
       onOptimisticEdit?.(cell.id, {
         value: cell.translated ?? "",
@@ -5921,7 +6252,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, project.validationRoleFloor, project.validationNamedUsers, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.originalHtml, cell.metadata, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, idmlConfiguration, t, settleOwedRepetitions])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -5948,6 +6279,74 @@ function EditorRow({
       savedTimerRef.current = null
     }, 2400)
   }, [onCompleteSingle, cell, onActivateEditor, getEditorActivationVersion])
+
+  const alignStylesAndReturn = useCallback(async (target: CellData = cell) => {
+    if (!onAlignStyles) return
+    const activationVersion = getEditorActivationVersion()
+    const saved = await onAlignStyles(target)
+    onActivateEditor(cell.id, { ifActivationVersion: activationVersion })
+    if (!saved) return
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setShowSaved(true)
+    savedTimerRef.current = setTimeout(() => {
+      setShowSaved(false)
+      savedTimerRef.current = null
+    }, 2400)
+  }, [onAlignStyles, cell, onActivateEditor, getEditorActivationVersion])
+
+  const noteSaved = useCallback(() => {
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setShowSaved(true)
+    savedTimerRef.current = setTimeout(() => {
+      setShowSaved(false)
+      savedTimerRef.current = null
+    }, 2400)
+  }, [])
+
+  /**
+   * Preview typing is a plain sentence. Persist it beside an empty copy of the
+   * source runs so the words are not a style run yet. A flush that arrives
+   * after a draft has already filled those runs is dropped.
+   */
+  const commitTranslated = useCallback((snapshot: { value: string; valueHtml: string; tmInsert?: true }) => {
+    const config = idmlConfiguration
+    if (config?.kind === "ready" && idmlTargetIsPreview(storedTargetHtmlRef.current, cell.metadata)) {
+      return handleEditorCommit({
+        ...snapshot,
+        valueHtml: emptyIdmlEditableHtml(config.context.sourceHtml, config.context.metadata),
+      })
+    }
+    if (config?.kind === "ready" && !snapshot.valueHtml.includes("data-idml-protected")) {
+      return false
+    }
+    return handleEditorCommit(snapshot)
+  }, [cell.metadata, handleEditorCommit, idmlConfiguration])
+
+  const passPreviewToSegments = useCallback(async () => {
+    translatedEditorRef.current?.flushPendingCommit()
+    const latest = latestTargetRef.current
+    const snapshot: CellData = {
+      ...cell,
+      translated: latest.value,
+      translatedHtml: latest.valueHtml || cell.translatedHtml,
+    }
+    if (!snapshot.translated.trim()) return
+    if (cellCanAlignStyles(snapshot)) {
+      await alignStylesAndReturn(snapshot)
+      return
+    }
+    if (readIdmlMetadataV2(snapshot.metadata)?.editableSlotIndexes.length !== 1) return
+    try {
+      const placed = placeIdmlPreviewInOnlySlot(snapshot, snapshot.translated)
+      const saved = await handleEditorCommit({
+        value: placed.value,
+        valueHtml: placed.valueHtml ?? "",
+      })
+      if (saved) noteSaved()
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : t("editor.idml.alignStylesFailed"))
+    }
+  }, [alignStylesAndReturn, cell, handleEditorCommit, noteSaved, t])
 
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
@@ -6643,12 +7042,22 @@ function EditorRow({
   const showVoiceChip = Boolean(cellVoices?.chip) && !castHoldsSlot
   const showCellLabel = cellLabelsEnabled && Boolean(labelText) && !showVoiceChip
 
-  // The cell number tints by worst severity. That's the whole signal — the
-  // concrete issue list lives in the expansion's Issues tab, not in a hover
-  // popover here. (Replaced the old severity stripe / warning triangle / dot;
-  // the cast label moved to the target column header lane so it isn't squished
-  // into this 44px gutter.)
+  // The cell number tints by worst severity. Hover names every active check
+  // and why it fired (AQU-757); the Issues tab is where you waive one.
+  // (Replaced the old severity stripe / warning triangle / dot; the cast label
+  // moved to the target column header lane so it isn't squished into this
+  // 44px gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
+  const issueLines = useMemo(
+    () => summarizeCellIssues(cellInfractions, ruleMap, t),
+    [cellInfractions, ruleMap, t],
+  )
+  const issueHint = issueLines.length === 0 && cellNeedsAttention
+    ? t("editor.issues.notYetValidated")
+    : undefined
+  const issueSummary = issueLines.length > 0
+    ? issueLines.map(formatCellIssueLine).join(". ")
+    : issueHint
   const numberLabel = cellNumberLabel({
     lineNumbersEnabled,
     cellType: cell.type,
@@ -6691,22 +7100,32 @@ function EditorRow({
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
   const gutterLanguageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
+  const lineAria = t("editor.row.lineAria", { number: numberLabel ?? "" })
   const numberPill = numberLabel === null ? null : (
     // Box the digit to the source's first line (fontSize × line-height 1.6,
     // both set on the source well below) and center it, so the number keeps
     // riding that line as the reader changes font size. A fixed height only
-    // happens to line up at one size.
-    <span
-      className="flex items-center justify-center leading-none"
-      style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
-      aria-label={t("editor.row.lineAria", { number: numberLabel })}
+    // happens to line up at one size. The tooltip is only there when the
+    // tint means something — a clean line stays a plain number.
+    <AppTooltip
+      content={issueLines.length > 0 ? <CellIssueLines lines={issueLines} /> : issueHint}
+      side="right"
+      className="max-w-xs"
     >
-      <CellNumberPill
-        number={numberLabel}
-        plain
-        tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
-      />
-    </span>
+      <span
+        className="flex items-center justify-center leading-none"
+        style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+        aria-label={issueSummary ? `${lineAria}. ${issueSummary}` : lineAria}
+        role={issueSummary ? "img" : undefined}
+        data-testid={issueSummary ? "cell-issue-flag" : undefined}
+      >
+        <CellNumberPill
+          number={numberLabel}
+          plain
+          tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
+        />
+      </span>
+    </AppTooltip>
   )
 
   // ── Hover / focus state for the floating action rail ─────────────────────
@@ -6944,9 +7363,11 @@ function EditorRow({
   // Inline rule click → open the standard bottom-right violation toast. Keep
   // the row collapsed and clear the transient hover preview so one gesture
   // produces one violation surface.
-  const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement) => {
+  const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement, matchHash?: string) => {
     setHoveredRule(null)
-    openRuleCard(cell.id, ruleId)
+    // AQU-1740: carry the clicked finding so the card's waive accepts that
+    // match, not every match of the rule in this cell.
+    openRuleCard(cell.id, ruleId, matchHash)
   }, [cell.id])
 
   // Same card, opened from the cell's Issues tab instead of an inline blot.
@@ -7289,6 +7710,8 @@ function EditorRow({
             point={healthRibbonPoint}
             hasMajorIssue={hasMajorInfraction}
             hasIssue={hasAnyIssue}
+            issues={issueLines}
+            issueHint={issueHint}
             className="top-0 bottom-0 md:hidden"
             testId="health-ribbon-mobile"
           />
@@ -7694,6 +8117,11 @@ function EditorRow({
                   idmlParagraphStyleId={idmlParagraphStyleId}
                   concepts={terminologyConcepts}
                   termMatching={project.termMatching}
+                  // AQU-1757: the same underlines as the plain path. The spans
+                  // index the text the checks read, not the markup.
+                  ranges={sourceRanges}
+                  rangeText={effectiveSourceText(cell)}
+                  onRangeClick={openInlineRule}
                 />
               </div>
             ) : cellMentions ? (
@@ -7800,6 +8228,8 @@ function EditorRow({
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
               hasIssue={hasAnyIssue}
+              issues={issueLines}
+              issueHint={issueHint}
               className="hidden md:block"
             />
           ) : undefined}
@@ -7855,10 +8285,11 @@ function EditorRow({
               {validationControl}
               {audioValidationControl}
             <EditorTargetCellWell
+              className={showStyleAlignWarning || showPassToStyleSegments ? "pb-5 pe-6" : undefined}
               onClick={(event) => {
                 if (isEditorActive) return
                 event.stopPropagation()
-                requestTargetEdit(idmlConfiguration
+                requestTargetEdit(idmlConfiguration && !idmlPreview
                   ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                   : null)
               }}
@@ -7870,8 +8301,8 @@ function EditorRow({
                     ref={translatedEditorRef}
                     cellId={cell.id}
                     initialPlain={visibleTranslated}
-                    initialHtml={visibleTranslatedHtml}
-                    idmlConfiguration={idmlConfiguration}
+                    initialHtml={idmlPreview ? undefined : visibleTranslatedHtml}
+                    idmlConfiguration={idmlPreview ? null : idmlConfiguration}
                     initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
                     onInitialIdmlSelectionApplied={() => {
                       pendingIdmlPointerSelectionRef.current = null
@@ -7880,7 +8311,7 @@ function EditorRow({
                     // AQU-667: only authoritative when we're not masking it with a
                     // local human draft — then `visibleTranslated` IS cell.translated.
                     aiDrafted={!localTargetDraft && cell.aiDrafted}
-                    onCommit={handleEditorCommit}
+                    onCommit={commitTranslated}
                     pendingInputRef={pendingActivationInputRef}
                     pendingReplaceRef={pendingExampleInsertRef}
                     onFocus={handleEditorFocus}
@@ -7899,7 +8330,7 @@ function EditorRow({
                     heldByLabel={lockHolderLabel}
                     infractions={blotInfractions}
                     ruleSeverity={ruleSeverity}
-                    waivedRuleIds={waivedRuleIds}
+                    waivedKeys={waivedKeys}
                     onRuleClick={openInlineRule}
                     onRuleHover={handleRuleHover}
                     onLiveTextChange={setLiveTargetText}
@@ -7923,6 +8354,7 @@ function EditorRow({
                     }}
                     ariaLabel={editorAriaLabel}
                     onEscapeToGrid={onEscapeToGrid}
+                    healthSpans={healthDisplaySpans}
                   />
                 ) : (
                   <EditorTargetReadSurface
@@ -7947,7 +8379,7 @@ function EditorRow({
                     editable={editable && !isLoading && !lockHolderLabel}
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
-                    preserveWhitespace={Boolean(idmlConfiguration)}
+                    preserveWhitespace={Boolean(idmlConfiguration) && !idmlPreview}
                     onMouseDown={(event) => {
                       if (!targetIsPlainText) return
                       const generatedPlaying = generatedVoiceController.isPlaying
@@ -7966,7 +8398,7 @@ function EditorRow({
                       event.stopPropagation()
                       // Option/Alt+click seeks (onMouseDown); don't also enter edit.
                       if (isWordSeekClick(event)) return
-                      requestTargetEdit(idmlConfiguration
+                      requestTargetEdit(idmlConfiguration && !idmlPreview
                         ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                         : null)
                     }}
@@ -7989,7 +8421,7 @@ function EditorRow({
                         <span data-remote-presence-draft>
                           {overlayDraftText}
                         </span>
-                      ) : idmlConfiguration && visibleTranslatedHtml ? (
+                      ) : idmlConfiguration && visibleTranslatedHtml && !idmlPreview ? (
                         <TargetIdmlHtml
                           html={visibleTranslatedHtml}
                           idmlStyleCatalog={idmlStyleCatalog}
@@ -8008,6 +8440,7 @@ function EditorRow({
                           <TargetReadText
                             text={visibleTranslated}
                             ranges={targetRanges}
+                            healthSpans={healthDisplaySpans}
                             concepts={terminologyConcepts}
                             onRangeClick={openInlineRule}
                             onTermChipClick={handleTermChipClick}
@@ -8073,7 +8506,9 @@ function EditorRow({
                       <span>
                         {loadingPhase === "searching"
                           ? t("editor.ai.lookingUpExamples")
-                          : t("editor.ai.generatingTranslation")}
+                          : loadingPhase === "aligning"
+                            ? t("editor.ai.aligningStyles")
+                            : t("editor.ai.generatingTranslation")}
                       </span>
                     </div>
                   )}
@@ -8108,6 +8543,33 @@ function EditorRow({
                 }
                 className="absolute inset-x-2 bottom-1 z-10"
               />
+              {showStyleAlignWarning && (
+                <StyleAlignWarning
+                  aligning={loadingPhase === "aligning"}
+                  busy={isLoading}
+                  editable={editable}
+                  hasText={Boolean(visibleTranslated.trim())}
+                  isAnonymous={Boolean(isAnonymous)}
+                  isCompletionConfigured={isCompletionConfigured}
+                  isCompletionAvailable={isCompletionAvailable}
+                  onAlign={alignStylesAndReturn}
+                  onAiSetupNeeded={onAiSetupNeeded}
+                />
+              )}
+              {showPassToStyleSegments && (
+                <PassToStyleSegmentsButton
+                  aligning={loadingPhase === "aligning"}
+                  busy={isLoading}
+                  editable={editable}
+                  hasText={Boolean(previewText.trim())}
+                  isAnonymous={Boolean(isAnonymous)}
+                  needsModel={previewNeedsModel}
+                  isCompletionConfigured={isCompletionConfigured}
+                  isCompletionAvailable={isCompletionAvailable}
+                  onPass={passPreviewToSegments}
+                  onAiSetupNeeded={onAiSetupNeeded}
+                />
+              )}
             </EditorTargetCellWell>
             </div>
             {hasInlineFootnotes && (
@@ -8160,10 +8622,12 @@ function EditorRow({
               className="sr-only"
             >
               {isLoading && !completionPreview
-                ? // i18n-exempt "searching" is a loading-phase tag, not copy
+                ? // i18n-exempt "searching" / "aligning" are loading-phase tags, not copy
                   (loadingPhase === "searching"
                     ? t("editor.row.draftSearching", { cellRef })
-                    : t("editor.row.draftGenerating", { cellRef }))
+                    : loadingPhase === "aligning"
+                      ? t("editor.row.aligningStyles", { cellRef })
+                      : t("editor.row.draftGenerating", { cellRef }))
                 : isLoading && completionPreview
                   ? t("editor.row.draftPreviewReady", { cellRef })
                   : null}
@@ -8499,11 +8963,36 @@ function EditorRow({
                 onOpenHistory={onOpenHistory}
               />
 
-              {onSeekToCue && (
+              {/* AQU-1118: while this row's line is the one playing, the
+                  button shows Pause and stops playback; pressing it again
+                  plays from this line. "Playing" is the bottom bar's own
+                  current line, so the row and the bar always agree. */}
+              {onSeekToCue && (cuePlaying && onPauseCue ? (
+                <RailButton
+                  icon={<Pause className="h-3.5 w-3.5" />}
+                  tooltip={t("editor.cue.pause")}
+                  onClick={onPauseCue}
+                  toneClass="text-primary hover:text-primary/80"
+                />
+              ) : (
                 <RailButton
                   icon={<Play className="h-3.5 w-3.5" />}
                   tooltip={t("editor.cue.playFrom")}
                   onClick={() => onSeekToCue(cell.id)}
+                />
+              ))}
+
+              {onAlignStyles && cellCanAlignStyles(cell) && (
+                <AlignStylesButton
+                  hasText={Boolean(visibleTranslated.trim())}
+                  editable={editable}
+                  isAnonymous={Boolean(isAnonymous)}
+                  isCompletionConfigured={isCompletionConfigured}
+                  isCompletionAvailable={isCompletionAvailable}
+                  aligning={loadingPhase === "aligning"}
+                  busy={isLoading}
+                  onAlign={alignStylesAndReturn}
+                  onAiSetupNeeded={onAiSetupNeeded}
                 />
               )}
             </CellActionRail>
@@ -8738,9 +9227,20 @@ function EditorRow({
       )}
 
       {openRuleId && (() => {
-        const inf = [...cellInfractions, ...waivedInfractions].find(
+        // AQU-1740: `partitionInfractions` can split one rule across an active
+        // and a waived infraction, so match on the CLICKED finding first — a
+        // blot the reviewer already accepted must open its waived entry (which
+        // offers "un-waive"), not the active one next to it.
+        const candidates = [...cellInfractions, ...waivedInfractions].filter(
           (i) => i.ruleId === openRuleId,
         )
+        const openMatchHash = openCard?.matchHash
+        const inf =
+          (openMatchHash
+            ? candidates.find((i) =>
+                i.spans.some((sp) => spanMatchHash(sp) === openMatchHash),
+              )
+            : undefined) ?? candidates[0]
         const rule = ruleMap.get(openRuleId)
         if (!inf || !rule) return null
         return (
@@ -8750,6 +9250,7 @@ function EditorRow({
               if (!next) closeRuleCard(cell.id)
             }}
             infraction={inf}
+            matchHash={openMatchHash}
             ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
             onOpenRule={(ruleId) => {

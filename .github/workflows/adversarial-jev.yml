@@ -138,11 +138,19 @@ jobs:
           ATTACK_CODE: ${{ steps.attack.outputs.code }}
           PREVIEW_STATE: ${{ steps.preview.outputs.state }}
           GATE_STATE: ${{ steps.gate.outputs.state }}
+          # comment.ts writes the run's status here; the last step reads it.
+          ADVERSARIAL_STATUS_FILE: ${{ runner.temp }}/adversarial-status
         run: |
           set -euo pipefail
           # One comment per head: a run for an older commit must not overwrite a newer one.
           current=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
-          if [ "$current" != "$HEAD_SHA" ]; then echo "Head moved to $current; not posting."; exit 0; fi
+          if [ "$current" != "$HEAD_SHA" ]; then
+            echo "Head moved to $current; not posting."
+            printf 'superseded\nHead moved to %s.\n' "$current" > "$ADVERSARIAL_STATUS_FILE"
+            exit 0
+          fi
+          # The inline NOT RUN bodies below skip comment.ts, so record their status here.
+          printf 'not_run\nThe workflow could not run the suite.\n' > "$ADVERSARIAL_STATUS_FILE"
           results=$(ls -td smart-tests/results/adv-*/ 2>/dev/null | head -1 || true)
           # Gate failures skip pnpm install (and a stale branch has no comment.ts), so write these inline.
           not_run() { printf '<!-- aquilla-adversarial -->\n## Adversarial Jev\n\nCommit `%s` · [run log](%s)\n\n**NOT RUN.** %s\n' "${HEAD_SHA:0:8}" "$RUN_URL" "$1"; }
@@ -174,6 +182,23 @@ jobs:
           name: adversarial-evidence-pr-${{ github.event.pull_request.number }}
           path: smart-tests/results/adv-*
           retention-days: 14
+      # AQU-1899: product findings stay advisory (the attack step continues on
+      # error), but a run that said nothing about this commit must not show as
+      # a green check. HARNESS UNAVAILABLE, NOT RUN, and NOT VERIFIED fail here.
+      - name: Fail unless the harness tested this commit
+        if: always()
+        env:
+          ADVERSARIAL_STATUS_FILE: ${{ runner.temp }}/adversarial-status
+        run: |
+          status=$(sed -n 1p "$ADVERSARIAL_STATUS_FILE" 2>/dev/null || true)
+          reason=$(sed -n 2p "$ADVERSARIAL_STATUS_FILE" 2>/dev/null || true)
+          case "$status" in
+            healthy) echo "The harness tested this commit. Findings, if any, are advisory; see the PR comment." ;;
+            superseded) echo "::notice::$reason This run's commit is no longer the PR head." ;;
+            *)
+              echo "::error title=Adversarial Jev said nothing about this commit::${status:-no status} ${reason:-The comment step did not record a status.}"
+              exit 1 ;;
+          esac
 
   nightly:
     if: github.event_name != 'pull_request'

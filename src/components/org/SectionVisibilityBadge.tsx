@@ -265,7 +265,10 @@ export function SectionVisibilityBadge({
           </button>
         )}
       />
-      <PopoverContent align="end" className="w-64">
+      {/* Wide enough for the longest English choice ("Follow the org (Maintainers
+          and owners)"); at w-64 the picker hung out of the popover. Longer
+          translations truncate inside the picker instead. */}
+      <PopoverContent align="end" className="w-[22rem] max-w-[calc(100vw-2rem)]">
         <Field>
           <div className="flex items-center justify-between gap-2">
             <FieldLabel className="text-xs font-medium">{t("org.sectionVisibilityBadge.whoCanSeeLabel")}</FieldLabel>
@@ -293,7 +296,9 @@ export function SectionVisibilityBadge({
             onValueChange={(v) => void handleChange(v)}
             disabled={busy}
           >
-            <SelectTrigger aria-label={t("org.sectionVisibilityBadge.whoCanSeeLabel")} size="sm" className="w-full">
+            {/* w-full! beats the shared trigger's own w-fit!, so the picker fills the
+                popover and truncates instead of overflowing it. */}
+            <SelectTrigger aria-label={t("org.sectionVisibilityBadge.whoCanSeeLabel")} size="sm" className="w-full! min-w-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

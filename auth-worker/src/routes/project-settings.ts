@@ -49,8 +49,9 @@
 //
 // AQU-1771: `rosterViewMinRole` and `memberProgressViewMinRole` are this
 // project's own, stricter-only copies of the org's visibility floors. They
-// keep the maintainer gate (org owners reach it through their org role) and
-// are refused below the org's floor — see visibilityFloorWriteProblem.
+// keep the maintainer gate (org owners reach it through their org role), are
+// refused below the org's floor, and only a caller at or above a stored value
+// may lower or remove it — see visibilityFloorWriteRefusal.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -58,7 +59,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { ROLE_NAMES, resolveProjectRole } from "../services/project-permissions"
-import { roleRequiredBody } from "../lib/role-denial"
+import { roleRequiredBody, type RoleRequiredBody } from "../lib/role-denial"
 import {
   getTermbaseEditMinRoleForProject,
   getOrgCountStructuralCellsForProject,
@@ -269,33 +270,61 @@ async function withOrgDefaults(
 type VisibilityFloorsView = Record<VisibilityFloorKey, { org: number; project: number | null; effective: number }>
 
 /**
- * AQU-1771: a write that changes a project's own visibility floor must name a
- * role-ladder level at or above the org's floor — a project can make who sees
- * its member list or each member's progress stricter, never looser. Judged on
- * the CHANGE, so a stored value the org has since overtaken (inert: the
- * floor is the higher of the two) still rides along on an unrelated save.
- * Returns the refusal message, or null.
+ * AQU-1771: the rules for changing a project's own visibility floors. Judged
+ * on the CHANGE, so a stored value rides along unchanged on an unrelated save.
+ *
+ *   - A value set must be a role-ladder level at or above the org's floor: a
+ *     project can make who sees its member list or each member's progress
+ *     stricter, never looser (400). A stored value the org has since
+ *     overtaken is inert — the floor is the higher of the two.
+ *   - Lowering or removing a stored value needs a role at least that value
+ *     (Sam, 2026-10-13: "Owners only" binds maintainers — only an owner may
+ *     loosen it). Removing the key by leaving it out of the whole-object write
+ *     counts as removing it (403, the role-required shape). Raising stays open
+ *     to anyone who may write the project's settings.
  */
-async function visibilityFloorWriteProblem(
+async function visibilityFloorWriteRefusal(
   env: AuthHonoEnv["Bindings"],
   projectId: string,
   stored: Record<string, unknown>,
   next: Record<string, unknown>,
-): Promise<string | null> {
+  role: { level: number; source?: string | null },
+): Promise<{ status: 400 | 403; body: { error: string } | RoleRequiredBody } | null> {
   const changed = VISIBILITY_FLOOR_KEYS.filter(
-    (key) => next[key] != null && JSON.stringify(stored[key]) !== JSON.stringify(next[key]),
+    (key) => JSON.stringify(stored[key]) !== JSON.stringify(next[key]),
   )
   if (changed.length === 0) return null
   const { orgPolicy } = await getProjectOrgPolicy(env, projectId, next)
   for (const key of changed) {
-    const level = parseProjectVisibilityFloor(next[key])
-    if (level == null) {
-      return `${key} must be a role level: one of ${VISIBILITY_FLOOR_LEVELS.join(", ")}`
+    const what = key === "rosterViewMinRole" ? "the member list" : "each member's progress"
+    if (next[key] != null) {
+      const level = parseProjectVisibilityFloor(next[key])
+      if (level == null) {
+        return { status: 400, body: { error: `${key} must be a role level: one of ${VISIBILITY_FLOOR_LEVELS.join(", ")}` } }
+      }
+      const orgFloor = orgPolicy[key]
+      if (level < orgFloor) {
+        return {
+          status: 400,
+          body: {
+            error: `${key} ${level} is below the organization's setting (${orgFloor}). A project can only make who sees ${what} stricter than its organization does: choose ${orgFloor} or higher, or remove ${key} to follow the organization.`,
+          },
+        }
+      }
     }
-    const orgFloor = orgPolicy[key]
-    if (level < orgFloor) {
-      const what = key === "rosterViewMinRole" ? "the member list" : "each member's progress"
-      return `${key} ${level} is below the organization's setting (${orgFloor}). A project can only make who sees ${what} stricter than its organization does: choose ${orgFloor} or higher, or remove ${key} to follow the organization.`
+    const storedLevel = parseProjectVisibilityFloor(stored[key])
+    const nextLevel = parseProjectVisibilityFloor(next[key])
+    const loosens = storedLevel != null && (nextLevel == null || nextLevel < storedLevel)
+    if (loosens && role.level < storedLevel) {
+      const name = (ROLE_NAMES[storedLevel] ?? `role ${storedLevel}`).replaceAll("_", " ")
+      return {
+        status: 403,
+        body: roleRequiredBody(
+          `${name} or higher is required to make who sees ${what} on this project less strict (${key} is ${storedLevel})`,
+          storedLevel,
+          role,
+        ),
+      }
     }
   }
   return null
@@ -553,8 +582,8 @@ projectSettings.on(
     }
 
     // AQU-1771: a project's own visibility floors can only be stricter.
-    const floorProblem = await visibilityFloorWriteProblem(c.env, projectId, stored.settings, settings)
-    if (floorProblem) return c.json({ error: floorProblem }, 400)
+    const floorRefusal = await visibilityFloorWriteRefusal(c.env, projectId, stored.settings, settings, role)
+    if (floorRefusal) return c.json(floorRefusal.body, floorRefusal.status)
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
     const headerVersion = parseIntOrNull(c.req.header("If-Match-Version"))

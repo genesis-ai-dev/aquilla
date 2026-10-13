@@ -480,6 +480,69 @@ describe("saving a project's own visibility floors (AQU-1771)", () => {
     expect(res.status).toBe(200)
   })
 
+  // Sam, 2026-10-13: "Owners only" binds maintainers. A stored project value
+  // may be lowered or removed only by someone at or above it.
+  const storedProject = async () => {
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT settings FROM project_settings WHERE project_id = 'proj1'",
+    ).first<{ settings: string }>()
+    return JSON.parse(row?.settings ?? "{}") as Record<string, unknown>
+  }
+
+  it("refuses a maintainer lowering an owner's Owners-only value", async () => {
+    await seedSettings({ rosterViewMinRole: 700 })
+    const res = await patchProject("anna", { rosterViewMinRole: 600 })
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { code?: string; required?: { roleLevel: number }; error: string }
+    expect(body.code).toBe("role_required")
+    expect(body.required?.roleLevel).toBe(700)
+    expect(body.error).toMatch(/owner or higher is required to make who sees the member list on this project less strict/)
+    expect((await storedProject()).rosterViewMinRole).toBe(700)
+  })
+
+  it("refuses a maintainer removing it, whether by null or by leaving it out of the save", async () => {
+    await seedSettings({ memberProgressViewMinRole: 700, systemPrompt: "Be brief." })
+    expect((await patchProject("anna", { memberProgressViewMinRole: null, systemPrompt: "Be brief." })).status).toBe(403)
+    // The client saves the whole object; a save without the key removes it.
+    expect((await patchProject("anna", { systemPrompt: "Be terse." })).status).toBe(403)
+    expect(await storedProject()).toEqual({ memberProgressViewMinRole: 700, systemPrompt: "Be brief." })
+  })
+
+  it("lets an owner lower it and remove it", async () => {
+    await seedSettings({ rosterViewMinRole: 700 })
+    const lowered = await patchProject("wendi", { rosterViewMinRole: 600 })
+    expect(lowered.status).toBe(200)
+    const removed = await app.request(
+      "/api/v2/projects/proj1/settings",
+      {
+        method: "PATCH",
+        headers: authHeader(await jwtFor("wendi")),
+        body: JSON.stringify({ settings: {}, ifMatchVersion: 2 }),
+      },
+      env,
+    )
+    expect(removed.status).toBe(200)
+    expect((await storedProject()).rosterViewMinRole).toBeUndefined()
+  })
+
+  it("lets a maintainer raise it, and loosen a value at their own level", async () => {
+    await seedSettings({ rosterViewMinRole: 600 }, { rosterViewMinRole: 400 })
+    // Lower their own Maintainers value to Project leads: allowed (600 ≥ 600).
+    const lowered = await patchProject("anna", { rosterViewMinRole: 500 })
+    expect(lowered.status).toBe(200)
+    const raised = await app.request(
+      "/api/v2/projects/proj1/settings",
+      {
+        method: "PATCH",
+        headers: authHeader(await jwtFor("anna")),
+        body: JSON.stringify({ settings: { rosterViewMinRole: 700 }, ifMatchVersion: 2 }),
+      },
+      env,
+    )
+    expect(raised.status).toBe(200)
+    expect((await storedProject()).rosterViewMinRole).toBe(700)
+  })
+
   it("carries the org's policy to a project-only member who cannot read the org's settings", async () => {
     await seedSettings({ rosterViewMinRole: 700 }, {
       memberProgressViewMinRole: 500,

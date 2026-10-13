@@ -733,6 +733,33 @@ describe('UpdateProjectSettings — retired terminology key (AQU-1724)', () => {
   })
 })
 
+// AQU-1771: a project's own stricter visibility floor can be lowered or
+// removed only by a person at or above it — and never by an agent, whose
+// writes to policy keys only ever tighten.
+describe('agent writes cannot remove a stored visibility floor (AQU-1771)', () => {
+  it('PatchSettings: clearing it (null) is a loosening, refused even for an owner', async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({ rosterViewMinRole: 700 })
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, patchCmd([{ key: 'rosterViewMinRole', value: null }]))
+    expect(res.status).toBe(403)
+    expect(body.error.details.loosening[0].key).toBe('rosterViewMinRole')
+  })
+
+  it('UpdateProjectSettings: a whole blob that leaves it out is refused', async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({ memberProgressViewMinRole: 700 })
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, [
+      { kind: 'UpdateProjectSettings', projectId: PROJECT, settings: { terminology: { concepts: [] } }, ifMatchVersion: 1 },
+    ])
+    expect(res.status).toBe(403)
+    expect(body.error.code).toBe('permission_denied')
+    expect(body.error.details.policyKeys).toContain('memberProgressViewMinRole')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+})
+
 // AQU-1176: GET .../settings is the read that makes ifMatchVersion usable —
 // this is the whole loop an agent actually runs (read the live version, patch
 // ONE key with it, commit) asserted end to end.

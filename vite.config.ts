@@ -222,6 +222,13 @@ export default defineConfig(({ mode }) => ({
           name: "app",
           environment: "happy-dom",
           setupFiles: ["./src/test-setup.ts"],
+          // Stall watchdogs, not speed limits (AGENTS.md rule 15, AQU-1749). A
+          // passing test is unaffected; a stalled one fails after a minute.
+          // Each wait inside a test has 10 s (STALL_WATCHDOG_MS,
+          // src/test-utils/timeouts.ts), so these ceilings stay above the sum
+          // of a test's waits.
+          testTimeout: 60_000,
+          hookTimeout: 60_000,
           passWithNoTests: false,
           exclude: [
             "**/node_modules/**",
@@ -246,8 +253,16 @@ export default defineConfig(({ mode }) => ({
             // red by design until implemented, so they must not fail the default
             // suite.
             "parity/**",
-            // Owned by the "scripts-node" project below.
+            // Owned by the "scripts-node" project below. The .ts files here
+            // import node:url / node:path; the app project's browser polyfill
+            // makes fileURLToPath's dirname "." on Windows, so repo-root
+            // lookups walk up out of the checkout.
             "scripts/**/*.test.mjs",
+            "scripts/lib/e2e-lock.test.ts",
+            "scripts/lib/worktree-install-guard.test.ts",
+            "scripts/lib/spawn-command.test.ts",
+            "scripts/lib/playwright-loader-env.test.ts",
+            "scripts/lib/listening-pids.test.ts",
           ],
         },
       },

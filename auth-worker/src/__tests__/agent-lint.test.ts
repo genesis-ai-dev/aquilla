@@ -31,3 +31,17 @@ describe("lintDraft", () => {
     expect(tooMany.message).toContain(`"grace" ×1 in the source, "gracia" ×2 in the target`)
   })
 })
+
+describe("rule pattern ReDoS guard", () => {
+  it("skips catastrophic nested-quantifier patterns instead of running them", () => {
+    const rule: LintRule = {
+      id: "r-redos",
+      name: "redos",
+      enabled: true,
+      check: { type: "target-forbids", targetPattern: "(a+)+$" },
+    }
+    const t0 = Date.now()
+    expect(lintDraft([rule], "src", "a".repeat(40) + "!")).toEqual([])
+    expect(Date.now() - t0).toBeLessThan(500)
+  })
+})

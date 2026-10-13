@@ -979,6 +979,11 @@ async function run(args: Args) {
         gs.skipped ? `unchanged since ${prev?.syncedAt} (plan hash match — upsert skipped)` : args.apply ? "upserted" : "planned (dry-run)"
       } to Neon`,
     )
+    // AQU-1800: team membership with no lane grant reaches the team's projects
+    // and shows source text only, so the grant count rides the same report.
+    if (gs.laneGrants !== null) {
+      console.log(`  lane-access rows ${args.apply ? "written" : "an apply would add"}: ${gs.laneGrants}`)
+    }
     // Re-read full maps from Neon (now incl. any orgs just created) — fetchOrgTeamMaps
     // also carries owner_user_id, which the project upsert needs.
     const maps = await fetchOrgTeamMaps()

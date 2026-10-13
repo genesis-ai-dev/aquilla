@@ -13,6 +13,7 @@ import {
   regionAfterCell,
   regionBeforeCell,
   cellIdAtSec,
+  heldCellIdAtSec,
   insertSlotsByCell,
   cuesAroundGap,
   type RegionSegment,
@@ -184,6 +185,37 @@ describe("regionAfterCell / regionBeforeCell", () => {
 // The burned-in caption needs this when the linked VIDEO is the transport: the
 // play queue answers "what is sounding" everywhere it runs, and it cannot run
 // at all for a subtitle file with no audio, so there is nothing to ask.
+// AQU-1118 (Sam, Oct 7): the Text pane's playing mark holds through the
+// silence after a line, ending at the later of its end and the next start.
+describe("heldCellIdAtSec", () => {
+  const subs = [seg("a", 10, 12), seg("b", 20, 22), seg("c", 21, 25)]
+
+  it("is the line under the playhead", () => {
+    expect(heldCellIdAtSec(subs, 11)).toBe("a")
+  })
+
+  it("stays on the line that just ended until the next one starts", () => {
+    expect(heldCellIdAtSec(subs, 12)).toBe("a")
+    expect(heldCellIdAtSec(subs, 15)).toBe("a")
+    expect(heldCellIdAtSec(subs, 19.99)).toBe("a")
+    expect(heldCellIdAtSec(subs, 20)).toBe("b")
+  })
+
+  it("keeps an overlapped line until its own end, then moves to the next", () => {
+    expect(heldCellIdAtSec(subs, 21.5)).toBe("b")
+    expect(heldCellIdAtSec(subs, 22.5)).toBe("c")
+  })
+
+  it("marks nothing before the first line or after the last", () => {
+    expect(heldCellIdAtSec(subs, 5)).toBeNull()
+    expect(heldCellIdAtSec(subs, 26)).toBeNull()
+  })
+
+  it("ignores lines without timings", () => {
+    expect(heldCellIdAtSec([seg("a", 10, 12), { id: "x" }, seg("b", 20, 22)], 15)).toBe("a")
+  })
+})
+
 describe("cellIdAtSec", () => {
   const subs = [seg("a", 10, 12), seg("b", 20, 22)]
 

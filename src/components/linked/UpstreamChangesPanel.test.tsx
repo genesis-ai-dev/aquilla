@@ -57,7 +57,13 @@ function makeGroup(): ReviewBatchGroup {
         newSourceEventId: "mirror-evt-2",
         batchId: "batch-1",
         batchServerTs: Date.parse("2026-07-06T12:00:00Z"),
-        target: { eventId: "target-evt-1", sourceEventId: "mirror-evt-1", value: "Au commencement" },
+        target: {
+          eventId: "target-evt-1",
+          sourceEventId: "mirror-evt-1",
+          value: "Au commencement",
+          targetLang: "French",
+          laneId: "lane-fr",
+        },
       },
     ],
   }
@@ -118,6 +124,9 @@ describe("UpstreamChangesPanel", () => {
         cellId: "cell-1",
         sourceEventId: "mirror-evt-2",
         expectedTargetEventId: "target-evt-1",
+        // AQU-1902: the repin addresses the target row's own lane.
+        targetLang: "French",
+        laneId: "lane-fr",
       }),
     )
   })

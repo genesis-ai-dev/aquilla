@@ -78,8 +78,7 @@ import {
 } from "@/lib/sync/role-policy"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import {
-  DEFAULT_LANE_SELECT_VALUE,
-  isDefaultLaneValue,
+  buildLaneItems,
   laneTagForAssignment,
   selectValueForLane,
 } from "@/lib/sync/assignment-lane"
@@ -345,36 +344,23 @@ export function AssignModal({
   // in one click via the per-group "Select all".
   const fileGroups = useMemo(() => groupByCorpus(projectFiles), [projectFiles])
 
-  // AQU-538 (§3.5): lane options — the default lane ('') first, then each extra
-  // lane. Only rendered (length > 1) when the project actually has extra lanes,
-  // keeping N=1 projects byte-identical to the pre-lane flow.
-  const laneItems = useMemo(() => {
-    // A lane literally named "default" is not a lane this product can store.
-    const extra = (targetLanes ?? []).filter((lane) => !isDefaultLaneValue(lane))
-    if (extra.length === 0) return [] as { value: string; label: string }[]
-    // AQU-728 / AQU-729: the '' lane IS a real language — the project's own
-    // default target language. Label it with that language's name (e.g.
-    // "Portuguese"). The option value is a sentinel, not '': Base UI treats
-    // '' as "nothing selected", which is what made this control read as
-    // "default". The sentinel is mapped back to the default lane on submit
-    // and is never stored. AQU-1418: a lane row's name wins over the tag for
-    // every lane, the default included; the tag is the fallback.
-    const defaultLabel = laneLabels?.[""]?.trim() || defaultLaneLabel?.trim() || t("dialog.assign.defaultLaneFallback")
-    const all = [
-      { value: DEFAULT_LANE_SELECT_VALUE, label: defaultLabel },
-      ...extra.map((lane) => ({ value: lane, label: laneLabels?.[lane] || lane })),
-    ]
-    // AQU-581: a lane delegate may only assign inside the lanes the org
-    // scoped them to, so don't offer the rest — a lane in this picker that
-    // canSubmitAssignment would then refuse is a dead end, not a choice.
-    // Leads/maintainers pass no grant and keep the full list. Grant scopes
-    // are raw lane tags ('' = default), so compare against the item's raw
-    // tag, not its select value (AQU-729 sentinel).
-    const allowed = laneDelegateLanes(effectiveDelegate)
-    return allowed.length > 0
-      ? all.filter((item) => allowed.includes(laneTagForAssignment(item.value) ?? ""))
-      : all
-  }, [targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, t])
+  // AQU-538 (§3.5) / AQU-1601: the default lane first, then each extra lane.
+  // One lane still names itself — the field is how a person learns a lane
+  // exists. AQU-728 / AQU-729: the '' lane is a real language, and its option
+  // value is a sentinel because Base UI treats '' as "nothing selected".
+  // AQU-581: a lane delegate may only assign inside the lanes the org scoped
+  // them to. Leads pass no grant and keep the full list.
+  const laneItems = useMemo(
+    () =>
+      buildLaneItems({
+        targetLanes,
+        laneLabels,
+        defaultLaneLabel,
+        defaultLaneFallback: t("dialog.assign.defaultLaneFallback"),
+        allowedTags: laneDelegateLanes(effectiveDelegate),
+      }),
+    [targetLanes, laneLabels, defaultLaneLabel, effectiveDelegate, t],
+  )
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.
@@ -689,9 +675,9 @@ export function AssignModal({
             </Select>
           </Field>
 
-          {/* AQU-538 (§3.5): lane select — only when the project has extra
-              lanes. Assigning routes WORK to a lane; it is not a permission
-              wall (that's a scope — see §3.5). */}
+          {/* AQU-538 (§3.5) / AQU-1601: the lane this work is for. Several lanes
+              are a choice; one lane is named rather than hidden. Assigning
+              routes WORK to a lane; it is not a permission wall. */}
           {laneItems.length > 1 && (
             <Field>
               <FieldLabel htmlFor="assign-modal-lane">{t("dialog.assign.laneLabel")}</FieldLabel>
@@ -829,6 +815,7 @@ export function AssignModal({
                       <SelectItem key={item.value || "empty"} value={item.value}>
                         {member ? (
                           <UsernameWithAvatar
+                            userId={member.userId}
                             username={member.username}
                             label={item.label}
                             size="xs"

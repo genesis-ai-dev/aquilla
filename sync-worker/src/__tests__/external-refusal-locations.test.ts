@@ -144,6 +144,11 @@ beforeEach(async () => {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
   env = makeEnv(tdb.db)
 })
 
@@ -153,8 +158,8 @@ describe('CommitChangeset (SetTranslation) — a refusal names its line', () => 
     refuse.cells.add('b')
 
     const { res, body } = await prepareAndCommit(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'a', value: 'primero' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'b', value: 'segundo' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'a', laneId: 'deflane1', value: 'primero' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'b', laneId: 'deflane1', value: 'segundo' },
     ])
 
     expect(res.status, JSON.stringify(body)).toBe(200)
@@ -174,8 +179,8 @@ describe('CommitChangeset (SetTranslation) — a refusal names its line', () => 
     refuse.cells.add('b')
 
     const { res, body } = await prepareAndCommit(env, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'a', value: 'primero' },
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'b', value: 'segundo' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'a', laneId: 'deflane1', value: 'primero' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'b', laneId: 'deflane1', value: 'segundo' },
     ])
 
     expect(res.status).toBe(403)

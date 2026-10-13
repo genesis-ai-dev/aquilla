@@ -121,6 +121,7 @@ import {
 } from "@/lib/event-names"
 import { YouTubeImportPanel } from "@/components/import/YouTubeImportPanel"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
+import { JsonImportPanel } from "@/components/import/JsonImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
@@ -154,9 +155,10 @@ import {
   type TranslationSignal,
 } from "@/lib/import/translation-signals"
 import { LANGUAGES, type LanguageEntry } from "@/lib/languages/catalog"
+import { resolveImportDirection, type ImportDirectionLane } from "@/components/import/import-direction"
 import { loadFullLanguageCatalog, peekFullLanguageCatalog } from "@/lib/languages/full-catalog"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "partner" | "direction" | "result" | "collision" | "spreadsheet" | "jsonKeys" | "paired" | "sdbh" | "dcs" | "gdrive" | "youtube" | "linkProject"
   // AQU-1365: a translation's destination file is opening in the editor, then
   // its review (FileTargetImportPanel) runs, or one of the other ways into it
   // (eBible in target mode, a paired spreadsheet).
@@ -285,6 +287,11 @@ interface ImportDialogProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  /**
+   * Lane rows. Direction is decided from these, not from the active tag:
+   * `""` does not match a target lane tagged with its language.
+   */
+  lanes?: readonly ImportDirectionLane[] | null
   /** Active target-lane storage key. Empty means the project default lane. */
   targetLang?: string
   /** Identity JWT used only when a format needs AI-assisted analysis. */
@@ -381,6 +388,7 @@ export function ImportDialog({
   username,
   sourceLanguage,
   targetLanguage,
+  lanes,
   targetLang,
   identityToken,
   getToken,
@@ -485,10 +493,13 @@ export function ImportDialog({
     /** Commits the parsed results to the server once user confirms. */
     commit: (options?: PreviewConfirmOptions) => void | Promise<void>
     /** Surface to restore if the user cancels the preview. */
-    returnScreen: "upload" | "spreadsheet" | "gdrive"
+    returnScreen: "upload" | "spreadsheet" | "jsonKeys" | "gdrive"
   } | null>(null)
   const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
   const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
+  // AQU-525: a single JSON file goes through the key picker before import.
+  const [jsonSeedFile, setJsonSeedFile] = useState<File | null>(null)
+  const [jsonReturnScreen, setJsonReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
   // PreviewPanel can render an in-flight indicator).
@@ -612,26 +623,43 @@ export function ImportDialog({
         return
       }
 
-      const effectiveSource = (inferredLanguages?.sourceLanguage || sourceLanguage).trim()
-      const effectiveTarget = (inferredLanguages?.targetLanguage || targetLanguage).trim()
-
-      // Direction is ambiguous when: both empty, target is unset, or source==target
-      // (using the normalizer so "French"=="fra" doesn't spuriously trigger this).
-      // Small fix: also fire when both are empty (""=="" would otherwise pass the
-      // effectiveSource!=="" gate and silently leave source==target=="").
-      const bothEmpty = effectiveSource === "" && effectiveTarget === ""
-      const needsDirection =
-        bothEmpty ||
-        (effectiveSource !== "" && (effectiveTarget === "" || languagesEqual(effectiveSource, effectiveTarget)))
+      // Lane rows name the direction. The active tag is often `""`, which does
+      // not match a target lane tagged `fr`, so the language props can both be
+      // empty while the project already has a source and a target.
+      //
+      // AQU-1596: the direction decision reads the *lane's* languages. A file's
+      // declared languages are import information and can disagree with the
+      // lane — letting a declaration stand in for the lane's language here is
+      // what let a Spanish-declaring file answer the direction question for a
+      // French lane. The declaration is still used, but only to pre-fill the
+      // panel below as a suggestion.
+      const direction = resolveImportDirection({
+        lanes,
+        activeTag: targetLang ?? "",
+        sourceLanguage,
+        targetLanguage,
+      })
+      const declaredSource = (inferredLanguages?.sourceLanguage ?? "").trim()
+      const declaredTarget = (inferredLanguages?.targetLanguage ?? "").trim()
 
       // Respect the persisted per-project skip choice so we don't re-prompt on
       // every import once the user has deliberately deferred direction setup.
       const skipped = localStorage.getItem(skipStorageKey(projectId)) === "true"
 
-      if (needsDirection && !skipped) {
+      if (direction.needsDirection && !skipped) {
         setPendingImport({ refs, inferredLanguages })
-        setDirectionSource(effectiveSource)
-        setDirectionTarget(languagesEqual(effectiveSource, effectiveTarget) ? "" : effectiveTarget)
+        // The declared values are the suggestion: they pre-fill the inputs
+        // wherever the lane has nothing usable to show, and the user's answer is
+        // what actually gets saved (AQU-1596 — suggest or warn, never silently
+        // adopt). "Usable" excludes a target equal to the source, which is the
+        // broken state the panel exists to repair — there the declaration is
+        // the most useful thing we can offer.
+        const suggestedSource = direction.source || declaredSource
+        const laneTargetUsable =
+          direction.target !== "" && !languagesEqual(direction.source, direction.target)
+        const suggestedTarget = laneTargetUsable ? direction.target : declaredTarget
+        setDirectionSource(suggestedSource)
+        setDirectionTarget(languagesEqual(suggestedSource, suggestedTarget) ? "" : suggestedTarget)
         setScreen("direction")
         return
       }
@@ -643,8 +671,35 @@ export function ImportDialog({
       await onImported(refs, inferredLanguages)
       onOpenChange(false)
     },
-    [sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
+    [lanes, targetLang, sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
   )
+
+  // Lane rows can arrive after the import callback already opened an empty
+  // direction form. A project whose lanes already name a source and a target
+  // must not stay on that form. Closing does not record a skip.
+  const directionAutoFinished = useRef<typeof pendingImport>(null)
+  useEffect(() => {
+    if (screen !== "direction" || !pendingImport) {
+      if (screen !== "direction") directionAutoFinished.current = null
+      return
+    }
+    const direction = resolveImportDirection({
+      lanes,
+      activeTag: targetLang ?? "",
+      sourceLanguage,
+      targetLanguage,
+    })
+    if (!direction.needsDirection) {
+      if (directionAutoFinished.current === pendingImport) return
+      directionAutoFinished.current = pendingImport
+      void finishPendingImport(pendingImport, false)
+      return
+    }
+    // A source can arrive before any target. Show it. Leave an equal target
+    // blank: the form cleared it so the person can type a different one, and
+    // putting it back would lock the field.
+    setDirectionSource((current) => (current.trim() ? current : direction.source))
+  }, [screen, pendingImport, lanes, targetLang, sourceLanguage, targetLanguage, finishPendingImport])
 
   // AQU-277: called from ResultPanel when the user explicitly dismisses the
   // import-result screen. At this point we flush the actual onImported callback
@@ -679,7 +734,12 @@ export function ImportDialog({
     try {
       const mergedLanguages = {
         ...(captured.inferredLanguages ?? {}),
-        sourceLanguage: directionSource.trim() || captured.inferredLanguages?.sourceLanguage,
+        // AQU-1596: the confirmed value is exactly what stands in the field.
+        // The source used to fall back to the file's declaration when the user
+        // cleared it, which turned a declaration the user had just deleted into
+        // the lane's language. Cleared now means "leave the lane alone", which
+        // is what the target side already did.
+        sourceLanguage: directionSource.trim() || undefined,
         targetLanguage: directionTarget.trim() || undefined,
         // BLOCKER 1: mark as explicit so handleImported in ProjectWorkspace
         // REPLACES current values instead of only filling empty slots.
@@ -1024,6 +1084,7 @@ export function ImportDialog({
                   : screen === "tn" ? t("importExport.dialog.titleTn")
                   : screen === "partner" ? t(activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title")
                   : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
+                  : screen === "jsonKeys" ? t("importExport.dialog.titleJsonKeys")
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
                   : screen === "sdbh" ? t("importExport.landing.sdbh.title")
                   : screen === "linkProject" ? t("importExport.landing.linkProject.title")
@@ -1196,6 +1257,11 @@ export function ImportDialog({
               setSpreadsheetReturnScreen("upload")
               setScreen("spreadsheet")
             }}
+            onJsonFile={(file) => {
+              setJsonSeedFile(file)
+              setJsonReturnScreen("upload")
+              setScreen("jsonKeys")
+            }}
             onCommitPhase={setPreviewUploadPhase}
             onCommitProgress={setPreviewUploadProgress}
             onCommitError={setPreviewCommitError}
@@ -1238,6 +1304,11 @@ export function ImportDialog({
               setSpreadsheetSeedFile(file)
               setSpreadsheetReturnScreen("gdrive")
               setScreen("spreadsheet")
+            }}
+            onJsonFile={(file) => {
+              setJsonSeedFile(file)
+              setJsonReturnScreen("gdrive")
+              setScreen("jsonKeys")
             }}
             onCommitPhase={setPreviewUploadPhase}
             onCommitProgress={setPreviewUploadProgress}
@@ -1383,6 +1454,34 @@ export function ImportDialog({
             onCancel={() => {
               setSpreadsheetSeedFile(null)
               setScreen(spreadsheetReturnScreen)
+            }}
+          />
+        )}
+
+        {/* AQU-525: JSON source import — pick the translatable keys first. */}
+        {screen === "jsonKeys" && (
+          <JsonImportPanel
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
+            targetLang={targetLang}
+            getToken={getToken}
+            onPreview={(results, commit) => {
+              setPreviewUploadPhase("")
+              setPreviewUploadProgress(null)
+              setPreviewCommitError(null)
+              setPreviewState({ results, commit, returnScreen: "jsonKeys" })
+              setScreen("preview")
+            }}
+            onCommitError={setPreviewCommitError}
+            onImported={async (refs) => {
+              await handleChildImported(refs)
+            }}
+            initialFile={jsonSeedFile}
+            onCancel={() => {
+              setJsonSeedFile(null)
+              setScreen(jsonReturnScreen)
             }}
           />
         )}
@@ -1930,6 +2029,9 @@ interface UploadPanelProps {
    * Keep this handoff inside the unified Upload files entry point so users do
    * not have to know which specialized importer to choose. */
   onSpreadsheetFile: (file: File) => void
+  /** AQU-525: a lone JSON file goes through the key picker, so the user says
+   * which keys hold translatable text before any cell is created. */
+  onJsonFile: (file: File) => void
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
    *  the Paratext preview). */
   excludeFrontMatter?: boolean
@@ -2024,6 +2126,21 @@ function fileExts(list: File[]): string {
 // Outside React render (called from a progress callback passed into a plain
 // lib helper), so this uses the standalone t() rather than useT() — see
 // src/lib/i18n/standalone.ts.
+/**
+ * AQU-525: is this file small enough to read whole on the main thread? The
+ * JSON key picker parses the document before anything is imported, so an
+ * oversized file must not be read here at all — the ordinary import pipeline
+ * rejects it against the same ceiling, with the usual message.
+ */
+function withinUploadCeiling(file: File): boolean {
+  try {
+    assertSourceUploadByteLength(file.size)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function idmlParsePhase(
   fileName: string,
   progress: { phase: string; completed: number; total: number },
@@ -2046,7 +2163,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck }: UploadPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -2138,6 +2255,28 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         }
         onSpreadsheetFile(spreadsheets[0])
         return
+      }
+
+      // AQU-525: a lone JSON file goes to the key picker, which asks which keys
+      // hold translatable text and keeps the original document as the source
+      // side-car for a keyed export. A multi-file drop keeps the previous
+      // behavior (every string leaf of every file) so bulk imports still work,
+      // and an unparseable .json still falls through to the normal pipeline,
+      // which reports the parse error (or classifies the file).
+      if (list.length === 1 && detectFileType(list[0].name) === "json" && withinUploadCeiling(list[0])) {
+        const candidate = list[0]
+        const parseable = await candidate.arrayBuffer().then((bytes) => {
+          try {
+            JSON.parse(decodeImportText(bytes, candidate.name))
+            return true
+          } catch {
+            return false
+          }
+        })
+        if (parseable) {
+          onJsonFile(candidate)
+          return
+        }
       }
 
       setImporting(true)

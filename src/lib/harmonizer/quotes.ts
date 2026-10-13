@@ -182,7 +182,12 @@ export const quotationCheck: HarmonyCheck<QuotePlan> = {
   plan(cells) {
     const pair = learnQuotePair(cells)
     if (!pair) return null
-    const spans = findQuoteSpans(cells, pair).slice(0, MAX_SPANS)
+    // Only BROKEN spans: a quotation still open at the end of the passage is
+    // usually a long discourse that runs on past the window, and asking Jev
+    // where it ends produced most of this check's false alarms on clean text
+    // (harmonizer eval, BSB + Macula, 2026-10-05). A broken span has proof the
+    // speech ended — a new one opened.
+    const spans = findQuoteSpans(cells, pair).filter((s) => s.broken).slice(0, MAX_SPANS)
     return spans.length > 0 ? { pair, spans } : null
   },
 
@@ -223,17 +228,18 @@ export const quotationCheck: HarmonyCheck<QuotePlan> = {
     return out
   },
 
-  findings(plan, cells, answers, prefix) {
+  findings(plan, cells, answers, prefix, opts) {
+    const min = opts?.minProbability ?? QUOTE_MIN_PROBABILITY
     const out: HarmonizerFinding[] = []
     plan.spans.forEach((span, s) => {
       const picked = choiceValue(answers[`${prefix}s${s}`])
-      if (!picked || picked.choice === CONTINUES || picked.probability < QUOTE_MIN_PROBABILITY) return
+      if (!picked || picked.choice === CONTINUES || picked.probability < min) return
       const m = /^c(\d+)$/.exec(picked.choice)
       if (!m) return
       const k = Number(m[1])
       if (!span.candidates.includes(k)) return
       const atEnd = noulValue(answers[`${prefix}s${s}_end${k}`])
-      if (atEnd === undefined || atEnd < QUOTE_MIN_PROBABILITY) return
+      if (atEnd === undefined || atEnd < min) return
       const cell = cells[k]
       const range = cell && closingSpan(cell.target)
       if (!range) return

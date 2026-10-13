@@ -204,6 +204,12 @@ describe("AQU-365: header actions hidden for below-floor roles", () => {
     expect(batchValidate.isAvailable(c)).toBe(true)
   })
 
+  it("opens the file modal for drafting and for text validation", () => {
+    expect(runCompletions.opensFileModal).toBe("draft-next")
+    expect(completeAll.opensFileModal).toBe("draft-all")
+    expect(batchValidate.opensFileModal).toBe("validate")
+  })
+
   it("fails open (shows) for a local project with no syncRole", () => {
     const c = ctxWithRole(null)
     expect(runCompletions.isAvailable(c)).toBe(true)

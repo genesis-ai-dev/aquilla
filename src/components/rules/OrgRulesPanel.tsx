@@ -28,7 +28,9 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { RuleEditor } from "@/components/RuleEditor"
 import { SeverityBadge, SeverityIcon } from "@/components/rules/RuleSeverity"
 import type { CellData } from "@/hooks/useCells"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { UserChip } from "@/components/UserChip"
 import type { PromotionRequest, TranslationRule } from "@/lib/parsers/types"
 import type { OrgPatchResult, OrgWideSettings } from "@/lib/sync/org-settings"
 
@@ -245,10 +247,20 @@ export function OrgRulesPanel({
                         {req.rule.description && (
                           <p className="mt-0.5 text-xs text-muted-foreground truncate">{req.rule.description}</p>
                         )}
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {t("rules.surface.requestedBy", {
-                            requester: req.requestedByName ?? t("rules.surface.requestedByFallback", { userId: req.requestedBy }),
-                          })}
+                        <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                          <RichMessage
+                            k="rules.surface.requestedBy"
+                            values={{
+                              requester: (
+                                <UserChip
+                                  userId={req.requestedBy}
+                                  username={req.requestedByName}
+                                  size="xs"
+                                  nameClassName="text-xs font-medium text-foreground"
+                                />
+                              ),
+                            }}
+                          />
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">

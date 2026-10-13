@@ -16,6 +16,7 @@ import {
   MINI_CHAT_WINDOW_SIZE,
   readMiniChatPlacement,
 } from "@/lib/agent/mini-chat-window"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 // The body is the shared dock view; this suite is about the frame around it.
 vi.mock("./AgentDockView", () => ({
@@ -234,7 +235,7 @@ describe("AgentMiniChat", () => {
     renderMiniChat()
     await user.click(screen.getByRole("button", { name: "Chat options" }))
     await user.click(await screen.findByRole("menuitem", { name: "Draft GEN 1" }))
-    await vi.waitFor(() => expect(switchTo).toHaveBeenCalledWith("s-old", []))
+    await vi.waitFor(() => expect(switchTo).toHaveBeenCalledWith("s-old", []), { timeout: STALL_WATCHDOG_MS })
   })
 
   it("titles the window after the thread on screen", () => {

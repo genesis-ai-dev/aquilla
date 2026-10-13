@@ -27,7 +27,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
-import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { OptionalMark } from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -50,6 +49,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DisabledFieldTooltip, PermissionLockHint } from "./ProjectSettings/DisabledFieldTooltip"
+import {
+  InheritedFieldNote,
+  InheritedSettingsSection,
+  useUpstreamProjectName,
+} from "./ProjectSettings/InheritedSettingsChoice"
+import { parseInheritedFromLink, type InheritFieldId } from "@/lib/sync/inherited-settings"
 import { PrivilegedMembersDialog } from "./ProjectSettings/PrivilegedMembersDialog"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
@@ -86,8 +91,11 @@ import type {
 import {
   AUDIO_MEDIA_STRATEGY_LABELS,
   projectHasScriptureFiles,
-  resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
+import { isAutopilotVisible } from "@/lib/features/flags"
+import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
+import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
+import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
 import {
   resolveTimingLocked,
   createProjectLane,
@@ -240,8 +248,6 @@ function withStyledTerms(
 
 interface Baseline {
   name: string
-  sourceLanguage: string
-  targetLanguage: string
   username: string
   provider: CompletionProvider
   endpoint: string
@@ -279,6 +285,8 @@ interface Baseline {
    *  yet — the effective (displayed) state is derived via
    *  `resolveBibleResourcesEnabled`, not defaulted here. */
   bibleResourcesEnabled: boolean | undefined
+  /** AQU-1686: EXPLICIT enrichment choices only; a missing id shows its default. */
+  bibleEnrichments: BibleEnrichmentSettings
   decaySettings: DecaySettings | undefined
   audioMediaStrategy: AudioMediaStrategy
   geminiApiKey: string
@@ -296,8 +304,6 @@ interface Baseline {
 function buildBaseline(project: ProjectRecord): Baseline {
   return {
     name: project.name,
-    sourceLanguage: project.sourceLanguage,
-    targetLanguage: project.targetLanguage,
     username: project.username || "local",
     provider: project.completionSettings ? resolveProvider(project.completionSettings) : "frontier",
     endpoint: project.completionSettings?.endpoint ?? "",
@@ -340,6 +346,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
     bibleResourcesEnabled: project.bibleResourcesEnabled,
+    // AQU-1686: explicit choices only — never fill in the defaults, or Save
+    // would pin today's defaults onto the project.
+    bibleEnrichments: project.bibleEnrichments ?? {},
     decaySettings: project.decaySettings,
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
@@ -354,8 +363,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
 /** Baseline fields whose stored value lives only in the shared settings blob.
  *  Each is written to the blob on Save, so each must be read back from it. */
 const BLOB_BACKED_KEYS = [
-  "sourceLanguage",
-  "targetLanguage",
   "validationCount",
   "validationCountAudio",
   "validationRoleFloor",
@@ -369,6 +376,7 @@ const BLOB_BACKED_KEYS = [
   "timingLocked",
   "harmonize_min_role",
   "bibleResourcesEnabled",
+  "bibleEnrichments",
   "precedingTargetCells",
   "importExcludeFrontMatter",
   "importCellUnit",
@@ -467,7 +475,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
     lanes: sharedLanes,
-    refresh: refreshSharedSettings,
+    refreshAfterWrite: refreshSharedSettingsAfterWrite,
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
@@ -478,6 +486,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     languageEditMinRole: project?.languageEditMinRole,
     roleTelemetry,
   })
+
+  const inheritedConfig = useMemo(
+    () => parseInheritedFromLink(sharedSettingsBlob?.inheritedFromLink),
+    [sharedSettingsBlob],
+  )
+  const inheritedUpstreamName = useUpstreamProjectName(project?.sourceProjectId ?? null)
+  const detachInherited = useCallback(
+    (field: InheritFieldId) => {
+      if (!inheritedConfig) return
+      void patchShared({
+        inheritedFromLink: {
+          ...inheritedConfig,
+          receive: { ...inheritedConfig.receive, [field]: false },
+          detached: { ...inheritedConfig.detached, [field]: true },
+        },
+      })
+    },
+    [inheritedConfig, patchShared],
+  )
 
   // Org context for the termbase-sharing section. The user's org; the section's
   // server calls re-validate org-membership / org-ownership, so a mismatch just
@@ -507,36 +534,61 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
 
-  const renameLane = useCallback(async (laneId: string, name: string) => {
+  // AQU-1816: the lane-row endpoints write around `patchShared`, which is the
+  // only path that told the page behind this modal (overview, workspace) that
+  // the settings row moved — so a lane added here stayed invisible behind the
+  // dialog until a reload (the AQU-1570 shape, for lanes). Every lane write
+  // below re-reads through `refreshSharedSettingsAfterWrite`, which broadcasts
+  // first and then refreshes this instance.
+  //
+  // AQU-1592: the languages screen sends the identity fields the user touched —
+  // the language, or a nullable name/code override. A null clears an override
+  // rather than writing a derived value back.
+  const renameLane = useCallback(async (
+    laneId: string,
+    edit: { name?: string | null; language?: string; code?: string | null },
+  ) => {
     const jwt = session?.jwt
     if (!jwt || !id) return "invalid" as const
-    const result = await renameProjectLane(jwt, id, laneId, name)
+    const result = await renameProjectLane(jwt, id, laneId, edit)
     if (result.kind === "ok") {
-      await refreshSharedSettings()
+      await refreshSharedSettingsAfterWrite()
       return "ok" as const
     }
-    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
-  }, [session?.jwt, id, refreshSharedSettings])
+    if (result.kind === "duplicate") return "duplicate" as const
+    if (result.kind === "malformed_code") return "malformed_code" as const
+    return "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
-  const createLane = useCallback(async (input: { name: string; language: string }) => {
+  const createLane = useCallback(async (
+    input: {
+      name: string
+      language: string
+      code?: string | null
+      /** AQU-1784: the section already warned about the duplicate inline. */
+      allowDuplicateName?: boolean
+    },
+  ) => {
     const jwt = session?.jwt
     if (!jwt || !id) return "invalid" as const
     const result = await createProjectLane(jwt, id, input)
     if (result.kind === "ok") {
-      await refreshSharedSettings()
+      await refreshSharedSettingsAfterWrite()
       return "ok" as const
     }
-    return result.kind === "duplicate" ? "duplicate" as const : "invalid" as const
-  }, [session?.jwt, id, refreshSharedSettings])
+    if (result.kind === "duplicate") return "duplicate" as const
+    if (result.kind === "malformed_code") return "malformed_code" as const
+    return "invalid" as const
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
     const jwt = session?.jwt
     if (!jwt || !id) return false
     const result = await setProjectLaneArchived(jwt, id, laneId, archived)
     if (result.kind !== "ok") return false
-    await refreshSharedSettings()
+    await refreshSharedSettingsAfterWrite()
     return true
-  }, [session?.jwt, id, refreshSharedSettings])
+  }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   // AQU-1464: the archive confirmation asks when the lane was last translated in.
   // No session or project id means we genuinely cannot answer — report that as an
@@ -639,8 +691,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [name, setName] = useState("")
   // AQU-765: inline validation for an empty/whitespace-only rename.
   const [nameError, setNameError] = useState<string | null>(null)
-  const [sourceLanguage, setSourceLanguage] = useState("")
-  const [targetLanguage, setTargetLanguage] = useState("")
   const [username, setUsername] = useState("")
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
@@ -676,6 +726,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // choice yet. The switch displays the DERIVED effective value (see render);
   // this state only ever holds what will be persisted on Save.
   const [bibleResourcesEnabled, setBibleResourcesEnabled] = useState<boolean | undefined>(undefined)
+  // AQU-1686: explicit enrichment choices — same "persist only what was
+  // chosen" contract as the switch above.
+  const [bibleEnrichments, setBibleEnrichments] = useState<BibleEnrichmentSettings>({})
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
@@ -706,11 +759,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const lastModelFetchKeyRef = useRef<string | null>(null)
 
   const seededRef = useRef(false)
+  // Snapshot of the first seed. Late blob adoption compares against this, not
+  // against a baseline a save may already have replaced (AQU-1744).
+  const seedBaselineRef = useRef<Baseline | null>(null)
 
   const applyBaseline = useCallback((b: Baseline) => {
     setName(b.name)
-    setSourceLanguage(b.sourceLanguage)
-    setTargetLanguage(b.targetLanguage)
     setUsername(b.username)
     setProvider(b.provider)
     setEndpoint(b.endpoint)
@@ -742,6 +796,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
+    setBibleEnrichments(b.bibleEnrichments)
     setDecaySettings(b.decaySettings)
     setAudioMediaStrategy(b.audioMediaStrategy)
     setGeminiApiKey(b.geminiApiKey)
@@ -765,6 +820,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const b = buildBaseline(
       sharedSettingsFetched ? overlaySettings(project, sharedSettingsBlob ?? {}) : project,
     )
+    seedBaselineRef.current = b
     setBaseline(b)
     applyBaseline(b)
     seededRef.current = true
@@ -781,23 +837,29 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   //
   // Once this page's own settings GET has resolved, rebuild the baseline
   // through the same overlay the rest of the app reads with, and adopt it for
-  // these keys. Once only, matching the "seed once" contract above. A field the
-  // user has already moved off the (stale) seed keeps their edit; the baseline
-  // still moves, so settling to the server value never reads as an edit.
-  // `hasFetched` fails closed (stays false on a failed GET), so a settings
-  // outage leaves the seeded values rather than blanking anything.
+  // these keys. Once only, matching the "seed once" contract above.
+  //
+  // Adoption is against the original seed, not the baseline in this closure.
+  // A field the user has already moved off that seed keeps their edit; the
+  // baseline still moves when it is still the seed, so settling an untouched
+  // field never reads as an edit. A successful save moves the saved keys off
+  // the seed on both sides. Comparing to the closed-over baseline instead
+  // treated that saved value as the thing to replace, so a GET that landed
+  // after the save snapped the draft and the baseline back to the stale blob
+  // (AQU-1744). `hasFetched` fails closed (stays false on a failed GET), so a
+  // settings outage leaves the seeded values rather than blanking anything.
   const blobResyncedRef = useRef(false)
   useEffect(() => {
     if (!project || !baseline || !sharedSettingsFetched) return
     if (blobResyncedRef.current) return
+    const seed = seedBaselineRef.current
+    if (!seed) return
     blobResyncedRef.current = true
     if (!sharedSettingsBlob) return
     const hydrated = buildBaseline(overlaySettings(project, sharedSettingsBlob))
-    const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], baseline[key]))
+    const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], seed[key]))
     if (changed.length === 0) return
     const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
-      sourceLanguage: setSourceLanguage,
-      targetLanguage: setTargetLanguage,
       validationCount: setValidationCount,
       validationCountAudio: setValidationCountAudio,
       validationRoleFloor: setValidationRoleFloor,
@@ -811,6 +873,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       timingLocked: setTimingLocked,
       harmonize_min_role: setHarmonizeMinRole,
       bibleResourcesEnabled: setBibleResourcesEnabled,
+      bibleEnrichments: setBibleEnrichments,
       precedingTargetCells: setPrecedingTargetCells,
       importExcludeFrontMatter: setImportExcludeFrontMatter,
       importCellUnit: setImportCellUnit,
@@ -819,13 +882,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     }
     setBaseline((prev) => {
       if (!prev) return prev
+      let moved = false
       const next = { ...prev }
-      for (const key of changed) adoptKey(next, hydrated, key)
-      return next
+      for (const key of changed) {
+        // A save may already have replaced this key. Leave it: `prev` can be
+        // the saved baseline even when this effect closed over the seed.
+        if (!sameSetting(prev[key], seed[key])) continue
+        adoptKey(next, hydrated, key)
+        moved = true
+      }
+      return moved ? next : prev
     })
     const adoptDraft = <K extends BlobBackedKey>(key: K) => {
       const setter = draftSetters[key] as Dispatch<SetStateAction<Baseline[K]>>
-      setter((prev) => (sameSetting(prev, baseline[key]) ? hydrated[key] : prev))
+      setter((prev) => (sameSetting(prev, seed[key]) ? hydrated[key] : prev))
     }
     for (const key of changed) adoptDraft(key)
   }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
@@ -891,8 +961,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!baseline) return false
     return (
       name !== baseline.name ||
-      sourceLanguage !== baseline.sourceLanguage ||
-      targetLanguage !== baseline.targetLanguage ||
       username !== baseline.username ||
       provider !== baseline.provider ||
       endpoint !== baseline.endpoint ||
@@ -923,6 +991,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
+      !sameSetting(bibleEnrichments, baseline.bibleEnrichments) ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
@@ -933,7 +1002,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
-    baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
+    baseline, name, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
@@ -942,7 +1011,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     allowTrackEditing,
     timingLocked,
-    harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
+    harmonizeMinRole, bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
   ])
 
@@ -1140,8 +1209,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
 
       const sharedUpdates: ProjectWideSettings = {}
-      if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
-      if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
       if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
@@ -1160,7 +1227,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(isBibleDataExperimentOn(project) ? "Bible data" : "Bible resources") }
+      if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push("Bible data enrichments") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
       if (importCellUnit !== baseline.importCellUnit) { sharedUpdates.importCellUnit = importCellUnit; changedFieldLabels.push("import cell unit") }
       if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
@@ -1209,10 +1277,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // AQU-765: re-baseline (and reflect in the input) with the trimmed name
       // we actually persisted, so the canonical value doesn't read back dirty.
       if (trimmedName !== name) setName(trimmedName)
+      // Built from this callback's closure — the draft at click time, not a
+      // settings GET that resolved while the PATCH was in flight. That GET
+      // may already have moved untouched blob keys onto the baseline and the
+      // draft. Replacing the baseline wholesale would put those keys back to
+      // the seed and leave the form dirty (AQU-1744).
       const newBaseline: Baseline = {
         name: trimmedName,
-        sourceLanguage,
-        targetLanguage,
         username,
         provider,
         endpoint: endpoint.trim(),
@@ -1243,6 +1314,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
+        bibleEnrichments,
         decaySettings,
         audioMediaStrategy,
         geminiApiKey,
@@ -1252,7 +1324,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         smartQuotes,
         termMatching,
       }
-      setBaseline(newBaseline)
+      setBaseline((prev) => {
+        const next: Baseline = { ...newBaseline }
+        if (!prev) return next
+        for (const key of BLOB_BACKED_KEYS) {
+          if (sameSetting(newBaseline[key], baseline[key]) && !sameSetting(prev[key], newBaseline[key])) {
+            adoptKey(next, prev, key)
+          }
+        }
+        return next
+      })
       // Refresh `useProject` in the background so other components see the
       // updated IDB record. We don't await it — the form is already correct.
       refresh()
@@ -1278,7 +1359,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setSaving(false)
     }
   }, [
-    id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
+    id, baseline, name, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
@@ -1301,7 +1382,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // merge that brought it here is where it became visible — dev's own
     // handleSave list never named it either.
     cellEditingFloor, timingLocked, allowTrackEditing,
-    bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
+    bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
 
@@ -1358,16 +1439,38 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // this guard prevents a double mount.
   const hasDcsUpstream = !hasSourceLink && !!readCursor((sharedSettingsBlob ?? {}) as Record<string, unknown>)
 
+  // AQU-1685: the card is "Bible data", with its enrichment rows, only while
+  // this device has the Bible data experiment on; otherwise it is the old
+  // "Bible resources" card, findable by its old keywords.
+  const bibleDataExperiment = isBibleDataExperimentOn(project)
+
   const ALL_SECTIONS: SettingsSection[] = [
     // AQU-1525: the counterpart of section-source-link — exactly one of the two
     // is ever visible, keyed off whether this project already has an upstream.
     { id: "section-link-source", label: "Link source", keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
     { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
+    { id: "section-inherited-settings", label: "Inherited settings", keywords: ["inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
-    { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    // AQU-1686: "translation notes" stays. It used to mislead (this card did
+    // not control the Translation Notes sidebar, and still does not), but the
+    // card now holds the Translation helps enrichment, which shows
+    // unfoldingWord's Translation Notes. "bible resources" keeps the old name
+    // findable.
+    bibleDataExperiment
+      ? {
+          id: "section-bible-resources",
+          label: "Bible data",
+          keywords: [
+            "bible data", "bible resources", "aquifer", "bibletranslation", "reference", "scholarly",
+            "enrichments", "voices", "who's who", "passage structure", "original language", "greek",
+            "hebrew", "translation helps", "translation notes", "translation questions", "key terms",
+            "places", "maps", "checks", "macula", "opentext", "acai", "unfoldingword", "data sources", "license",
+          ],
+        }
+      : { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
@@ -1443,7 +1546,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, content structure, username, Bible resources",
+      description: `Name, languages, content structure, username, ${bibleDataExperiment ? "Bible data" : "Bible resources"}`,
       icon: SlidersHorizontal,
       hub: "Project",
       sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
@@ -1466,6 +1569,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       sectionIds: [
         "section-link-source",
         "section-source-link",
+        "section-inherited-settings",
         "section-upstream-changes",
         "section-dcs-upstream",
         "section-git-sync",
@@ -1882,6 +1986,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}
+        {searchGroupLabel("section-inherited-settings")}
+        {hasSourceLink && project?.sourceProjectId && sectionsToRender.some((s) => s.id === "section-inherited-settings") && (
+          <div id="section-inherited-settings">
+            <InheritedSettingsSection
+              sourceProjectId={project.sourceProjectId}
+              settings={sharedSettingsBlob}
+              canEdit={canEditShared}
+              onPatch={patchShared}
+            />
+          </div>
+        )}
         {searchGroupLabel("section-upstream-changes")}
         {hasLiveSourceLink && sectionsToRender.some((s) => s.id === "section-upstream-changes") && (
           <UpstreamChangesPanel
@@ -1937,38 +2052,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 </p>
               ) : null}
               <SettingsRow
-                label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
-                control={
-                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
-                    <LanguageComboboxInput
-                      id="sl"
-                      value={sourceLanguage}
-                      onValueChange={setSourceLanguage}
-                      disabled={!canEditLanguages}
-                      aria-label={t("projectSettings.info.sourceLanguageLabel")}
-                      className="w-40 bg-background"
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
-              <SettingsRow
-                label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
-                control={
-                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
-                    <LanguageComboboxInput
-                      id="tl"
-                      value={targetLanguage}
-                      onValueChange={setTargetLanguage}
-                      disabled={!canEditLanguages}
-                      aria-label={t("projectSettings.info.targetLanguageLabel")}
-                      className="w-40 bg-background"
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
-              <SettingsRow
                 label={<label htmlFor="smart-quotes">{t("projectSettings.info.smartQuotesLabel")}</label>}
-                description={t("projectSettings.info.smartQuotesDescription")}
+                description={
+                  <>
+                    {t("projectSettings.info.smartQuotesDescription")}
+                    <InheritedFieldNote
+                      field="smartQuotes"
+                      upstreamName={inheritedUpstreamName}
+                      config={inheritedConfig}
+                      canEdit={canEditShared}
+                      onDetach={detachInherited}
+                    />
+                  </>
+                }
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                     <Switch
@@ -2051,36 +2147,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-bible-resources")}
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <div id="section-bible-resources">
-            <SettingsGroup label={t("projectSettings.section.bibleResources")}>
-              <SettingsRow
-                label={<label htmlFor="bible-resources-enabled">{t("projectSettings.bible.enableLabel")}</label>}
-                description={
-                  <>
-                    {t("projectSettings.bible.description")}
-                    {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.scriptureDefaultHint")}</span>
-                    ) : null}
-                    {bibleResourcesEnabled === undefined && !projectHasScriptureFiles(project?.files) ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.nonScriptureDefaultHint")}</span>
-                    ) : null}
-                    {bibleResourcesEnabled === false ? (
-                      <span className="mt-1 block">{t("projectSettings.bible.disabledHint")}</span>
-                    ) : null}
-                  </>
-                }
-                control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                    <Switch
-                      id="bible-resources-enabled"
-                      checked={resolveBibleResourcesEnabled(bibleResourcesEnabled, projectHasScriptureFiles(project?.files))}
-                      onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
-                      disabled={!canEditShared}
-                      aria-label={t("projectSettings.bible.enableLabel")}
-                    />
-                  </DisabledFieldTooltip>
-                }
-              />
-            </SettingsGroup>
+            <BibleDataSection
+              switchValue={bibleResourcesEnabled}
+              onSwitchChange={setBibleResourcesEnabled}
+              enrichments={bibleEnrichments}
+              onEnrichmentChange={(enrichment, checked) =>
+                setBibleEnrichments((prev) => ({ ...prev, [enrichment]: checked }))
+              }
+              hasScriptureFiles={projectHasScriptureFiles(project?.files)}
+              canEdit={canEditShared}
+              lockedTooltip={sharedDisabledTooltip ?? null}
+              // The project-wide opt-in, or the legacy device-local flag that
+              // useProject overlays onto the record (AQU-1246).
+              autopilotOn={isAutopilotVisible({
+                autopilotEnabled: sharedSettingsBlob.autopilotEnabled,
+                experimentalFlags: project?.experimentalFlags,
+              })}
+              // Through requestNavigate, so unsaved edits get the discard prompt.
+              onOpenBuiltinChecks={id ? () => requestNavigate(projectMemoryPath(id, "quality")) : undefined}
+              experimentOn={bibleDataExperiment}
+            />
           </div>
         )}
 
@@ -2692,6 +2778,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-validation" className="flex flex-col gap-12">
             <ValidationSettingsSection
               projectId={id}
+              notice={
+                <InheritedFieldNote
+                  field="workflowPolicy"
+                  upstreamName={inheritedUpstreamName}
+                  config={inheritedConfig}
+                  canEdit={canEditShared}
+                  onDetach={detachInherited}
+                />
+              }
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
               validationRoleFloor={validationRoleFloor}

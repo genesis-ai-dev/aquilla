@@ -8,6 +8,7 @@
 // it is correct on every call instead of re-derived (or fumbled) per run.
 
 import { visibleSourceSql } from '../../hidden-cells-scope'
+import { resolveLane, type RequiredLaneRef } from '../../../../../db/shared/lane-ref'
 
 export interface CellPair {
   cellId: string
@@ -211,11 +212,14 @@ export async function resolveFileByBook(
 export async function selectCellPairs(
   db: AquillaDb,
   projectId: string,
-  scope: { fileId: string; range?: RefRange; targetLang: string },
+  scope: { fileId: string; range?: RefRange } & RequiredLaneRef,
 ): Promise<CellPair[]> {
-  // Lane is required ('' = default lane). This ensures no caller accidentally
-  // pairs source cells from one lane with target rows from ALL lanes.
-  const lanePredicate = " AND t.target_lang = ?"
+  // AQU-1610: the lane is required and is matched by `lane_id`, so no caller
+  // can pair one lane's source cells with another lane's target rows — which
+  // a shared tag silently did. The source side is `side = 'source'`, with no
+  // `target_lang = ''`: a source row's lane is the project's source lane.
+  const { laneId } = await resolveLane(db, projectId, scope)
+  const lanePredicate = " AND t.lane_id = ?"
   const { results } = await db
     .prepare(
       `SELECT s.cell_id, s.canonical_ref, s.sequence_index, s.anchor_cell_id,
@@ -228,7 +232,6 @@ export async function selectCellPairs(
          ON t.project_id = s.project_id AND t.file_id = s.file_id
         AND t.cell_id = s.cell_id AND t.side = 'target'${lanePredicate}
        WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
-         AND s.target_lang = ''
          -- AQU-1424: a parked cell is not work, and THIS is the one selector both
          -- the autopilot tick and the agent's read/draft tools go through, so the
          -- predicate belongs here rather than at each caller's status filter.
@@ -237,7 +240,7 @@ export async function selectCellPairs(
          -- file neither reports nor drafts it.
          AND ${visibleSourceSql('s')}`,
     )
-    .bind(scope.targetLang, projectId, scope.fileId)
+    .bind(laneId, projectId, scope.fileId)
     .all<PairRow>()
 
   let pairs: CellPair[] = results.map((r) => ({

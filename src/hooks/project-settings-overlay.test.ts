@@ -53,6 +53,14 @@ describe("overlaySettings", () => {
     expect(out.harmonize_min_role).toBe("maintainer")
   })
 
+  // AQU-1686: the settings card showed a stored {voices: "off"} as a switch
+  // that is on. The overlay now reads the value the way the server does.
+  it("drops unknown enrichment ids and values that are not booleans", () => {
+    const blob = { bibleEnrichments: { voices: "off", nope: true, places: false } } as unknown as ProjectWideSettings
+    const out = overlaySettings(makeRecord({}), blob)
+    expect(out.bibleEnrichments).toEqual({ places: false })
+  })
+
   it("carries stored false booleans and the rest of the Settings-page fields", () => {
     const blob: ProjectWideSettings = {
       sourceLanguage: "English",
@@ -61,6 +69,7 @@ describe("overlaySettings", () => {
       timingLocked: false,
       cellEditingFloor: "contributor",
       bibleResourcesEnabled: false,
+      bibleEnrichments: { voices: false, autopilot: true },
       importExcludeFrontMatter: true,
       draftContext: { precedingTargetCells: 4 },
       termMatching: { prefixes: ["re"], suffixes: [] },
@@ -72,6 +81,9 @@ describe("overlaySettings", () => {
     expect(out.timingLocked).toBe(false)
     expect(out.cellEditingFloor).toBe("contributor")
     expect(out.bibleResourcesEnabled).toBe(false)
+    // AQU-1686: a dropped key would load layers for enrichments the project
+    // switched off.
+    expect(out.bibleEnrichments).toEqual({ voices: false, autopilot: true })
     expect(out.importExcludeFrontMatter).toBe(true)
     expect(out.draftContext).toEqual({ precedingTargetCells: 4 })
     expect(out.termMatching).toEqual({ prefixes: ["re"], suffixes: [] })

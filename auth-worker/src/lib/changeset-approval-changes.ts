@@ -11,6 +11,7 @@
 // file stays plain text and diffs are reviewable. Same string value.
 
 import type { AuthHonoEnv } from "../middleware/auth"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 
 /** Hard cap on per-cell change rows returned to the approval page. A plan can
  *  hold thousands of SetTranslation commands; the page needs enough to audit,
@@ -124,7 +125,7 @@ export async function buildChangeDetails(
   const inList = pairs.map(() => "(?, ?)").join(", ")
   const cellRows = await db
     .prepare(
-      `SELECT file_id, cell_id, side, target_lang, value, canonical_ref
+      `SELECT file_id, cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, value, canonical_ref
          FROM cells
         WHERE project_id = ? AND (file_id, cell_id) IN (${inList})`,
     )
@@ -145,7 +146,9 @@ export async function buildChangeDetails(
     if (row.side === "source") {
       sourceByCell.set(key, { value: row.value, canonicalRef: row.canonical_ref })
     } else {
-      targetByLane.set(`${key}\u0000${row.target_lang}`, row.value)
+      // Commands still name a lane by its legacy tag ('' = the default lane).
+      // The tag is the lane's, not the projection column.
+      targetByLane.set(`${key}\u0000${row.target_lang ?? ""}`, row.value)
     }
   }
 

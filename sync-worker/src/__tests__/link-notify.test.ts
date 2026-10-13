@@ -9,7 +9,8 @@
 //   - NOT fire for clone-mode downstreams
 //   - NOT fire when the batch is comment/validation/audio-only (no lane-
 //     relevant kind touched)
-//   - respect the downstream-count cap
+//   - reach EVERY live downstream, coalesce a burst per downstream, and skip
+//     downstreams whose DO has no connected sockets (AQU-1830)
 //   - never be awaited in the request path (response resolves before the
 //     notify promise) — the self-heal / no-regression acceptance criteria.
 
@@ -23,7 +24,8 @@ vi.mock("partyserver", () => ({
 
 import { handleEventsWriteRequest } from "../events/route"
 import {
-  __resetLinkNotifyDownstreamCacheForTests,
+  __resetLinkNotifyStateForTests,
+  __setLinkNotifyTuningForTests,
   collectLaneTouches,
   isLinkLaneKind,
 } from "../events/link-notify"
@@ -86,13 +88,26 @@ async function makeRequest(events: unknown[], token?: string): Promise<Request> 
  *  them explicitly (since the hook must NOT be awaited by the route itself). */
 function makeCtx() {
   const promises: Promise<unknown>[] = []
+  let settled = 0
+  const tally = () => { settled++ }
   return {
-    ctx: { waitUntil: (p: Promise<unknown>) => { promises.push(p) } },
+    ctx: {
+      waitUntil: (p: Promise<unknown>) => {
+        promises.push(p)
+        void Promise.resolve(p).then(tally, tally)
+      },
+    },
     flush: () => Promise.all(promises),
+    /** How many deferred promises are still running (AQU-1830 tests wait for
+     *  the notify chain to reach its coalesce window rather than racing it). */
+    outstanding: () => promises.length - settled,
   }
 }
 
-function makeProjectSyncEnv(db: AquillaDb) {
+/** `recipientsOf` mirrors the real DO's `__broadcast` reply, which carries its
+ *  connected-socket count. Omitted by default so the pre-AQU-1830 tests keep
+ *  exercising the "reply says nothing about sockets" path. */
+function makeProjectSyncEnv(db: AquillaDb, recipientsOf?: (downstream: string) => number) {
   const bodies: Array<{ downstream: string; body: Record<string, unknown> }> = []
   const env = {
     AQUILLA_PG: db,
@@ -102,7 +117,9 @@ function makeProjectSyncEnv(db: AquillaDb) {
       get: vi.fn().mockImplementation((id: { id: string }) => ({
         fetch: vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
           bodies.push({ downstream: id.id, body: JSON.parse(String(init?.body)) })
-          return new Response(JSON.stringify({ ok: true }), { status: 200 })
+          const reply: Record<string, unknown> = { ok: true }
+          if (recipientsOf) reply.recipients = recipientsOf(id.id)
+          return new Response(JSON.stringify(reply), { status: 200 })
         }),
       })),
     } as unknown as DurableObjectNamespace,
@@ -205,7 +222,7 @@ function upstreamChangedFrames(
 
 describe("AQU-479 link.upstream-changed notify hook", () => {
   beforeEach(() => {
-    __resetLinkNotifyDownstreamCacheForTests()
+    __resetLinkNotifyStateForTests()
   })
 
   it("emits a frame to a live downstream for a lane-relevant upstream commit", async () => {
@@ -274,11 +291,14 @@ describe("AQU-479 link.upstream-changed notify hook", () => {
     }
   })
 
-  it("respects the downstream-notification cap", async () => {
+  // AQU-1830: the notify used to stop at 50 downstreams, so the 51st live
+  // downstream of a popular base text never heard about an upstream edit until
+  // someone reopened a file there. None are skipped now.
+  it("notifies every live downstream, past the old 50 cap", async () => {
     const t = await makeTestDb()
     try {
       await seedUpstreamFile(t)
-      const total = 55 // above LINK_NOTIFY_DOWNSTREAM_CAP (50)
+      const total = 55
       for (let i = 0; i < total; i++) {
         await seedDownstream(t, `proj-down-${i}`, "live")
       }
@@ -290,7 +310,9 @@ describe("AQU-479 link.upstream-changed notify hook", () => {
       expect(res?.status).toBe(200)
       await flush()
 
-      expect(upstreamChangedFrames(bodies)).toHaveLength(50)
+      const frames = upstreamChangedFrames(bodies)
+      expect(frames).toHaveLength(total)
+      expect(new Set(frames.map((f) => f.downstream)).size).toBe(total)
     } finally {
       await t.close()
     }
@@ -424,7 +446,7 @@ describe("AQU-479 link.upstream-changed notify hook", () => {
 // and never learned them — an open downstream saw neither until a reload.
 describe("AQU-1545 link.upstream-changed for hide/show and rename", () => {
   beforeEach(() => {
-    __resetLinkNotifyDownstreamCacheForTests()
+    __resetLinkNotifyStateForTests()
   })
 
   it("an upstream hide notifies a live downstream with the hidden cell", async () => {
@@ -570,5 +592,218 @@ describe("AQU-1545 the notify and the mirror sync share one definition of an ups
     ]
     const touches = collectLaneTouches(frames).get(UPSTREAM) ?? []
     expect(touches.map((x) => x.kind)).toEqual([...laneKindsFor("target")])
+  })
+})
+
+// AQU-1830: a popular base text turned continuous upstream editing into one DO
+// subrequest per downstream per commit — and silently starved everyone past the
+// 50th. The fan-out is now bounded by WHO is listening (a downstream whose DO
+// has no sockets is skipped) and by HOW OFTEN (one leading frame plus one
+// trailing frame per coalesce window), never by a count cap.
+describe("AQU-1830 link-notify coalescing and idle downstreams", () => {
+  beforeEach(() => {
+    __resetLinkNotifyStateForTests()
+  })
+
+  /** Virtual time for the coalescer. `now` only moves when the test says so,
+   *  and `sleep` parks the trailing flush until the test releases it — so the
+   *  assertions never depend on wall-clock timing (AGENTS.md: machine speed
+   *  must not decide correctness). */
+  function makeVirtualTime(start = 1_700_000_000_000) {
+    let t = start
+    const parked: Array<() => void> = []
+    return {
+      now: () => t,
+      sleep: (_ms: number) => new Promise<void>((resolve) => { parked.push(resolve) }),
+      /** How many trailing flushes are armed and waiting for their window. */
+      armed: () => parked.length,
+      /** Close every armed coalesce window. */
+      release: () => { for (const resolve of parked.splice(0)) resolve() },
+      /** Jump the clock forward (no flush is armed in the tests that use it). */
+      jump: (ms: number) => { t += ms },
+    }
+  }
+
+  /** Poll an observable condition with a stall watchdog — the notify hook runs
+   *  behind `ctx.waitUntil` and reaches its coalesce decision only after a DB
+   *  read, so there is no synchronous moment to assert at. */
+  async function waitFor(label: string, ready: () => boolean): Promise<void> {
+    const deadlineAt = Date.now() + 10_000
+    while (!ready()) {
+      if (Date.now() > deadlineAt) throw new Error(`timed out waiting for ${label}`)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+  }
+
+  /** Commit `events` through the real route on a caller-owned env/ctx, so a
+   *  burst can be fired without settling in between. */
+  async function commit(
+    env: unknown,
+    ctx: { waitUntil: (p: Promise<unknown>) => void },
+    events: unknown[],
+  ): Promise<void> {
+    const res = await handleEventsWriteRequest(
+      await makeRequest(events, await makeToken()),
+      env as never,
+      ctx as never,
+    )
+    expect(res?.status).toBe(200)
+  }
+
+  function cellCommit(n: number): RawEvent<"source.cell.commit"> {
+    return sourceCommit({ id: `evt-burst-${n}`, cellId: `cell-${n}` })
+  }
+
+  it("collapses a burst of upstream commits into one leading and one trailing frame", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-live", "live")
+      const clock = makeVirtualTime()
+      __setLinkNotifyTuningForTests({ coalesceWindowMs: 2_000, now: clock.now, sleep: clock.sleep })
+
+      const { env, bodies } = makeProjectSyncEnv(t.db)
+      const { ctx, flush, outstanding } = makeCtx()
+      for (let n = 1; n <= 20; n++) await commit(env, ctx, [cellCommit(n)])
+
+      // The leading frame went out; the other 19 commits are owed as ONE
+      // trailing frame, so exactly one flush is armed and everything else has
+      // already settled.
+      await waitFor("the coalesce window to be armed", () => clock.armed() === 1 && outstanding() === 1)
+      expect(upstreamChangedFrames(bodies)).toHaveLength(1)
+
+      clock.release()
+      await flush()
+
+      const frames = upstreamChangedFrames(bodies)
+      expect(frames).toHaveLength(2)
+      expect(frames[0].cellIds).toEqual(["cell-1"])
+      // Nothing is lost: the trailing frame carries every cell committed after
+      // the leading one, so the downstream's fold covers the whole burst.
+      expect(new Set(frames[1].cellIds)).toEqual(
+        new Set(Array.from({ length: 19 }, (_, i) => `cell-${i + 2}`)),
+      )
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("still notifies the last commit of a burst, so an open downstream never sits stale", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-live", "live")
+      const clock = makeVirtualTime()
+      __setLinkNotifyTuningForTests({ coalesceWindowMs: 2_000, now: clock.now, sleep: clock.sleep })
+
+      const { env, bodies } = makeProjectSyncEnv(t.db)
+      const { ctx, flush, outstanding } = makeCtx()
+      await commit(env, ctx, [cellCommit(1)])
+      await commit(env, ctx, [cellCommit(2)])
+
+      // A leading-edge-only throttle would swallow the final commit of a burst
+      // and leave an open downstream stale until it reloaded.
+      await waitFor("the coalesce window to be armed", () => clock.armed() === 1 && outstanding() === 1)
+      clock.release()
+      await flush()
+
+      const frames = upstreamChangedFrames(bodies)
+      expect(frames).toHaveLength(2)
+      expect(frames[1].cellIds).toEqual(["cell-2"])
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("stops waking a downstream whose DO reports no connected sockets", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-live", "live")
+      const clock = makeVirtualTime()
+      __setLinkNotifyTuningForTests({
+        coalesceWindowMs: 2_000,
+        idleTtlMs: 10_000,
+        now: clock.now,
+        sleep: clock.sleep,
+      })
+
+      const { env, bodies } = makeProjectSyncEnv(t.db, () => 0)
+      const { ctx, flush } = makeCtx()
+
+      await commit(env, ctx, [cellCommit(1)])
+      await flush()
+      expect(upstreamChangedFrames(bodies)).toHaveLength(1)
+
+      // Past the coalesce window but inside the idle TTL: no subrequest at all,
+      // so the downstream DO is not woken per upstream commit.
+      clock.jump(3_000)
+      await commit(env, ctx, [cellCommit(2)])
+      await flush()
+      expect(clock.armed()).toBe(0)
+      expect(upstreamChangedFrames(bodies)).toHaveLength(1)
+
+      // Once the TTL lapses we probe again — a client may have connected.
+      clock.jump(10_000)
+      await commit(env, ctx, [cellCommit(3)])
+      await flush()
+      expect(upstreamChangedFrames(bodies)).toHaveLength(2)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("keeps notifying a downstream that has a connected socket", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-live", "live")
+      const clock = makeVirtualTime()
+      __setLinkNotifyTuningForTests({ coalesceWindowMs: 2_000, now: clock.now, sleep: clock.sleep })
+
+      const { env, bodies } = makeProjectSyncEnv(t.db, () => 1)
+      const { ctx, flush } = makeCtx()
+
+      await commit(env, ctx, [cellCommit(1)])
+      await flush()
+      clock.jump(3_000)
+      await commit(env, ctx, [cellCommit(2)])
+      await flush()
+
+      expect(upstreamChangedFrames(bodies)).toHaveLength(2)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("skips only the idle downstreams, not the open ones, on the same upstream", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstreamFile(t)
+      await seedDownstream(t, "proj-down-open", "live")
+      await seedDownstream(t, "proj-down-idle", "live")
+      const clock = makeVirtualTime()
+      __setLinkNotifyTuningForTests({ coalesceWindowMs: 2_000, now: clock.now, sleep: clock.sleep })
+
+      const { env, bodies } = makeProjectSyncEnv(t.db, (id) => (id === "proj-down-open" ? 1 : 0))
+      const { ctx, flush } = makeCtx()
+
+      await commit(env, ctx, [cellCommit(1)])
+      await flush()
+      expect(upstreamChangedFrames(bodies).map((f) => f.downstream).sort()).toEqual([
+        "proj-down-idle",
+        "proj-down-open",
+      ])
+
+      clock.jump(3_000)
+      await commit(env, ctx, [cellCommit(2)])
+      await flush()
+
+      expect(upstreamChangedFrames(bodies).slice(2).map((f) => f.downstream)).toEqual([
+        "proj-down-open",
+      ])
+    } finally {
+      await t.close()
+    }
   })
 })

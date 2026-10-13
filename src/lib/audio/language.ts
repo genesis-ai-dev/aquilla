@@ -56,6 +56,9 @@ export function whisperLanguageFromTag(tag: string | undefined | null): string |
   if (!tag) return undefined
   const norm = tag.trim().toLowerCase()
   if (!norm) return undefined
+  // A lane id is not a language. Callers pass the lane's language; an 8-hex
+  // tag that leaked through must not be sent to Whisper.
+  if (/^[0-9a-f]{8}$/.test(norm)) return undefined
 
   // BCP-47 / region-tagged: split on hyphen or underscore. "en-US" → "en".
   const head = norm.split(/[-_]/, 1)[0]

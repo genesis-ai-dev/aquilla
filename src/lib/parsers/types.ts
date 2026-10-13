@@ -100,6 +100,7 @@ export type BuiltinCheckId =
   | "target-equals-source"
   | "placeholder-integrity"
   | "number-integrity"
+  | "number-integrity-extra"
   | "end-punctuation-mismatch"
   | "punctuation-integrity"
   | "double-space"
@@ -107,6 +108,8 @@ export type BuiltinCheckId =
   | "unpaired-symbols"
   | "abbreviation-mismatch"
   | "usfm-structure"
+  | "capitalization"
+  | "footnote-quote-mismatch"
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -180,7 +183,7 @@ export interface RuleWaiver {
  * compose a localized sentence itself — it returns a reason CODE instead,
  * and a render-time helper (`formatInfractionReason` /
  * `formatInfractionMessage` in `src/lib/rules/format-infraction.ts`) turns
- * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the ten
+ * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the
  * algorithmic checks; the other three are the user-authored rule shapes.
  */
 export type RuleInfractionReason =
@@ -503,14 +506,19 @@ export interface ProjectRecord {
    */
   archivedLanes?: string[]
   /**
-   * AQU-1418: lane rows. The screen shows `name`. Selection and cell storage
-   * still use `legacyTag` ('' is the default target lane). Absent until the
-   * settings read returns them.
+   * AQU-1418: lane rows. Selection and cell storage still use `legacyTag` ('' is
+   * the default target lane). Absent until the settings read returns them.
+   *
+   * AQU-1592: read the display name and the language code through
+   * `laneDisplayName` / `laneLanguageCode` (src/lib/lanes/lane-display.ts) — a
+   * lane stores only what the user typed, so `name` is null when it just shows
+   * its `language`, and `langCode` is null when the code is derived.
    */
   lanes?: {
     id: string
     role: "source" | "target"
-    name: string
+    language?: string | null
+    name: string | null
     langCode: string | null
     legacyTag: string | null
     position: number
@@ -743,6 +751,12 @@ export interface ProjectRecord {
    *  never persisted just by opening/viewing). Gates the Search-dock "Bible
    *  resources" mode and the agent's aquifer branch. */
   bibleResourcesEnabled?: boolean
+  /** AQU-1686: explicit per-enrichment Bible data choices, synced via
+   *  ProjectWideSettings. A missing id means that enrichment's default. Do not
+   *  read it directly for gating; use `resolveBibleEnrichment`
+   *  (db/shared/bible-enrichments.ts), which also applies the Bible data
+   *  switch above. */
+  bibleEnrichments?: import("../../../db/shared/bible-enrichments").BibleEnrichmentSettings
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings
@@ -813,9 +827,17 @@ export interface FileReference {
    * mutates cell data — it only chooses the sort key. Fully reversible.
    */
   orderedBy?: OrderedBy
-  /** Optional file-level language hints from import metadata. */
-  sourceLanguage?: string
-  targetLanguage?: string
+  /**
+   * AQU-1596: the languages this file's header *declared* at import. Import
+   * information about the file, not the language of any lane — a Macula file
+   * declares the corpus code `hbo`, and a file declaring Spanish may have been
+   * imported into the French lane. Nothing resolves a lane's or project's
+   * language from these (see `resolveActiveSourceLanguage` / AQU-848 and
+   * `resolveActiveTargetLanguage` / AQU-583); the one surface that shows them
+   * is the file-details modal, which labels them as declared.
+   */
+  declaredSourceLanguage?: string
+  declaredTargetLanguage?: string
   /** Optional file-level text direction hints from import metadata. */
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
@@ -968,6 +990,18 @@ export function isVideoTimedSubtitleFile(
 export function resolveFileTimingMode(
   file: Pick<FileReference, "timingMode" | "type" | "coreMediaUrl"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
+  opts?: {
+    /**
+     * AQU-1565 follow-up: the file is timed to a linked YouTube video, so its
+     * DEFAULT is Original timing and the Media view shows the video. The
+     * legacy project-level Free timing no longer reaches it (it hid the video
+     * on a "Link video only" file that nobody had set). A choice made on the
+     * file itself still stands: Free timing there was picked through a
+     * warning that the video stays hidden. A flag rather than a URL test so
+     * this module stays import-free.
+     */
+    timedToLinkedVideo?: boolean
+  },
 ): AudioTimingMode {
   // AQU-646, rescoped by AQU-1704: Free timing does not exist for a subtitle
   // import whose video is linked here. This check runs BEFORE the file's own
@@ -982,6 +1016,8 @@ export function resolveFileTimingMode(
   // AQU-1704: every other file reads its own choice next, so the picker the
   // workspace now shows a video-less subtitle file is not inert.
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
+  // Below the file's own choice, above the project's: see `timedToLinkedVideo`.
+  if (opts?.timedToLinkedVideo) return "dubbing"
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
   // arbitrary top-level keys), reads as Original timing. Same normalization
@@ -1114,9 +1150,13 @@ export interface CellHistoryEntry {
 export interface CommentMessage {
   id: string
   author: string
+  /** Username when the record has one. Edit and delete use it, not the label. */
+  authorId?: string
   authorType: "user" | "anonymous"
   text: string
   timestamp: string
+  /** Set when the body was changed after it was posted. */
+  editedAt?: string
   mentions?: string[]
 }
 

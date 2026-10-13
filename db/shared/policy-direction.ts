@@ -55,6 +55,9 @@ export const POLICY_DIRECTION_TABLE: readonly { key: string; restrictiveDirectio
   { key: 'cellEditingFloor', restrictiveDirection: 'a higher rung: commenter < reviewer < contributor < project_lead < maintainer < "none" (unset reads as "none" — nobody)' },
   { key: 'validationNamedUsers', restrictiveDirection: 'empty → named, or dropping names from a non-empty list (unset/empty reads as anyone above the floor; adding a name to a non-empty list admits someone new)' },
   { key: 'validationNamedUsersAudio', restrictiveDirection: 'empty → named, or dropping names from a non-empty list (unset/empty reads as anyone above the floor; adding a name to a non-empty list admits someone new)' },
+  // AQU-1771: who may see the project's member list / each member's progress.
+  { key: 'rosterViewMinRole', restrictiveDirection: "a higher role level, 100 viewer … 700 owner (unset reads as the org's floor, Maintainer 600 by default; a project is never looser than its org)" },
+  { key: 'memberProgressViewMinRole', restrictiveDirection: "a higher role level, 100 viewer … 700 owner (unset reads as the org's floor, Maintainer 600 by default; a project is never looser than its org)" },
 ]
 
 // ── Per-key rules ────────────────────────────────────────────────────────────
@@ -70,6 +73,12 @@ interface PolicyRule {
   /** Comparable rank; higher = more restrictive. `null` = not accepted. */
   rank: (value: unknown) => number | null
   describe: (value: unknown) => string
+  /**
+   * The inherited org value is a FLOOR, not only a fallback: the project
+   * enforces the higher of its own value and the org's (AQU-1771), so a stored
+   * value below the org's reads as the org's.
+   */
+  inheritedIsFloor?: boolean
 }
 
 /** Booleans where `false` is the restrictive value and unset means `true`:
@@ -104,6 +113,16 @@ const countRule: PolicyRule = {
   describe: String,
 }
 
+/** A project's visibility floor (db/shared/visibility-floors.ts): a role
+ *  level, Maintainer when neither the project nor its org set one, and never
+ *  below the org's. Raising it hides more. */
+const visibilityFloorRule: PolicyRule = {
+  defaultValue: 600,
+  rank: (v) => (typeof v === 'number' && [100, 200, 300, 400, 500, 600, 700].includes(v) ? v : null),
+  describe: String,
+  inheritedIsFloor: true,
+}
+
 const RULES: Readonly<Record<string, PolicyRule>> = {
   contributeToGlobalTm: falseIsTighter,
   allowSelfValidation: falseIsTighter,
@@ -127,6 +146,8 @@ const RULES: Readonly<Record<string, PolicyRule>> = {
     ['commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer', 'none'],
     'none',
   ),
+  rosterViewMinRole: visibilityFloorRule,
+  memberProgressViewMinRole: visibilityFloorRule,
 }
 
 /** `agentAuthorship` is a one-value enum: "none" hides translator identity
@@ -201,8 +222,15 @@ export function policyWriteDirection(
   const fallback = inherited !== undefined && inherited !== null && rule.rank(inherited) !== null
     ? inherited
     : rule.defaultValue
-  const effectiveCurrent = current === undefined || current === null ? fallback : current
-  const currentRank = rule.rank(effectiveCurrent) ?? rule.rank(fallback)
+  let effectiveCurrent = current === undefined || current === null ? fallback : current
+  let currentRank = rule.rank(effectiveCurrent) ?? rule.rank(fallback)
+  // A value below an inherited floor is inert: the project already enforces
+  // the org's, so that is what a write is judged against.
+  const fallbackRank = rule.rank(fallback)
+  if (rule.inheritedIsFloor && currentRank !== null && fallbackRank !== null && fallbackRank > currentRank) {
+    effectiveCurrent = fallback
+    currentRank = fallbackRank
+  }
   const effectiveProposed = proposed === null ? fallback : proposed
   const proposedRank = rule.rank(effectiveProposed)
   if (currentRank === null || proposedRank === null) {

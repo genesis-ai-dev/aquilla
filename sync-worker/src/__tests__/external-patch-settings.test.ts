@@ -510,6 +510,10 @@ const POLICY_DIRECTION_CASES: {
   { key: 'allowSelfValidationAudio', tighten: { from: undefined, to: false }, loosen: { from: false, to: true } },
   { key: 'validationRoleFloorAudio', tighten: { from: 'reviewer', to: 'project_lead' }, loosen: { from: 'maintainer', to: null } },
   { key: 'validationNamedUsersAudio', tighten: { from: undefined, to: ['a'] }, loosen: { from: ['a'], to: [] } },
+  // AQU-1771: the project's own visibility floors. The org sets none here, so
+  // its floor is Maintainer; clearing a stricter value goes back to it.
+  { key: 'rosterViewMinRole', tighten: { from: undefined, to: 700 }, loosen: { from: 700, to: null } },
+  { key: 'memberProgressViewMinRole', tighten: { from: 600, to: 700 }, loosen: { from: 700, to: 600 } },
 ]
 
 describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §1)', () => {
@@ -560,6 +564,25 @@ describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §
     expect(body.error.details.loosening[0].key).toBe('validationCount')
     const { res: upRes, body: up } = await prepare(env, owner.token, patchCmd([{ key: 'validationCount', value: 4 }]))
     expect(upRes.status, JSON.stringify(up)).toBe(200)
+  })
+
+  // AQU-1771: a project's visibility floors follow the org's floor when unset,
+  // and can never sit below it.
+  it("judges a visibility floor against the org's floor: unset reads as it, and nothing goes below it", async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({})
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
+      [ORG_ID, JSON.stringify({ rosterViewMinRole: 400 })],
+    )
+    const owner = await memberToken(tdb, 700)
+    const up = await prepare(env, owner.token, patchCmd([{ key: 'rosterViewMinRole', value: 500 }]))
+    expect(up.res.status, JSON.stringify(up.body)).toBe(200)
+    const below = await prepare(env, owner.token, patchCmd([{ key: 'rosterViewMinRole', value: 300 }]))
+    expect(below.res.status).toBe(403)
+    expect(below.body.error.details.loosening[0].key).toBe('rosterViewMinRole')
+    const garbage = await prepare(env, owner.token, patchCmd([{ key: 'rosterViewMinRole', value: 450 }]))
+    expect(garbage.res.status).toBe(400)
   })
 
   it('a fresh project (no settings row, version 0) accepts contributeToGlobalTm:false + agentAuthorship:"none" in one changeset', async () => {

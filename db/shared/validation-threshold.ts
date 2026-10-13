@@ -11,6 +11,7 @@
 // reads, the dashboards and the Monday push all resolve the same number.
 
 import type { AquillaDb } from "../shim/postgres"
+import { loadOrgVisibilityFloorsForProject } from "./visibility-floors"
 
 export const MAX_VALIDATION_THRESHOLD = 15
 
@@ -92,10 +93,17 @@ export async function loadInheritedPolicyDefaults(
   db: AquillaDb,
   projectId: string,
 ): Promise<Record<string, unknown>> {
-  const org = await loadOrgValidationDefaults(db, projectId)
+  const [org, floors] = await Promise.all([
+    loadOrgValidationDefaults(db, projectId),
+    // AQU-1771: the org's visibility floors, always present for a project in
+    // an org (Maintainer when the org set none). They are floors as well as
+    // defaults: a project may only be stricter.
+    loadOrgVisibilityFloorsForProject(db, projectId),
+  ])
   const out: Record<string, unknown> = {}
   if (org.validationCount != null) out.validationCount = org.validationCount
   if (org.validationCountAudio != null) out.validationCountAudio = org.validationCountAudio
+  if (floors) Object.assign(out, floors)
   return out
 }
 

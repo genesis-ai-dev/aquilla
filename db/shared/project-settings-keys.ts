@@ -23,6 +23,13 @@ import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
 import { BIBLE_VOICE_OVERRIDES_TYPE_NAME, bibleVoiceOverridesProblem } from './bible-voice-overrides'
 import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
 import { PROJECT_FACTS_TYPE_NAME, projectFactsProblem } from './project-facts'
+import { parseProjectVisibilityFloor, VISIBILITY_FLOOR_LEVELS } from './visibility-floors'
+
+const VISIBILITY_FLOOR_TYPE_NAME = `${VISIBILITY_FLOOR_LEVELS.join(' | ')} (a role level: 100 viewer … 700 owner)`
+
+function visibilityFloorProblem(value: unknown): string | null {
+  return parseProjectVisibilityFloor(value) == null ? `not a role level (${VISIBILITY_FLOOR_LEVELS.join(', ')})` : null
+}
 
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
@@ -44,9 +51,9 @@ export interface SettingsKeySpec {
    */
   booleanFlags?: readonly string[]
   /**
-   * AQU-1688: when `kind` is 'object' (or, since AQU-1691, 'object[]'), a
-   * structural check the value must also pass. Returns null when it is fine,
-   * else what is wrong.
+   * AQU-1688: when `kind` is 'object' (or, since AQU-1691, 'object[]'; since
+   * AQU-1771, 'number'), a check the value must also pass. Returns null when
+   * it is fine, else what is wrong.
    */
   problem?: (value: unknown) => string | null
   /** AQU-1688: the type shown in errors and describe_command, when `kind` undersells it. */
@@ -72,7 +79,7 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
     case 'string':
       return typeof value === 'string'
     case 'number':
-      return typeof value === 'number' && Number.isFinite(value)
+      return typeof value === 'number' && Number.isFinite(value) && (!spec.problem || spec.problem(value) === null)
     case 'boolean':
       return typeof value === 'boolean'
     case 'string[]':
@@ -178,6 +185,20 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
     kind: 'enum',
     values: ['none', 'commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer'],
   },
+  // AQU-1771: this project's own floors for who sees its member list and each
+  // member's progress. Stricter-only: the project enforces the higher of its
+  // own value and its org's (db/shared/visibility-floors.ts), and an agent
+  // may only raise them (policy-direction.ts).
+  rosterViewMinRole: {
+    kind: 'number',
+    problem: (value) => visibilityFloorProblem(value),
+    typeName: VISIBILITY_FLOOR_TYPE_NAME,
+  },
+  memberProgressViewMinRole: {
+    kind: 'number',
+    problem: (value) => visibilityFloorProblem(value),
+    typeName: VISIBILITY_FLOOR_TYPE_NAME,
+  },
 
   // Capability switches
   allowLineCreation: { kind: 'boolean' },
@@ -250,7 +271,9 @@ export function validateSettingsKeyValue(key: string, value: unknown): string | 
   if (value === null) return null
   if (!matchesSpec(spec, value)) {
     // A structural problem names the field at fault, not only the expected type.
-    const detail = spec.problem && (isPlainObject(value) || Array.isArray(value)) ? spec.problem(value) : null
+    const detail = spec.problem && (isPlainObject(value) || Array.isArray(value) || typeof value === 'number')
+      ? spec.problem(value)
+      : null
     return `settings key "${key}" expects ${settingsTypeName(spec)}${detail ? ` (${detail})` : ''}`
   }
   return null

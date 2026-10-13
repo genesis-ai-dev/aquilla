@@ -119,3 +119,36 @@ export async function loadProjectVisibilityOverride(
 ): Promise<ProjectVisibilityOverrides> {
   return (await loadProjectVisibilityOverrides(db, [projectId])).get(projectId) ?? NO_OVERRIDES
 }
+
+/**
+ * The org's two floors for a project, defaults applied, or null when the
+ * project has no org. Reads only these two keys out of the org's blob.
+ */
+export async function loadOrgVisibilityFloorsForProject(
+  db: AquillaDb,
+  projectId: string,
+): Promise<Record<VisibilityFloorKey, number> | null> {
+  const row = await db
+    .prepare(
+      `SELECT p.org_id AS org_id,
+              CASE WHEN jsonb_typeof(x.j -> 'rosterViewMinRole') = 'number'
+                   THEN x.j ->> 'rosterViewMinRole' END AS roster,
+              CASE WHEN jsonb_typeof(x.j -> 'memberProgressViewMinRole') = 'number'
+                   THEN x.j ->> 'memberProgressViewMinRole' END AS progress
+         FROM projects p
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+         LEFT JOIN LATERAL (SELECT os.settings::jsonb AS j) x ON TRUE
+        WHERE p.id = ?`,
+    )
+    .bind(projectId)
+    .first<{ org_id: number | string | null; roster: string | null; progress: string | null }>()
+  if (row?.org_id == null) return null
+  return {
+    rosterViewMinRole: orgVisibilityFloor(
+      { rosterViewMinRole: row.roster == null ? null : Number(row.roster) }, "rosterViewMinRole",
+    ),
+    memberProgressViewMinRole: orgVisibilityFloor(
+      { memberProgressViewMinRole: row.progress == null ? null : Number(row.progress) }, "memberProgressViewMinRole",
+    ),
+  }
+}

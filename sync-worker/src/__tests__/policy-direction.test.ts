@@ -253,3 +253,45 @@ describe('policyWriteDirection — org defaults (AQU-1771)', () => {
     expect(verdicts.map((v) => v.key)).toEqual(['validationCount'])
   })
 })
+
+// AQU-1771: a project's own visibility floors. The org's floor is both the
+// value an unset key reads as and a minimum: the project enforces the higher
+// of the two, so a write is judged against what it actually enforces.
+describe('policyWriteDirection — visibility floors (AQU-1771)', () => {
+  for (const key of ['rosterViewMinRole', 'memberProgressViewMinRole']) {
+    describe(key, () => {
+      it('raising tightens, lowering loosens', () => {
+        expect(policyWriteDirection(key, 600, 700, 600).direction).toBe('tighten')
+        expect(policyWriteDirection(key, 700, 600, 600).direction).toBe('loosen')
+      })
+
+      it("unset reads as the org's floor", () => {
+        expect(policyWriteDirection(key, undefined, 500, 400).direction).toBe('tighten')
+        expect(policyWriteDirection(key, undefined, 500, 600).direction).toBe('loosen')
+      })
+
+      it("clearing means following the org: compared as the org's floor", () => {
+        expect(policyWriteDirection(key, 700, null, 600).direction).toBe('loosen')
+        expect(policyWriteDirection(key, 500, null, 600).direction).toBe('tighten')
+      })
+
+      it("a stored value below the org's floor reads as the org's floor", () => {
+        // Stored 400 before the org raised to 600: the project enforces 600,
+        // so writing 500 would loosen nothing it enforces — and is refused as
+        // below the org, not admitted as 400 → 500.
+        expect(policyWriteDirection(key, 400, 500, 600).direction).toBe('loosen')
+        expect(policyWriteDirection(key, 400, 700, 600).direction).toBe('tighten')
+      })
+
+      it('a value that is not a role level is invalid', () => {
+        expect(policyWriteDirection(key, undefined, 650, 600).direction).toBe('invalid')
+        expect(policyWriteDirection(key, undefined, 'owner', 600).direction).toBe('invalid')
+      })
+
+      it('with no org to inherit from, unset reads as Maintainer', () => {
+        expect(policyWriteDirection(key, undefined, 500).direction).toBe('loosen')
+        expect(policyWriteDirection(key, undefined, 700).direction).toBe('tighten')
+      })
+    })
+  }
+})

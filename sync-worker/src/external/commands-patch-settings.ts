@@ -88,6 +88,10 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
   // able to flip this could talk a human into approving a settings changeset
   // that turns its own team's names back on.
   'agentAuthorship',
+  // AQU-1771: who may see the member list and each member's progress on this
+  // project. Raising them hides more; an agent may never lower them.
+  'rosterViewMinRole',
+  'memberProgressViewMinRole',
 ]
 
 const POLICY_KEY_SET = new Set(POLICY_SETTINGS_KEYS)

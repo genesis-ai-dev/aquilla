@@ -105,18 +105,14 @@ test("Aquilla Tools — build, permit, harmonize, attribute, revert", async ({ p
 
   let toolName = "Key-Term Heat Map"
   if (!USE_STARTER) {
-    const box = page.getByRole("textbox", { name: "Build an extension" })
+    const box = page.getByRole("textbox", { name: "What should it do?" })
     await box.click()
     await box.pressSequentially(BUILD_PROMPT.slice(0, 120), { delay: 8 })
-    await box.fill(BUILD_PROMPT)
-    await page.getByRole("button", { name: "Build", exact: true }).click()
     timeline.buildStart = Date.now() - t0
-    const dialog = page.getByRole("dialog", { name: /^Install .*\?$/ })
-    await expect(dialog).toBeVisible({ timeout: 780_000 })
+    toolName = await tools.buildExtension(BUILD_PROMPT)
     timeline.buildEnd = Date.now() - t0
-    toolName = ((await dialog.getByRole("heading").first().textContent()) ?? "").replace(/^Install /, "").replace(/\?$/, "")
     await page.waitForTimeout(1500)
-    await dialog.getByRole("button", { name: "Install", exact: true }).click()
+    await tools.addCandidate()
     await page.waitForURL(/\/extensions\/[0-9a-f-]{36}$/)
   } else {
     await tools.installStarter(toolName)
@@ -135,7 +131,7 @@ test("Aquilla Tools — build, permit, harmonize, attribute, revert", async ({ p
   await expect(activity.getByTestId("tool-activity-row").first()).toBeVisible()
   await page.waitForTimeout(2500)
   await tools.revertSince(activity)
-  await expect(activity.getByRole("status").first()).toContainText("Reverted")
+  await expect(activity.getByRole("status").first()).toContainText("Undone")
   await page.waitForTimeout(2500)
   timeline.end = Date.now() - t0
 

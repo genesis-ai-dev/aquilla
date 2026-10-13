@@ -43,16 +43,11 @@ test("Smart Extensions — the builder makes a custom editor", async ({ page }, 
   const tools = new ToolsPage(page)
   await tools.open(seeded.projectId)
   const timeline: Record<string, number | string> = { open: Date.now() - t0 }
-  const box = page.getByRole("textbox", { name: "Build an extension" })
-  await box.fill(PROMPT)
-  await page.getByRole("button", { name: "Build", exact: true }).click()
   timeline.buildStart = Date.now() - t0
-  const dialog = page.getByRole("dialog", { name: /^Install .*\?$/ })
-  await expect(dialog).toBeVisible({ timeout: 780_000 })
+  const name = await tools.buildExtension(PROMPT)
   timeline.buildEnd = Date.now() - t0
-  const name = ((await dialog.getByRole("heading").first().textContent()) ?? "").replace(/^Install /, "").replace(/\?$/, "")
   timeline.name = name
-  await dialog.getByRole("button", { name: "Install", exact: true }).click()
+  await tools.addCandidate()
 
   await openSeededProject(page, seeded)
   await page.keyboard.press("Control+Shift+E")

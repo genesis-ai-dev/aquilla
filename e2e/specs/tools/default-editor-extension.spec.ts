@@ -111,7 +111,7 @@ test("the default editor is a first-party extension that edits, validates, shows
   const activity = await tools.openActivity(DEFAULT_EDITOR)
   await expect(activity.getByTestId("tool-activity-row").first()).toContainText("Verified extension write")
   await tools.revertSince(activity)
-  await expect(activity.getByRole("status").first()).toContainText("Reverted")
+  await expect(activity.getByRole("status").first()).toContainText("Undone")
   await expect.poll(async () => (await target(jwt, seeded, "MAT 1:1"))?.value ?? "").toBe("")
   await expect.poll(async () => (await target(jwt, seeded, "MAT 1:2"))?.value ?? "").toBe("")
   await expect.poll(async () => (await target(jwt, seeded, "MAT 1:2"))?.validated ?? false).toBe(false)

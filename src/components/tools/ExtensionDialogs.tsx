@@ -1,13 +1,15 @@
 /**
- * The Smart Extensions page's secondary surfaces, each behind the row's "…"
- * menu: permissions (plain sentences with switches), activity + revert, copy
- * to another project, and the code review of a copied extension.
+ * An extension's secondary surfaces: permissions (plain sentences with
+ * switches), changes + undo, copy to another project, and the code review of
+ * a copied extension. Each body is exported on its own so the extension's
+ * page can show it as a tab; the dialogs wrap them for the list's "…" menu.
  */
 
 import { useEffect, useState } from "react"
-import { Copy } from "lucide-react"
+import { Check, Copy, FolderOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { fetchProjectList } from "@/lib/sync/projects-read"
@@ -24,16 +26,15 @@ export function useScopeSentence(): (scope: ToolScope) => string {
   return (scope) => t("extensions.can", { scope: label(scope) })
 }
 
-export function PermissionsDialog({
+/** The permission switches (dialog, and the page's "What it can do" tab). */
+export function PermissionsList({
   tool,
   roleLevel,
   onChange,
-  onClose,
 }: {
   tool: ToolSummary
   roleLevel: number | null
   onChange: (scopes: ToolScope[]) => Promise<void>
-  onClose: () => void
 }) {
   const t = useT()
   const sentence = useScopeSentence()
@@ -47,6 +48,45 @@ export function PermissionsDialog({
       setBusy(false)
     }
   }
+  if (grantable.length === 0 && blocked.length === 0) return <p className="text-sm text-muted-foreground">{t("extensions.scopes.none")}</p>
+  return (
+    <ul className="divide-y overflow-hidden rounded-xl border bg-card" data-testid="tool-grants">
+      {grantable.map((scope) => {
+        const on = tool.grantedScopes.includes(scope)
+        return (
+          <li key={scope} className="flex items-center gap-3 px-3.5 py-3 text-sm">
+            <span className="min-w-0 flex-1">
+              <span className="block" data-testid={on ? "tool-grant" : "tool-ask"}>{sentence(scope)}</span>
+              <span className={on ? "block text-xs text-emerald-700 dark:text-emerald-400" : "block text-xs text-muted-foreground"}>
+                {on ? t("extensions.permissions.allowed") : t("extensions.permissions.asks")}
+              </span>
+            </span>
+            <Switch aria-label={sentence(scope)} checked={on} disabled={busy} onCheckedChange={(next) => void toggle(scope, next)} />
+          </li>
+        )
+      })}
+      {blocked.map((scope) => (
+        <li key={scope} className="flex items-center gap-3 px-3.5 py-3 text-sm text-muted-foreground">
+          <span className="min-w-0 flex-1">{sentence(scope)}</span>
+          <span className="text-xs">{t("extensions.installDialog.blocked")}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export function PermissionsDialog({
+  tool,
+  roleLevel,
+  onChange,
+  onClose,
+}: {
+  tool: ToolSummary
+  roleLevel: number | null
+  onChange: (scopes: ToolScope[]) => Promise<void>
+  onClose: () => void
+}) {
+  const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-md">
@@ -55,27 +95,7 @@ export function PermissionsDialog({
           <DialogDescription>{t("extensions.permissions.hint")}</DialogDescription>
         </DialogHeader>
         <DialogBody>
-          <ul className="divide-y rounded-lg border" data-testid="tool-grants">
-            {grantable.map((scope) => (
-              <li key={scope} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-                <span className="min-w-0 flex-1" data-testid={tool.grantedScopes.includes(scope) ? "tool-grant" : "tool-ask"}>
-                  {sentence(scope)}
-                </span>
-                <Switch
-                  aria-label={sentence(scope)}
-                  checked={tool.grantedScopes.includes(scope)}
-                  disabled={busy}
-                  onCheckedChange={(on) => void toggle(scope, on)}
-                />
-              </li>
-            ))}
-            {blocked.map((scope) => (
-              <li key={scope} className="flex items-center gap-3 px-3 py-2.5 text-sm text-muted-foreground">
-                <span className="min-w-0 flex-1">{sentence(scope)}</span>
-                <span className="text-xs">{t("extensions.installDialog.blocked")}</span>
-              </li>
-            ))}
-          </ul>
+          <PermissionsList tool={tool} roleLevel={roleLevel} onChange={onChange} />
         </DialogBody>
       </DialogContent>
     </Dialog>
@@ -86,9 +106,10 @@ export function ActivityDialog({ projectId, tool, jwt, author, onClose }: { proj
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("extensions.activity.title", { name: tool.name })}</DialogTitle>
+          <DialogDescription>{t("extensions.activity.undoHint")}</DialogDescription>
         </DialogHeader>
         <DialogBody>
           <ToolActivityPanel projectId={projectId} tool={tool} jwt={jwt} author={author} />
@@ -98,11 +119,13 @@ export function ActivityDialog({ projectId, tool, jwt, author, onClose }: { proj
   )
 }
 
-export function CopyDialog({ projectId, tool, jwt, onClose }: { projectId: string; tool: ToolSummary; jwt: string; onClose: () => void }) {
+/** Pick another project to copy an extension into (dialog, and the Share tab). */
+export function CopyList({ projectId, tool, jwt }: { projectId: string; tool: ToolSummary; jwt: string }) {
   const t = useT()
   const [projects, setProjects] = useState<{ id: string; name: string }[] | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [done, setDone] = useState<string[]>([])
   useEffect(() => {
     let cancelled = false
     fetchProjectList(jwt)
@@ -116,6 +139,46 @@ export function CopyDialog({ projectId, tool, jwt, onClose }: { projectId: strin
       cancelled = true
     }
   }, [jwt, projectId])
+  if (projects === null) return <Spinner />
+  if (projects.length === 0) return <p className="text-sm text-muted-foreground">{t("extensions.copy.none")}</p>
+  const copy = (p: { id: string; name: string }) => {
+    setBusy(p.id)
+    void copyTool(jwt, projectId, tool.id, p.id)
+      .then(() => {
+        setDone((prev) => [...prev, p.id])
+        setStatus(t("extensions.copy.done", { project: p.name }))
+      })
+      .catch((err: unknown) => setStatus(err instanceof Error ? err.message : String(err)))
+      .finally(() => setBusy(null))
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <ul className="max-h-72 divide-y overflow-y-auto rounded-xl border bg-card">
+        {projects.map((p) => (
+          <li key={p.id} className="flex items-center gap-3 px-3.5 py-2.5 text-sm">
+            <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            {done.includes(p.id) ? (
+              <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+                <Check className="size-3.5" aria-hidden />
+                {t("extensions.copy.copied")}
+              </span>
+            ) : (
+              <Button size="xs" variant="outline" disabled={busy !== null} onClick={() => copy(p)}>
+                {busy === p.id ? <Spinner className="size-3" /> : <Copy className="size-3" aria-hidden />}
+                {t("extensions.copy.button")}
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {status && <p role="status" className="text-sm text-muted-foreground">{status}</p>}
+    </div>
+  )
+}
+
+export function CopyDialog({ projectId, tool, jwt, onClose }: { projectId: string; tool: ToolSummary; jwt: string; onClose: () => void }) {
+  const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="max-w-md">
@@ -124,33 +187,7 @@ export function CopyDialog({ projectId, tool, jwt, onClose }: { projectId: strin
           <DialogDescription>{t("extensions.copy.hint")}</DialogDescription>
         </DialogHeader>
         <DialogBody>
-          {projects === null ? null : projects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("extensions.copy.none")}</p>
-          ) : (
-            <ul className="max-h-72 divide-y overflow-y-auto rounded-lg border">
-              {projects.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                  <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={() => {
-                      setBusy(p.id)
-                      void copyTool(jwt, projectId, tool.id, p.id)
-                        .then(() => setStatus(t("extensions.copy.done", { project: p.name })))
-                        .catch((err: unknown) => setStatus(err instanceof Error ? err.message : String(err)))
-                        .finally(() => setBusy(null))
-                    }}
-                  >
-                    <Copy className="size-3" aria-hidden />
-                    {t("extensions.copy.button")}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {status && <p role="status" className="mt-2 text-sm text-muted-foreground">{status}</p>}
+          <CopyList projectId={projectId} tool={tool} jwt={jwt} />
         </DialogBody>
       </DialogContent>
     </Dialog>
@@ -175,7 +212,7 @@ export function ReviewCodeDialog({ projectId, tool, jwt, onClose }: { projectId:
   }, [jwt, projectId, tool.id])
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("extensions.review.title", { name: tool.name })}</DialogTitle>
           <DialogDescription>{t("extensions.review.note")}</DialogDescription>

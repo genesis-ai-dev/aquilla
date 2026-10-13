@@ -27,15 +27,37 @@ export class ToolsPage {
     expect((await listed).ok()).toBe(true)
   }
 
-  /** Install a starter in one click (reads granted, writes ask on first use). */
+  /** Add a ready-made starter: "Try {name}" opens Review & try (a sandboxed
+   *  preview), then "Add to project" (reads granted, writes ask on first use). */
   async installStarter(name: string, opts: { landsIn?: "page" | "editor" } = {}): Promise<void> {
     const installed = this.page.waitForResponse(
       (r) => r.request().method() === "POST" && /\/tools$/.test(new URL(r.url()).pathname),
     )
-    await this.page.getByRole("button", { name: `Install: ${name}` }).click()
+    await this.page.getByRole("button", { name: `Try ${name}` }).click()
+    await expect(this.page.getByTestId("built-candidate")).toBeVisible()
+    await this.page.getByTestId("candidate-add").click()
     expect((await installed).status()).toBe(201)
     // Editor extensions land in the editor (its switcher); others on their page.
     await this.page.waitForURL(opts.landsIn === "editor" ? /\/editor/ : /\/extensions\/[0-9a-f-]{36}$/)
+  }
+
+  /** Step 1 of the builder: describe it, "Build it", and wait for Review &
+   *  try. Resolves to the built extension's name. */
+  async buildExtension(description: string, opts: { timeout?: number } = {}): Promise<string> {
+    await this.page.getByRole("textbox", { name: "What should it do?" }).fill(description)
+    await this.page.getByTestId("builder-build").click()
+    const candidate = this.page.getByTestId("built-candidate")
+    await expect(candidate).toBeVisible({ timeout: opts.timeout ?? 780_000 })
+    return ((await candidate.getByRole("heading", { level: 2 }).textContent()) ?? "").trim()
+  }
+
+  /** Step 3: "Add to project" from Review & try. */
+  async addCandidate(): Promise<void> {
+    const installed = this.page.waitForResponse(
+      (r) => r.request().method() === "POST" && /\/tools$/.test(new URL(r.url()).pathname),
+    )
+    await this.page.getByTestId("candidate-add").click()
+    expect((await installed).status()).toBe(201)
   }
 
   /** Pick an editor in the file view's editor switcher (the native "Aquilla editor" or an extension). */
@@ -87,7 +109,8 @@ export class ToolsPage {
   }
 
   async answerPrompt(answer: "Allow" | "Always" | "Deny"): Promise<void> {
-    await this.permissionPrompt().getByRole("button", { name: answer }).click()
+    const label = { Allow: "Allow once", Always: "Always allow", Deny: "Not now" }[answer]
+    await this.permissionPrompt().getByRole("button", { name: label, exact: true }).click()
     await expect(this.permissionPrompt()).toBeHidden()
   }
 
@@ -108,8 +131,8 @@ export class ToolsPage {
   }
 
   async openActivity(name: string): Promise<Locator> {
-    await this.openToolMenu(name, "Activity")
-    return this.page.getByRole("dialog").getByRole("region", { name: "Activity" })
+    await this.openToolMenu(name, "Changes & undo")
+    return this.page.getByRole("dialog").getByRole("region", { name: "Changes" })
   }
 
   /** The permissions dialog: one row per declared scope, granted ones marked. */
@@ -119,7 +142,7 @@ export class ToolsPage {
   }
 
   async revertSince(activity: Locator): Promise<void> {
-    await activity.getByRole("button", { name: "Revert everything since then" }).click()
+    await activity.getByRole("button", { name: "Undo these changes" }).click()
     await activity.getByRole("button", { name: "Confirm" }).click()
   }
 }

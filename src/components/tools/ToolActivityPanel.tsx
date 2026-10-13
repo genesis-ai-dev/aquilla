@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react"
 import { BadgeCheck, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { useOutbox } from "@/context/OutboxContext"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
@@ -14,6 +15,9 @@ import type { RevertPlan } from "../../../shared/tools/revert"
 import { fetchToolActivity, type ToolActivity, type ToolSummary } from "@/lib/tools/tools-api"
 
 const HOUR = 60 * 60 * 1000
+const RANGES = ["hour", "day", "week", "custom"] as const
+type Range = (typeof RANGES)[number]
+const RANGE_MS = { hour: HOUR, day: 24 * HOUR, week: 7 * 24 * HOUR } as const
 
 function toLocalInput(ms: number): string {
   const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000)
@@ -33,7 +37,12 @@ export function ToolActivityPanel({
 }) {
   const t = useT()
   const { flushNow } = useOutbox()
-  const [sinceMs, setSinceMs] = useState(() => Date.now() - 24 * HOUR)
+  const [range, setRange] = useState<Range>("day")
+  const [sinceMs, setSinceMs] = useState(() => Date.now() - RANGE_MS.day)
+  const pickRange = (next: Range) => {
+    setRange(next)
+    if (next !== "custom") setSinceMs(Date.now() - RANGE_MS[next])
+  }
   const [activity, setActivity] = useState<ToolActivity | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -82,14 +91,27 @@ export function ToolActivityPanel({
   }
 
   return (
-    <section aria-label={t("extensions.activity.heading")} className="mt-3 rounded-md border bg-muted/30 p-3 text-sm">
+    <section aria-label={t("extensions.activity.heading")} className="rounded-xl border bg-card p-3.5 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-medium">{t("extensions.activity.heading")}</h3>
-        <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+        <h3 className="me-auto font-medium">{t("extensions.activity.heading")}</h3>
+        <div className="flex items-center gap-1">
+          <SegmentTabs
+            aria-label={t("extensions.activity.since")}
+            value={range}
+            onValueChange={pickRange}
+            options={RANGES.map((r) => ({ value: r, label: t(`extensions.activity.range.${r}`) }))}
+          />
+          <Button size="icon-sm" variant="ghost" onClick={() => void load()} disabled={loading} aria-label={t("extensions.activity.refresh")}>
+            <RefreshCw className="size-3.5" aria-hidden />
+          </Button>
+        </div>
+      </div>
+      {range === "custom" && (
+        <label className="mt-2 flex items-center justify-end gap-2 text-xs text-muted-foreground">
           {t("extensions.activity.since")}
           <input
             type="datetime-local"
-            className="rounded border bg-background px-1 py-0.5 text-foreground"
+            className="rounded-md border bg-background px-1.5 py-0.5 text-foreground"
             value={toLocalInput(sinceMs)}
             onChange={(e) => {
               const ms = new Date(e.target.value).getTime()
@@ -97,11 +119,7 @@ export function ToolActivityPanel({
             }}
           />
         </label>
-        <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className="size-3.5" aria-hidden />
-          {t("extensions.activity.refresh")}
-        </Button>
-      </div>
+      )}
 
       {error && <p role="alert" className="mt-2 text-destructive">{error}</p>}
       {loading && !activity && <Spinner className="mt-2" />}
@@ -113,7 +131,7 @@ export function ToolActivityPanel({
           {[...activity.events].reverse().map((e) => {
             const cell = e.ref ?? e.cellId?.slice(0, 8) ?? ""
             return (
-              <li key={e.id} className="flex flex-wrap items-center gap-2 rounded bg-background px-2 py-1" data-testid="tool-activity-row">
+              <li key={e.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2.5 py-1.5" data-testid="tool-activity-row">
                 <span className="font-medium">
                   {e.kind === "target.cell.commit"
                     ? t("extensions.activity.edit", { cell })
@@ -148,8 +166,8 @@ export function ToolActivityPanel({
           {t("extensions.revert.button")}
         </Button>
         {pendingPlan && (
-          <span role="group" className="flex items-center gap-2">
-            <span className="text-xs">{t("extensions.revert.confirm", { count: pendingPlan.commits.length })}</span>
+          <span role="group" className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5">
+            <span className="text-xs text-amber-900 dark:text-amber-200">{t("extensions.revert.confirm", { count: pendingPlan.commits.length })}</span>
             <Button size="sm" variant="destructive" onClick={() => void confirmRevert()} disabled={reverting}>
               {reverting && <Spinner className="size-3.5" />}
               {t("common.confirm")}

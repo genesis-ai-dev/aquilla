@@ -113,7 +113,7 @@ test("a tool bulk-harmonizes with attribution, and revert-since-T restores every
   await harmonize.click()
 
   // write:target was left out of the standing grant → the host asks.
-  await expect(tools.permissionPrompt()).toContainText(`Allow ${TOOL} to edit translations?`)
+  await expect(tools.permissionPrompt()).toContainText(`${TOOL} wants to edit translations.`)
   await tools.answerPrompt("Always")
 
   await expect
@@ -141,7 +141,7 @@ test("a tool bulk-harmonizes with attribution, and revert-since-T restores every
   await expect(activity.getByTestId("tool-activity-row").first()).toContainText("Verified extension write (v1)")
 
   await tools.revertSince(activity)
-  await expect(activity.getByRole("status").first()).toContainText("Reverted 2 cell(s).")
+  await expect(activity.getByRole("status").first()).toContainText("Undone: 2 cell(s) are back")
   await expect(activity).toContainText("Skipped 1 cell(s) someone else edited since:")
 
   await expect

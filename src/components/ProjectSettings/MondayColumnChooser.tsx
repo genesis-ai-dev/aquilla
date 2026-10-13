@@ -4,12 +4,11 @@
 // One list of everything Aquilla can fill, in three short groups. Each row is a
 // checkbox, a name and a tag: "On your board" for a column that's already there
 // (it is used as it is) or "New column" for one Aquilla will create when the
-// user confirms. What a column shows sits behind an ⓘ, so the list stays
-// quiet. Aquilla ID is always included and can't be unticked. A live line
+// user confirms. What a column shows is a short line under its name, always
+// visible. Aquilla ID is always included and can't be unticked. A live line
 // under the list says how many columns get added and how many are reused.
 
-import { useId, useState } from "react"
-import { Info } from "lucide-react"
+import { useId } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { MONDAY_COLUMN_CATALOG, metricOnBoard, type MondayColumnMapping, type MondayMetricKey } from "@/lib/monday/types"
@@ -115,53 +114,45 @@ function ColumnRow({
   onToggle: (on: boolean) => void
 }) {
   const t = useT()
-  const [infoOpen, setInfoOpen] = useState(false)
   const id = useId()
   const labelId = `${id}-label`
   const infoId = `${id}-info`
   const title = TITLE_BY_METRIC.get(metric) ?? metric
   return (
-    <li className="flex flex-col py-1" data-testid={`monday-column-${metric}`}>
-      <div className="flex items-center gap-3">
-        <Checkbox
-          aria-labelledby={labelId}
-          checked={checked}
-          disabled={locked || disabled}
-          onCheckedChange={(on) => onToggle(on === true)}
-        />
-        <span id={labelId} className="min-w-0 truncate">{title}</span>
-        {onBoard ? (
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            {t("projectSettings.monday.columnPickerOnBoard")}
-          </span>
-        ) : (
-          <span
-            className={cn(
-              "shrink-0 rounded-full px-2 py-0.5 text-xs",
-              checked
-                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                : "border border-dashed text-muted-foreground",
-            )}
-          >
-            {t("projectSettings.monday.chooser.newColumn")}
-          </span>
-        )}
-        <button
-          type="button"
-          className="ml-auto inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground data-[state=open]:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
-          aria-label={t("projectSettings.monday.chooser.infoAriaLabel", { column: title })}
-          aria-expanded={infoOpen}
-          aria-controls={infoId}
-          data-state={infoOpen ? "open" : "closed"}
-          onClick={() => setInfoOpen((v) => !v)}
-        >
-          <Info className="size-3.5" aria-hidden />
-        </button>
+    <li className="flex items-start gap-3 py-1.5" data-testid={`monday-column-${metric}`}>
+      <Checkbox
+        className="mt-0.5"
+        aria-labelledby={labelId}
+        aria-describedby={infoId}
+        checked={checked}
+        disabled={locked || disabled}
+        onCheckedChange={(on) => onToggle(on === true)}
+      />
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span id={labelId}>{title}</span>
+          {onBoard ? (
+            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              {t("projectSettings.monday.columnPickerOnBoard")}
+            </span>
+          ) : (
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-xs",
+                checked
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                  : "border border-dashed text-muted-foreground",
+              )}
+            >
+              {t("projectSettings.monday.chooser.newColumn")}
+            </span>
+          )}
+        </div>
+        <p id={infoId} className="text-xs text-muted-foreground">
+          {t(`projectSettings.monday.columnInfo.${metric}` as MessageKey)}
+          {note && <> {note}</>}
+        </p>
       </div>
-      {note && <p className="ml-7 text-xs text-muted-foreground">{note}</p>}
-      <p id={infoId} hidden={!infoOpen} className="ml-7 text-xs text-muted-foreground">
-        {t(`projectSettings.monday.columnInfo.${metric}` as MessageKey)}
-      </p>
     </li>
   )
 }

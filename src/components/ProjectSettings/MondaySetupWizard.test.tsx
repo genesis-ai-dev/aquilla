@@ -174,14 +174,12 @@ describe("step 2: what the board shows", () => {
     expect(screen.getByTestId("monday-column-deadline").textContent).toMatch(/new column/i)
   })
 
-  it("keeps descriptions behind an (i) until asked", async () => {
+  it("shows what each column means under its name, with no (i) buttons", async () => {
     renderWizard()
     await toColumns()
-    const info = screen.getByRole("button", { name: /what “deadline” shows/i })
-    expect(info.getAttribute("aria-expanded")).toBe("false")
-    fireEvent.click(info)
-    expect(info.getAttribute("aria-expanded")).toBe("true")
-    expect(screen.getByText(/the project's deadline/i)).toBeTruthy()
+    expect(screen.getByTestId("monday-column-deadline").textContent).toMatch(/the project's deadline/i)
+    expect(box(/^Deadline$/).getAttribute("aria-describedby")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /what “.*” shows/i })).toBeNull()
   })
 
   it("says how many columns get added and how many are reused, live", async () => {

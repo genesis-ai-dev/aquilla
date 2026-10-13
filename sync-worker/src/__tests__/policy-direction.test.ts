@@ -219,3 +219,37 @@ describe('loosensPolicy — batch filter', () => {
     ).toEqual([])
   })
 })
+
+// AQU-1771: an unset key follows the ORG default before the built-in one, so
+// the direction is judged against what the project actually enforces.
+describe('policyWriteDirection — org defaults (AQU-1771)', () => {
+  it('a project following an org default of 3 approvals: 2 loosens, 4 tightens', () => {
+    expect(policyWriteDirection('validationCount', undefined, 2, 3).direction).toBe('loosen')
+    expect(policyWriteDirection('validationCount', undefined, 4, 3).direction).toBe('tighten')
+    expect(policyWriteDirection('validationCountAudio', null, 1, 2).direction).toBe('loosen')
+  })
+
+  it("clearing a project's own value means following the org: compared as the org value", () => {
+    // Own 4, org 2: clearing drops to 2 — a loosening.
+    expect(policyWriteDirection('validationCount', 4, null, 2).direction).toBe('loosen')
+    // Own 2, org 3: clearing raises to 3 — a tightening.
+    expect(policyWriteDirection('validationCount', 2, null, 3).direction).toBe('tighten')
+  })
+
+  it("a project's own value still wins over the org's", () => {
+    expect(policyWriteDirection('validationCount', 5, 4, 1).direction).toBe('loosen')
+  })
+
+  it('an org value the key does not accept is ignored (built-in default applies)', () => {
+    expect(policyWriteDirection('validationCount', undefined, 2, 'lots').direction).toBe('tighten')
+  })
+
+  it('loosensPolicy passes each key its own org default', () => {
+    const verdicts = loosensPolicy(
+      [{ key: 'validationCount', value: 2 }, { key: 'validationCountAudio', value: 2 }],
+      {},
+      { validationCount: 3, validationCountAudio: 1 },
+    )
+    expect(verdicts.map((v) => v.key)).toEqual(['validationCount'])
+  })
+})

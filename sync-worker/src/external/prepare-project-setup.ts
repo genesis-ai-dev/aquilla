@@ -57,6 +57,7 @@ import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
+import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-threshold'
 import { BRIEF_SETTINGS_KEY, isBriefFieldId, isBriefPatchSatisfied, readBriefFromSettings } from '../../../db/shared/brief'
 import { REQUIRED_ROLE } from '../events/role-policy'
 
@@ -159,7 +160,7 @@ export async function prepareProjectSetup(
   }
 
   const current = await loadProjectSettings(db, urlProjectId)
-  const loosening = loosensPolicy(ops.policy, current.settings)
+  const loosening = loosensPolicy(ops.policy, current.settings, await loadInheritedPolicyDefaults(db, urlProjectId))
   if (loosening.length > 0) {
     return fieldError(
       'permission_denied',

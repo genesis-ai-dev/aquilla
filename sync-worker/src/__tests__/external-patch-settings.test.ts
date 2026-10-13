@@ -545,6 +545,23 @@ describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §
     expect(JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)[key]).toEqual(loosen.from)
   })
 
+  // AQU-1771: a project following the org's default of 3 approvals has
+  // nothing stored; lowering it to 2 is a loosening all the same.
+  it('judges an unset key against the org default it follows, not the built-in one', async () => {
+    const env = makeEnv(tdb.db)
+    await seedPolicy({})
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
+      [ORG_ID, JSON.stringify({ validationCount: 3 })],
+    )
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, patchCmd([{ key: 'validationCount', value: 2 }]))
+    expect(res.status).toBe(403)
+    expect(body.error.details.loosening[0].key).toBe('validationCount')
+    const { res: upRes, body: up } = await prepare(env, owner.token, patchCmd([{ key: 'validationCount', value: 4 }]))
+    expect(upRes.status, JSON.stringify(up)).toBe(200)
+  })
+
   it('a fresh project (no settings row, version 0) accepts contributeToGlobalTm:false + agentAuthorship:"none" in one changeset', async () => {
     const env = makeEnv(tdb.db)
     await tdb.pg.query(`DELETE FROM project_settings WHERE project_id = $1`, [PROJECT])

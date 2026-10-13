@@ -41,6 +41,7 @@ import {
 } from '../../../db/shared/project-settings-keys'
 import { RETIRED_LANE_SETTINGS_KEYS, RETIRED_LANE_SETTINGS_MESSAGE } from './external-lane'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
+import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-threshold'
 import { ROLE, roleLabel } from '../events/role-policy'
 
 /** One top-level settings key replace. `value` is any JSON value (null stores
@@ -327,8 +328,9 @@ function retiredKeyOpDenial(ops: readonly PatchSettingsOp[]): Response | null {
 function policyOpDenial(
   ops: readonly PatchSettingsOp[],
   live: Record<string, unknown>,
+  inherited: Readonly<Record<string, unknown>>,
 ): Response | null {
-  const loosening = loosensPolicy(ops, live)
+  const loosening = loosensPolicy(ops, live, inherited)
   if (loosening.length === 0) return null
   return errorResponse(
     'permission_denied',
@@ -361,7 +363,7 @@ export async function preparePatchSettings(
 
   // The live blob serves both the policy direction check and the version pin.
   const current = await loadProjectSettings(db, urlProjectId)
-  const denial = policyOpDenial(cmd.ops, current.settings)
+  const denial = policyOpDenial(cmd.ops, current.settings, await loadInheritedPolicyDefaults(db, urlProjectId))
   if (denial) return denial
 
   const languageFloor = await resolveLanguageEditMinRole(db, urlProjectId)
@@ -434,7 +436,7 @@ export async function commitPatchSettings(
   if (retired) return retired
 
   const live = await loadProjectSettings(db, projectId)
-  const denial = policyOpDenial(cmd.ops, live.settings)
+  const denial = policyOpDenial(cmd.ops, live.settings, await loadInheritedPolicyDefaults(db, projectId))
   if (denial) return denial
 
   const languageFloor = await resolveLanguageEditMinRole(db, projectId)

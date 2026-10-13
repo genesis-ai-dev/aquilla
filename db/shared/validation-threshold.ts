@@ -83,6 +83,22 @@ export async function loadOrgValidationDefaults(
   }
 }
 
+/**
+ * The org defaults a project's policy keys inherit when unset, keyed like the
+ * settings blob — what the agent's tighten/loosen check (policy-direction.ts)
+ * compares an unset key against. Only keys the org actually set appear.
+ */
+export async function loadInheritedPolicyDefaults(
+  db: AquillaDb,
+  projectId: string,
+): Promise<Record<string, unknown>> {
+  const org = await loadOrgValidationDefaults(db, projectId)
+  const out: Record<string, unknown> = {}
+  if (org.validationCount != null) out.validationCount = org.validationCount
+  if (org.validationCountAudio != null) out.validationCountAudio = org.validationCountAudio
+  return out
+}
+
 /** The effective threshold for one project, read from the generated columns only. */
 export async function loadEffectiveThreshold(
   db: AquillaDb,

@@ -55,6 +55,7 @@ import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings, patchProjectSettingsShared } from '../../../db/shared/projects'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
+import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-threshold'
 import {
   applyBriefL1Summary,
   applyBriefPatch,
@@ -252,7 +253,8 @@ async function applySettingsStep(step: StepContext, ops: PatchSettingsOp[]): Pro
  */
 async function applyPolicyStep(step: StepContext, ops: PatchSettingsOp[]): Promise<StepOutcome> {
   const live = await loadProjectSettings(step.db, step.cs.projectId)
-  const refused = new Set(loosensPolicy(ops, live.settings).map((verdict) => verdict.key))
+  const inherited = await loadInheritedPolicyDefaults(step.db, step.cs.projectId)
+  const refused = new Set(loosensPolicy(ops, live.settings, inherited).map((verdict) => verdict.key))
   const admissible = ops.filter((op) => !refused.has(op.key))
   for (const key of refused) {
     if (!step.policyKeysNotApplied.includes(key)) step.policyKeysNotApplied.push(key)

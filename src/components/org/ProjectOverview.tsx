@@ -2643,13 +2643,26 @@ export function ProjectOverview() {
                             <Info className="size-3.5" aria-hidden />
                           </button>
                         </span>
-                        {teamMovedWhyOpen && (
-                          <p className="max-w-sm text-end text-xs text-muted-foreground" data-testid="overview-team-visibility-moved-why">
+                        {/* Same open/close as the badge's own (i) hint: stays
+                            mounted, the 0fr→1fr grid row grows to the text's
+                            height without measuring it, and the negative
+                            margin cancels the gap while it is shut. */}
+                        <div
+                          className={cn(
+                            "grid justify-items-end transition-[grid-template-rows,opacity,margin] duration-200 ease-out motion-reduce:transition-none",
+                            teamMovedWhyOpen ? "grid-rows-[1fr] opacity-100" : "-mt-0.5 grid-rows-[0fr] opacity-0",
+                          )}
+                          data-testid="overview-team-visibility-moved-why"
+                          data-state={teamMovedWhyOpen ? "open" : "closed"}
+                          aria-hidden={!teamMovedWhyOpen}
+                          inert={!teamMovedWhyOpen}
+                        >
+                          <p className="min-h-0 max-w-sm overflow-hidden text-end text-xs text-muted-foreground">
                             {t("org.projectOverview.teamVisibilityMovedByMembers", {
                               level: t(visibilityRolePickerLabelKey(teamMovedByMembers)),
                             })}
                           </p>
-                        )}
+                        </div>
                       </div>
                     )}
                     {teamOpen && (

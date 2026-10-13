@@ -1577,23 +1577,25 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
     // Members raised to owners only: the Team card follows it up.
     useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, rosterOwn: ROLE.OWNER, progressOrg: ROLE.MAINTAINER })))
     view.rerender(overviewTree())
-    const moved = await screen.findByTestId("overview-team-visibility-moved")
-    expect(moved).toHaveTextContent(/^Visibility adjusted$/)
+    await screen.findByTestId("overview-team-visibility-moved")
+    const why = () => screen.getByTestId("overview-team-visibility-moved-why")
+    expect(why()).toHaveAttribute("data-state", "closed")
+    expect(why()).toHaveAttribute("aria-hidden", "true")
     fireEvent.click(screen.getByTestId("overview-team-visibility-moved-info"))
-    expect(screen.getByTestId("overview-team-visibility-moved-why")).toHaveTextContent(
-      "Changed to “Owners only” because Members changed.",
-    )
+    expect(why()).toHaveAttribute("data-state", "open")
+    expect(why()).toHaveTextContent("Changed to “Owners only” because Members changed.")
+    // The (i) closes it again.
+    fireEvent.click(screen.getByTestId("overview-team-visibility-moved-info"))
+    expect(why()).toHaveAttribute("data-state", "closed")
+    fireEvent.click(screen.getByTestId("overview-team-visibility-moved-info"))
 
     // Members back to the org's: the Team card drops back to its own setting.
     useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.MAINTAINER })))
     view.rerender(overviewTree())
     // A new move starts with the why tucked away again.
-    await waitFor(() => expect(screen.queryByTestId("overview-team-visibility-moved-why")).toBeNull())
-    expect(screen.getByTestId("overview-team-visibility-moved")).toHaveTextContent(/^Visibility adjusted$/)
+    await waitFor(() => expect(why()).toHaveAttribute("data-state", "closed"))
     fireEvent.click(screen.getByTestId("overview-team-visibility-moved-info"))
-    expect(screen.getByTestId("overview-team-visibility-moved-why")).toHaveTextContent(
-      "Changed to “Maintainers and owners” because Members changed.",
-    )
+    expect(why()).toHaveTextContent("Changed to “Maintainers and owners” because Members changed.")
 
     // A Team change of its own clears the note.
     useProject.mockReturnValue(owner(projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })))

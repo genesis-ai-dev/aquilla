@@ -36,9 +36,6 @@ export function hasForeignOrgGrants(
  * stay empty rather than fabricating 0%-of-N from file cell counts.
  */
 export function toSharedPortfolioRow(p: CloudProjectSummary): SharedPortfolioRow {
-  const files = p.files ?? []
-  const withSource = files.find((f) => f.sourceLanguage)
-  const withTarget = files.find((f) => f.targetLanguage)
   return {
     id: p.id,
     name: p.name,
@@ -51,8 +48,11 @@ export function toSharedPortfolioRow(p: CloudProjectSummary): SharedPortfolioRow
     validatedAudioCells: 0,
     recordedMs: 0,
     deadlineAt: null,
-    sourceLanguage: withSource?.sourceLanguage ?? null,
-    targetLanguage: withTarget?.targetLanguage ?? null,
+    // AQU-1596: a guest-org grant brings no portfolio row and no lane rows, and
+    // a file's declared language is not its lane's, so these stay null rather
+    // than naming a language picked off whichever file happened to declare one.
+    sourceLanguage: null,
+    targetLanguage: null,
     pm: p.pm ?? null,
     orgId: p.orgId ?? undefined,
     orgName: p.orgName ?? null,

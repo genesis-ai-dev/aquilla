@@ -218,6 +218,23 @@ describe("audioValidatedPct (AQU-508 / AQU-1093)", () => {
   })
 })
 
+describe("audio denominator (AQU-1566)", () => {
+  // A dubbing episode: 6 subtitle rows, a 40-cue sheet beside them, 7 cues
+  // recorded. The text total no longer carries the sheet, so dividing by it
+  // read 7/6 = 100% recorded while the plan board said 7/40.
+  it("measures recordings against the server's audio total, like the plan board", () => {
+    const p = project({ totalCells: 6, audioTotalCells: 40, audioCells: 7, validatedAudioCells: 4 })
+    expect(audioPct(p)).toBe(7 / 40)
+    expect(audioValidatedPct(p)).toBe(4 / 40)
+  })
+
+  it("falls back to the text total when an older server sends no audio total", () => {
+    const p = project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 })
+    expect(audioPct(p)).toBe(0.25)
+    expect(audioValidatedPct(p)).toBe(0.1)
+  })
+})
+
 describe("audioValidatedOfRecordedPct", () => {
   it("keeps the reviewer's ratio the tile no longer shows", () => {
     expect(audioValidatedOfRecordedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.4)

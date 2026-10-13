@@ -669,6 +669,68 @@ textarea,
 .idml-style-bold { font-weight: 700; }
 .idml-style-italic { font-style: italic; }
 
+/* Visible style segments: only bold and italic runs are blocks. Consecutive
+   plain runs are one typing space. An empty plain run shows a single faint
+   "Regular" on its first slot, with no box; the plain slots after it add
+   neither another word nor a gap. An empty bold or italic run shows its own
+   faint label until the translator types. Labels are not document text. */
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic {
+  border-radius: 0.2em;
+  padding-inline: 0.18em;
+  margin-inline: 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  background-color: color-mix(in oklch, var(--color-foreground) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 16%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold {
+  background-color: color-mix(in oklch, var(--color-foreground) 14%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold[data-style-segment-empty],
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic[data-style-segment-empty] {
+  display: inline-block;
+  min-height: 1.15em;
+  vertical-align: baseline;
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+  color: color-mix(in oklch, var(--color-foreground) 40%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic:not(.idml-style-bold)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-italic, "Italic");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold:not(.idml-style-italic)[data-style-segment-empty]::before {
+  content: var(--aq-style-label-bold, "Bold");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-style-italic[data-style-segment-empty]::before {
+  content: var(--aq-style-label-bold-italic, "Bold italic");
+}
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-bold.idml-segment-caret,
+[data-visible-style-segments] [data-idml-protected="slot"].idml-style-italic.idml-segment-caret {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-foreground) 48%, transparent);
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"] {
+  display: inline-block;
+  min-height: 1.15em;
+  vertical-align: baseline;
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="label"]::before {
+  content: var(--aq-style-label-regular, "Regular");
+  color: color-mix(in oklch, var(--color-foreground) 32%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+[data-visible-style-segments] [data-idml-protected="slot"][data-style-plain-group="join"] {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+}
+
 /* Audio view (Sam, 2026-09-28): a line's waveform and its audio check point at
    each other, since a validated line shows the same green check for text and
    audio. Pointing at the audio check outlines the waveform it is about;

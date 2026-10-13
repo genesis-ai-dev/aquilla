@@ -269,6 +269,17 @@ export const agent = defineNamespace({
     "agent.chatOptions.untitledChat": "Untitled chat",
     "agent.chatOptions.openChat": "{title} — open now",
 
+    // ── Floating AI mini-chat (AgentMiniChat, AQU-1651) ─────────────────
+    // The frame around the SAME conversation the dock and the workbench show.
+    // "Close" dismisses the window only — never say or imply it ends, clears
+    // or deletes the thread, which stays on the server under Previous chats.
+    "agent.miniChat.title": "Ask AI",
+    "agent.miniChat.windowLabel": "AI mini-chat",
+    "agent.miniChat.expand": "Open in full AI chat",
+    "agent.miniChat.minimize": "Minimize chat",
+    "agent.miniChat.restore": "Reopen AI chat",
+    "agent.miniChat.close": "Close chat window",
+
     // ── NEW: v3 agent modes (autonomy dial + react loop + next passage) ───
     // The agent's autonomy is a dial, not an on/off: two independent loops
     // (initiative, react) plus a scope bound. Wording discipline for this
@@ -367,9 +378,15 @@ export const agent = defineNamespace({
       other: "…and {count} more changes.",
     }),
     "agent.changeset.moreCellsPreview": "…and {count} more cells.",
+    // AQU-1673: marks a proposal that came from an imported translation set
+    // rather than from the model, so a reviewer knows a human wrote it.
+    "agent.changeset.importedFrom": "Imported from {fileName}",
     "agent.changeset.approveAgentChanges": "Approve agent changes",
     "agent.changeset.signInNotice": "Sign in to review and approve this changeset.",
     "agent.changeset.approvedFull": "Approved — return to your agent, it can now commit.",
+    // AQU-1673: shown instead of approvedFull when the approval also applied
+    // the changes, because no agent was waiting to commit them.
+    "agent.changeset.appliedFull": "Approved and applied — the changes are now in the file.",
     "agent.changeset.rejectedFull": "Rejected — the changeset was discarded.",
     "agent.changeset.loading": "Loading changeset…",
     "agent.changeset.backTo": "Back to {projectName}",
@@ -660,6 +677,12 @@ export const agent = defineNamespace({
     "agent.finding.lint": "Project rule: {rule}",
     "agent.finding.unsupported": "Wording not found in the sources",
     "agent.finding.redrafted": "Redrafted after review",
+    // AQU-1690: Bible data findings on autopilot drafts.
+    "agent.finding.bible": "Bible data: {check}",
+    "agent.finding.bibleUnknown": "Bible data check {code}",
+    "agent.finding.bibleCheck.speaker": "Speaker named",
+    "agent.finding.bibleCheck.negation": "Negation kept",
+    "agent.finding.bibleCheck.youNumber": "Singular or plural “you”",
     "agent.finding.needsYou": "Needs you",
     "agent.finding.advisory": "Advisory",
   },
@@ -855,6 +878,23 @@ export const agent = defineNamespace({
           "changeset, stating how many further changes exist beyond the ones shown.",
         placeholders: { count: "How many additional changes are not shown; also selects the plural form." },
       },
+      "agent.changeset.appliedFull": {
+        description:
+          "AQU-1673: confirmation on the /approve/:changesetId page when the " +
+          "approval ALSO committed the plan, which happens for a plan staged " +
+          "from the app itself (e.g. \"Import as proposals\") where no agent is " +
+          "waiting to commit it. Sibling of agent.changeset.approvedFull, which " +
+          "tells the user to return to their agent — this one must not, because " +
+          "there is no agent and the work is already done.",
+      },
+      "agent.changeset.importedFrom": {
+        description:
+          "Provenance line on a per-cell change in a staged changeset, naming the " +
+          "file the proposed translation was imported from. Shown only for " +
+          "proposals staged by \"Import as proposals\" — its presence is how a " +
+          "reviewer tells an imported human translation from an AI draft.",
+        placeholders: { fileName: "Name of the uploaded file the translation came from, shown verbatim." },
+      },
       "agent.changeset.moreCellsPreview": {
         description:
           "Truncation notice under a sampled list of cells in a changeset's import " +
@@ -918,7 +958,9 @@ export const agent = defineNamespace({
           "Line on a staged changeset naming the person it has been routed to for " +
           "review. Routing is an expectation, not a decision: the changeset is still " +
           "waiting for a human to approve or reject it.",
-        placeholders: { user: "Display name of the assigned reviewer, or their user id when no name is known." },
+        placeholders: {
+          user: "The person chip for the assigned reviewer: their username, or the anonymous label when they have none. Not a raw user id.",
+        },
       },
       "agent.changeset.heldCount": {
         description:
@@ -1278,16 +1320,16 @@ export const agent = defineNamespace({
         placeholders: { step: "The already-localized plain-language step sentence." },
       },
       "agent.chatOptions.label": {
-        description: "Accessible name for the workbench's overflow menu of occasional chat-management actions.",
+        description: "Accessible name for the icon-only chat menu on compact surfaces (the floating mini-chat's title bar), which holds New chat plus the list of past chats.",
       },
       "agent.chatOptions.newChat": {
-        description: "Menu action that starts a fresh conversation. Not destructive: the chat being left is saved on the server and listed under Previous chats.",
+        description: "Action that starts a fresh conversation — a labelled button on the workbench toolbar, a menu item on compact surfaces. Not destructive: the chat being left is saved on the server and listed under Previous chats.",
       },
       "agent.chatOptions.newChatDescription": {
-        description: "Explains that starting a new chat keeps the current one (reopenable under Previous chats), and that a reopened chat restores the messages but not the proposal cards from the original run. Do not soften the second half — it is the one thing that does not come back.",
+        description: "Explains that starting a new chat keeps the current one (reopenable under Previous chats), and that a reopened chat restores the messages but not the proposal cards from the original run. Shown as the New chat button's tooltip on the workbench and as the menu item's description on compact surfaces. Do not soften the second half — it is the one thing that does not come back.",
       },
       "agent.chatOptions.previousHeading": {
-        description: "Inert heading above the list of the signed-in user's own past chats on this project.",
+        description: "Names the list of the signed-in user's own past chats on this project: an inert heading above the list in the compact icon menu, and the visible label plus accessible name of the chats menu on the workbench toolbar.",
       },
       "agent.chatOptions.previousLoading": {
         description: "Placeholder row while the user's chat list is being fetched.",
@@ -1304,6 +1346,41 @@ export const agent = defineNamespace({
       "agent.chatOptions.openChat": {
         description: "Label for the chat already on screen, listed so the user can see where they are but not re-openable onto itself.",
         placeholders: { title: "The chat's own title, or the localized Untitled chat placeholder." },
+      },
+      "agent.miniChat.title": {
+        description:
+          "Fallback heading in the floating mini-chat's title bar, used until " +
+          "the thread has a title of its own. Matches the editor's 'Ask AI' " +
+          "selection action, which is what opens the window.",
+        maxLength: 20,
+      },
+      "agent.miniChat.windowLabel": {
+        description:
+          "Accessible name of the floating chat window itself (a non-modal " +
+          "dialog over the translation view).",
+      },
+      "agent.miniChat.expand": {
+        description:
+          "Tooltip/accessible name for the button that moves the CURRENT " +
+          "thread into the full AI chat surface for longer work. Nothing is " +
+          "lost or started over.",
+      },
+      "agent.miniChat.minimize": {
+        description:
+          "Tooltip/accessible name for the button that collapses the floating " +
+          "chat window to a small bar.",
+      },
+      "agent.miniChat.restore": {
+        description:
+          "Accessible name for the collapsed bar, which reopens the chat " +
+          "window when clicked.",
+      },
+      "agent.miniChat.close": {
+        description:
+          "Tooltip/accessible name for the button that dismisses the floating " +
+          "chat window. It closes the WINDOW only — the conversation is kept " +
+          "and can be reopened under Previous chats. Do not translate it as " +
+          "ending, clearing or deleting the chat.",
       },
       "agent.team.openQuestionAriaLabel": {
         description:
@@ -1443,6 +1520,23 @@ export const agent = defineNamespace({
       },
       "agent.finding.redrafted": {
         description: "Verifier finding on a draft: the first attempt was rejected and this is the redraft.",
+      },
+      "agent.finding.bible": {
+        description: "Finding on an autopilot draft: a Bible data check (from the Bible Knowledge Pack) does not hold for the draft text.",
+        placeholders: { check: "The check's name, already translated, such as 'Quotation closes'." },
+      },
+      "agent.finding.bibleUnknown": {
+        description: "Finding on an autopilot draft from a Bible data check this version of the app has no name for.",
+        placeholders: { code: "The check's code, such as 'V4' — not translated." },
+      },
+      "agent.finding.bibleCheck.speaker": {
+        description: "Name of an autopilot Bible data check: the draft makes clear who speaks the quoted words. Shown as {check} in 'Bible data: {check}'.",
+      },
+      "agent.finding.bibleCheck.negation": {
+        description: "Name of a Bible data check: the translation keeps the source's negation ('not', 'never'). Shown in Rules → Built-in checks, and as {check} in 'Bible data: {check}' on autopilot drafts.",
+      },
+      "agent.finding.bibleCheck.youNumber": {
+        description: "Name of an autopilot Bible data check: the draft's 'you' is singular or plural as in the source. Shown as {check} in 'Bible data: {check}'.",
       },
       "agent.finding.needsYou": {
         description: "Badge on a draft whose findings were triaged as needing a person before approval.",

@@ -4,6 +4,7 @@ import {
   createLinkUpstreamChangedHandler,
   createReconnectResyncHandler,
   createScopedRefreshScheduler,
+  CONNECTION_SUPERSEDED_CLOSE_CODE,
   createWsReconciler,
   fileInventoryChanged,
   isOwnWriteEcho,
@@ -12,6 +13,7 @@ import {
   type ProjectWsServerMessage,
   type ScopedRefreshScope,
 } from "./ws-reconciler"
+import { buildFileScopedTokenFetcher } from "./cqrs-bridge"
 import {
   applyRemoteFrame,
   attachContextualRun,
@@ -591,6 +593,80 @@ describe("createWsReconciler", () => {
     r.close()
   })
 
+  it("reuses one connId per tab when a storage key is given, so a reconnect replaces its row", async () => {
+    // AQU-1791: a fresh id per socket meant a reconnect — the normal outcome
+    // of a dropped link — asked the DO for a NEW presence row while the dead
+    // socket's row was still there, listing one person 2–3× as "viewing".
+    sessionStorage.clear()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.p",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    const first = new URL(FakeWebSocket.instances[0].url).searchParams.get("connId")
+    expect(first).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBe(first)
+    FakeWebSocket.instances[0].open()
+
+    r.reconnect()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(new URL(FakeWebSocket.instances[1].url).searchParams.get("connId")).toBe(first)
+    r.close()
+
+    // A different project in the same tab is a different presence row.
+    const other = createWsReconciler({
+      projectId: "q",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.q",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(new URL(FakeWebSocket.instances[2].url).searchParams.get("connId")).not.toBe(first)
+    other.close()
+    sessionStorage.clear()
+  })
+
+  it("rotates its tab connId when another connection supersedes it", async () => {
+    // A duplicated browser tab inherits the original's sessionStorage, so both
+    // would present one connId and take it from each other forever. The loser
+    // of a 4409 close gives the id up.
+    sessionStorage.clear()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      minBackoffMs: 1,
+      maxBackoffMs: 1,
+      connIdStorageKey: "aquilla.presence.connId.p",
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    const ws = FakeWebSocket.instances[0]
+    const first = new URL(ws.url).searchParams.get("connId")
+    ws.open()
+    ws.close(CONNECTION_SUPERSEDED_CLOSE_CODE, "connection superseded")
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBeNull()
+
+    await vi.waitFor(() => expect(FakeWebSocket.instances.length).toBe(2))
+    const second = new URL(FakeWebSocket.instances[1].url).searchParams.get("connId")
+    expect(second).not.toBe(first)
+    expect(sessionStorage.getItem("aquilla.presence.connId.p")).toBe(second)
+    r.close()
+    sessionStorage.clear()
+  })
+
   it("delivers parsed server frames to onMessage", async () => {
     const onMessage = vi.fn()
     const r = createWsReconciler(
@@ -699,6 +775,165 @@ describe("createWsReconciler", () => {
     await Promise.resolve()
     expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(2)
     r.close()
+  })
+
+  // ── AQU-1838 reconnect storm ──────────────────────────────────────────
+  //
+  // A sync-worker deploy drops every socket in the fleet in the same instant.
+  // The old schedule waited `window × (1 + rand×0.25)`, so 1,000 clients came
+  // back inside one 250ms band — 1,000 sockets, token mints and AQU-845
+  // resync fan-outs at once. Full jitter draws from the WHOLE window instead,
+  // so the same fleet arrives spread across it.
+
+  it("AQU-1838: draws the first reconnect from the whole window, not its end", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      randomSource: () => 0.5,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(1006, "deploy")
+    // Mid-window draw on the 5s default = 2.5s. The old schedule could only
+    // ever fire between 1000ms and 1250ms, whatever the client.
+    await vi.advanceTimersByTimeAsync(2_400)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(200)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    r.close()
+  })
+
+  it("AQU-1838: a draw at the bottom of the window still waits out the floor", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      randomSource: () => 0,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(1006, "deploy")
+    // Full jitter can draw ~0; the floor keeps the unluckiest client from
+    // reconnecting hard against a server that is still coming up.
+    await vi.advanceTimersByTimeAsync(240)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(20)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    r.close()
+  })
+
+  it("AQU-1838: the window — not the delay — doubles while reconnects keep failing", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      // Top-of-window draw every time, so the delay is the window itself and
+      // the growth is observable.
+      randomSource: () => 1,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(1006, "deploy")
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    // Second failure: no open() this time, so the window stays grown.
+    FakeWebSocket.instances[1].close(1006, "still down")
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    r.close()
+  })
+
+  it("AQU-1838: a successful open resets the window", async () => {
+    vi.useFakeTimers()
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: async () => "tok",
+      webSocketCtor: FakeWsCtor,
+      randomSource: () => 1,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    FakeWebSocket.instances[0].open()
+    FakeWebSocket.instances[0].close(1006, "blip")
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    FakeWebSocket.instances[1].open()
+    FakeWebSocket.instances[1].close(1006, "blip")
+    // Back to the first window, not the doubled one.
+    await vi.advanceTimersByTimeAsync(5_000)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(FakeWebSocket.instances).toHaveLength(3)
+    r.close()
+  })
+
+  it("AQU-1838: reconnects inside the token lifetime do not mint a new sync token", async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          token: "sync-tok",
+          expiresIn: 900,
+          role: { level: 3, name: "translator", source: "group" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    // The workspace mints through this file-scoped fetcher, which caches the
+    // token in a closure that outlives any socket. A deploy that drops the
+    // fleet must not become a burst of /sync-token mints on auth-worker.
+    const getToken = buildFileScopedTokenFetcher(() => "jwt", "p")
+    const r = createWsReconciler({
+      projectId: "p",
+      baseUrl: "https://example.com",
+      getToken: () => getToken("f-1"),
+      webSocketCtor: FakeWsCtor,
+      randomSource: () => 0,
+    })
+    await vi.advanceTimersByTimeAsync(1)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    for (let i = 0; i < 3; i += 1) {
+      FakeWebSocket.instances[i].open()
+      FakeWebSocket.instances[i].close(1006, "deploy")
+      await vi.advanceTimersByTimeAsync(300)
+      await Promise.resolve()
+      await Promise.resolve()
+    }
+    expect(FakeWebSocket.instances).toHaveLength(4)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    r.close()
+    vi.unstubAllGlobals()
   })
 
   it("close() prevents further reconnects", async () => {

@@ -69,6 +69,17 @@ describe("entityTermAction", () => {
     expect(entityTermAction(jesus, inputs({ concepts: [concept({})], canLink: false }))).toBeNull()
   })
 
+  // AQU-1721: the editor lists the concepts of subscribed termbases ahead of
+  // the project's own. They are read-only here, so none may be offered for a
+  // term.update, and a project entry under the same headword is not added
+  // beside one either.
+  it("never offers to link a subscribed termbase's entry, and links the project's own one past it", () => {
+    const subscribed = concept({ id: "c-shared", termbaseProjectId: "termbase-1" })
+    expect(entityTermAction(jesus, inputs({ concepts: [subscribed] }))).toBeNull()
+    const own = concept({})
+    expect(entityTermAction(jesus, inputs({ concepts: [subscribed, own] }))).toMatchObject({ kind: "link", concept: own })
+  })
+
   it("offers nothing once any entry links him, even a suggestion still in review", () => {
     expect(entityTermAction(jesus, inputs({ concepts: [concept({ status: "draft", externalIds: { acai: JESUS } })] }))).toBeNull()
   })

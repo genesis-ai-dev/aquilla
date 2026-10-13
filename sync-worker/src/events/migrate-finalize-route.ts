@@ -27,6 +27,7 @@
 import { projectFileCountersRecomputeStmt } from './event-projection'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
+import { withLongOperationTimeout } from '../../../db/shim/postgres'
 
 const PATH = '/migrate/finalize'
 
@@ -105,7 +106,12 @@ export async function handleMigrateFinalizeRequest(
     return new Response('fileIds must be an array of non-empty strings', { status: 400 })
   }
 
-  const db = env.AQUILLA_PG
+  // AQU-1876: projectFileCountersRecomputeStmt below is a project-WIDE
+  // recompute — one statement over every file — so it runs under the
+  // registered `migration-finalize` ceiling rather than the 15s default every
+  // worker connection otherwise carries. See LONG_OPERATION_TIMEOUTS in
+  // db/shim/postgres.ts, the one list of operations allowed to outrun it.
+  const db = withLongOperationTimeout(env.AQUILLA_PG, 'migration-finalize')
   // One instant for the whole finalize, so every row it touches carries the
   // same `updated_at` rather than drifting across a multi-second loop.
   const finalizedAt = Date.now()

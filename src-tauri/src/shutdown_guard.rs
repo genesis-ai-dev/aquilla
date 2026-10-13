@@ -29,9 +29,6 @@ pub struct ShutdownGuardState {
     /// itself triggers) is let through immediately instead of being
     /// prevented again.
     exiting: Arc<AtomicBool>,
-    /// Set by `restart_app`: once the handshake finishes, relaunch instead of
-    /// exiting.
-    restart: Arc<AtomicBool>,
 }
 
 impl ShutdownGuardState {
@@ -39,7 +36,6 @@ impl ShutdownGuardState {
         Self {
             notify: Arc::new(Notify::new()),
             exiting: Arc::new(AtomicBool::new(false)),
-            restart: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -70,14 +66,25 @@ pub fn confirm_offline_shutdown(state: State<'_, ShutdownGuardState>) {
 /// relaunches the app.
 #[tauri::command]
 pub fn restart_app(app: AppHandle, state: State<'_, ShutdownGuardState>) {
-    if !claim_shutdown(&state.exiting) {
-        return;
-    }
-    state.restart.store(true, Ordering::SeqCst);
-    begin_graceful_exit(&app, state.notify.clone(), state.restart.clone());
+    exit_after_handshake(&app, &state, |app| app.restart());
 }
 
-fn begin_graceful_exit(app: &AppHandle, notify: Arc<Notify>, restart: Arc<AtomicBool>) {
+/// False if a shutdown is already under way. `after` may never return (Windows `install()` exits).
+pub fn exit_after_handshake<F>(app: &AppHandle, state: &ShutdownGuardState, after: F) -> bool
+where
+    F: FnOnce(&AppHandle) + Send + 'static,
+{
+    if !claim_shutdown(&state.exiting) {
+        return false;
+    }
+    begin_graceful_exit(app, state.notify.clone(), after);
+    true
+}
+
+fn begin_graceful_exit<F>(app: &AppHandle, notify: Arc<Notify>, after: F)
+where
+    F: FnOnce(&AppHandle) + Send + 'static,
+{
     let app_handle = app.clone();
     if let Err(err) = app_handle.emit(PREPARE_SHUTDOWN_EVENT, ()) {
         log::warn!("[shutdown_guard] failed to emit {PREPARE_SHUTDOWN_EVENT}: {err}");
@@ -93,9 +100,7 @@ fn begin_graceful_exit(app: &AppHandle, notify: Arc<Notify>, restart: Arc<Atomic
         }
         // `exiting` is already claimed, so the exit this triggers passes
         // straight through the hooks below instead of re-running the handshake.
-        if restart.load(Ordering::SeqCst) {
-            app_handle.restart();
-        }
+        after(&app_handle);
         app_handle.exit(0);
     });
 }
@@ -110,7 +115,7 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
             return;
         }
         api.prevent_close();
-        begin_graceful_exit(app, state.notify.clone(), state.restart.clone());
+        begin_graceful_exit(app, state.notify.clone(), |_| {});
     }
 }
 
@@ -123,7 +128,7 @@ pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
             return;
         }
         api.prevent_exit();
-        begin_graceful_exit(app, state.notify.clone(), state.restart.clone());
+        begin_graceful_exit(app, state.notify.clone(), |_| {});
     }
 }
 

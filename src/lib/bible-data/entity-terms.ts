@@ -7,7 +7,9 @@
 //   • link: an active concept already names the participant by headword but
 //     is not linked. Linking is a term.update, which the server allows only
 //     at the termbase floor, so only someone who can approve terms gets it;
-//     anyone else gets nothing rather than a duplicate entry;
+//     anyone else gets nothing rather than a duplicate entry. A concept from a
+//     termbase this project subscribes to (AQU-1721) is read-only here, so
+//     when only such a concept names the participant there is nothing either;
 //   • add: no concept names the participant. One click suggests a draft
 //     concept with the link and no rendering; its "View entry" toast opens it
 //     to add the rendering.
@@ -47,10 +49,14 @@ export function entityTermAction(entity: BkpEntity | undefined, inputs: EntityTe
 
   const sourceName = inputs.sourceLanguage ? bareName(entity.labels[inputs.sourceLanguage]) : ""
   const names = [sourceName, inputs.lemma?.trim() ?? ""].filter(Boolean)
-  const named = names
+  const naming = names
     .flatMap((name) => conceptsNamed(name, inputs))
-    .find((concept) => !concept.externalIds?.acai)
-  if (named) return inputs.canLink ? { kind: "link", concept: named, externalIds: { acai } } : null
+    .filter((concept) => !concept.externalIds?.acai)
+  const own = naming.find((concept) => !concept.termbaseProjectId)
+  if (own) return inputs.canLink ? { kind: "link", concept: own, externalIds: { acai } } : null
+  // Only a subscribed termbase's concept names him: not this project's to
+  // link (AQU-1721), and a second entry under its headword would duplicate it.
+  if (naming.length > 0) return null
 
   if (!inputs.canAdd) return null
   const sourceTerm = sourceName || inputs.lemma?.trim() || bareName(entity.labels.eng)

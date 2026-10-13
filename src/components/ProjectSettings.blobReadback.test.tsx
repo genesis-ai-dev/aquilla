@@ -16,10 +16,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+import { renameProject } from "@/lib/sync/cloud-projects"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderWithTooltips } from "@/test-utils/tooltip"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import userEvent from "@testing-library/user-event"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const PROJECT_ID = "proj-blob-readback"
 
@@ -37,9 +39,28 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 
 const patchSpy = vi.fn().mockResolvedValue({ kind: "ok" })
 
+type SettingsLane = {
+  id: string
+  role: "source" | "target"
+  language: string | null
+  name: string | null
+  langCode: string | null
+  legacyTag: string | null
+  position: number
+  archivedAt: null
+}
+
+function lanesFor(source: string, target: string): SettingsLane[] {
+  return [
+    { id: "source-lane", role: "source", language: source, name: null, langCode: null, legacyTag: null, position: 0, archivedAt: null },
+    { id: "target-lane", role: "target", language: target, name: null, langCode: null, legacyTag: "", position: 1, archivedAt: null },
+  ]
+}
+
 let currentProject: ProjectRecord = makeProject()
 let currentSettings: Record<string, unknown> = {}
 let currentHasFetched = true
+let currentLanes: SettingsLane[] = lanesFor("", "")
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -53,7 +74,13 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   useProjectSettings: () => ({
     canEdit: true,
     reasonCannotEdit: null,
+    canEditLanguages: true,
+    reasonCannotEditLanguages: null,
     patch: patchSpy,
+    lanes: currentLanes,
+    renameLane: vi.fn().mockResolvedValue("ok"),
+    createLane: vi.fn().mockResolvedValue({ kind: "ok" }),
+    setLaneArchived: vi.fn().mockResolvedValue({ kind: "ok" }),
     version: 1,
     updatedAt: null,
     updatedBy: null,
@@ -125,6 +152,14 @@ vi.mock("@/lib/store/project-index", () => ({
   updateProject: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
+  return {
+    ...actual,
+    renameProject: vi.fn(async (_jwt: string, id: string, name: string) => ({ id, name })),
+  }
+})
+
 vi.mock("@/lib/store/user-api-keys", () => ({
   setUserApiKey: vi.fn(),
   useUserApiKey: vi.fn(() => null),
@@ -156,9 +191,11 @@ function renderSettings(pane: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  patchSpy.mockResolvedValue({ kind: "ok" })
   currentProject = makeProject()
   currentSettings = {}
   currentHasFetched = true
+  currentLanes = lanesFor("", "")
 })
 
 describe("ProjectSettings — blob-only settings read back after a reload", () => {
@@ -174,11 +211,14 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
     expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("Maintainer")
   })
 
-  it("sourceLanguage / targetLanguage", () => {
-    currentSettings = { sourceLanguage: "Greek", targetLanguage: "Tok Pisin" }
+  it("shows lane languages and does not read sourceLanguage / targetLanguage keys", () => {
+    currentLanes = lanesFor("Greek", "Tok Pisin")
+    currentSettings = { sourceLanguage: "Spanish", targetLanguage: "German" }
     renderSettings("general")
-    expect(screen.getByDisplayValue("Greek")).toBeInTheDocument()
-    expect(screen.getByDisplayValue("Tok Pisin")).toBeInTheDocument()
+    expect(screen.getByLabelText("Source Language")).toHaveValue("Greek")
+    expect(screen.getByTestId("lane-language-target-lane")).toHaveValue("Tok Pisin")
+    expect(screen.queryByDisplayValue("Spanish")).toBeNull()
+    expect(screen.queryByDisplayValue("German")).toBeNull()
   })
 
   it("timingLocked (absent means locked, so a stored false must show unlocked)", () => {
@@ -291,5 +331,70 @@ describe("ProjectSettings — the re-sync does not stomp an in-progress edit", (
     await user.click(screen.getByRole("button", { name: /save changes/i }))
     expect(patchSpy).toHaveBeenCalledTimes(1)
     expect(patchSpy.mock.calls[0][0]).toEqual({ validationCount: 2 })
+  })
+})
+
+describe("ProjectSettings — a settings GET that lands after a successful save", () => {
+  it("does not mark the form dirty or revert the saved source language (AQU-1744)", async () => {
+    const user = userEvent.setup()
+    currentHasFetched = false
+    const view = renderSettings("general")
+
+    const renamed = "Blob Readback Test Project renamed"
+    fireEvent.change(screen.getByLabelText("Project title"), { target: { value: renamed } })
+    fireEvent.change(screen.getByLabelText("Source Language"), { target: { value: "English (US)" } })
+    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+
+    await user.click(screen.getByRole("button", { name: /save changes/i }))
+    expect(await screen.findByText(/Saved: project title\./i)).toBeInTheDocument()
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+    // Source language is a lane rename, not a settings-blob write.
+    expect(patchSpy).not.toHaveBeenCalled()
+
+    // The GET resolves after the save. A stale settings key must not revert
+    // the language the user typed. An untouched blob field still adopts the
+    // server value.
+    currentSettings = { sourceLanguage: "Greek", smartQuotes: true }
+    currentHasFetched = true
+    view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
+
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+    expect(screen.getByText(/Saved: project title\./i)).toBeInTheDocument()
+    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    // The untouched field still adopts the server value, and that is not an edit.
+    expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
+  })
+
+  it("keeps the saved source language when the stale GET resolves during the save (AQU-1744)", async () => {
+    const user = userEvent.setup()
+    currentHasFetched = false
+    const view = renderSettings("general")
+
+    fireEvent.change(screen.getByLabelText("Project title"), { target: { value: "Blob Readback Test Project renamed" } })
+    fireEvent.change(screen.getByLabelText("Source Language"), { target: { value: "English (US)" } })
+
+    // A title-only save goes through renameProject, not the settings patch.
+    // Hold that call open so the stale GET lands while the save is in flight.
+    let resolveRename: (value: { id: string; name: string }) => void = () => {}
+    vi.mocked(renameProject).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRename = resolve }),
+    )
+    const clickDone = user.click(screen.getByRole("button", { name: /save changes/i }))
+    await vi.waitFor(() => expect(renameProject).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
+
+    // The GET was in flight before the rename finished. Its sourceLanguage key
+    // is stale, and it carries a blob field the user never touched.
+    currentSettings = { sourceLanguage: "Greek", smartQuotes: true }
+    currentHasFetched = true
+    view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
+
+    resolveRename({ id: PROJECT_ID, name: "Blob Readback Test Project renamed" })
+    await clickDone
+
+    expect(await screen.findByText(/Saved: project title\./i)).toBeInTheDocument()
+    expect(patchSpy).not.toHaveBeenCalled()
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
   })
 })

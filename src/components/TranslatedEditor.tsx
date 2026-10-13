@@ -30,6 +30,11 @@ import { cn } from "@/lib/utils"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
+import {
+  createHealthScoreDecorationExtension,
+  healthScorePluginKey,
+  type HealthScoreDecorationSpan,
+} from "@/lib/richtext/health-score-decoration-plugin"
 import { createSmartEditDecorationExtension, smartEditPluginKey, smartEditRange } from "@/lib/richtext/smart-edit-decoration-plugin"
 import { suggestionId } from "@/lib/smart-edits/store"
 import type { SmartEditSuggestion } from "@/lib/smart-edits/client"
@@ -65,6 +70,8 @@ import {
   idmlPointerIsBelowEditableSlots,
   type IdmlPointerSelection,
 } from "@/lib/richtext/idml-caret"
+import { createIdmlActiveSegmentExtension, idmlSegmentCaretStep } from "@/lib/richtext/idml-segment-caret"
+import { getVisibleStyleSegments } from "@/lib/store/visible-style-segments-pref"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
@@ -101,6 +108,7 @@ export const PRESENCE_DRAFT_IDLE_MS = 650
 export const PRESENCE_WORD_BATCH_SIZE = 2
 /** Keep presence frames lightweight even if a malformed/imported cell is huge. */
 export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
+const EMPTY_HEALTH_SPANS: readonly HealthScoreDecorationSpan[] = []
 
 function placeDomCaretAtProseMirrorPosition(view: EditorView, position: number): void {
   const selection = view.dom.ownerDocument.getSelection()
@@ -344,6 +352,8 @@ export interface TranslatedEditorHandle {
    * flat text over it would drop the protected anchors the export depends on.
    */
   replacePlainText: (text: string) => boolean
+  /** Commit text still inside the idle window, without waiting for blur. */
+  flushPendingCommit: () => void
 }
 
 interface PendingFootnoteDelete {
@@ -404,8 +414,13 @@ interface TranslatedEditorProps {
   heldByLabel?: string | null
   infractions?: RuleInfraction[]
   ruleSeverity?: Map<string, "major" | "minor">
-  waivedRuleIds?: Set<string>
-  onRuleClick?: (ruleId: string, anchor: HTMLElement) => void
+  /** AQU-1740: one key per active waiver on this cell — `waiverKey(ruleId)`
+   *  cell-wide, `waiverKey(ruleId, matchHash)` for a single accepted finding.
+   *  See `waivedKeys` in `src/lib/rules/waivers.ts`. */
+  waivedKeys?: Set<string>
+  /** AQU-1740: `matchHash` names the finding the clicked blot covers, so the
+   *  caller's rule card can act on that match alone. */
+  onRuleClick?: (ruleId: string, anchor: HTMLElement, matchHash?: string) => void
   /**
    * AQU-664: hover ("wave over") a violation blot to preview the rule
    * explanation. Fires with the blot's `data-rule-id` + the blot element on
@@ -482,6 +497,8 @@ interface TranslatedEditorProps {
    * the parent to return focus to the grid row wrapper.
    */
   onEscapeToGrid?: () => void
+  /** Display-only AI-draft provenance wash (#946). Empty when the toggle is off. */
+  healthSpans?: readonly HealthScoreDecorationSpan[]
 }
 
 export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEditorProps>(function TranslatedEditor({
@@ -510,7 +527,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   heldByLabel,
   infractions,
   ruleSeverity,
-  waivedRuleIds,
+  waivedKeys,
   onRuleClick,
   onRuleHover,
   onLiveTextChange,
@@ -531,6 +548,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onFootnoteHover,
   ariaLabel,
   onEscapeToGrid,
+  healthSpans = EMPTY_HEALTH_SPANS,
 }, ref) {
   const t = useT()
   // Held in a ref so the editor's keydown handler — created once per cellId —
@@ -568,8 +586,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const latestViolationStateRef = useRef({
     infractions: infractions ?? [],
     ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
-    waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+    waivedKeys: waivedKeys ?? new Set<string>(),
   })
+  const latestHealthSpansRef = useRef(healthSpans)
 
   const latestSmartEditsRef = useRef<readonly SmartEditSuggestion[]>(smartEdits ?? [])
   const [openSmartEdit, setOpenSmartEdit] = useState<{ suggestion: SmartEditSuggestion; anchor: HTMLElement } | null>(null)
@@ -651,6 +670,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // can flush it (navigate-away / reload during the idle window must not drop
   // the edit into the void — the commit has to reach the outbox to survive).
   const pendingCommitRef = useRef<TranslatedEditorCommit | null>(null)
+  const flushPendingCommitRef = useRef<() => void>(() => {})
   const onCommitRef = useRef(onCommit)
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
   // AQU-667: mirrors read by the blur handler / re-hydrate effect so both can
@@ -813,6 +833,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         () => showFootnoteTooltipsRef.current,
       ),
       createViolationDecorationExtension(() => latestViolationStateRef.current),
+      createHealthScoreDecorationExtension(() => latestHealthSpansRef.current),
       createSmartEditDecorationExtension(() => latestSmartEditsRef.current),
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(smartQuotes ? [createSmartQuotesExtension(lang)] : []),
@@ -823,10 +844,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           )]
         : []),
       ...(idmlContext
-        ? idmlEditorExtensions({
-            context: idmlContext,
-            onRejected: (diagnostic) => reportIdmlError(idmlDiagnosticMessage(diagnostic)),
-          })
+        ? [
+            ...idmlEditorExtensions({
+              context: idmlContext,
+              onRejected: (diagnostic) => reportIdmlError(idmlDiagnosticMessage(diagnostic)),
+            }),
+            createIdmlActiveSegmentExtension(),
+          ]
         : []),
     ],
     editorProps: {
@@ -902,9 +926,6 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         // phantom trailing br), not for selecting text. A drag or Shift-click
         // range must not be collapsed on mouseup.
         const native = view.dom.ownerDocument.getSelection()
-        if (event.shiftKey || !view.state.selection.empty || (native && !native.isCollapsed)) {
-          return false
-        }
         const target = event.target instanceof HTMLElement
           ? event.target.closest<HTMLElement>("[data-idml-slot]")
           : null
@@ -912,6 +933,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         const requestedSlot = clickedSlot !== null && clickedSlot !== undefined
           ? Number(clickedSlot)
           : undefined
+        const hitEditableSlot = Boolean(
+          target
+          && target.getAttribute("contenteditable") !== "false"
+          && Number.isSafeInteger(requestedSlot)
+        )
+        const textDrag = view.state.selection instanceof TextSelection && !view.state.selection.empty
+        if (event.shiftKey || textDrag) return false
+        // A click that missed every slot must not collapse a browser drag
+        // ProseMirror has not adopted yet. A click on a slot always places the
+        // caret there: the first click otherwise selects the paragraph, which
+        // reads as selecting the whole cell, and a second click is required.
+        if (!hitEditableSlot && (
+          !view.state.selection.empty
+          || (native !== null && native !== undefined && !native.isCollapsed)
+        )) {
+          return false
+        }
         const resolvedClick = view.state.doc.resolve(pos)
         const position = (
           Number.isSafeInteger(requestedSlot)
@@ -946,6 +984,30 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           const target = event.target instanceof HTMLElement
             ? event.target.closest<HTMLElement>("[data-idml-slot]")
             : null
+          // An empty run (faint Regular, or an empty bold/italic box) has no
+          // text node. Leaving mousedown to the browser selects the paragraph
+          // — the whole cell — and the click never becomes a caret in the run.
+          if (
+            target
+            && target.getAttribute("contenteditable") !== "false"
+            && !(target.textContent ?? "").replace(/\u200b/g, "")
+          ) {
+            const requestedSlot = Number(target.getAttribute("data-idml-slot"))
+            const position = idmlEditableSlotPosition(
+              view.state.doc,
+              Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+            )
+            if (position === null) return false
+            event.preventDefault()
+            view.dispatch(
+              view.state.tr
+                .setSelection(TextSelection.create(view.state.doc, position))
+                .scrollIntoView(),
+            )
+            view.focus()
+            placeDomCaretAtProseMirrorPosition(view, position)
+            return true
+          }
           // Direct text/slot clicks retain their precise browser coordinates.
           if (target) return false
           // AQU-1031: the caret gap after the last letter is on the slot's
@@ -1213,6 +1275,42 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             reportIdmlError(t("editor.idml.caretOutsideSlot"))
           }
           return true
+        }
+        // Visible style segments: regular text arrows through like one sentence.
+        // Entering or leaving a bold or italic run stops in that block, including
+        // an empty one, so the next letters belong to it. Right is forward in
+        // LTR; left is forward in RTL.
+        if (
+          idmlContext
+          && getVisibleStyleSegments()
+          && !event.isComposing
+          && !event.shiftKey
+          && !event.metaKey
+          && !event.altKey
+          && !event.ctrlKey
+          && (event.key === "ArrowLeft" || event.key === "ArrowRight")
+        ) {
+          const rtl = view.dom.ownerDocument.defaultView?.getComputedStyle(view.dom).direction === "rtl"
+          const forward = rtl ? event.key === "ArrowLeft" : event.key === "ArrowRight"
+          const next = idmlSegmentCaretStep(
+            view.state.doc,
+            view.state.selection,
+            forward ? "forward" : "backward",
+            {
+              catalog: idmlContext.styleCatalog,
+              paragraphStyleId: idmlContext.paragraphStyleId,
+            },
+          )
+          if (next !== null) {
+            event.preventDefault()
+            view.dispatch(
+              view.state.tr
+                .setSelection(TextSelection.create(view.state.doc, next))
+                .scrollIntoView(),
+            )
+            placeDomCaretAtProseMirrorPosition(view, next)
+            return true
+          }
         }
         // AQU-584: plain Enter confirms the edit. Left to StarterKit's default,
         // Enter split the paragraph and left a trailing newline inside the cell
@@ -1571,6 +1669,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       commitEditorSnapshot.current("tm-insert")
       return true
     },
+    flushPendingCommit() {
+      flushPendingCommitRef.current()
+    },
   }), [editor, idmlContext, isReadOnly, t])
 
   // The committed baseline is the editor's OWN canonical text, never the raw
@@ -1671,13 +1772,20 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     latestViolationStateRef.current = {
       infractions: infractions ?? [],
       ruleSeverity: ruleSeverity ?? new Map<string, "major" | "minor">(),
-      waivedRuleIds: waivedRuleIds ?? new Set<string>(),
+      waivedKeys: waivedKeys ?? new Set<string>(),
     }
     if (editor) {
       const tr = editor.state.tr.setMeta(violationPluginKey, "rebuild")
       editor.view.dispatch(tr)
     }
-  }, [editor, infractions, ruleSeverity, waivedRuleIds])
+  }, [editor, infractions, ruleSeverity, waivedKeys])
+
+  useEffect(() => {
+    latestHealthSpansRef.current = healthSpans
+    if (editor) {
+      editor.view.dispatch(editor.state.tr.setMeta(healthScorePluginKey, "rebuild"))
+    }
+  }, [editor, healthSpans])
 
   useEffect(() => {
     latestSmartEditsRef.current = smartEdits ?? []
@@ -1784,6 +1892,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       onCommitRef.current(pending)
     }
   }, [])
+  flushPendingCommitRef.current = flushPendingCommit
   useEffect(() => flushPendingCommit, [flushPendingCommit])
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -1942,7 +2051,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             smartEdit: Boolean(smartEdits?.length),
             term: Boolean(onTermChipClick),
           })
-          if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element)
+          if (hit?.kind === "rule") onRuleClick?.(hit.ruleId, hit.element, hit.matchHash)
           else if (hit?.kind === "smartEdit") {
             const suggestion = smartEdits?.find((s) => suggestionId(s) === hit.id)
             if (suggestion) setOpenSmartEdit({ suggestion, anchor: hit.element })

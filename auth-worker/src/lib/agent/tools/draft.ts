@@ -10,12 +10,18 @@
 // tells the orchestrator how much work remains.
 
 import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
+import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
 import { executeExamples } from "./examples"
 import { pairToRow, resolveScope } from "./read"
 import { selectCellPairs, statusOf, type CellPair } from "./select-cells"
 import type { FileCandidate, ToolOutcome } from "./types"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../../../shared/vendor-timeouts"
 
 export interface DraftArgs {
   fileId?: unknown
@@ -42,7 +48,9 @@ export interface DraftModelConfig {
 export interface DraftGenerationContext {
   projectId: string
   focusedFileId?: string
-  /** Active lane ('' = default lane). Required for proper lane scoping. */
+  /** The active lane, as either its `lanes.id` or its legacy tag: resolved
+   *  to the id every lane-scoped query keys on (AQU-1610). `''` is the
+   *  project's former default lane. */
   lane: string
   aliases: AliasMap
   sourceLanguage?: string
@@ -160,22 +168,39 @@ async function callDraftModel(
   messages: { role: "system" | "user"; content: string }[],
   signal: AbortSignal,
 ): Promise<DraftModelResult> {
-  const res = await fetch(modelCfg.url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${modelCfg.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: modelCfg.model,
-      messages,
-      stream: false,
-      usage: { include: true },
-      reasoning: { effort: "none" },
-      ...(modelCfg.maxTokens ? { max_tokens: modelCfg.maxTokens } : {}),
-    }),
-    signal,
-  })
+  // AQU-1849: deadline on the provider's answer, linked to the run's signal
+  // so a cancelled run still aborts upstream. `stream: false` means the
+  // headers do not arrive until the completion is whole, so disarming at
+  // headers bounds the whole answer. A hung provider used to park the entire
+  // agent turn with no error the harness could show.
+  const deadline = vendorDeadline("openRouterNonStreaming", signal)
+  let res: Response
+  try {
+    res = await fetch(modelCfg.url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${modelCfg.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: modelCfg.model,
+        messages,
+        stream: false,
+        usage: { include: true },
+        reasoning: { effort: "none" },
+        ...(modelCfg.maxTokens ? { max_tokens: modelCfg.maxTokens } : {}),
+      }),
+      signal: deadline.signal,
+    })
+  } catch (err) {
+    if (deadline.timedOut()) {
+      logVendorTimeout("openRouterNonStreaming", err)
+      return { ok: false, error: vendorTimeoutMessage("openRouterNonStreaming") }
+    }
+    throw err
+  } finally {
+    deadline.clear()
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "")
     return { ok: false, error: `model failed (${res.status}): ${text.slice(0, 300)}` }
@@ -256,7 +281,7 @@ export async function generateDrafts(
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, targetLang: ctx.lane })
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: (await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)).laneId })
 
   // Work list: explicit cellIds (aliases ok), else every untranslated cell in scope.
   let work: CellPair[]

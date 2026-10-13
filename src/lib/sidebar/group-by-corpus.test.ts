@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { groupByCorpus } from "./group-by-corpus"
+import { groupByCorpus, groupLabelForMarker } from "./group-by-corpus"
 
 function f(name: string, corpusMarker?: string) {
   return { id: name, name, type: "txt" as const, createdAt: "", cellCount: 0, corpusMarker }
@@ -310,5 +310,33 @@ describe("groupByCorpus — hand-placed order (AQU-1569)", () => {
       { ...f("c", "Season 1"), sortIndex: Number.POSITIVE_INFINITY },
     ])
     expect(groups[0].files.map((x) => x.name)).toEqual(["a", "b", "c"])
+  })
+})
+
+// AQU-1702: a cross-group drag asks this before it writes, because a file's
+// group is not always its marker — clearing a Bible book's marker hands it
+// straight back to the testament fallback.
+describe("groupLabelForMarker", () => {
+  /** A Bible book in a scripture-capable file, so the fallback can read it. */
+  const book = (name: string, corpusMarker?: string) =>
+    ({ ...f(name, corpusMarker), type: "usfm" })
+
+  it("is the marker when there is one", () => {
+    expect(groupLabelForMarker(book("GEN", "Season 1"), "Season 2")).toBe("Season 2")
+  })
+
+  it("falls back to the testament when the marker is cleared", () => {
+    expect(groupLabelForMarker(book("GEN"), null)).toBe("OT")
+    expect(groupLabelForMarker(book("ACT"), "")).toBe("NT")
+  })
+
+  it("is Ungrouped for a file with no book to fall back to", () => {
+    expect(groupLabelForMarker(f("notes"), null)).toBe("Ungrouped")
+  })
+
+  it("agrees with the group a marker actually produces", () => {
+    const file = book("GEN", "Season 1")
+    const marker = groupLabelForMarker(file, "OT")
+    expect(groupByCorpus([{ ...file, corpusMarker: marker }])[0].label).toBe(marker)
   })
 })

@@ -11,6 +11,8 @@ export type RenderingStatus = "preferred" | "admitted" | "forbidden"
 export interface TermRendering {
   rendering: string
   status: RenderingStatus
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 /**

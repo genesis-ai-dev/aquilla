@@ -32,6 +32,7 @@ import { makeVerifiedProjectId, querySimilarSourceCells } from "../events/scoped
 import { lexicalSimilarity } from "../lib/confidence/lexical-confidence"
 import type { SyncTokenClaims } from "../auth"
 import { externalError } from "./errors"
+import { lanesVisibleToCaller, loadLaneResolutionContext } from "./external-lane"
 import { paginate, parsePageParams } from "./pagination"
 import { authenticateAndScope, checkReadRateLimit, type ExternalReadsEnv } from "./read-auth"
 
@@ -54,7 +55,7 @@ export interface SimilarCellOut {
   fileId: string
   sourceValue: string
   targetValue: string
-  targetLang: string
+  laneId: string
   /** Symmetric lexical (Jaccard) similarity in [0, 1]; 1 = identical term sets. */
   score: number
 }
@@ -148,16 +149,30 @@ async function handleExternalSimilar(
     excludeCellId: resolved.excludeCellId,
   })
 
+  const laneCtx = await loadLaneResolutionContext(
+    db,
+    projectId,
+    env.LANE_READ_WALL,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+  )
+  const laneIdByTag = new Map(
+    lanesVisibleToCaller(laneCtx).map((lane) => [lane.legacyTag ?? "", lane.id]),
+  )
   const scored: SimilarCellOut[] = candidates
-    .map((c) => ({
-      cellId: c.cellId,
-      fileId: c.fileId,
-      sourceValue: c.sourceValue,
-      targetValue: c.targetValue,
-      targetLang: c.targetLang,
-      score: lexicalSimilarity(resolved.text, c.sourceValue),
-    }))
-    .filter((c) => c.score > 0)
+    .map((c) => {
+      const laneId = laneIdByTag.get(c.targetLang)
+      if (!laneId) return null
+      return {
+        cellId: c.cellId,
+        fileId: c.fileId,
+        sourceValue: c.sourceValue,
+        targetValue: c.targetValue,
+        laneId,
+        score: lexicalSimilarity(resolved.text, c.sourceValue),
+      }
+    })
+    .filter((c): c is SimilarCellOut => c !== null && c.score > 0)
     // Tie-break on cellId so equal-scoring rows paginate deterministically —
     // this is offset pagination (see pagination.ts), which an unstable sort
     // would turn into duplicated/skipped rows across pages.

@@ -101,6 +101,10 @@ export type ContextualSpanReason =
   | "rejected_by_quorum"
   | "target_already_filled"
   | "span_failed"
+  // AQU-1690: the Bible Knowledge Pack did not load; the span ran without it.
+  | "bible_data_offline"
+  | "bible_data_not_found"
+  | "bible_data_invalid"
 
 const SPAN_PHASES: ReadonlySet<string> = new Set(["reading", "drafting", "checking", "staging"])
 const SPAN_OUTCOMES: ReadonlySet<string> = new Set(["complete", "partial", "failed"])
@@ -112,6 +116,9 @@ const SPAN_REASONS: ReadonlySet<string> = new Set([
   "rejected_by_quorum",
   "target_already_filled",
   "span_failed",
+  "bible_data_offline",
+  "bible_data_not_found",
+  "bible_data_invalid",
 ])
 
 /** Ceiling on drafts carried in one frame — mirrors MAX_DRAFTS_PER_FRAME in

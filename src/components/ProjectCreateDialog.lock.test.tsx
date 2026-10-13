@@ -74,6 +74,9 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
 })
 
 vi.mock("@/lib/sync/project-settings", () => ({
+  createProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "lane" } }),
+  renameProjectLane: vi.fn().mockResolvedValue({ kind: "ok", lane: { id: "source-lane" } }),
+
   fetchProjectSettings: vi.fn(),
   patchProjectSettings: vi.fn(),
   PROJECT_SETTINGS_VERSION_INITIAL: 0,

@@ -46,6 +46,8 @@
 import { v4 as uuid } from "uuid"
 import type { Concept, TermRendering, RenderingStatus, TermMatchOptions } from "./types"
 import { coerceMatchOptions } from "./match-options"
+import { laneRowLanguage, type LaneLanguageRow } from "@/lib/lanes/lane-language"
+import { legacyEmptyLaneId, renderingLaneId } from "./rendering-lane"
 import { acaiIdOf } from "./external-ids"
 
 const ACAI_TARGET_PREFIX = "acai:"
@@ -76,9 +78,16 @@ const TBX_TO_STATUS: Record<string, RenderingStatus> = {
 // Export
 // ---------------------------------------------------------------------------
 
-/** Export Concept[] to a minimal TBX-Basic XML string. */
-export function exportConceptsTbx(concepts: Concept[]): string {
-  const entries = concepts.map((c) => termEntry(c)).join("\n")
+/**
+ * Export Concept[] to a minimal TBX-Basic XML string.
+ *
+ * Without `lanes`, every rendering stays in one `xml:lang="target"` langSet
+ * (the historical file). With lanes, each lane is its own langSet and
+ * `xml:lang` is that lane's language. A rendering's lane id is written as
+ * `termNote type="aquillaLaneId"` so import can put it back.
+ */
+export function exportConceptsTbx(concepts: Concept[], lanes?: readonly LaneLanguageRow[]): string {
+  const entries = concepts.map((c) => termEntry(c, lanes)).join("\n")
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE martif SYSTEM "TBXBasiccoreStructV02.dtd">
 <martif type="TBX-Basic" xml:lang="en">
@@ -95,7 +104,45 @@ ${entries}
 </martif>`
 }
 
-function termEntry(c: Concept): string {
+function renderingTig(r: TermRendering, laneId?: string): string {
+  const laneNote = laneId
+    ? `\n          <termNote type="aquillaLaneId">${xmlEscape(laneId)}</termNote>`
+    : ""
+  return `        <tig>\n          <term>${xmlEscape(r.rendering)}</term>\n          <termNote type="administrativeStatus">${STATUS_TO_TBX[r.status]}</termNote>${laneNote}\n        </tig>`
+}
+
+function targetLangSet(c: Concept, lanes: readonly LaneLanguageRow[] | undefined): string {
+  if (!lanes || lanes.length === 0) {
+    if (c.renderings.length === 0) return ""
+    const tigs = c.renderings.map((r) => renderingTig(r)).join("\n")
+    return `\n      <langSet xml:lang="target">\n${tigs}\n      </langSet>`
+  }
+  const emptyId = legacyEmptyLaneId(lanes)
+  const groups = new Map<string, TermRendering[]>()
+  for (const rendering of c.renderings) {
+    const id = emptyId
+      ? renderingLaneId(rendering, emptyId)
+      : typeof rendering.laneId === "string" && rendering.laneId !== ""
+        ? rendering.laneId
+        : ""
+    const list = groups.get(id) ?? []
+    list.push(rendering)
+    groups.set(id, list)
+  }
+  const known = lanes.filter((lane) => lane.role !== "source" && groups.has(lane.id))
+  const extra = [...groups.keys()].filter((id) => !lanes.some((lane) => lane.id === id))
+  const ids = [...known.map((lane) => lane.id), ...extra]
+  return ids
+    .map((id) => {
+      const lane = lanes.find((row) => row.id === id)
+      const lang = lane ? laneRowLanguage(lane) ?? "target" : "target"
+      const tigs = (groups.get(id) ?? []).map((rendering) => renderingTig(rendering, id || undefined)).join("\n")
+      return `\n      <langSet xml:lang="${xmlAttr(lang)}">\n${tigs}\n      </langSet>`
+    })
+    .join("")
+}
+
+function termEntry(c: Concept, lanes?: readonly LaneLanguageRow[]): string {
   const note = c.notes ? `\n      <note>${xmlEscape(c.notes)}</note>` : ""
   const acai = acaiIdOf(c.externalIds?.acai)
   const xref = acai
@@ -114,17 +161,7 @@ function termEntry(c: Concept): string {
     )
     .join("\n")
   const sourceLang = `\n      <langSet xml:lang="source">\n${[headTig, variantTigs].filter(Boolean).join("\n")}\n      </langSet>`
-  const targetTigs = c.renderings
-    .map(
-      (r) =>
-        `        <tig>\n          <term>${xmlEscape(r.rendering)}</term>\n          <termNote type="administrativeStatus">${STATUS_TO_TBX[r.status]}</termNote>\n        </tig>`,
-    )
-    .join("\n")
-  const targetLang =
-    c.renderings.length > 0
-      ? `\n      <langSet xml:lang="target">\n${targetTigs}\n      </langSet>`
-      : ""
-  return `    <termEntry id="${xmlAttr(c.id)}">${note}${xref}${sourceLang}${targetLang}\n    </termEntry>`
+  return `    <termEntry id="${xmlAttr(c.id)}">${note}${xref}${sourceLang}${targetLangSet(c, lanes)}\n    </termEntry>`
 }
 
 // ---------------------------------------------------------------------------
@@ -160,14 +197,14 @@ export function importConceptsTbx(xml: string): Concept[] {
     // Collect langSets in order: first = source, rest = target.
     const langSets: Array<{
       lang: string
-      tigs: Array<{ term: string; status?: string; termType?: string; matchOptionsJson?: string }>
+      tigs: Array<{ term: string; status?: string; termType?: string; matchOptionsJson?: string; laneId?: string }>
     }> = []
     const langSetRe = /<langSet[^>]*>([\s\S]*?)<\/langSet>/g
     let lsMatch: RegExpExecArray | null
     while ((lsMatch = langSetRe.exec(block)) !== null) {
       const lsAttr = lsMatch[0].match(/xml:lang="([^"]*)"/)
       const lang = lsAttr ? lsAttr[1] : "unknown"
-      const tigs: Array<{ term: string; status?: string; termType?: string; matchOptionsJson?: string }> = []
+      const tigs: Array<{ term: string; status?: string; termType?: string; matchOptionsJson?: string; laneId?: string }> = []
       const tigRe = /<tig[^>]*>([\s\S]*?)<\/tig>/g
       let tigMatch: RegExpExecArray | null
       while ((tigMatch = tigRe.exec(lsMatch[1])) !== null) {
@@ -183,11 +220,16 @@ export function importConceptsTbx(xml: string): Concept[] {
         const optMatch = tigBlock.match(
           /<termNote[^>]*type="aquillaMatchOptions"[^>]*>([\s\S]*?)<\/termNote>/,
         )
+        const laneMatch = tigBlock.match(
+          /<termNote[^>]*type="aquillaLaneId"[^>]*>([\s\S]*?)<\/termNote>/,
+        )
+        const laneId = laneMatch ? xmlUnescape(laneMatch[1].trim()) : ""
         tigs.push({
           term,
           status,
           termType: typeMatch?.[1].trim(),
           matchOptionsJson: optMatch ? xmlUnescape(optMatch[1].trim()) : undefined,
+          ...(laneId ? { laneId } : {}),
         })
       }
       langSets.push({ lang, tigs })
@@ -218,7 +260,11 @@ export function importConceptsTbx(xml: string): Concept[] {
         if (!tig.term) continue
         const rawStatus = tig.status?.toLowerCase() ?? ""
         const status: RenderingStatus = TBX_TO_STATUS[rawStatus] ?? "preferred"
-        renderings.push({ rendering: tig.term, status })
+        renderings.push({
+          rendering: tig.term,
+          status,
+          ...(tig.laneId ? { laneId: tig.laneId } : {}),
+        })
       }
     }
 

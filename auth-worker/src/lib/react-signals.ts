@@ -29,8 +29,11 @@ export interface ExpertEventRow {
   id: string
   kind: string
   file_id: string
-  /** Lane legacy tag from the event payload ('' = default lane, AQU-538). */
+  /** Lane legacy tag from the event payload ('' = default lane, AQU-538).
+   *  Events still carry the tag; AQU-1612 puts the id on the event itself. */
   target_lang: string
+  /** The lane that tag resolves to, `null` when it names no lane (AQU-1610). */
+  lane_id: string | null
   cell_id: string | null
   canonical_ref: string | null
   server_ts: number | string
@@ -39,7 +42,11 @@ export interface ExpertEventRow {
 export interface FileSignal {
   fileId: string
   /** The lane the human was editing — the reaction drafts in that lane, never
-   *  the default one by accident (AQU-1447 made the agent lane-scoped). */
+   *  the default one by accident (AQU-1447 made the agent lane-scoped).
+   *  `lanes.id`, resolved from the event's tag (AQU-1610); `null` when the tag
+   *  names no lane, which keys the signal apart from every real lane. */
+  laneId: string | null
+  /** The same lane's legacy tag, passed on to callers that still take one. */
   targetLang: string
   count: number
   /** Most recently touched cell — where the human was working, and so where
@@ -74,12 +81,20 @@ export async function readExpertEvents(
   const kindPlaceholders = HUMAN_EXPERT_EVENT_KINDS.map(() => "?").join(",")
   const { results } = await db
     .prepare(
+      // AQU-1610: the payload tag is resolved to its lane id here, so the
+      // signal and the run-state map below key on the same lane identity.
+      // The source join drops `target_lang = ''` — a source row is
+      // `side = 'source'`, whatever lane it sits in.
       `SELECT e.id, e.kind, e.file_id, COALESCE(e.payload::jsonb ->> 'targetLang', '') AS target_lang,
+              ln.id AS lane_id,
               e.cell_id, c.canonical_ref, e.server_ts
          FROM events e
          LEFT JOIN cells c
            ON c.project_id = e.project_id AND c.file_id = e.file_id
-          AND c.cell_id = e.cell_id AND c.side = 'source' AND c.target_lang = ''
+          AND c.cell_id = e.cell_id AND c.side = 'source'
+         LEFT JOIN lanes ln
+           ON ln.project_id = e.project_id AND ln.role = 'target'
+          AND ln.legacy_tag = COALESCE(e.payload::jsonb ->> 'targetLang', '')
         WHERE e.project_id = ?
           AND e.kind IN (${kindPlaceholders})
           AND e.file_id IS NOT NULL
@@ -100,9 +115,10 @@ export async function readExpertEvents(
 export function groupByFile(rows: ExpertEventRow[]): FileSignal[] {
   const byFile = new Map<string, FileSignal>()
   for (const row of rows) {
-    const key = fileLaneKey(row.file_id, row.target_lang)
+    const key = fileLaneKey(row.file_id, row.lane_id)
     const signal = byFile.get(key) ?? {
       fileId: row.file_id,
+      laneId: row.lane_id,
       targetLang: row.target_lang,
       count: 0,
       anchorCellId: null,
@@ -157,9 +173,12 @@ export type FileRunState =
   | { state: "parked"; runId: string; parkReason: "awaiting_input" | "work_exhausted" | null }
 
 /** Key for run states and signals: dev's one-active-run guard is per
- *  (file, lane), so a reaction must never wake or wait on another lane's run. */
-export function fileLaneKey(fileId: string, targetLang: string): string {
-  return `${fileId}\u0000${targetLang}`
+ *  (file, lane), so a reaction must never wake or wait on another lane's run.
+ *  Keyed on `lanes.id` since AQU-1610 — a tag can name two lanes, and then one
+ *  lane's reaction waits on the other lane's run. A `null` lane id (a tag that
+ *  resolves to no lane) gets its own key rather than joining the real ones. */
+export function fileLaneKey(fileId: string, laneId: string | null): string {
+  return `${fileId}\u0000${laneId ?? "\u0001none"}`
 }
 
 export async function readRunStatesByFile(
@@ -168,13 +187,13 @@ export async function readRunStatesByFile(
 ): Promise<Map<string, FileRunState>> {
   const { results } = await db
     .prepare(
-      `SELECT file_id, target_lang, id, status, park_reason FROM contextual_runs
+      `SELECT file_id, lane_id, id, status, park_reason FROM contextual_runs
         WHERE project_id = ?
           AND status IN ('running','pausing','paused','parked','waiting')
         ORDER BY updated_at DESC`,
     )
     .bind(projectId)
-    .all<{ file_id: string; target_lang: string | null; id: string; status: string; park_reason: string | null }>()
+    .all<{ file_id: string; lane_id: string | null; id: string; status: string; park_reason: string | null }>()
   const rank = (state: FileRunState["state"]): number =>
     state === "busy" ? 2 : state === "paused" ? 1 : 0
   const map = new Map<string, FileRunState>()
@@ -192,7 +211,7 @@ export async function readRunStatesByFile(
                   : null,
             }
           : { state: "busy" }
-    const key = fileLaneKey(row.file_id, row.target_lang ?? "")
+    const key = fileLaneKey(row.file_id, row.lane_id)
     const current = map.get(key)
     // Rows arrive newest-first, so on equal rank the FRESHEST run wins (a
     // reaction wakes the most recently parked run, not an ancient one).
@@ -225,7 +244,7 @@ export async function readEditSamples(
          LEFT JOIN events p ON p.id = e.parent_id AND p.project_id = e.project_id
          LEFT JOIN cells src
            ON src.project_id = e.project_id AND src.file_id = e.file_id
-          AND src.cell_id = e.cell_id AND src.side = 'source' AND src.target_lang = ''
+          AND src.cell_id = e.cell_id AND src.side = 'source'
         WHERE e.project_id = ? AND e.id IN (${placeholders})`,
     )
     .bind(projectId, ...eventIds)

@@ -86,6 +86,16 @@ export function FileChapterToolbar({
       </span>
     ) : undefined
     return [
+      // AQU-358: the chapter row used to carry a labelled split button with its
+      // own chevron menu BESIDE this ⋯, and a reader could not tell which of
+      // the two held what. There is one menu now, so each run of items says
+      // what it is for — starting with the two editor-wide passes this toolbar
+      // owns, which belong to the open view rather than to the file.
+      {
+        id: "editor-tools-section",
+        type: "label" as const,
+        label: t("nav.fileMenu.section.editorTools"),
+      },
       ...(onTranslateAsReadChange ? [{
         id: "translate-as-read",
         type: "checkbox" as const,

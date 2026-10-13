@@ -111,9 +111,7 @@ async function seedSourceCells(t: TestDb, fileId: string, count: number): Promis
     [UPSTREAM, fileId, base, count],
   )
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, 'cell-' || g, 'source', '', 'Verse ' || g, 'MAT 1:' || g, 'evt-src-' || $2::text || '-' || g, 'lead', 1
-       FROM generate_series(1, $3::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_editor, last_edit_at) SELECT $1, $2, 'cell-' || g, 'source', 'Verse ' || g, 'MAT 1:' || g, 'evt-src-' || $2::text || '-' || g, 'lead', 1 FROM generate_series(1, $3::int) g`,
     [UPSTREAM, fileId, count],
   )
 }
@@ -132,9 +130,7 @@ async function seedTargetCommits(t: TestDb, fileId: string, count: number): Prom
     [UPSTREAM, fileId, base, count],
   )
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at)
-     SELECT $1, $2, 'cell-' || g, 'target', '', 'Verset ' || g, 'evt-tgt-' || $2::text || '-' || g, 'translator', 1
-       FROM generate_series(1, $3::int) g`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_editor, last_edit_at) SELECT $1, $2, 'cell-' || g, 'target', 'Verset ' || g, 'evt-tgt-' || $2::text || '-' || g, 'translator', 1 FROM generate_series(1, $3::int) g`,
     [UPSTREAM, fileId, count],
   )
 }

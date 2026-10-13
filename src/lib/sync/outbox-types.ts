@@ -140,8 +140,10 @@ export interface AiDraftProvenance {
   provider: string
   promptVersion: string
   exampleIds: string[]
+  /** Source/target of examples placed in the prompt (#946 reload). */
+  exampleTexts?: Array<{ cellId: string; source: string; target: string }>
   generatedAt: number
-  mode: "single" | "batch" | "paragraph" | "agent" | "read"
+  mode: "single" | "batch" | "paragraph" | "agent" | "read" | "align-styles"
   /** AQU-1656: the ai_interventions row holding this draft's prompt and raw
    *  output. A row is current while the cell's draft still carries its id. */
   interventionId?: string
@@ -317,9 +319,15 @@ export interface OutboxEventPayloads {
     laneId?: string
   }
 
-  // QA rule waivers. One row per (cell, rule); DELETE-on-unwaive.
+  // QA rule waivers. One row per (cell, rule, matchHash); DELETE-on-unwaive.
   "cell.waive": {
     ruleId: string
+    /**
+     * AQU-1740: finding hash — dismisses just the match whose text hashes to
+     * this value. Omitted waives the rule across the whole cell (the only
+     * shape that existed before AQU-1740; still emitted and still honoured).
+     */
+    matchHash?: string
     reason?: string
     /** AQU-1462: lane the member was working in. Omitted for the default lane. */
     targetLang?: string
@@ -328,6 +336,9 @@ export interface OutboxEventPayloads {
   }
   "cell.unwaive": {
     ruleId: string
+    /** AQU-1740: see `cell.waive`. Must match the waiver being lifted —
+     *  omitting it lifts the rule-wide waiver, not the per-finding ones. */
+    matchHash?: string
     /** AQU-1462: see `cell.waive`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -359,6 +370,8 @@ export interface OutboxEventPayloads {
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
     laneId?: string
+    /** AQU-1565 follow-up: "source" marks the shared programme audio; absent is a dub. */
+    role?: "dub" | "source"
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line
@@ -730,6 +743,10 @@ export interface OutboxEventPayloads {
     /** The target row's event_id as observed when the reviewer opened the
      *  review panel — the server no-ops if the head has since moved. */
     expectedTargetEventId: string
+    /** AQU-1902: the lane of the repinned target row. Absent/'' = default lane. */
+    targetLang?: string
+    /** AQU-1902: the lane row's id. Must match `targetLang`. */
+    laneId?: string
   }
 }
 

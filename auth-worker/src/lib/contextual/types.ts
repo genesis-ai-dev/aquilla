@@ -6,6 +6,8 @@
 // shapes — no class instances cross a node boundary, so the Workflows runtime
 // (or a plain test harness) can serialize any edge value verbatim.
 
+import type { BibleCheckFinding } from "../../../../db/shared/bible-checks/types"
+
 // ── Model interface ──────────────────────────────────────────────────────────
 
 export type Tier = "fast" | "mid" | "deep"
@@ -153,6 +155,9 @@ export interface LintFlag {
   cellId: string
   ruleId: string
   message: string
+  /** AQU-1690: set on a `bkp:` flag — the Bible data finding behind it. Such
+   *  flags are counted apart from lint (router.ts). */
+  bible?: BibleCheckFinding
 }
 
 export type VerifierKey = "force" | "ambiguity" | "naturalness"
@@ -228,4 +233,18 @@ export interface SpanReport {
   notes: string[]
   unitsUsed: number
   callsUsed: number
+  /** AQU-1690 metrics: how scene construal ended (absent when the span had no work). */
+  closure?: { rounds: number; exit: ClosureExit }
+  /** AQU-1690 metrics: what Bible data did in this span, when it had any. */
+  bible?: SpanBibleMetrics
+}
+
+export interface SpanBibleMetrics {
+  /** bkp: findings per code, over every draft of the span (first drafts and redrafts). */
+  findings: Record<string, number>
+  jevCalls: number
+  /** Every judgment, shadow ones included, with its certainty. */
+  judgments: { cellId: string; check: string; outcome: string; mode: string; decidedBy: string; certainty?: number }[]
+  /** Cells that took the cheap expectation repair. */
+  repaired: number
 }

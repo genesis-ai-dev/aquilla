@@ -2,7 +2,7 @@
 // GET https://api.inworld.ai/voices/v1/supportedLanguages
 // Keep parseInworldSupportedLanguages in sync with src/lib/audio/inworld-supported-languages.ts.
 
-import { inworldApiBase, inworldAuthHeader, type InworldTtsConfig } from "./inworld-tts"
+import { fetchInworld, inworldApiBase, inworldAuthHeader, type InworldTtsConfig } from "./inworld-tts"
 
 export interface InworldSupportedLanguage {
   code: string
@@ -80,7 +80,7 @@ export async function listInworldSupportedLanguages(
 ): Promise<InworldSupportedLanguage[]> {
   let res: Response
   try {
-    res = await fetch(`${inworldApiBase(config)}/voices/v1/supportedLanguages`, {
+    res = await fetchInworld(`${inworldApiBase(config)}/voices/v1/supportedLanguages`, {
       method: "GET",
       headers: { Authorization: inworldAuthHeader(config.apiKey) },
     })

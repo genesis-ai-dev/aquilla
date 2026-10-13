@@ -360,7 +360,7 @@ usage.get("/org/:orgId/credits", async (c) => {
 
   // Auth: platform-admin OR (org-maintainer AND showToOrg). Resolve config only
   // after the membership/role gate, so a non-member never triggers a config read.
-  const isAdmin = isPlatformAdmin(c)
+  const isAdmin = await isPlatformAdmin(c)
   let cfg
   if (isAdmin) {
     cfg = await resolveCreditConfig(c.env, c.env.AQUILLA_PG, orgId)

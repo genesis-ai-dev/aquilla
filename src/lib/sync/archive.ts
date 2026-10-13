@@ -156,6 +156,10 @@ export interface LinkProjectSourceResult {
   consumes: "source" | "target"
   gate: "head" | "validated"
   previousSourceProjectId: string | null
+  /** AQU-1605: the upstream lane this link consumes, as stored. Null = the
+   *  upstream's former default lane, which is what every link made before that
+   *  slice consumes. Absent from an older server's response. */
+  laneId?: string | null
   /** AQU-476/QA-BUG-1: true if the server-side seed (clone snapshot or the
    *  first live mirror sync) actually ran. False means the caller should
    *  fall back to `triggerLinkSync` before assuming content is present —
@@ -190,6 +194,14 @@ export async function linkProjectSource(
      */
     fileIds?: string[]
     /**
+     * AQU-1605: WHICH of the upstream's lanes this link consumes, by `lanes.id`.
+     * Omit for the upstream's former default lane — what every link consumed
+     * before that slice. Required in practice whenever the upstream has more
+     * than one lane the user may see and `consumes` is `'target'`: the server
+     * accepts the omission, but it then picks the lane for them.
+     */
+    laneId?: string
+    /**
      * AQU-1679: files this project ALREADY has that should follow an upstream
      * file, in place of that upstream file arriving as a second copy. The
      * project's file keeps its translations and takes the upstream's source.
@@ -199,6 +211,18 @@ export async function linkProjectSource(
      * `fetchLinkFileMatches`.
      */
     replaceFiles?: Array<{ upstreamFileId: string; fileId: string }>
+    /**
+     * AQU-1075: which settings this project copies from the upstream. Omitted
+     * fields use the server defaults. AI instructions default to off.
+     */
+    inherit?: {
+      translationBrief?: boolean
+      knowledgeDocs?: boolean
+      workflowPolicy?: boolean
+      livingMemory?: boolean
+      smartQuotes?: boolean
+      systemPrompt?: boolean
+    }
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<LinkProjectSourceResult> {

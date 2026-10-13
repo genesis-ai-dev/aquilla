@@ -3,6 +3,30 @@ import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 
 export const IDML_STYLE_BOLD_CLASS = "idml-style-bold"
 export const IDML_STYLE_ITALIC_CLASS = "idml-style-italic"
+/** Present on a slot whose translator-visible text is still empty. Display only. */
+export const IDML_STYLE_SEGMENT_EMPTY_ATTR = "data-style-segment-empty"
+/**
+ * Display only. `label` is the single "Regular" hit target for an empty run of
+ * consecutive plain slots. `join` is a later plain slot in that run: it stays
+ * in the same typing space and draws neither a word nor a gap.
+ */
+export const IDML_PLAIN_GROUP_ATTR = "data-style-plain-group"
+
+/** A zero-width composition sentinel is not text the translator wrote. */
+export function idmlSlotHasVisibleContent(text: string, hasBreak: boolean): boolean {
+  return hasBreak || text.replace(/\u200b/g, "").length > 0
+}
+
+export function syncIdmlStyleSegmentEmpty(
+  element: HTMLElement,
+  text: string,
+  hasBreak: boolean,
+): void {
+  element.toggleAttribute(
+    IDML_STYLE_SEGMENT_EMPTY_ATTR,
+    !idmlSlotHasVisibleContent(text, hasBreak),
+  )
+}
 
 export type { IdmlStyleCatalog }
 
@@ -159,7 +183,9 @@ export function prepareIdmlDisplayHtml(
       catalog,
       paragraphStyleId,
     )
+    syncIdmlStyleSegmentEmpty(slot, slot.textContent ?? "", Boolean(slot.querySelector("br")))
   }
+  syncIdmlPlainGroups(template.content)
   const container = document.createElement("div")
   container.append(template.content.cloneNode(true))
   return container.innerHTML
@@ -167,4 +193,48 @@ export function prepareIdmlDisplayHtml(
 
 export function looksLikeIdmlHtml(html: string): boolean {
   return html.includes("data-idml-protected") || html.includes("data-idml-version")
+}
+
+/**
+ * Consecutive plain slots are one part. An empty run shows a single Regular
+ * on its first slot; every following plain slot joins that space. Bold,
+ * italic, and tokens break the run, matching Align styles.
+ */
+export function syncIdmlPlainGroups(root: ParentNode): void {
+  const paragraphs = [...root.querySelectorAll("p")]
+  const hosts = paragraphs.length > 0 ? paragraphs : [root]
+  for (const host of hosts) markPlainGroup(host)
+}
+
+function markPlainGroup(parent: ParentNode): void {
+  let group: HTMLElement[] = []
+  const close = () => {
+    const anyText = group.some((slot) => !slot.hasAttribute(IDML_STYLE_SEGMENT_EMPTY_ATTR))
+    group.forEach((slot, index) => {
+      if (!slot.hasAttribute(IDML_STYLE_SEGMENT_EMPTY_ATTR)) {
+        slot.removeAttribute(IDML_PLAIN_GROUP_ATTR)
+        return
+      }
+      slot.setAttribute(
+        IDML_PLAIN_GROUP_ATTR,
+        !anyText && index === 0 ? "label" : "join",
+      )
+    })
+    group = []
+  }
+  for (const child of parent.children) {
+    if (!(child instanceof HTMLElement) || !isPlainSlot(child)) {
+      if (child instanceof HTMLElement) child.removeAttribute(IDML_PLAIN_GROUP_ATTR)
+      close()
+      continue
+    }
+    group.push(child)
+  }
+  close()
+}
+
+function isPlainSlot(element: HTMLElement): boolean {
+  return element.getAttribute("data-idml-protected") === "slot"
+    && !element.classList.contains(IDML_STYLE_BOLD_CLASS)
+    && !element.classList.contains(IDML_STYLE_ITALIC_CLASS)
 }

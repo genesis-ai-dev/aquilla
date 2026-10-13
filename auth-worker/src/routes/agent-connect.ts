@@ -1,12 +1,13 @@
 // AQU-1205: browser consent for generic agents (RFC 8628). No token ever
 // enters the consent browser. Single-statement redemption prevents replay.
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type AuthUser } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
+import { orgLevelWithoutUnelevatedAdmin, roleWithoutUnelevatedAdmin } from "../services/elevation-gate"
 import { mintApiToken, sha256Hex } from "../../../db/shared/api-credentials"
 import { countRecentEvents, recordAuthEvent, ipIdentifier, userIdentifier } from "../utils/rate-limit"
 
@@ -47,6 +48,25 @@ export async function scopeLevel(
   if (!orgId) return null
   const numericOrgId = Number(orgId)
   return Number.isInteger(numericOrgId) ? await getEffectiveOrgRole(env, numericOrgId, user) : null
+}
+/** The approver's authority at consent time, with un-elevated platform-admin
+ * power removed (OPS-44, same rule as credential minting). The resulting
+ * credential never expires, so an admin approving on bare admin authority would
+ * hold a permanent cross-tenant credential that no later elevation check can
+ * reach. Genuine members are unaffected: for them both answers are identical. */
+async function approverScopeLevel(
+  c: Context<AuthHonoEnv>, user: AuthUser,
+  projectId: string | null | undefined, orgId: string | null | undefined,
+): Promise<number | null> {
+  if (projectId) {
+    const resolved = await resolveProjectRole(c.env, user, projectId)
+    if (!resolved) return null
+    return (await roleWithoutUnelevatedAdmin(c, user, projectId, resolved))?.level ?? null
+  }
+  if (!orgId) return null
+  const numericOrgId = Number(orgId)
+  if (!Number.isInteger(numericOrgId)) return null
+  return orgLevelWithoutUnelevatedAdmin(c, numericOrgId, user, await getEffectiveOrgRole(c.env, numericOrgId, user))
 }
 async function body(req: Request): Promise<unknown> {
   if (req.headers.get("content-type")?.includes("application/x-www-form-urlencoded")) {
@@ -157,7 +177,7 @@ routes.post("/decision", authMiddleware, async (c) => {
       return c.json({ error: "scope_denied" }, 403)
     }
     const floor = mode === "act" ? ROLE.MAINTAINER : ROLE.CONTRIBUTOR
-    const level = await scopeLevel(c.env, c.get("user"), input.project_id, input.org_id)
+    const level = await approverScopeLevel(c, c.get("user"), input.project_id, input.org_id)
     if (level == null || level < floor) return c.json({ error: "scope_denied" }, 403)
   }
   // Approval restarts the ten-minute window so an agent whose polling gave up

@@ -301,7 +301,10 @@
 > wiring the trigger spends the runner minutes AQU-564 set out to save and goes
 > red immediately on the six known-failing files, so the ordering, and whether
 > those contexts are meant to be required at all, is a maintainer's
-> control-plane call.
+> control-plane call. **Update (2026-10-13, AQU-1551, #1275):** `ci.yml` now
+> runs lint, `i18n:check`, the secret scan, unit tests, the worker suites and
+> `pnpm neon:check` on every pull request into `dev`; which of those contexts
+> branch protection requires is still that call.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -464,7 +467,7 @@ actually enforced.
 
 **Update (2026-09-09, AQU-1219): validation runs before push.** Cloudflare
 Workers Builds now compiles previews only. `.husky/pre-push` runs
-`pnpm scan:secrets` before the existing commit-based affected E2E gate. The dispatch-only `ci.yml` retains manual equivalents.
+`pnpm scan:secrets` before the existing commit-based affected E2E gate. `ci.yml` runs the same secret scan, plus lint and unit tests, on every pull request into `dev`.
 A green preview check confirms compilation, not security or functional testing.
 Local hooks can be bypassed; API-created commits do not execute them. QA reviews
 published previews under this explicitly chosen policy.
@@ -582,8 +585,8 @@ resolved by AQU-564 — see its section above.)
 | Fail closed on the sync auth bypass in deployed environments | `sync-worker/src/environment-guard.ts`, `index.ts`, `project-do.ts` |
 | Baseline HTTP security headers on the web surface | `worker/security-headers.ts` |
 | Invite tokens fingerprinted, never logged whole | `src/lib/sync/invites.ts` |
-| Credential scanning before push | `scripts/secret-scan.ts`; first command in `.husky/pre-push`; manual fallback in `.github/workflows/ci.yml` |
-| SPA Worker suite available for targeted/manual validation | `pnpm run test:worker`; manual ci.yml `unit` job |
+| Credential scanning before push | `scripts/secret-scan.ts`; first command in `.husky/pre-push`; the pull-request `ci.yml` lint job |
+| SPA Worker suite available for targeted/manual validation | `pnpm run test:worker`; the pull-request `ci.yml` `unit` job |
 | auth-worker `hono` floor raised above the SEC-7 advisory | `auth-worker/package.json` |
 
 Every one has a test. A control without a test is V4 waiting to happen again.

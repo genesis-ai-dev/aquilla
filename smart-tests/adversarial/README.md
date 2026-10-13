@@ -68,6 +68,10 @@ reach them. The local target falls back to the e2e seed users.
 - **nightly** attacks deployed dev at 09:00 UTC, or on dispatch, and files
   Linear tickets.
 
+A release preview is not a target for either job: that preview writes to the
+shared dev database, and a preview sync worker cannot call a preview auth
+worker.
+
 Secrets: `ADVERSARIAL_USER_1..3`, `TYPESAFE_API_KEY`, and
 `TEXT_MODEL_API_KEY` as repository secrets. `LINEAR_API_KEY` goes only in
 the `adversarial-nightly` environment, restricted to the `dev` branch, so

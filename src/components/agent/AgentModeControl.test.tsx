@@ -37,8 +37,16 @@ const { AgentModeControl } = await import("./AgentModeControl")
 
 const OFF: AgentMode = { initiative: false, react: false, scope: "full" }
 
+/** Project settings that have nothing to do with the agent. */
+const OTHER_SETTINGS = { validationCount: 2, allowTrackEditing: true }
+
 function state(mode: AgentMode, version = 3): AgentModeState {
-  return { mode, version }
+  return { mode, version, settings: { ...OTHER_SETTINGS, agentMode: mode } }
+}
+
+/** The base a write is built on: the version and whole blob the server returned. */
+function base(mode: AgentMode, version = 3) {
+  return { version, settings: { ...OTHER_SETTINGS, agentMode: mode } }
 }
 
 function renderControl(roleLevel: number = ROLE.PROJECT_LEAD) {
@@ -88,7 +96,7 @@ describe("AgentModeControl", () => {
       "test-jwt",
       "p1",
       { initiative: false, react: true, scope: "full" },
-      3,
+      base(OFF),
     )
     resolvePatch({ kind: "ok", state: state({ ...OFF, react: true }, 4) })
   })
@@ -110,11 +118,29 @@ describe("AgentModeControl", () => {
     expect(screen.getByTestId("agent-mode-trigger")).toHaveTextContent("Manual")
   })
 
-  it("keeps the second version the server hands back, so the next save is not a conflict", async () => {
-    patchAgentMode.mockResolvedValue({
-      kind: "ok",
-      state: state({ ...OFF, react: true }, 9),
-    })
+  it("builds each write on the whole settings row it read, not on the mode alone", async () => {
+    // The settings PATCH replaces the entire blob, so the dial has to hand the
+    // write every other setting it was given — dropping them here is how a
+    // mode change used to erase the project's validation count and the rest.
+    patchAgentMode.mockResolvedValue({ kind: "ok", state: state({ ...OFF, react: true }, 4) })
+    await openPopover()
+
+    fireEvent.click(screen.getByRole("switch", { name: "React loop" }))
+
+    await waitFor(() => expect(patchAgentMode).toHaveBeenCalledTimes(1))
+    const [, , , sent] = patchAgentMode.mock.calls[0]
+    expect(sent).toEqual({ version: 3, settings: { ...OTHER_SETTINGS, agentMode: OFF } })
+  })
+
+  it("keeps the row the server hands back, so the next save is not a conflict", async () => {
+    // A collaborator's change can ride back on our own write's response; the
+    // next save must be built on that row, version and settings both.
+    const returned: AgentModeState = {
+      mode: { ...OFF, react: true },
+      version: 9,
+      settings: { ...OTHER_SETTINGS, validationCount: 3, agentMode: { ...OFF, react: true } },
+    }
+    patchAgentMode.mockResolvedValue({ kind: "ok", state: returned })
     await openPopover()
 
     fireEvent.click(screen.getByRole("switch", { name: "React loop" }))
@@ -127,10 +153,11 @@ describe("AgentModeControl", () => {
         "test-jwt",
         "p1",
         { initiative: true, react: true, scope: "full" },
-        9,
+        { version: 9, settings: returned.settings },
       ),
     )
   })
+
 
   it("sets both switches AND the scope from one preset chip", async () => {
     patchAgentMode.mockResolvedValue({
@@ -146,7 +173,7 @@ describe("AgentModeControl", () => {
         "test-jwt",
         "p1",
         { initiative: false, react: true, scope: "qa" },
-        3,
+        base(OFF),
       ),
     )
     await waitFor(() => {
@@ -179,7 +206,7 @@ describe("AgentModeControl", () => {
         "test-jwt",
         "p1",
         { initiative: false, react: false, scope: "draft" },
-        3,
+        base(OFF),
       ),
     )
   })

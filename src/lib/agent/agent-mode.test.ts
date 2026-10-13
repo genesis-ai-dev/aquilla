@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { ProjectSettingsResponse } from "@/lib/sync/project-settings"
+import type { ProjectSettingsResponse, ProjectWideSettings } from "@/lib/sync/project-settings"
 
 vi.mock("@/lib/sync/project-settings", async () => {
   const actual = await vi.importActual<typeof import("@/lib/sync/project-settings")>(
@@ -48,13 +48,22 @@ const {
 function settingsResponse(
   agentMode: unknown,
   version = 4,
+  others: ProjectWideSettings = {},
 ): ProjectSettingsResponse {
   return {
     version,
     updatedAt: "2026-08-28T12:00:00Z",
     updatedBy: null,
-    settings: { agentMode } as ProjectSettingsResponse["settings"],
+    settings: { ...others, agentMode } as ProjectWideSettings,
   }
+}
+
+/** Settings that have nothing to do with the agent, and must survive a mode write. */
+const UNRELATED: ProjectWideSettings = {
+  validationCount: 2,
+  countStructuralCells: false,
+  allowTrackEditing: true,
+  systemPrompt: "Keep the register formal.",
 }
 
 beforeEach(() => {
@@ -146,14 +155,16 @@ describe("normalizeAgentMode", () => {
 })
 
 describe("fetchAgentMode", () => {
-  it("reads the mode and the settings version the patch will need", async () => {
+  it("reads the mode, plus the version and whole settings blob the patch will need", async () => {
+    const stored = { initiative: false, react: true, scope: "qa" as const }
     fetchProjectSettingsResult.mockResolvedValue({
       ok: true,
-      value: settingsResponse({ initiative: false, react: true, scope: "qa" }, 7),
+      value: settingsResponse(stored, 7, UNRELATED),
     })
     await expect(fetchAgentMode("jwt", "p1")).resolves.toEqual({
-      mode: { initiative: false, react: true, scope: "qa" },
+      mode: stored,
       version: 7,
+      settings: { ...UNRELATED, agentMode: stored },
     })
   })
 
@@ -162,6 +173,7 @@ describe("fetchAgentMode", () => {
     await expect(fetchAgentMode("jwt", "p1")).resolves.toEqual({
       mode: DEFAULT_AGENT_MODE,
       version: 0,
+      settings: {},
     })
   })
 
@@ -175,28 +187,76 @@ describe("fetchAgentMode", () => {
 
 describe("patchAgentMode", () => {
   const next = { initiative: true, react: true, scope: "full" as const }
+  /** What the dial read: the agent off, alongside the project's other settings. */
+  const base = { version: 7, settings: { ...UNRELATED, agentMode: DEFAULT_AGENT_MODE } }
 
-  it("sends only the agentMode key, at the version it read", async () => {
-    patchProjectSettings.mockResolvedValue({ kind: "ok", value: settingsResponse(next, 8) })
-    const outcome = await patchAgentMode("jwt", "p1", next, 7)
-    expect(patchProjectSettings).toHaveBeenCalledWith("jwt", "p1", { agentMode: next }, 7)
-    expect(outcome).toEqual({ kind: "ok", state: { mode: next, version: 8 } })
+  it("keeps every other project setting — the PATCH replaces the whole blob", async () => {
+    // The data-loss bug this pins: the route stores the body as the ENTIRE
+    // settings row, so a body of `{ agentMode }` alone erased the validation
+    // count, structural-cell counting, track editing and the rest.
+    patchProjectSettings.mockResolvedValue({
+      kind: "ok",
+      value: settingsResponse(next, 8, UNRELATED),
+    })
+    const outcome = await patchAgentMode("jwt", "p1", next, base)
+    expect(patchProjectSettings).toHaveBeenCalledWith(
+      "jwt",
+      "p1",
+      { ...UNRELATED, agentMode: next },
+      7,
+    )
+    expect(outcome).toEqual({
+      kind: "ok",
+      state: { mode: next, version: 8, settings: { ...UNRELATED, agentMode: next } },
+    })
   })
 
-  it("retries once against the version a concurrent write left behind", async () => {
+  it("on a conflict, retries on the row the server handed back — its version AND its settings", async () => {
     // The settings row is shared; a collaborator saving an unrelated key
-    // between our read and our write is ordinary, not an error to show.
+    // between our read and our write is ordinary, not an error to show. The
+    // retry must carry THEIR save: resending our older copy at the new
+    // version would quietly undo it.
+    const collaborator: ProjectWideSettings = {
+      ...UNRELATED,
+      validationCount: 3,
+      rules: [],
+    }
     patchProjectSettings
-      .mockResolvedValueOnce({ kind: "conflict", latest: settingsResponse(DEFAULT_AGENT_MODE, 9) })
-      .mockResolvedValueOnce({ kind: "ok", value: settingsResponse(next, 10) })
-    const outcome = await patchAgentMode("jwt", "p1", next, 7)
-    expect(patchProjectSettings).toHaveBeenNthCalledWith(2, "jwt", "p1", { agentMode: next }, 9)
-    expect(outcome).toEqual({ kind: "ok", state: { mode: next, version: 10 } })
+      .mockResolvedValueOnce({
+        kind: "conflict",
+        latest: settingsResponse(DEFAULT_AGENT_MODE, 9, collaborator),
+      })
+      .mockResolvedValueOnce({ kind: "ok", value: settingsResponse(next, 10, collaborator) })
+    const outcome = await patchAgentMode("jwt", "p1", next, base)
+    expect(patchProjectSettings).toHaveBeenNthCalledWith(
+      1,
+      "jwt",
+      "p1",
+      { ...UNRELATED, agentMode: next },
+      7,
+    )
+    expect(patchProjectSettings).toHaveBeenNthCalledWith(
+      2,
+      "jwt",
+      "p1",
+      { ...collaborator, agentMode: next },
+      9,
+    )
+    expect(outcome).toEqual({
+      kind: "ok",
+      state: { mode: next, version: 10, settings: { ...collaborator, agentMode: next } },
+    })
+  })
+
+  it("writes onto an empty base when the project has no settings row yet", async () => {
+    patchProjectSettings.mockResolvedValue({ kind: "ok", value: settingsResponse(next, 1) })
+    await patchAgentMode("jwt", "p1", next, { version: 0, settings: {} })
+    expect(patchProjectSettings).toHaveBeenCalledWith("jwt", "p1", { agentMode: next }, 0)
   })
 
   it("reports a role refusal distinctly, so the UI can explain instead of retrying", async () => {
     patchProjectSettings.mockResolvedValue({ kind: "forbidden", required: 500, role: 400 })
-    await expect(patchAgentMode("jwt", "p1", next, 7)).resolves.toEqual({ kind: "forbidden" })
+    await expect(patchAgentMode("jwt", "p1", next, base)).resolves.toEqual({ kind: "forbidden" })
     expect(patchProjectSettings).toHaveBeenCalledTimes(1)
   })
 
@@ -205,7 +265,7 @@ describe("patchAgentMode", () => {
       kind: "conflict",
       latest: settingsResponse(DEFAULT_AGENT_MODE, 9),
     })
-    const outcome = await patchAgentMode("jwt", "p1", next, 7)
+    const outcome = await patchAgentMode("jwt", "p1", next, base)
     expect(patchProjectSettings).toHaveBeenCalledTimes(2)
     expect(outcome.kind).toBe("error")
   })

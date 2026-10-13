@@ -19,6 +19,11 @@
 // READ (any member). Every aligned cell of the file, grouped. A cell whose
 // source text changed since it was aligned comes back `stale: true` with no
 // links; a cell that no longer exists does not come back at all.
+//
+// A cell's source row is the one on `side = 'source'`: a project has exactly
+// one source lane (`uq_lanes_project_source`), and the projection's
+// `target_lang` column is gone (AQU-1611c, migration 0155), so nothing else
+// keys it (AQU-1904).
 
 import { verifyTokenForDoc } from "../auth"
 import { ROLE } from "./role-policy"
@@ -145,7 +150,7 @@ async function currentHashes(db: AquillaDb, projectId: string, fileId: string, c
   const res = await db
     .prepare(
       `SELECT cell_id, content_hash FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'source' AND COALESCE(target_lang, '') = ''
+        WHERE project_id = ? AND file_id = ? AND side = 'source'
           AND cell_id IN (${cellIds.map(() => "?").join(", ")})`,
     )
     .bind(projectId, fileId, ...cellIds)
@@ -169,7 +174,7 @@ async function writeAlignment(db: AquillaDb, projectId: string, fileId: string, 
             WHERE project_id = ? AND file_id = ?
               AND cell_id NOT IN (
                 SELECT cell_id FROM cells
-                 WHERE project_id = ? AND file_id = ? AND side = 'source' AND COALESCE(target_lang, '') = ''
+                 WHERE project_id = ? AND file_id = ? AND side = 'source'
               )`,
         )
         .bind(projectId, fileId, projectId, fileId),
@@ -242,7 +247,7 @@ async function readAlignment(db: AquillaDb, projectId: string, fileId: string): 
          FROM source_word_alignment a
          JOIN cells c
            ON c.project_id = a.project_id AND c.file_id = a.file_id AND c.cell_id = a.cell_id
-          AND c.side = 'source' AND COALESCE(c.target_lang, '') = ''
+          AND c.side = 'source'
         WHERE a.project_id = ? AND a.file_id = ?
         ORDER BY a.cell_id, a.tgt_token_idx, a.src_word_id`,
     )

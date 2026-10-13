@@ -2490,16 +2490,9 @@ export function canViewRoster(callerRoleLevel: number | null, rosterMinRole: num
 
 /**
  * True when `callerRoleLevel` meets or exceeds the org's configured
- * member-progress floor.
- *
- * SWARM-TODO(AQU-498): still unconsumed by any auth-worker route — the
- * per-member activity view AQU-498 shipped reads straight from sync-worker
- * (GET /api/v1/projects/:projectId/members/:author/activity, gated by its
- * own resolveMemberProgressFloor in member-progress-floor.ts, since
- * sync-worker doesn't depend on auth-worker). If a future auth-worker route
- * needs the same floor (e.g. a member-progress summary folded into
- * /projects/:projectId/members), it should call this helper rather than
- * re-deriving the comparison.
+ * member-progress floor. The sync-worker's per-member activity read has its
+ * own copy of the floor (member-progress-floor.ts), since sync-worker does
+ * not depend on auth-worker.
  */
 export function canViewMemberProgress(callerRoleLevel: number | null, progressMinRole: number): boolean {
   if (callerRoleLevel == null) return false
@@ -2688,6 +2681,47 @@ export async function getProjectRosterViewMinRole(env: Env, orgId: number): Prom
   ])
   if (rosterFloor > DEFAULT_ROSTER_VIEW_MIN_ROLE) return rosterFloor
   return Math.min(rosterFloor, assignmentFloor)
+}
+
+/**
+ * AQU-1771: the roster and member-progress floors that apply to ONE project.
+ * A project with no org has no org policy to read, so it gets the defaults —
+ * the same reading /assignments/unit has always taken for one.
+ */
+export interface ProjectVisibilityFloors {
+  rosterViewMinRole: number
+  memberProgressViewMinRole: number
+}
+
+export async function getProjectVisibilityFloors(
+  env: Env,
+  orgId: number | null,
+): Promise<ProjectVisibilityFloors> {
+  if (orgId == null) {
+    return {
+      rosterViewMinRole: DEFAULT_ROSTER_VIEW_MIN_ROLE,
+      memberProgressViewMinRole: DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+    }
+  }
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return {
+    rosterViewMinRole: extractRoleFloor(settings, "rosterViewMinRole", DEFAULT_ROSTER_VIEW_MIN_ROLE),
+    memberProgressViewMinRole: extractRoleFloor(
+      settings, "memberProgressViewMinRole", DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
+    ),
+  }
+}
+
+/**
+ * AQU-1771: per-member progress is shown with the member's NAME, so reading it
+ * needs both floors — the stricter one wins. True when `roleLevel` meets both.
+ */
+export function canViewNamedProgress(
+  roleLevel: number | null,
+  floors: ProjectVisibilityFloors,
+): boolean {
+  return canViewMemberProgress(roleLevel, floors.memberProgressViewMinRole)
+    && canViewRoster(roleLevel, floors.rosterViewMinRole)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

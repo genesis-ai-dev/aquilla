@@ -18,12 +18,14 @@ import {
   deleteGroup,
   deleteOrganization,
   detachGroupProject,
+  canViewNamedProgress,
   getEffectiveOrgRole,
   getMemberEffectiveAccess,
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgDeletedFiles,
   getOrgMemberRole,
+  getProjectVisibilityFloors,
   getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
@@ -52,6 +54,7 @@ import {
 import {
   ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
+  resolveProjectRoles,
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { countTargetLanesByOrg } from "../lib/billing/words"
@@ -496,18 +499,36 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
  * the org's active projects, with project + progress attribution (AQU-494:
  * one row per assignment, not aggregated by assignee, so the manager can see
  * which project each assignment belongs to and remove any one of them).
- * Maintainer+ (managers).
+ *
+ * AQU-1771: gated on the org's member-progress AND roster floors (each row is
+ * a named person's progress), not on a hard Maintainer floor — the org
+ * overview shows the Team workload card from those floors, so an org that
+ * opened them to contributors got a card that never loaded. Each row is then
+ * kept only when the caller could read that project's own Team card: they
+ * reach the project, and their role there meets its floors. Opening the floors
+ * to contributors must not hand them the assignments of projects they are not
+ * on.
  */
 orgs.get("/:orgId/assignments/workload", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
-  if (role == null || role < ROLE.MAINTAINER) {
-    return c.json({ error: "org role >= maintainer required" }, 403)
+  if (role == null) return c.json({ error: "not an org member" }, 403)
+  const orgFloors = await getProjectVisibilityFloors(c.env, orgId)
+  if (!canViewNamedProgress(role, orgFloors)) {
+    return c.json({ error: "member progress hidden by org policy" }, 403)
   }
   const assignments = await getOrgAssignmentWorkload(c.env, orgId)
-  return c.json({ assignments })
+  // An owner meets every floor and reaches every project in the org.
+  if (role >= ROLE.OWNER) return c.json({ assignments })
+  const projectRoles = await resolveProjectRoles(
+    c.env, user, assignments.map((a) => a.projectId),
+  )
+  const visible = assignments.filter((a) =>
+    canViewNamedProgress(projectRoles.get(a.projectId)?.level ?? null, orgFloors),
+  )
+  return c.json({ assignments: visible })
 })
 
 /**

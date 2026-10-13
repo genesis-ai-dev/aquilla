@@ -68,12 +68,10 @@ import {
   getCommentFloors,
   attachGroupProject,
   getOrgMemberRole,
-  getMemberProgressViewMinRole,
-  DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
-  DEFAULT_ROSTER_VIEW_MIN_ROLE,
   getOrCreateUserOrg,
-  getRosterViewMinRole,
   getProjectRosterViewMinRole,
+  getProjectVisibilityFloors,
+  type ProjectVisibilityFloors,
   getTermbaseEditMinRole,
   getLanguageEditMinRole,
   listEffectiveProjectMembers,
@@ -1216,38 +1214,56 @@ projects.get("/:projectId/assignments/given", authMiddleware, async (c) => {
 
 /**
  * GET /api/v2/projects/:projectId/assignments/all — per-assignee open workload
- * + derived progress for THIS project. Maintainer+ on the project required.
- * Returns the same AssigneeWorkload shape as the org workload endpoint so
- * the client can reuse the same rendering logic.
+ * + derived progress for THIS project (the overview's Team card). Returns the
+ * same AssigneeWorkload shape as the org workload endpoint so the client can
+ * reuse the same rendering logic.
+ *
+ * AQU-1771: gated on the member-progress AND roster floors, like
+ * /assignments/unit below — not on a hard Maintainer floor. The Team card shows
+ * itself from those two floors, so an org that opened per-member progress to
+ * contributors got a card that rendered and then 403'd into "No open
+ * assignments". The names on this list are the member list, so the stricter
+ * of the two floors wins.
  */
 projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   const user = c.get("user")
   const projectId = c.req.param("projectId") as string
   const role = await resolveProjectRole(c.env, user, projectId)
   if (!role) return c.json({ error: "no access to project" }, 403)
-  if (role.level < ROLE.MAINTAINER) {
-    return c.json(roleRequiredBody("maintainer+ required", ROLE.MAINTAINER, role), 403)
-  }
 
-  // Names on this roster are the member list. An owner-only roster floor must
-  // hide them here too — the Team card is how a maintainer still "sees" the
-  // roster after the Members card has closed, under a badge that still reads
-  // "only maintainers & owners".
   const project = await c.env.AQUILLA_PG.prepare(
     "SELECT org_id FROM projects WHERE id = ?",
   )
     .bind(projectId)
     .first<{ org_id: number | null }>()
-  if (project?.org_id != null) {
-    const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
-    if (!canViewRoster(role.level, rosterMinRole)) {
-      return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
-    }
-  }
+  if (!project) return c.json({ error: "project not found" }, 404)
+  const denial = namedProgressDenial(
+    role.level,
+    await getProjectVisibilityFloors(c.env, project.org_id),
+  )
+  if (denial) return c.json(denial, 403)
 
   const roster = await getProjectAssignmentRoster(c.env, projectId)
   return c.json({ roster })
 })
+
+/**
+ * AQU-1771: the 403 body for a caller below either floor of a read that shows
+ * per-member progress by name, or null when they meet both. The progress floor
+ * is asked first, so its message wins when both refuse.
+ */
+function namedProgressDenial(
+  roleLevel: number,
+  floors: ProjectVisibilityFloors,
+): { error: string; rosterHidden?: true } | null {
+  if (!canViewMemberProgress(roleLevel, floors.memberProgressViewMinRole)) {
+    return { error: "member progress hidden by org policy" }
+  }
+  if (!canViewRoster(roleLevel, floors.rosterViewMinRole)) {
+    return { error: "roster hidden by org policy", rosterHidden: true }
+  }
+  return null
+}
 
 /**
  * GET /api/v2/projects/:projectId/assignments/unit — every live assignment
@@ -1302,13 +1318,7 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
   // progress counts". There is no org to ask, so the answer is the default,
   // not the absence of one — the same reading every other floor takes for an
   // org-less project (see getLanguageEditMinRoleForProject).
-  const progressMinRole = project.org_id != null
-    ? await getMemberProgressViewMinRole(c.env, project.org_id)
-    : DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
-  if (!canViewMemberProgress(role.level, progressMinRole)) {
-    return c.json({ error: "member progress hidden by org policy" }, 403)
-  }
-
+  //
   // AND THE ROSTER FLOOR, because this response is identity data.
   //
   // AQU-485 made rosterViewMinRole and memberProgressViewMinRole INDEPENDENT
@@ -1318,12 +1328,11 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
   // below the roster floor was handing every assignee's username to callers
   // the members route answers 403 to. A name is roster information wherever
   // it is printed, so this asks both questions and the stricter one wins.
-  const rosterMinRole = project.org_id != null
-    ? await getRosterViewMinRole(c.env, project.org_id)
-    : DEFAULT_ROSTER_VIEW_MIN_ROLE
-  if (!canViewRoster(role.level, rosterMinRole)) {
-    return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
-  }
+  const denial = namedProgressDenial(
+    role.level,
+    await getProjectVisibilityFloors(c.env, project.org_id),
+  )
+  if (denial) return c.json(denial, 403)
 
   // A `laneId` the caller sent is used as given. Otherwise resolve the legacy
   // tag to the lane it names. An unresolvable tag yields '', which matches no
@@ -1356,28 +1365,12 @@ projects.get("/:projectId/assignments/units", authMiddleware, async (c) => {
     .first<{ org_id: number | null }>()
   if (!project) return c.json({ error: "project not found" }, 404)
 
-  const progressMinRole = project.org_id != null
-    ? await getMemberProgressViewMinRole(c.env, project.org_id)
-    : DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
-  if (!canViewMemberProgress(role.level, progressMinRole)) {
-    return c.json({ error: "member progress hidden by org policy" }, 403)
-  }
-
-  // AND THE ROSTER FLOOR, because this response is identity data.
-  //
-  // AQU-485 made rosterViewMinRole and memberProgressViewMinRole INDEPENDENT
-  // keys: one decides who may learn which people are on a project, the other
-  // who may see per-person productivity. Both default to MAINTAINER, so a
-  // default org sees no change — but an org that lowers the progress floor
-  // below the roster floor was handing every assignee's username to callers
-  // the members route answers 403 to. A name is roster information wherever
-  // it is printed, so this asks both questions and the stricter one wins.
-  const rosterMinRole = project.org_id != null
-    ? await getRosterViewMinRole(c.env, project.org_id)
-    : DEFAULT_ROSTER_VIEW_MIN_ROLE
-  if (!canViewRoster(role.level, rosterMinRole)) {
-    return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
-  }
+  // Both floors, as on the per-unit read: names are roster information.
+  const denial = namedProgressDenial(
+    role.level,
+    await getProjectVisibilityFloors(c.env, project.org_id),
+  )
+  if (denial) return c.json(denial, 403)
 
   const assignees = await getProjectUnitAssignees(c.env, projectId)
   return c.json({ assignees })

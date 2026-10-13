@@ -54,6 +54,14 @@ async function seedOrgWithMembers() {
   ).run()
 }
 
+async function setOrgFloors(settings: Record<string, unknown>) {
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, ?, 1, 1)",
+  )
+    .bind(JSON.stringify(settings))
+    .run()
+}
+
 async function seedTtsRow(userId: number, orgId: number, date: string, seconds: number, requests: number) {
   await env.AQUILLA_PG.prepare(
     `INSERT INTO tts_usage_daily (user_id, org_id, date_utc, audio_seconds, request_count)
@@ -193,6 +201,42 @@ describe("GET /api/v1/usage/org/:orgId", () => {
     const res = await app.request(
       "/api/v1/usage/org/1",
       { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+  })
+
+  // AQU-1771: the org's member-progress and roster floors decide, not a hard
+  // Maintainer gate — the Team usage card shows itself from those floors.
+  it("lets a contributor read it once the org opens BOTH floors to contributors", async () => {
+    await seedOrgWithMembers()
+    await setOrgFloors({ memberProgressViewMinRole: 400, rosterViewMinRole: 400 })
+    await seedTtsRow(1, 1, today(), 60, 3)
+    const res = await app.request(
+      "/api/v1/usage/org/1",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it("still refuses a contributor when only the progress floor is opened (names are roster data)", async () => {
+    await seedOrgWithMembers()
+    await setOrgFloors({ memberProgressViewMinRole: 400 })
+    const res = await app.request(
+      "/api/v1/usage/org/1",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+  })
+
+  it("refuses a maintainer once the org raises the progress floor to owners", async () => {
+    await seedOrgWithMembers()
+    await setOrgFloors({ memberProgressViewMinRole: 700 })
+    const res = await app.request(
+      "/api/v1/usage/org/1",
+      { headers: authHeader(await jwtFor("wendi")) },
       env,
     )
     expect(res.status).toBe(403)

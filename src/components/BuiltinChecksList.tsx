@@ -21,12 +21,10 @@ import type {
 import { translateRuleName, translateRuleDescription } from "@/lib/lqa/builtin-resolver"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { BIBLE_CHECK_NEEDS, isBibleCheckId, type BibleCheckSlot } from "../../db/shared/bible-checks/types"
-import {
-  filledLanguageProfileSlots,
-  readLanguageProfile,
-  type LanguageProfile,
-} from "../../db/shared/language-profile"
+import { isBibleCheckId, type BibleCheckSlot } from "../../db/shared/bible-checks/types"
+import { bibleCheckDormancy, type BibleCheckNeed } from "../../db/shared/bible-checks/dormancy"
+import type { BibleCheckReadiness } from "../../db/shared/bible-checks/participant-types"
+import { readLanguageProfile, type LanguageProfile } from "../../db/shared/language-profile"
 
 /** AQU-1688: why a Bible data check is dormant, by the Language-profile slot it waits for. */
 const NEEDS_KEY: Readonly<Record<BibleCheckSlot, MessageKey>> = {
@@ -36,6 +34,23 @@ const NEEDS_KEY: Readonly<Record<BibleCheckSlot, MessageKey>> = {
   negators: "bibleChecks.needs.negators",
   headings: "bibleChecks.needs.headings",
   textualVariants: "bibleChecks.needs.textualVariants",
+}
+
+/** AQU-1699: what a check-pack-B check waits for besides a slot: forms, decisions, terminology or an alignment. */
+const NEED_KEY: Readonly<Record<BibleCheckNeed, MessageKey>> = {
+  agreedNames: "bibleParticipants.needs.agreedNames",
+  nameForms: "bibleParticipants.needs.nameForms",
+  secondPersonForms: "bibleParticipants.needs.secondPersonForms",
+  secondPersonSame: "bibleParticipants.needs.secondPersonSame",
+  clusivityForms: "bibleParticipants.needs.clusivityForms",
+  clusivitySame: "bibleParticipants.needs.clusivitySame",
+  groupNumberForms: "bibleParticipants.needs.groupNumberForms",
+  groupNumberNone: "bibleParticipants.needs.groupNumberNone",
+  divineNames: "bibleParticipants.needs.divineNames",
+  deityCapitals: "bibleParticipants.needs.deityCapitals",
+  deityCapitalsOff: "bibleParticipants.needs.deityCapitalsOff",
+  alignment: "bibleParticipants.needs.alignment",
+  clusivityDecisions: "bibleParticipants.needs.clusivityDecisions",
 }
 
 interface Props {
@@ -56,6 +71,12 @@ interface Props {
    * is empty is dormant, and its row says which slot it needs.
    */
   languageProfile?: LanguageProfile | null
+  /**
+   * AQU-1699: what the project's decisions and terminology switch on (agreed
+   * names, name forms, κύριος renderings, clusivity decisions). Without it, a
+   * check that needs them says so.
+   */
+  bibleReadiness?: BibleCheckReadiness
 }
 
 const isBibleRule = (rule: TranslationRule) => rule.check.type === "builtin" && isBibleCheckId(rule.check.checkId)
@@ -68,6 +89,7 @@ export function BuiltinChecksList({
   canHarmonize = true,
   canManage = true,
   languageProfile,
+  bibleReadiness,
 }: Props) {
   const t = useT()
   const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
@@ -83,7 +105,7 @@ export function BuiltinChecksList({
     }
     return c
   }, [infractions])
-  const filledSlots = filledLanguageProfileSlots(readLanguageProfile(languageProfile))
+  const profile = readLanguageProfile(languageProfile)
   const textRules = builtinRules.filter((rule) => !isBibleRule(rule))
   const bibleRules = builtinRules.filter(isBibleRule)
 
@@ -94,7 +116,9 @@ export function BuiltinChecksList({
     const description = translateRuleDescription(rule, t)
     const count = counts.get(rule.id) ?? 0
     const showHarmonize = onHarmonize != null && count > 0
-    const needs = isBibleCheckId(checkId) ? BIBLE_CHECK_NEEDS[checkId].filter((slot) => !filledSlots.has(slot)) : []
+    const needs: MessageKey[] = isBibleCheckId(checkId)
+      ? bibleCheckDormancy(checkId, profile, bibleReadiness).map((d) => ("slot" in d ? NEEDS_KEY[d.slot] : NEED_KEY[d.need]))
+      : []
     return (
       <li
         key={rule.id}
@@ -104,9 +128,9 @@ export function BuiltinChecksList({
         <div className="min-w-0 flex-1">
           <div className="font-medium">{name}</div>
           <div className="text-xs text-muted-foreground truncate">{description}</div>
-          {needs.map((slot) => (
-            <div key={slot} data-testid="builtin-row-needs" className="text-xs text-amber-700 dark:text-amber-400">
-              {t(NEEDS_KEY[slot])}
+          {needs.map((key) => (
+            <div key={key} data-testid="builtin-row-needs" className="text-xs text-amber-700 dark:text-amber-400">
+              {t(key)}
             </div>
           ))}
         </div>

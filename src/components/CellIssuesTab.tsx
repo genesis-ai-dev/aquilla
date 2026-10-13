@@ -1,5 +1,5 @@
 import { AlertCircle, AlertTriangle, ArrowRight, Check } from "lucide-react"
-import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
+import { infractionSeverity, type RuleInfraction, type TranslationRule } from "@/lib/parsers/types"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
@@ -64,7 +64,7 @@ export function CellIssuesTab({
     <div className="flex flex-col gap-1.5">
       {activeInfractions.flatMap((inf) => {
         const rule = ruleMap.get(inf.ruleId)
-        const isMajor = rule?.severity === "major"
+        const isMajor = infractionSeverity(inf, rule?.severity) === "major"
         const Icon = isMajor ? AlertTriangle : AlertCircle
         const findings = distinctFindings(inf)
         // `undefined` = no finding to name, so the row's waive is cell-wide.

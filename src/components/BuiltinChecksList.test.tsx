@@ -69,7 +69,8 @@ describe("BuiltinChecksList — Bible data checks", () => {
     render(<BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} />)
     const group = screen.getByTestId("builtin-bible-checks")
     expect(within(group).getByText("Bible data checks")).toBeInTheDocument()
-    expect(within(group).getAllByTestId("builtin-row")).toHaveLength(16)
+    // AQU-1688 quotations and question (8), AQU-1697 pack A (8), AQU-1699 pack B (13).
+    expect(within(group).getAllByTestId("builtin-row")).toHaveLength(29)
     expect(within(group).getByText("Question kept")).toBeInTheDocument()
     expect(within(group).getByText("Negation kept")).toBeInTheDocument()
   })
@@ -82,8 +83,9 @@ describe("BuiltinChecksList — Bible data checks", () => {
   it("says which slot each check waits for while the Language profile is empty", () => {
     render(<BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} languageProfile={{}} />)
     const needs = within(screen.getByTestId("builtin-bible-checks")).getAllByTestId("builtin-row-needs")
-    // Every check but S8 (verse numbering needs nothing from the profile).
-    expect(needs).toHaveLength(15)
+    // Every check but S8 and X3 (verse numbering and repeated quotations need
+    // nothing from the profile); P15 and X4 wait for two things each.
+    expect(needs).toHaveLength(29)
     expect(needsOf("Quotation closes")).toEqual(["Needs: quotation marks in Language profile"])
     // AQU-1691: M1 has its own slot. Naming quotation marks here would send the
     // maintainer to fill in the wrong part of the profile.
@@ -118,6 +120,51 @@ describe("BuiltinChecksList — Bible data checks", () => {
     expect(needsOf("Question kept")).toEqual([])
     // AQU-1697: S3 waits for the same slot.
     expect(needsOf("Sentence runs on")).toEqual([])
+  })
+
+  // AQU-1699: check pack B waits for more than a filled slot: the project's
+  // decisions or terminology, a slot's forms, or a word alignment. WHY: a
+  // maintainer must see what switches each one on, and a check that does not
+  // apply at all ("you" has no number in this language) is not a missing answer.
+  it("says what each check-pack-B check waits for, and drops it once decided", () => {
+    const empty = { agreedNames: false, nameForms: false, divineNameFacts: false, clusivityFacts: false, pronounSpans: false }
+    const { unmount } = render(
+      <BuiltinChecksList builtinRules={withBible} infractions={new Map()} onSetOverride={() => {}} languageProfile={{}} bibleReadiness={empty} />,
+    )
+    expect(needsOf("Names kept")).toEqual(["Needs: agreed names, from decisions (render.…) or terminology entries"])
+    expect(needsOf("No names the source lacks")).toEqual(["Needs: agreed names, from decisions (render.…) or terminology entries"])
+    expect(needsOf("Name form kept")).toEqual(["Needs: a decision for two forms of one name (render.….form.…)"])
+    expect(needsOf("Singular or plural “you”")).toEqual(["Needs: singular and plural “you” forms in Language profile"])
+    expect(needsOf("Capitals for God")).toEqual([
+      "Needs: the capitals rule for God in Language profile (Divine names)",
+      "Needs: word alignment between the Greek and the translation, which this project does not have",
+    ])
+    expect(needsOf("Decisions kept")).toEqual([
+      "Needs: a decision about “we” in a passage (clusivity.…)",
+      "Needs: inclusive and exclusive “we” forms in Language profile",
+    ])
+    expect(needsOf("Repeated quotations alike")).toEqual([])
+    unmount()
+    // English: one "you", one "we", and a decided name. The forms checks do not apply; the name checks run.
+    const english = {
+      pronouns: { secondPerson: { numberDistinction: false }, firstPersonPlural: { clusivity: false } },
+    }
+    render(
+      <BuiltinChecksList
+        builtinRules={withBible}
+        infractions={new Map()}
+        onSetOverride={() => {}}
+        languageProfile={english}
+        bibleReadiness={{ ...empty, agreedNames: true }}
+      />,
+    )
+    expect(needsOf("Names kept")).toEqual([])
+    expect(needsOf("Singular or plural “you”")).toEqual([
+      "Not used: in Language profile, “you” is the same for one person and for several",
+    ])
+    expect(needsOf("Inclusive or exclusive “we”")).toEqual([
+      "Not used: in Language profile, “we” is the same with or without the listener",
+    ])
   })
 
   it("drops the reason once the marks are set, and keeps the switch and severity", () => {

@@ -88,6 +88,9 @@ export function overlaySettings(
   )
   // AQU-1688: quotation marks enable Bible data checks in the workspace.
   assign("languageProfile", settings.languageProfile)
+  // AQU-1699: must reach the workspace, or the name and clusivity checks never
+  // see the project's render.* and clusivity.* decisions.
+  assign("projectFacts", settings.projectFacts)
   // AQU-1692: must reach the workspace, or a saved voice correction never
   // shows in the editor.
   assign("bibleVoiceOverrides", settings.bibleVoiceOverrides)

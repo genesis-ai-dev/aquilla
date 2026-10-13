@@ -246,7 +246,7 @@ export async function patchMondayLink(
   jwt: string,
   projectId: string,
   body: { enabled?: boolean; config?: MondayMapping },
-): Promise<{ link: MondayBoardLink; warnings: string[] }> {
+): Promise<{ link: MondayBoardLink; warnings: string[]; push?: MondaySyncResult }> {
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/link`, {
     method: "PATCH",
     headers: authHeaders(jwt),
@@ -254,10 +254,12 @@ export async function patchMondayLink(
   })
   if (!res.ok) await readError(res, "error.monday.updateLink")
   // Accept both `{ link, warnings }` (PUT-style envelope) and a bare link object.
-  const out = (await res.json()) as MondayBoardLink | { link: MondayBoardLink; warnings?: string[] }
+  const out = (await res.json()) as
+    | MondayBoardLink
+    | { link: MondayBoardLink; warnings?: string[]; push?: MondaySyncResult }
   notifyMondayLinkChanged(projectId)
   return "link" in out && typeof out.link === "object"
-    ? { link: out.link, warnings: out.warnings ?? [] }
+    ? { link: out.link, warnings: out.warnings ?? [], ...(out.push && { push: out.push }) }
     : { link: out as MondayBoardLink, warnings: [] }
 }
 

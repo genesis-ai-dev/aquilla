@@ -44,6 +44,7 @@ import {
   type MondayBoardLink,
   type MondayBoardStructure,
   type MondayConnectionStatus,
+  type MondaySyncResult,
 } from "@/lib/monday/api"
 import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingTable } from "./MondayMappingEditor"
@@ -64,6 +65,12 @@ interface Props {
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
+}
+
+function syncNoticeText(res: MondaySyncResult): string {
+  return res.ok
+    ? `Pushed to Monday${res.itemsUpserted != null ? ` (${res.itemsUpserted} items)` : ""}.`
+    : `Sync failed${res.error ? `: ${res.error}` : ""}.`
 }
 
 export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props) {
@@ -212,8 +219,12 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
       setToggling(true)
       setError(null)
       try {
+        setSyncNotice(null)
         const next = await patchMondayLink(jwt, projectId, { enabled })
-        if (aliveRef.current) setLink(next.link)
+        if (!aliveRef.current) return
+        setLink(next.link)
+        // Turning Sync back on pushes straight away; say how it went.
+        if (next.push) setSyncNotice(syncNoticeText(next.push))
       } catch (e) {
         if (aliveRef.current) setError(errMsg(e))
       } finally {
@@ -255,11 +266,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
     try {
       const res = await syncMondayNow(jwt, projectId)
       if (!aliveRef.current) return
-      setSyncNotice(
-        res.ok
-          ? `Pushed to Monday${res.itemsUpserted != null ? ` (${res.itemsUpserted} items)` : ""}.`
-          : `Sync failed${res.error ? `: ${res.error}` : ""}.`,
-      )
+      setSyncNotice(syncNoticeText(res))
       void load()
     } catch (e) {
       if (aliveRef.current) setSyncNotice(`Sync failed: ${errMsg(e)}`)

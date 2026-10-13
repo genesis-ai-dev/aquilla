@@ -699,12 +699,20 @@ monday.patch(
       .bind(body.enabled ?? null, configJson, freshStructureJson, freshStructureJson, link.id)
       .run()
 
-    const fresh = await getLink(c.env, guard.projectId)
+    let fresh = await getLink(c.env, guard.projectId)
     if (!fresh) return c.json({ error: "link update failed" }, 500)
     // `enabled` is part of what the DO caches, so even a config-only edit
     // re-checks rather than guessing which fields mattered.
     notifyLinkChangedBestEffort(c, guard.projectId)
-    return c.json({ link: linkResponse(fresh, true), warnings })
+
+    // Turning Sync back on pushes straight away: edits made while it was off
+    // were never queued, so nothing else would bring the board up to date.
+    let push: Awaited<ReturnType<typeof pushBoardLink>> | undefined
+    if (body.enabled === true && !link.enabled) {
+      push = await pushBoardLink(c.env, fresh)
+      fresh = (await getLink(c.env, guard.projectId)) ?? fresh
+    }
+    return c.json({ link: linkResponse(fresh, true), warnings, ...(push && { push }) })
   },
 )
 

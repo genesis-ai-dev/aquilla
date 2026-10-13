@@ -447,6 +447,39 @@ describe("POST /api/v2/monday/projects/:projectId/sync (Sync now)", () => {
   })
 })
 
+describe("PATCH link: turning Sync back on", () => {
+  it("pushes straight away and returns the result", async () => {
+    await seedOrgProject()
+    await seedLink({ lastPushedAt: null })
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET enabled = FALSE WHERE id = 'link-1'").run()
+    mockFetch((url, body) => {
+      if (url.startsWith("https://api.monday.com/v2") && body.includes("create_item")) {
+        return jsonResponse({ data: { c0: { id: "901" } } })
+      }
+      return null
+    })
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { enabled: true })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { link: { enabled: boolean; lastPushedAt: string | null }; push?: { ok: boolean; itemsUpserted?: number } }
+    expect(body.link.enabled).toBe(true)
+    expect(body.push).toMatchObject({ ok: true, itemsUpserted: 1 })
+    expect(body.link.lastPushedAt).not.toBeNull()
+  })
+
+  it("doesn't push when Sync was already on, or when turning it off", async () => {
+    await seedOrgProject()
+    await seedLink()
+    const fetchFn = mockFetch(() => null)
+    for (const enabled of [true, false]) {
+      const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { enabled })
+      expect(res.status).toBe(200)
+      expect(((await res.json()) as { push?: unknown }).push).toBeUndefined()
+    }
+    const urls = fetchFn.mock.calls.map(([url]) => String(url))
+    expect(urls.filter((url) => url.startsWith("https://api.monday.com"))).toEqual([])
+  })
+})
+
 describe("re-linking a board Aquilla has written to before", () => {
   it("reuses the item carrying this project's Aquilla ID instead of creating a second one", async () => {
     await seedOrgProject()

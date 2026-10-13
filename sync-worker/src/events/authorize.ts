@@ -17,7 +17,6 @@ import { decideLaneWrite, laneReadWallEnabled } from '../../../src/lib/lanes/wri
 import { visibleLaneTags, type LaneIdentity } from '../../../src/lib/lanes/read-wall'
 import { laneScopeAdmitsTag } from '../../../src/lib/lanes/scope-ids'
 import {
-  createsBlankLaneBridge,
   laneTagForArchiveCheck,
   missingLaneReason,
   writesLaneRow,
@@ -480,21 +479,16 @@ export async function authorize<K extends EventKind>(
     // would project a NULL lane_id and fail the whole batch as a 500. Refuse
     // it here with a reason the caller can act on.
     //
-    // AQU-1884: that includes a validation with NO lane at all. It asks for
-    // the default lane, and a project created today has none — every lane
-    // carries a real tag — so it is this 4xx rather than the per-event 500 it
-    // used to project as. Only a kind that mints the bridge itself, or a
-    // project with no target lane at all (where a sibling event in this batch
-    // may be minting it), may name `''` before the row exists.
+    // AQU-1884 / AQU-1900: that includes a validation or a target.cell.* write
+    // with NO lane at all. It asks for the default lane, and a project created
+    // today has none — every lane carries a real tag — so it is this 4xx
+    // rather than the per-event 500 it used to project as. Only a project with
+    // no target lane at all may name `''` before the row exists: there the
+    // write mints the '' bridge itself (or a sibling in this batch does), and
+    // since AQU-1615 that is the only project the bridge is ever minted on.
     if (
       writesLaneRow(raw.kind) &&
-      !(await targetLaneRowExists(
-        db,
-        raw.projectId,
-        archiveTag,
-        settings,
-        createsBlankLaneBridge(raw.kind),
-      ))
+      !(await targetLaneRowExists(db, raw.projectId, archiveTag, settings))
     ) {
       return { ok: false, status: 422, reason: missingLaneReason(archiveTag) }
     }

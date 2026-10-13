@@ -13,6 +13,7 @@ import { OUTBOX_SCHEMA_VERSION } from "../src/lib/sync/outbox-types"
 import { v7 as uuidv7 } from "uuid"
 import type { ValidationContract } from "./validation-oracle"
 import { assertOwnedStack, verifyEdit, type EditContract } from "./outcome"
+import { readTargetLane } from "./target-lane"
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
 
@@ -108,6 +109,8 @@ export async function seedTargetTranslations(
 ): Promise<ProjectedCellRow[]> {
   const sources = await readProjectedCells(session.jwt, seeded, "source")
   const token = await mintSyncToken(session.jwt, seeded.projectId, seeded.fileId)
+  // Name the target lane: a lane-less target write is refused (AQU-1899).
+  const lane = await readTargetLane(session.jwt, seeded.projectId)
   const events = seeded.cellIds.map((cellId, index) => ({
     id: uuidv7(),
     schemaVersion: OUTBOX_SCHEMA_VERSION,
@@ -119,7 +122,7 @@ export async function seedTargetTranslations(
     // parent would be accepted and logged as a stale sibling instead.
     parentId: sources.find((row) => row.cellId === cellId)?.eventId ?? null,
     author: session.username,
-    payload: { value: `Tafsiri ya mstari wa ${index + 1}.` },
+    payload: { value: `Tafsiri ya mstari wa ${index + 1}.`, ...lane },
     clientTs: Date.now(),
   }))
   const response = await postIdempotentJson({
@@ -129,7 +132,7 @@ export async function seedTargetTranslations(
     operation: "seed target translations",
   })
   const { rejected } = await response.json() as { rejected: unknown[] }
-  if (rejected.length > 0) throw new Error("Seeded translations were rejected")
+  if (rejected.length > 0) throw new Error(`Seeded translations were rejected: ${JSON.stringify(rejected)}`)
   const rows = await readProjectedCells(session.jwt, seeded)
   if (rows.filter((row) => row.side === "target" && row.value).length !== seeded.cellIds.length) {
     throw new Error("Seeded translations did not project")

@@ -18,6 +18,7 @@ import {
 } from "../routes/contextual"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import {
+  CONTEXTUAL_MAX_STARTS_PER_USER,
   createRun,
   getRun,
   insertDrafts,
@@ -227,6 +228,42 @@ describe("POST /contextual/runs", () => {
     const activity = await req("GET", `/runs/${runId}/activity`, contrib)
     const activityBody = (await activity.json()) as { events: { kind: string }[] }
     expect(activityBody.events.map((event) => event.kind)).toContain("run_created")
+  })
+
+  // AQU-1847. The capacity ceilings bound how much is in flight; they cannot
+  // bound how often someone presses start, and each press fans out to up to 24
+  // files. Like the AQU-827 gate below, this must refuse before any spend —
+  // and it must say WHY, because "Autopilot could not start" sends the user
+  // hunting for a fault that does not exist.
+  it("throttles a user who keeps starting runs, before any spend, and leaves other users alone", async () => {
+    const { contrib, lead } = await seedWorld()
+    const snapshot = JSON.stringify({ userId: 2, username: "contrib", level: 400 })
+    for (let i = 0; i < CONTEXTUAL_MAX_STARTS_PER_USER; i++) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO contextual_runs (id, project_id, file_id, lane_id, status, initiated_by, role_snapshot)
+         VALUES (?, ?, ?, 'ctxr-tgt', 'terminated', 'contrib', ?)`,
+      ).bind(`throttle-seed-${i}`, PROJECT, `throttle-file-${i}`, snapshot).run()
+    }
+
+    const throttled = await req("POST", "/runs", contrib, { fileId: FILE })
+    expect(throttled.status).toBe(429)
+    const body = (await throttled.json()) as {
+      error: { code: string; message: string; details: { retryAfterSeconds: number } }
+    }
+    expect(body.error.code).toBe("start_throttled")
+    expect(body.error.message).toContain("Too many Autopilot runs started")
+    expect(body.error.details.retryAfterSeconds).toBeGreaterThan(0)
+    // Refused before the run row, the model call, and the live relay.
+    expect(modelCallCount).toBe(0)
+    expect(syncFrames).toEqual([])
+    expect(await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed")).toEqual([])
+
+    // It is a PER-USER throttle: one noisy account must not take Autopilot
+    // away from their teammates.
+    const other = await req("POST", "/runs", lead, { fileId: FILE })
+    expect(other.status).toBe(201)
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
   })
 
   // AQU-827. The gate is server-side because the client's disabled button is a

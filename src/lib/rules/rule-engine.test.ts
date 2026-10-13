@@ -3,7 +3,8 @@ import { checkRules, checkRulesForCell, rulesForLane, ruleLaneScope } from "./ru
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { RULE_LINT_PARITY_CASES } from "./__fixtures__/rule-lint-parity"
-import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import { resolveBuiltinRules, withBuiltinOverrides } from "@/lib/lqa/builtin-resolver"
+import { resolvePunctuation, type PunctuationConventions } from "../../../db/shared/punctuation-conventions"
 
 function makeCell(overrides: Partial<CellData> & { id: string }): CellData {
   return {
@@ -475,5 +476,30 @@ describe("checkRulesForCell — verdicts the agent's lint must match", () => {
     const cell = makeCell({ id: "c1", original: source, translated: target, status: "unvalidated" })
     const infractions = checkRulesForCell(cell, "f1", [makeRule({ id: ruleId, check })])
     expect(infractions.map((i) => i.ruleId)).toEqual(flagged ? [ruleId] : [])
+  })
+})
+
+// AQU-1906: the lane's punctuation conventions reach the check function from
+// the rule's own descriptor, so every consumer of a lane-resolved rule set
+// agrees — no per-cell context needed.
+describe("checkRulesForCell — target-language punctuation (AQU-1906)", () => {
+  const cell = (translated: string) =>
+    makeCell({ id: "c1", original: "He went home.", translated, status: "unvalidated" })
+
+  const endPunctuationRules = (punctuation: PunctuationConventions | null) =>
+    withBuiltinOverrides(resolveBuiltinRules(undefined), undefined, punctuation).filter(
+      (rule) => rule.id === "builtin:end-punctuation-mismatch",
+    )
+
+  it("flags a bare Thai translation without conventions, and accepts it with them", () => {
+    const bare = cell("เขากลับบ้าน")
+    expect(checkRulesForCell(bare, "f1", endPunctuationRules(null))).toHaveLength(1)
+    const thai = resolvePunctuation({ language: "Thai" }).conventions
+    expect(checkRulesForCell(bare, "f1", endPunctuationRules(thai))).toHaveLength(0)
+  })
+
+  it("still flags a wrong-class mark in the same lane", () => {
+    const thai = resolvePunctuation({ language: "Thai" }).conventions
+    expect(checkRulesForCell(cell("เขากลับบ้าน?"), "f1", endPunctuationRules(thai))).toHaveLength(1)
   })
 })

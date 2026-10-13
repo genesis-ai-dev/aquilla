@@ -26,12 +26,14 @@ import {
   SLOT_TYPE_NAMES,
   divineNamesProblem,
   headingsProblem,
+  isMarkCharacter,
   isPlainObject,
   kinTermsProblem,
   measuresProblem,
   negatorsProblem,
   numberWordsProblem,
   pronounsProblem,
+  punctuationProblem,
   questionMarkersProblem,
   speechVerbsProblem,
   textualVariantsProblem,
@@ -41,6 +43,7 @@ import {
   type MeasuresStrategy,
   type NumberWordsProfile,
   type PronounsProfile,
+  type PunctuationProfile,
   type QuestionMarkersProfile,
   type TextualVariantPolicy,
 } from './language-profile-slots'
@@ -52,6 +55,7 @@ export type {
   MeasuresStrategy,
   NumberWordsProfile,
   PronounsProfile,
+  PunctuationProfile,
   QuestionMarkersProfile,
   TextualVariantPolicy,
 } from './language-profile-slots'
@@ -85,6 +89,8 @@ export interface QuoteMarksProfile {
 
 export interface LanguageProfile {
   quoteMarks?: QuoteMarksProfile
+  /** AQU-1906: the target language's own terminal and clause marks. */
+  punctuation?: PunctuationProfile
   questionMarkers?: QuestionMarkersProfile
   pronouns?: PronounsProfile
   negators?: string[]
@@ -105,10 +111,7 @@ export type LanguageProfileSlot = keyof LanguageProfile
  * string could never match.
  */
 export function isQuoteMarkCharacter(value: unknown): value is string {
-  if (typeof value !== 'string') return false
-  const chars = Array.from(value)
-  if (chars.length !== 1) return false
-  return !/[\p{L}\p{N}\s]/u.test(value)
+  return isMarkCharacter(value)
 }
 
 function quoteMarksProblem(value: unknown): string | null {
@@ -137,6 +140,7 @@ function quoteMarksProblem(value: unknown): string | null {
 
 const SLOT_PROBLEMS: Readonly<Record<LanguageProfileSlot, (value: unknown) => string | null>> = {
   quoteMarks: quoteMarksProblem,
+  punctuation: punctuationProblem,
   questionMarkers: questionMarkersProblem,
   pronouns: pronounsProblem,
   negators: negatorsProblem,

@@ -105,6 +105,14 @@ export const rules = defineNamespace({
 
     // ── Built-in checks list (RulesSurface) ─────────────────────────────────
     "rules.builtinChecks.heading": "Built-in checks",
+    // AQU-1906: these switches are per-lane once a project has several lanes,
+    // and the two punctuation rows say which conventions they are applying.
+    "rules.builtinChecks.laneScopeNote":
+      "These switches apply to the {lane} lane only. Other lanes keep their own.",
+    "rules.builtinChecks.punctuation.fromLanguage": "Using {language} punctuation conventions.",
+    "rules.builtinChecks.punctuation.fromProfile": "Using the punctuation from the Language profile.",
+    "rules.builtinChecks.punctuation.sourceRelative":
+      "Judged by the source's own marks — this lane records no language.",
     "rules.builtinChecks.violationCount": plural({
       one: "{count} violation",
       other: "{count} violations",

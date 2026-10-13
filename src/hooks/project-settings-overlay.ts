@@ -44,6 +44,7 @@ export function overlaySettings(
   assign("rules", settings.rules)
   assign("rulePenalties", settings.rulePenalties)
   assign("algorithmicChecks", settings.algorithmicChecks)
+  assign("algorithmicChecksByLane", settings.algorithmicChecksByLane)
   assign("terminology", settings.terminology)
   assign("termMatching", settings.termMatching)
   assign("fileGenres", settings.fileGenres)

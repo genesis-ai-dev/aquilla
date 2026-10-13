@@ -74,6 +74,12 @@ export interface ProjectWideSettings {
    *  full merged object. Project-wide so LQA severity is consistent across
    *  devices/members (same rationale as `rulePenalties`). */
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
+  /** AQU-1906: per-target-lane built-in check overrides, keyed by the lane's
+   *  legacy tag (`''` = the default lane). Replaces wholesale like
+   *  `algorithmicChecks`, so a writer sends the full merged map. Absent means
+   *  every lane shares the project-wide overrides, which is what every project
+   *  had before this key existed. */
+  algorithmicChecksByLane?: Record<string, Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>>
   validationCount?: number
   validationCountAudio?: number
   /**

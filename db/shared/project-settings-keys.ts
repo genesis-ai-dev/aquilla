@@ -123,6 +123,11 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   rules: { kind: 'object[]' },
   rulePenalties: { kind: 'object' },
   algorithmicChecks: { kind: 'object' },
+  // AQU-1906: the same overrides, PER TARGET LANE — `{ [laneTag]: { [checkId]:
+  // override } }`, where "" is the default lane. A lane entry lies over
+  // `algorithmicChecks` per check id (src/lib/lqa/lane-builtin-checks.ts), so a
+  // project with one lane keeps working untouched with this key absent.
+  algorithmicChecksByLane: { kind: 'object' },
   // `terminology` is NOT here: it is retired (AQU-1724) — see
   // RETIRED_TERMINOLOGY_KEY below.
   // AQU-1688: facts about the target language that Bible data checks need

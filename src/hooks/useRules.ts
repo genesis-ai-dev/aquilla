@@ -9,6 +9,11 @@ import type {
 } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import {
+  laneCheckOverrides,
+  lanePunctuation,
+  withLaneOverride,
+} from "@/lib/lqa/lane-builtin-checks"
 import { bibleChecksEnabled } from "@/lib/bible-data/check-context"
 import { rulesForLane } from "@/lib/rules/rule-engine"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -69,7 +74,16 @@ export function useRules(
   // workspace render for projects without rules, which re-ran every consumer
   // memo (useHealth's checkRules pass, ~700 times in one scroll session).
   const userRules = project?.rules ?? EMPTY_RULES
-  const algorithmicChecks = project?.algorithmicChecks
+  // AQU-1906: the lane's own overrides lie over the project-wide ones. With no
+  // lane (a management surface) this IS `project.algorithmicChecks`, by
+  // identity — memoized for the same reason `userRules` is above: a fresh
+  // object per render re-runs every consumer memo.
+  const projectChecks = project?.algorithmicChecks
+  const laneChecks = project?.algorithmicChecksByLane
+  const algorithmicChecks = useMemo(
+    () => laneCheckOverrides({ algorithmicChecks: projectChecks, algorithmicChecksByLane: laneChecks }, lane),
+    [projectChecks, laneChecks, lane],
+  )
   const penalties: RulePenalties = project?.rulePenalties || { major: 15, minor: 5 }
   const terminology = localConcepts
 
@@ -126,9 +140,32 @@ export function useRules(
   // AQU-1688: the Bible data checks are rules only while the project's Bible
   // data checks enrichment is on (which also needs Bible data itself on).
   const bibleChecks = bibleChecksEnabled(project)
+  // AQU-1906: the punctuation checks judge the target by the ACTIVE lane's own
+  // marks. Resolved here, once per lane, and stamped onto the two checks'
+  // descriptors, so every consumer of this rule set — editor underline, Issues
+  // tab, health ribbon, Check file — agrees. A management surface (no lane)
+  // keeps the source-relative sets; the Rules page resolves the lane it is
+  // viewing itself, through `withBuiltinOverrides`.
+  const projectLanes = project?.lanes
+  const projectTargetLanguage = project?.targetLanguage
+  const projectLanguageProfile = project?.languageProfile
+  const punctuation = useMemo(
+    () =>
+      lane === undefined
+        ? null
+        : lanePunctuation(
+            {
+              lanes: projectLanes,
+              targetLanguage: projectTargetLanguage ?? "",
+              languageProfile: projectLanguageProfile,
+            },
+            lane,
+          ).conventions,
+    [projectLanes, projectTargetLanguage, projectLanguageProfile, lane],
+  )
   const builtinRules = useMemo(
-    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks }),
-    [algorithmicChecks, bibleChecks],
+    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks, punctuation }),
+    [algorithmicChecks, bibleChecks, punctuation],
   )
 
   // Subscribed (org-managed) concepts union local terminology, subscribed
@@ -244,11 +281,34 @@ export function useRules(
     refresh()
   }, [project, refresh, patchShared])
 
+  /**
+   * AQU-1906: `overrideLane` switches ONE lane's copy of the check instead of
+   * the project-wide one (`''` is the default lane). Omit it and this writes
+   * `algorithmicChecks`, exactly as before — which is what a single-lane
+   * project keeps doing.
+   */
   const setBuiltinOverride = useCallback(async (
     checkId: BuiltinCheckId,
     override: AlgorithmicCheckOverride,
+    overrideLane?: string,
   ) => {
     if (!project) return
+    if (overrideLane !== undefined) {
+      const next = withLaneOverride(project.algorithmicChecksByLane, overrideLane, checkId, override)
+      const stored = await patchProject(project.id, (p) => ({
+        ...p,
+        algorithmicChecksByLane: withLaneOverride(
+          p.algorithmicChecksByLane,
+          overrideLane,
+          checkId,
+          override,
+        ),
+      }))
+      // Top-level settings keys replace wholesale — send the full merged map.
+      void patchShared?.({ algorithmicChecksByLane: stored?.algorithmicChecksByLane ?? next })
+      refresh()
+      return
+    }
     const updated = await patchProject(project.id, (p) => ({
       ...p,
       algorithmicChecks: { ...(p.algorithmicChecks ?? {}), [checkId]: override },

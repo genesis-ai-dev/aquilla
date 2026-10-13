@@ -26,6 +26,8 @@ import { OrgRulesPanel } from "@/components/rules/OrgRulesPanel"
 import { SeverityBadge, SeverityIcon } from "@/components/rules/RuleSeverity"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { rulesForLane, ruleLaneScope, type RuleLaneScope } from "@/lib/rules/rule-engine"
+import { withBuiltinOverrides } from "@/lib/lqa/builtin-resolver"
+import { laneCheckOverrides, laneLanguageLabel, lanePunctuation } from "@/lib/lqa/lane-builtin-checks"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
 import { RuleImportDialog } from "./RuleImportDialog"
@@ -154,6 +156,29 @@ export function RulesSurface({
   const setViewLane = onActiveLaneChange ?? setLocalLane
   const hasLaneRules = userRules.some((rule) => rule.scope === "lane")
   const multiLane = laneOptions.length > 1 || hasLaneRules
+  // AQU-1906: a built-in check's switch and severity apply to ONE lane once the
+  // project HAS more than one. With a single lane they stay project-wide, so
+  // nothing an existing project stored changes meaning. Lane-scoped user rules
+  // alone (`hasLaneRules`) do not make a second lane — hence not `multiLane`.
+  const perLaneChecks = laneOptions.length > 1
+  // The list shows the lane it is VIEWING, which need not be the lane the
+  // editor is evaluating, so the rows are re-resolved here rather than taken
+  // from `builtinRules` as the project-wide pass left them.
+  const lanePunctuationResolved = lanePunctuation(project, viewLane)
+  const laneBuiltinRules = withBuiltinOverrides(
+    builtinRules,
+    laneCheckOverrides(project, viewLane),
+    lanePunctuationResolved.conventions,
+  )
+  const punctuationOrigin = lanePunctuationResolved.origin
+  const punctuationNote =
+    punctuationOrigin.kind === "profile"
+      ? t("rules.builtinChecks.punctuation.fromProfile")
+      : punctuationOrigin.kind === "language"
+        ? t("rules.builtinChecks.punctuation.fromLanguage", {
+            language: laneLanguageLabel(project, viewLane),
+          })
+        : t("rules.builtinChecks.punctuation.sourceRelative")
 
   // Default: only rules enforced in the viewed lane. Other lanes' rules are
   // one click away and sort last, marked as not applied here.
@@ -592,11 +617,19 @@ export function RulesSurface({
         )}
 
         <BuiltinChecksList
-          builtinRules={builtinRules}
+          builtinRules={laneBuiltinRules}
           infractions={infractions}
-          onSetOverride={setBuiltinOverride}
+          onSetOverride={(checkId, override) =>
+            setBuiltinOverride(checkId, override, perLaneChecks ? viewLane : undefined)
+          }
           languageProfile={project.languageProfile}
           bibleReadiness={bibleReadiness}
+          laneNote={
+            perLaneChecks
+              ? t("rules.builtinChecks.laneScopeNote", { lane: laneName(viewLane) })
+              : undefined
+          }
+          punctuationNote={punctuationNote}
         />
         </div>
       </div>

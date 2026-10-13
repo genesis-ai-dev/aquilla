@@ -615,3 +615,60 @@ describe("members matrix follows each project's member-list floor (AQU-1771)", (
     expect((await matrix("rita")).has("proj1")).toBe(true)
   })
 })
+
+// AQU-1771: an org MAINTAINER used to skip a project's member-list floor on
+// every access-inspection surface. A project closed to owners must stay
+// closed to them there too, as it is on GET …/members.
+describe("access inspection follows a project's Owners-only member list (AQU-1771)", () => {
+  async function ownersOnlyProject() {
+    await seedOrgAndProject()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 3, 400, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES ('proj1', ?, 1, 1)",
+    )
+      .bind(JSON.stringify({ rosterViewMinRole: 700 }))
+      .run()
+  }
+  const get = async (username: string, path: string) =>
+    app.request(path, { headers: authHeader(await jwtFor(username)) }, env)
+
+  it("the member inspector refuses an org maintainer the project's view, not an owner", async () => {
+    await ownersOnlyProject()
+    expect((await get("anna", "/api/v2/users/3/access?from=project:proj1")).status).toBe(403)
+    expect((await get("wendi", "/api/v2/users/3/access?from=project:proj1")).status).toBe(200)
+  })
+
+  it("People & access leaves the project and its grantees out for an org maintainer", async () => {
+    await ownersOnlyProject()
+    const mentions = (text: string) => text.includes("proj1") || text.includes("Gospel of John")
+    const maintainerView = await get("anna", "/api/v2/orgs/1/access")
+    expect(maintainerView.status).toBe(200)
+    expect(mentions(await maintainerView.text())).toBe(false)
+    const ownerView = await get("wendi", "/api/v2/orgs/1/access")
+    expect(mentions(await ownerView.text())).toBe(true)
+  })
+
+  it("a member's access breakdown leaves the project out for an org maintainer", async () => {
+    await ownersOnlyProject()
+    const projectsOf = async (username: string) =>
+      ((await (await get(username, "/api/v2/orgs/1/members/3/access")).json()) as {
+        projects: Array<{ projectId: string }>
+      }).projects.map((p) => p.projectId)
+    expect(await projectsOf("anna")).toEqual([])
+    expect(await projectsOf("wendi")).toEqual(["proj1"])
+  })
+
+  it("an org maintainer still sees a project that follows the org's default", async () => {
+    await seedOrgAndProject()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 3, 400, 1)",
+    ).run()
+    expect((await get("anna", "/api/v2/users/3/access?from=project:proj1")).status).toBe(200)
+    const projects = ((await (await get("anna", "/api/v2/orgs/1/members/3/access")).json()) as {
+      projects: Array<{ projectId: string }>
+    }).projects
+    expect(projects.map((p) => p.projectId)).toEqual(["proj1"])
+  })
+})

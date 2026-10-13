@@ -64,6 +64,7 @@ import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { loadProjectVisibilityOverrides } from "../../../db/shared/visibility-floors"
+import { ViewerScope } from "../services/access-payload"
 import { sendOrgInviteEmail } from "../services/email"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
 import { applyTeamMemberLaneGrants, applyTeamProjectLaneGrants } from "../services/lane-grants"
@@ -481,6 +482,11 @@ orgs.get("/:orgId/deleted-files", async (c) => {
  * GET /api/v2/orgs/:orgId/members/:userId/access — AD-12 effective-access
  * breakdown: every grant path (direct/group/org/creator) per project + the
  * resolved max. Maintainer+ (managers) only.
+ *
+ * AQU-1771: a project whose member list the caller may not read (it closed it
+ * to owners) is left out, as the access inspector leaves it out — otherwise
+ * asking this about each person in turn rebuilds the roster the project hid.
+ * Owners, and a person reading their own access, see every project.
  */
 orgs.get("/:orgId/members/:userId/access", async (c) => {
   const user = c.get("user")
@@ -494,7 +500,13 @@ orgs.get("/:orgId/members/:userId/access", async (c) => {
     return c.json({ error: "org role >= maintainer required" }, 403)
   }
   const access = await getMemberEffectiveAccess(c.env, orgId, targetUserId)
-  return c.json(access)
+  if (role >= ROLE.OWNER || Number(user.id) === targetUserId) return c.json(access)
+  const vs = new ViewerScope(c.env, user)
+  const projects = []
+  for (const project of access.projects) {
+    if (await vs.canSeeProject(project.projectId, orgId)) projects.push(project)
+  }
+  return c.json({ ...access, projects })
 })
 
 /**

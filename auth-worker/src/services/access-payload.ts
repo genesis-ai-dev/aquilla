@@ -197,9 +197,18 @@ export class ViewerScope {
     return (role ?? 0) >= 600 || canViewRoster(role, await this.rosterFloor(orgId))
   }
 
-  /** A project the viewer can open AND whose roster its policy lets them list. */
+  /**
+   * A project the viewer can open AND whose roster its policy lets them list.
+   *
+   * AQU-1771: only an org OWNER skips the project's member-list floor. The
+   * shortcut used to start at Maintainer, so an org maintainer read the
+   * grantees of a project that had closed its member list to owners — through
+   * the access inspector and People & access — while GET …/members refused
+   * them. A maintainer now answers to the project's floor like anyone else
+   * (and meets it unless the project or org raised it to owners).
+   */
   async canSeeProject(projectId: string, orgId: number | null): Promise<boolean> {
-    if (orgId != null && ((await this.orgRole(orgId)) ?? 0) >= 600) return true
+    if (orgId != null && ((await this.orgRole(orgId)) ?? 0) >= 700) return true
     const role = await this.projectRole(projectId)
     if (role == null) return false
     const floor = await this.projectFloor(projectId, orgId)

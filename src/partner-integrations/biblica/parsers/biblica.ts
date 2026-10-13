@@ -19,6 +19,13 @@ export interface BiblicaStudyNotesParseOptions {
    * When false, each line stays a single cell (lists still split per line).
    */
   splitSentences?: boolean
+  /**
+   * Scripture paragraphs become verse cells only when a caller asks.
+   * The study-note import leaves them out: Bible text is swapped in from
+   * the publisher's scripture files. The scripture export tests ask,
+   * because that path is what writes a verse back into the publisher's slot.
+   */
+  includeScripture?: boolean
 }
 
 export interface BiblicaStudyNotesParseResult {
@@ -70,7 +77,7 @@ export async function extractBiblicaStudyNoteStrings(
     // Bible text stays out of the import. It is swapped in later from the
     // publisher's scripture files, so a book volume and a front/back volume
     // both leave it off.
-    includeScripture: false,
+    includeScripture: options?.includeScripture === true,
   })
 
   const bookCodes: string[] = []

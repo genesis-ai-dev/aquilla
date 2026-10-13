@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { Check, CheckCircle2, Copy, ExternalLink, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
@@ -45,6 +45,11 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { openExternal } from "@/lib/open-external"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
+
+/** The connected Monday account's home (falls back to monday.com). */
+function mondayAccountUrl(slug: string | null | undefined): string {
+  return slug && /^[a-z0-9-]+$/i.test(slug) ? `https://${slug}.monday.com` : "https://monday.com"
+}
 
 export function OrgSettingsMonday() {
   const { locale, t } = useI18n()
@@ -265,7 +270,15 @@ export function OrgSettingsMonday() {
                 {connection?.account?.slug && (
                   <p>
                     {t("auth.resetPassword.accountPrefix")}{" "}
-                    <span className="font-medium">{connection.account.slug}</span>
+                    <a
+                      href={mondayAccountUrl(connection.account.slug)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline"
+                    >
+                      {connection.account.slug}
+                      <ExternalLink className="size-3.5" aria-hidden="true" />
+                    </a>
                   </p>
                 )}
                 {connection?.account?.userName && (
@@ -283,11 +296,23 @@ export function OrgSettingsMonday() {
                   </p>
                 )}
               </div>
-              {canManage ? (
-                <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={busy}>
-                  {t("settings.monday.disconnectButton")}
-                </Button>
-              ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={mondayAccountUrl(connection?.account?.slug)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonVariants({ variant: "outline" })}
+                >
+                  <ExternalLink data-icon="inline-start" />
+                  {t("settings.monday.openMondayButton")}
+                </a>
+                {canManage && (
+                  <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={busy}>
+                    {t("settings.monday.disconnectButton")}
+                  </Button>
+                )}
+              </div>
+              {!canManage && (
                 <p className="text-xs text-muted-foreground">
                   {t("settings.monday.manageRestrictedNotice")}
                 </p>

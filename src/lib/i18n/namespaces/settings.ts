@@ -316,6 +316,7 @@ export const settings = defineNamespace({
     "settings.monday.connectedAsRow": "Connected as {username}",
     "settings.monday.connectedOnRow": "Connected {date}",
     "settings.monday.disconnectButton": "Disconnect",
+    "settings.monday.openMondayButton": "Open Monday.com",
     "settings.monday.manageRestrictedNotice": "Only org maintainers and owners can manage this connection.",
     "settings.monday.connectPrompt":
       "Connect a Monday.com account to let projects in this organization link " +
@@ -540,6 +541,12 @@ export const settings = defineNamespace({
           "Red notice in the tab that opened Monday.com for connecting, when 11 minutes " +
           "pass with no word from the Monday tab. \"Reload this page\" means the current " +
           "Aquilla settings page.",
+      },
+      "settings.monday.openMondayButton": {
+        description:
+          "Button on the organization's Monday.com settings, beside Disconnect, shown once " +
+          "an account is connected. Opens the connected Monday.com account's home page in a " +
+          "new tab. \"Monday.com\" is a product name and is not translated.",
       },
       "settings.monday.connectedAsRow": {
         description: "Row on the Monday.com connection card naming the connected Monday user.",

@@ -58,3 +58,14 @@ it("stops waiting and shows the failure when the Monday tab reports one", async 
   await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/cancelled in Monday\.com/))
   expect(screen.queryByText(/waiting for the monday\.com tab/i)).toBeNull()
 })
+
+it("links to the connected Monday account from its name and an Open Monday.com button", async () => {
+  vi.mocked(fetchMondayConnection).mockResolvedValue({
+    connected: true, account: { id: "1", slug: "acme-team", userName: "Sam" },
+  } as Awaited<ReturnType<typeof fetchMondayConnection>>)
+  render(<MemoryRouter><OrgSettingsMonday /></MemoryRouter>)
+  const open = await screen.findByRole("link", { name: "Open Monday.com" })
+  expect(open).toHaveAttribute("href", "https://acme-team.monday.com")
+  expect(open).toHaveAttribute("target", "_blank")
+  expect(screen.getByRole("link", { name: "acme-team" })).toHaveAttribute("href", "https://acme-team.monday.com")
+})

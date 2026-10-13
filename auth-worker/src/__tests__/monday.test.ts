@@ -14,6 +14,7 @@ import {
   decryptMondayToken,
   codeChallengeS256,
 } from "../lib/monday/crypto"
+import { parseJsonColumn } from "../lib/monday/types"
 
 const menv = {
   ...env,
@@ -619,6 +620,9 @@ describe("PUT /api/v2/monday/projects/:projectId/link", () => {
         const query = (JSON.parse(body) as { query: string }).query
         webhookUrls.push(/url: "([^"]+)"/.exec(query)?.[1] ?? "")
         return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      }
+      if (body.includes("create_group")) {
+        return jsonResponse({ data: { create_group: { id: "group_aq", title: "Aquilla projects" } } })
       }
       return null
     })
@@ -1379,6 +1383,36 @@ describe("POST /api/v2/monday/projects/:projectId/columns", () => {
     expect(out.structure.columns.map((col) => col.id)).toContain("col_5")
   })
 
+  it("gives percentage columns a % sign and no footer sum; other columns get no settings", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const bodies: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("create_column(")) {
+        bodies.push((JSON.parse(body) as { query: string }).query)
+        return jsonResponse({ data: { create_column: { id: `col_${bodies.length}`, title: "t", type: "numbers" } } })
+      }
+      if (body.includes("settings_str")) {
+        return jsonResponse({ data: { boards: [{ name: "Ruth Board", columns: [{ id: "b", title: "Aquilla ID", type: "text" }], groups: [] }] } })
+      }
+      return null
+    })
+    await request("anna", "POST", "/api/v2/monday/projects/proj-1/columns", {
+      boardId: "board-9",
+      metrics: ["validated_pct", "status_auto"],
+    })
+    const defaultsOf = (query: string) => {
+      const raw = /defaults: ("(?:[^"\\]|\\.)*")/.exec(query)?.[1]
+      return raw ? (JSON.parse(JSON.parse(raw) as string) as unknown) : null
+    }
+    expect(defaultsOf(bodies[0]!)).toEqual({
+      unit: { symbol: "custom", custom_unit: "%", direction: "right" },
+      hide_footer: true,
+    })
+    expect(defaultsOf(bodies[1]!)).toBeNull()
+  })
+
   it("is idempotent: asking again for columns the board now has creates nothing", async () => {
     await seedOrgProject()
     await seedConnection()
@@ -1485,5 +1519,126 @@ describe("POST /api/v2/monday/projects/:projectId/columns", () => {
 
     expect((await post({ type: "create_column", boardId: "board-9", columnId: "someone_elses" })).status).toBe(200)
     expect(await stale()).toBe(true)
+  })
+})
+
+// ── The "Aquilla projects" group ───────────────────────────────────────────
+
+describe("PUT link puts the project's rows in an \"Aquilla projects\" group", () => {
+  function fakeGroupedBoard(groups: Array<{ id: string; title: string }>) {
+    const calls: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      const query = (JSON.parse(body) as { query: string }).query
+      if (query.includes("settings_str")) {
+        return jsonResponse({
+          data: { boards: [{ name: "Ruth Board", columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }], groups }] },
+        })
+      }
+      calls.push(query)
+      if (query.includes("create_group")) {
+        return jsonResponse({ data: { create_group: { id: "group_aq", title: "Aquilla projects" } } })
+      }
+      if (query.includes("create_webhook")) return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      if (query.includes("move_item_to_group")) return jsonResponse({ data: { m0: { id: "item-42" } } })
+      return null
+    })
+    return calls
+  }
+  const savedConfig = async () =>
+    (await env.AQUILLA_PG.prepare("SELECT config FROM integration_links WHERE project_id = 'proj-1'").first<{
+      config: unknown
+    }>())!.config
+
+  it("creates the group above the board's own groups, over the AI's pick of Monday's sample group", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const calls = fakeGroupedBoard([{ id: "topics", title: "Group Title" }])
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", {
+      boardId: "board-9",
+      config: { ...baseConfig, groupId: "topics" },
+    })
+    expect(res.status).toBe(200)
+    const create = calls.find((q) => q.includes("create_group"))!
+    expect(create).toContain('group_name: "Aquilla projects"')
+    expect(create).toContain('relative_to: "topics", position_relative_method: before_at')
+    const body = (await res.json()) as { link: { config: { groupId?: string } }; warnings: string[] }
+    expect(body.link.config.groupId).toBe("group_aq")
+    expect(body.warnings).toEqual([])
+    expect(parseJsonColumn<{ groupId?: string }>(await savedConfig(), {}).groupId).toBe("group_aq")
+  })
+
+  it("uses an \"Aquilla projects\" group already on the board instead of making another", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    const calls = fakeGroupedBoard([
+      { id: "topics", title: "Group Title" },
+      { id: "g_existing", title: "Aquilla Projects" },
+    ])
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", { boardId: "board-9", config: baseConfig })
+    expect(res.status).toBe(200)
+    expect(calls.some((q) => q.includes("create_group"))).toBe(false)
+    expect(((await res.json()) as { link: { config: { groupId?: string } } }).link.config.groupId).toBe("g_existing")
+  })
+
+  it("keeps a group the user renamed, and moves nothing when the group didn't change", async () => {
+    await seedOrgProject()
+    await seedLink({ config: { ...baseConfig, groupId: "g_renamed" } })
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO integration_item_links (link_id, entity_kind, entity_id, external_item_id) VALUES ('link-1', 'project', 'proj-1', 'item-42')",
+    ).run()
+    const calls = fakeGroupedBoard([
+      { id: "topics", title: "Group Title" },
+      { id: "g_renamed", title: "Biblica projects" },
+    ])
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", { boardId: "board-9", config: baseConfig })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { link: { config: { groupId?: string } } }).link.config.groupId).toBe("g_renamed")
+    expect(calls.some((q) => q.includes("create_group") || q.includes("move_item_to_group"))).toBe(false)
+  })
+
+  it("moves the project's existing row into the group when the group is new", async () => {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO integration_item_links (link_id, entity_kind, entity_id, external_item_id) VALUES ('link-1', 'project', 'proj-1', 'item-42')",
+    ).run()
+    const calls = fakeGroupedBoard([{ id: "topics", title: "Group Title" }])
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", { boardId: "board-9", config: baseConfig })
+    expect(res.status).toBe(200)
+    expect(calls.find((q) => q.includes("move_item_to_group"))).toContain(
+      'move_item_to_group(item_id: "item-42", group_id: "group_aq")',
+    )
+  })
+
+  it("still links when Monday refuses the group, and says where rows will go", async () => {
+    await seedOrgProject()
+    await seedConnection()
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      if (body.includes("settings_str")) {
+        return jsonResponse({ data: { boards: [{ name: "Ruth Board", columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }], groups: [] }] } })
+      }
+      if (body.includes("create_group")) return jsonResponse({ errors: [{ message: "nope" }] })
+      if (body.includes("create_webhook")) return jsonResponse({ data: { create_webhook: { id: 111 } } })
+      return null
+    })
+    const res = await request("anna", "PUT", "/api/v2/monday/projects/proj-1/link", {
+      boardId: "board-9",
+      config: { ...baseConfig, groupId: "ai_pick" },
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { link: { config: { groupId?: string } }; warnings: string[] }
+    expect(body.link.config.groupId).toBeUndefined()
+    expect(body.warnings.some((w) => w.includes("Aquilla projects"))).toBe(true)
+  })
+
+  it("a mapping edit keeps the saved group", async () => {
+    await seedOrgProject()
+    await seedLink({ config: { ...baseConfig, groupId: "group_aq" } })
+    fakeGroupedBoard([{ id: "group_aq", title: "Aquilla projects" }])
+    const res = await request("anna", "PATCH", "/api/v2/monday/projects/proj-1/link", { config: baseConfig })
+    expect(res.status).toBe(200)
+    expect(parseJsonColumn<{ groupId?: string }>(await savedConfig(), {}).groupId).toBe("group_aq")
   })
 })

@@ -27,6 +27,13 @@ Defined twice, kept in lockstep: `auth-worker/src/lib/monday/types.ts` and
 `src/lib/monday/types.ts`.
 
 - `itemGranularity`: one item for the project, or one per file.
+- `groupId`: the Monday group new rows go in. Linking sets it, never the
+  client or the AI: the group a project on this board already uses (so a
+  renamed group keeps working), else a group titled "Aquilla projects", else a
+  new one created above the board's own groups. Linking a project whose group
+  changed moves its existing rows there once; pushes never move a row, so one
+  the user drags elsewhere stays put. A mapping edit (PATCH) keeps the saved
+  group. If Monday refuses the group the link still saves, without one.
 - `columns`: Monday column id → Aquilla metric (`completion_pct`,
   `validated_pct`, `audio_validated_pct`, `has_audio_pct`, counts,
   `translators`, `last_activity`, `status_auto`, `deadline`, `project_name`,
@@ -95,7 +102,10 @@ contract beyond "maintainer can, member can view":
   creates a column for each requested metric the board lacks, with a plain
   title and type (`COLUMN_SPEC_BY_METRIC` in `lib/monday/columns.ts`, mirrored
   by `MONDAY_COLUMN_CATALOG` in `src/lib/monday/types.ts`), and always adds an
-  Aquilla ID column when the board has none. A column already on the board
+  Aquilla ID column when the board has none. Percentage columns get a "%"
+  after the number and a hidden footer (an app can't choose average, and a
+  sum of percentages means nothing); "Days since activity" hides its footer
+  too. A column already on the board
   under that title, with a type the metric can write, is reused instead, so
   asking twice creates nothing. Columns are created one at a time; any Monday
   refuses come back in `failed` while the rest still land. The answer is

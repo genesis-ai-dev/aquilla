@@ -9,6 +9,7 @@
 import { MondayApiError, gqlString, mondayGraphQL } from "./client"
 import {
   READ_ONLY_COLUMN_TYPES,
+  type MondayBoardGroup,
   WRITABLE_TYPES_BY_METRIC,
   type MondayBoardColumn,
   type MondayMetricKey,
@@ -18,7 +19,21 @@ export interface ColumnSpec {
   title: string
   /** Monday `ColumnType` enum value passed to create_column. */
   type: "numbers" | "status" | "date" | "text" | "link"
+  /** Column settings passed as create_column `defaults` (Monday's column settings schema). */
+  defaults?: Record<string, unknown>
 }
+
+/**
+ * Percentages show a "%" after the number. Monday's footer can only be set to
+ * hidden by an app (sum/average is the user's choice in Monday), and a sum of
+ * percentages across projects means nothing, so it is hidden.
+ */
+const PERCENT: Record<string, unknown> = {
+  unit: { symbol: "custom", custom_unit: "%", direction: "right" },
+  hide_footer: true,
+}
+/** A footer sum of "days since" across projects means nothing either. */
+const NO_FOOTER: Record<string, unknown> = { hide_footer: true }
 
 /**
  * The column Aquilla creates for each metric it can fill. `project_name` is
@@ -29,10 +44,10 @@ export interface ColumnSpec {
  * in Monday's own colours.
  */
 export const COLUMN_SPEC_BY_METRIC: Partial<Record<MondayMetricKey, ColumnSpec>> = {
-  completion_pct: { title: "Completion %", type: "numbers" },
-  validated_pct: { title: "Validated %", type: "numbers" },
-  audio_validated_pct: { title: "Audio validated %", type: "numbers" },
-  has_audio_pct: { title: "Has audio %", type: "numbers" },
+  completion_pct: { title: "Completion %", type: "numbers", defaults: PERCENT },
+  validated_pct: { title: "Validated %", type: "numbers", defaults: PERCENT },
+  audio_validated_pct: { title: "Audio validated %", type: "numbers", defaults: PERCENT },
+  has_audio_pct: { title: "Has audio %", type: "numbers", defaults: PERCENT },
   filled_count: { title: "Filled cells", type: "numbers" },
   total_count: { title: "Total cells", type: "numbers" },
   validated_count: { title: "Validated cells", type: "numbers" },
@@ -42,7 +57,7 @@ export const COLUMN_SPEC_BY_METRIC: Partial<Record<MondayMetricKey, ColumnSpec>>
   schedule_status: { title: "Schedule", type: "status" },
   books_done: { title: "Books done", type: "text" },
   next_target_date: { title: "Next target date", type: "date" },
-  days_since_activity: { title: "Days since activity", type: "numbers" },
+  days_since_activity: { title: "Days since activity", type: "numbers", defaults: NO_FOOTER },
   project_manager: { title: "Project manager", type: "text" },
   languages: { title: "Languages", type: "text" },
   active_contributors_30d: { title: "Active contributors (30 days)", type: "numbers" },
@@ -123,7 +138,9 @@ export async function addMissingColumns(
         create_column: { id: string; title: string; type: string } | null
       }>(
         accessToken,
-        `mutation { create_column(board_id: ${gqlString(boardId)}, title: ${gqlString(spec.title)}, column_type: ${spec.type}) { id title type } }`,
+        `mutation { create_column(board_id: ${gqlString(boardId)}, title: ${gqlString(spec.title)}, column_type: ${spec.type}${
+          spec.defaults ? `, defaults: ${gqlString(JSON.stringify(spec.defaults))}` : ""
+        }) { id title type } }`,
       )
       const made = data.create_column
       if (!made?.id) throw new MondayApiError("create_column returned no id", 200)
@@ -139,4 +156,40 @@ export async function addMissingColumns(
     }
   }
   return result
+}
+
+// ── The "Aquilla projects" group ────────────────────────────────────────────
+
+/** The group Aquilla puts its rows in, so they sit together instead of among the board's own rows. */
+export const PROJECTS_GROUP_TITLE = "Aquilla projects"
+
+/**
+ * The group this link's new rows go in: the first of `preferredIds` still on
+ * the board (the group this project or another project on the board already
+ * uses, so a renamed group keeps working), else a group titled "Aquilla
+ * projects", else a new one created at the top of the board.
+ */
+export async function ensureProjectsGroup(
+  accessToken: string,
+  boardId: string,
+  groups: MondayBoardGroup[],
+  preferredIds: string[],
+): Promise<{ group: MondayBoardGroup; created: boolean }> {
+  for (const id of preferredIds) {
+    const kept = groups.find((g) => g.id === id)
+    if (kept) return { group: kept, created: false }
+  }
+  const want = normalizeTitle(PROJECTS_GROUP_TITLE)
+  const named = groups.find((g) => normalizeTitle(g.title) === want)
+  if (named) return { group: named, created: false }
+  const top = groups[0]
+  const data = await mondayGraphQL<{ create_group: { id: string; title: string } | null }>(
+    accessToken,
+    `mutation { create_group(board_id: ${gqlString(boardId)}, group_name: ${gqlString(PROJECTS_GROUP_TITLE)}${
+      top ? `, relative_to: ${gqlString(top.id)}, position_relative_method: before_at` : ""
+    }) { id title } }`,
+  )
+  const made = data.create_group
+  if (!made?.id) throw new MondayApiError("create_group returned no id", 200)
+  return { group: { id: String(made.id), title: made.title ?? PROJECTS_GROUP_TITLE }, created: true }
 }

@@ -46,8 +46,10 @@ import {
   deleteWebhooksBestEffort,
   fetchBoardItemsSample,
   fetchBoardStructure,
+  gqlString,
   listBoards,
   mondayGraphQL,
+  runAliasedMutations,
 } from "../lib/monday/client"
 import {
   parseJsonColumn,
@@ -67,7 +69,13 @@ import {
   NoBoardsError,
 } from "../lib/monday/analyze"
 import { pushBoardLink, schedulePush } from "../lib/monday/push"
-import { addMissingColumns, findExistingColumn, isCreatableMetric } from "../lib/monday/columns"
+import {
+  addMissingColumns,
+  ensureProjectsGroup,
+  findExistingColumn,
+  isCreatableMetric,
+  PROJECTS_GROUP_TITLE,
+} from "../lib/monday/columns"
 import { notifySyncWorkerOfMondayLinkChange } from "../services/sync-worker-notify"
 import { secureCompare } from "../utils/secure-compare"
 
@@ -432,6 +440,28 @@ monday.get("/projects/:projectId/link", authMiddleware, async (c) => {
   return c.json({ linked: true, orgConnected, orgId, link: linkResponse(link, orgConnected) })
 })
 
+/**
+ * The groups projects already use on this board, this project's first: a
+ * renamed "Aquilla projects" group keeps collecting rows, and a second project
+ * on the board joins the first one's group instead of making another.
+ */
+async function projectsGroupIdsOnBoard(env: Env, boardId: string, projectId: string): Promise<string[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    "SELECT project_id, config FROM integration_links WHERE external_id = ? AND provider = ?",
+  )
+    .bind(boardId, PROVIDER)
+    .all<{ project_id: string; config: unknown }>()
+  const ordered = [...(rows.results ?? [])].sort(
+    (a, b) => Number(b.project_id === projectId) - Number(a.project_id === projectId),
+  )
+  const ids: string[] = []
+  for (const row of ordered) {
+    const groupId = parseJsonColumn<Partial<MondayMapping>>(row.config, {}).groupId
+    if (groupId && !ids.includes(groupId)) ids.push(groupId)
+  }
+  return ids
+}
+
 const putLinkSchema = z.object({
   boardId: z.string().min(1),
   boardName: z.string().optional(),
@@ -483,17 +513,39 @@ monday.put(
     const { mapping, warnings } = sanitizeMapping(body.config, structure)
     if (!mapping) return c.json({ error: "invalid config", warnings }, 400)
 
+    // New rows go in an "Aquilla projects" group so they sit together, not
+    // among the board's own rows. The server picks it: the AI may suggest a
+    // group, but on a fresh board that is Monday's sample "Group Title".
+    const previous = await getLink(c.env, guard.projectId)
+    const previousGroupId =
+      previous?.external_id === body.boardId
+        ? parseJsonColumn<Partial<MondayMapping>>(previous.config, {}).groupId
+        : undefined
+    let groups = structure.groups
+    try {
+      const preferred = await projectsGroupIdsOnBoard(c.env, body.boardId, guard.projectId)
+      const { group, created } = await ensureProjectsGroup(token, body.boardId, structure.groups, preferred)
+      mapping.groupId = group.id
+      if (created) groups = [group, ...structure.groups]
+    } catch (err) {
+      console.warn("[monday] projects group failed (link still saved):", err)
+      delete mapping.groupId
+      warnings.push(
+        `could not create the “${PROJECTS_GROUP_TITLE}” group; new rows go in the board's first group`,
+      )
+    }
+
     const cachedStructure: MondayBoardStructure = {
       fetchedAt: new Date().toISOString(),
       url: structure.url ?? null,
       name: structure.name ?? null,
       columns: structure.columns,
-      groups: structure.groups,
+      groups,
     }
 
     // Webhooks: keep existing ones when re-linking the same board; otherwise
     // clean up the old board's webhooks (best-effort) and create fresh ones.
-    const existing = await getLink(c.env, guard.projectId)
+    const existing = previous
     let webhookIds = parseJsonColumn<string[]>(existing?.webhook_ids ?? null, [])
     if (!existing || existing.external_id !== body.boardId || webhookIds.length === 0) {
       if (existing && webhookIds.length > 0) {
@@ -543,12 +595,41 @@ monday.put(
       )
       .run()
 
+    // Rows this project already has on the board move into the group once,
+    // when its group changes. Never on a push: a row the user moves elsewhere
+    // in Monday stays where they put it.
+    if (mapping.groupId && previousGroupId !== mapping.groupId) {
+      await moveItemsToGroupBestEffort(c.env, token, linkId, mapping.groupId)
+    }
+
     const link = await getLink(c.env, guard.projectId)
     if (!link) return c.json({ error: "link write failed" }, 500)
     notifyLinkChangedBestEffort(c, guard.projectId)
     return c.json({ link: linkResponse(link, true), warnings })
   },
 )
+
+async function moveItemsToGroupBestEffort(
+  env: Env,
+  token: string,
+  linkId: string,
+  groupId: string,
+): Promise<void> {
+  try {
+    const items = await env.AQUILLA_PG.prepare(
+      "SELECT external_item_id FROM integration_item_links WHERE link_id = ?",
+    )
+      .bind(linkId)
+      .all<{ external_item_id: string }>()
+    const mutations = (items.results ?? []).map((row, i) => ({
+      alias: `m${i}`,
+      body: `move_item_to_group(item_id: ${gqlString(row.external_item_id)}, group_id: ${gqlString(groupId)}) { id }`,
+    }))
+    if (mutations.length > 0) await runAliasedMutations(token, mutations)
+  } catch (err) {
+    console.warn("[monday] moving existing rows into the projects group failed (best-effort):", err)
+  }
+}
 
 const patchLinkSchema = z.object({
   enabled: z.boolean().optional(),
@@ -597,6 +678,12 @@ monday.patch(
       const result = sanitizeMapping(body.config, structure)
       if (!result.mapping) return c.json({ error: "invalid config", warnings: [...warnings, ...result.warnings] }, 400)
       warnings.push(...result.warnings)
+      // The client edits columns, not the group: keep the saved group unless
+      // it is gone from the board.
+      const savedGroupId = parseJsonColumn<Partial<MondayMapping>>(link.config, {}).groupId
+      if (!result.mapping.groupId && savedGroupId && structure?.groups.some((g) => g.id === savedGroupId)) {
+        result.mapping.groupId = savedGroupId
+      }
       configJson = JSON.stringify(result.mapping)
     }
 

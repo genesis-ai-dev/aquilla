@@ -79,6 +79,31 @@ describe("mentionNoticesFor", () => {
     expect(notices.find((n) => n.commentId === "reply")?.cellText).toBe("The Creation")
   })
 
+  // Seen on dev after PR #1319: a cell whose importer stored its own id as
+  // the canonical ref titled the row "b7f7b6f9-c87b-4100-96cc-f3f2dfee7ade in …".
+  it("drops a canonical ref that is only the cell's id and keeps real locators", () => {
+    const opaque = "b7f7b6f9-c87b-4100-96cc-f3f2dfee7ade"
+    const notices = mentionNoticesFor(
+      [
+        comment({
+          commentId: "opaque",
+          cellId: opaque,
+          cellRef: opaque,
+          createdForTranslated: "Bread and fish",
+          body: "@[alice] here",
+        }),
+        comment({ commentId: "locator", cellRef: " 1PE:toc2:1 ", body: "@[alice] toc" }),
+      ],
+      "alice",
+    )
+    expect(notices.find((n) => n.commentId === "opaque")).toMatchObject({
+      cellId: opaque,
+      cellRef: null,
+      cellText: "Bread and fish",
+    })
+    expect(notices.find((n) => n.commentId === "locator")?.cellRef).toBe("1PE:toc2:1")
+  })
+
   it("drops a deleted comment so the inbox cannot point at it", () => {
     expect(
       mentionNoticesFor([comment({ deletedAt: 9, body: "@[alice] gone" })], "alice"),

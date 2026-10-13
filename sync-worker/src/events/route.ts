@@ -43,6 +43,7 @@ import {
 } from './chain-claims'
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
+import { deferBestEffort } from './defer-best-effort'
 import { checkProjectMembershipDetailed, type MembershipDetail } from './membership'
 import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
 import { createCommentFloorsCache } from './comment-floors'
@@ -54,6 +55,7 @@ import {
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
 import { makeRequestCache } from './request-cache'
+import { dbFailureInfo, reportServerRejections } from './rejection-telemetry'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -210,6 +212,9 @@ export interface EventsRouteEnv {
   BASE_URL?: string
   /** AQU-1415: "1" turns the lane write wall on. Unset keeps additive scopes. */
   LANE_READ_WALL?: string
+  /** PostHog Logs project token; unset (local dev, e2e) makes telemetry a no-op. */
+  POSTHOG_KEY?: string
+  POSTHOG_HOST?: string
 }
 
 interface AcceptedEntry {
@@ -410,7 +415,7 @@ async function prefetchCellHeads(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, side, target_lang, event_id FROM cells
+      `SELECT project_id, file_id, cell_id, side, COALESCE((SELECT l.legacy_tag FROM public.lanes l WHERE l.project_id = cells.project_id AND l.id = cells.lane_id), '') AS target_lang, event_id FROM cells
        WHERE (project_id, file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
@@ -544,7 +549,7 @@ async function prefetchLastEditors(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, target_lang, event_id, last_editor FROM cells
+      `SELECT project_id, file_id, cell_id, COALESCE((SELECT l.legacy_tag FROM public.lanes l WHERE l.project_id = cells.project_id AND l.id = cells.lane_id), '') AS target_lang, event_id, last_editor FROM cells
        WHERE side = 'target' AND (project_id, file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
@@ -1864,6 +1869,7 @@ export async function handleEventsWriteRequest(
       await recomputeCommitted()
     } catch (err) {
       console.error("[events] DB batch failed:", err)
+      const batchFailure = dbFailureInfo(err)
       // The chunks that did commit are durable, so their counters must still
       // be brought up to date (AQU-1261) before we report the partial result.
       await recomputeCommitted()
@@ -1880,6 +1886,9 @@ export async function handleEventsWriteRequest(
         }
       }
 
+      // These 5xx results ride inside a 200, which the request wrapper in
+      // index.ts never ships — report them here (grouped, throttled).
+      reportServerRejections(env, ctx, rawEvents, rejected, batchFailure)
       return Response.json(
         {
           accepted,
@@ -2025,7 +2034,14 @@ export async function handleEventsWriteRequest(
           }),
         )
       }
-      await Promise.all(doFanOut)
+      // AQU-1837: the subrequests above are ALREADY in flight (stub.fetch is
+      // eager) — awaiting them is what used to cost the author. A busy project
+      // DO queues this __broadcast behind its own work, and every save in the
+      // project inherited that delay. The author's own result is complete at
+      // this point (`applied[]` rides the HTTP response below) and a missed
+      // peer broadcast is non-fatal by design, so let the fan-out settle after
+      // the response instead of in front of it.
+      await deferBestEffort(Promise.all(doFanOut), ctx, 'events/route ProjectSync fan-out')
     }
 
     // FRO-479 push accelerator — see link-notify.ts for the full contract.
@@ -2074,6 +2090,8 @@ export async function handleEventsWriteRequest(
     }
   }
 
+  // A handler / auth 5xx inside this 200 (the batch itself committed).
+  reportServerRejections(env, ctx, rawEvents, rejected)
   return Response.json({
     accepted,
     rejected,

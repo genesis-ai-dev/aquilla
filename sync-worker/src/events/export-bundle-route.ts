@@ -13,6 +13,7 @@
 // PURE-ADDITIVE: a new file that reuses usfm-lossless + a dependency-free zip
 // writer; it does not touch the import / event-projection path.
 
+import { attachmentDisposition } from "./content-disposition"
 import { verifyTokenForProject } from "../auth"
 import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
@@ -130,7 +131,7 @@ export async function handleExportBundleRequest(
       status: 200,
       headers: {
         "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${projectId}-deliverable.zip"`,
+        "Content-Disposition": attachmentDisposition(`${projectId}-deliverable.zip`),
       },
     }),
     request,

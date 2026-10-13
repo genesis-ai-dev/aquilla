@@ -61,10 +61,16 @@ export type AuthResult =
   | { ok: true; claims: SyncTokenClaims }
   | { ok: false; status: 401 | 403 | 500; reason: string }
 
-export async function verifyTokenForDoc(
+/**
+ * Signature + audience: the half of verification that needs nothing from the
+ * request. Split out for AQU-1858 so a route whose scope check depends on
+ * parsed body fields (POST /import reads projectId/fileId out of the body)
+ * can reject an unauthenticated caller *before* it materializes that body;
+ * the scope comparison then runs on these claims via verifyDocScope.
+ */
+export async function verifySyncToken(
   token: string | null | undefined,
-  expected: { projectId: string; fileId: string },
-  secret: string | undefined
+  secret: string | undefined,
 ): Promise<AuthResult> {
   if (!secret) {
     return { ok: false, status: 500, reason: "SYNC_SECRET_KEY not configured" }
@@ -92,14 +98,31 @@ export async function verifyTokenForDoc(
     return { ok: false, status: 401, reason: "wrong audience" }
   }
 
+  return { ok: true, claims }
+}
+
+/** The (project, file) scope half of verifyTokenForDoc, on already-verified claims. */
+export function verifyDocScope(
+  claims: SyncTokenClaims,
+  expected: { projectId: string; fileId: string },
+): AuthResult {
   if (claims.projectId !== expected.projectId) {
     return { ok: false, status: 403, reason: "token scoped to different project" }
   }
   if (claims.fileId !== expected.fileId) {
     return { ok: false, status: 403, reason: "token scoped to different file" }
   }
-
   return { ok: true, claims }
+}
+
+export async function verifyTokenForDoc(
+  token: string | null | undefined,
+  expected: { projectId: string; fileId: string },
+  secret: string | undefined
+): Promise<AuthResult> {
+  const verified = await verifySyncToken(token, secret)
+  if (!verified.ok) return verified
+  return verifyDocScope(verified.claims, expected)
 }
 
 /**
@@ -119,27 +142,9 @@ export async function verifyTokenForProject(
   expectedProjectId: string,
   secret: string | undefined,
 ): Promise<AuthResult> {
-  if (!secret) {
-    return { ok: false, status: 500, reason: "SYNC_SECRET_KEY not configured" }
-  }
-  if (!token) {
-    return { ok: false, status: 401, reason: "missing token" }
-  }
-
-  let claims: SyncTokenClaims
-  try {
-    claims = (await verify(token, secret, "HS256")) as unknown as SyncTokenClaims
-  } catch (err) {
-    const name = (err as { name?: string }).name
-    if (name === "JwtTokenExpired") {
-      return { ok: false, status: 401, reason: "token expired" }
-    }
-    return { ok: false, status: 401, reason: "invalid token signature" }
-  }
-
-  if (claims.aud !== "sync") {
-    return { ok: false, status: 401, reason: "wrong audience" }
-  }
+  const verified = await verifySyncToken(token, secret)
+  if (!verified.ok) return verified
+  const { claims } = verified
 
   if (claims.projectId !== expectedProjectId) {
     return { ok: false, status: 403, reason: "token scoped to different project" }
@@ -165,27 +170,9 @@ export async function verifyTokenForFile(
   expectedFileId: string,
   secret: string | undefined,
 ): Promise<AuthResult> {
-  if (!secret) {
-    return { ok: false, status: 500, reason: "SYNC_SECRET_KEY not configured" }
-  }
-  if (!token) {
-    return { ok: false, status: 401, reason: "missing token" }
-  }
-
-  let claims: SyncTokenClaims
-  try {
-    claims = (await verify(token, secret, "HS256")) as unknown as SyncTokenClaims
-  } catch (err) {
-    const name = (err as { name?: string }).name
-    if (name === "JwtTokenExpired") {
-      return { ok: false, status: 401, reason: "token expired" }
-    }
-    return { ok: false, status: 401, reason: "invalid token signature" }
-  }
-
-  if (claims.aud !== "sync") {
-    return { ok: false, status: 401, reason: "wrong audience" }
-  }
+  const verified = await verifySyncToken(token, secret)
+  if (!verified.ok) return verified
+  const { claims } = verified
 
   if (claims.fileId !== expectedFileId) {
     return { ok: false, status: 403, reason: "token scoped to different file" }

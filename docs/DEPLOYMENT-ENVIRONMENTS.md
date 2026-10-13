@@ -14,7 +14,8 @@ profile or fall back from an unknown branch.
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
 `/sync/*` through the sync Worker. The identity Worker also owns
 `/.well-known/oauth-authorization-server/*`, the RFC 8414 discovery location for
-its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`). Staging is retired from the deployable
+its MCP OAuth issuer (`docs/CHATGPT-PLUGIN.md`), and
+`/.well-known/openai-apps-challenge`, OpenAI's plugin domain check. Staging is retired from the deployable
 application contract; development is the only non-production live environment.
 
 `config/cloudflare-deployments.json` is the machine-readable source for Worker
@@ -49,6 +50,19 @@ applies pending `db/postgres/migrations/` files to the target Neon branch; only
 then does any deploy command get past its guard. Migrations are never applied
 automatically by a deploy path or by an agent — that is a deliberate human step
 (`npm run neon:status:dev` / `:prod` is the read-only check the guard runs).
+
+Each file commits together with its `schema_migrations` row, so a migration is
+either applied and recorded or neither; a file needing `CREATE INDEX
+CONCURRENTLY` takes an explicit non-transactional path and must stay idempotent
+(AQU-1877, `scripts/neon-migration-file.ts`). Both paths run under
+`lock_timeout` — 5 s by default, `AQUILLA_MIGRATION_LOCK_TIMEOUT` to widen it
+for a window where blocking every write to `events`/`cells` is acceptable — so a
+migration queued behind a long transaction fails fast instead of holding the
+write queue open. **`neon:apply:prod` refuses without a snapshot decision:**
+pass `--snapshot` to have it cut a `premigrate-<timestamp>` Neon branch off
+production first (instant and copy-on-write, and what you restore from if the
+apply goes wrong), or `--no-snapshot` if one already exists. `dev` and `local`
+are ungated — they are refreshable by design (`pnpm neon:refresh:dev`).
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
@@ -300,6 +314,46 @@ Environment and replace the repository-level token with a non-production-scoped
 token. The branch policy, fail-closed resolver, local-only default Worker names,
 and Wrangler branch hooks protect deployments independently of that final token
 split.
+
+## How to add or remove a platform admin
+
+Platform admins (the cross-tenant console accounts) are rows in the
+`platform_admins` table, not Worker config (AQU-1239: the repo is public, so
+the list cannot live in `wrangler.toml`). Deployed dev and prod do not set
+`ADMIN_EMAILS`; it exists only as a bootstrap for local dev, e2e and
+self-hosters.
+
+Rows are written by hand, on purpose: no API route can grant admin. The
+`neon:*` scripts only migrate, so connect with `psql` to the target Neon branch
+(connection string from the Neon console for the `dev` or production branch):
+
+```sh
+psql "$DEV_DATABASE_URL"    # or "$PROD_DATABASE_URL"
+```
+
+```sql
+-- add (email must be lowercase and trimmed; the table refuses anything else)
+INSERT INTO platform_admins (email, added_by, note)
+VALUES ('someone@example.com', 42, 'support lead, added per AQU-0000')
+ON CONFLICT (email) DO NOTHING;
+
+-- list
+SELECT email, added_by, note, created_at FROM platform_admins ORDER BY email;
+
+-- remove (takes effect on that person's next request)
+DELETE FROM platform_admins WHERE email = 'someone@example.com';
+```
+
+`added_by` is the `users.id` of the admin granting access, or `NULL` if you
+leave it out. `note` is free text for why the person has access. An email can
+be added before the person signs up; `GET /api/v2/admin/admins` shows it with
+`hasAccount: false` until they do.
+
+Order for a first rollout: apply the migration (`neon:apply:dev` /
+`neon:apply:prod`), insert the admins, then deploy the auth Worker that no
+longer sets `ADMIN_EMAILS`. Deploying first locks everyone out of the console
+until the rows exist. If the table is missing the Worker treats nobody as a
+table admin and logs `platform_admins read failed`; it does not fail requests.
 
 ## Change checklist
 

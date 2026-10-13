@@ -38,6 +38,23 @@ const MARK_TO_TAG: Partial<Record<Mark, string>> = {
   b: "<w:b/>", i: "<w:i/>", u: '<w:u w:val="single"/>', s: "<w:strike/>", // code → none
 }
 
+/** OOXML element name behind each inline mark (`code` has no run property). */
+const MARK_TO_ELEMENT: Partial<Record<Mark, string>> = { b: "b", i: "i", u: "u", s: "strike" }
+
+/**
+ * Remove a toggle element from a verbatim `<w:rPr>` string (AQU-1719).
+ *
+ * A base rPr often already declares the toggle we are about to splice in — a
+ * Google Docs export writes an explicit `<w:b w:val="0"/>` on every run — and
+ * two contradictory flags for one property is not valid OOXML. Drop the stale
+ * one so the toggle we emit is the only one. Toggles the translator did not
+ * set are left alone, so the source run's own formatting still carries over.
+ */
+function stripToggleElement(rPrXml: string, name: string): string {
+  const re = new RegExp(`<w:${name}(?:\\s[^>]*)?/>|<w:${name}(?:\\s[^>]*)?>[\\s\\S]*?</w:${name}>`, "g")
+  return rPrXml.replace(re, "")
+}
+
 /**
  * String-based run builder: returns clean OOXML run markup with NO xmlns pollution.
  *
@@ -50,13 +67,16 @@ const MARK_TO_TAG: Partial<Record<Mark, string>> = {
  */
 export function spansToRunXml(spans: Span[], baseRprXml: string | null): string {
   return spans.map((span) => {
-    const toggles = (["b", "i", "u", "s"] as Mark[])
-      .filter((m) => span.marks.has(m)).map((m) => MARK_TO_TAG[m]).join("")
+    const applied = (["b", "i", "u", "s"] as Mark[]).filter((m) => span.marks.has(m))
+    const toggles = applied.map((m) => MARK_TO_TAG[m]).join("")
     let rPr = ""
     if (baseRprXml) {
-      // splice toggles in just before the closing </w:rPr> (or expand a self-closed base)
-      rPr = baseRprXml.includes("</w:rPr>")
-        ? baseRprXml.replace("</w:rPr>", `${toggles}</w:rPr>`)
+      // splice toggles in just before the closing </w:rPr> (or expand a self-closed base),
+      // after dropping any same-property flag the base already carries (AQU-1719)
+      const base = applied.reduce(
+        (xml, m) => stripToggleElement(xml, MARK_TO_ELEMENT[m] as string), baseRprXml)
+      rPr = base.includes("</w:rPr>")
+        ? base.replace("</w:rPr>", `${toggles}</w:rPr>`)
         : `<w:rPr>${toggles}</w:rPr>` // base was <w:rPr/> or empty
     } else if (toggles) {
       rPr = `<w:rPr>${toggles}</w:rPr>`
@@ -72,6 +92,11 @@ export function spansToRuns(doc: Document, spans: Span[], baseRpr: Element | nul
       ? (baseRpr.cloneNode(true) as Element)
       : doc.createElementNS(W_NS, "w:rPr")
     const addToggle = (name: string, attrs?: Record<string, string>) => {
+      // AQU-1719: the cloned base rPr may already declare this property (often
+      // as an explicit off flag) — replace it rather than contradict it.
+      for (const child of Array.from(rPr.children)) {
+        if (child.localName === name) rPr.removeChild(child)
+      }
       const el = doc.createElementNS(W_NS, `w:${name}`)
       if (attrs) for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
       rPr.appendChild(el)

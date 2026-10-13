@@ -76,6 +76,11 @@ async function seed(): Promise<TestDb> {
       },
     ],
   })
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
   return tdb
 }
 
@@ -285,7 +290,8 @@ describe('MCP tools/call — reads', () => {
     expect(p.projectLifecycle.commitTool).toBe('confirm_changeset')
     // AQU-538: multi-target-language lanes are self-described — an agent can
     // learn the register → write-per-lane → read-per-lane workflow from here.
-    expect(p.multiLanguage.note).toContain('targetLanes')
+    expect(p.multiLanguage.note).toContain('lane id')
+    expect(p.multiLanguage.note).not.toContain('targetLanes')
     expect(p.multiLanguage.workflow.join(' ')).toContain('laneId')
     expect(p.linkMedia.mcpStagingTool).toBe('prepare_translations')
     expect(p.linkMedia.commitTool).toBe('confirm_changeset')
@@ -416,7 +422,7 @@ describe('MCP tools/call — reads', () => {
     // read_content with fileId -> read cells.
     const cellsRes = await rpc(env, token, {
       jsonrpc: '2.0', id: 10, method: 'tools/call',
-      params: { name: 'read_content', arguments: { projectId: PROJECT, fileId: FILE } },
+      params: { name: 'read_content', arguments: { projectId: PROJECT, fileId: FILE, lane: 'deflane1' } },
     })
     const cells = toolPayload(((await cellsRes.json()) as any).result)
     expect((cells.payload as any).data.length).toBeGreaterThan(0)
@@ -429,7 +435,7 @@ describe('MCP tools/call — reads', () => {
 
     const qualityRes = await rpc(env, token, {
       jsonrpc: '2.0', id: 20, method: 'tools/call',
-      params: { name: 'read_quality', arguments: { projectId: PROJECT, fileId: FILE } },
+      params: { name: 'read_quality', arguments: { projectId: PROJECT, fileId: FILE, lane: 'deflane1' } },
     })
     const quality = toolPayload(((await qualityRes.json()) as any).result)
     expect(quality.isError).toBe(false)
@@ -439,7 +445,7 @@ describe('MCP tools/call — reads', () => {
 
     const termsRes = await rpc(env, token, {
       jsonrpc: '2.0', id: 21, method: 'tools/call',
-      params: { name: 'read_term_consistency', arguments: { projectId: PROJECT, onlyDrift: true } },
+      params: { name: 'read_term_consistency', arguments: { projectId: PROJECT, lane: 'deflane1', onlyDrift: true } },
     })
     const terms = toolPayload(((await termsRes.json()) as any).result)
     expect(terms.isError).toBe(false)
@@ -744,7 +750,7 @@ describe('MCP tools/call — changesets', () => {
         name: 'prepare_translations',
         arguments: {
           projectId: PROJECT,
-          translations: [{ cellId: 'cell-1', fileId: FILE, value: 'Au commencement' }],
+          translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'Au commencement' }],
         },
       },
     })
@@ -784,7 +790,7 @@ describe('MCP tools/call — changesets', () => {
       jsonrpc: '2.0', id: 14, method: 'tools/call',
       params: {
         name: 'prepare_translations',
-        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }] },
       },
     })
     const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
@@ -809,7 +815,7 @@ describe('MCP tools/call — changesets', () => {
       jsonrpc: '2.0', id: 16, method: 'tools/call',
       params: {
         name: 'prepare_translations',
-        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }] },
       },
     })
     const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
@@ -841,7 +847,7 @@ describe('MCP tools/call — changesets', () => {
       jsonrpc: '2.0', id: 18, method: 'tools/call',
       params: {
         name: 'prepare_translations',
-        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }] },
       },
     })
     const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
@@ -876,7 +882,7 @@ describe('MCP tools/call — changesets', () => {
         jsonrpc: '2.0', id: 21, method: 'tools/call',
         params: {
           name: 'prepare_translations',
-          arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value }] },
+          arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value }] },
         },
       })
       ids.push((toolPayload(((await res.json()) as any).result).payload as any).changesetId)
@@ -917,7 +923,7 @@ describe('MCP tools/call — changesets', () => {
       jsonrpc: '2.0', id: 24, method: 'tools/call',
       params: {
         name: 'prepare_translations',
-        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }] },
       },
     })
     const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
@@ -1020,7 +1026,7 @@ describe('MCP tools/call — v1.1 commands via the generic `commands` argument',
         name: 'prepare_translations',
         arguments: {
           projectId: PROJECT,
-          translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }],
+          translations: [{ cellId: 'cell-1', fileId: FILE, laneId: 'deflane1', value: 'x' }],
           commands: [{ kind: 'CreateProject', name: 'Nested project' }],
         },
       },
@@ -1069,13 +1075,13 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
     const token = await oauthToken()
     const proposed = await invoke(token, 'prepare_translations', {
       projectId: PROJECT,
-      translations: [{ fileId: FILE, cellId: 'cell-1', value: 'En el principio' }],
+      translations: [{ fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'En el principio' }],
     })
     expect(proposed.result?.isError).not.toBe(true)
     const plan = toolPayload(proposed.result!).payload as { changesetId: string; digest: string }
     const commit = await invoke(token, 'confirm_changeset', { projectId: PROJECT, changesetId: plan.changesetId, digest: plan.digest })
     expect(commit.result?.isError).not.toBe(true)
-    const read = await invoke(token, 'read_content', { projectId: PROJECT, fileId: FILE })
+    const read = await invoke(token, 'read_content', { projectId: PROJECT, fileId: FILE, lane: 'deflane1' })
     expect(JSON.stringify(toolPayload(read.result!).payload)).toContain('En el principio')
     const events = await tdb.rows<{ kind: string }>('events')
     expect(events.some(e => e.kind === 'target.cell.commit')).toBe(true)
@@ -1103,7 +1109,7 @@ describe('resource-bound OAuth uses the same engine through reviewable tools', (
     const plan = toolPayload(staged.result!).payload as { changesetId: string; digest: string }
     const committed = await invoke(token, 'confirm_changeset', { projectId: PROJECT, changesetId: plan.changesetId, digest: plan.digest })
     expect(committed.result?.isError).not.toBe(true)
-    const read = await invoke(token, 'read_content', { projectId: PROJECT, fileId: FILE })
+    const read = await invoke(token, 'read_content', { projectId: PROJECT, fileId: FILE, lane: 'deflane1' })
     expect(toolPayload(read.result!).payload).toMatchObject({ data: expect.arrayContaining([expect.objectContaining({ cellId: 'cell-1', hidden: true })]) })
   })
 

@@ -23,6 +23,8 @@ import {
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { categorizeAiError } from "@/lib/audio/ai-error"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 interface Props {
   projectId: string
@@ -76,7 +78,9 @@ export function DenoiseButton(props: Props) {
       // Success: the cleaned take is optimistically selected, so this component
       // re-renders into the "Noise removed" state on the next pass.
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // AQU-510: route through AQU-891's categoriser so the reason reads in the
+      // active language instead of a raw model/decoder throw.
+      setError(categorizeAiError(e instanceof Error ? e.message : String(e)).body)
     } finally {
       setProcessing(false)
     }
@@ -113,7 +117,9 @@ export function DenoiseButton(props: Props) {
       await revertP
       notifyAudioAttachmentsChanged(fileId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // AQU-510: localized reason, not the raw throw (no `context` noun —
+      // it would be interpolated untranslated).
+      setError(toUserFacingError(e).message)
     } finally {
       setReverting(false)
     }

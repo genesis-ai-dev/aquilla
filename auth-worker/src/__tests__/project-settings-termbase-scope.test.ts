@@ -78,7 +78,6 @@ describe("project-settings terminology carve-out (AQU-822)", () => {
   it("lets a contributor write terminology when the org floor is 400", async () => {
     await seed('{"termbaseEditMinRole":400}')
     const res = await patchProjectSettings("carla", {
-      sourceLanguage: "en", // unchanged echo — the client always sends the whole object
       terminology: CONCEPT,
     })
     expect(res.status).toBe(200)
@@ -89,7 +88,6 @@ describe("project-settings terminology carve-out (AQU-822)", () => {
   it("403s a contributor's terminology write at the default floor (500)", async () => {
     await seed() // org never configured a floor
     const res = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
       terminology: CONCEPT,
     })
     expect(res.status).toBe(403)
@@ -103,7 +101,6 @@ describe("project-settings terminology carve-out (AQU-822)", () => {
     // closes that divergence.
     await seed()
     const res = await patchProjectSettings("dan", {
-      sourceLanguage: "en",
       terminology: CONCEPT,
     })
     expect(res.status).toBe(200)
@@ -112,13 +109,12 @@ describe("project-settings terminology carve-out (AQU-822)", () => {
   it("403s a below-maintainer write that changes any non-terminology key, even with the floor lowered", async () => {
     await seed('{"termbaseEditMinRole":400}')
     const bundled = await patchProjectSettings("carla", {
-      sourceLanguage: "fr", // changed alongside terminology
+      sourceLanguage: "fr",
       terminology: CONCEPT,
     })
-    expect(bundled.status).toBe(403)
+    expect(bundled.status).toBe(400)
 
     const otherKeyOnly = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
       validationCount: 3,
     })
     expect(otherKeyOnly.status).toBe(403)
@@ -129,40 +125,34 @@ describe("project-settings terminology carve-out (AQU-822)", () => {
     expect(stored.validationCount).toBeUndefined()
   })
 
-  it("403s a below-maintainer write that DROPS a non-terminology key", async () => {
-    // A removed key is a change too — otherwise a contributor could wipe the
-    // project's languages by omitting them from an otherwise terminology-only
-    // write.
+  it("keeps stored language keys when a terminology write omits them", async () => {
     await seed('{"termbaseEditMinRole":400}')
     const res = await patchProjectSettings("carla", { terminology: CONCEPT })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
     expect((await storedSettings()).sourceLanguage).toBe("en")
   })
 
   it("leaves the maintainer path untouched", async () => {
     await seed()
     const res = await patchProjectSettings("bob", {
-      sourceLanguage: "fr",
       terminology: CONCEPT,
       validationCount: 2,
     })
     expect(res.status).toBe(200)
     const stored = await storedSettings()
-    expect(stored.sourceLanguage).toBe("fr")
+    expect(stored.sourceLanguage).toBe("en")
     expect(stored.terminology).toEqual(CONCEPT)
   })
 
   it("preserves optimistic concurrency on a carve-out write", async () => {
     await seed('{"termbaseEditMinRole":400}')
     const first = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
       terminology: CONCEPT,
     })
     expect(first.status).toBe(200)
 
     // Same stale ifMatchVersion — must 409 with the current row, not clobber.
     const stale = await patchProjectSettings("carla", {
-      sourceLanguage: "en",
       terminology: [],
     })
     expect(stale.status).toBe(409)

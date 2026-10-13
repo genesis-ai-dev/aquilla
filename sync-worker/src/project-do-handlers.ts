@@ -208,8 +208,24 @@ export interface ServerPong {
   /** Echo of the ping's `ts`, when it sent one. */
   ts?: number
 }
+/**
+ * AQU-1839: the expiry of the verified token this connection is currently
+ * authorized by, in epoch ms (null in ALLOW_UNAUTHENTICATED dev, where there
+ * is no token to expire). Sent to the socket at handshake and again after
+ * every accepted `token.refresh`.
+ *
+ * Its arrival is also how the client learns this worker supports in-band
+ * refresh at all: a worker that predates it sends nothing, and the client
+ * keeps the old behaviour of being closed at expiry and reconnecting.
+ */
+export interface ServerTokenExpiry {
+  t: "token.expiry"
+  expiresAt: number | null
+}
+
 export type ProjectDoServerMessage =
   | ServerPong
+  | ServerTokenExpiry
   | ServerEventApplied
   | ServerEventStale
   | ServerPresence
@@ -287,8 +303,19 @@ export interface ClientPing {
   t: "ping"
   ts?: number
 }
+/**
+ * AQU-1839: a freshly minted sync token for THIS connection, sent before the
+ * current one expires. Accepting it in-band re-resolves the connection's role
+ * and pushes its expiry out, so a tab left open all day keeps one socket
+ * instead of being closed and reconnecting every token TTL (15 min).
+ */
+export interface ClientTokenRefresh {
+  t: "token.refresh"
+  token: string
+}
 export type ProjectDoClientMessage =
   | ClientPing
+  | ClientTokenRefresh
   | ClientOutboxEvent
   | ClientFocusClaim
   | ClientFocusRenew
@@ -311,6 +338,10 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
   const t = m.t
   if (t === "ping") {
     return typeof m.ts === "number" && Number.isFinite(m.ts) ? { t: "ping", ts: m.ts } : { t: "ping" }
+  }
+  if (t === "token.refresh") {
+    if (typeof m.token !== "string" || m.token.length === 0) return null
+    return { t: "token.refresh", token: m.token }
   }
   if (t === "focus.claim") {
     if (typeof m.cellId !== "string") return null
@@ -354,24 +385,95 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
 
 /**
  * Accept the client's connId when it is a sane opaque token and not already
- * held by a live socket; otherwise mint one. A collision can only come from a
- * buggy/malicious client — never merge two sockets onto one presence row.
+ * held by a live socket of a DIFFERENT user; otherwise mint one.
+ *
+ * AQU-1791: a collision is no longer necessarily a buggy client. The client
+ * now keeps one connId per tab in sessionStorage, so a tab that reconnects
+ * after a dirty drop re-presents the id its previous socket used — and that
+ * previous socket is still in the DO's connection map, because a socket that
+ * dies without a close frame is only noticed by the heartbeat sweep below.
+ * Refusing the id there is what produced the reported ghosts: the tab came
+ * back under a fresh id and the dead one's row stayed in the roster.
+ *
+ * So a collision whose holder is the SAME verified user is a takeover: the
+ * caller retires the superseded socket and the returning tab reuses its row.
+ * A collision across users is still refused (a client must not be able to
+ * evict someone else's presence by guessing their connId), as is a collision
+ * when the caller passes no identity.
  */
 export function resolveConnId(
   requested: string | null,
-  connections: ReadonlyMap<unknown, { connId: string }>,
+  connections: ReadonlyMap<unknown, { connId: string; userId?: string }>,
+  requestingUserId?: string,
 ): string {
   if (requested && /^[A-Za-z0-9_-]{8,64}$/.test(requested)) {
-    let taken = false
+    let takenByOther = false
     for (const c of connections.values()) {
-      if (c.connId === requested) {
-        taken = true
-        break
-      }
+      if (c.connId !== requested) continue
+      if (requestingUserId !== undefined && c.userId === requestingUserId) continue
+      takenByOther = true
+      break
     }
-    if (!taken) return requested
+    if (!takenByOther) return requested
   }
   return crypto.randomUUID()
+}
+
+/**
+ * AQU-1791: how long a connection that has proven it heartbeats may go silent
+ * before the DO treats its socket as dead and retires it.
+ *
+ * The client pings every 25s (`heartbeatIntervalMs` in ws-reconciler.ts), so
+ * three missed pings is the bar — short enough that a field team's ghost row
+ * clears within a couple of minutes, long enough that an ordinary GC pause,
+ * a backgrounded tab's throttled timer or one dropped frame never evicts a
+ * live user.
+ */
+export const PRESENCE_HEARTBEAT_TTL_MS = 90_000
+
+/** The per-connection bookkeeping the heartbeat sweep reads. */
+export interface HeartbeatTracked {
+  connId: string
+  userId: string
+  /** Epoch ms of the last frame received from this socket. */
+  lastSeenAt: number
+  /**
+   * Whether this socket has ever sent a `ping`. Only a connection that has
+   * proven it heartbeats is subject to the TTL — an older client that never
+   * pings would otherwise be evicted every TTL while perfectly alive, the
+   * same guard the client applies before killing silent sockets
+   * (`serverPongSeen` in ws-reconciler.ts).
+   */
+  heartbeatSeen: boolean
+}
+
+/**
+ * AQU-1791: connections that are half-open — still in the DO's map, so
+ * `sweepOrphanedPresence` (AQU-1374) considers their rows live, but silent
+ * well past the heartbeat they themselves established.
+ *
+ * This is the case AQU-1374 could not reach. A VPN drop, a sleeping laptop or
+ * a carrier handover leaves the socket OPEN on the server with no close/error
+ * event, so the row keeps a live connId and the roster keeps the ghost until
+ * the DO is evicted. The client's own reconnect then adds a second row, which
+ * is why one person in one tab was listed two or three times as "viewing".
+ *
+ * Returns the connections to retire; the caller closes each socket and runs
+ * its normal disconnect path, so presence.left / lock.released are emitted
+ * exactly as a clean close would.
+ */
+export function selectStaleConnections<T extends HeartbeatTracked>(
+  connections: Iterable<T>,
+  now: number,
+  ttlMs: number = PRESENCE_HEARTBEAT_TTL_MS,
+): T[] {
+  const stale: T[] = []
+  for (const conn of connections) {
+    if (!conn.heartbeatSeen) continue
+    if (now - conn.lastSeenAt <= ttlMs) continue
+    stale.push(conn)
+  }
+  return stale
 }
 
 // ── Lock state transitions (pure) ─────────────────────────────────────────
@@ -756,6 +858,72 @@ export function applyDisconnect(
 }
 
 /**
+ * AQU-1839: decide whether an in-band `token.refresh` may re-authorize an open
+ * connection. Pure so the policy is testable without a DO host; the caller
+ * (ProjectSync) does the signature verification and applies the outcome.
+ *
+ * Two refusals matter:
+ *
+ *  - **identity mismatch.** A connection is authorized as one user for its
+ *    whole life — presence, lock ownership and event authorship all key off
+ *    that identity. Accepting a token minted for somebody else would let one
+ *    socket change who it is mid-session, so the refresh is refused and the
+ *    connection keeps the authorization it already had.
+ *  - **already expired.** A token that is past its own `exp` buys nothing: it
+ *    would leave the connection due for the very sweep it was meant to avoid,
+ *    and treating it as a refresh would hide a broken client clock.
+ *
+ * A refresh that does not extend the expiry (a replayed token, or one minted
+ * from the same cache) is still accepted: it re-resolves the role, which is
+ * the other half of what the expiry close bought (see TOKEN_EXPIRED_CLOSE_CODE).
+ */
+export type TokenRefreshOutcome =
+  | { ok: true; role: number | null; tokenExpiresAt: number }
+  | { ok: false; reason: "identity-mismatch" | "expired" }
+
+export function resolveTokenRefresh(
+  conn: { numericUserId: number | null },
+  claims: { userId: number; role: number | null; exp: number },
+  now: number,
+): TokenRefreshOutcome {
+  if (conn.numericUserId !== null && claims.userId !== conn.numericUserId) {
+    return { ok: false, reason: "identity-mismatch" }
+  }
+  const tokenExpiresAt = claims.exp * 1000
+  if (tokenExpiresAt <= now) return { ok: false, reason: "expired" }
+  return { ok: true, role: claims.role, tokenExpiresAt }
+}
+
+/**
+ * AQU-1839: drop every focus lock held by one user and emit the releases.
+ *
+ * Needed when a `token.refresh` downgrades a connection to a read-only role.
+ * Before in-band refresh existed, the role change took effect by closing the
+ * socket, and the disconnect path released the locks on the way out; keeping
+ * the socket open has to release them explicitly, or a demoted user holds
+ * every cell they had open until the lease lapses — the exact lock-out the
+ * role gate on `focus.claim` exists to prevent.
+ *
+ * Locks are per user rather than per socket (see applyDisconnect), so this is
+ * keyed by userId too: a role is a property of the account, so a downgrade
+ * seen on one of the user's sockets applies to all of them.
+ */
+export function releaseUserLocks(
+  locks: ReadonlyMap<string, LockState>,
+  userId: string,
+  now: number,
+): { locks: Map<string, LockState>; emit: ProjectDoServerMessage[] } {
+  const nextLocks = clone(locks)
+  const emit: ProjectDoServerMessage[] = []
+  for (const [cellId, lock] of nextLocks) {
+    if (lock.userId !== userId) continue
+    nextLocks.delete(cellId)
+    emit.push({ t: "lock.released", cellId, by: { userId, ts: now } })
+  }
+  return { locks: nextLocks, emit }
+}
+
+/**
  * AQU-1374: reconcile the presence roster against the DO's live sockets.
  *
  * Presence rows are created at handshake and removed by applyDisconnect, which
@@ -769,9 +937,14 @@ export function applyDisconnect(
  *
  * Every row is keyed by the connId of the socket that created it, so a row
  * whose connId no longer has a live connection is definitively orphaned. That
- * makes this exact rather than heuristic — unlike a `ts`-based TTL, which would
- * evict a live but idle user, since the client sends `presence.update` only on
- * change and has no heartbeat.
+ * makes this exact rather than heuristic — unlike a `presence.update`-based
+ * TTL, which would evict a live but idle user, since the client publishes
+ * presence only on change.
+ *
+ * AQU-1791: this reaches only rows whose socket has LEFT the connection map.
+ * A half-open socket is still in it, so its row still looks live here — that
+ * residue is what `selectStaleConnections` (above) retires, keyed off the
+ * client's `ping` heartbeat rather than its presence traffic.
  *
  * Emits `presence.left` per dropped row, the same frame applyDisconnect sends,
  * so `PresenceStore.applyPresenceLeft` removes the peer with no client change.

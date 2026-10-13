@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  handleSearchPassagesRequest,
   handleSearchReadRequest,
   sanitizeFtsQuery,
 } from "../events/search-route"
@@ -70,6 +71,44 @@ describe("GET /api/v1/projects/:projectId/search", () => {
     expect(body.results).toHaveLength(1)
     expect(body.results[0].cellId).toBe("c1")
     expect(body.results[0].side).toBe("source")
+  })
+
+  // AQU-1566: a promoted caption leaves its cues live in a deleted staging (or
+  // track) file. The editor only drops hits from hidden files it can list,
+  // never a deleted one, so the caption came back twice, the second time
+  // under a blank file name. Deleted and hidden timeline files are not searched.
+  it("returns one hit per caption after it became the file's rows", async () => {
+    const caption = "Earlier caption"
+    const { db } = await makeTestDb({
+      files: [
+        { id: "file-x", project_id: "proj-a", name: "Episode", kind: "srt", event_id: "e-f1" },
+        { id: "staged", project_id: "proj-a", name: "captions.srt", kind: "srt", role: "timeline-content",
+          anchor_file_id: "file-x", event_id: "e-f2", deleted_at: 5 },
+        { id: "track", project_id: "proj-a", name: "Track B", kind: "vtt", role: "timeline-content",
+          anchor_file_id: "file-x", event_id: "e-f3" },
+        { id: "gone", project_id: "proj-a", name: "Deleted doc", kind: "codex", event_id: "e-f4", deleted_at: 6 },
+      ],
+      cells: [
+        makeCell({ cell_id: "row1", side: "source", value: caption }),
+        makeCell({ cell_id: "cue1", side: "source", value: caption, file_id: "staged" }),
+        makeCell({ cell_id: "cue2", side: "source", value: caption, file_id: "track" }),
+        makeCell({ cell_id: "doc1", side: "source", value: caption, file_id: "gone" }),
+        // A cell whose file row is missing is still read as before.
+        makeCell({ cell_id: "orphan", side: "source", value: caption, file_id: "no-row" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    for (const [path, handle] of [
+      ["search?q=earlier%20caption", handleSearchReadRequest],
+      ["search/passages?q=earlier%20caption", handleSearchPassagesRequest],
+    ] as const) {
+      const res = (await handle(new Request(`https://w/api/v1/projects/proj-a/${path}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }), envWith(db)))!
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { results: Array<{ cellId: string; fileId: string }> }
+      expect(body.results.map((r) => r.cellId).sort()).toEqual(["orphan", "row1"])
+    }
   })
 
   it("filters by side when specified", async () => {

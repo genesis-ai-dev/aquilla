@@ -1,3 +1,7 @@
+// AQU-1774 adds the labelled surface below: on the workbench, New chat is a
+// visible text button and the menu beside it is named for what it holds, so
+// neither the action nor the chat list depends on hovering an icon.
+//
 // AQU-1653: the chat menu's job changed. It used to guard one destructive
 // "Reset chat…" behind a confirmation, because a reset put the conversation out
 // of reach. Now the server lists a user's past chats back, so the menu starts a
@@ -138,5 +142,91 @@ describe("AgentChatOptions", () => {
     expect(past).toHaveAttribute("aria-disabled", "true")
     fireEvent.click(past)
     expect(onOpenSession).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-1774: the reported bug was discoverability, not safety — AQU-1653 had
+// already made starting a new chat recoverable, but it lived behind an
+// icon-only "…" trigger, so nothing on screen said "new chat" and users read
+// the icon as a destructive reset. On the labelled surface the action is a
+// button with words on it, and the menu next to it is the chat list by name.
+describe("AgentChatOptions — labelled surface", () => {
+  it("offers New chat as a visible text button, no menu to open first", async () => {
+    const user = userEvent.setup()
+    const onNewChat = vi.fn()
+    render(<AgentChatOptions labelled onNewChat={onNewChat} sessions={SESSIONS} currentSessionId="s-new" />)
+
+    const button = screen.getByRole("button", { name: "New chat" })
+    // The whole point: the label is readable text, not an aria-label standing
+    // in for an unlabelled glyph.
+    expect(button).toHaveTextContent("New chat")
+    expect(screen.queryByRole("button", { name: "Chat options" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument()
+
+    await user.click(button)
+    expect(onNewChat).toHaveBeenCalledTimes(1)
+    // Still no confirmation: the action is not destructive (AQU-1653).
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  })
+
+  it("keeps the honest caveat on the button it belongs to", async () => {
+    const user = userEvent.setup()
+    render(<AgentChatOptions labelled onNewChat={vi.fn()} sessions={SESSIONS} currentSessionId="s-new" />)
+
+    await user.hover(screen.getByRole("button", { name: "New chat" }))
+    const tip = await screen.findByRole("tooltip")
+    expect(tip).toHaveTextContent(/reopen it under Previous chats/i)
+    expect(tip).toHaveTextContent(/not the proposal cards/i)
+  })
+
+  it("names the chats menu for what it holds and opens the chat chosen", async () => {
+    const user = userEvent.setup()
+    const onOpenSession = vi.fn()
+    render(
+      <AgentChatOptions
+        labelled
+        onNewChat={vi.fn()}
+        sessions={SESSIONS}
+        currentSessionId="s-new"
+        onOpenSession={onOpenSession}
+      />,
+    )
+
+    const trigger = screen.getByRole("button", { name: "Previous chats" })
+    expect(trigger).toHaveTextContent("Previous chats")
+    await user.click(trigger)
+
+    const rows = await screen.findAllByTestId("agent-chat-history-item")
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Why is MRK 4 flagged? — open now",
+      "Draft GEN 1",
+      "Untitled chat",
+    ])
+    // The trigger says "Previous chats", so repeating it as an inert row
+    // inside would be chrome for its own sake.
+    expect(screen.queryByRole("menuitem", { name: "Previous chats" })).not.toBeInTheDocument()
+    // New chat stays out of this menu — it is the button next to it.
+    expect(screen.queryByRole("menuitem", { name: /New chat/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("menuitem", { name: "Draft GEN 1" }))
+    expect(onOpenSession).toHaveBeenCalledWith("s-old")
+  })
+
+  it("still says the list failed rather than showing it as empty", async () => {
+    const user = userEvent.setup()
+    render(<AgentChatOptions labelled onNewChat={vi.fn()} historyStatus="error" />)
+
+    await user.click(screen.getByRole("button", { name: "Previous chats" }))
+    expect(await screen.findByRole("menuitem", { name: "Couldn't load your chats." })).toBeInTheDocument()
+  })
+
+  it("blocks the labelled New chat button while an apply or undo is in progress", async () => {
+    const onNewChat = vi.fn()
+    render(<AgentChatOptions labelled onNewChat={onNewChat} sessions={SESSIONS} currentSessionId="s-new" disabled />)
+
+    const button = screen.getByRole("button", { name: "New chat" })
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(onNewChat).not.toHaveBeenCalled()
   })
 })

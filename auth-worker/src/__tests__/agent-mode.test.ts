@@ -9,12 +9,7 @@
 // consent.
 
 import { describe, expect, it } from "vitest"
-import {
-  AGENT_MODE_DEFAULT,
-  agentReactStateValue,
-  readAgentMode,
-  readAgentReactState,
-} from "../lib/agent-mode"
+import { AGENT_MODE_DEFAULT, readAgentMode } from "../lib/agent-mode"
 
 describe("readAgentMode", () => {
   it("defaults to all-off/full when the key is absent, null, or not an object", () => {
@@ -63,40 +58,5 @@ describe("readAgentMode", () => {
     first.react = true
     expect(readAgentMode({}).react).toBe(false)
     expect(AGENT_MODE_DEFAULT.react).toBe(false)
-  })
-})
-
-describe("readAgentReactState", () => {
-  it("reads an empty bookmark when absent or malformed", () => {
-    expect(readAgentReactState(undefined)).toEqual({ cursor: null, lastReactionAt: {} })
-    expect(readAgentReactState({ agentReactState: 7 })).toEqual({
-      cursor: null,
-      lastReactionAt: {},
-    })
-  })
-
-  it("round-trips a cursor and cooldown stamps", () => {
-    const value = agentReactStateValue({
-      cursor: 1_700_000_000_000,
-      lastReactionAt: { "file-a": "2026-08-28T10:00:00.000Z" },
-    })
-    expect(readAgentReactState({ agentReactState: value })).toEqual({
-      cursor: 1_700_000_000_000,
-      lastReactionAt: { "file-a": "2026-08-28T10:00:00.000Z" },
-    })
-  })
-
-  it("rejects a cursor that is not a usable epoch and drops non-string stamps", () => {
-    // A zero/negative/NaN cursor must read as "never swept" — reacting to the
-    // whole of a project's history is exactly what the lookback default exists
-    // to prevent.
-    expect(readAgentReactState({ agentReactState: { cursor: 0 } }).cursor).toBeNull()
-    expect(readAgentReactState({ agentReactState: { cursor: -5 } }).cursor).toBeNull()
-    expect(readAgentReactState({ agentReactState: { cursor: "soon" } }).cursor).toBeNull()
-    expect(
-      readAgentReactState({
-        agentReactState: { lastReactionAt: { good: "2026-01-01T00:00:00Z", bad: 5 } },
-      }).lastReactionAt,
-    ).toEqual({ good: "2026-01-01T00:00:00Z" })
   })
 })

@@ -129,11 +129,11 @@ export function mergeConcepts(
   // Union-merge renderings: case-insensitive dedup, survivor wins on collision.
   const seen = new Map<string, import("./types").TermRendering>()
   for (const r of survivor.renderings) {
-    seen.set(r.rendering.toLowerCase(), r)
+    seen.set(`${r.laneId ?? ""}\0${r.rendering.toLowerCase()}`, r)
   }
   for (const other of others) {
     for (const r of other.renderings) {
-      const key = r.rendering.toLowerCase()
+      const key = `${r.laneId ?? ""}\0${r.rendering.toLowerCase()}`
       if (!seen.has(key)) seen.set(key, r)
     }
   }

@@ -359,8 +359,8 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
  * AQU-1771: how many of the org's projects make "who sees the member list" /
  * "who sees each member's progress" stricter than the org does. Its own route
  * rather than part of every settings response: the settings GET is read on
- * nearly every page, and this count has to look inside each project's
- * settings — only the Security page, which shows the line, asks for it.
+ * nearly every page and only the Security page shows this line, so only it
+ * pays for the per-project read (the 0161 generated columns, org-scoped).
  * Any org member may read it; it is a count, and names no project.
  */
 orgSettings.get("/:orgId/settings/visibility-overrides", authMiddleware, async (c) => {

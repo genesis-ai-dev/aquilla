@@ -318,7 +318,17 @@ CREATE TABLE project_settings (
       GENERATED ALWAYS AS (CASE (settings::jsonb) ->> 'bibleResourcesEnabled' WHEN 'true' THEN TRUE WHEN 'false' THEN FALSE END) STORED,
     -- One boolean per Bible data enrichment; readers validate it
     -- (db/shared/bible-enrichments.ts readBibleEnrichments).
-    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED
+    bible_enrichments JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'bibleEnrichments') STORED,
+    -- AQU-1771 (0161): this project's own, stricter-only floors for who sees
+    -- its member list and each member's progress — read on every roster and
+    -- named-progress check (members, mentions, assignments, activity), so they
+    -- must never open the blob. NULL unless the key holds a JSON number; the
+    -- readers keep only role-ladder values (db/shared/visibility-floors.ts).
+    -- One line each, for the dev-stack reconciler (see bible_resources_enabled).
+    roster_view_min_role TEXT
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'rosterViewMinRole') = 'number' THEN (settings::jsonb) ->> 'rosterViewMinRole' END) STORED,
+    member_progress_view_min_role TEXT
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'memberProgressViewMinRole') = 'number' THEN (settings::jsonb) ->> 'memberProgressViewMinRole' END) STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 

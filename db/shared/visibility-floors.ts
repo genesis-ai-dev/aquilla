@@ -73,30 +73,14 @@ export interface ProjectVisibilityOverrides {
 const NO_OVERRIDES: ProjectVisibilityOverrides = { rosterViewMinRole: null, memberProgressViewMinRole: null }
 
 /**
- * The own values of the project_settings rows `source` (a FROM … WHERE …
- * clause aliasing project_settings as `ps`) yields.
- *
- * The blob can run to megabytes and there is no column for these keys, so it
- * is parsed only when its text names one of them — almost every project
- * follows its org, and for those the read is a substring scan. The MATERIALIZED
- * CTE is a fence: without it the planner inlines `j` into each CASE below and
- * parses the blob once per reference instead of once per row, and it evaluates
- * the scan only for the rows `source` selects (its own WHERE/JOIN filters run
- * first), never for every project in the table.
+ * The own values come from the STORED generated columns migration 0161 added
+ * (`roster_view_min_role`, `member_progress_view_min_role`), never from the
+ * settings blob: that can run to megabytes, and these are read on every
+ * roster and named-progress check.
  */
-function overridesSql(source: string, onlyWithOwnValues = false): string {
-  return `WITH s AS MATERIALIZED (
-           SELECT ps.project_id AS project_id,
-                  CASE WHEN strpos(ps.settings, 'ViewMinRole') > 0 THEN ps.settings::jsonb END AS j
-             ${source}
-         )
-         SELECT project_id,
-                CASE WHEN jsonb_typeof(j -> 'rosterViewMinRole') = 'number'
-                     THEN j ->> 'rosterViewMinRole' END AS roster,
-                CASE WHEN jsonb_typeof(j -> 'memberProgressViewMinRole') = 'number'
-                     THEN j ->> 'memberProgressViewMinRole' END AS progress
-           FROM s${onlyWithOwnValues ? "\n          WHERE j IS NOT NULL" : ""}`
-}
+const OVERRIDE_COLUMNS = `ps.project_id AS project_id,
+              ps.roster_view_min_role AS roster,
+              ps.member_progress_view_min_role AS progress`
 
 interface OverrideRow { project_id: string; roster: string | null; progress: string | null }
 
@@ -120,8 +104,9 @@ export async function loadProjectVisibilityOverrides(
   if (ids.length === 0) return out
   const { results } = await db
     .prepare(
-      overridesSql(`FROM project_settings ps
-            WHERE ps.project_id IN (${ids.map(() => "?").join(", ")})`),
+      `SELECT ${OVERRIDE_COLUMNS}
+         FROM project_settings ps
+        WHERE ps.project_id IN (${ids.map(() => "?").join(", ")})`,
     )
     .bind(...ids)
     .all<OverrideRow>()
@@ -143,12 +128,11 @@ export async function loadOrgProjectVisibilityOverrides(
 ): Promise<Map<string, ProjectVisibilityOverrides>> {
   const { results } = await db
     .prepare(
-      overridesSql(
-        `FROM projects p
-             JOIN project_settings ps ON ps.project_id = p.id
-            WHERE p.org_id = ? AND p.archived_at IS NULL`,
-        true,
-      ),
+      `SELECT ${OVERRIDE_COLUMNS}
+         FROM projects p
+         JOIN project_settings ps ON ps.project_id = p.id
+        WHERE p.org_id = ? AND p.archived_at IS NULL
+          AND (ps.roster_view_min_role IS NOT NULL OR ps.member_progress_view_min_role IS NOT NULL)`,
     )
     .bind(orgId)
     .all<OverrideRow>()

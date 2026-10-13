@@ -96,7 +96,7 @@ import {
   type AssigneeWorkload,
   type UnitAssignment,
 } from "@/lib/sync/assignments"
-import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { UserError } from "@/lib/errors/user-error"
 import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { ROLE } from "@/lib/frontier/roles"
@@ -610,14 +610,33 @@ export function ProjectOverview() {
   // policy object (a new one every render).
   const policyAllowSelfAssignment = projectPolicy.allowSelfAssignment
   const policyAssignmentMinRole = projectPolicy.assignmentMinRole
-  const canEditVisibility = canEditRosterProgressFloor(orgRoleLevel)
+  // AQU-1771: the floors THIS project enforces — its organization's, or its
+  // own where stricter (a project can hide more than its org, never less).
+  const rosterFloor = projectPolicy.rosterViewMinRole
+  const progressFloor = projectPolicy.memberProgressViewMinRole
   // Names on the Team card are the roster. A progress floor of maintainer
   // must not keep that card (and its "maintainers & owners" badge) open after
   // the roster floor was raised to owner-only.
-  const teamNamesFloor = Math.max(
-    orgSettings.memberProgressViewMinRole,
-    orgSettings.rosterViewMinRole,
-  )
+  const teamNamesFloor = Math.max(progressFloor.effective, rosterFloor.effective)
+  // What the Team card would show if this project followed its org on
+  // progress: choosing it (or anything lower, which the picker refuses)
+  // clears the project's own progress value.
+  const teamOrgShown = Math.max(progressFloor.org, rosterFloor.effective)
+  // The badges write THIS project's own values, so they follow the project
+  // settings write gate — Maintainer and up on the project, which every org
+  // owner is — not the org-owner gate that guards the org's own setting.
+  const canEditVisibility = Boolean(projectSettings?.canEdit) && projectPolicy.ready
+  const patchProjectVisibility = async (
+    key: "rosterViewMinRole" | "memberProgressViewMinRole",
+    next: number,
+    followAtOrBelow: number,
+  ) => {
+    if (!projectSettings) return
+    const own = next > followAtOrBelow ? next : undefined
+    // Following the org already and choosing to follow it: nothing to write.
+    if (own === undefined && projectSettings.settings[key] === undefined) return
+    await projectSettings.patch({ [key]: own })
+  }
 
   const loadRow = useCallback(async () => {
     if (!jwt || portfolioOrgId == null) return
@@ -1309,9 +1328,11 @@ export function ProjectOverview() {
           // Sam ruled this a real gap and a later ticket — **TODO: assignment-
           // level audio on dubbing projects** — and text-only until then.
           showAudio={assignmentsShowAudio(selectedPlanUnit, planAudioFiles)}
-          minRole={orgSettings.memberProgressViewMinRole}
+          // AQU-1771: names AND progress, so the higher of the two floors
+          // this project enforces — the same gate as the Team card.
+          minRole={teamNamesFloor}
           viewerRoleLevel={projectRoleLevel}
-          ready={orgSettings.hasFetched}
+          ready={projectPolicy.ready}
           assign={planAssignTarget}
         />
       }
@@ -2463,7 +2484,7 @@ export function ProjectOverview() {
                 <SectionVisibilityGate
                   minRole={teamNamesFloor}
                   viewerRoleLevel={projectRoleLevel}
-                  ready={orgSettings.hasFetched}
+                  ready={projectPolicy.ready}
                 >
                   <div
                     className={cn(
@@ -2496,20 +2517,35 @@ export function ProjectOverview() {
                       <SectionVisibilityBadge
                         minRole={teamNamesFloor}
                         canEdit={canEditVisibility}
-                        onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                        // AQU-1771: writes THIS project's own progress floor.
+                        // The org's setting stays the org's (Settings → Security).
+                        onChangeMinRole={async (next) => {
+                          await patchProjectVisibility("memberProgressViewMinRole", next, teamOrgShown)
+                        }}
                         description={t("org.projectOverview.teamVisibilityDescription")}
-                        // AQU-1779: the badge shows the higher of the two floors
-                        // but writes only the progress floor, so a value below
-                        // the roster floor would save, snap back, and loosen
-                        // per-member progress org-wide unseen. Offer only what
-                        // can show; the roster is lowered on the Members card.
-                        minSelectableRole={orgSettings.rosterViewMinRole}
-                        // Re-picking the shown floor still writes when progress
-                        // sits below it, so an owner can undo the old loosening.
-                        storedMinRole={orgSettings.memberProgressViewMinRole}
-                        belowMinSelectableHint={t("org.projectOverview.teamVisibilityRosterFloorHint", {
-                          floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
-                        })}
+                        // AQU-1779 / AQU-1771: the badge shows the higher of the
+                        // two floors but writes only progress, so nothing below
+                        // the member list can show; and a project is never
+                        // looser than its org.
+                        minSelectableRole={teamOrgShown}
+                        storedMinRole={progressFloor.effective}
+                        orgDefaultRole={rosterFloor.project == null ? teamOrgShown : undefined}
+                        origin={
+                          (progressFloor.effective >= rosterFloor.effective
+                            ? progressFloor.project
+                            : rosterFloor.project) != null
+                            ? "project"
+                            : "org"
+                        }
+                        belowMinSelectableHint={
+                          rosterFloor.effective > progressFloor.org
+                            ? t("org.projectOverview.teamVisibilityRosterFloorHint", {
+                                floor: t(visibilityRolePickerLabelKey(rosterFloor.effective)),
+                              })
+                            : t("org.projectOverview.visibilityOrgFloorHint", {
+                                floor: t(visibilityRolePickerLabelKey(progressFloor.org)),
+                              })
+                        }
                       />
                     </div>
                     {teamOpen && (
@@ -2607,15 +2643,15 @@ export function ProjectOverview() {
                   archived project. */}
               {canManage && !isArchived && (
                 <SectionVisibilityGate
-                  minRole={orgSettings.rosterViewMinRole}
+                  minRole={rosterFloor.effective}
                   viewerRoleLevel={projectRoleLevel}
-                  ready={orgSettings.hasFetched}
+                  ready={projectPolicy.ready}
                 >
                   <div
                     className={cn(
                       "relative rounded-lg border bg-card px-5",
                       membersOpen ? "py-5" : "py-3",
-                      sectionTintClass(orgSettings.rosterViewMinRole),
+                      sectionTintClass(rosterFloor.effective),
                     )}
                     data-testid="overview-members-card"
                     data-expanded={membersOpen ? "true" : "false"}
@@ -2639,10 +2675,20 @@ export function ProjectOverview() {
                         </button>
                       </h2>
                       <SectionVisibilityBadge
-                        minRole={orgSettings.rosterViewMinRole}
+                        minRole={rosterFloor.effective}
                         canEdit={canEditVisibility}
-                        onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
+                        // AQU-1771: writes THIS project's own member-list floor;
+                        // choosing the org's setting follows the org again.
+                        onChangeMinRole={async (next) => {
+                          await patchProjectVisibility("rosterViewMinRole", next, rosterFloor.org)
+                        }}
                         description={t("org.projectOverview.membersVisibilityDescription")}
+                        minSelectableRole={rosterFloor.org}
+                        orgDefaultRole={rosterFloor.org}
+                        origin={rosterFloor.project != null ? "project" : "org"}
+                        belowMinSelectableHint={t("org.projectOverview.visibilityOrgFloorHint", {
+                          floor: t(visibilityRolePickerLabelKey(rosterFloor.org)),
+                        })}
                       />
                     </div>
                     {membersOpen && (

@@ -123,6 +123,15 @@ export interface SectionVisibilityBadgeProps {
   /** Why the options below `minSelectableRole` are off. Whenever any option
    *  is disabled, a circled-i beside the picker's label expands it in place. */
   belowMinSelectableHint?: string
+  /**
+   * AQU-1771: where the shown floor comes from, on a section a PROJECT can make
+   * stricter than its org — "org" when the project follows its organization,
+   * "project" when the project set its own. Shown in the badge itself so it is
+   * never a guess which one a change would touch. Omit on org-only sections.
+   */
+  origin?: "org" | "project"
+  /** AQU-1771: the option that means "follow the organization" — labelled so. */
+  orgDefaultRole?: number
   className?: string
 }
 
@@ -140,6 +149,8 @@ export function SectionVisibilityBadge({
   minSelectableRole,
   storedMinRole,
   belowMinSelectableHint,
+  origin,
+  orgDefaultRole,
   className,
 }: SectionVisibilityBadgeProps) {
   const t = useT()
@@ -147,7 +158,17 @@ export function SectionVisibilityBadge({
   const [busy, setBusy] = useState(false)
   const [hintOpen, setHintOpen] = useState(false)
   const hintId = useId()
-  const label = t(visibilityFloorLabelKey(minRole))
+  const floorLabel = t(visibilityFloorLabelKey(minRole))
+  const originLabel = origin === "project"
+    ? t("org.sectionVisibilityBadge.originProject")
+    : origin === "org"
+      ? t("org.sectionVisibilityBadge.originOrg")
+      : null
+  const label = originLabel ? `${floorLabel} · ${originLabel}` : floorLabel
+  const optionLabel = (opt: (typeof VISIBILITY_ROLE_OPTIONS)[number]) =>
+    opt.level === orgDefaultRole
+      ? t("org.sectionVisibilityBadge.orgDefaultOption", { label: t(opt.labelKey) })
+      : t(opt.labelKey)
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
   const isSelectable = (level: number) => minSelectableRole == null || level >= minSelectableRole
@@ -163,7 +184,15 @@ export function SectionVisibilityBadge({
       )}
     >
       <Icon className="size-3" />
-      {label}
+      {floorLabel}
+      {originLabel && (
+        <>
+          {" "}
+          <span className="text-muted-foreground/70" data-testid="section-visibility-origin">
+            · {originLabel}
+          </span>
+        </>
+      )}
       {interactive && <ChevronDown className="size-3" />}
     </Badge>
   )
@@ -228,7 +257,7 @@ export function SectionVisibilityBadge({
             )}
           </div>
           <Select
-            items={VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: t(opt.labelKey) }))}
+            items={VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: optionLabel(opt) }))}
             value={String(minRole)}
             onValueChange={(v) => void handleChange(v)}
             disabled={busy}
@@ -240,7 +269,7 @@ export function SectionVisibilityBadge({
               <SelectGroup>
                 {VISIBILITY_ROLE_OPTIONS.map((opt) => (
                   <SelectItem key={opt.level} value={String(opt.level)} disabled={!isSelectable(opt.level)}>
-                    {t(opt.labelKey)}
+                    {optionLabel(opt)}
                   </SelectItem>
                 ))}
               </SelectGroup>

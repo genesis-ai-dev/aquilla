@@ -32,6 +32,21 @@ describe("isRestrictedFloor / sectionTintClass", () => {
 })
 
 describe("SectionVisibilityBadge", () => {
+  // AQU-1771: on a section a project can make stricter, the badge says where
+  // the shown setting comes from; org-only sections say nothing extra.
+  it("tags the badge with the setting's origin only when told one", () => {
+    const { rerender } = render(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} />)
+    expect(screen.queryByTestId("section-visibility-origin")).toBeNull()
+    rerender(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} origin="org" />)
+    expect(screen.getByTestId("section-visibility-badge")).toHaveTextContent(
+      "Only maintainers & owners can see this · Org default",
+    )
+    rerender(<SectionVisibilityBadge minRole={ROLE.OWNER} origin="project" />)
+    expect(screen.getByTestId("section-visibility-badge")).toHaveTextContent(
+      "Only owners can see this · Stricter for this project",
+    )
+  })
+
   it("renders a plain, non-interactive badge when the caller cannot edit", () => {
     render(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} />)
     const badge = screen.getByTestId("section-visibility-badge")

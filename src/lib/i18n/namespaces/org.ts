@@ -612,6 +612,10 @@ export const org = defineNamespace({
     // never be more open than the member list.
     "org.projectOverview.teamVisibilityRosterFloorHint":
       "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
+    // AQU-1771: under a project's Team / Members visibility picker when the
+    // options below the organization's setting are greyed out.
+    "org.projectOverview.visibilityOrgFloorHint":
+      "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, an org owner lowers it in Settings → Security first.",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
@@ -959,6 +963,11 @@ export const org = defineNamespace({
     "org.sectionVisibilityBadge.changeVisibilityAriaLabel": "{label}. Change section visibility",
     "org.sectionVisibilityBadge.whoCanSeeLabel": "Who can see this section",
     "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": "Why some options are unavailable",
+    // AQU-1771: on a project's Team / Members badge, where the shown setting
+    // comes from — the organization, or this project's own stricter choice.
+    "org.sectionVisibilityBadge.originOrg": "Org default",
+    "org.sectionVisibilityBadge.originProject": "Stricter for this project",
+    "org.sectionVisibilityBadge.orgDefaultOption": "{label} (org default)",
 
     // -- WorkloadRollup: org Overview team-workload manager rollup --
     "org.workloadRollup.title": "Team workload",
@@ -2671,6 +2680,28 @@ export const org = defineNamespace({
           "Note in the project overview's Team card visibility popover, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the card shows people, so it can't be more open than the member list) and where to lower the member list first. 'Members card' is the card of that name on the same page; 'Settings → Security' is the org settings page — use the localized names of both.",
         placeholders: {
           floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
+        },
+      },
+      "org.sectionVisibilityBadge.originOrg": {
+        description:
+          "Short tag after a project's 'who can see this section' badge (e.g. 'Only maintainers & owners can see this · Org default') when the project follows its organization's setting.",
+      },
+      "org.sectionVisibilityBadge.originProject": {
+        description:
+          "Short tag after a project's 'who can see this section' badge when the project chose its own setting, which can only ever be stricter (hide more) than the organization's.",
+      },
+      "org.sectionVisibilityBadge.orgDefaultOption": {
+        description:
+          "An option in a project's 'Who can see this section' picker: the role choice that equals the organization's setting. Choosing it makes the project follow the organization again.",
+        placeholders: {
+          label: "The option's already-localized role label, e.g. 'Maintainers and owners'.",
+        },
+      },
+      "org.projectOverview.visibilityOrgFloorHint": {
+        description:
+          "Note in a project's Team / Members visibility popover, expanded from a small circled-i button when the options below the organization's setting are greyed out. A project may only hide more than its organization. 'Settings → Security' is the org settings page — use its localized name.",
+        placeholders: {
+          floor: "The organization's current setting as its already-localized picker label, e.g. 'Maintainers and owners'.",
         },
       },
       "org.sectionVisibilityBadge.whyOptionsOffAriaLabel": {

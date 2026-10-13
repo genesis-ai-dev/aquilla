@@ -174,7 +174,12 @@ export interface PlanAssignmentsProps {
    * behaves as it did.
    */
   unitSectionKeys?: readonly string[]
-  /** The org's memberProgressViewMinRole. Same floor the Team card uses. */
+  /**
+   * The floor the Team card uses: the HIGHER of the project's effective
+   * member-progress and member-list floors (each the org's, or the project's
+   * own when stricter — AQU-1771). Not the progress floor alone: every row
+   * prints a name, and a name is member-list information.
+   */
   minRole: number
   viewerRoleLevel: number | null | undefined
   /** True once that floor is known; false renders nothing at all. */
@@ -183,12 +188,13 @@ export interface PlanAssignmentsProps {
 }
 
 /**
- * GATED ON memberProgressViewMinRole (AQU-485), exactly as the Team card is —
- * this is one person's productivity broken out by name, which is precisely what
- * that org setting governs. NOT on `canPlan`: that is the MAINTAINER floor for
- * setting dates and marking units done, a different question with a different
- * answer, and reusing it here would both show this to maintainers whose org
- * hid per-member progress and hide it from the contributors an org deliberately
+ * GATED LIKE THE TEAM CARD (AQU-485, AQU-1771): one person's productivity
+ * broken out by name, so the caller needs the member-progress floor AND the
+ * member-list floor this project enforces — `minRole` is the higher of the
+ * two. NOT on `canPlan`: that is the MAINTAINER floor for setting dates and
+ * marking units done, a different question with a different answer, and
+ * reusing it here would both show this to maintainers whose org hid
+ * per-member progress and hide it from the contributors an org deliberately
  * opened it to.
  */
 export function PlanAssignments({

@@ -7693,9 +7693,17 @@ export function ProjectWorkspace() {
               // was only ever refreshed on import/settings frames. The pushed
               // file-scope counts are the same three numbers, so a peer's save
               // now moves the bar live instead of waiting for a remount —
-              // without the GET /files that refreshing it would cost. Only the
-              // default lane: the rollup is one row per file, and a named
-              // lane's numbers are not what that row reports.
+              // without the GET /files that refreshing it would cost.
+              //
+              // Only the default lane, because that is the lane the rollup
+              // itself is pinned to: files-read-route takes its filled and
+              // approved counts from the '' bridge lane, falling back to the
+              // single target lane when a project has no bridge (AQU-1594).
+              // On such a project no frame ever matches and the bar keeps its
+              // old refresh — the one thing that must not happen is a named
+              // lane's numbers landing in a row reporting the bridge's. The
+              // denominator is safe either way: it is a fact about the source
+              // text, so every lane's row carries the same one (AQU-1599).
               if (msg.lane === "") {
                 setAllFilesProgressSnapshot((current) => {
                   const existing = current.get(msg.file)

@@ -2011,13 +2011,6 @@ export async function handleEventsWriteRequest(
       await Promise.all(broadcasts)
     }
 
-    // Inline each committed cell's CURRENT projected rows (post-commit) so
-    // clients apply the head directly instead of a GET …/cells?cellIds=
-    // round-trip per event. ONE SELECT for every cell this request touched;
-    // skipped when none qualify. The same frames go to two places: the
-    // ProjectSync DO broadcast (peers) and the HTTP response `applied[]`
-    // (the author's own client, which would otherwise refetch after its
-    // outbox flush — see src/lib/sync/outbox-flush.ts onApplied).
     // AQU-1832: read back the progress rows this request's recompute just
     // wrote and broadcast them, so a peer's client applies the new numbers
     // instead of firing the `/progress` GET its `event.applied` handler used
@@ -2045,6 +2038,13 @@ export async function handleEventsWriteRequest(
       }
     }
 
+    // Inline each committed cell's CURRENT projected rows (post-commit) so
+    // clients apply the head directly instead of a GET …/cells?cellIds=
+    // round-trip per event. ONE SELECT for every cell this request touched;
+    // skipped when none qualify. The same frames go to two places: the
+    // ProjectSync DO broadcast (peers) and the HTTP response `applied[]`
+    // (the author's own client, which would otherwise refetch after its
+    // outbox flush — see src/lib/sync/outbox-flush.ts onApplied).
     const rowsByCell = await readEventAppliedRows(db, newEntries)
     const progressPushedFiles = new Set(pushFramesByFile.keys())
     for (const entry of newEntries) {

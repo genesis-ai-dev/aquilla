@@ -21,9 +21,15 @@ interface VoiceDetailsProps {
   view: CellVoiceView
   /** A speaker's name, or the "Unknown speaker" text. */
   nameOf: (entityId: BkpEntityId | undefined) => string
+  /**
+   * AQU-1689: where the details are shown. In the chip's popover (the
+   * default) the title names the popover; in the cell's Context tab it is a
+   * plain section heading.
+   */
+  placement?: "popover" | "section"
 }
 
-export function VoiceDetails({ id, view, nameOf }: VoiceDetailsProps) {
+export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceDetailsProps) {
   const t = useT()
   const { context, voices } = view
   const shown = distinctVoices(voiceSequence(context.index, voices))
@@ -45,7 +51,11 @@ export function VoiceDetails({ id, view, nameOf }: VoiceDetailsProps) {
 
   return (
     <div id={id} data-testid="voice-details" className="flex flex-col gap-2.5 text-xs">
-      <PopoverTitle className="text-sm">{t("bibleData.voices.popoverTitle")}</PopoverTitle>
+      {placement === "popover" ? (
+        <PopoverTitle className="text-sm">{t("bibleData.voices.popoverTitle")}</PopoverTitle>
+      ) : (
+        <h4 className="text-sm font-medium">{t("bibleData.voices.popoverTitle")}</h4>
+      )}
       <ul className="flex flex-col gap-2.5">
         {shown.map((voice) => (
           <li key={voiceListKey(voice)}>

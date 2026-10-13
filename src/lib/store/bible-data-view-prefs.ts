@@ -1,6 +1,8 @@
 /**
  * bible-data-view-prefs — each person's view options for Bible data (AQU-1687):
- * voice chips on/off, speech rails on/off, and the label language.
+ * voice chips on/off, speech rails on/off, and the label language. AQU-1689
+ * adds Who's Who: when mention highlights show (on hover, always, or never)
+ * and how many implied-subject hints the source text shows.
  *
  * Device-local, like the "Show cell labels" switch: what a person likes to see
  * while they read, not a project fact. Whether Voices exists at all is the
@@ -11,7 +13,9 @@
  * switch on something the person did not choose.
  *
  * Key schema: `aq.bible-data-view.v1` →
- *   { voiceChips?: boolean, speechRails?: boolean, labelMode?: VoiceLabelMode }
+ *   { voiceChips?: boolean, speechRails?: boolean, labelMode?: VoiceLabelMode,
+ *     whosWhoHighlights?: WhosWhoHighlightMode,
+ *     impliedSubjectHints?: ImpliedSubjectHintMode }
  */
 
 import { useSyncExternalStore } from "react"
@@ -19,16 +23,49 @@ import { DEFAULT_VOICE_LABEL_MODE, isVoiceLabelMode, type VoiceLabelMode } from 
 
 const STORAGE_KEY = "aq.bible-data-view.v1"
 
+/**
+ * When Who's Who marks the people a source word refers to:
+ *   hover  — a light underline at rest; hovering or focusing a mention tints
+ *            every mention of that participant in view;
+ *   always — every mention carries its participant's tint;
+ *   off    — no marks in the source text (the panel and the Context tab stay).
+ */
+export const WHOS_WHO_HIGHLIGHT_MODES = ["hover", "always", "off"] as const
+export type WhosWhoHighlightMode = (typeof WHOS_WHO_HIGHLIGHT_MODES)[number]
+
+/**
+ * Which implied subjects get a hint before their verb ("[he = Jesus]"):
+ * none, only those the data names (an ACAI person, deity or group), or all.
+ */
+export const IMPLIED_SUBJECT_HINT_MODES = ["off", "names", "all"] as const
+export type ImpliedSubjectHintMode = (typeof IMPLIED_SUBJECT_HINT_MODES)[number]
+
+function isOneOf<T extends string>(options: readonly T[], value: unknown): value is T {
+  return typeof value === "string" && (options as readonly string[]).includes(value)
+}
+
+export function isWhosWhoHighlightMode(value: unknown): value is WhosWhoHighlightMode {
+  return isOneOf(WHOS_WHO_HIGHLIGHT_MODES, value)
+}
+
+export function isImpliedSubjectHintMode(value: unknown): value is ImpliedSubjectHintMode {
+  return isOneOf(IMPLIED_SUBJECT_HINT_MODES, value)
+}
+
 export interface BibleDataViewPrefs {
   voiceChips: boolean
   speechRails: boolean
   labelMode: VoiceLabelMode
+  whosWhoHighlights: WhosWhoHighlightMode
+  impliedSubjectHints: ImpliedSubjectHintMode
 }
 
 export const DEFAULT_BIBLE_DATA_VIEW_PREFS: BibleDataViewPrefs = Object.freeze({
   voiceChips: true,
   speechRails: true,
   labelMode: DEFAULT_VOICE_LABEL_MODE,
+  whosWhoHighlights: "hover",
+  impliedSubjectHints: "names",
 })
 
 const listeners = new Set<() => void>()
@@ -50,6 +87,12 @@ function read(): BibleDataViewPrefs {
     voiceChips: typeof value.voiceChips === "boolean" ? value.voiceChips : DEFAULT_BIBLE_DATA_VIEW_PREFS.voiceChips,
     speechRails: typeof value.speechRails === "boolean" ? value.speechRails : DEFAULT_BIBLE_DATA_VIEW_PREFS.speechRails,
     labelMode: isVoiceLabelMode(value.labelMode) ? value.labelMode : DEFAULT_BIBLE_DATA_VIEW_PREFS.labelMode,
+    whosWhoHighlights: isWhosWhoHighlightMode(value.whosWhoHighlights)
+      ? value.whosWhoHighlights
+      : DEFAULT_BIBLE_DATA_VIEW_PREFS.whosWhoHighlights,
+    impliedSubjectHints: isImpliedSubjectHintMode(value.impliedSubjectHints)
+      ? value.impliedSubjectHints
+      : DEFAULT_BIBLE_DATA_VIEW_PREFS.impliedSubjectHints,
   }
 }
 

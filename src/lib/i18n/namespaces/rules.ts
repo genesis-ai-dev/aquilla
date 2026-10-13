@@ -499,6 +499,28 @@ export const rules = defineNamespace({
           tokens: "The missing placeholder token(s), comma-joined — raw text, never translated.",
         },
       },
+      "rules.builtinChecks.laneScopeNote": {
+        description:
+          "Note above the built-in checks list on a project with several target lanes: the switches and severities below belong to the lane the page is viewing, not the whole project (AQU-1906).",
+        placeholders: {
+          lane: "The viewed lane's display name — the user's own lane name or its language, verbatim, never translated.",
+        },
+      },
+      "rules.builtinChecks.punctuation.fromLanguage": {
+        description:
+          "Note on the End punctuation and Punctuation integrity rows: those checks are judging the translation by this language's own marks rather than the source's (AQU-1906).",
+        placeholders: {
+          language: "The lane's language as the user typed it — verbatim, never translated.",
+        },
+      },
+      "rules.builtinChecks.punctuation.fromProfile": {
+        description:
+          "Same note, when the project's Language profile fills in the punctuation itself and so wins over the per-language defaults.",
+      },
+      "rules.builtinChecks.punctuation.sourceRelative": {
+        description:
+          "Same note, when the lane records no language: the two punctuation checks fall back to comparing against the source's own marks.",
+      },
       "rules.builtinChecks.violationCount": {
         description:
           "Badge on a built-in check's row in the checks list, counting how many cells currently violate it.",

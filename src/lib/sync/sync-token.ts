@@ -139,6 +139,24 @@ export interface SyncTokenMintResult {
   status: number | null
 }
 
+/** AQU-1788: options for one mint call. */
+export interface SyncTokenMintOptions {
+  /**
+   * Discard the in-memory token and mint a new one even though the cached one
+   * has not expired.
+   *
+   * The sync-token bakes in the member's role at mint time and lives for up to
+   * 15 minutes, so a role the server lowered mid-session keeps being asserted
+   * by a perfectly unexpired token. The sync-worker's downgrade gate refuses
+   * such a write with `role downgraded since token was issued`; the only way
+   * for the client to learn the live role is to mint again. Normal callers
+   * never pass this — a forced mint bypasses the cache AND any mint already
+   * in flight for this JWT, since that one may itself have been served from
+   * the same stale role.
+   */
+  forceRefresh?: boolean
+}
+
 /**
  * Like makeSyncTokenFetcher but surfaces the HTTP status of a failed mint
  * instead of swallowing it to null. Same in-memory caching / refresh window.
@@ -150,11 +168,12 @@ export function makeSyncTokenMinter(
   bootstrap: ProjectBootstrap = {},
   apiUrl?: string,
   callbacks: SyncTokenCallbacks = {}
-): () => Promise<SyncTokenMintResult> {
+): (opts?: SyncTokenMintOptions) => Promise<SyncTokenMintResult> {
   let cached: CachedToken | null = null
   const pending = new Map<string, Promise<SyncTokenMintResult>>()
-  return async () => {
+  return async (opts?: SyncTokenMintOptions) => {
     const now = Date.now()
+    const forceRefresh = opts?.forceRefresh === true
     // Resolve the active JWT BEFORE the cache check: the cached token is only
     // reusable for the identity that minted it. After an account switch
     // (owner→contributor) or logout+login without a page reload, getJwt()
@@ -165,10 +184,13 @@ export function makeSyncTokenMinter(
     // rather than handing back a token from the signed-out session. AQU-616.
     const jwt = getJwt()
     if (!jwt) return { token: null, status: null }
-    if (cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
+    // AQU-1788: a forced mint evicts the cached token first, so a failed
+    // re-mint cannot leave the stale-role token available to the next caller.
+    if (forceRefresh) cached = null
+    if (!forceRefresh && cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
       return { token: cached.value, status: 200 }
     }
-    const existing = pending.get(jwt)
+    const existing = forceRefresh ? undefined : pending.get(jwt)
     if (existing) return existing
     const request = (async (): Promise<SyncTokenMintResult> => {
       try {

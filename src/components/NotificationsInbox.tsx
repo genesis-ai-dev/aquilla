@@ -1,0 +1,694 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
+import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
+import { Bell, MailBadge, MailCheck, MailX, MoreHorizontal } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
+import { cn } from "@/lib/utils"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { mentionNoticesFor, type MentionNotice } from "@/lib/comments/mention-inbox"
+import {
+  dismissMentions,
+  markMentionsRead,
+  markMentionsUnread,
+  restoreMentions,
+  useMentionDismissedIds,
+  useMentionReadIds,
+} from "@/lib/store/mention-read-state"
+import { editorCommentHref } from "@/components/project-workspace-lane-deeplink"
+import type { CommentRecord } from "@/lib/sync/comments-read-types"
+
+/**
+ * Rough row height. Each row is the verse and file, then who commented and
+ * the comment, so a fixed estimate is enough.
+ */
+const NOTICE_ROW_PX = 56
+
+/** The fields both a React key event and a window KeyboardEvent provide. */
+type InboxKeyEvent = {
+  key: string
+  altKey: boolean
+  ctrlKey: boolean
+  metaKey: boolean
+  shiftKey: boolean
+  preventDefault: () => void
+  stopPropagation: () => void
+}
+
+type PendingDelete =
+  | { kind: "one"; commentId: string }
+  | { kind: "all" }
+  | { kind: "read" }
+
+/**
+ * In-app inbox for comment @mentions (AQU-761). Derived from comments already
+ * loaded for the open project — there is no notification table. Read and
+ * dismissed state live on this device. Dismissing a row hides it here; the
+ * comment stays. The first line is the verse and file, like "GEN 1:1 in
+ * Genesis.usfm", when the mention has them. The second line is "{author}
+ * commented: {message}". The time sits on the right of the first line.
+ * Opening the inbox does not highlight a row; keyboard navigation does.
+ */
+export function NotificationsInbox({
+  projectId,
+  readerUsername,
+  comments,
+  files = [],
+}: {
+  projectId: string
+  readerUsername: string
+  comments: readonly CommentRecord[]
+  /** File names used in the first line of a mention that belongs to a file. */
+  files?: readonly { id: string; name: string }[]
+}) {
+  const t = useT()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [unreadsOnly, setUnreadsOnly] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
+  // The confirm dialog is portaled outside the popover. Hold the inbox open
+  // across that outside press, then release on the next turn.
+  const holdOpen = useRef(false)
+  const listRef = useRef<HTMLDivElement>(null)
+  // The list publishes this. A window listener reads it while the inbox is
+  // open, so arrows work even when focus never entered the popover.
+  const listKeyDownRef = useRef<(event: InboxKeyEvent) => void>(() => {})
+  const readIds = useMentionReadIds(projectId, readerUsername)
+  const dismissedIds = useMentionDismissedIds(projectId, readerUsername)
+  const notices = useMemo(
+    () =>
+      mentionNoticesFor(comments, readerUsername).filter(
+        (notice) => !dismissedIds.has(notice.commentId),
+      ),
+    [comments, readerUsername, dismissedIds],
+  )
+  const unread = notices.filter((notice) => !readIds.has(notice.commentId))
+  const read = notices.filter((notice) => readIds.has(notice.commentId))
+  // Newest first, the order mentionNoticesFor already produced. Marking a row
+  // read only drops its dot; it does not sink to the bottom.
+  const shown = unreadsOnly ? unread : notices
+
+  function openNotice(notice: MentionNotice) {
+    markMentionsRead(projectId, readerUsername, [notice.commentId])
+    setOpen(false)
+    if (notice.scopeKind === "cell" && notice.fileId && notice.cellId) {
+      navigate(editorCommentHref(projectId, notice.fileId, notice.cellId, notice.commentId))
+      return
+    }
+    navigate(`/project/${projectId}/comments`)
+  }
+
+  function dismissOne(commentId: string) {
+    dismissMentions(projectId, readerUsername, [commentId])
+    const toastId = `mention-dismiss:${projectId}:${commentId}`
+    const action = t("comments.inbox.deletedToast")
+    const icon = <MailX aria-hidden />
+    let settled = false
+    function undo() {
+      if (settled) return
+      settled = true
+      restoreMentions(projectId, readerUsername, [commentId])
+      toast.update(toastId, { actionProps: undefined, data: { icon } })
+      toast.add({
+        id: `mention-undone:${toastId}`,
+        type: "success",
+        title: t("comments.inbox.undoneToast", { action }),
+      })
+    }
+    toast.add({
+      id: toastId,
+      title: action,
+      timeout: 10_000,
+      data: { undo, icon },
+      actionProps: {
+        children: t("comments.inbox.undo"),
+        onClick: () => undo(),
+      },
+    })
+  }
+
+  function askDelete(pending: PendingDelete) {
+    holdOpen.current = true
+    setPendingDelete(pending)
+  }
+
+  function closeDeleteDialog() {
+    setPendingDelete(null)
+    queueMicrotask(() => {
+      holdOpen.current = false
+    })
+  }
+
+  function confirmDelete() {
+    const pending = pendingDelete
+    closeDeleteDialog()
+    if (!pending) return
+    const ids =
+      pending.kind === "one"
+        ? [pending.commentId]
+        : pending.kind === "read"
+          ? read.map((notice) => notice.commentId)
+          : notices.map((notice) => notice.commentId)
+    dismissMentions(projectId, readerUsername, ids)
+  }
+
+  // Capture phase, so an editor row does not take the arrow first. Menus are
+  // portaled outside the popover and keep their own keys.
+  useEffect(() => {
+    if (!open || pendingDelete) return
+    function onKey(event: globalThis.KeyboardEvent) {
+      const target = event.target
+      if (target instanceof Element && target.closest("[role='menu']")) return
+      listKeyDownRef.current(event)
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [open, pendingDelete])
+
+  const deleteCopy =
+    pendingDelete?.kind === "all"
+      ? { title: t("comments.inbox.deleteAllTitle"), description: t("comments.inbox.deleteAllDescription") }
+      : pendingDelete?.kind === "read"
+        ? { title: t("comments.inbox.deleteAllReadTitle"), description: t("comments.inbox.deleteAllReadDescription") }
+        : { title: t("comments.inbox.deleteTitle"), description: t("comments.inbox.deleteDescription") }
+
+  return (
+    <>
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          if (!next && holdOpen.current) return
+          setOpen(next)
+        }}
+      >
+        <PopoverTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="relative"
+              aria-label={
+                unread.length > 0
+                  ? t("comments.inbox.openUnreadAria", { count: unread.length })
+                  : t("comments.inbox.openAria")
+              }
+              data-testid="notifications-inbox-trigger"
+            >
+              <Bell className="size-4" />
+              {unread.length > 0 && (
+                <span
+                  className="absolute -top-0.5 -end-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground"
+                  data-testid="notifications-unread-count"
+                >
+                  {unread.length > 9 ? "9+" : unread.length}
+                </span>
+              )}
+            </Button>
+          }
+        />
+        <PopoverContent
+          align="end"
+          side="bottom"
+          sideOffset={6}
+          initialFocus={shown.length > 0 ? listRef : undefined}
+          className="flex max-h-[min(560px,calc(100vh-6rem))] w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-hidden pt-2 pr-0 pb-0 pl-2"
+        >
+          <header className="flex shrink-0 items-center justify-between gap-2 pr-2">
+            <h3 className="text-base font-semibold tracking-tight">{t("comments.inbox.title")}</h3>
+            {notices.length > 0 && (
+              <div className="flex items-center gap-1">
+                <AppTooltip content={t("comments.inbox.unreadsOnly")}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-pressed={unreadsOnly}
+                    aria-label={t("comments.inbox.unreadsOnly")}
+                    data-testid="notifications-unreads-only"
+                    className={unreadsOnly ? "bg-accent text-foreground" : undefined}
+                    onClick={() => setUnreadsOnly((value) => !value)}
+                  >
+                    <MailBadge />
+                  </Button>
+                </AppTooltip>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t("comments.inbox.actionsAria")}
+                        data-testid="notifications-actions"
+                      />
+                    }
+                  >
+                    <MoreHorizontal />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-44">
+                    <MenuItem
+                      disabled={unread.length === 0}
+                      onClick={() =>
+                        markMentionsRead(
+                          projectId,
+                          readerUsername,
+                          notices.map((notice) => notice.commentId),
+                        )
+                      }
+                    >
+                      <MailCheck />
+                      {t("comments.inbox.markAllRead")}
+                    </MenuItem>
+                    <MenuSeparator />
+                    <MenuItem disabled={notices.length === 0} onClick={() => askDelete({ kind: "all" })}>
+                      <MailX />
+                      {t("comments.inbox.deleteAll")}
+                    </MenuItem>
+                    <MenuItem disabled={read.length === 0} onClick={() => askDelete({ kind: "read" })}>
+                      <MailX />
+                      {t("comments.inbox.deleteAllRead")}
+                    </MenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+          </header>
+
+          {shown.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 px-3 py-10 text-center">
+              <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <Bell className="size-4" aria-hidden />
+              </span>
+              <p className="text-sm font-medium">
+                {notices.length === 0 ? t("comments.inbox.emptyTitle") : t("comments.inbox.noUnreadTitle")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {notices.length === 0 ? t("comments.inbox.empty") : t("comments.inbox.noUnread")}
+              </p>
+            </div>
+          ) : (
+            <NotificationList
+              label={t("comments.inbox.title")}
+              notices={shown}
+              readIds={readIds}
+              files={files}
+              listRef={listRef}
+              keyDownRef={listKeyDownRef}
+              markReadLabel={t("comments.inbox.markRead")}
+              markUnreadLabel={t("comments.inbox.markUnread")}
+              deleteLabel={t("comments.inbox.delete")}
+              t={t}
+              onOpen={openNotice}
+              onMarkRead={(commentId) => markMentionsRead(projectId, readerUsername, [commentId])}
+              onMarkUnread={(commentId) => markMentionsUnread(projectId, readerUsername, [commentId])}
+              onDelete={dismissOne}
+            />
+          )}
+        </PopoverContent>
+      </Popover>
+
+      {pendingDelete && (
+        <Dialog open onOpenChange={(next) => { if (!next) closeDeleteDialog() }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{deleteCopy.title}</DialogTitle>
+              <DialogDescription>{deleteCopy.description}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={closeDeleteDialog}>
+                {t("common.cancel")}
+              </Button>
+              <Button type="button" variant="destructive" onClick={confirmDelete}>
+                {t("common.delete")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  )
+}
+
+function NotificationList({
+  label,
+  notices,
+  readIds,
+  files,
+  listRef,
+  keyDownRef,
+  markReadLabel,
+  markUnreadLabel,
+  deleteLabel,
+  t,
+  onOpen,
+  onMarkRead,
+  onMarkUnread,
+  onDelete,
+}: {
+  label: string
+  notices: MentionNotice[]
+  readIds: ReadonlySet<string>
+  files: readonly { id: string; name: string }[]
+  listRef: RefObject<HTMLDivElement | null>
+  keyDownRef: RefObject<(event: InboxKeyEvent) => void>
+  markReadLabel: string
+  markUnreadLabel: string
+  deleteLabel: string
+  t: TFunction
+  onOpen: (notice: MentionNotice) => void
+  onMarkRead: (commentId: string) => void
+  onMarkUnread: (commentId: string) => void
+  onDelete: (commentId: string) => void
+}) {
+  const pendingFocus = useRef<number | null>(null)
+  // No row is highlighted until the reader moves with the keyboard or focuses one.
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const virtualizer = useVirtualizer({
+    count: notices.length,
+    getScrollElement: () => listRef.current,
+    getItemKey: (index) => notices[index]?.commentId ?? index,
+    estimateSize: () => NOTICE_ROW_PX,
+    overscan: 8,
+    initialRect: { width: 420, height: 360 },
+    // happy-dom reports 0×0 for CSS-sized scrollports; coerce so rows mount.
+    observeElementRect: (instance, cb) =>
+      observeElementRect(instance, (rect) => {
+        cb({
+          width: rect.width > 0 ? rect.width : 420,
+          height: rect.height > 0 ? rect.height : 360,
+        })
+      }),
+  })
+
+  const handleScrollRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      listRef.current = element
+      if (element) virtualizer.measure()
+    },
+    [listRef, virtualizer],
+  )
+
+  const focusRow = useCallback((index: number) => {
+    // preventScroll: the browser otherwise centers an absolutely positioned
+    // virtual row, which jumps the list by a whole screen.
+    listRef.current
+      ?.querySelector<HTMLButtonElement>(`[data-notice-index="${index}"]`)
+      ?.focus({ preventScroll: true })
+  }, [listRef])
+
+  useEffect(() => {
+    const index = pendingFocus.current
+    if (index == null) return
+    const button = listRef.current?.querySelector<HTMLButtonElement>(
+      `[data-notice-index="${index}"]`,
+    )
+    if (!button) return
+    button.focus({ preventScroll: true })
+    pendingFocus.current = null
+  })
+
+  function rowIsInView(index: number): boolean {
+    const scroller = listRef.current
+    const node = scroller?.querySelector(`[data-notice-index="${index}"]`)
+    if (!scroller || !(node instanceof HTMLElement)) return false
+    const port = scroller.getBoundingClientRect()
+    const row = node.getBoundingClientRect()
+    if (port.height <= 0 || row.height <= 0) return false
+    return row.top >= port.top - 1 && row.bottom <= port.bottom + 1
+  }
+
+  function focusIndex(index: number) {
+    const count = notices.length
+    const next = ((index % count) + count) % count
+    setActiveIndex(next)
+    pendingFocus.current = next
+    // Overscan mounts rows that are still outside the scrollport. Follow the
+    // highlight whenever the destination is not actually on screen.
+    if (!rowIsInView(next)) {
+      const isEnd = next === count - 1
+      virtualizer.scrollToIndex(next, {
+        align: next === 0 ? "start" : isEnd ? "end" : "auto",
+      })
+    }
+    focusRow(next)
+  }
+
+  function onKeyDown(event: InboxKeyEvent) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    if (notices.length === 0) return
+    const range = virtualizer.range
+    const page = Math.max(1, range ? range.endIndex - range.startIndex : 1)
+    let next: number
+    // Nothing is highlighted yet. The first key starts at an end of the list
+    // instead of treating "no selection" as the first row.
+    if (activeIndex < 0) {
+      if (
+        event.key === "ArrowDown" ||
+        event.key === "Home" ||
+        event.key === "PageDown" ||
+        event.key === "PageUp"
+      ) {
+        next = 0
+      } else if (event.key === "ArrowUp" || event.key === "End") {
+        next = notices.length - 1
+      } else return
+    } else if (event.key === "ArrowDown") next = activeIndex + 1
+    else if (event.key === "ArrowUp") next = activeIndex - 1
+    else if (event.key === "Home") next = 0
+    else if (event.key === "End") next = notices.length - 1
+    else if (event.key === "PageDown") next = Math.min(notices.length - 1, activeIndex + page)
+    else if (event.key === "PageUp") next = Math.max(0, activeIndex - page)
+    else return
+    event.preventDefault()
+    event.stopPropagation()
+    focusIndex(next)
+  }
+
+  // Assign in the layout effect, not during render. StrictMode replays the
+  // effect as setup → cleanup → setup, and a cleanup that only clears the
+  // ref would leave arrow keys on a no-op until some later render (a click)
+  // published the handler again.
+  useLayoutEffect(() => {
+    keyDownRef.current = onKeyDown
+    return () => {
+      keyDownRef.current = () => {}
+    }
+  })
+
+  return (
+    <div
+      ref={handleScrollRef}
+      aria-label={label}
+      tabIndex={-1}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin pr-2 pb-2 outline-hidden"
+    >
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const notice = notices[virtualItem.index]
+          if (!notice) return null
+          const location = locationLabel(notice, files, t)
+          const commented = t("comments.inbox.commented", {
+            author: notice.authorLabel,
+            message: notice.excerpt,
+          })
+          return (
+            <div
+              key={virtualItem.key}
+              data-index={virtualItem.index}
+              className="absolute top-0 left-0 w-full"
+              style={{
+                height: virtualItem.size,
+                transform: `translateY(${virtualItem.start}px)`,
+              }}
+            >
+              <NotificationRow
+                notice={notice}
+                isUnread={!readIds.has(notice.commentId)}
+                index={virtualItem.index}
+                setSize={notices.length}
+                active={virtualItem.index === activeIndex}
+                tabbable={
+                  virtualItem.index === activeIndex ||
+                  (activeIndex < 0 && virtualItem.index === 0)
+                }
+                title={location ?? commented}
+                timeLabel={formatRelativeTime(notice.createdAt, t)}
+                message={location ? commented : ""}
+                markReadLabel={markReadLabel}
+                markUnreadLabel={markUnreadLabel}
+                deleteLabel={deleteLabel}
+                onOpen={() => onOpen(notice)}
+                onMarkRead={() => onMarkRead(notice.commentId)}
+                onMarkUnread={() => onMarkUnread(notice.commentId)}
+                onDelete={() => onDelete(notice.commentId)}
+                onFocus={() => setActiveIndex(virtualItem.index)}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function NotificationRow({
+  notice,
+  isUnread,
+  index,
+  setSize,
+  active,
+  tabbable,
+  title,
+  timeLabel,
+  message,
+  markReadLabel,
+  markUnreadLabel,
+  deleteLabel,
+  onOpen,
+  onMarkRead,
+  onMarkUnread,
+  onDelete,
+  onFocus,
+}: {
+  notice: MentionNotice
+  isUnread: boolean
+  index: number
+  setSize: number
+  active: boolean
+  tabbable: boolean
+  title: string
+  timeLabel: string
+  message: string
+  markReadLabel: string
+  markUnreadLabel: string
+  deleteLabel: string
+  onOpen: () => void
+  onMarkRead: () => void
+  onMarkUnread: () => void
+  onDelete: () => void
+  onFocus: () => void
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        render={
+          <button
+            type="button"
+            tabIndex={tabbable ? 0 : -1}
+            data-notice-index={index}
+            aria-setsize={setSize}
+            aria-posinset={index + 1}
+            onClick={onOpen}
+            onFocus={onFocus}
+            data-active={active || undefined}
+            className="flex h-full w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-start outline-hidden select-none hover:bg-accent/40 focus-visible:bg-accent focus-visible:text-accent-foreground data-[active=true]:bg-accent data-[active=true]:text-accent-foreground data-[active=true]:hover:bg-accent"
+          />
+        }
+      >
+        <span aria-hidden className="shrink-0">
+          <InitialsAvatar name={notice.authorId} size="sm" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-1.5">
+              {isUnread && (
+                <span
+                  aria-hidden
+                  data-testid="notification-unread-dot"
+                  className="size-1.5 shrink-0 rounded-full bg-primary"
+                />
+              )}
+              <span className={cn("truncate text-sm font-medium", isUnread ? "text-foreground" : "text-foreground/90")} data-ph-mask>
+                {title}
+              </span>
+            </span>
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+              {timeLabel}
+            </span>
+          </span>
+          {message ? (
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground" data-ph-mask>
+              {message}
+            </span>
+          ) : null}
+        </span>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-44">
+        {isUnread ? (
+          <MenuItem onClick={onMarkRead}>
+            <MailCheck />
+            {markReadLabel}
+          </MenuItem>
+        ) : (
+          <MenuItem onClick={onMarkUnread}>
+            <MailBadge />
+            {markUnreadLabel}
+          </MenuItem>
+        )}
+        <MenuSeparator />
+        <MenuItem onClick={onDelete}>
+          <MailX />
+          {deleteLabel}
+        </MenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+/** Project comments are stamped with this file id; it is not a file name. */
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
+function fileNameOf(
+  notice: MentionNotice,
+  files: readonly { id: string; name: string }[],
+): string | null {
+  if (!notice.fileId || notice.fileId === PROJECT_SENTINEL_FILE_ID) return null
+  const name = files.find((file) => file.id === notice.fileId)?.name.trim()
+  return name || null
+}
+
+/** "GEN 1:1 in Genesis.usfm", or whichever of the verse and file is known. */
+function locationLabel(
+  notice: MentionNotice,
+  files: readonly { id: string; name: string }[],
+  t: TFunction,
+): string | null {
+  const file = fileNameOf(notice, files)
+  const verse = notice.scopeKind === "cell" ? notice.cellRef : null
+  if (verse && file) return t("comments.inbox.verseInFile", { verse, file })
+  return verse || file
+}
+
+function formatRelativeTime(timestamp: number, t: TFunction): string {
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000))
+  if (seconds < 5) return t("nav.outbox.timeJustNow")
+  if (seconds < 60) return t("nav.outbox.timeSecondsAgo", { sec: seconds })
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return t("nav.outbox.timeMinutesAgo", { min: minutes })
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return t("nav.outbox.timeHoursAgo", { hr: hours })
+  const days = Math.round(hours / 24)
+  return t("nav.outbox.timeDaysAgo", { d: days })
+}

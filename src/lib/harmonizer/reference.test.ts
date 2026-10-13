@@ -8,9 +8,10 @@
 
 import { describe, expect, it } from "vitest"
 import { IMPLIED, referenceBoundaries, referenceCheck } from "./reference"
-import { harmonizerFindings, planHarmonizer } from "./runner"
+import { CHECKS, harmonizerFindings, planHarmonizer, UNREGISTERED_CHECKS } from "./runner"
+import { quotationCheck } from "./quotes"
 import { wordSpans } from "./segment"
-import type { HarmonizerCell } from "./types"
+import type { HarmonizerCell, HarmonyCheck } from "./types"
 
 const JOHN_13: HarmonizerCell[] = [
   {
@@ -71,7 +72,7 @@ describe("referenceCheck findings", () => {
       flagOnly: true,
       reasonKey: "harmonizer.reference.unclearSubject",
       reasonValues: { previous: "JHN 13:37" },
-      confidence: 0.88,
+      confidence: expect.closeTo(0.88, 5),
     }])
   })
 
@@ -89,7 +90,12 @@ describe("referenceCheck findings", () => {
   })
 
   it("never flags a switch the target already makes clear", () => {
-    expect(ask({ p_r0_switch: { noul: 0.95 }, p_r0_clear: { noul: 0.6 } })).toEqual([])
+    // Jev leans toward "clear": originals sat at ~0.83, so 0.7 is the cut-off.
+    expect(ask({ p_r0_switch: { noul: 0.95 }, p_r0_clear: { noul: 0.75 } })).toEqual([])
+  })
+
+  it("flags at Jev's calibrated cut-off, not at a symmetric 0.3 it never reaches", () => {
+    expect(ask({ p_r0_switch: { noul: 0.9 }, p_r0_clear: { noul: 0.62 } })).toHaveLength(1)
   })
 
   it("never flags on a missing answer", () => {
@@ -98,8 +104,13 @@ describe("referenceCheck findings", () => {
 })
 
 describe("runner with both checks", () => {
+  it("is not registered until it passes the eval — it flagged too much clean text", () => {
+    expect(CHECKS.map((c) => c.id)).not.toContain("textual.reference")
+    expect(UNREGISTERED_CHECKS.map((c) => c.id)).toContain("textual.reference")
+  })
+
   it("keeps each check's questions and answers apart", () => {
-    const run = planHarmonizer(JOHN_13, "m")
+    const run = planHarmonizer(JOHN_13, "m", [quotationCheck as HarmonyCheck<unknown>, referenceCheck as HarmonyCheck<unknown>])
     const ids = Object.keys(run.request!.questions).filter((id) => id.startsWith("h1_"))
     expect(ids).toEqual(["h1_r0_switch", "h1_r0_clear", "h1_r0_word"])
     const findings = harmonizerFindings(run, JOHN_13, {

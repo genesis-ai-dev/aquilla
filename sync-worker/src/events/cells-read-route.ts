@@ -10,12 +10,14 @@
 //                         views).
 //   limit=N             — page size. Default 500, max 2000.
 //   cursor=...          — opaque pagination cursor; the previous response's
-//                         `nextCursor`.
+//                         `nextCursor`. AQU-1841: it carries the watermark the
+//                         stream's ordering was pinned at, so later pages are
+//                         served from that same ordering (and re-advertise its
+//                         `maxServerSeq`) instead of re-walking the file under
+//                         a watermark a peer commit has since moved.
 //   lane=<tag>          — AQU-538: optional. When present, target rows are
-//                         dual-read to the lane whose legacy_tag is <tag>
-//                         (prefer lane_id once backfill has populated it;
-//                         fall back to target_lang while lane_id is NULL);
-//                         source rows are ALWAYS included regardless. Applies
+//                         the lane whose legacy_tag is <tag>, matched on
+//                         lane_id. Source rows are ALWAYS included. Applies
 //                         to the full read, the delta (`?since=`) read, and
 //                         the cellIds fast path alike. Absent = all lanes
 //                         (unchanged). Max 64 chars; longer values are
@@ -74,7 +76,8 @@ import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
 import { sourceOrTargetLaneSql, targetLaneDualReadBinds } from "./lane-id-sql"
-import { grantedLaneIds, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
+import { cellMetadataWireSql } from "../../../db/shared/cell-metadata-sql"
+import { grantedLaneIds, scopeReadClause, targetVisibilityClause, visibilityCacheToken, visibleLanesForRead } from "./lane-read-wall"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -253,7 +256,27 @@ export interface AnchorChainRow {
  * (AQU-1160): enough to walk and to key the per-side/lane page lookup, so a
  * cold isolate never reads a file's full row values just to order it.
  */
-type OrderRow = Pick<CellRowRaw, "cell_id" | "side" | "target_lang" | "anchor_cell_id" | "event_id">
+type OrderRow = Pick<CellRowRaw, "cell_id" | "side" | "target_lang" | "lane_id" | "anchor_cell_id" | "event_id">
+
+/** Default-lane tag ('') first, then other tags, lane id as the tiebreak.
+ *  Identity is lane_id: two lanes are never one walk just because their tags agree. */
+function targetLanesInWalkOrder(rows: OrderRow[]): OrderRow[][] {
+  const byLane = new Map<string, OrderRow[]>()
+  for (const r of rows) {
+    const id = r.lane_id ?? ""
+    const bucket = byLane.get(id)
+    if (bucket) bucket.push(r)
+    else byLane.set(id, [r])
+  }
+  return [...byLane.entries()]
+    .sort((a, b) => {
+      const ta = a[1][0]?.target_lang ?? ""
+      const tb = b[1][0]?.target_lang ?? ""
+      if (ta !== tb) return ta < tb ? -1 : 1
+      return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0
+    })
+    .map(([, group]) => group)
+}
 
 export function walkAnchorChain<T extends AnchorChainRow>(rows: T[]): T[] {
   if (rows.length === 0) return []
@@ -350,6 +373,67 @@ export function walkAnchorChain<T extends AnchorChainRow>(rows: T[]): T[] {
 interface Cursor {
   /** Index into the ordered chain to resume from. */
   offset: number
+  /** AQU-1841: the watermark this stream's ordering was pinned at. Absent on
+   *  a cursor minted before AQU-1841, which pages exactly as it did then. */
+  pin?: CursorPin
+}
+
+/** AQU-1841: the ordering a stream was pinned to, carried in its cursor.
+ *
+ *  Before this, a page's cursor was a bare offset into "whatever ordering the
+ *  server computes for the CURRENT watermark". Any peer commit mid-stream
+ *  moved that watermark, so the chain cache missed and every later page paid
+ *  another full-file walk — and the ordering it walked was a different one,
+ *  which is the torn-snapshot hazard `streamFileCells` refuses to mint a
+ *  `?since=` cursor from. Pinning the watermark in the cursor lets later
+ *  pages ask for the SAME ordering the stream started on.
+ *
+ *  A cursor is client-supplied, so this carries only the WATERMARK — never the
+ *  cache key. The key is rebuilt server-side from these numbers plus the
+ *  caller's OWN visibility token (`makeEtag(fileId, …, visibility)`): the
+ *  ordering a pin can reach is therefore always one built for this caller's
+ *  lane grants. Carrying the ETag itself would have let a lane-scoped reader
+ *  pin an unscoped reader's key — which is fully predictable, since every
+ *  component of it but the (empty) visibility token is advertised — and be
+ *  served an ordering over lanes the AQU-730 wall hides from them. */
+interface CursorPin {
+  /** MAX(server_seq) over the file at pin time — the ETag's seq component. */
+  maxSeq: number
+  /** The projection-rebuild marker at pin time (audit B5). A rebuild changes
+   *  cells without minting events, so a pin from before one is retired. */
+  rebuiltSeq: number
+  /** AQU-943 incarnation the pin belongs to. A mismatch retires the pin. */
+  epoch: number
+  /** The `maxServerSeq` that watermark advertised, carrying the AQU-1005
+   *  pending-allocation clamp it was minted under. Re-advertised on every page
+   *  served from the pinned ordering — never RAISED above this value, so the
+   *  whole stream is one consistent snapshot the client may resume from, and
+   *  a forged value can only ever cost its own author a re-read. */
+  seq: number
+}
+
+function decodePin(raw: unknown): CursorPin | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const p = raw as Record<string, unknown>
+  for (const k of ["maxSeq", "rebuiltSeq", "epoch", "seq"]) {
+    const v = p[k]
+    if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) return undefined
+  }
+  return {
+    maxSeq: p.maxSeq as number,
+    rebuiltSeq: p.rebuiltSeq as number,
+    epoch: p.epoch as number,
+    seq: p.seq as number,
+  }
+}
+
+/** The chain-cache ETag a pin names, rebuilt under the CALLER's visibility. */
+function pinnedEtag(fileId: string, pin: CursorPin, visibility: string): string {
+  return makeEtag(
+    fileId,
+    { maxSeq: pin.maxSeq, rebuiltSeq: pin.rebuiltSeq, epoch: pin.epoch, pendingFloor: null },
+    visibility,
+  )
 }
 
 // ─── AQU-1160: ordered-id chain cache ───────────────────────────────────────
@@ -365,7 +449,7 @@ interface Cursor {
 // ORDERED LIST OF IDS (not the row data — cheap, ~40 bytes/id) so every
 // subsequent page for the same version is a single bounded
 // side/lane-scoped `cell_id = ANY(...)` point lookup sized to the page,
-// served by idx_cells_file_scan (0083_cells_scan_index.sql).
+// served by idx_cells_file_scan (project, file, side, lane_id, cell_id).
 //
 // Keyed by the response ETag: that string is already the exact "identity of
 // current full state" value this route computes for conditional reads
@@ -379,10 +463,14 @@ interface Cursor {
 // cold isolate or eviction falls back to a narrow ordering read and full walk — see the
 // SWARM-TODO for the isolate-hit-rate caveat this implies for the very first
 // page of a newly-opened file.
+/** The page lookup's lane predicate. Exported so the plan test explains the
+ *  same shape the route runs (AQU-1611). */
+export const CELLS_PAGE_LANE_PREDICATE = "(side = ? AND lane_id = ? AND cell_id = ANY(?::text[]))"
+
 interface ChainCacheItem {
   cellId: string
   side: "source" | "target"
-  targetLang: string
+  laneId: string
 }
 
 async function readPageValues(db: AquillaDb, columns: string, projectId: string, fileId: string, items: ChainCacheItem[]): Promise<CellRowOut[]> {
@@ -391,8 +479,8 @@ async function readPageValues(db: AquillaDb, columns: string, projectId: string,
   // one array parameter, rather than thousands of OR-expanded tuples.
   const groups = new Map<string, { side: string; lane: string; ids: string[] }>()
   for (const item of items) {
-    const key = JSON.stringify([item.side, item.targetLang])
-    const group = groups.get(key) ?? { side: item.side, lane: item.targetLang, ids: [] }
+    const key = JSON.stringify([item.side, item.laneId])
+    const group = groups.get(key) ?? { side: item.side, lane: item.laneId, ids: [] }
     group.ids.push(item.cellId)
     groups.set(key, group)
   }
@@ -402,12 +490,13 @@ async function readPageValues(db: AquillaDb, columns: string, projectId: string,
     // explicitly escaped array literal; cell IDs remain parameter values.
     const ids = `{${group.ids.map(id => `"${id.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`
     pageBinds.push(group.side, group.lane, ids)
-    return "(side = ? AND target_lang = ? AND cell_id = ANY(?::text[]))"
+    return CELLS_PAGE_LANE_PREDICATE
   })
   const pageParts = [
     `SELECT ${columns}`,
     "FROM cells",
-    "WHERE project_id = ? AND file_id = ?",
+    "LEFT JOIN public.lanes wl ON wl.project_id = cells.project_id AND wl.id = cells.lane_id",
+    "WHERE cells.project_id = ? AND cells.file_id = ?",
     `AND (${predicates.join(" OR ")})`,
   ]
   const pageRes = await db
@@ -415,10 +504,10 @@ async function readPageValues(db: AquillaDb, columns: string, projectId: string,
     .bind(...pageBinds)
     .all<CellRowRaw>()
   const bySlot = new Map<string, CellRowRaw>()
-  for (const r of pageRes.results) bySlot.set(`${r.side} ${r.target_lang ?? ""} ${r.cell_id}`, r)
+  for (const r of pageRes.results) bySlot.set(`${r.side} ${r.lane_id ?? ""} ${r.cell_id}`, r)
   const cells: CellRowOut[] = []
   for (const item of items) {
-    const row = bySlot.get(`${item.side} ${item.targetLang} ${item.cellId}`)
+    const row = bySlot.get(`${item.side} ${item.laneId} ${item.cellId}`)
     if (row) cells.push(mapRow(row))
   }
   return cells
@@ -443,6 +532,14 @@ const CHAIN_CACHE_MAX_TOTAL_ITEMS = 200_000
 // index.ts constructs a fresh PostgresDb for EVERY request, so a per-db
 // WeakMap could never hit across the sequential page requests this cache
 // exists for (every page re-ran the full-file SELECT in production).
+//
+// AQU-1841: a continuation request looks this cache up under the watermark
+// its CURSOR pinned, falling back to the live one. Without that, a single peer
+// commit mid-stream moved the live ETag and every remaining page missed and
+// re-walked the whole file — ~60 full-file scans to open a 30k-cell file while
+// someone else edits it. The pinned lookup is also what makes the stream one
+// consistent snapshot rather than a sequence of offsets into orderings that
+// keep changing underneath it.
 //
 // Staleness: the key embeds the response ETag, which is recomputed from the
 // watermark query on every request (fetchWatermarks → makeEtag:
@@ -471,7 +568,9 @@ function chainCacheKey(
   laneFilter: string | null,
   paired: boolean,
 ): string {
-  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneFilter ?? ""} ${paired}`
+  // `null` (every target lane) must not share a slot with `''` (the blank bridge).
+  const laneKey = laneFilter === null ? "*" : `=${laneFilter}`
+  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneKey} ${paired}`
 }
 
 /** Keep every side/lane of a cell together, even across a page boundary. */
@@ -535,7 +634,10 @@ function decodeCursor(s: string | null): Cursor | null {
   try {
     const parsed = JSON.parse(atob(s)) as Cursor
     if (typeof parsed.offset !== "number" || parsed.offset < 0) return null
-    return parsed
+    // A malformed pin degrades to an unpinned cursor (the pre-AQU-1841 read),
+    // never to a rejected cursor — that would silently restart the stream.
+    const pin = decodePin((parsed as { pin?: unknown }).pin)
+    return pin ? { offset: parsed.offset, pin } : { offset: parsed.offset }
   } catch {
     return null
   }
@@ -695,18 +797,25 @@ export async function handleCellsReadRequest(
   const paired = url.searchParams.get("paired") === "1" && sideFilter === null
 
   // AQU-538: optional lane filter — target rows only; source rows are always
-  // included (the shared-source invariant). Absent = all lanes (unchanged).
+  // included (the shared-source invariant). Absent (`null`) means every target
+  // lane. Present and empty (`''`) is the blank bridge, the target lane whose
+  // legacy_tag is `''`. The in-app client omits the param when it wants every
+  // lane, so those two must stay distinct.
   const qLane = url.searchParams.get("lane")
   if (qLane !== null && qLane.length > 64) {
     return new Response("invalid lane: must be 64 characters or fewer", { status: 400 })
   }
-  const laneFilter = qLane && qLane.length > 0 ? qLane : null
+  const laneFilter = qLane
   // AQU-730: when the wall is on, "no lane param" is no longer "every target
   // lane". Below Maintainer the response is cut to granted lanes. The token
   // is already verified above; 600+ and platform stay unrestricted (token "").
   const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
   const laneIds = await grantedLaneIds(env.AQUILLA_PG, projectId, visibleLanes)
-  const visibility = laneIds === null ? "" : visibilityCacheToken(new Set(laneIds))
+  // Wall off: a scoped member still only reads their lanes. The token keeps
+  // their cached body off an unscoped member's ETag.
+  const scopeClause = await scopeReadClause(env.AQUILLA_PG, projectId, auth.claims, laneIds)
+  const visibility =
+    (laneIds === null ? "" : visibilityCacheToken(new Set(laneIds))) + (scopeClause?.token ?? "")
 
   const qSince = url.searchParams.get("since")
   let since: number | null = null
@@ -737,10 +846,10 @@ export async function handleCellsReadRequest(
   // but the v1 SLO target is "open a project, render cells" and the chain
   // walk dominates only at >10x current file sizes.
   const columns =
-    "cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, " +
-    "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
-    "endorsement_count, start_ms, end_ms, " +
-    "medium, sequence_index, transcription, camera_state, metadata, lane_id, hidden_at"
+    `cells.cell_id, cells.side, COALESCE(wl.legacy_tag, '') AS target_lang, cells.value, cells.value_html, cells.type, cells.canonical_ref, cells.anchor_cell_id, ` +
+    "cells.event_id, cells.source_event_id, cells.last_editor, cells.last_edit_at, cells.validated, cells.ai_drafted, cells.ai_draft, cells.word_count, " +
+    "cells.endorsement_count, cells.start_ms, cells.end_ms, " +
+    `cells.medium, cells.sequence_index, cells.transcription, cells.camera_state, ${cellMetadataWireSql("cells")} AS metadata, cells.lane_id, cells.hidden_at`
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell
@@ -767,8 +876,12 @@ export async function handleCellsReadRequest(
   let maxServerSeq: number | null = null
   let projectEpoch: number | null = null
   let etag: string | null = null
+  // AQU-1841: kept beyond this block so the cursor-pin gates below can compare
+  // a pin's rebuild marker / incarnation against the live ones.
+  let liveWatermarks: Watermarks | null = null
   if (!cellIdsFilter || cellIdsFilter.length === 0) {
     const watermarks = await fetchWatermarks(env.AQUILLA_PG, projectId, fileId)
+    liveWatermarks = watermarks
     maxServerSeq = advertisedSeq(watermarks)
     projectEpoch = watermarks.epoch
     etag = makeEtag(fileId, watermarks, visibility)
@@ -847,7 +960,8 @@ export async function handleCellsReadRequest(
         const deltaParts = [
           `SELECT ${columns}`,
           "FROM cells",
-          `WHERE project_id = ? AND file_id = ? AND cell_id IN (${placeholders})`,
+          "LEFT JOIN public.lanes wl ON wl.project_id = cells.project_id AND wl.id = cells.lane_id",
+          `WHERE cells.project_id = ? AND cells.file_id = ? AND cells.cell_id IN (${placeholders})`,
         ]
         const deltaBinds: unknown[] = [projectId, fileId, ...changedCellIds]
         if (sideFilter !== null) {
@@ -866,6 +980,10 @@ export async function handleCellsReadRequest(
         if (deltaWall) {
           deltaParts.push(deltaWall.sql)
           deltaBinds.push(...deltaWall.binds)
+        }
+        if (scopeClause) {
+          deltaParts.push(scopeClause.sql)
+          deltaBinds.push(...scopeClause.binds)
         }
         const deltaRes = await env.AQUILLA_PG.prepare(deltaParts.join(" "))
           .bind(...deltaBinds)
@@ -893,8 +1011,70 @@ export async function handleCellsReadRequest(
   // caller's request order) and only when the watermark/ETag was computed
   // (i.e. cellIdsFilter is empty, same gate as the delta branch above).
   const useChainCache = etag !== null && (!cellIdsFilter || cellIdsFilter.length === 0)
-  const cacheKey = useChainCache ? chainCacheKey(projectId, etag!, sideFilter, laneFilter, paired) : null
-  const cached = cacheKey ? chainCacheGet(cacheKey) : null
+
+  // AQU-1841: the ordering this page is served under. A continuation cursor
+  // asks for the ordering its stream started on; the live watermark is the
+  // fallback (and what a first page always pins).
+  //
+  // The pin is retired — and the stream re-pinned at the live watermark, which
+  // is exactly the pre-AQU-1841 behavior — when it can no longer describe a
+  // snapshot this project can still resume a delta from:
+  //   • a different incarnation (AQU-943): the pinned seq range means nothing
+  //     in this one, and ids are deterministic enough to collide;
+  //   • a projection rebuild since the pin (audit B5): it changed cells
+  //     without minting events, so a delta from the pinned seq cannot see it;
+  //   • seq inversion (a pinned MAX(server_seq) above the file's current one):
+  //     a hard event delete or a restarted allocator, both wanting a resync.
+  const pin = cursor?.pin ?? null
+  const pinLive =
+    pin !== null &&
+    liveWatermarks !== null &&
+    pin.epoch === liveWatermarks.epoch &&
+    pin.rebuiltSeq === liveWatermarks.rebuiltSeq &&
+    pin.maxSeq <= liveWatermarks.maxSeq
+
+  const livePin: CursorPin | null =
+    liveWatermarks !== null
+      ? {
+          maxSeq: liveWatermarks.maxSeq,
+          rebuiltSeq: liveWatermarks.rebuiltSeq,
+          epoch: liveWatermarks.epoch,
+          seq: maxServerSeq!,
+        }
+      : null
+
+  let cacheKey: string | null = null
+  let cached: ChainCacheEntry | null = null
+  // The pin only pays off while the ordering it names is still cached. On a
+  // miss we fall through to the live ordering (today's behavior): a page-to-
+  // page watermark change is how the client learns the stream may be torn and
+  // declines to mint a `?since=` cursor from it (audit B2).
+  let servedPin: CursorPin | null = null
+  if (useChainCache) {
+    if (pinLive) {
+      const pinnedKey = chainCacheKey(projectId, pinnedEtag(fileId, pin!, visibility), sideFilter, laneFilter, paired)
+      const pinnedEntry = chainCacheGet(pinnedKey)
+      if (pinnedEntry) {
+        cacheKey = pinnedKey
+        cached = pinnedEntry
+        servedPin = pin
+      }
+    }
+    if (!cached) {
+      cacheKey = chainCacheKey(projectId, etag!, sideFilter, laneFilter, paired)
+      cached = chainCacheGet(cacheKey)
+    }
+  }
+  if (servedPin === null) servedPin = livePin
+
+  // The seq a pinned page re-advertises. Never raised above what the pin was
+  // minted under (that would strand an allocation the pin's clamp was fencing,
+  // AQU-1005) and never above what this request could advertise on its own, so
+  // a tampered `seq` costs only its author an extra read.
+  const advertisedForPage =
+    pin !== null && servedPin === pin && maxServerSeq !== null
+      ? Math.min(servedPin.seq, maxServerSeq, Math.max(servedPin.maxSeq, servedPin.rebuiltSeq))
+      : maxServerSeq
 
   if (cached) {
     const offset = completePageStart(cached.items, cursor?.offset ?? 0, paired, (r) => r.cellId)
@@ -905,18 +1085,26 @@ export async function handleCellsReadRequest(
     let cells: CellRowOut[] = []
     if (pageItems.length > 0) {
       // Bounded point lookup: exactly the page's rows, served by
-      // idx_cells_file_scan (project_id, file_id, side, target_lang, cell_id)
+      // idx_cells_file_scan (project_id, file_id, side, lane_id, cell_id)
       // — independent of file size (AQU-1160 AC1).
       cells = await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, pageItems)
-      console.log(`[cells-read] chain-cache hit file=${fileId} rows=${cells.length} page=${pageItems.length} totalOrdered=${cached.items.length}`)
+      console.log(`[cells-read] chain-cache hit file=${fileId} rows=${cells.length} page=${pageItems.length} totalOrdered=${cached.items.length} pinned=${servedPin === pin ? 1 : 0}`)
     }
 
     return Response.json(
       {
         cells,
-        nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
+        nextCursor: hasMore ? encodeCursor({ offset: nextOffset, ...(servedPin ? { pin: servedPin } : {}) }) : null,
         total: cached.items.length,
-        maxServerSeq,
+        // AQU-1841: a page served from the pinned ordering re-advertises the
+        // PINNED watermark, not the live one — the rows it delivered are that
+        // snapshot's. Cells created after it are absent here and arrive
+        // through the client's next delta; cells deleted after it resolve to
+        // no row and are dropped the same way. A page served from the live
+        // ordering advertises the live watermark, as before.
+        maxServerSeq: advertisedForPage,
+        // Unchanged: a pin whose epoch is not the live one was already retired
+        // above, so the pinned and live incarnations are the same here.
         projectEpoch,
         ...(paired ? { completeRows: true } : {}),
       },
@@ -928,9 +1116,10 @@ export async function handleCellsReadRequest(
   // and value hydration must remain eligible for the client's next delta.
   // Do not refresh that watermark after hydration.
   const parts: string[] = [
-    `SELECT ${useChainCache ? "cell_id, side, target_lang, anchor_cell_id, event_id" : columns}`,
+    `SELECT ${useChainCache ? "cells.cell_id, cells.side, cells.lane_id, COALESCE(wl.legacy_tag, '') AS target_lang, cells.anchor_cell_id, cells.event_id" : columns}`,
     "FROM cells",
-    "WHERE project_id = ? AND file_id = ?",
+    "LEFT JOIN public.lanes wl ON wl.project_id = cells.project_id AND wl.id = cells.lane_id",
+    "WHERE cells.project_id = ? AND cells.file_id = ?",
   ]
   const binds: unknown[] = [projectId, fileId]
   if (sideFilter !== null) {
@@ -954,6 +1143,10 @@ export async function handleCellsReadRequest(
   if (wall) {
     parts.push(wall.sql)
     binds.push(...wall.binds)
+  }
+  if (scopeClause) {
+    parts.push(scopeClause.sql)
+    binds.push(...scopeClause.binds)
   }
   const sql = parts.join(" ")
 
@@ -993,38 +1186,19 @@ export async function handleCellsReadRequest(
     // Default lane ('') first, then added lanes in name order — for N=1
     // (only '' exists) the output is byte-identical to the pre-lane walk.
     const sourceRows: OrderRow[] = []
-    const targetByLane = new Map<string, OrderRow[]>()
+    const targetRows: OrderRow[] = []
     for (const r of allRows) {
       if (r.side === "source") sourceRows.push(r)
-      else if (r.side === "target") {
-        const lane = r.target_lang ?? ""
-        let bucket = targetByLane.get(lane)
-        if (!bucket) {
-          bucket = []
-          targetByLane.set(lane, bucket)
-        }
-        bucket.push(r)
-      }
+      else if (r.side === "target") targetRows.push(r)
     }
     ordered = walkAnchorChain(sourceRows)
-    for (const lane of [...targetByLane.keys()].sort()) {
-      ordered = [...ordered, ...walkAnchorChain(targetByLane.get(lane)!)]
+    for (const laneRows of targetLanesInWalkOrder(targetRows)) {
+      ordered = [...ordered, ...walkAnchorChain(laneRows)]
     }
   } else if (sideFilter === "target") {
-    // Same per-lane walk for target-only reads.
-    const byLane = new Map<string, OrderRow[]>()
-    for (const r of allRows) {
-      const lane = r.target_lang ?? ""
-      let bucket = byLane.get(lane)
-      if (!bucket) {
-        bucket = []
-        byLane.set(lane, bucket)
-      }
-      bucket.push(r)
-    }
     ordered = []
-    for (const lane of [...byLane.keys()].sort()) {
-      ordered = [...ordered, ...walkAnchorChain(byLane.get(lane)!)]
+    for (const laneRows of targetLanesInWalkOrder(allRows)) {
+      ordered = [...ordered, ...walkAnchorChain(laneRows)]
     }
   } else {
     ordered = walkAnchorChain(allRows)
@@ -1045,7 +1219,7 @@ export async function handleCellsReadRequest(
 
   if (cacheKey) {
     chainCacheSet(cacheKey, {
-      items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })),
+      items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, laneId: r.lane_id ?? "" })),
       cachedAt: Date.now(),
     })
   }
@@ -1058,10 +1232,13 @@ export async function handleCellsReadRequest(
   return Response.json(
     {
       cells: useChainCache
-        ? await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, slice.map(r => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })))
+        ? await readPageValues(env.AQUILLA_PG, columns, projectId, fileId, slice.map(r => ({ cellId: r.cell_id, side: r.side, laneId: r.lane_id ?? "" })))
         // Targeted reads selected all columns above.
         : (slice as CellRowRaw[]).map(mapRow),
-      nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
+      // AQU-1841: hand the live watermark forward as the pin so the pages
+      // after this one can be served from the ordering just cached, even if a
+      // peer commits in between.
+      nextCursor: hasMore ? encodeCursor({ offset: nextOffset, ...(servedPin ? { pin: servedPin } : {}) }) : null,
       total: ordered.length,
       ...(paired ? { completeRows: true } : {}),
       // Null only on the cellIds fast path, which skips the watermark query.

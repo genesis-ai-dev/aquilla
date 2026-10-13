@@ -16,6 +16,7 @@ import { useState } from "react"
 import { AlertTriangle, AlertCircle, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { RuleCheckSummary } from "@/components/rules/RuleSuggestions"
 import type { RuleSuggestion } from "@/lib/rules/rule-suggester"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -116,28 +117,7 @@ export function RuleImportReview({
                     </p>
                   )}
                   <div className="mt-1 rounded bg-muted/50 p-1.5">
-                    <p className="font-mono text-[11px] leading-relaxed break-all">
-                      {draft.check.type === "source-target-match" && (
-                        <>
-                          {t("rules.importReview.checkLabel.sourceTargetMatch")}{" "}
-                          <span className="font-semibold">{draft.check.pattern}</span>
-                        </>
-                      )}
-                      {draft.check.type === "target-forbids" && (
-                        <>
-                          {t("rules.importReview.checkLabel.targetForbids")}{" "}
-                          <span className="font-semibold">{draft.check.targetPattern}</span>
-                        </>
-                      )}
-                      {draft.check.type === "source-requires-target" && (
-                        <>
-                          {t("rules.importReview.checkLabel.sourceRequiresTargetPrefix")}{" "}
-                          <span className="font-semibold">{draft.check.sourcePattern}</span>{" "}
-                          {t("rules.importReview.checkLabel.sourceRequiresTargetSuffix")}{" "}
-                          <span className="font-semibold">{draft.check.targetPattern}</span>
-                        </>
-                      )}
-                    </p>
+                    <RuleCheckSummary check={draft.check} />
                   </div>
                   {evidence?.[i] && (
                     <p className="mt-1 text-[10px] text-muted-foreground italic">

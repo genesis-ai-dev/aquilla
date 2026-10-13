@@ -1,4 +1,4 @@
--- 0150_cell_waivers_match_hash.sql — AQU-1740
+-- 0163_cell_waivers_match_hash.sql — AQU-1740
 --
 -- A waiver was keyed (project_id, file_id, cell_id, rule_id), so accepting one
 -- repeated word hid every repeated-word finding in that cell — including ones

@@ -115,7 +115,7 @@ describe("toSharedPortfolioRow", () => {
       name: "Guest Gospel",
       orgName: "Host Org",
       grantedAt: "2026-07-20T00:00:00Z",
-      files: [{ id: "f1", name: "John", type: "usfm", cellCount: 40, sourceLanguage: "en", targetLanguage: "fr" }],
+      files: [{ id: "f1", name: "John", type: "usfm", cellCount: 40, declaredSourceLanguage: "en", declaredTargetLanguage: "fr" }],
     })
     expect(row).toMatchObject({
       id: "p503",
@@ -124,10 +124,21 @@ describe("toSharedPortfolioRow", () => {
       orgName: "Host Org",
       origin: "shared",
       grantedAt: "2026-07-20T00:00:00Z",
-      sourceLanguage: "en",
-      targetLanguage: "fr",
       totalCells: 0,
       filledCells: 0,
     })
+  })
+
+  // AQU-1596 regression guard: the row used to name the language off whichever
+  // file declared one. A declared language is import information and can
+  // disagree with the lane the rows actually live in, so a shared row — which
+  // has no portfolio row and no lane rows to read — reports none.
+  it("does not borrow a language from a file's declared languages", () => {
+    const row = toSharedPortfolioRow({
+      ...proj("p503", 503),
+      files: [{ id: "f1", name: "John", type: "usfm", cellCount: 40, declaredSourceLanguage: "en", declaredTargetLanguage: "fr" }],
+    })
+    expect(row.sourceLanguage).toBeNull()
+    expect(row.targetLanguage).toBeNull()
   })
 })

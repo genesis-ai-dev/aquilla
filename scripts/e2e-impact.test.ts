@@ -33,6 +33,7 @@ describe("changed-file E2E impact selection", () => {
       "src/lib/sync/bulk-import.ts", "sync-worker/src/events/import-route.ts",
       "src/lib/import/timeline-text.ts", "shared/timeline-import.ts",
       "sync-worker/src/events/import-track-publication.ts",
+      "sync-worker/src/events/import-caption-promotion.ts",
       "src/hooks/useTimelineTextCells.ts", "src/components/timeline/TimelineEditor.tsx",
       "src/lib/audio/script-alignment.ts",
       "src/lib/audio/align-source-script.ts", "src/lib/audio/source-alignment.ts",
@@ -63,7 +64,8 @@ describe("changed-file E2E impact selection", () => {
   })
   it("maps imported video producers and picture resolution to the import journey", () => {
     for (const file of ["src/hooks/useMediaPictureUrl.ts", "src/lib/sync/bulk-import.ts",
-      "sync-worker/src/events/import-route.ts"]) {
+      "sync-worker/src/events/import-route.ts",
+      "sync-worker/src/events/import-caption-promotion.ts"]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-and-edit.smoke.spec.ts",
       )
@@ -84,6 +86,22 @@ describe("changed-file E2E impact selection", () => {
   })
   it("runs a changed smoke spec directly", () => {
     expect(selectAffectedE2E([specs[3]], specs).specs).toEqual([specs[3]])
+  })
+
+  it("does not treat the word popover as a feature match", () => {
+    const withPresence = [
+      ...specs,
+      "e2e/specs/collab/member-presence-popover.smoke.spec.ts",
+    ]
+    const selected = selectAffectedE2E(
+      ["src/components/org/AddLanguagePopover.tsx"],
+      withPresence,
+    ).specs
+    expect(selected).not.toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
+    expect(selectAffectedE2E(
+      ["src/components/collab/MemberPresence.tsx"],
+      withPresence,
+    ).specs).toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
   })
 
   it("maps domain code to a sentinel and close filename matches", () => {

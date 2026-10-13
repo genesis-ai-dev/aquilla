@@ -654,6 +654,18 @@ describe("guardSql — pen-test 2026-09-30 literal-desync and xml-function bypas
   it("rejects U&'…' literals", () => {
     expect(guard("SELECT U&'a' FROM cells WHERE project_id = :project").ok).toBe(false)
   })
+  it("rejects ts_stat / advisory locks / server-FS probes", () => {
+    for (const expr of [
+      "(ts_stat('select value_tsv from cells')).word",
+      "pg_advisory_lock(1)::text",
+      "pg_advisory_xact_lock(1)::text",
+      "(pg_stat_file('/etc/passwd')).size",
+    ]) {
+      const r = guard(`SELECT ${expr} FROM cells WHERE project_id = :project`)
+      expect(r.ok).toBe(false)
+    }
+  })
+
   it("rejects query_to_xml (runs an unscoped query from a string)", () => {
     const r = guard("SELECT query_to_xml('select * from users', true, false, '') FROM cells WHERE project_id = :project")
     expect(r.ok).toBe(false)

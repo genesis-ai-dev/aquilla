@@ -379,8 +379,15 @@ export interface CreateAssignmentArgs {
   /**
    * AQU-538 (§3.5): target-language lane to pin this assignment to. Omit or ''
    * for the default lane — the field is dropped from the event payload when ''.
+   * `''` is that lane's `legacy_tag`, the permanent bridge for old events.
    */
   targetLang?: string
+  /**
+   * AQU-1601 / AQU-1612: the lane row's id, stamped beside `targetLang` when
+   * the caller has the row. Omitted when the project has no lane rows yet
+   * (before the AQU-1616 backfill). The two forms must name the same lane.
+   */
+  laneId?: string
   deadline?: string | null
   note?: string | null
 }
@@ -396,6 +403,7 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
   // '', a missing value, and the word "default" are that lane — the product
   // cannot store a lane named "default". An explicit tag is kept.
   const targetLang = laneTagForAssignment(args.targetLang)
+  const laneId = args.laneId?.trim() || undefined
   const event = buildRawEvent({
     kind: "assignment.create",
     projectId: args.projectId,
@@ -409,6 +417,7 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
       scopeLabel: args.scopeLabel,
       assigneeUserId: args.assigneeUserId,
       ...(targetLang ? { targetLang } : {}),
+      ...(laneId ? { laneId } : {}),
       ...(args.deadline !== undefined ? { deadline: args.deadline } : {}),
       ...(args.note !== undefined ? { note: args.note } : {}),
     },

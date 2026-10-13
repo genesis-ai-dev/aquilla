@@ -553,6 +553,11 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
       return t("autopilot.inspector.event.idle")
     }
     if (event.status === "running") return t("autopilot.inspector.event.running")
+    // AQU-1847: the run holds its place in line for model capacity — behind
+    // another file, another project in this workspace, or another tenant. It
+    // is neither working nor stalled, and the generic "status changed" this
+    // used to fall through to read as the latter.
+    if (event.status === "queued") return t("autopilot.inspector.event.queuedForCapacity")
     if (event.status === "pausing") return t("autopilot.inspector.event.pauseRequested")
     if (event.status === "paused") return t("autopilot.inspector.event.paused")
     if (event.status === "done") return t("autopilot.inspector.event.completed")

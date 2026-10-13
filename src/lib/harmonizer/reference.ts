@@ -33,6 +33,15 @@ export const MAX_BOUNDARIES = 8
 /** First words of cell b offered as the subject's span. */
 export const MAX_WORD_OPTIONS = 12
 export const REFERENCE_MIN_PROBABILITY = 0.7
+/**
+ * Jev is biased toward "a reader would know who this is": on 40 BSB verses
+ * whose speaker name was replaced by "he" after a switch, its `clear` answer
+ * never went below 0.5 (mean 0.83 original → 0.72 damaged), so a symmetric
+ * "clear ≤ 0.3" rule could never fire. Below 0.7 separated damaged (13/40)
+ * from original (2/40) verses. Re-measure with scripts/harmonizer-eval.ts
+ * before changing it, and whenever JEV_MODEL moves.
+ */
+export const REFERENCE_MAX_CLEAR = 0.7
 export const IMPLIED = "implied"
 
 export interface ReferenceBoundary {
@@ -134,13 +143,14 @@ export const referenceCheck: HarmonyCheck<ReferencePlan> = {
     return out
   },
 
-  findings(plan, cells, answers, prefix) {
+  findings(plan, cells, answers, prefix, opts) {
+    const min = opts?.minProbability ?? REFERENCE_MIN_PROBABILITY
     const out: HarmonizerFinding[] = []
     plan.boundaries.forEach(({ b, words }, i) => {
       const switched = noulValue(answers[`${prefix}r${i}_switch`])
       const clear = noulValue(answers[`${prefix}r${i}_clear`])
       if (switched === undefined || clear === undefined) return
-      if (switched < REFERENCE_MIN_PROBABILITY || 1 - clear < REFERENCE_MIN_PROBABILITY) return
+      if (switched < min || clear >= REFERENCE_MAX_CLEAR) return
       // Point at the subject's word when Jev is sure which it is; otherwise at
       // the first word, where an implied subject's clause begins.
       const picked = choiceValue(answers[`${prefix}r${i}_word`])
@@ -160,7 +170,7 @@ export const referenceCheck: HarmonyCheck<ReferencePlan> = {
           ? "harmonizer.reference.impliedSubject"
           : "harmonizer.reference.unclearSubject",
         reasonValues: { previous: cells[b - 1].ref ?? label(b - 1) },
-        confidence: Math.min(switched, 1 - clear),
+        confidence: Math.min(switched, REFERENCE_MAX_CLEAR - clear + 0.3),
       })
     })
     return out

@@ -24,7 +24,7 @@ import { t } from "./i18n/standalone"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
-import { detectSpeechSegments } from "./timeline/silence-split"
+import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
 import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
 import { createMediaCueSpecs } from "./import/media-cues"
@@ -60,7 +60,8 @@ import { extractIdmlStrings } from "./parsers/idml"
 import type { PartnerImportEdition, PartnerImportProgress } from "./partners/types"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
-import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
+import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./sync/bulk-import"
+import { importCellEventId, releaseImportSession, resolveImportSession } from "./sync/import-session"
 import {
   assertSourceUploadByteLength,
   assertSourceUploadSize,
@@ -1610,6 +1611,21 @@ export function buildBulkCells(
   return buildBulkCellsWithSpeakers(strings, options).cells
 }
 
+/**
+ * How one parsed source file is recognised again across import attempts
+ * (`resolveImportSession`). Deliberately the same shape of identity
+ * `reimportKeysFor` uses — format, book, name — so retrying "Jonah.usfm" into
+ * a project resolves the session the failed attempt left, while a different
+ * file in the same project gets its own.
+ */
+export function importSessionKeyFor(
+  fileType: FileType,
+  result: { name: string; originalName?: string; bookCode?: string },
+): string {
+  const name = (result.originalName ?? result.name).trim().toLowerCase()
+  return `${fileType}:${result.bookCode?.trim().toUpperCase() ?? ""}:${name}`
+}
+
 export interface EmitParsedFileResult {
   ref: FileReference
   /** (cellId, speaker) pairs from the same `buildBulkCellsWithSpeakers` call
@@ -1633,7 +1649,6 @@ export async function emitParsedFile(
   const existingFileId = reimportKeysFor(result)
     .map((key) => ctx.reimportFileIds?.get(key))
     .find((id): id is string => Boolean(id))
-  const fileId = existingFileId ?? uuidv7()
 
   const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
     fileName: result.name,
@@ -1654,12 +1669,39 @@ export async function emitParsedFile(
   const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
     normalizedFile: normalized,
   })
+
+  // AQU-1859: a fresh import runs inside a resumable session, so a chunk that
+  // fails half-way through a Bible can be retried into the same file instead
+  // of leaving a hidden partial file behind and starting a second one. A
+  // re-import of an EXISTING file already has its own identity and goes
+  // through the reconcile path, which is not chunked.
+  const session = existingFileId
+    ? undefined
+    : await resolveImportSession({
+      projectId: ctx.projectId,
+      importKey: importSessionKeyFor(fileType, result),
+      fileName: result.name,
+      cellKeys: cells.map((cell) => cell.cellId),
+      chunkSize: BULK_IMPORT_CHUNK,
+    })
+  const fileId = existingFileId ?? session?.fileId ?? uuidv7()
+
+  // Inside a session the event ids are derived from the file id rather than
+  // minted per parse, so re-parsing the file to retry produces byte-identical
+  // chunks and the already-landed ones replay as no-ops. Mutated in place
+  // because `speakerPairs` is keyed to these same cell objects' `cellId`.
+  if (session) {
+    cells.forEach((cell, index) => {
+      cell.id = importCellEventId(fileId, index, cell.cellId)
+    })
+  }
+
   const targets: TargetCommit[] = cells.flatMap((cell, index) => {
     const value = result.strings[index]?.translated
     const valueHtml = result.strings[index]?.translatedHtml
     return value || valueHtml
       ? [{
-          id: uuidv7(),
+          id: session ? importCellEventId(fileId, index, cell.cellId, "target") : uuidv7(),
           cellId: cell.cellId,
           parentId: cell.id,
           value: value ?? "",
@@ -1677,14 +1719,23 @@ export async function emitParsedFile(
   // AQU-990: the bulk-import route rejects an oversized cell with a bare 413
   // after the whole payload has been chunked and uploaded. Check the same
   // ceiling here so an unsplittable section fails immediately, naming itself.
-  assertImportCellsWithinSizeLimit(result.name, cells, targets)
+  try {
+    assertImportCellsWithinSizeLimit(result.name, cells, targets)
+  } catch (error) {
+    // Nothing was uploaded, so hand the session key back here rather than
+    // leaving this file un-resumable for the rest of the tab's life;
+    // `bulkUploadSource` owns the release once the upload has started.
+    if (session) releaseImportSession(session.key)
+    throw error
+  }
 
   const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
   await upload({
     projectId: ctx.projectId,
     fileId,
+    ...(session ? { session } : {}),
     file: {
-      id: uuidv7(),
+      id: session?.fileEventId ?? uuidv7(),
       name: result.name,
       fileType,
       role: "source",
@@ -1776,9 +1827,15 @@ export interface MediaSegmentSpec {
 export async function computeMediaSegmentSpecs(
   file: File,
 ): Promise<{ durationMs: number | undefined; specs: MediaSegmentSpec[] }> {
-  const decoded = await decodeAudioFile(file).catch(() => null)
-  const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
-  const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
+  // AQU-1857: the analysis decode is sized to the recording — a 100-minute MP3
+  // is decoded a minute at a time instead of as one multi-gigabyte PCM buffer.
+  // `null` (platform can't decode) and an empty `segments` (too long to
+  // analyse at all) both land on the single whole-file fallback below.
+  const analysis = await analyseSpeechInFile(file, {
+    probeDurationMs: (blob) => probeMediaDurationMs(blob).catch(() => undefined),
+  }).catch(() => null)
+  const durationMs = analysis?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
+  const segments = analysis?.segments ?? []
 
   const timings = tileSegments(segments, durationMs)
   const specs: MediaSegmentSpec[] =
@@ -1921,6 +1978,9 @@ export function createMediaFileCommit(
           audioId: `${upload.audioId}.${upload.ext}`,
           url: upload.url,
           slot: "recording",
+          // AQU-1565 follow-up: the imported recording is the file's shared
+          // programme audio, not a dub of each row (see attach-media.ts).
+          role: "source",
           ...(s.transcription !== undefined ? { transcription: s.transcription } : {}),
           ...(file.type ? { mimeType: file.type } : {}),
           ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
@@ -1960,41 +2020,6 @@ export function createMediaFileCommit(
       return result
     })().finally(() => { inFlight = null })
     return inFlight
-  }
-}
-
-/**
- * Decode an audio file to mono PCM for silence-splitting. Returns null when
- * the platform can't decode it (no AudioContext, or an undecodable container
- * such as most video) — callers then fall back to a single whole-file segment.
- */
-async function decodeAudioFile(
-  file: File,
-): Promise<{ channel: Float32Array; sampleRate: number; durationMs: number } | null> {
-  const AC: typeof AudioContext | undefined =
-    typeof window !== "undefined"
-      ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      : undefined
-  if (!AC) return null
-  const buf = await file.arrayBuffer()
-  const audioCtx = new AC()
-  try {
-    // decodeAudioData rejects with a cryptic DOMException ("EncodingError:
-    // Decoding failed") — rewrap so anything that surfaces or logs the message
-    // is user-actionable. The original error is preserved as `cause`.
-    const audio = await audioCtx.decodeAudioData(buf).catch((err: unknown) => {
-      throw new Error(
-        t("importExport.errors.couldNotDecodeAudio", { fileName: file.name }),
-        { cause: err },
-      )
-    })
-    return {
-      channel: audio.getChannelData(0),
-      sampleRate: audio.sampleRate,
-      durationMs: audio.duration * 1000,
-    }
-  } finally {
-    void audioCtx.close?.()
   }
 }
 

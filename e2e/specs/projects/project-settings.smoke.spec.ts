@@ -11,7 +11,7 @@ import { LivingMemory } from "../../helpers/page-objects/LivingMemory"
  * Entry: project Overview (`/projects/:id`) → header "Project settings" gear
  * → `/project/:id/settings` (then General).
  */
-test("project settings renames the project and saves source language", async ({ alice }) => {
+test("project settings renames the project and edits a lane language", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
 
@@ -52,11 +52,8 @@ test("project settings renames the project and saves source language", async ({ 
   const renamedName = `${originalName} renamed`
   await nameInput.fill(renamedName)
 
-  const sourceLanguage = alice.locator("#sl")
-  await expect(sourceLanguage).toBeEnabled()
-  await sourceLanguage.fill("English (US)")
-
-  // "Save changes" button only appears when isDirty.
+  // Name-only. Language is a lane row, edited below, so this save does not
+  // touch the settings blob (and must not depend on the settings-save race).
   const saveBtn = alice.getByRole("button", { name: /Save changes/i })
   await expect(saveBtn).toBeVisible({ timeout: 5_000 })
 
@@ -64,14 +61,29 @@ test("project settings renames the project and saves source language", async ({ 
   // AQU-501: the General pane is expressed via `?section=general`, so match
   // the path prefix rather than anchoring on end-of-string.
   await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(?:/|\\?|$)`), { timeout: 10_000 })
-  await expect(alice.getByText(/Saved: project title, source language/i)).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByText(/Saved: project title\./i)).toBeVisible({ timeout: 10_000 })
   await expect(nameInput).toHaveValue(renamedName, { timeout: 5_000 })
-  await expect(sourceLanguage).toHaveValue("English (US)", { timeout: 5_000 })
 
   // The rename must have landed on the server row, not just local state —
   // reload and confirm the settings page hydrates the new name back.
   await alice.reload()
   await expect(alice.locator("#pname")).toHaveValue(renamedName, { timeout: 10_000 })
+
+  // AQU-1594: source language moved off Project Info onto the source lane.
+  const sourceLanguage = alice.getByLabel(/^Source Language$/i)
+  await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
+  await expect(sourceLanguage).toBeEnabled()
+  const laneSaved = alice.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      /\/lanes\/[^/]+$/.test(response.url()) &&
+      response.ok(),
+  )
+  await sourceLanguage.fill("English (US)")
+  await sourceLanguage.blur()
+  await laneSaved
+  await alice.reload()
+  await expect(alice.getByLabel(/^Source Language$/i)).toHaveValue("English (US)", { timeout: 10_000 })
 
   // AQU-825: Knowledge Base originals cross SPA → auth-worker → Postgres + R2.
   // Exercise the real upload, rehydrate it after navigation, read the server-

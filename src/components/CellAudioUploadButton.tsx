@@ -24,6 +24,7 @@ import { RailButton } from "./CellActionRail"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ACCEPT, attachAudioFileToCell } from "@/lib/audio/attach-file"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 interface Props {
   projectId: string
@@ -70,7 +71,12 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
       })
       onTakeSaved?.(cellId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // AQU-510: no `context` noun is passed. `error.network.contextSuffix`
+      // translates its frame but interpolates the caller's noun verbatim, so
+      // "audio" would sit in English inside a Burmese sentence — the very
+      // defect this ticket is about. A wholly localized sentence beats a
+      // more specific half-translated one.
+      setError(toUserFacingError(e).message)
     } finally {
       setUploading(false)
     }

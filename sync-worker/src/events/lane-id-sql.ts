@@ -70,22 +70,16 @@ export function laneIdResolveBindingSql(): string {
 }
 
 /**
- * Which column an `artifact_bindings` upsert must name in `ON CONFLICT`.
+ * The column an `artifact_bindings` upsert names in `ON CONFLICT`.
  *
- * Migration 0134 adds `artifact_bindings_lane_member_key` on `lane_id`. The
- * Workers can deploy before that lands, and naming a column the live unique
- * does not cover raises "there is no unique or exclusion constraint matching
- * the ON CONFLICT specification". Absent that index, the tag-keyed unique is
- * the one that exists, so fail toward `target_lang`.
+ * Migration 0134 added `artifact_bindings_lane_member_key` on `lane_id`.
+ * AQU-1611 (0155) dropped the tag-keyed UNIQUE with the `target_lang` column,
+ * so the conflict target is `lane_id`.
  */
 export async function artifactBindingConflictColumn(
-  db: AquillaDb,
-): Promise<"lane_id" | "target_lang"> {
-  const row = await db
-    .prepare("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?")
-    .bind("artifact_bindings_lane_member_key")
-    .first<{ indexdef: string }>()
-  return row?.indexdef.includes("lane_id") ? "lane_id" : "target_lang"
+  _db: AquillaDb,
+): Promise<"lane_id"> {
+  return "lane_id"
 }
 
 /** Binds for {@link laneIdResolveBindingSql}: projectId, role, role, targetLang. */

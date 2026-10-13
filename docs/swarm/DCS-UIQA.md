@@ -107,6 +107,12 @@ project per repo@ref, downstreams *link* to it rather than re-import), but it's 
 the standalone-old-cursor construction for a delta demo collides with any existing import of the
 same repo. Worth a guard/warning if two projects ever try to own the same DCS resource.
 
+**Resolved (AQU-1891):** file ids are now project-scoped — `dcsFileId(projectId, repo, key)` —
+so any number of projects can import the same resource and each gets its own file rows. (Event
+ids were already scoped; CELL ids stay content-addressed, which is what keeps re-import a
+stable-id commit.) The delta/repair paths still recognise the pre-fix project-agnostic id
+(`dcsLegacyFileId`) so projects imported before the change keep matching their files.
+
 ## The product gap you flagged (confirmed)
 
 **The import UI pins latest-only — there is no release picker.** Import always pins the *current*

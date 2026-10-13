@@ -582,6 +582,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "link and snapshots its data. A casual toggle and a one-way destructive " +
     "operation carry very different weight, and many languages would render " +
     "'detach' with a stronger verb for the latter.",
+  "projectSettings.inherit.detach":
+    "One-click button beside a single setting the project is still copying " +
+    "from its upstream: it stops future copies of that one field and keeps " +
+    "the current value, with no confirmation. projectSettings.sourceLink." +
+    "detachConfirmButton confirms a typed, irreversible dialog that severs the " +
+    "project's whole live source link. Same reasoning as org.teamDetail." +
+    "detachButton above: a light per-field choice and a one-way destructive " +
+    "operation carry different weight, and many languages use a stronger verb " +
+    "for the latter.",
   "terminology.editor.errorImportFailed":
     "Failure notice for importing TERMS into the project termbase — a glossary " +
     "operation. importExport.errors.importFailed reports a failed SOURCE-DOCUMENT " +
@@ -761,15 +770,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "many languages lexicalize 'a term's review state' and 'a project's state' " +
     "differently, or decline the noun differently depending on the thing it " +
     "describes.",
-  "rules.createDialog.descriptionLabel":
-    "Visible field label above the free-text description input in the standalone " +
-    "rule-creation dialog — a sighted user reads it beside the input. " +
-    "nav.report.descriptionFieldLabel is a visually-hidden (screen-reader-only) " +
-    "label for a bug-report textarea that shows a placeholder instead of a visible " +
-    "label. A visible form label and an sr-only accessible name serve different " +
-    "audiences and often take different phrasing (e.g. a visible label can be " +
-    "terser since layout already implies context; an sr-only label must stand " +
-    "alone).",
   "audio.voice.clear":
     "One of a fixed set of one-word Gemini TTS voice tone descriptions (see " +
     "audio.voice.bright) — an ADJECTIVE describing how a voice sounds ('distinct, " +
@@ -911,4 +911,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "data the agent READS is a different UI role from a navigation entry, and " +
     "languages that distinguish the subject matter from the place it lives " +
     "should be free to split them.",
+  "bibleData.enrichment.voices.label":
+    "AQU-1686: names the Bible data enrichment that labels who SPEAKS in the " +
+    "Bible text (Jesus, the narrator, a crowd). common.voices is the panel of " +
+    "synthetic text-to-speech voices. People speaking and machine voices are " +
+    "different words in most target languages.",
+  "bibleData.enrichment.terms.label":
+    "AQU-1686: names the enrichment that marks biblical key terms (a term of art " +
+    "in Bible translation, as in Paratext's Biblical Terms) in the source text. " +
+    "autopilot.readiness.terminology.label names the readiness check on the " +
+    "project's own approved renderings, which several languages call terminology.",
 }

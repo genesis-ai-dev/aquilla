@@ -360,7 +360,7 @@ describe("audio R2 endpoints", () => {
     })
   })
 
-  it("upserts the audio binding on the lane key and on the tag key", async () => {
+  it("upserts the audio binding on the lane key", async () => {
     const { db } = await makeTestDb({
       projects: [{ id: "p1", name: "Test", created_by: 1 }],
       files: [{ id: "f1", project_id: "p1", name: "Interview", event_id: "ev1" }],
@@ -385,12 +385,6 @@ describe("audio R2 endpoints", () => {
     ).bind(artifactId).first<{ n: number }>()
 
     expect((await put())?.status).toBe(200)
-    expect((await put())?.status).toBe(200)
-    expect((await count())?.n).toBe(1)
-
-    await db.prepare(
-      "ALTER TABLE artifact_bindings DROP CONSTRAINT artifact_bindings_lane_member_key",
-    ).run()
     expect((await put())?.status).toBe(200)
     expect((await count())?.n).toBe(1)
   })

@@ -43,6 +43,7 @@ function runAt(doneSpans: number): ContextualRun {
     id: "run-1",
     projectId: "p",
     fileId: "f",
+    laneId: "lane-def",
     targetLang: "",
     status: "parked",
     initiatedBy: "tester",

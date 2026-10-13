@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { describe, expect, it, vi } from "vitest"
 import { workersBuildPreviewAlias } from "./cloudflare-pr-preview.mjs"
 import { deployStackPreview, previewConfig, previewOrigin, PREVIEW_WORKERS } from "./cloudflare-stack-preview.mjs"
+import { hostedPosthog } from "./hosted-posthog.mjs"
 
 const env = { WORKERS_CI: "1", WORKERS_CI_BRANCH: "feature/example", WORKERS_CI_COMMIT_SHA: "abc123", WRANGLER_CI_OVERRIDE_NAME: "aquilla-web-preview" }
 
@@ -26,6 +27,8 @@ describe("full-stack Cloudflare previews", () => {
         expect(options.env.VITE_AUTH_BASE).toBe(`${authOrigin}/identity`)
         expect(options.env.VITE_CHAT_BASE).toBe(`${authOrigin}/chat`)
         expect(options.env.VITE_SYNC_WORKER_HOST).toBe(`${new URL(syncOrigin).host}/sync`)
+        expect(options.env.VITE_POSTHOG_KEY).toBe(hostedPosthog.projectToken)
+        expect(options.env.VITE_POSTHOG_HOST).toBe(hostedPosthog.ingestHost)
         return { stdout: "" }
       }
       expect(args.slice(0, 3)).toEqual(["exec", "wrangler", "preview"])
@@ -48,6 +51,12 @@ describe("full-stack Cloudflare previews", () => {
     const result = await deployStackPreview({ cwd: "/tmp/preview-contract-fixture", env: { ...env, WRANGLER_OUTPUT_FILE_DIRECTORY: outputDirectory }, run, verify, notify })
     expect(configs.map(({ surface }) => surface)).toEqual(["auth", "sync", "web", "auth", "sync"])
     expect(configs[0].config.previews.vars.SYNC_WORKER_URL).toBe("https://preview-not-ready.invalid")
+    for (const { config } of configs.filter(({ surface }) => surface !== "web")) {
+      expect(config.previews.vars).toMatchObject({
+        POSTHOG_KEY: hostedPosthog.projectToken,
+        POSTHOG_HOST: hostedPosthog.ingestHost,
+      })
+    }
     expect(configs[3].config.previews.vars).toMatchObject({
       BASE_URL: result.urls.web, SYNC_WORKER_URL: `${result.urls.sync}/sync`,
     })

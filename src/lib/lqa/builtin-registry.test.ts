@@ -8,6 +8,7 @@ describe("builtin-registry", () => {
       "target-equals-source",
       "placeholder-integrity",
       "number-integrity",
+      "number-integrity-extra",
       "end-punctuation-mismatch",
       "punctuation-integrity",
       "double-space",
@@ -15,6 +16,7 @@ describe("builtin-registry", () => {
       "unpaired-symbols",
       "abbreviation-mismatch",
       "capitalization",
+      "footnote-quote-mismatch",
     ])
   })
 

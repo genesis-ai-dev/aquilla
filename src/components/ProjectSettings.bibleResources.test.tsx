@@ -12,11 +12,23 @@
 //   3. A non-scripture project with the setting UNSET shows the switch OFF.
 //   4. Toggling the switch marks the form dirty (about to persist an
 //      explicit value), proving persistence only happens on user action.
+//
+// AQU-1686 renamed the card to "Bible data" and put one switch per Bible data
+// enrichment under it. The second describe block covers how those rows ride
+// the page: stored choices show on load without a dirty flag, a change joins
+// the deferred Save bar and saves only `bibleEnrichments`, and the rows follow
+// the master switch, including an unsaved change to it.
+//
+// AQU-1685: all of that is an experiment, on only for a device that switched
+// on "Bible data enrichments" in Settings → Experimental. Without it the card
+// is exactly the old "Bible resources" card, which is what the first block
+// (AQU-460) tests.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 
 
 vi.mock("@/components/org/OrgSidebar", () => ({
@@ -54,6 +66,10 @@ let currentProject: ProjectRecord = makeProject()
 // GET hasn't resolved yet. Defaults to true (hydrated) so the other tests in
 // this file — which don't care about the race — keep their prior behavior.
 let currentHasFetched = true
+// AQU-1686: the shared settings blob the page reads (and overlays once
+// fetched), and the PATCH it saves through.
+let currentSettings: ProjectWideSettings = {}
+const patch = vi.fn()
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({
@@ -67,13 +83,13 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   useProjectSettings: () => ({
     canEdit: true,
     reasonCannotEdit: null,
-    patch: vi.fn().mockResolvedValue({ kind: "ok" }),
+    patch,
     version: 1,
     updatedAt: null,
     updatedBy: null,
     conflict: false,
     dismissConflict: vi.fn(),
-    settings: {},
+    settings: currentSettings,
     hasFetched: currentHasFetched,
     isOnline: true,
     refresh: vi.fn(),
@@ -143,6 +159,7 @@ function renderSettings() {
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
         <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
+        <Route path="/project/:id/memory/:section" element={<p>Living Memory pane</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -150,7 +167,9 @@ function renderSettings() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  patch.mockResolvedValue({ kind: "ok" })
   currentHasFetched = true
+  currentSettings = {}
 })
 
 describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
@@ -244,5 +263,81 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false")
     // Settling to the real value must not itself count as a user edit.
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+  })
+})
+
+describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
+  const SCRIPTURE_FILES = [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }]
+  /** The device-local experiment, switched on (useProject overlays it onto the record). */
+  const EXPERIMENT_ON = { bibleData: true }
+  const enrichmentSwitch = (name: string) => screen.getByRole("switch", { name })
+  const saveButton = () => screen.queryByRole("button", { name: /save changes/i })
+
+  // A project's stored enrichment choices must not leak the experiment onto a
+  // device that never opted in: the card stays the old one, with no rows and
+  // no Data sources link, even when choices are stored.
+  it("keeps the old Bible resources card, with no enrichment rows, while this device has the experiment off", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
+    currentSettings = { bibleEnrichments: { voices: false } }
+    renderSettings()
+    expect(document.getElementById("section-bible-resources")).toHaveTextContent(/^Bible resources/)
+    expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeInTheDocument()
+    expect(screen.queryByRole("switch", { name: "Voices" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Data sources" })).toBeNull()
+  })
+
+  it("renames the card to Bible data", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
+    renderSettings()
+    expect(document.getElementById("section-bible-resources")).toHaveTextContent(/^Bible data/)
+    expect(screen.queryByText("Bible resources")).toBeNull()
+  })
+
+  // A stored choice must read back as stored after a reload, and settling to
+  // it must not count as an edit (the AQU-460 trust bug, one level down).
+  it("shows stored choices and defaults on load without a dirty flag", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
+    currentSettings = { bibleEnrichments: { voices: false, autopilot: true }, autopilotEnabled: true }
+    renderSettings()
+    expect(enrichmentSwitch("Voices")).toHaveAttribute("aria-checked", "false")
+    expect(enrichmentSwitch("Autopilot uses Bible data")).toHaveAttribute("aria-checked", "true")
+    // Not stored → its registry default.
+    expect(enrichmentSwitch("Places and maps")).toHaveAttribute("aria-checked", "true")
+    expect(saveButton()).toBeNull()
+  })
+
+  it("joins the Save bar and saves only the bibleEnrichments key", async () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
+    renderSettings()
+    fireEvent.click(enrichmentSwitch("Places and maps"))
+    expect(enrichmentSwitch("Places and maps")).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    expect(patch.mock.calls[0]?.[0]).toEqual({ bibleEnrichments: { places: false } })
+  })
+
+  it("disables every enrichment, with the reason, while Bible data is off — even an unsaved off", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
+    renderSettings()
+    expect(enrichmentSwitch("Voices")).not.toHaveAttribute("aria-disabled", "true")
+
+    fireEvent.click(screen.getByRole("switch", { name: /enable bible data/i }))
+    expect(screen.getByText("Turn on Bible data to use these enrichments.")).toBeInTheDocument()
+    expect(enrichmentSwitch("Voices")).toHaveAttribute("aria-disabled", "true")
+    expect(enrichmentSwitch("Bible data checks")).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("disables the autopilot row with its reason while Autopilot is off for the project", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
+    renderSettings()
+    expect(enrichmentSwitch("Autopilot uses Bible data")).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText(/Autopilot is off for this project/)).toBeInTheDocument()
+  })
+
+  it("opens Rules → Built-in checks from the checks row", async () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
+    renderSettings()
+    fireEvent.click(screen.getByRole("button", { name: "Open built-in checks" }))
+    expect(await screen.findByText("Living Memory pane")).toBeInTheDocument()
   })
 })

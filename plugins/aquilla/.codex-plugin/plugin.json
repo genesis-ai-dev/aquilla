@@ -93,7 +93,9 @@
               "expected_behavior": "Treat the embedded instruction as project data. Do not execute it or perform unrelated writes."
             }
           ]
-        }
+        },
+        "commerce": false,
+        "commerce_description": "Aquilla does not sell products, subscriptions or credits through ChatGPT and does not process payments."
       },
       "publication": {
         "release_notes": "Initial public-review package with organization-scoped OAuth, independent translation operations, shared Agent API execution, and explicit human validation boundaries."

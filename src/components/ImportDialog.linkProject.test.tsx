@@ -26,6 +26,9 @@ import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { resetLinkSeedStatusForTests } from "@/lib/sync/link-seed-status"
+import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
+
+const inherit = { ...INHERIT_DEFAULTS }
 
 const linkProjectSource = vi.fn()
 const triggerLinkSync = vi.fn()
@@ -244,6 +247,7 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
         sourceProjectId: "proj-upstream",
         mode: "live",
         consumes: "source",
+        inherit,
       })
     })
     // Refresh first, close second: the file list behind the dialog is what has
@@ -291,6 +295,7 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
         mode: "live",
         consumes: "source",
         fileIds: ["up-MAT", "up-MRK"],
+        inherit,
       })
     })
   })

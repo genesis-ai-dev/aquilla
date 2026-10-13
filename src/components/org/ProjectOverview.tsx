@@ -6,7 +6,7 @@ import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -43,11 +43,13 @@ import {
   useDownloadProgress,
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { isLaneArchived } from "@/components/project-lane-archive"
 import { laneLabelForTag, laneLabelsByTag } from "@/lib/lanes/lane-language"
 import { laneChipLabel } from "./project-lanes"
+import { isHiddenTimelineFile } from "@/lib/parsers/types"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
@@ -101,6 +103,7 @@ import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
   sectionTintClass,
+  visibilityRolePickerLabelKey,
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
 import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
@@ -409,16 +412,26 @@ export function ProjectOverview() {
   const [analysisOpen, setAnalysisOpen] = useState(false)
   const jwtRef = useRef(jwt)
   jwtRef.current = jwt
-  const analysisFiles = useMemo(
-    () => (project?.files ?? []).map((f) => ({ fileId: f.id, name: f.name })),
+  // AQU-1566: the project's DOCUMENTS. `project.files` still carries the hidden
+  // timeline files (a dubbing import's cue sheet, a caption track's content),
+  // which the editor drops from its own file list. Counting or offering them
+  // here showed a linked video with one caption track as "2 files" and let a
+  // manager assign work on a file nobody can open. Token minting below keeps
+  // reading `project.files`: any file of the project mints a project token.
+  const documentFiles = useMemo(
+    () => (project?.files ?? []).filter((f) => !isHiddenTimelineFile(f)),
     [project?.files],
+  )
+  const analysisFiles = useMemo(
+    () => documentFiles.map((f) => ({ fileId: f.id, name: f.name })),
+    [documentFiles],
   )
   const analysisLoadSources = useMemo(
     () => buildSourceLoader(id, buildFileScopedTokenFetcher(() => jwtRef.current, id)),
     [id],
   )
   const canManagePm = (project?.syncRole?.level ?? 0) >= 600
-  const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
+  const { members: pmCandidates, refresh: refreshMembers } = useProjectMembers(canManagePm ? id : null)
   const { activeOrgId, activeOrg, orgs, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
@@ -454,13 +467,11 @@ export function ProjectOverview() {
    * worse than not offering it.
    */
   const autopilotLanes = useMemo(() => {
-    const archived = new Set(
-      (project?.archivedLanes ?? []).map((lane) => lane.trim().toLowerCase()).filter(Boolean),
-    )
+    const archivedLanes = project?.archivedLanes ?? []
     return [
       "",
       ...extraRegistryLanes(project?.targetLanes, project?.targetLanguage).filter(
-        (lane) => !archived.has(lane.trim().toLowerCase()),
+        (lane) => !isLaneArchived(lane.trim(), archivedLanes),
       ),
     ]
   }, [project?.targetLanes, project?.targetLanguage, project?.archivedLanes])
@@ -1202,7 +1213,7 @@ export function ProjectOverview() {
     return {
       projectId: id,
       activeFileId: selectedUnitFileId,
-      files: (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
+      files: documentFiles.map((f) => ({ id: f.id, name: f.name })),
       targetLanes: extraRegistryLanes(project?.targetLanes, project?.targetLanguage),
       jwt,
       author: session?.username ?? "",
@@ -1219,7 +1230,7 @@ export function ProjectOverview() {
       },
     }
   }, [
-    canAssign, isArchived, jwt, id, selectedUnitFileId, project?.files, project?.targetLanes,
+    canAssign, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
     project?.targetLanguage, project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
     orgSettings.assignmentMinRole, handleAssigned,
   ])
@@ -1316,7 +1327,11 @@ export function ProjectOverview() {
   // PortfolioLane the tabs are filtered to (null = "All"); when set, the
   // Translated/Validated tiles + bars read that lane, and the cross-language
   // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
-  const projectLanes: PortfolioLane[] = audio?.lanes ?? []
+  // AQU-1796: a source lane rides along in the portfolio with lane "" so the
+  // source-language label can find it. It is not a target lane. Listing it
+  // here put the source language in the Languages table and, because the
+  // former default target also uses lane "", opened two staff popovers.
+  const projectLanes: PortfolioLane[] = (audio?.lanes ?? []).filter((lane) => lane.role !== "source")
   // AQU-1458: an archived lane is not another active language. The progress
   // tabs stay hidden for a single active lane, and the Languages section
   // still renders when an archived lane needs a place to live.
@@ -1399,6 +1414,7 @@ export function ProjectOverview() {
     try {
       await setProjectPm(jwt, id, pmUserId)
       await refresh()
+      void refreshMembers()
       // AQU-507: the org overview's PM column joins from the app-wide
       // accessible-projects directory (OrgContext, fetched once per session) —
       // revalidate it so the new PM shows there without a hard reload. Not
@@ -1625,7 +1641,7 @@ export function ProjectOverview() {
                       <p className="mt-0.5 text-sm text-muted-foreground">{languagePair}</p>
                     )}
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      {t("search.expanded.fileCount", { count: project?.files.length ?? 0 })}
+                      {t("search.expanded.fileCount", { count: documentFiles.length })}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -1739,7 +1755,7 @@ export function ProjectOverview() {
                     </FieldLabel>
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       {pm ? (
-                        <UsernameWithAvatar username={pm.username} nameTestId="overview-pm-name" />
+                        <UsernameWithAvatar userId={pm.id} username={pm.username} nameTestId="overview-pm-name" />
                       ) : (
                         <span className="text-muted-foreground" data-testid="overview-pm-name">
                           {t("org.projectOverview.unassigned")}
@@ -1761,6 +1777,11 @@ export function ProjectOverview() {
                         />
                       )}
                     </div>
+                    {pm ? (
+                      <p className="mt-1 max-w-sm text-xs text-muted-foreground" data-testid="overview-pm-lead-note">
+                        {t("org.projectOverview.pmGrantsProjectLead")}
+                      </p>
+                    ) : null}
                   </Field>
                   <Field className="w-auto min-w-56">
                     <FieldLabel className="text-xs font-semibold text-muted-foreground">
@@ -1857,6 +1878,7 @@ export function ProjectOverview() {
                       <DialogTitle>{pm ? t("org.projectOverview.changeProjectManagerDialogTitle") : t("org.projectOverview.assignProjectManagerDialogTitle")}</DialogTitle>
                       <DialogDescription>
                         {t("org.projectOverview.pmDialogDescription")}
+                        {pmSelection !== "" ? ` ${t("org.projectOverview.pmGrantsProjectLead")}` : ""}
                       </DialogDescription>
                     </DialogHeader>
                     <FieldGroup>
@@ -1882,6 +1904,7 @@ export function ProjectOverview() {
                               {pmCandidates.map((m) => (
                                 <SelectItem key={m.userId} value={String(m.userId)}>
                                   <UsernameWithAvatar
+                                    userId={m.userId}
                                     username={m.username}
                                     size="xs"
                                     menuSafe
@@ -2117,7 +2140,7 @@ export function ProjectOverview() {
                         <StatBar
                           label={t("org.orgHome.table.audioHeaderLabel")}
                           value={audio.audioCells}
-                          total={audio.totalCells}
+                          total={audioDenominator(audio)}
                           fillClass="bg-sky-500"
                           suffix={t("org.projectOverview.cellsSuffix")}
                         />
@@ -2142,13 +2165,14 @@ export function ProjectOverview() {
               {showLanguages && audio && (
                 <OverviewLaneTable
                   projectId={id}
+                  projectName={project?.name}
                   orgId={portfolioOrgId}
                   jwt={jwt}
                   lanes={activeProjectLanes}
                   archivedLanes={archivedProjectLanes}
                   defaultLanguageLabel={project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")}
                   extraLanes={extraRegistryLanes(project?.targetLanes, project?.targetLanguage)}
-                  files={project?.files ?? []}
+                  files={documentFiles}
                   roleLevel={project?.syncRole?.level ?? 0}
                   author={session?.username ?? ""}
                   canManageLanes={canAssign}
@@ -2439,6 +2463,18 @@ export function ProjectOverview() {
                       canEdit={canEditVisibility}
                       onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
                       description={t("org.projectOverview.teamVisibilityDescription")}
+                      // AQU-1779: the badge shows the higher of the two floors
+                      // but writes only the progress floor, so a value below
+                      // the roster floor would save, snap back, and loosen
+                      // per-member progress org-wide unseen. Offer only what
+                      // can show; the roster is lowered on the Members card.
+                      minSelectableRole={orgSettings.rosterViewMinRole}
+                      // Re-picking the shown floor still writes when progress
+                      // sits below it, so an owner can undo the old loosening.
+                      storedMinRole={orgSettings.memberProgressViewMinRole}
+                      belowMinSelectableHint={t("org.projectOverview.teamVisibilityRosterFloorHint", {
+                        floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
+                      })}
                     />
                   </div>
                   {teamOpen && (
@@ -2453,16 +2489,12 @@ export function ProjectOverview() {
                             return (
                               <li key={w.userId} className="flex items-center gap-3 text-sm">
                                 {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
-                                <AppTooltip content={w.username ?? String(w.userId)}>
-                                  <span className="flex w-40 shrink-0 items-center gap-2 font-medium">
-                                    <InitialsAvatar
-                                      name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })}
-                                      size="sm"
-                                      className="shrink-0"
-                                    />
-                                    <ExpandableName name={w.username ?? t("org.workloadRollup.unknownUser", { id: w.userId })} />
-                                  </span>
-                                </AppTooltip>
+                                <UserChip
+                                  userId={w.userId}
+                                  username={w.username}
+                                  size="sm"
+                                  className="w-40 shrink-0"
+                                />
                                 <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                                   <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
                                 </span>
@@ -2503,14 +2535,22 @@ export function ProjectOverview() {
                         />
                       )}
 
-                      {canAssign && !isArchived && activeOrgId != null && (project?.files.length ?? 0) > 0 && (
+                      {canAssign && !isArchived && activeOrgId != null && documentFiles.length > 0 && (
                         <div className="mt-3 pt-3 border-t">
                           <AssignWork
                             projectId={id}
-                            files={project?.files ?? []}
+                            files={documentFiles}
                             jwt={jwt ?? ""}
                             author={session?.username ?? ""}
-                            targetLang={selectedLaneTag ?? ""}
+                            arrivedLane={showLaneTabs ? selectedLaneTag : null}
+                            laneTags={
+                              targetLaneRows.length > 0
+                                ? [...new Set(targetLaneRows.map((lane) => lane.legacyTag ?? ""))]
+                                : ["", ...(project?.targetLanes ?? [])]
+                            }
+                            laneLabels={autopilotLaneLabels}
+                            defaultLaneLabel={project?.targetLanguage ?? ""}
+                            laneRows={targetLaneRows}
                             roleLevel={project?.syncRole?.level ?? 0}
                             allowSelfAssignment={orgSettings.allowSelfAssignment}
                             assignmentMinRole={orgSettings.assignmentMinRole}

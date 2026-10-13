@@ -990,4 +990,51 @@ describe("audio-first transport — video-less subtitle import (AQU-1704)", () =
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c3" })
     expect(getQueueProgress().currentTime).toBeCloseTo(6, 6)
   })
+
+  // AQU-1747. The takes played back to back correctly (the test above) while
+  // the timeline's playhead sat on 0:00, because the only thing the queue said
+  // about its clock was `queueClockIsFileTime` — true solely for an imported
+  // source recording, which a video-less subtitle file does not have. So the
+  // transport now says outright when its position is a PROGRAMME second, and
+  // these pin the three answers a consumer may act on.
+  it("publishes `programmeClock` while the programme is the transport", async () => {
+    const cells = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+
+    expect(getQueueProgress().programmeClock).toBe(true)
+    // …and it stays true across a verse boundary and a pause — every position
+    // the playhead would paint, not just the first one.
+    dubEl("c1")!.tick(1)
+    await settle()
+    expect(getQueueProgress().programmeClock).toBe(true)
+    pauseQueue()
+    expect(getQueueProgress().programmeClock).toBe(true)
+  })
+
+  it("does NOT claim the programme clock for a one-cell 'play just this line'", async () => {
+    // The guard that keeps the per-take regression from returning by another
+    // route: a snapshot context builds a ONE-slot programme starting at 0, so a
+    // consumer that painted it would yank a file-wide playhead to the left edge
+    // while the take sounding is the one at 6-9 s.
+    const cells = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000), cue("c3", 6, 9, 2_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue({ ...ctxFor([cells[2]]), snapshot: true }, 0)
+    await settle()
+
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c3" })
+    expect(getQueueProgress().currentTime).toBe(0) // the slot's own clock
+    expect(getQueueProgress().programmeClock).toBe(false)
+  })
+
+  it("does NOT claim the programme clock in dubbing mode", async () => {
+    const cells = [cue("c1", 0, 3, 1_000), cue("c2", 3, 6, 5_000)]
+    setQueueTimingMode("dubbing")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1" })
+    expect(getQueueProgress().programmeClock).toBe(false)
+  })
 })

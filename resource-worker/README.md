@@ -27,6 +27,7 @@ Kept in `EXTERNAL_CONTENT_HOSTS` (`resource-proxy-handler.ts`):
 - `cdn.door43.org` — Door43 media (OBS images)
 - `bible.helloao.org` — Free Use Bible API
 - `raw.githubusercontent.com` — BibleNLP/ebible corpus + `translations.csv`
+- `bibletranslation.org` — Bible Knowledge Pack static files under `/bkp/v1/` (AQU-1686)
 
 Intentional exceptions (not client content fetches, so out of scope): provider
 calls already routed through our Workers (OpenRouter/chat, `api.aquilla.app`,

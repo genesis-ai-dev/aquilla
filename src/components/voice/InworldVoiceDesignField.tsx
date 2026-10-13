@@ -38,6 +38,7 @@ import {
   structuredDesignPromptHasValue,
   type InworldDesignMode,
 } from "@/lib/audio/inworld-voice-design"
+import { explainVoiceRequestError } from "@/lib/audio/voice-request-error"
 import { designInworldVoice, synthesizeCellTts, type InworldDesignedPreview } from "@/lib/sync/tts"
 import { cn } from "@/lib/utils"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -179,7 +180,7 @@ export function InworldVoiceDesignField({
       } catch (err) {
         setPreviews([])
         onSelectionChange(null)
-        setSubmitError(err instanceof Error ? err.message : String(err))
+        setSubmitError(explainVoiceRequestError(err instanceof Error ? err.message : String(err)))
       }
     },
   })
@@ -338,7 +339,9 @@ export function InworldVoiceDesignField({
       savedSrcRef.current = src
       playSrc(src, existingVoiceId)
     } catch (err) {
-      if (aliveRef.current) setSubmitError(err instanceof Error ? err.message : String(err))
+      if (aliveRef.current) {
+        setSubmitError(explainVoiceRequestError(err instanceof Error ? err.message : String(err)))
+      }
     } finally {
       if (aliveRef.current) setLoadingSaved(false)
     }

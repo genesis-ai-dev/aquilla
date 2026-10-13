@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { Sparkles } from "lucide-react"
+import { Columns3, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
@@ -31,28 +31,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
-import { SparkleButton } from "@/components/SparkleButton"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   analyzeMondayMapping,
   deleteMondayLink,
-  fetchMondayBoards,
   fetchMondayBoardStructure,
   fetchMondayConnection,
   fetchMondayLink,
   patchMondayLink,
-  putMondayLink,
   syncMondayNow,
-  type MondayBoard,
   type MondayBoardLink,
   type MondayBoardStructure,
   type MondayConnectionStatus,
@@ -61,7 +49,7 @@ import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingTable } from "./MondayMappingEditor"
 import { MondayLinkedView } from "./MondayLinkedView"
 import { MondaySetupWizard } from "./MondaySetupWizard"
-import { MondayColumnPicker } from "./MondayColumnPicker"
+import { MondayAddColumnsDialog } from "./MondayAddColumnsDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const MAINTAINER = 600
@@ -91,8 +79,6 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [boards, setBoards] = useState<MondayBoard[] | null>(null)
-  const [selectedBoardId, setSelectedBoardId] = useState("")
   const [structure, setStructure] = useState<MondayBoardStructure | null>(null)
 
   const [proposal, setProposal] = useState<{ proposal: MondayMapping; summary: string } | null>(null)
@@ -108,8 +94,9 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   const [unlinkOpen, setUnlinkOpen] = useState(false)
   const [unlinking, setUnlinking] = useState(false)
   const [wizardOpen, setWizardOpen] = useState(false)
-  /** Manual board+mapping path, revealed on demand — the AI wizard is primary. */
-  const [manualOpen, setManualOpen] = useState(false)
+  /** The same setup steps, without the AI — the escape hatch under "Set up with AI". */
+  const [wizardMode, setWizardMode] = useState<"ai" | "manual">("ai")
+  const [addColumnsOpen, setAddColumnsOpen] = useState(false)
 
   const aliveRef = useRef(true)
   useEffect(() => {
@@ -156,30 +143,8 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
 
   const orgConnected = projectConnected ?? link?.orgConnected ?? connection?.connected ?? false
 
-  // ── Boards list (unlinked, maintainer only) ──────────────────────────────
-  // Only fetched once the manual path is opened; the wizard picks the board
-  // server-side, so the default path costs no board listing at all.
-  useEffect(() => {
-    if (!jwt || orgId == null || !canManage || loading || link || !orgConnected) return
-    if (!manualOpen || boards !== null) return
-    let alive = true
-    fetchMondayBoards(jwt, orgId)
-      .then((got) => {
-        if (alive && aliveRef.current) setBoards(got)
-      })
-      .catch((e: unknown) => {
-        if (alive && aliveRef.current) {
-          setBoards([])
-          setError(errMsg(e))
-        }
-      })
-    return () => {
-      alive = false
-    }
-  }, [jwt, orgId, canManage, loading, link, orgConnected, boards, manualOpen])
-
-  // ── Board structure (selected or linked board) ───────────────────────────
-  const structureBoardId = link?.boardId ?? selectedBoardId
+  // ── Board structure (linked board) ───────────────────────────────────────
+  const structureBoardId = link?.boardId ?? ""
   useEffect(() => {
     if (!jwt || orgId == null || !canManage || !structureBoardId) {
       setStructure(null)
@@ -222,28 +187,15 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   )
 
   const applyProposal = useCallback(async () => {
-    if (!jwt || !proposal) return
+    if (!jwt || !proposal || !link) return
     setApplying(true)
     setError(null)
     try {
-      if (link) {
-        // Reconfigure of an existing link — config-only PATCH.
-        const next = await patchMondayLink(jwt, projectId, { config: proposal.proposal })
-        if (!aliveRef.current) return
-        setLink(next.link)
-        setWarnings(next.warnings)
-      } else {
-        const boardId = selectedBoardId
-        const boardName = boards?.find((b) => b.id === boardId)?.name
-        const out = await putMondayLink(jwt, projectId, {
-          boardId,
-          ...(boardName ? { boardName } : {}),
-          config: proposal.proposal,
-        })
-        if (!aliveRef.current) return
-        setLink(out.link)
-        setWarnings(out.warnings)
-      }
+      // Reconfigure of an existing link — config-only PATCH.
+      const next = await patchMondayLink(jwt, projectId, { config: proposal.proposal })
+      if (!aliveRef.current) return
+      setLink(next.link)
+      setWarnings(next.warnings)
       setProposal(null)
       setReconfigureMsg("")
     } catch (e) {
@@ -251,7 +203,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
     } finally {
       if (aliveRef.current) setApplying(false)
     }
-  }, [jwt, proposal, link, projectId, selectedBoardId, boards])
+  }, [jwt, proposal, link, projectId])
 
   // ── Linked-state actions ─────────────────────────────────────────────────
   const handleToggleEnabled = useCallback(
@@ -272,20 +224,22 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   )
 
   const handleSaveMapping = useCallback(
-    async (columns: MondayMapping["columns"]) => {
-      if (!jwt || !link) return
+    async (columns: MondayMapping["columns"]): Promise<boolean> => {
+      if (!jwt || !link) return false
       setSavingMapping(true)
       setError(null)
       try {
         const next = await patchMondayLink(jwt, projectId, {
           config: { ...link.config, columns },
         })
-        if (!aliveRef.current) return
+        if (!aliveRef.current) return false
         setLink(next.link)
         // Columns the board doesn't have are dropped server-side; say which.
         setWarnings(next.warnings)
+        return true
       } catch (e) {
         if (aliveRef.current) setError(errMsg(e))
+        return false
       } finally {
         if (aliveRef.current) setSavingMapping(false)
       }
@@ -323,8 +277,6 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
       if (!aliveRef.current) return
       setLink(null)
       setUnlinkOpen(false)
-      setBoards(null)
-      setSelectedBoardId("")
     } catch (e) {
       if (aliveRef.current) setError(errMsg(e))
     } finally {
@@ -402,20 +354,16 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               warnings={warnings}
               missingColumns={
                 canManage ? (
-                  <MondayColumnPicker
-                    jwt={jwt}
-                    projectId={projectId}
-                    boardId={link.boardId}
-                    rows={link.config.columns}
-                    boardColumns={structure?.columns}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAddColumnsOpen(true)}
                     disabled={savingMapping}
-                    onAdded={(next, built) => {
-                      setStructure(built)
-                      // Mapped straight away: the user asked for these columns
-                      // to be used, so saving is part of the same click.
-                      void handleSaveMapping(next)
-                    }}
-                  />
+                    data-testid="monday-add-columns"
+                  >
+                    <Columns3 data-icon="inline-start" />
+                    {t("projectSettings.monday.addColumnsButton")}
+                  </Button>
                 ) : null
               }
             />
@@ -428,56 +376,33 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               <p className="text-sm text-muted-foreground">
                 {t("projectSettings.monday.linkBoardPrompt")}
               </p>
-              <Button onClick={() => setWizardOpen(true)} data-testid="monday-setup-with-ai">
+              <Button
+                onClick={() => {
+                  setWizardMode("ai")
+                  setWizardOpen(true)
+                }}
+                data-testid="monday-setup-with-ai"
+              >
                 <Sparkles data-icon="inline-start" />
                 {t("projectSettings.monday.setupWithAiButton")}
               </Button>
               <p className="text-xs text-muted-foreground">
                 {t("projectSettings.monday.setupWithAiBlurb")}
               </p>
-              {/* Manual board+mapping path, kept as an escape hatch. Hidden until
-                  the org is connected — without a token it can only ever show an
-                  empty board picker. */}
-              {orgConnected &&
-                (!manualOpen ? (
-                  <Button variant="ghost" onClick={() => setManualOpen(true)}>
-                    {t("projectSettings.monday.setupManuallyButton")}
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <Select
-                      items={Object.fromEntries((boards ?? []).map((b) => [b.id, b.name]))}
-                      value={selectedBoardId || null}
-                      onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
-                      disabled={boards === null}
-                    >
-                      <SelectTrigger aria-label={t("projectSettings.monday.boardSelectAriaLabel")} className="bg-background">
-                        <SelectValue
-                          placeholder={boards === null ? "Loading boards…" : "Pick a board"}
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {(boards ?? []).map((b) => (
-                            <SelectItem key={b.id} value={b.id}>
-                              {b.name}
-                              {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <span className="flex items-center gap-1 text-sm text-muted-foreground">
-                      <SparkleButton
-                        disabled={!selectedBoardId}
-                        loading={analyzing}
-                        onComplete={() => void runAnalyze(selectedBoardId)}
-                        tooltip={t("projectSettings.monday.useAiToConfigure")}
-                      />
-                      {t("projectSettings.monday.useAiToConfigure")}
-                    </span>
-                  </div>
-                ))}
+              {/* The same steps without the AI, kept as an escape hatch. Hidden
+                  until the org is connected — without a token it can only ever
+                  show an empty board picker. */}
+              {orgConnected && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setWizardMode("manual")
+                    setWizardOpen(true)
+                  }}
+                >
+                  {t("projectSettings.monday.setupManuallyButton")}
+                </Button>
+              )}
               {analyzing && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Spinner /> {t("projectSettings.monday.analyzingBoardAndProject")}
@@ -491,18 +416,6 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               <p className="text-sm font-medium">{t("projectSettings.monday.aiProposalLabel")}</p>
               <p className="text-sm text-muted-foreground">{proposal.summary}</p>
               <MondayMappingTable columns={proposal.proposal.columns} structure={structure} />
-              <MondayColumnPicker
-                jwt={jwt}
-                projectId={projectId}
-                boardId={link?.boardId ?? selectedBoardId}
-                rows={proposal.proposal.columns}
-                boardColumns={structure?.columns}
-                disabled={applying}
-                onAdded={(next, built) => {
-                  setProposal((p) => (p ? { ...p, proposal: { ...p.proposal, columns: next } } : p))
-                  setStructure(built)
-                }}
-              />
               {proposal.proposal.notes && (
                 <p className="text-xs text-muted-foreground">{proposal.proposal.notes}</p>
               )}
@@ -529,17 +442,31 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
         orgId={orgId}
         jwt={jwt}
         orgConnected={orgConnected}
+        mode={wizardMode}
         onLinked={(next, linkWarnings) => {
           setLink(next)
           setWarnings(linkWarnings)
         }}
-        onUnlinked={() => {
-          setLink(null)
-          setBoards(null)
-          setSelectedBoardId("")
-        }}
+        onUnlinked={() => setLink(null)}
         onConnected={() => void load()}
       />
+
+      {link && (
+        <MondayAddColumnsDialog
+          open={addColumnsOpen}
+          onOpenChange={setAddColumnsOpen}
+          jwt={jwt}
+          projectId={projectId}
+          boardId={link.boardId}
+          boardName={link.boardName ?? link.boardId}
+          rows={link.config.columns}
+          boardColumns={structure?.columns}
+          onSave={async (columns, built) => {
+            if (built) setStructure(built)
+            return handleSaveMapping(columns)
+          }}
+        />
+      )}
 
       <Dialog open={unlinkOpen} onOpenChange={setUnlinkOpen}>
         <DialogContent>

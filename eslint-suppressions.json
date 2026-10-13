@@ -91,7 +91,7 @@
   },
   "src/components/ProjectSettings/MondayIntegrationSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 2
     }
   },
   "src/components/ProjectSettings/MondayMappingEditor.tsx": {
@@ -101,7 +101,7 @@
   },
   "src/components/ProjectSettings/MondaySetupWizard.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 5
     }
   },
   "src/components/agent/AgentContextPane.tsx": {

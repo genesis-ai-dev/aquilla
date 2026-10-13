@@ -1296,6 +1296,50 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.viewBoardLink": "View board on Monday",
     "projectSettings.monday.connectButton": "Connect Monday.com",
     "projectSettings.monday.applyAndPushButton": "Apply and push",
+    "projectSettings.monday.wizardIntroLine":
+      "Aquilla picks a board and suggests what to show. Nothing changes in Monday until you confirm.",
+    "projectSettings.monday.wizardStepOf": "Step {step} of {total}",
+    "projectSettings.monday.wizardBoardTitle": "Which board?",
+    "projectSettings.monday.wizardColumnsTitle": "What should your board show?",
+    "projectSettings.monday.wizardConfirmTitle": "Ready to connect",
+    "projectSettings.monday.wizardAdvancedShow": "Advanced: match columns myself",
+    "projectSettings.monday.wizardAdvancedHide": "Hide advanced",
+    "projectSettings.monday.wizardConfirmAdds": plural({
+      one: "Aquilla will add {count} column to your Monday board and keep one row for this project up to date.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row for this project up to date.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmAddsPerFile": plural({
+      one: "Aquilla will add {count} column to your Monday board and keep one row per file up to date.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row per file up to date.",
+    }, "count"),
+    "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project up to date on {board}.",
+    "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}.",
+    "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
+    "projectSettings.monday.wizardAddingColumns": "Adding columns to your board…",
+    "projectSettings.monday.wizardAddColumnsFailed": "Couldn't add the columns: {reason}. Nothing was connected yet.",
+    "projectSettings.monday.wizardSomeColumnsNotAdded":
+      "Monday didn't add: {columns} ({reason}). Everything else is connected; you can add them later from this page.",
+    "projectSettings.monday.chooser.intro":
+      "Tick what you want on your Monday board. We'll use columns you already have and add any that are missing.",
+    "projectSettings.monday.chooser.groupSchedule": "Schedule",
+    "projectSettings.monday.chooser.groupTeam": "Team and activity",
+    "projectSettings.monday.chooser.newColumn": "New column",
+    "projectSettings.monday.chooser.infoAriaLabel": "What “{column}” shows",
+    "projectSettings.monday.chooser.alwaysIncluded": "Always included, so Aquilla can find this project's row again.",
+    "projectSettings.monday.chooser.summaryAdds": plural({
+      one: "Adds {count} new column to {board} and uses {uses} already there.",
+      other: "Adds {count} new columns to {board} and uses {uses} already there.",
+    }, "count"),
+    "projectSettings.monday.chooser.summaryNoAdds": plural({
+      one: "Uses {count} column already on {board}; nothing new is added.",
+      other: "Uses {count} columns already on {board}; nothing new is added.",
+    }, "count"),
+    "projectSettings.monday.addColumnsButton": "Add columns",
+    "projectSettings.monday.addColumnsDialogTitle": "Add columns to your board",
+    "projectSettings.monday.addColumnsConfirm": plural({
+      one: "Add {count} column",
+      other: "Add {count} columns",
+    }, "count"),
 
     // ── Terminology source-term matching (AQU-1271) ──
     "projectSettings.termMatching.title": "Prefixes and suffixes",
@@ -2139,6 +2183,113 @@ export const projectSettings = defineNamespace({
           "Confirmation after adding columns from the column picker when the board already had " +
           "columns with the right names: nothing was created, those columns were connected instead.",
         placeholders: { count: "How many existing columns were connected." },
+      },
+      "projectSettings.monday.wizardIntroLine": {
+        description: "One-sentence description at the start of the Monday.com setup dialog in project settings.",
+      },
+      "projectSettings.monday.wizardStepOf": {
+        description: "Small step counter above the title of each step of the three-step Monday.com setup dialog.",
+        placeholders: { step: "The current step number, e.g. 2.", total: "How many steps there are (3)." },
+      },
+      "projectSettings.monday.wizardBoardTitle": {
+        description: "Title of step 1 of the Monday.com setup: choosing which Monday board the project's progress goes to.",
+      },
+      "projectSettings.monday.wizardColumnsTitle": {
+        description:
+          "Title of step 2 of the Monday.com setup: a checklist of the columns (progress figures, dates, names) " +
+          "Aquilla can show on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardConfirmTitle": {
+        description: "Title of step 3 of the Monday.com setup, a summary before anything is written to Monday.",
+      },
+      "projectSettings.monday.wizardAdvancedShow": {
+        description:
+          "Link under the column checklist that reveals per-row controls for sending each figure to a column " +
+          "of the user's choosing. For admins who want to pick columns themselves.",
+      },
+      "projectSettings.monday.wizardAdvancedHide": {
+        description: "The same link once the advanced controls are open; hides them again.",
+      },
+      "projectSettings.monday.wizardConfirmAdds": {
+        description: "Summary on the last setup step when new columns will be created on the Monday board.",
+        placeholders: { count: "How many columns Aquilla will create." },
+      },
+      "projectSettings.monday.wizardConfirmAddsPerFile": {
+        description: "Same summary when the board gets one row per file of the project instead of one for the whole project.",
+        placeholders: { count: "How many columns Aquilla will create." },
+      },
+      "projectSettings.monday.wizardConfirmNoAdds": {
+        description: "Summary on the last setup step when the board already has every chosen column.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.wizardConfirmNoAddsPerFile": {
+        description: "Same summary when the board gets one row per file of the project.",
+        placeholders: { board: "The Monday board's name (Monday data, not translated)." },
+      },
+      "projectSettings.monday.wizardAddAndConnectButton": {
+        description: "Final button of the Monday.com setup when new columns must be created first; then the board is connected.",
+      },
+      "projectSettings.monday.wizardAddingColumns": {
+        description: "Progress line while Aquilla creates the chosen columns on the user's Monday board.",
+      },
+      "projectSettings.monday.wizardAddColumnsFailed": {
+        description: "Error when creating the columns on Monday failed entirely; the board was not connected.",
+        placeholders: { reason: "The error message, usually Monday's own, shown as received." },
+      },
+      "projectSettings.monday.wizardSomeColumnsNotAdded": {
+        description:
+          "Warning after setup when Monday refused to create some of the chosen columns; the board is " +
+          "connected with the rest, and the missing ones can be added later.",
+        placeholders: {
+          columns: "Comma-separated titles of the refused columns (Monday data, untranslated).",
+          reason: "Monday's own error message, in English, shown as received.",
+        },
+      },
+      "projectSettings.monday.chooser.intro": {
+        description:
+          "Instruction at the top of the Monday.com column checklist. 'We' is Aquilla. Columns the board lacks " +
+          "are created on the user's Monday board.",
+      },
+      "projectSettings.monday.chooser.groupSchedule": {
+        description: "Group heading in the Monday.com column checklist for deadline, status and plan dates.",
+      },
+      "projectSettings.monday.chooser.groupTeam": {
+        description: "Group heading in the Monday.com column checklist for people and recent activity.",
+      },
+      "projectSettings.monday.chooser.newColumn": {
+        description: "Small tag beside a column in the checklist that isn't on the Monday board yet and would be created.",
+      },
+      "projectSettings.monday.chooser.infoAriaLabel": {
+        description: "Screen-reader label of the small (i) button that reveals what a column shows.",
+        placeholders: { column: "The column's title on the Monday board, e.g. 'Completion %' (Monday data, untranslated)." },
+      },
+      "projectSettings.monday.chooser.alwaysIncluded": {
+        description: "Note under the locked 'Aquilla ID' column in the checklist, saying why it can't be unticked.",
+      },
+      "projectSettings.monday.chooser.summaryAdds": {
+        description: "Live summary under the column checklist when some ticked columns will be created.",
+        placeholders: {
+          count: "How many new columns will be created.",
+          board: "The Monday board's name (Monday data, not translated).",
+          uses: "How many ticked columns are already on the board (a number).",
+        },
+      },
+      "projectSettings.monday.chooser.summaryNoAdds": {
+        description: "Live summary under the column checklist when every ticked column is already on the board.",
+        placeholders: {
+          count: "How many ticked columns are already on the board.",
+          board: "The Monday board's name (Monday data, not translated).",
+        },
+      },
+      "projectSettings.monday.addColumnsButton": {
+        description: "Button on a project's linked Monday board settings that opens the column checklist to add more columns.",
+      },
+      "projectSettings.monday.addColumnsDialogTitle": {
+        description: "Title of the dialog for adding more columns to an already linked Monday board.",
+      },
+      "projectSettings.monday.addColumnsConfirm": {
+        description: "Confirm button of that dialog: create the ticked new columns on the Monday board.",
+        placeholders: { count: "How many columns will be created." },
       },
       "projectSettings.monday.addMissingColumnsFailed": {
         description:

@@ -112,7 +112,7 @@ describe("MondayIntegrationSection", () => {
     expect(mocked.fetchMondayBoards).not.toHaveBeenCalled()
   })
 
-  it("unlinked: the manual escape hatch still reveals the board picker", async () => {
+  it("unlinked: the manual escape hatch opens the same steps without the AI, starting with the board", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: false })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
     mocked.fetchMondayBoards.mockResolvedValue([
@@ -126,7 +126,8 @@ describe("MondayIntegrationSection", () => {
 
     await waitFor(() => expect(screen.getByLabelText(/monday board/i)).toBeTruthy())
     expect(mocked.fetchMondayBoards).toHaveBeenCalledWith("tok", 7)
-    expect(screen.getByText(/use ai to configure/i)).toBeTruthy()
+    expect(screen.getByText("Step 1 of 3")).toBeTruthy()
+    expect(mocked.analyzeMondayMapping).not.toHaveBeenCalled()
   })
 
   it("unlinked, below maintainer: read-only summary, no picker, no boards fetch", async () => {
@@ -251,8 +252,8 @@ it("refreshes organization authorization when returning from another tab", async
   expect(await screen.findByRole("button", { name: "Scan and propose" })).toBeTruthy()
 })
 
-describe("Column picker (linked board)", () => {
-  it("adds the columns and saves them into the mapping in the same click", async () => {
+describe("Add columns (linked board)", () => {
+  it("opens the column list and saves the new columns into the mapping", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
     mocked.addMondayColumns.mockResolvedValue({
@@ -264,24 +265,30 @@ describe("Column picker (linked board)", () => {
     mocked.patchMondayLink.mockResolvedValue({ link: makeLink(), warnings: [] })
 
     renderSection()
-    const box = await screen.findByRole("checkbox", { name: /^Validated %$/ })
+    fireEvent.click(await screen.findByTestId("monday-add-columns"))
+    const dialog = await screen.findByTestId("monday-add-columns-dialog")
+    // Only what the board already uses starts ticked (plus the locked Aquilla ID).
+    expect(screen.getByRole("checkbox", { name: /^Completion %$/ }).getAttribute("aria-checked")).toBe("true")
+    const box = screen.getByRole("checkbox", { name: /^Validated %$/ })
+    expect(box.getAttribute("aria-checked")).toBe("false")
     fireEvent.click(box)
     await waitFor(() => expect(box.getAttribute("aria-checked")).toBe("true"))
-    fireEvent.click(screen.getByRole("button", { name: /add selected to my board/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^add 2 columns$/i }))
 
     await waitFor(() => expect(mocked.patchMondayLink).toHaveBeenCalled())
-    expect(mocked.addMondayColumns.mock.calls[0][2].boardId).toBe("b1")
+    expect(mocked.addMondayColumns.mock.calls[0][2]).toEqual({ boardId: "b1", metrics: ["validated_pct", "external_id"] })
     expect(mocked.patchMondayLink.mock.calls[0][2].config?.columns).toEqual([
       { columnId: "numbers_1", columnType: "numbers", metric: "completion_pct" },
       { columnId: "v1", columnType: "numbers", metric: "validated_pct" },
     ])
+    await waitFor(() => expect(dialog.isConnected).toBe(false))
   })
 
-  it("below maintainer: no column picker", async () => {
+  it("below maintainer: no Add columns", async () => {
     mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
     mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
     renderSection({ roleLevel: 400 })
     await waitFor(() => expect(screen.getByText(/translation tracker/i)).toBeTruthy())
-    expect(screen.queryByTestId("monday-column-picker")).toBeNull()
+    expect(screen.queryByTestId("monday-add-columns")).toBeNull()
   })
 })

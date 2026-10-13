@@ -131,6 +131,26 @@ contract beyond "maintainer can, member can view":
 
 ## Deploying
 
+### The Monday app itself (Developer Center)
+
+Walked against a real account on 2026-10-12 (AQU-1770). The app Aquilla's
+`MONDAY_CLIENT_ID` points at needs, on the version that is live:
+
+- **New OAuth Flow switched ON** (OAuth & permissions; the toggle is per app
+  version). The code uses Monday's OAuth 2.1 token endpoint
+  (`auth.monday.com/oauth_ms/oauth/token`) with PKCE. With the toggle off,
+  `/oauth2/authorize` hands out legacy codes that this endpoint answers with
+  `invalid_grant … not_found`, and every connect ends on "Monday.com didn't
+  accept the approval". Monday retired legacy tokens on 2026-10-01.
+- **Scopes:** `me:read`, `account:read`, `boards:read`, `boards:write`,
+  `webhooks:read`, `webhooks:write`, and `workspaces:read` (board workspace
+  names in "Set up with AI"; without it the board list still loads, unnamed).
+  OAuth 2.1 enforces scopes per field, and a scope added later only applies
+  after the org reconnects.
+- **Redirect URL:** the SPA's `/oauth/callback` on each origin, matching
+  `MONDAY_REDIRECT_URI` exactly.
+
+
 ### Webhook address (AQU-1770)
 
 When a project is linked to a board, the identity Worker asks Monday to create

@@ -669,6 +669,7 @@ export function GlossaryEditor({
         onLoadMore={occurrences.loadMore}
         canEdit={canEditCells}
         projectId={id!}
+        activeLane={activeLane}
         username={frontierSession?.username ?? project?.username ?? "local"}
         onClose={handleCloseDetails}
         onCellCommitted={occurrences.revalidate}

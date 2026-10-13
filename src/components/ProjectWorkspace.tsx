@@ -57,6 +57,7 @@ import {
   writePersistedActiveLane,
 } from "@/lib/lanes/active-lane-choice"
 import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
+import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
 import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
@@ -327,7 +328,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3 } from "lucide-react"
+import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Loader2 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -2441,6 +2442,17 @@ export function ProjectWorkspace() {
     const hadStoredChoice = stored.laneId !== null || stored.legacyTag !== null
     if (hadStoredChoice && laneId) writePersistedActiveLane(projectId, laneId, lane)
   }, [projectId, project?.lanes, laneRows, fallbackLaneId])
+  // AQU-1902: the lane row target writes go to. Null while it cannot be named
+  // (lane rows still loading and no remembered lane id for this tag): the
+  // editor is then read-only, so no edit is queued onto a lane the server will
+  // refuse — or onto a lane the reader is not looking at.
+  const activeTargetLane = useActiveTargetLane(
+    projectId,
+    project?.lanes != null ? laneRows : null,
+    settingsFetched,
+    activeLane,
+  )
+  const lanesPending = activeTargetLane === null
   // A member the org limited to certain lanes opens in one of them, never on
   // the default lane when that lies outside their limit, and may switch among
   // them (`scopedLanesFor`). Null keeps the AQU-608 rule for everyone else.
@@ -5406,6 +5418,8 @@ export function ProjectWorkspace() {
     // declared further down and a deps array is evaluated at render — the same
     // temporal-dead-zone trap the note over handleToggleCueLink describes.
     if (activeLaneLock !== null) return
+    // AQU-1902: nor before the active lane's row is known.
+    if (lanesPending) return
     // TOCTOU guard: `cell` is the row snapshot captured when the sparkle was
     // clicked. A rapid second draft can arrive after the FIRST draft's
     // projection confirmed (which clears its pending-head entry) but before
@@ -5585,7 +5599,7 @@ export function ProjectWorkspace() {
     // only that row's stats and cell data back (its authoritative event_id
     // becomes the next commit's parent) instead of re-fetching the file.
     confirmCommitted(cell.id, eventId)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, cellStore, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, cellStore, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted, lanesPending])
 
   const commitCompletedCells = useCallback(async (
     drafts: CompletedCellDraft[],
@@ -8498,7 +8512,8 @@ export function ProjectWorkspace() {
    * that keeps asking `isReadOnly` on its own is the "imported from git"
    * banner, which would otherwise blame git for a lane a PM archived.
    */
-  const laneWriteFrozen = isReadOnly || activeLaneLock !== null
+  // AQU-1902: …and, briefly, while the active lane's row is not yet known.
+  const laneWriteFrozen = isReadOnly || activeLaneLock !== null || lanesPending
 
   /**
    * AQU-646: give a cell a TARGET ROW when it gains a recording, so that a line
@@ -13608,6 +13623,16 @@ export function ProjectWorkspace() {
                 {t("workspace.readOnlyGitBanner")}
               </div>
             )}
+            {!isReadOnly && lanesPending && (
+              <div
+                role="status"
+                data-testid="lanes-loading-banner"
+                className="flex items-center gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {t("workspace.loadingLanguagesBanner")}
+              </div>
+            )}
             {project && (
               <SystemPromptNudge
                 project={project}
@@ -14379,6 +14404,7 @@ export function ProjectWorkspace() {
             // AQU-1463: non-null turns the table read-only and banners which
             // lane was archived, whatever the reader's role.
             archivedLaneLabel={activeLaneLock?.label ?? null}
+            languagesLoading={lanesPending}
             onLaneChange={setActiveLane}
             defaultLaneLabel={laneLabels[""] || activeTargetLanguage || "Target"}
             laneLabels={laneLabels}

@@ -35,6 +35,12 @@ import type { AudioOrigin, TelemetrySource, TelemetrySurface } from "@/lib/cell-
 import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
 import type { TrackKind } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
+import {
+  resolveTargetLaneRef,
+  targetLanePayload,
+  type TargetLaneUnresolved,
+} from "@/lib/lanes/target-lane-ref"
+import { getProjectLaneHint, getProjectTargetLanes } from "./project-target-lanes"
 
 // Session-scoped flags — reset on page reload (true "first in session" semantics).
 let _firstCommitFired = false
@@ -171,16 +177,85 @@ export function intMs(value: number | null | undefined): number | null | undefin
   return Math.round(value)
 }
 
-export async function enqueueEvent<K extends OutboxEventKind>(
+/**
+ * AQU-1902: thrown by enqueueEvent when a lane-addressed write cannot be
+ * resolved to one of the project's lane rows — the lanes have not loaded yet,
+ * or the write names no lane on a project whose lanes all carry a real tag.
+ * The server would refuse it and the outbox would drop it: a lost edit. Failing
+ * at the source keeps the user's text in the editor and surfaces the error
+ * through the emitter's existing `.catch`.
+ */
+export class TargetLaneUnresolvedError extends Error {
+  kind: string
+  reason: TargetLaneUnresolved
+  constructor(kind: string, reason: TargetLaneUnresolved) {
+    super(
+      reason === "lanes-loading"
+        ? `${kind}: the project's languages have not loaded yet`
+        : `${kind}: names no lane of this project`,
+    )
+    this.kind = kind
+    this.reason = reason
+    this.name = "TargetLaneUnresolvedError"
+  }
+}
+
+/** Kinds whose projection writes a row keyed by lane (mirrors the server's
+ *  `writesLaneRow`, src/lib/lanes/archived-lane.ts). */
+const LANE_ADDRESSED_KINDS = new Set<string>([
+  "target.cell.create",
+  "target.cell.commit",
+  "target.cell.delete",
+  "target.cell.reorder",
+  "target.cell.repin",
+  "cell.validate",
+  "cell.unvalidate",
+])
+
+/**
+ * AQU-1902: stamp a lane-addressed write with its lane row — `laneId` plus the
+ * row's own tag — so it can never reach the server naming no lane. Every typed
+ * emitter, the agent apply path and the importers pass through here.
+ *
+ * Projects whose lane rows were never registered in this tab (no useProject
+ * mounted for them) pass through unchanged; the server stays authoritative.
+ */
+function withResolvedTargetLane<K extends OutboxEventKind>(
   input: BuildEventInput<K>,
+): BuildEventInput<K> {
+  if (!LANE_ADDRESSED_KINDS.has(input.kind)) return input
+  const rows = getProjectTargetLanes(input.projectId)
+  if (rows === undefined) return input
+  const payload = input.payload as { targetLang?: unknown; laneId?: unknown }
+  const resolved = resolveTargetLaneRef(
+    rows,
+    {
+      targetLang: typeof payload.targetLang === "string" ? payload.targetLang : "",
+      laneId: typeof payload.laneId === "string" ? payload.laneId : null,
+    },
+    getProjectLaneHint(input.projectId),
+  )
+  if (!resolved.ok) throw new TargetLaneUnresolvedError(input.kind, resolved.reason)
+  const { targetLang: _tag, laneId: _id, ...rest } = payload
+  void _tag
+  void _id
+  return {
+    ...input,
+    payload: { ...rest, ...targetLanePayload(resolved.lane) } as OutboxPayloadFor<K>,
+  }
+}
+
+export async function enqueueEvent<K extends OutboxEventKind>(
+  rawInput: BuildEventInput<K>,
 ): Promise<{ event: OutboxRawEvent<K>; eventId: string }> {
   // Pre-enqueue role gate (client mirror of the server's authorize() check).
   // Only blocks when the role is KNOWN and provably insufficient — otherwise
   // fail open and let the server stay authoritative.
   const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
-  if (!canPerform(input.kind, roleLevel) && roleLevel != null) {
-    throw new InsufficientRoleError(input.kind, roleLevel, requiredRoleFor(input.kind) ?? 0)
+  if (!canPerform(rawInput.kind, roleLevel) && roleLevel != null) {
+    throw new InsufficientRoleError(rawInput.kind, roleLevel, requiredRoleFor(rawInput.kind) ?? 0)
   }
+  const input = withResolvedTargetLane(rawInput)
   const event = buildRawEvent(input)
   // The legacy outbox accepts CqrsRawEvent; our OutboxRawEvent is a superset
   // (added parentId, prefixed kinds). The IDB serialization keeps unknown
@@ -203,7 +278,9 @@ export async function enqueueEvents<K extends OutboxEventKind>(
     if (!canPerform(input.kind, roleLevel) && roleLevel != null) {
       throw new InsufficientRoleError(input.kind, roleLevel, requiredRoleFor(input.kind) ?? 0)
     }
-    return buildRawEvent(input)
+    // AQU-1902: resolved before anything is written, so one unresolvable
+    // event refuses the whole batch rather than half-queuing it.
+    return buildRawEvent(withResolvedTargetLane(input))
   })
   await enqueueOutboxEvents(
     events as unknown as Parameters<typeof enqueueOutboxEvents>[0],
@@ -229,12 +306,13 @@ export interface CellCommitInput {
   /** AD-9 staleness pin: source row's `event_id`. Null for target-owned cells. */
   sourceEventId?: string | null
   /**
-   * AQU-538: target-language lane this commit addresses. Omit (or pass '')
-   * for the file's single configured target language — the default lane;
-   * every pre-lane caller. Non-'' lanes commit to that lane's own row and
-   * chain slot server-side.
+   * AQU-538 / AQU-1902: the target lane this commit addresses — REQUIRED. `''`
+   * names only a legacy project's default lane row (or a project with no target
+   * lane at all, where the server mints the bridge); on a project whose lanes
+   * all carry a real tag it addresses nothing. The emit layer resolves the
+   * lane row and stamps `laneId` (see `withResolvedTargetLane`).
    */
-  targetLang?: string
+  targetLang: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
   laneId?: string
   value: string
@@ -357,10 +435,10 @@ export interface CellValidateInput {
   /** The target.cell.commit (or target.cell.create) event being validated. */
   editEventId: string
   /**
-   * AQU-538: the active target LANE. `''`/undefined = default lane and is
-   * OMITTED from the wire payload, so N=1 validations are byte-identical.
+   * AQU-538 / AQU-1902: the target LANE being validated — REQUIRED, same
+   * contract as `CellCommitInput.targetLang`. `''` is omitted from the wire.
    */
-  targetLang?: string
+  targetLang: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
   laneId?: string
   /**
@@ -1281,9 +1359,9 @@ export interface CellHarmonizeInput {
    * AQU-1805: the target lane this sweep addresses — same contract as
    * `CellCommitInput.targetLang`. A rule fix is proposed against the lane the
    * reader is looking at, so it must commit to that lane's own row; omitting
-   * it landed every fix on the default lane.
+   * it landed every fix on the default lane. AQU-1902: required.
    */
-  targetLang?: string
+  targetLang: string
   /** AQU-1805: the lane row's id, when the caller has it. Must match `targetLang`. */
   laneId?: string
   value: string
@@ -1843,6 +1921,14 @@ export interface TargetCellRepinInput {
    *  review panel. The server no-ops the update if the head has since
    *  moved (a translator re-committed) — the fresher pin wins. */
   expectedTargetEventId: string
+  /**
+   * AQU-1902: the lane of the target row being repinned — REQUIRED. A repin
+   * updates one lane's row; with no lane it addressed the default lane, which
+   * a project created today does not have, and was refused.
+   */
+  targetLang: string
+  /** The lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
   author: string
   clientTs?: number
 }
@@ -1867,6 +1953,7 @@ export async function emitTargetCellRepin(input: TargetCellRepinInput): Promise<
     payload: {
       sourceEventId: input.sourceEventId,
       expectedTargetEventId: input.expectedTargetEventId,
+      ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
   })

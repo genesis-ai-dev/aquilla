@@ -757,6 +757,11 @@ interface EditorTableProps {
    *  ladder: it turns off editing and validation and puts a banner naming the
    *  lane above the table. The host derives it with `laneLockFor`. */
   archivedLaneLabel?: string | null
+  /** AQU-1902: true while the active lane's row is not yet known (the
+   *  project's languages are still loading). Editing and validation are off
+   *  until then, so no write is queued that names no lane — the host shows a
+   *  "Loading languages…" banner. */
+  languagesLoading?: boolean
   /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
    *  is used. Omit to keep the tag non-interactive. */
   onLaneChange?: (lane: string) => void
@@ -1079,7 +1084,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, archivedLaneLabel = null, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
@@ -1171,11 +1176,20 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     project.id,
     project.syncRole?.level ?? null,
   )
-  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel: roleReadOnlyLabel } = useEditorCapabilities(project, {
+  const {
+    canEdit: roleCanEdit,
+    canValidate: roleCanValidate,
+    canEditSource,
+    sourceReadOnlyReason,
+    readOnlyLabel: roleReadOnlyLabel,
+  } = useEditorCapabilities(project, {
     hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
     // AQU-1463: a frozen lane outranks the role ladder — see the prop's note.
     archivedLaneLabel,
   })
+  // AQU-1902: no target write or validation until the active lane's row is known.
+  const canEdit = roleCanEdit && !languagesLoading
+  const canValidate = roleCanValidate && !languagesLoading
   // AQU-1571: the reviewer banner promised "you can validate" even where the
   // project's minimum role or named-validator list shuts this reader out of
   // text validation, while every check below it said "unavailable" (walk

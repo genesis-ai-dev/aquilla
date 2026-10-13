@@ -5246,7 +5246,11 @@ export const editor = defineNamespace({
         description: "Shown when the current ticks would draft nothing.",
       },
       "editor.batchFile.confirmDraft": {
-        description: "Confirm button of the draft modal. Imperative.",
+        description:
+          "Confirm button of the batch draft modal: the imperative command that "
+          + "starts drafting the chosen cells, in the slot where validate mode shows "
+          + "'Validate'. A verb, not the autopilot pipeline's 'Draft' stage caption "
+          + "(autopilot.graph.node.draft), which is a noun.",
         maxLength: 16,
       },
       "editor.batchValidate.skip.alreadyMine": {

@@ -5,7 +5,7 @@
 
 import { TOOLS_API_REV, TOOL_SCOPES } from "../../../../shared/tools/manifest"
 import { TOOLS_SDK_PROMPT } from "./build-prompt-sdk"
-import { TOOLS_DESIGN_PROMPT, TOOLS_DOMAIN_PROMPT } from "./build-prompt-guide"
+import { TOOLS_DESIGN_PROMPT, TOOLS_DOMAIN_PROMPT, TOOLS_DOOR43_PROMPT } from "./build-prompt-guide"
 import { normalizeRequirements, type ToolRequirement } from "../../../../shared/tools/requirements"
 import { MAX_TOOL_SOURCE_BYTES } from "../../../../shared/tools/lint"
 
@@ -15,7 +15,7 @@ inside a sandboxed iframe with NO network access and an opaque origin. It talks 
 through the global \`aquilla\` object the host injects before your code runs.
 
 ## Hard rules (a lint enforces them; violations fail the build)
-- No fetch, XMLHttpRequest, WebSocket, EventSource, eval, new Function, importScripts.
+- No fetch (only aquilla.web.fetch, for declared sites), XMLHttpRequest, WebSocket, EventSource, eval, new Function, importScripts.
 - No localStorage/sessionStorage/indexedDB/cookies — use aquilla.storage.
 - No external <script src>, <link href>, @import, <iframe>, <base>, <meta http-equiv>.
 - Never touch window.parent / window.top — only the aquilla API.
@@ -149,6 +149,14 @@ through the global \`aquilla\` object the host injects before your code runs.
     tint the number and say "Not yet validated" on hover). editor.config also carries readOnlyLabel and readOnlyKind
     ("lane-archived" | "role") — show readOnlyLabel as the read-only banner.
 
+### apiRev 6 — reading websites (any mount)
+- aquilla.web.fetch(url, { as: "text" | "json" }) → { status, contentType, body, url }   scope read:web
+    The HOST fetches it (the frame stays offline). Declare the sites in the manifest: "web": ["git.door43.org"]
+    (exact host names; "*.example.org" covers its subdomains) and put "read:web" in scopes; the user approves
+    them the first time. https GET only, ≤12 MB, text/JSON only, ~15 s timeout; errors have .code
+    ("host_not_allowed", "permission_denied", "too_large", "timeout", "rate_limited", …). Cache what you fetch in
+    memory (and small things in aquilla.storage); fetch per chapter or book, never per verse in a loop.
+
 Every bridge error is an Error with a .code. Wrap awaits in try/catch and show errors in the UI.
 Start your script with: \`(async () => { … })()\` and render a loading state first.
 
@@ -157,6 +165,8 @@ ${TOOLS_SDK_PROMPT}
 ${TOOLS_DESIGN_PROMPT}
 
 ${TOOLS_DOMAIN_PROMPT}
+
+${TOOLS_DOOR43_PROMPT}
 
 ## Output format — exactly three fenced blocks, in this order, nothing else
 First plan, then code. The requirements block is your checklist of what the user asked for, numbered,
@@ -167,7 +177,7 @@ saying why when the bridge cannot support it (see "What Aquilla has"). Then buil
 [{ "id": 1, "text": "…", "priority": "must", "status": "planned" }, { "id": 2, "text": "…", "priority": "must", "status": "not_possible", "note": "…" }]
 \`\`\`
 \`\`\`json
-{ "name": "…", "description": "one short sentence", "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1 }
+{ "name": "…", "description": "one short sentence", "web": ["only with read:web"], "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1 }
 \`\`\`
 \`\`\`html
 <!doctype html>

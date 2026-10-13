@@ -92,6 +92,8 @@ export const METHOD_SCOPES: Readonly<Record<string, ToolScope>> = {
   "terms.view": "read:terms",
   "terms.add": "read:terms",
   "agent.ask": "read:cells",
+  // apiRev 6
+  "web.fetch": "read:web",
 }
 
 /** The event kind whose server role floor bounds each write scope. */

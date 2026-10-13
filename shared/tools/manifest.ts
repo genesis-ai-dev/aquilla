@@ -8,6 +8,8 @@
  * scopes it needs; the user approves them once as a standing grant.
  */
 
+import { MAX_WEB_DOMAINS, validateWebDomain } from "./web-domains"
+
 /** Bridge API revision. Bump when a bridge call is added, removed or changes
  *  shape; tools built against an older revision still run while it is at or
  *  above TOOLS_MIN_API_REV (api-rev.ts), and are flagged "rebuild" below it.
@@ -21,9 +23,11 @@
  *  extension SDK (`window.aq`: live data hooks, Aquilla components, UI kit,
  *  actions) on top of the bridge. Rev 5 (additive only): what dev's built-in
  *  editor gained after rev 4 — Align styles, the AI-draft provenance wash,
- *  integrity-check explanations and the read-only/archived-lane banner. See
- *  API_REV_ADDITIONS in api-rev.ts. */
-export const TOOLS_API_REV = 5
+ *  integrity-check explanations and the read-only/archived-lane banner. Rev 6
+ *  (additive only): `read:web` + `manifest.web` and aquilla.web.fetch — reads
+ *  from declared sites through the host's proxy. See API_REV_ADDITIONS in
+ *  api-rev.ts. */
+export const TOOLS_API_REV = 6
 
 /** SDK majors the host can inject (manifest.sdk; shared/tools/sdk/sdk.ts). */
 export const TOOLS_SDK_MAJORS: readonly number[] = [1]
@@ -42,6 +46,8 @@ export const TOOL_SCOPES = [
   "ai:draft",
   "write:audio",
   "write:source",
+  // apiRev 6: read from the sites in manifest.web, through the host's proxy.
+  "read:web",
 ] as const
 
 export type ToolScope = (typeof TOOL_SCOPES)[number]
@@ -56,6 +62,7 @@ export const TOOL_SCOPE_LABELS: Record<ToolScope, string> = {
   "ai:draft": "draft and back-translate with Aquilla's AI (uses your project's AI credits)",
   "write:audio": "record and generate audio for cells",
   "write:source": "edit source text and add, remove or hide cells",
+  "read:web": "read from the websites it names",
 }
 
 export function isToolScope(value: unknown): value is ToolScope {
@@ -76,6 +83,8 @@ export interface ToolManifest {
   apiRev: number
   /** apiRev 4: the extension SDK major to inject as `window.aq` (absent: none). */
   sdk?: number
+  /** apiRev 6: the sites `read:web` may read ("git.door43.org", "*.door43.org"). */
+  web?: string[]
 }
 
 export interface ManifestValidation {
@@ -140,8 +149,24 @@ export function validateManifest(input: unknown): ManifestValidation {
     if (apiRev < TOOLS_SDK_MIN_API_REV) errors.push(`manifest.sdk needs apiRev ${TOOLS_SDK_MIN_API_REV} or later`)
   }
 
+  const web: string[] = []
+  if (input.web !== undefined && input.web !== null) {
+    if (!Array.isArray(input.web)) errors.push("manifest.web must be a list of domains")
+    else {
+      for (const d of input.web) {
+        const v = validateWebDomain(d)
+        if (!v.ok) errors.push(v.error)
+        else if (!web.includes(v.domain)) web.push(v.domain)
+      }
+      if (web.length > MAX_WEB_DOMAINS) errors.push(`manifest.web lists more than ${MAX_WEB_DOMAINS} domains`)
+    }
+  }
+  if (scopes.includes("read:web") && web.length === 0) errors.push('scope read:web needs manifest.web: the domains it reads, e.g. ["git.door43.org"]')
+  if (web.length > 0 && !scopes.includes("read:web")) errors.push("manifest.web is only allowed with the read:web scope")
+  if (scopes.includes("read:web") && apiRev < 6) errors.push("scope read:web needs apiRev 6 or later")
+
   if (errors.length > 0) return { ok: false, manifest: null, errors }
-  return { ok: true, manifest: { name, description, scopes, mounts, apiRev, ...(sdk ? { sdk } : {}) }, errors }
+  return { ok: true, manifest: { name, description, scopes, mounts, apiRev, ...(sdk ? { sdk } : {}), ...(web.length ? { web } : {}) }, errors }
 }
 
 /** The provenance a tool write carries in its event payload (`tool_origin`).
@@ -180,6 +205,7 @@ export async function toolCodeHash(source: string, manifest: ToolManifest): Prom
       apiRev: manifest.apiRev,
       // Only when set, so every pre-SDK tool keeps its hash.
       ...(manifest.sdk ? { sdk: manifest.sdk } : {}),
+      ...(manifest.web?.length ? { web: [...manifest.web].sort() } : {}),
     },
   })
   const bytes = new TextEncoder().encode(canonical)

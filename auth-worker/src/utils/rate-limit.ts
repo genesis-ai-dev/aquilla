@@ -107,6 +107,7 @@ export type RateLimitKind =
   | "mcp_oauth_decision"
   | "access_link_redeem"
   | "feedback"
+  | "tool_web_fetch"
 
 /** Roughly 1-in-50 calls also prunes stale rows so the table stays bounded
  *  without a scheduled job. Cheap (indexed on created_at via the lookup

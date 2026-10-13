@@ -182,6 +182,10 @@ export interface Env {
   TOOLS_BUILDER_API_KEY?: string
   TOOLS_BUILDER_BASE_URL?: string
   TOOLS_BUILDER_MODEL?: string
+  /** Smart Extensions read:web (aquilla.web.fetch): optional deployment-wide
+   *  allowlist of domains (comma-separated, manifest.web syntax). Unset = any
+   *  domain a user approves for an extension. */
+  TOOLS_WEB_ALLOWED_DOMAINS?: string
   /** Kill switch for Jev react decisions (lib/jev/decide.ts): "off" makes the
    *  react loop use its fixed rules without calling Jev. Unset = on. */
   JEV_REACT?: string

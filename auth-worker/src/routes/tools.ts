@@ -37,12 +37,14 @@ import {
   listTools,
   toolRow,
   listVersions,
+  revokeScopeForAll,
   setGrant,
   type SaveVersionInput,
   type ToolVersionOrigin,
 } from "../lib/tools/store"
 import { readToolActivity } from "../lib/tools/activity"
 import { buildToolRoute } from "./tools-build"
+import { webFetchRoute } from "./tools-web"
 import { FIRST_PARTY_TOOLS, firstPartyToolId } from "../../../shared/tools/first-party/default-editor"
 
 const tools = new Hono<AuthHonoEnv>()
@@ -88,6 +90,7 @@ tools.get("/:projectId/tools", authMiddleware, async (c) => {
 })
 
 tools.post("/:projectId/tools/build", authMiddleware, buildToolRoute)
+tools.post("/:projectId/tools/:toolId/web-fetch", authMiddleware, webFetchRoute)
 
 tools.post("/:projectId/tools", authMiddleware, async (c) => {
   const level = await roleFor(c)
@@ -198,6 +201,9 @@ tools.post("/:projectId/tools/:toolId/versions", authMiddleware, async (c) => {
   // what the current manifest declares.
   const kept = existing.grantedScopes.filter((s) => checked.manifest.scopes.includes(s))
   if (kept.length !== existing.grantedScopes.length) await setGrant(c.env.AQUILLA_PG, projectId, toolId, userId, kept)
+  // New sites to read: nobody approved those, so everyone is asked again.
+  const before = new Set(existing.manifest.web ?? [])
+  if ((checked.manifest.web ?? []).some((d) => !before.has(d))) await revokeScopeForAll(c.env.AQUILLA_PG, toolId, "read:web")
   return c.json({ tool: await getTool(c.env.AQUILLA_PG, projectId, toolId, userId), version }, 201)
 })
 

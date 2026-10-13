@@ -18,7 +18,7 @@ import { copyTool, fetchToolSource, type ToolSummary } from "@/lib/tools/tools-a
 import type { ToolScope } from "../../../shared/tools/manifest"
 import { useScopeLabel } from "./scope-label"
 import { ToolActivityPanel } from "./ToolActivityPanel"
-import { PERM } from "./builder/ExtensionFacts"
+import { PERM, usePermLabel } from "./builder/ExtensionFacts"
 
 /** "Can edit translations" — a scope as a short, plain sentence. */
 export function useScopeSentence(): (scope: ToolScope) => string {
@@ -38,6 +38,7 @@ export function PermissionsList({
   onChange: (scopes: ToolScope[]) => Promise<void>
 }) {
   const t = useT()
+  const permLabel = usePermLabel()
   const { grantable, blocked } = grantableAtInstall(tool.manifest.scopes, roleLevel)
   const [busy, setBusy] = useState(false)
   const toggle = async (scope: ToolScope, on: boolean) => {
@@ -58,12 +59,13 @@ export function PermissionsList({
           <li key={scope} className="flex items-center gap-3 px-3.5 py-3 text-sm">
             <p.icon className={p.kind === "write" ? "size-4 shrink-0 text-amber-600 dark:text-amber-400" : "size-4 shrink-0 text-muted-foreground"} aria-hidden />
             <span className="min-w-0 flex-1">
-              <span className="block font-medium" data-testid={on ? "tool-grant" : "tool-ask"}>{t(p.label)}</span>
+              <span className="block font-medium" data-testid={on ? "tool-grant" : "tool-ask"}>{permLabel(scope, tool.manifest.web)}</span>
+              {scope === "read:web" && <span className="block text-xs text-muted-foreground">{t("extensions.perm.webNote")}</span>}
               <span className={on ? "block text-xs text-emerald-700 dark:text-emerald-400" : "block text-xs text-muted-foreground"}>
                 {on ? t("extensions.permissions.allowed") : t("extensions.permissions.asks")}
               </span>
             </span>
-            <Switch aria-label={t(p.label)} checked={on} disabled={busy} onCheckedChange={(next) => void toggle(scope, next)} />
+            <Switch aria-label={permLabel(scope, tool.manifest.web)} checked={on} disabled={busy} onCheckedChange={(next) => void toggle(scope, next)} />
           </li>
         )
       })}

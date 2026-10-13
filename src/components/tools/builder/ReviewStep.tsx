@@ -70,7 +70,7 @@ export function ReviewStep({
 
       <ExtensionPreview source={candidate.source} manifest={manifest} />
 
-      <MetaChips mounts={manifest.mounts} scopes={manifest.scopes} />
+      <MetaChips mounts={manifest.mounts} scopes={manifest.scopes} web={manifest.web} />
 
       {candidate.requirements && <RequirementsList requirements={candidate.requirements} />}
 

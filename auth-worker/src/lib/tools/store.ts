@@ -293,6 +293,15 @@ export async function setGrant(
     .run()
 }
 
+/** A new version reads sites no one approved: drop read:web from every user's
+ *  grant so each is asked again, naming the new sites. */
+export async function revokeScopeForAll(db: AquillaDb, toolId: string, scope: ToolScope): Promise<void> {
+  await db
+    .prepare(`UPDATE project_tool_grants SET scopes = scopes - ?::text, updated_at = now() WHERE tool_id = ? AND jsonb_exists(scopes, ?::text)`)
+    .bind(scope, toolId, scope)
+    .run()
+}
+
 export async function archiveTool(db: AquillaDb, projectId: string, toolId: string): Promise<boolean> {
   const { results } = await db
     .prepare(`UPDATE project_tools SET archived_at = now() WHERE id = ? AND project_id = ? AND archived_at IS NULL RETURNING id`)

@@ -79,6 +79,14 @@ export interface ToolValidateResult {
   failed: { cellId: string; reason: string }[]
 }
 
+/** aquilla.web.fetch result: the proxied response (body parsed when as = "json"). */
+export interface ToolWebResponse {
+  status: number
+  contentType: string
+  body: unknown
+  url: string
+}
+
 export interface ToolHostData extends ToolEditorHostData, ToolRev4HostData {
   listFiles: () => Promise<ToolFileView[]>
   listCells: (fileId: string, lane: string) => Promise<ToolCellView[]>
@@ -91,6 +99,8 @@ export interface ToolHostData extends ToolEditorHostData, ToolRev4HostData {
   notify: (message: string) => void
   /** One completion through the app's own AI proxy, as the user. */
   generate: (input: { prompt: string; system: string; maxTokens: number }) => Promise<{ text: string }>
+  /** apiRev 6: a GET through the auth-worker proxy (allowlist, SSRF and size checks there). */
+  webFetch: (url: string, as: "text" | "json") => Promise<ToolWebResponse>
   /** A message for the user that stays until dismissed (unlike notify). */
   tell: (message: string) => void
   grantedScopes: () => ToolScope[]
@@ -227,6 +237,11 @@ export function createToolHandlers(data: ToolHostData): Record<string, BridgeHan
     "permissions.request": async (params) => {
       if (!isRecord(params) || !isToolScope(params.scope)) bad("scope must be a known scope")
       return data.requestScope(params.scope)
+    },
+    "web.fetch": async (params) => {
+      if (!isRecord(params) || typeof params.url !== "string" || !params.url.trim()) bad("url must be a non-empty string")
+      if (params.url.length > 2048) bad("url exceeds 2048 characters")
+      return data.webFetch(params.url.trim(), params.as === "json" ? "json" : "text")
     },
     "ai.generate": async (params) => {
       if (!isRecord(params) || typeof params.prompt !== "string" || !params.prompt.trim()) bad("prompt must be a non-empty string")

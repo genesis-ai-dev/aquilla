@@ -18,7 +18,7 @@ import { defaultSmokeFixtures, runToolSmoke } from "../smoke"
 import { buildToolSrcdoc, type ToolBoot } from "../srcdoc"
 import { createFakeFramePair, fakeSmokeFrame } from "./fake-frame"
 
-const ALL: ToolManifest = { name: "x", description: "", scopes: [...TOOL_SCOPES], mounts: ["page", "panel"], apiRev: TOOLS_API_REV, sdk: 1 }
+const ALL: ToolManifest = { name: "x", description: "", scopes: [...TOOL_SCOPES], mounts: ["page", "panel"], apiRev: TOOLS_API_REV, sdk: 1, web: ["git.door43.org"] }
 
 function data(scopes: readonly ToolScope[] = TOOL_SCOPES): ToolHostData {
   return defaultSmokeFixtures({ ...ALL, scopes: [...scopes] })[1].data

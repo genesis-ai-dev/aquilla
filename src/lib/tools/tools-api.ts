@@ -194,6 +194,17 @@ export async function fetchToolActivity(jwt: string, projectId: string, toolId: 
   return request<ToolActivity>(jwt, `${p(projectId)}/${encodeURIComponent(toolId)}/activity?since=${Math.max(0, Math.floor(sinceMs))}`)
 }
 
+/** aquilla.web.fetch through auth-worker (POST …/tools/:toolId/web-fetch). */
+export async function webFetch(
+  jwt: string,
+  projectId: string,
+  toolId: string,
+  url: string,
+  as: "text" | "json",
+): Promise<{ status: number; contentType: string; body: unknown; url: string }> {
+  return request(jwt, `${p(projectId)}/${encodeURIComponent(toolId)}/web-fetch`, { method: "POST", body: { url, as } })
+}
+
 export async function buildToolAttempt(
   jwt: string,
   projectId: string,

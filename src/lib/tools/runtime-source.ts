@@ -255,6 +255,10 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
         return call("ui.hostKey", { key: String(k && k.key || ""), mod: !!(k && k.mod), shift: !!(k && k.shift), alt: !!(k && k.alt) });
       },
     },
+    // apiRev 6: read a declared site through the host's proxy (scope read:web).
+    web: {
+      fetch: function (url, opts) { return call("web.fetch", { url: String(url), as: opts && opts.as === "json" ? "json" : "text" }); },
+    },
     ai: {
       generate: function (prompt, opts) {
         return call("ai.generate", { prompt: String(prompt), system: opts && opts.system ? String(opts.system) : "", maxTokens: opts && opts.maxTokens ? Number(opts.maxTokens) : 0 });
@@ -286,7 +290,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
   Object.freeze(aquilla.storage); Object.freeze(aquilla.permissions); Object.freeze(aquilla.ui); Object.freeze(aquilla.ai);
   Object.freeze(aquilla.editor); Object.freeze(aquilla.backtranslation); Object.freeze(aquilla.history); Object.freeze(aquilla.attachments);
   Object.freeze(aquilla.rules); Object.freeze(aquilla.selection); Object.freeze(aquilla.suggestions);
-  Object.freeze(aquilla.agent); Object.freeze(aquilla.source);
+  Object.freeze(aquilla.agent); Object.freeze(aquilla.source); Object.freeze(aquilla.web);
   Object.defineProperty(window, "aquilla", { value: Object.freeze(aquilla), writable: false, configurable: false });
 
   // apiRev 2: focus handoff. App-wide shortcuts (Ctrl/Cmd+K search, the

@@ -87,11 +87,22 @@ describe("prompt assembly (AQU-1793)", () => {
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/never contradicts|Never write copy the UI then\s+contradicts/)
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/skeleton in the STATIC HTML/)
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/Never add "panel" to a wide multi-column layout/)
-    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/Word-level alignment data/)
-    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/Translation Notes \(TN\)/)
+    // Viewing alignments is buildable via Door43; saving them is stated as not possible, with the reason.
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/SAVING alignments[\s\S]*no shared storage for extension data/)
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/word-level ALIGNMENTS \(read from the aligned USFM\)/)
     // Data a project has only if it imported it is "partial", never silently "covered".
     expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/only when the project has imported the data[\s\S]*"partial"/)
     expect(TOOLS_REVIEW_SYSTEM_PROMPT).toMatch(/imported that data as a file[\s\S]*"partial"/)
+  })
+
+  it("documents read:web and Door43's layout (raw URLs, TSV columns, aligned USFM)", () => {
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("aquilla.web.fetch(url")
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain('"web": ["git.door43.org"]')
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("https://git.door43.org/unfoldingWord/<repo>/raw/branch/master/<path>")
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("Reference, ID, Tags, SupportReference, Quote, Occurrence, Note")
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("Reference, ID, Tags, OrigWords, Occurrence, TWLink")
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toMatch(/\\zaln-s \|x-strong=/)
+    expect(TOOLS_BUILDER_SYSTEM_PROMPT).toContain("bible/kt/<word>.md")
   })
 
   it("no SDK example draws a title the host already shows", () => {
@@ -100,7 +111,7 @@ describe("prompt assembly (AQU-1793)", () => {
 
   it("the review prompt lists every UI check and the domain limits", () => {
     for (const c of UI_CHECKS) expect(TOOLS_REVIEW_SYSTEM_PROMPT).toContain(c)
-    expect(TOOLS_REVIEW_SYSTEM_PROMPT).toMatch(/Word-level alignment data/)
+    expect(TOOLS_REVIEW_SYSTEM_PROMPT).toMatch(/SAVING alignments/)
   })
 
   it("an edit lists only the change's requirements", () => {

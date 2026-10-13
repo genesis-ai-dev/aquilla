@@ -8,6 +8,8 @@
  * resolves it from its own read, so a tool cannot aim a write at a stale head.
  */
 
+import { webFetch as webFetchViaProxy } from "./tools-api"
+import type { ToolWebResponse } from "./host-handlers"
 import { fetchAllFileCells, fetchCellsByIds, fetchFileCells, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { fetchConcepts } from "@/lib/sync/concepts-read"
@@ -627,6 +629,11 @@ export class LiveToolData implements ToolHostData {
     if (!res.ok) throw new Error(`AI request failed (HTTP ${res.status})`)
     const body = (await res.json()) as { choices?: { message?: { content?: string | null } }[] }
     return { text: body.choices?.[0]?.message?.content ?? "" }
+  }
+
+  /** aquilla.web.fetch: auth-worker fetches on the extension's behalf (the frame has no network). */
+  async webFetch(url: string, as: "text" | "json"): Promise<ToolWebResponse> {
+    return webFetchViaProxy(this.opts.sessionJwt, this.opts.projectId, this.opts.toolOrigin.toolId, url, as)
   }
 
   grantedScopes(): ToolScope[] {

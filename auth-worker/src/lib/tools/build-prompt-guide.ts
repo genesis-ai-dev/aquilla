@@ -49,17 +49,43 @@ same book (e.g. a literal and a simplified text) are linked only by matching ref
 
 Available through the bridge: files, cells (source/target/html/ref/chapter, validation, history panel, comments
 counts/threads, audio), lanes, sections/chapters, the termbase and term matches, back-translations, AI drafting,
-presence/locks, per-tool storage.
+presence/locks, per-tool storage (per user), and — with read:web — websites the manifest names (aquilla.web.fetch).
+Through aquilla.web.fetch from Door43 (see below) an extension CAN show unfoldingWord resources live: ULT/UST
+text, word-level ALIGNMENTS (read from the aligned USFM), UGNT/UHB with lemmas, Strong's and morphology, TN, TQ,
+TW articles and TWL links — matched to the project's cells by book/chapter/verse.
 NOT available (state these as not possible instead of faking them):
-- Word-level alignment data (original-language ↔ target word links, as in unfoldingWord's aligned USFM).
-- Original-language morphology, lemmas, Strong's numbers or lexicons — unless the project imported the
-  Greek/Hebrew text as its own file, in which case it is plain cell text joined by ref.
-- unfoldingWord Translation Notes (TN), Translation Words (TW), Translation Questions or academy articles —
-  unless imported as files (then they are ordinary cells, joined by ref).
-- Anything on the network (other projects, Door43, APIs) — the frame is offline.
+- SAVING alignments or any shared extension data: there is no shared storage for extension data (aquilla.storage
+  is per user and small), and Door43 is read-only from an extension. Viewing alignments is possible; editing and
+  saving them is "not_possible" with that reason.
+- Writing to Door43 or any website (read:web is GET only), or sites the manifest does not name.
+- Alignment between the PROJECT'S own translation and the original (Aquilla stores no word links for project text).
 Bible-translation basics: unfoldingWord resources (ULT literal text, UST simplified text, TN notes, TW key-term
 articles, TQ questions, TA academy) are all keyed by book/chapter/verse; translators work verse by verse with
 several of them side by side, and checkers validate. When a request needs data from this NOT-available list,
 build everything else well and mark that requirement not_possible with the reason — never silently drop it.
 A requirement that works only when the project has imported the data (Greek/Hebrew text, TN, TW, ULT/UST as
-files) is "partial", with a note such as "works when the notes are imported as a file" — not "covered".`
+files) is "partial", with a note such as "works when the notes are imported as a file" — not "covered". Prefer
+fetching unfoldingWord resources live from Door43 (read:web) over depending on imported copies.`
+
+export const TOOLS_DOOR43_PROMPT = String.raw`## Door43 (unfoldingWord's open resources) — via aquilla.web.fetch, manifest "web": ["git.door43.org"]
+Raw files: https://git.door43.org/unfoldingWord/<repo>/raw/branch/master/<path>   (text/plain; fetch per book)
+Catalog:   https://git.door43.org/api/v1/catalog/search?owner=unfoldingWord&lang=en  (JSON; releases, subjects)
+Book files are numbered: OT 01-GEN … 39-MAL; NT 41-MAT 42-MRK 43-LUK 44-JHN 45-ACT 46-ROM … 67-REV (no 40).
+Map a project ref "MAT 1:1" to book code MAT, chapter 1, verse 1.
+- en_ult / en_ust: <NN>-<BOOK>.usfm (e.g. 41-MAT.usfm). Literal / simplified English, ALIGNED to the original:
+    \v 1 \zaln-s |x-strong="G09760" x-lemma="βίβλος" x-morph="Gr,N,,,,,NFS," x-occurrence="1" x-occurrences="1" x-content="Βίβλος"\*\w The|x-occurrence="1" x-occurrences="1"\w*
+    \w book|x-occurrence="1" x-occurrences="1"\w*\zaln-e\*
+  Each \zaln-s … \zaln-e\* milestone wraps the English \w words aligned to ONE original word (x-content, with
+  x-strong/x-lemma/x-morph; x-occurrence says which occurrence in the verse). Milestones can nest (many-to-many).
+  Plain text = the \w words in order; strip markers. Chapters: \c N; verses: \v N; \p, \q paragraphs.
+- el-x-koine_ugnt (Greek NT) / hbo_uhb (Hebrew OT): <NN>-<BOOK>.usfm with \w word|lemma="…" strong="G…/H…" x-morph="…"\w*.
+- en_tn  (Translation Notes): tn_<BOOK>.tsv — columns Reference, ID, Tags, SupportReference, Quote, Occurrence, Note
+    (Reference "1:1"; Quote = original-language words; Note is Markdown; SupportReference rc://*/ta/man/translate/…).
+- en_tq  (Translation Questions): tq_<BOOK>.tsv — Reference, ID, Tags, Quote, Occurrence, Question, Response.
+- en_twl (Translation Words Links): twl_<BOOK>.tsv — Reference, ID, Tags, OrigWords, Occurrence, TWLink
+    (TWLink rc://*/tw/dict/bible/kt/god → en_tw file bible/kt/god.md).
+- en_tw  (Translation Words): bible/kt/<word>.md, bible/names/<word>.md, bible/other/<word>.md (Markdown article).
+- en_ta  (Translation Academy): translate/<article>/01.md (title.md, sub-title.md beside it).
+TSVs: first line is the header; split rows on newlines and fields on tabs; a literal backslash-n inside a Note is a line break.
+Fetch each book file once, parse it into a { "chapter:verse": … } map, and look rows up by the cell's ref.
+Door43 can be slow or rate-limit heavy use: show a per-track loading state and a clear error, and never refetch per verse.`

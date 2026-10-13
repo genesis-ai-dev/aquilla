@@ -86,7 +86,8 @@ export function ToolsPage() {
     if (!jwt) return
     setAdding(true)
     try {
-      const grant = grantableAtInstall(c.manifest.scopes, roleLevel ?? null).grantable.filter((s) => s.startsWith("read:"))
+      // read:web asks the first time it is used, naming the site — never granted silently at install.
+      const grant = grantableAtInstall(c.manifest.scopes, roleLevel ?? null).grantable.filter((s) => s.startsWith("read:") && s !== "read:web")
       const tool = await installTool(jwt, projectId, {
         source: c.source,
         manifest: c.manifest,

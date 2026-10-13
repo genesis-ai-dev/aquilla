@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react"
-import { AppWindow, AudioLines, BookOpen, CheckCheck, Eye, MessageSquare, PanelRight, PenLine, Rows3, Sparkles, SquarePen, Type } from "lucide-react"
+import { AppWindow, AudioLines, BookOpen, CheckCheck, Eye, Globe, MessageSquare, PanelRight, PenLine, Rows3, Sparkles, SquarePen, Type } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { primaryMount } from "@/lib/tools/builder-model"
@@ -24,8 +24,16 @@ export const PERM = {
   "write:source": { icon: Type, label: "extensions.perm.writeSource", kind: "write" },
   "ai:generate": { icon: Sparkles, label: "extensions.perm.aiGenerate", kind: "ai" },
   "ai:draft": { icon: Sparkles, label: "extensions.perm.aiDraft", kind: "ai" },
-} as const satisfies Record<ToolScope, { icon: LucideIcon; label: string; kind: "read" | "write" | "ai" }>
-const HINT = { read: "extensions.perm.readHint", write: "extensions.perm.writeHint", ai: "extensions.perm.aiHint" } as const
+  "read:web": { icon: Globe, label: "extensions.perm.readWeb", kind: "web" },
+} as const satisfies Record<ToolScope, { icon: LucideIcon; label: string; kind: "read" | "write" | "ai" | "web" }>
+const HINT = { read: "extensions.perm.readHint", write: "extensions.perm.writeHint", ai: "extensions.perm.aiHint", web: "extensions.perm.webHint" } as const
+
+/** A scope as a short label; read:web names its sites ("Reads git.door43.org"). */
+export function usePermLabel(): (scope: ToolScope, web?: readonly string[]) => string {
+  const t = useT()
+  return (scope, web) =>
+    scope === "read:web" && web?.length ? t("extensions.perm.readWebFrom", { domains: web.join(", ") }) : t(PERM[scope].label)
+}
 
 /** The one icon that says where an extension lives. */
 export function MountIcon({ mounts, className }: { mounts: readonly ToolMount[]; className?: string }) {
@@ -40,11 +48,12 @@ export function MountIcon({ mounts, className }: { mounts: readonly ToolMount[];
 const chip = "inline-flex h-7 items-center gap-1.5 rounded-full border bg-background px-2.5 text-xs text-foreground/80 dark:bg-transparent"
 
 /** Where it appears + what it may do, as icon chips; the rule is in the tooltip. */
-export function MetaChips({ mounts, scopes }: { mounts: readonly ToolMount[]; scopes: readonly ToolScope[] }) {
+export function MetaChips({ mounts, scopes, web }: { mounts: readonly ToolMount[]; scopes: readonly ToolScope[]; web?: readonly string[] }) {
   const t = useT()
+  const permLabel = usePermLabel()
   const mount = primaryMount(mounts)
   const Where = MOUNT_ICON[mount]
-  const order = { read: 0, write: 1, ai: 2 }
+  const order = { read: 0, web: 1, write: 2, ai: 3 }
   const perms = [...scopes].sort((a, b) => order[PERM[a].kind] - order[PERM[b].kind])
   return (
     <ul className="flex flex-wrap items-center gap-1.5" data-testid="scope-summary">
@@ -59,7 +68,7 @@ export function MetaChips({ mounts, scopes }: { mounts: readonly ToolMount[]; sc
           <AppTooltip key={s} content={t(HINT[p.kind])}>
             <li className={chip} tabIndex={0} data-scope-kind={p.kind}>
               <p.icon className={cn("size-3.5", p.kind === "write" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")} aria-hidden />
-              {t(p.label)}
+              {permLabel(s, web)}
             </li>
           </AppTooltip>
         )

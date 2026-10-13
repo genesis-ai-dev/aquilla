@@ -102,6 +102,8 @@ function stubData(populated: boolean, scopes: ToolManifest["scopes"]): ToolHostD
     },
     notify: () => {},
     generate: async ({ prompt }) => ({ text: `(generated for: ${prompt.slice(0, 40)})` }),
+    // A small, well-formed answer for any declared site (the smoke render has no network).
+    webFetch: async (url, as) => ({ status: 200, contentType: as === "json" ? "application/json" : "text/plain", body: as === "json" ? [] : "", url }),
     tell: () => {},
     grantedScopes: () => [...scopes],
     requestScope: async () => true,

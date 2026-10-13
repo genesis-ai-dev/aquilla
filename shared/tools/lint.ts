@@ -17,7 +17,8 @@ interface BannedPattern {
 }
 
 const BANNED: BannedPattern[] = [
-  { re: /\bfetch\s*\(/, message: "fetch() is not available; use the aquilla bridge" },
+  // aquilla.web.fetch(…) (apiRev 6) is the bridge, proxied by the host; any other fetch( is not.
+  { re: /(?<!\bweb\.)\bfetch\s*\(/, message: "fetch() is not available; use the aquilla bridge (aquilla.web.fetch for declared sites)" },
   { re: /\bXMLHttpRequest\b/, message: "XMLHttpRequest is not available; use the aquilla bridge" },
   { re: /\bWebSocket\b/, message: "WebSocket is not available" },
   { re: /\bEventSource\b/, message: "EventSource is not available" },

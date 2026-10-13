@@ -26,6 +26,8 @@ export function useScopeLabel(): (scope: ToolScope) => string {
           return t("extensions.scope.writeAudio")
         case "write:source":
           return t("extensions.scope.writeSource")
+        case "read:web":
+          return t("extensions.scope.readWeb")
       }
     },
     [t],

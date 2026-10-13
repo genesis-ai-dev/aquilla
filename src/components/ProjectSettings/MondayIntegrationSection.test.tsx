@@ -16,6 +16,8 @@ vi.mock("@/lib/monday/api", () => ({
   fetchMondayLink: vi.fn(),
   fetchMondayBoards: vi.fn(),
   fetchMondayBoardStructure: vi.fn(),
+  fetchMondayBoardChanges: vi.fn(),
+  dismissMondayBoardChanges: vi.fn(),
   putMondayLink: vi.fn(),
   patchMondayLink: vi.fn(),
   addMondayColumns: vi.fn(),
@@ -63,6 +65,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocked.fetchMondayBoards.mockResolvedValue([])
   mocked.fetchMondayBoardStructure.mockResolvedValue({ columns: [], groups: [] })
+  // Unless a test says otherwise, the board-changes read fails and the page
+  // falls back to the plain column list, leaving the link's own flag alone.
+  mocked.fetchMondayBoardChanges.mockRejectedValue(new Error("not mocked"))
 })
 
 describe("MondayIntegrationSection", () => {
@@ -290,5 +295,75 @@ describe("Add columns (linked board)", () => {
     renderSection({ roleLevel: 400 })
     await waitFor(() => expect(screen.getByText(/translation tracker/i)).toBeTruthy())
     expect(screen.queryByTestId("monday-add-columns")).toBeNull()
+  })
+
+  describe("new columns on the board (Board structure changed)", () => {
+    const columns = [
+      { id: "numbers_1", title: "Completion %", type: "numbers" },
+      { id: "numeric_b", title: "Budget", type: "numbers" },
+      { id: "formula_f", title: "Total", type: "formula" },
+    ]
+    const changes = (newIds: string[]) => ({
+      structureStale: newIds.length > 0,
+      newColumns: columns.filter((col) => newIds.includes(col.id)),
+      structure: { columns, groups: [] },
+    })
+
+    it("names each new column; Map it adds its row to the mapping, ready to save", async () => {
+      mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink({ structureStale: true }) })
+      mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+      mocked.fetchMondayBoardChanges.mockResolvedValue(changes(["numeric_b", "formula_f"]))
+      mocked.patchMondayLink.mockResolvedValue({ link: makeLink(), warnings: [] })
+
+      renderSection()
+      const banner = await screen.findByTestId("monday-board-changes")
+      await waitFor(() => expect(banner.textContent).toMatch(/budget/i))
+      expect(banner.textContent).toMatch(/total/i)
+      expect(banner.textContent).toMatch(/can't fill this kind of column/i)
+      expect(screen.getAllByRole("button", { name: /map it/i })).toHaveLength(1)
+
+      fireEvent.click(screen.getByRole("button", { name: /map it/i }))
+      fireEvent.click(screen.getByRole("button", { name: /save mapping/i }))
+      await waitFor(() => expect(mocked.patchMondayLink).toHaveBeenCalled())
+      const sent = mocked.patchMondayLink.mock.calls[0]![2].config!.columns.map((col) => col.columnId)
+      expect(sent).toEqual(["numbers_1", "numeric_b"])
+    })
+
+    it("Not needed stops asking, and the banner goes once nothing is left", async () => {
+      mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink({ structureStale: true }) })
+      mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+      mocked.fetchMondayBoardChanges.mockResolvedValue(changes(["numeric_b"]))
+      mocked.dismissMondayBoardChanges.mockResolvedValue(changes([]))
+
+      renderSection()
+      fireEvent.click(await screen.findByRole("button", { name: /not needed/i }))
+      await waitFor(() => expect(screen.queryByTestId("monday-board-changes")).toBeNull())
+      expect(mocked.dismissMondayBoardChanges).toHaveBeenCalledWith("tok", "p1", ["numeric_b"])
+    })
+
+    it("a new column that was deleted again clears the banner on its own", async () => {
+      mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink({ structureStale: true }) })
+      mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+      mocked.fetchMondayBoardChanges.mockResolvedValue(changes([]))
+
+      renderSection()
+      await screen.findByText("Translation Tracker")
+      await waitFor(() => expect(screen.queryByTestId("monday-board-changes")).toBeNull())
+    })
+
+    it("coming back to the tab re-reads the board, so a column added meanwhile shows up", async () => {
+      mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
+      mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+      mocked.fetchMondayBoardChanges.mockResolvedValue(changes([]))
+
+      renderSection()
+      await waitFor(() => expect(mocked.fetchMondayBoardChanges).toHaveBeenCalled())
+      const before = mocked.fetchMondayBoardChanges.mock.calls.length
+      mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink({ structureStale: true }) })
+      mocked.fetchMondayBoardChanges.mockResolvedValue(changes(["numeric_b"]))
+      fireEvent(window, new Event("focus"))
+      await waitFor(() => expect(mocked.fetchMondayBoardChanges.mock.calls.length).toBeGreaterThan(before))
+      expect(await screen.findByRole("button", { name: /map it/i })).toBeTruthy()
+    })
   })
 })

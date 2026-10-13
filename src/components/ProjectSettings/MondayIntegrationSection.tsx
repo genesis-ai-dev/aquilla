@@ -36,19 +36,18 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   analyzeMondayMapping,
   deleteMondayLink,
-  fetchMondayBoardStructure,
   fetchMondayConnection,
   fetchMondayLink,
   patchMondayLink,
   syncMondayNow,
   type MondayBoardLink,
-  type MondayBoardStructure,
   type MondayConnectionStatus,
   type MondaySyncResult,
 } from "@/lib/monday/api"
 import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingTable } from "./MondayMappingEditor"
 import { MondayLinkedView } from "./MondayLinkedView"
+import { useMondayBoardChanges, type MondayNewColumn } from "./useMondayBoardChanges"
 import { MondaySetupWizard } from "./MondaySetupWizard"
 import { MondayAddColumnsDialog } from "./MondayAddColumnsDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -86,7 +85,22 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [structure, setStructure] = useState<MondayBoardStructure | null>(null)
+  // The board's columns now, and which are new since the link was saved.
+  const markStale = useCallback(
+    (stale: boolean) => setLink((l) => (l && l.structureStale !== stale ? { ...l, structureStale: stale } : l)),
+    [],
+  )
+  const board = useMondayBoardChanges({
+    jwt,
+    projectId,
+    orgId,
+    boardId: link?.boardId ?? "",
+    enabled: canManage,
+    onStaleChange: markStale,
+  })
+  const { structure, newColumns, refresh: refreshBoard, dismiss: dismissBoardColumns } = board
+  /** "Map it" on a new column: a row for it appears in the mapping editor. */
+  const [requestedRow, setRequestedRow] = useState<{ column: MondayNewColumn; nonce: number } | null>(null)
 
   const [proposal, setProposal] = useState<{ proposal: MondayMapping; summary: string } | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
@@ -126,6 +140,8 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
       ])
       if (!aliveRef.current) return
       setLink(linkRes.linked && linkRes.link ? linkRes.link : null)
+      // Re-read the board too, so columns added on Monday since show up.
+      refreshBoard()
       setConnection(connRes)
       setProjectConnected(linkRes.orgConnected ?? linkRes.link?.orgConnected)
       if (linkRes.orgConnected == null && !linkRes.link && !connRes) {
@@ -136,7 +152,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
     } finally {
       if (aliveRef.current) setLoading(false)
     }
-  }, [jwt, projectId, orgId, t])
+  }, [jwt, projectId, orgId, t, refreshBoard])
 
   useEffect(() => {
     void load()
@@ -150,26 +166,6 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
 
   const orgConnected = projectConnected ?? link?.orgConnected ?? connection?.connected ?? false
 
-  // ── Board structure (linked board) ───────────────────────────────────────
-  const structureBoardId = link?.boardId ?? ""
-  useEffect(() => {
-    if (!jwt || orgId == null || !canManage || !structureBoardId) {
-      setStructure(null)
-      return
-    }
-    let alive = true
-    fetchMondayBoardStructure(jwt, orgId, structureBoardId)
-      .then((got) => {
-        if (alive && aliveRef.current) setStructure(got)
-      })
-      .catch(() => {
-        // Graceful degradation: tables fall back to raw column ids.
-        if (alive && aliveRef.current) setStructure(null)
-      })
-    return () => {
-      alive = false
-    }
-  }, [jwt, orgId, canManage, structureBoardId])
 
   // ── AI configure / reconfigure ───────────────────────────────────────────
   const runAnalyze = useCallback(
@@ -247,6 +243,8 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
         setLink(next.link)
         // Columns the board doesn't have are dropped server-side; say which.
         setWarnings(next.warnings)
+        // Saving re-reads the board and clears "Board structure changed".
+        refreshBoard()
         return true
       } catch (e) {
         if (aliveRef.current) setError(errMsg(e))
@@ -255,7 +253,19 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
         if (aliveRef.current) setSavingMapping(false)
       }
     },
-    [jwt, link, projectId],
+    [jwt, link, projectId, refreshBoard],
+  )
+
+  const handleDismissColumn = useCallback(
+    async (columnId: string) => {
+      setError(null)
+      try {
+        await dismissBoardColumns([columnId])
+      } catch (e) {
+        if (aliveRef.current) setError(errMsg(e))
+      }
+    },
+    [dismissBoardColumns],
   )
 
   const handleSyncNow = useCallback(async () => {
@@ -356,6 +366,10 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               onToggleEnabled={handleToggleEnabled}
               onSyncNow={handleSyncNow}
               onSaveMapping={handleSaveMapping}
+              newColumns={newColumns}
+              requestedRow={requestedRow}
+              onMapColumn={(column) => setRequestedRow((r) => ({ column, nonce: (r?.nonce ?? 0) + 1 }))}
+              onDismissColumn={(columnId) => void handleDismissColumn(columnId)}
               onReconfigure={() => void runAnalyze(link.boardId, reconfigureMsg.trim() || undefined, link.config)}
               onUnlink={() => setUnlinkOpen(true)}
               warnings={warnings}
@@ -468,10 +482,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
           boardName={link.boardName ?? link.boardId}
           rows={link.config.columns}
           boardColumns={structure?.columns}
-          onSave={async (columns, built) => {
-            if (built) setStructure(built)
-            return handleSaveMapping(columns)
-          }}
+          onSave={(columns) => handleSaveMapping(columns)}
         />
       )}
 

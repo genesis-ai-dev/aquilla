@@ -14,6 +14,8 @@
 //                                             (boardId optional — omit it and the AI picks the board too)
 //   POST   /projects/:projectId/columns       project maintainer+ — add the missing Aquilla columns to a board
 //   POST   /projects/:projectId/sync          project maintainer+ — push now
+//   GET    /projects/:projectId/board-changes project maintainer+ — columns new on the board since the link was saved
+//   POST   /projects/:projectId/board-changes/dismiss  project maintainer+ — "Not needed" for some of them
 //   POST   /webhook                           NO auth (Monday JWT via MONDAY_SIGNING_SECRET)
 //   POST   /internal/push                     Bearer SYNC_SECRET_KEY (sync-worker fire-and-forget)
 //
@@ -713,6 +715,107 @@ monday.patch(
       fresh = (await getLink(c.env, guard.projectId)) ?? fresh
     }
     return c.json({ link: linkResponse(fresh, true), warnings, ...(push && { push }) })
+  },
+)
+
+// ── Board changes since the link was saved ─────────────────────────────────
+//
+// The link keeps the board's columns as they were when it was saved
+// (`remote_state`). A column on the board now that isn't in that list is new,
+// and the "Board structure changed" banner names it. The board read here is
+// the authority: a webhook that flagged a column which has since been deleted
+// leaves nothing new, so the flag clears itself; a column that arrived while
+// the webhooks were unreachable still shows up.
+
+type BoardChangesBody = {
+  structureStale: boolean
+  newColumns: Array<{ id: string; title: string; type: string }>
+  structure: Omit<MondayBoardStructure, "fetchedAt">
+}
+
+async function boardChanges(
+  env: Env,
+  link: IntegrationLinkRow,
+  acknowledge: string[] = [],
+): Promise<BoardChangesBody | null> {
+  const token = await loadLinkToken(env, link)
+  if (!token) return null
+  const live = await fetchBoardStructure(token, link.external_id)
+  const saved = parseJsonColumn<MondayBoardStructure | null>(link.remote_state, null)
+  const known = [...(saved?.columns ?? [])]
+  for (const id of acknowledge) {
+    const column = live.columns.find((col) => col.id === id)
+    if (column && !known.some((col) => col.id === id)) {
+      known.push({ id: column.id, title: column.title, type: column.type })
+    }
+  }
+  const newColumns = live.columns
+    .filter((col) => !known.some((k) => k.id === col.id))
+    .map(({ id, title, type }) => ({ id, title, type }))
+  const stale = newColumns.length > 0
+  if (stale !== link.remote_state_stale || acknowledge.length > 0) {
+    // With nothing new left, the saved list becomes the board as it is now
+    // (deleted columns drop out too); otherwise only acknowledged columns join.
+    const next: MondayBoardStructure = {
+      fetchedAt: new Date().toISOString(),
+      url: live.url ?? saved?.url ?? null,
+      name: live.name ?? saved?.name ?? null,
+      columns: stale ? known : live.columns.map(({ id, title, type }) => ({ id, title, type })),
+      groups: live.groups,
+    }
+    await env.AQUILLA_PG.prepare(
+      "UPDATE integration_links SET remote_state = ?::jsonb, remote_state_stale = ?, updated_at = now() WHERE id = ?",
+    )
+      .bind(JSON.stringify(next), stale, link.id)
+      .run()
+  }
+  return {
+    structureStale: stale,
+    newColumns,
+    structure: {
+      url: live.url ?? null,
+      name: live.name ?? null,
+      columns: live.columns.map(({ id, title, type }) => ({ id, title, type })),
+      groups: live.groups,
+    },
+  }
+}
+
+monday.get("/projects/:projectId/board-changes", authMiddleware, async (c) => {
+  const guard = await projectGuard(c, MANAGE_MIN_ROLE)
+  if (guard instanceof Response) return guard
+  const link = await getLink(c.env, guard.projectId)
+  if (!link) return c.json({ error: "project has no Monday link" }, 404)
+  try {
+    const body = await boardChanges(c.env, link)
+    if (!body) return c.json({ error: "no Monday token for this link" }, 409)
+    return c.json(body)
+  } catch (err) {
+    console.error("[monday] board changes: board read failed:", err)
+    return c.json({ error: "Monday API error" }, 502)
+  }
+})
+
+const dismissChangesSchema = z.object({ columnIds: z.array(z.string().min(1)).min(1).max(100) })
+
+/** "Not needed": the board keeps these columns, Aquilla stops asking about them. */
+monday.post(
+  "/projects/:projectId/board-changes/dismiss",
+  authMiddleware,
+  zValidator("json", dismissChangesSchema),
+  async (c) => {
+    const guard = await projectGuard(c, MANAGE_MIN_ROLE)
+    if (guard instanceof Response) return guard
+    const link = await getLink(c.env, guard.projectId)
+    if (!link) return c.json({ error: "project has no Monday link" }, 404)
+    try {
+      const body = await boardChanges(c.env, link, c.req.valid("json").columnIds)
+      if (!body) return c.json({ error: "no Monday token for this link" }, 409)
+      return c.json(body)
+    } catch (err) {
+      console.error("[monday] dismiss board changes: board read failed:", err)
+      return c.json({ error: "Monday API error" }, 502)
+    }
   },
 )
 

@@ -13,7 +13,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { SparkleButton } from "@/components/SparkleButton"
 import type { MondayBoardLink, MondayBoardStructure } from "@/lib/monday/api"
-import type { MondayMapping } from "@/lib/monday/types"
+import {
+  MONDAY_METRIC_KEYS,
+  MONDAY_READONLY_COLUMN_TYPES,
+  MONDAY_WRITABLE_TYPES_BY_METRIC,
+  type MondayColumnMapping,
+  type MondayMapping,
+} from "@/lib/monday/types"
+import type { MondayNewColumn } from "./useMondayBoardChanges"
 import { MondayMappingEditor, MondayMappingTable } from "./MondayMappingEditor"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -37,6 +44,10 @@ export function MondayLinkedView({
   onUnlink,
   warnings,
   missingColumns = null,
+  newColumns = [],
+  requestedRow = null,
+  onMapColumn,
+  onDismissColumn,
 }: {
   link: MondayBoardLink
   structure: MondayBoardStructure | null
@@ -56,17 +67,57 @@ export function MondayLinkedView({
   warnings: string[]
   /** The column picker: add Aquilla's columns to the board and map them. */
   missingColumns?: ReactNode
+  /** Columns on the board that weren't there when the link was saved. */
+  newColumns?: MondayNewColumn[]
+  /** "Map it" was clicked: the editor adds a row for this column. */
+  requestedRow?: { column: MondayNewColumn; nonce: number } | null
+  onMapColumn?: (column: MondayNewColumn) => void
+  onDismissColumn?: (columnId: string) => void
 }) {
   const { t } = useI18n()
+  const showNewColumns = canManage && newColumns.length > 0
   return (
     <div className="space-y-4">
       {link.structureStale && (
         <div
           role="alert"
           className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          data-testid="monday-board-changes"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{t("projectSettings.monday.structureStaleWarning")}</span>
+          {showNewColumns ? (
+            <div className="min-w-0 flex-1 space-y-2">
+              <p>{t("projectSettings.monday.boardChangesIntro")}</p>
+              <ul className="space-y-1.5">
+                {newColumns.map((column) => (
+                  <li key={column.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-medium">{column.title}</span>
+                    {mappableMetric(column.type) ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          onMapColumn?.(column)
+                          document
+                            .querySelector('[data-testid="monday-mapping-editor"]')
+                            ?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+                        }}
+                      >
+                        {t("projectSettings.monday.boardChangesMap")}
+                      </Button>
+                    ) : (
+                      <span className="text-xs">{t("projectSettings.monday.boardChangesReadOnly")}</span>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={() => onDismissColumn?.(column.id)}>
+                      {t("projectSettings.monday.boardChangesDismiss")}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <span>{t("projectSettings.monday.structureStaleWarning")}</span>
+          )}
         </div>
       )}
       {warnings.length > 0 && (
@@ -152,6 +203,7 @@ export function MondayLinkedView({
           <MondayMappingEditor
             key={JSON.stringify(link.config.columns)}
             initialColumns={link.config.columns}
+            requestedRow={requestedRow ? { row: rowFor(requestedRow.column), nonce: requestedRow.nonce } : null}
             structure={structure}
             disabled={!canManage}
             saving={savingMapping}
@@ -186,4 +238,14 @@ export function MondayLinkedView({
       )}
     </div>
   )
+}
+
+/** The first metric that can write to a column of this type, or null when none can. */
+function mappableMetric(columnType: string): MondayColumnMapping["metric"] | null {
+  if (MONDAY_READONLY_COLUMN_TYPES.has(columnType)) return null
+  return MONDAY_METRIC_KEYS.find((metric) => MONDAY_WRITABLE_TYPES_BY_METRIC[metric].includes(columnType)) ?? null
+}
+
+function rowFor(column: MondayNewColumn): MondayColumnMapping {
+  return { columnId: column.id, columnType: column.type, metric: mappableMetric(column.type) ?? "completion_pct" }
 }

@@ -369,6 +369,39 @@ export async function addMondayColumns(
   }
 }
 
+/** Columns on the linked board that weren't there when the link was saved. */
+export interface MondayBoardChanges {
+  /** The server's verdict, saved on the link: true while anything is new. */
+  structureStale: boolean
+  newColumns: { id: string; title: string; type: string }[]
+  /** The board as it is now. */
+  structure: MondayBoardStructure
+}
+
+/** GET /api/v2/monday/projects/:projectId/board-changes (maintainer+). */
+export async function fetchMondayBoardChanges(jwt: string, projectId: string): Promise<MondayBoardChanges> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/board-changes`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) await readError(res, "error.monday.loadBoardStructure")
+  return (await res.json()) as MondayBoardChanges
+}
+
+/** POST /api/v2/monday/projects/:projectId/board-changes/dismiss — "Not needed". */
+export async function dismissMondayBoardChanges(
+  jwt: string,
+  projectId: string,
+  columnIds: string[],
+): Promise<MondayBoardChanges> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/board-changes/dismiss`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify({ columnIds }),
+  })
+  if (!res.ok) await readError(res, "error.monday.loadBoardStructure")
+  return (await res.json()) as MondayBoardChanges
+}
+
 /** POST /api/v2/monday/projects/:projectId/sync (maintainer+). Push now. */
 export async function syncMondayNow(jwt: string, projectId: string): Promise<MondaySyncResult> {
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/sync`, {

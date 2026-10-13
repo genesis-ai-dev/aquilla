@@ -1675,3 +1675,92 @@ describe("PUT link puts the project's rows in an \"Aquilla projects\" group", ()
     expect(parseJsonColumn<{ groupId?: string }>(await savedConfig(), {}).groupId).toBe("group_aq")
   })
 })
+
+// ── Board changes since the link was saved ─────────────────────────────────
+
+describe("GET/POST board-changes", () => {
+  /** A link whose saved list has Name + Progress, and a board with `live` columns. */
+  async function seedWithBoard(live: Array<{ id: string; title: string; type: string }>, stale = true) {
+    await seedOrgProject()
+    await seedLink()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE integration_links SET remote_state = ?::jsonb, remote_state_stale = ? WHERE id = 'link-1'",
+    )
+      .bind(
+        JSON.stringify({
+          fetchedAt: "2026-10-01T00:00:00Z",
+          columns: [
+            { id: "name", title: "Name", type: "name" },
+            { id: "numbers_1", title: "Progress", type: "numbers" },
+          ],
+          groups: [],
+        }),
+        stale,
+      )
+      .run()
+    mockFetch((url, body) => {
+      if (url.startsWith("https://api.monday.com/v2") && body.includes("settings_str")) {
+        return jsonResponse({ data: { boards: [{ name: "Ruth Board", url: "https://acme.monday.com/boards/9", columns: live, groups: [] }] } })
+      }
+      return null
+    })
+  }
+  const linkRow = async () =>
+    (await env.AQUILLA_PG.prepare(
+      "SELECT remote_state, remote_state_stale FROM integration_links WHERE id = 'link-1'",
+    ).first<{ remote_state: unknown; remote_state_stale: boolean }>())!
+  const base = [
+    { id: "name", title: "Name", type: "name" },
+    { id: "numbers_1", title: "Progress", type: "numbers" },
+  ]
+
+  it("names the columns that are new on the board", async () => {
+    await seedWithBoard([...base, { id: "numeric_new", title: "Budget", type: "numbers" }])
+    const res = await request("anna", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { structureStale: boolean; newColumns: unknown[]; structure: { columns: unknown[] } }
+    expect(body.structureStale).toBe(true)
+    expect(body.newColumns).toEqual([{ id: "numeric_new", title: "Budget", type: "numbers" }])
+    expect(body.structure.columns).toHaveLength(3)
+  })
+
+  it("clears the banner by itself when the new column was deleted again", async () => {
+    await seedWithBoard(base)
+    const res = await request("anna", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(((await res.json()) as { structureStale: boolean; newColumns: unknown[] })).toMatchObject({
+      structureStale: false,
+      newColumns: [],
+    })
+    expect((await linkRow()).remote_state_stale).toBe(false)
+  })
+
+  it("raises the banner for a column that arrived while no webhook reached us", async () => {
+    await seedWithBoard([...base, { id: "text_x", title: "Notes", type: "text" }], false)
+    const res = await request("anna", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(((await res.json()) as { structureStale: boolean }).structureStale).toBe(true)
+    expect((await linkRow()).remote_state_stale).toBe(true)
+  })
+
+  it("\"Not needed\" stops asking about that column, and clears the banner once nothing is left", async () => {
+    await seedWithBoard([
+      ...base,
+      { id: "numeric_new", title: "Budget", type: "numbers" },
+      { id: "text_x", title: "Notes", type: "text" },
+    ])
+    const one = await request("anna", "POST", "/api/v2/monday/projects/proj-1/board-changes/dismiss", { columnIds: ["text_x"] })
+    expect(((await one.json()) as { structureStale: boolean; newColumns: Array<{ id: string }> })).toMatchObject({
+      structureStale: true,
+      newColumns: [{ id: "numeric_new" }],
+    })
+    const two = await request("anna", "POST", "/api/v2/monday/projects/proj-1/board-changes/dismiss", { columnIds: ["numeric_new"] })
+    expect(((await two.json()) as { structureStale: boolean }).structureStale).toBe(false)
+    const again = await request("anna", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(((await again.json()) as { newColumns: unknown[] }).newColumns).toEqual([])
+  })
+
+  it("a contributor gets 403", async () => {
+    await seedWithBoard(base)
+    const res = await request("tom", "GET", "/api/v2/monday/projects/proj-1/board-changes")
+    expect(res.status).toBe(403)
+  })
+})

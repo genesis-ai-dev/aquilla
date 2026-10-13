@@ -1209,6 +1209,11 @@ export const projectSettings = defineNamespace({
       "untouched on Monday.",
     "projectSettings.monday.removeLinkButton": "Remove link",
     "projectSettings.monday.structureStaleWarning": "Board structure changed — review the mapping below.",
+    "projectSettings.monday.boardChangesIntro":
+      "New on your Monday board since it was linked. Map a column to fill it from Aquilla (then pick what it shows and save the mapping), or mark it not needed.",
+    "projectSettings.monday.boardChangesMap": "Map it",
+    "projectSettings.monday.boardChangesDismiss": "Not needed",
+    "projectSettings.monday.boardChangesReadOnly": "Aquilla can't fill this kind of column.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
     "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
     "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
@@ -2254,6 +2259,18 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.chooser.groupTeam": {
         description: "Group heading in the Monday.com column checklist for people and recent activity.",
+      },
+      "projectSettings.monday.boardChangesIntro": {
+        description: "Amber banner on a linked Monday board listing columns someone added on Monday since the link was saved; each listed column has 'Map it' and 'Not needed' buttons.",
+      },
+      "projectSettings.monday.boardChangesMap": {
+        description: "Button beside a new Monday column: adds a row for it to the mapping table below, to fill it from Aquilla.",
+      },
+      "projectSettings.monday.boardChangesDismiss": {
+        description: "Button beside a new Monday column: the column stays on the board, Aquilla stops asking about it.",
+      },
+      "projectSettings.monday.boardChangesReadOnly": {
+        description: "Shown instead of 'Map it' for a new Monday column Aquilla can't write to (a formula, mirror or similar column).",
       },
       "projectSettings.monday.chooser.newColumn": {
         description: "Small tag beside a column in the checklist that isn't on the Monday board yet and would be created.",

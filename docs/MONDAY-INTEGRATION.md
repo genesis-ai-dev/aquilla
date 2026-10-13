@@ -95,7 +95,20 @@ contract beyond "maintainer can, member can view":
   `{ link, warnings }`. Both settings paths (the manual one and "Set up with
   AI") show the warnings.
 - `POST /projects/:projectId/sync` pushes now. It refuses (409) while the
-  link's Sync switch is off.
+  link's Sync switch is off. Turning the switch back on (PATCH `{ enabled: true }`)
+  pushes straight away and returns the result as `push`: edits made while it
+  was off were never queued.
+- `GET /projects/:projectId/board-changes` reads the board and compares it
+  with the columns saved on the link (`remote_state`). Columns on the board
+  that aren't in that list come back as `newColumns`, and the answer is saved
+  as `remote_state_stale`: anything new raises "Board structure changed" (even
+  if no webhook arrived), nothing new clears it (a new column deleted again).
+  The settings page calls it whenever it loads the link, so the banner names
+  the new columns and the mapping can pick them. Each gets "Map it" (adds a
+  mapping row) or "Not needed"
+  (`POST /projects/:projectId/board-changes/dismiss { columnIds }`, which adds
+  them to the saved list). Saving the mapping re-reads the board and clears
+  the banner, as before.
 - `POST /projects/:projectId/columns { boardId, metrics }` backs the column
   picker (same permission as saving a link). Aquilla only ever writes items,
   so a board without number columns gave the user nothing to map to. This

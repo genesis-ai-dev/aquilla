@@ -298,6 +298,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   validationCountAudioDefault: null,
   validationCountOverrides: 0,
   validationCountAudioOverrides: 0,
+  overrideProjects: { countStructuralCells: null, validationCount: null, validationCountAudio: null },
   resetValidationCountOverrides: vi.fn(),
   // AQU-1037: assignment authority defaults to project_lead.
   assignmentMinRole: 500,

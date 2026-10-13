@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { StructuralCellsSection } from "./StructuralCellsSection"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -31,5 +32,22 @@ describe("StructuralCellsSection override status", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reset to the default" }))
     expect(settings.resetCountStructuralOverrides).toHaveBeenCalledOnce()
     expect(settings.patch).not.toHaveBeenCalled()
+  })
+
+  it("the count opens the projects with their own setting, each linking to its Validation settings (AQU-1938)", async () => {
+    const settings = orgSettings({
+      countStructuralOverrides: 2,
+      overrideProjects: {
+        countStructuralCells: { total: 2, projects: [{ id: "p-gen", name: "Genesis" }, { id: "p-exo", name: "Exodus" }] },
+        validationCount: null,
+        validationCountAudio: null,
+      },
+    })
+    render(<MemoryRouter><StructuralCellsSection orgSettings={settings} canEdit /></MemoryRouter>)
+    await userEvent.click(screen.getByRole("button", { name: "2 projects set their own setting" }))
+    expect(screen.getByRole("link", { name: "Genesis" })).toHaveAttribute("href", "/project/p-gen/settings/validation")
+    expect(screen.getByRole("link", { name: "Exodus" })).toHaveAttribute("href", "/project/p-exo/settings/validation")
+    // The reset is still there, beside the count.
+    expect(screen.getByRole("button", { name: "Reset to default" })).toBeInTheDocument()
   })
 })

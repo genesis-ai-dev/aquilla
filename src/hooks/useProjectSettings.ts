@@ -63,11 +63,11 @@ export function isCountStructuralOnlyPatch(partial: ProjectWideSettings): boolea
 }
 
 /**
- * AQU-1086: the project-language keys, gated by the org's configurable
- * `languageEditMinRole` (default maintainer 600 — today's behaviour) rather
- * than {@link SETTINGS_EDIT_ROLE_FLOOR}. The default target language and the
- * extra-lane registry are one scope so the Project Info and Languages cards
- * can never disagree about who may edit them (AQU-898).
+ * AQU-1086 / AQU-984: the project-language keys, gated by the org's
+ * configurable `languageEditMinRole` (default project lead 500 when unset)
+ * rather than {@link SETTINGS_EDIT_ROLE_FLOOR}. The default target language
+ * and the extra-lane registry are one scope so the Project Info and Languages
+ * cards can never disagree about who may edit them (AQU-898).
  *
  * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
  * which re-derives the same "only language keys changed" test against the
@@ -300,6 +300,15 @@ export interface UseProjectSettings {
   dismissConflict: () => void
   /** Force a re-GET. */
   refresh: () => Promise<ProjectSettingsResponse | null>
+  /**
+   * AQU-1816: re-read after a write that went AROUND `patch` — the lane-row
+   * endpoints (create / rename / archive). `patch` tells every other settings
+   * consumer in this tab that the row moved; those writes never did, so the
+   * page behind the settings modal (overview, workspace) kept its old lanes
+   * until a reload. Broadcasts with this instance's origin — the writer
+   * re-reads through the returned refresh, not the event — then re-GETs.
+   */
+  refreshAfterWrite: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
    *  conflict-snap on 409, returns outcome. Blocked when offline or below
    *  MAINTAINER (600) — except a terminology-only patch, gated by the org's
@@ -611,6 +620,17 @@ export function useProjectSettings(
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
   }, [projectId, jwt])
+
+  // AQU-1816: what a writer that bypasses `patch` calls instead of a bare
+  // `refresh()`. The broadcast reaches the sibling instances (and the overview's
+  // portfolio row); the origin keeps this instance from answering its own
+  // event, since the refresh below already re-reads it.
+  const refreshAfterWrite = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
+    if (projectId) {
+      broadcastProjectSettingsUpdated({ projectId, origin: instanceIdRef.current })
+    }
+    return refresh()
+  }, [projectId, refresh])
 
   // Hydrate local cache and server state in parallel on projectId change. The
   // server snapshot overlays local values, so their completion order is safe;
@@ -969,6 +989,7 @@ export function useProjectSettings(
     conflict,
     dismissConflict,
     refresh,
+    refreshAfterWrite,
     patch,
   }
 }

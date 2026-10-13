@@ -56,6 +56,16 @@ describe("AQU-730 read wall", () => {
     const allBody = (await all.json()) as { cells: Array<{ value: string }> }
     expect(allBody.cells.map((c) => c.value).sort()).toEqual(["bonjour", "default-hola", "hola", "source-text"])
 
+    const lead = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role: 500 })
+    const leadRead = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {
+        headers: { Authorization: `Bearer ${lead}` },
+      }),
+      envWith(db, true),
+    ))!
+    const leadBody = (await leadRead.json()) as { cells: Array<{ value: string }> }
+    expect(leadBody.cells.map((c) => c.value).sort()).toEqual(["bonjour", "default-hola", "hola", "source-text"])
+
     const dark = (await handleCellsReadRequest(
       new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {
         headers: { Authorization: `Bearer ${contributor}` },
@@ -80,6 +90,47 @@ describe("AQU-730 read wall", () => {
     const byCodeBody = (await byCode.json()) as { cells: Array<{ value: string }> }
     // A language code is not a grant. The id is.
     expect(byCodeBody.cells.map((c) => c.value).sort()).toEqual(["source-text"])
+  })
+
+  it("wall off: a lane scope keeps matching its own lane's new rows, which carry no target_lang (AQU-1039 × AQU-1611b)", async () => {
+    // Rows as the projection writers leave them after AQU-1611b: lane_id is
+    // the identity and target_lang is the column default on every row. The
+    // scope clause's tag match must resolve through lane_id, or a scope on
+    // the ''-tagged lane would match every lane and a scope on "es" none.
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: ES, project_id: PROJECT, role: "target", name: "Spanish", lang_code: "es", legacy_tag: "es" },
+        { id: FR, project_id: PROJECT, role: "target", name: "French", lang_code: "fr", legacy_tag: "fr" },
+        { id: DEFAULT, project_id: PROJECT, role: "target", name: "Spanish", lang_code: "es", legacy_tag: "" },
+      ],
+      cells: [
+        { project_id: PROJECT, file_id: FILE, cell_id: "s1", side: "source", event_id: "e-s", value: "source-text", target_lang: "" },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t1", side: "target", event_id: "e-es", value: "hola", target_lang: "", lane_id: ES },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t1", side: "target", event_id: "e-fr", value: "bonjour", target_lang: "", lane_id: FR },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t1", side: "target", event_id: "e-def", value: "default-hola", target_lang: "", lane_id: DEFAULT },
+      ],
+    })
+    const read = async (scope: string) => {
+      const token = await makeTestToken(SECRET, {
+        projectId: PROJECT,
+        fileId: FILE,
+        role: 400,
+        scopes: [{ kind: "lane", value: scope }],
+      })
+      const res = (await handleCellsReadRequest(
+        new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        envWith(db, false),
+      ))!
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { cells: Array<{ value: string }> }
+      return body.cells.map((c) => c.value).sort()
+    }
+    expect(await read(DEFAULT)).toEqual(["default-hola", "source-text"])
+    expect(await read(ES)).toEqual(["hola", "source-text"])
+    // A stored scope that is still the legacy tag resolves to the same lane.
+    expect(await read("fr")).toEqual(["bonjour", "source-text"])
   })
 
   it("does not return another lane's progress to a contributor without that grant", async () => {
@@ -130,5 +181,62 @@ describe("AQU-730 read wall", () => {
     const ownBody = (await own.json()) as { file: { totalCount: number; filledCount: number } }
     expect(ownBody.file.totalCount).toBe(3)
     expect(ownBody.file.filledCount).toBe(1)
+  })
+})
+
+describe("AQU-1841: a cursor pin cannot reach another reader's ordering", () => {
+  it("serves a lane-scoped reader their own lanes even when their pin names the unscoped watermark", async () => {
+    // The AQU-1841 pin carries only numbers. If it carried the chain-cache key
+    // itself, a scoped reader could name the UNSCOPED key — every component of
+    // which is advertised to them except its (empty) visibility token — and be
+    // served an ordering over lanes the wall hides. The key is therefore
+    // rebuilt from the pin under the caller's own visibility.
+    const { db } = await makeTestDb({
+      lanes: [
+        { id: ES, project_id: PROJECT, role: "target", name: "Spanish", lang_code: "es", legacy_tag: "es" },
+        { id: FR, project_id: PROJECT, role: "target", name: "French", lang_code: "fr", legacy_tag: "fr" },
+      ],
+      cells: [
+        { project_id: PROJECT, file_id: FILE, cell_id: "s1", side: "source", event_id: "e-s", value: "source-text", target_lang: "" },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t1", side: "target", event_id: "e-es", value: "hola", target_lang: "es", lane_id: ES },
+        { project_id: PROJECT, file_id: FILE, cell_id: "t2", side: "target", anchor_cell_id: "t1", event_id: "e-fr", value: "bonjour", target_lang: "fr", lane_id: FR },
+      ],
+      events: [
+        {
+          id: "e-s", schema_version: 1, project_id: PROJECT, file_id: FILE, cell_id: "s1",
+          kind: "source.cell.create", author: "alice", payload: "{}", client_ts: 1, server_ts: 1, server_seq: 3,
+        },
+      ],
+    })
+
+    // An unscoped maintainer pages the file first, warming the cache with an
+    // ordering that includes the French lane.
+    const maintainer = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE, role: 600 })
+    const warm = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells?limit=1`, {
+        headers: { Authorization: `Bearer ${maintainer}` },
+      }),
+      envWith(db, true),
+    ))!
+    const warmBody = (await warm.json()) as { nextCursor: string; maxServerSeq: number }
+    expect(warmBody.maxServerSeq).toBe(3)
+
+    // The scoped contributor replays the maintainer's cursor verbatim — pin
+    // and all. They must still only ever see their own lane's rows.
+    const contributor = await makeTestToken(SECRET, {
+      projectId: PROJECT,
+      fileId: FILE,
+      role: 400,
+      laneGrants: [{ lane: ES, level: 400 }],
+    })
+    const stolen = (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/${PROJECT}/files/${FILE}/cells?limit=10&cursor=${encodeURIComponent(warmBody.nextCursor)}`,
+        { headers: { Authorization: `Bearer ${contributor}` } },
+      ),
+      envWith(db, true),
+    ))!
+    const stolenBody = (await stolen.json()) as { cells: Array<{ value: string }> }
+    expect(stolenBody.cells.map((c) => c.value)).not.toContain("bonjour")
   })
 })

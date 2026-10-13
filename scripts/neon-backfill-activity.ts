@@ -14,7 +14,7 @@
 // Run through the target wrapper so credentials resolve the usual way:
 //   pnpm neon:backfill:activity:dev
 //   pnpm neon:backfill:activity:prod
-import { makePostgres } from '../db/shim/postgres'
+import { makeMaintenancePostgres } from '../db/shim/postgres'
 
 function connectionString(): string {
   const direct = process.env.AQUILLA_DATABASE_URL?.trim()
@@ -34,7 +34,7 @@ function connectionString(): string {
 }
 
 async function main(): Promise<void> {
-  const db = makePostgres(connectionString(), 1)
+  const db = makeMaintenancePostgres(connectionString(), 1)
   try {
     const { results: projects } = await db
       .prepare('SELECT id FROM projects ORDER BY id')

@@ -355,7 +355,7 @@ describe('LinkMedia — prepare preconditions', () => {
     const res = (await handleExternalChangesetsRequest(
       prepareReq(token, [
         { kind: 'LinkMedia', fileId: FILE, cellId: CELL, artifactId },
-        { kind: 'SetTranslation', fileId: FILE, cellId: CELL, value: 'x' },
+        { kind: 'SetTranslation', fileId: FILE, cellId: CELL, laneId: 'deflane1', value: 'x' },
       ]),
       env,
     ))!

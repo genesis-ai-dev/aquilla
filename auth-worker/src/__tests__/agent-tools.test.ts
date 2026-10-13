@@ -14,6 +14,7 @@ import { executeRead, resolveScope } from "../lib/agent/tools/read"
 import { executeExamples, orTsquery } from "../lib/agent/tools/examples"
 import { executeSearch } from "../lib/agent/tools/search"
 import { executeDraft } from "../lib/agent/tools/draft"
+import { _test as agentRouteTest } from "../routes/agent"
 import { migrateProjectConcepts } from "../../../sync-worker/src/events/migrate-concepts"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
@@ -217,10 +218,9 @@ describe("read filter:'flagged' — rule violations for the QA sweep", () => {
     await seedWorld()
     for (const c of CELLS) {
       await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'target', 'es', ?, ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', ?, ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, 'es')))`,
       )
-        .bind(PROJECT, FILE, cellId(c.id), c.target, c.ref, crypto.randomUUID())
+        .bind(PROJECT, FILE, cellId(c.id), c.target, c.ref, crypto.randomUUID(), PROJECT)
         .run()
     }
     const rules = [
@@ -239,6 +239,74 @@ describe("read filter:'flagged' — rule violations for the QA sweep", () => {
     expect(flagged.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
     expect(flagged.text).toContain("rule-es-only")
     expect(flagged.text).not.toContain("rule-fr-only")
+
+    // Production passes lanes.id. The rule stays pinned to the tag "es".
+    const laneRow = await env.AQUILLA_PG.prepare(
+      `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = 'es'`,
+    )
+      .bind(PROJECT)
+      .first<{ id: string }>()
+    expect(laneRow?.id).toBeTruthy()
+    expect(laneRow!.id).not.toBe("es")
+    const byId = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter: "flagged" }, toolCtx(laneRow!.id))
+    expect(byId.data?.cells?.map((c) => [c.ref, c.status])).toEqual([["MRK 4:2", "flagged"]])
+    expect(byId.text).toContain("rule-es-only")
+    expect(byId.text).not.toContain("rule-fr-only")
+  })
+})
+
+// AQU-1727: `flagged` shipped dead. The read schema offered it and the QA-sweep
+// playbook told the agent to use it, but it never matched a cell. To the agent,
+// an empty read looks like a clean file ("0 of N cells match"), so it cannot
+// tell a dead filter from a done one. This test runs every filter the schema
+// offers against a file with one cell of each kind. If you add a filter, add a
+// cell here that it matches. If a filter can never match a cell, do not offer it.
+describe("read filters — every filter the schema offers can return a cell", () => {
+  function advertisedReadFilters(): string[] {
+    const read = agentRouteTest
+      .buildTools(false)
+      .map((t) => (t.function ?? {}) as { name?: string; parameters?: { properties?: { filter?: { enum?: string[] } } } })
+      .find((f) => f.name === "read")
+    return read?.parameters?.properties?.filter?.enum ?? []
+  }
+
+  it("returns cells for every advertised filter, and only cells with that status", async () => {
+    await seedWorld()
+    // MRK 4 becomes: c1 validated, c2 drafted (and breaks a rule), c3 untranslated, c10 stale.
+    await env.AQUILLA_PG.prepare(
+      `UPDATE cells SET ai_drafted = 1 WHERE project_id = ? AND cell_id = ? AND side = 'target'`,
+    )
+      .bind(PROJECT, cellId("c2"))
+      .run()
+    // Stale: c10's translation was made against an older revision of its source.
+    await env.AQUILLA_PG.prepare(
+      `UPDATE cells SET value = 'Y cuando estuvo solo', source_event_id = ?
+       WHERE project_id = ? AND cell_id = ? AND side = 'target'`,
+    )
+      .bind(crypto.randomUUID(), PROJECT, cellId("c10"))
+      .run()
+    const rules = [
+      { id: "rule-ensenaba", name: "Avoid enseñaba", scope: "project", enabled: true, check: { type: "target-forbids", targetPattern: "enseñaba" } },
+    ]
+    await env.AQUILLA_PG.prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+      .bind(PROJECT, JSON.stringify({ rules }))
+      .run()
+
+    const filters = advertisedReadFilters()
+    // An empty list would make this test check nothing.
+    expect(filters.length).toBeGreaterThan(0)
+
+    const dead: string[] = []
+    for (const filter of filters) {
+      const out = await executeRead(env.AQUILLA_PG, { ref: "MRK 4", filter }, toolCtx())
+      const statuses = out.data?.cells?.map((c) => c.status) ?? []
+      const works =
+        filter === "all"
+          ? out.ok && statuses.length === CELLS.length
+          : out.ok && statuses.length > 0 && statuses.every((s) => s === filter)
+      if (!works) dead.push(`${filter}: ${out.ok ? `[${statuses.join(", ")}]` : out.text}`)
+    }
+    expect(dead).toEqual([])
   })
 })
 
@@ -1018,10 +1086,9 @@ describe("Lane plumbing (AQU-1447)", () => {
     for (const c of CELLS) {
       const id = cellId(c.id)
       await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'target', ?, '', ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', '', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
       )
-        .bind(PROJECT, FILE, id, laneB, c.ref, crypto.randomUUID())
+        .bind(PROJECT, FILE, id, c.ref, crypto.randomUUID(), PROJECT, laneB)
         .run()
     }
 
@@ -1044,10 +1111,9 @@ describe("Lane plumbing (AQU-1447)", () => {
     for (const c of CELLS.slice(0, 2)) {
       const id = cellId(c.id)
       await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'target', ?, '', ?, ?, 0)`,
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', '', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
       )
-        .bind(PROJECT, FILE, id, laneB, c.ref, crypto.randomUUID())
+        .bind(PROJECT, FILE, id, c.ref, crypto.randomUUID(), PROJECT, laneB)
         .run()
     }
 
@@ -1082,10 +1148,9 @@ describe("Lane plumbing (AQU-1447)", () => {
 
     // A validated lane-B translation of c1 (its source matches "teach")
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, validated, last_edit_at)
-       VALUES (?, ?, ?, 'target', ?, 'Lane B taught', ?, ?, 1, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, validated, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', 'Lane B taught', ?, ?, 1, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
     )
-      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .bind(PROJECT, FILE, cellId("c1"), "MRK 4:1", crypto.randomUUID(), PROJECT, laneB)
       .run()
 
     // Default lane: sees its own validated c1 only
@@ -1105,10 +1170,9 @@ describe("Lane plumbing (AQU-1447)", () => {
     const laneB = crypto.randomUUID()
 
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'target', ?, 'Carril B unico', ?, ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', 'Carril B unico', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
     )
-      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .bind(PROJECT, FILE, cellId("c1"), "MRK 4:1", crypto.randomUUID(), PROJECT, laneB)
       .run()
 
     const hitIds = (out: Awaited<ReturnType<typeof executeSearch>>) => out.data?.hits?.map((h) => h.cellId) ?? []
@@ -1125,10 +1189,9 @@ describe("Lane plumbing (AQU-1447)", () => {
     const laneB = crypto.randomUUID()
 
     await env.AQUILLA_PG.prepare(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, event_id, last_edit_at)
-       VALUES (?, ?, ?, 'target', ?, 'Carril B unico', ?, ?, 0)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', 'Carril B unico', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
     )
-      .bind(PROJECT, FILE, cellId("c1"), laneB, "MRK 4:1", crypto.randomUUID())
+      .bind(PROJECT, FILE, cellId("c1"), "MRK 4:1", crypto.randomUUID(), PROJECT, laneB)
       .run()
 
     const hits = async (q: string) =>
@@ -1142,7 +1205,7 @@ describe("Lane plumbing (AQU-1447)", () => {
 
   it("selectCellPairs requires an explicit lane (compile-time) and scopes to it (runtime)", async () => {
     await seedWorld()
-    // @ts-expect-error targetLang is required: no caller may leave the lane out
+    // @ts-expect-error a lane is required: no caller may leave it out (AQU-1610)
     const untyped = selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE })
     await untyped.catch(() => undefined)
     const pairs = await selectCellPairs(env.AQUILLA_PG, PROJECT, { fileId: FILE, targetLang: "no-such-lane" })

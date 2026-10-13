@@ -69,7 +69,6 @@ export function notHiddenSql(alias: string): string {
        AND hidden_src.file_id = ${alias}.file_id
        AND hidden_src.cell_id = ${alias}.cell_id
        AND hidden_src.side = 'source'
-       AND COALESCE(hidden_src.target_lang, '') = ''
        AND hidden_src.hidden_at IS NOT NULL
   )`
 }
@@ -119,7 +118,6 @@ export function visibleCellIdSql(
      WHERE hidden_src.project_id = ${projectExpr}
        AND hidden_src.file_id = ${fileExpr}
        AND hidden_src.side = 'source'
-       AND COALESCE(hidden_src.target_lang, '') = ''
        AND hidden_src.hidden_at IS NOT NULL
   )`
 }

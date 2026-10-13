@@ -18,6 +18,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ACCEPT, attachFileToCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 interface Props {
   projectId: string
@@ -87,7 +88,11 @@ export function CellAttachmentButton({
         cellRef: null,
       })
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      // AQU-510: the reason a translator reads must be localized like the
+      // title and the dismiss control above it — never the raw throw. No
+      // `context` noun: see CellAudioUploadButton for why it would re-introduce
+      // untranslated text into the sentence.
+      setError(toUserFacingError(e).message)
     } finally {
       setUploading(false)
     }

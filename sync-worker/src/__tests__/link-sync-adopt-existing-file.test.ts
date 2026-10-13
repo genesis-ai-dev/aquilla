@@ -194,7 +194,7 @@ async function ownSource(
 
 async function targetSide(t: TestDb): Promise<{ cells: unknown[]; validators: unknown[] }> {
   const cells = await t.pg.query(
-    `SELECT * FROM cells WHERE project_id = $1 AND file_id = $2 AND side = 'target' ORDER BY cell_id, target_lang`,
+    `SELECT * FROM cells WHERE project_id = $1 AND file_id = $2 AND side = 'target' ORDER BY cell_id, lane_id`,
     [ESTABLISHED, OWN_MRK],
   )
   const validators = await t.pg.query(

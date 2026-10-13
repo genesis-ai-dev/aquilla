@@ -25,6 +25,7 @@ import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { CellData } from "@/hooks/useCells"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { __resetFileAudioMemoryForTests } from "@/lib/audio/file-has-audio"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 vi.mock("@/hooks/useMicPermission", () => ({ useMicPermission: () => ({ micDenied: true }) }))
 vi.mock("@legendapp/list/react", async () => {
@@ -320,7 +321,7 @@ describe("EditorTable — a subtitle line's audio check reaches its heard lines"
     const row = await rowOf("bonjour cell-1")
     expect(within(row).queryByTestId("audio-validation-unavailable")).toBeNull()
     fireEvent.click(within(row).getByTestId("audio-validation-button"))
-    await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     expect(emits.validate.mock.calls[0][0]).toMatchObject({ fileId: "cue-file", cellId: "cue-a", audioId: "ta" })
   })
 
@@ -331,7 +332,7 @@ describe("EditorTable — a subtitle line's audio check reaches its heard lines"
     captureCellValidation.mockClear()
     renderWith(new Map([["cell-1", [{ cell: cue("cue-a", "ta", "Bring back some bread,"), sharedWith: 1, hasTake: true, performs: ["cell-1"], partOfSplit: false }]]]))
     fireEvent.click(within(await rowOf("bonjour cell-1")).getByTestId("audio-validation-button"))
-    await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(emits.validate).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
     expect(emits.validate.mock.calls[0][0]).toMatchObject({ fileId: "cue-file", cellId: "cue-a", surface: "cell" })
     expect(captureCellValidation).not.toHaveBeenCalled()
   })

@@ -51,7 +51,7 @@ export async function buildPlainTextExport(
   const sources = await db
     .prepare(
       `SELECT ${COLUMNS} FROM cells
-        WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''`,
+        WHERE project_id = ? AND file_id = ? AND side = 'source'`,
     )
     .bind(projectId, fileId)
     .all<CellRow>()

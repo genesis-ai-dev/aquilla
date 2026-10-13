@@ -163,6 +163,10 @@ safe by category.
   Environment-scoped bindings are correctly separated (`[env.development]` /
   `[env.production]`), and unnamed/default profiles are local-only by the
   convention `CLAUDE.md` documents.
+  - *Update 2026-10-08 (AQU-1239):* the repo went public, which made the
+    admin list a published set of real addresses. The list moved to the
+    `platform_admins` table; deployed environments no longer set
+    `ADMIN_EMAILS`, and no real admin email remains in the working tree.
 - **Deployment/preview scripts** (`scripts/cloudflare-stack-preview.mjs`,
   `scripts/cloudflare-pr-preview.mjs`, `scripts/resolve-deployment-target.sh`) —
   branch names and PR numbers are sanitized (regex-validated, or hashed) before

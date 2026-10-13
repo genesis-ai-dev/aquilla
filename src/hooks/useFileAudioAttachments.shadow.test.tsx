@@ -56,6 +56,7 @@ import {
   injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const LONG: AudioAttachmentOut = {
   audioId: "audio-c1-100-long.webm", url: "frontier-audio://long", slot: "recording",
@@ -114,7 +115,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverEmpty())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-attach")
       act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-attach"))
@@ -140,7 +141,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverLongSelected())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-select")
       act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
@@ -169,7 +170,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverLongSelected())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-select")
       act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-select"))
@@ -207,7 +208,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
       const GEN: AudioAttachmentOut = { ...SHORT, audioId: "audio-c1-300-gen.wav", slot: "generatedVoice" }
       fetchMock.mockResolvedValue(serverLongSelected()) // confirms neither overlay
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-short")
       queued("evt-gen")
@@ -426,7 +427,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverLongSelected())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       queued("evt-drag")
       act(() => injectOptimisticAudioPlace("f1", "c1", { ...LONG, targetOffsetMs: 2500 }, "evt-drag"))
@@ -446,7 +447,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     try {
       fetchMock.mockResolvedValue(serverLongSelected())
       const { result } = mount()
-      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1), { timeout: STALL_WATCHDOG_MS })
 
       act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT)) // no id at all
       vi.advanceTimersByTime(UNBOUND_TTL_MS + 1_000)

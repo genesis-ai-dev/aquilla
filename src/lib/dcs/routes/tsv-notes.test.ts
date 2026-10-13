@@ -5,6 +5,8 @@ import { contentHash } from "../content-hash"
 import { readNoteReferenceMetadata } from "@/lib/notes/note-metadata"
 import type { DcsCatalogEntry, DcsManifest } from "../types"
 
+const PROJECT_ID = "proj-1"
+
 const TN_ENTRY: DcsCatalogEntry = {
   name: "en_tn",
   owner: "unfoldingWord",
@@ -59,6 +61,7 @@ describe("tsvNotesRoute parse()", () => {
     tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", TN_TSV]]),
     })
 
@@ -66,7 +69,7 @@ describe("tsvNotesRoute parse()", () => {
     const out = parse()
     expect(out).toHaveLength(1)
     const file = out[0]
-    expect(file.fileId).toBe(dcsFileId("unfoldingWord/en_tn", "tn_TIT.tsv"))
+    expect(file.fileId).toBe(dcsFileId(PROJECT_ID, "unfoldingWord/en_tn", "tn_TIT.tsv"))
     expect(file.bookCode).toBe("TIT")
     expect(file.cells).toHaveLength(2)
 
@@ -112,6 +115,7 @@ describe("tsvNotesRoute parse()", () => {
     const cells = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", tsv]]),
     })[0].cells
     expect(cells[0].value).toBe("# Introduction to Titus\n\n## Part 1: General Introduction")
@@ -131,6 +135,7 @@ describe("tsvNotesRoute parse()", () => {
     const cells = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", tsv]]),
     })[0].cells
     // The plain value keeps the raw markdown (unescaped only) …
@@ -148,6 +153,7 @@ describe("tsvNotesRoute parse()", () => {
     const cells = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", tsv]]),
     })[0].cells
     expect(cells[0].value).toBe("")
@@ -162,6 +168,7 @@ describe("tsvNotesRoute parse()", () => {
     const changed = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([
         ["tn_TIT.tsv", TN_TSV.replace("Paul calls himself a servant here.", "REWRITTEN note.")],
       ]),
@@ -180,6 +187,7 @@ describe("tsvNotesRoute → notes sidebar seam (AQU-527)", () => {
     const cells = tsvNotesRoute.parse({
       entry: TN_ENTRY,
       manifest: TN_MANIFEST,
+      projectId: PROJECT_ID,
       files: new Map([["tn_TIT.tsv", TN_TSV]]),
     })[0].cells
 

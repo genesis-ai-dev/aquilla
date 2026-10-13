@@ -388,11 +388,16 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
                 ? { relationships: carrier.metadata.data.relationships }
                 : {}),
             },
+            // AQU-1780: the diagnostics describe the FILE, not this cell.
+            // Copied onto every row they made one 1,389-cell file ~290 MB of
+            // metadata and its paged read too big for a Worker. Keep the
+            // count; assessIdmlPair recomputes the list from the legacy file.
+            // Version 2 rows written before this carry `diagnostics` instead;
+            // nothing reads either field.
             idmlMigration: {
               version: 2,
               readiness: idmlReadiness,
-              diagnostics: (idmlAssessment?.diagnostics ?? [])
-                .map(({ code, message }) => ({ code, message })),
+              diagnosticCount: idmlAssessment?.diagnostics.length ?? 0,
             },
           }
         : undefined

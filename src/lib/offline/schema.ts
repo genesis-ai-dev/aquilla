@@ -1,5 +1,8 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
+/** Bump on any offline event change, then run `pnpm offline:fixture` (enforced by eventlog-compat.test.ts). */
+export const OFFLINE_DATA_GENERATION = 1
+
 /**
  * AQU-1614: prefix for a lane key derived from a lane's legacy tag rather than
  * its `lanes.id`. The cells read API sends `laneId` only once AQU-1616's

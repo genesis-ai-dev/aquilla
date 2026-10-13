@@ -39,8 +39,9 @@ import {
   RETIRED_TERMINOLOGY_MESSAGE,
   validateSettingsKeyValue,
 } from '../../../db/shared/project-settings-keys'
+import { RETIRED_LANE_SETTINGS_KEYS, RETIRED_LANE_SETTINGS_MESSAGE } from './external-lane'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
-import { ROLE } from '../events/role-policy'
+import { ROLE, roleLabel } from '../events/role-policy'
 
 /** One top-level settings key replace. `value` is any JSON value (null stores
  *  null; JSON cannot carry undefined, so "delete key" is not expressible). */
@@ -104,10 +105,10 @@ export const LANGUAGE_SETTINGS_KEYS: readonly string[] = [
 const LANGUAGE_KEY_SET = new Set(LANGUAGE_SETTINGS_KEYS)
 
 /** Default floor for the language keys when the org sets none — mirrors
- *  auth-worker's DEFAULT_LANGUAGE_EDIT_MIN_ROLE (org-permissions.ts). The
- *  default is MAINTAINER: an org opts IN to letting project leads change
- *  languages. */
-export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
+ *  auth-worker's DEFAULT_LANGUAGE_EDIT_MIN_ROLE (org-permissions.ts).
+ *  AQU-984: PROJECT_LEAD. A stored languageEditMinRole, including an explicit
+ *  MAINTAINER, is kept by resolveOrgRoleFloor. */
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
 export interface PatchValidationIssue {
   index: number
@@ -166,6 +167,10 @@ export function validatePatchSettingsCommand(
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].key "${op.key}" is a reserved key and cannot be used` })
       return null
     }
+    if ((RETIRED_LANE_SETTINGS_KEYS as readonly string[]).includes(op.key)) {
+      issues.push({ index, message: RETIRED_LANE_SETTINGS_MESSAGE })
+      return null
+    }
     if (!('value' in op)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].value is required (null to store null)` })
       return null
@@ -206,6 +211,18 @@ export function retiredTerminologyBlobDenial(
   return errorResponse('validation_failed', RETIRED_TERMINOLOGY_MESSAGE, { key: RETIRED_TERMINOLOGY_KEY })
 }
 
+/** Static index floor for PatchSettings (catalog parity): each key's DEFAULT
+ *  floor, not the org's stored override. Language-only (source/target and
+ *  lanes) advertises the language default (PROJECT_LEAD, AQU-984). Anything
+ *  else, including a language key mixed with another key, stays MAINTAINER.
+ *  prepare/commit re-resolve the org floors, so an org that stored a higher
+ *  language floor still denies there. `terminology` has no floor: it is
+ *  refused outright (AQU-1724). */
+export function staticPatchSettingsFloor(cmd: PatchSettingsCommand): number {
+  if (cmd.ops.every((op) => LANGUAGE_KEY_SET.has(op.key))) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+  return ROLE.MAINTAINER
+}
+
 /** Policy keys whose STORED value would change if `candidate` replaced the
  *  live blob. Compared post-normalization (the value that would actually land,
  *  e.g. validationCount clamped to 1..15) against the normalized live read, so
@@ -231,11 +248,11 @@ export function previewSettingValue(value: unknown): string {
   return s.length > SETTING_PREVIEW_MAX ? `${s.slice(0, SETTING_PREVIEW_MAX - 1)}…` : s
 }
 
-/** AQU-1086: effective floor for the language keys — the project org's
- *  `languageEditMinRole`, default MAINTAINER. Mirrors auth-worker's
- *  getLanguageEditMinRoleForProject — read with a targeted query so
- *  sync-worker never loads auth-worker code. Values outside the 100..700 role
- *  ladder fall back to the default, matching extractRoleFloor. */
+/** AQU-1086 / AQU-984: effective floor for the language keys — the project
+ *  org's `languageEditMinRole`, default PROJECT_LEAD when unset. Mirrors
+ *  auth-worker's getLanguageEditMinRoleForProject — read with a targeted query
+ *  so sync-worker never loads auth-worker code. Values outside the 100..700
+ *  role ladder fall back to the default, matching extractRoleFloor. */
 export async function resolveLanguageEditMinRole(
   db: AquillaDb,
   projectId: string,
@@ -270,6 +287,15 @@ async function resolveOrgRoleFloor(
     // Malformed org settings blob — fall through to the default floor.
   }
   return fallback
+}
+
+/** AQU-427 / AQU-623: the denial names the required role, not only its number. */
+function settingsRoleDenial(requiredRole: number): Response {
+  return errorResponse(
+    'permission_denied',
+    `insufficient project role for these settings keys (${roleLabel(requiredRole)} required)`,
+    { requiredRole },
+  )
 }
 
 /** Max per-key floor across the ops: a language key → the resolved org
@@ -342,9 +368,7 @@ export async function preparePatchSettings(
   const requiredRole = requiredRoleForOps(cmd.ops, languageFloor)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, urlProjectId)
   if (!role || role.level < requiredRole) {
-    return errorResponse('permission_denied', 'insufficient project role for these settings keys', {
-      requiredRole,
-    })
+    return settingsRoleDenial(requiredRole)
   }
 
   if (current.version !== cmd.ifMatchVersion) {
@@ -417,9 +441,7 @@ export async function commitPatchSettings(
   const requiredRole = requiredRoleForOps(cmd.ops, languageFloor)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!role || role.level < requiredRole) {
-    return errorResponse('permission_denied', 'insufficient project role for these settings keys', {
-      requiredRole,
-    })
+    return settingsRoleDenial(requiredRole)
   }
 
   const gate = await receiptOnlyGates(db, cs)
@@ -432,6 +454,7 @@ export async function commitPatchSettings(
     ops: cmd.ops,
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    registerLanes: false,
   })
 
   if (result.status === 'conflict') {

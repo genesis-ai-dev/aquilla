@@ -169,7 +169,9 @@ export async function createServerInvite(
   expiresInDays?: number | null,
   /** AQU-528: lane (target-language) scopes to auto-grant on join. Omit/empty
    * for an unscoped invite (grants access across every lane the role allows). */
-  scopeLanes?: string[]
+  scopeLanes?: string[],
+  /** AQU-1808: explicit every-current-lane choice. Omit to leave the choice unmade. */
+  allCurrentLanes?: boolean,
 ): Promise<ServerInviteCreated | null> {
   try {
     const body: Record<string, unknown> = { role }
@@ -177,6 +179,7 @@ export async function createServerInvite(
     // Pass expires_in_days to server (null = no expiry; omit = server default 30 days).
     if (expiresInDays !== undefined) body.expires_in_days = expiresInDays
     if (scopeLanes && scopeLanes.length > 0) body.scopeLanes = scopeLanes
+    if (allCurrentLanes) body.allCurrentLanes = true
     const res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
       {

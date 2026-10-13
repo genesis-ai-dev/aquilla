@@ -57,11 +57,11 @@
 // services/org-permissions.ts. Enforced by the terminology-scoped carve-out
 // in routes/project-settings.ts; this route only stores/validates it.
 //
-// AQU-1086: languageEditMinRole (who may change a project's source/target
-// language and its extra target lanes) is the second write-gating role-ladder
-// policy key, on the same OWNER-only write gate. Unlike termbaseEditMinRole
-// its default is MAINTAINER (600) — today's behaviour — so an org opts in by
-// lowering it to PROJECT_LEAD. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
+// AQU-1086 / AQU-984: languageEditMinRole (who may change a project's
+// source/target language and its extra target lanes) is a role-ladder policy
+// key, on the same OWNER-only write gate. Absent, the floor is PROJECT_LEAD.
+// A stored value — including an explicit MAINTAINER — is that org's choice
+// and is kept. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
 // services/org-permissions.ts and the language-scoped carve-out in
 // routes/project-settings.ts; this route only stores/validates it.
 
@@ -71,7 +71,8 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { ROLE } from "../types"
-import { getEffectiveOrgRole } from "../services/org-permissions"
+import { getEffectiveOrgRole, getOrgMemberRole } from "../services/org-permissions"
+import { hasActiveElevation } from "../middleware/platform-admin"
 
 const orgSettings = new Hono<AuthHonoEnv>()
 
@@ -292,7 +293,23 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   // deliberately deaf to this switch, and saying nothing about that is how the
   // switch becomes a no-op nobody can see.
   const overrides = await countStructuralOverrides(c.env, orgId)
-  if (role < SETTINGS_WRITE_MIN_ROLE) {
+  // OPS-44: the unredacted branch hands back the org's LIVE vendor API keys
+  // (D7 — someone else's credential we chose to hold). getEffectiveOrgRole
+  // returns 700 for any platform operator on any org, so without this an
+  // un-elevated admin session — the stolen-but-not-elevated admin JWT that
+  // /elevation/verify's own threat note describes — reads every tenant's
+  // Gemini/TTS keys in plaintext. Elevation is required when the write-level
+  // role rests ONLY on admin power; a genuine Maintainer+ is unaffected.
+  // Resolved lazily: only a caller already past the write floor can receive
+  // secrets, so only they are worth a second membership read (getEffectiveOrgRole
+  // made the first one). Every ordinary viewer keeps its single query.
+  let secretsVisible = role >= SETTINGS_WRITE_MIN_ROLE
+  if (secretsVisible) {
+    const genuineRole = await getOrgMemberRole(c.env, orgId, user.id)
+    const adminOnlyWrite = (genuineRole ?? 0) < SETTINGS_WRITE_MIN_ROLE
+    if (adminOnlyWrite && !(await hasActiveElevation(c))) secretsVisible = false
+  }
+  if (!secretsVisible) {
     return c.json({
       ...response,
       settings: redactSecrets(response.settings),

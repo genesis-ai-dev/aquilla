@@ -319,6 +319,7 @@ export async function commitSetBrief(
     ops: [{ key: BRIEF_SETTINGS_KEY, value: nextBrief }],
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
+    registerLanes: false,
   })
 
   if (result.status === 'conflict') {
@@ -392,6 +393,7 @@ async function autoRenderL1(
     ops: [{ key: BRIEF_SETTINGS_KEY, value: withL1 }],
     ifMatchVersion: version,
     updatedBy: cred.userId,
+    registerLanes: false,
   })
   if (write.status !== 'ok') {
     const reason = write.status === 'conflict' ? 'settings changed while the summary was rendering' : write.message

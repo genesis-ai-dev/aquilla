@@ -107,10 +107,9 @@ describe("project-settings: terminology is retired (AQU-1724)", () => {
     // The floor that used to admit the contributor, lowered as far as it went.
     await seed('{"termbaseEditMinRole":400}')
     for (const user of ["carla", "dan", "bob", "alice"]) {
-      const res = await patchProjectSettings(user, {
-        sourceLanguage: "en", // unchanged echo — the client always sends the whole object
-        terminology: CONCEPT,
-      })
+      // AQU-1595: language keys are lane rows now; a body that names one is
+      // refused for that reason, so none of these bodies carry them.
+      const res = await patchProjectSettings(user, { terminology: CONCEPT })
       await expectRetiredPointer(res)
     }
     const stored = await storedRow()
@@ -121,14 +120,15 @@ describe("project-settings: terminology is retired (AQU-1724)", () => {
   it("refuses a write that edits or drops a stored terminology value, keeping the blob", async () => {
     await seed("{}", WITH_TERMS)
     await expectRetiredPointer(
-      await patchProjectSettings("bob", { sourceLanguage: "en", terminology: CONCEPT }),
+      await patchProjectSettings("bob", { terminology: CONCEPT }),
     )
     // Dropped alongside a legitimate maintainer change: the change does not
     // land either, because one write is one blob.
-    await expectRetiredPointer(await patchProjectSettings("bob", { sourceLanguage: "fr" }))
+    await expectRetiredPointer(await patchProjectSettings("bob", { validationCount: 2 }))
     const stored = await storedRow()
     expect(stored.settings.terminology).toEqual(STORED_TERMS)
     expect(stored.settings.sourceLanguage).toBe("en")
+    expect(stored.settings.validationCount).toBeUndefined()
     expect(stored.version).toBe(1)
   })
 
@@ -136,7 +136,6 @@ describe("project-settings: terminology is retired (AQU-1724)", () => {
     await seed("{}", WITH_TERMS)
     // A maintainer changing other keys...
     const maintainer = await patchProjectSettings("bob", {
-      sourceLanguage: "fr",
       terminology: STORED_TERMS,
       validationCount: 2,
     })
@@ -146,7 +145,6 @@ describe("project-settings: terminology is retired (AQU-1724)", () => {
     const contributor = await patchProjectSettings(
       "carla",
       {
-        sourceLanguage: "fr",
         terminology: STORED_TERMS,
         validationCount: 2,
         alignmentSeeds: [{ source: "logos", target: "word", weight: 1 }],
@@ -156,36 +154,37 @@ describe("project-settings: terminology is retired (AQU-1724)", () => {
     expect(contributor.status).toBe(200)
     const stored = await storedRow()
     expect(stored.settings.terminology).toEqual(STORED_TERMS)
-    expect(stored.settings.sourceLanguage).toBe("fr")
+    expect(stored.settings.sourceLanguage).toBe("en")
+    expect(stored.settings.validationCount).toBe(2)
     expect(stored.version).toBe(3)
   })
 
   it("still admits a no-op read-modify-write from the sub-maintainers it admitted before", async () => {
-    // Default floors (termbase 500, languages 600): a project lead's no-op
-    // save on a project that still carries the legacy blob lands. Routed to
-    // the language scope instead, it would 403 at 600.
+    // Default floors (termbase 500, languages 500 since AQU-984): a project
+    // lead's no-op save on a project that still carries the legacy blob lands.
+    // It is gated at the org termbase floor, as before.
     await seed("{}", WITH_TERMS)
-    const lead = await patchProjectSettings("dan", { sourceLanguage: "en", terminology: STORED_TERMS })
+    const lead = await patchProjectSettings("dan", { terminology: STORED_TERMS })
     expect(lead.status).toBe(200)
     expect((await storedRow()).settings.terminology).toEqual(STORED_TERMS)
   })
 
   it("still admits a contributor's no-op save in an org that lowered the termbase floor", async () => {
     await seed('{"termbaseEditMinRole":400}')
-    const res = await patchProjectSettings("carla", { sourceLanguage: "en" })
+    const res = await patchProjectSettings("carla", {})
     expect(res.status).toBe(200)
   })
 
   it("keeps every other key's floor — a lowered termbase floor lends nothing", async () => {
-    await seed('{"termbaseEditMinRole":400}')
+    await seed('{"termbaseEditMinRole":400}', '{"sourceLanguage":"en","systemPrompt":"keep me"}')
     // Contributor: no carve-out for validationCount.
-    expect((await patchProjectSettings("carla", { sourceLanguage: "en", validationCount: 3 })).status).toBe(403)
-    // Lead: languages default to the maintainer floor (AQU-1086).
-    expect((await patchProjectSettings("dan", { sourceLanguage: "fr" })).status).toBe(403)
+    expect((await patchProjectSettings("carla", { validationCount: 3 })).status).toBe(403)
+    // Lead: no carve-out for validationCount either.
+    expect((await patchProjectSettings("dan", { validationCount: 3 })).status).toBe(403)
     // A below-maintainer write that DROPS another key is still a change.
     expect((await patchProjectSettings("carla", {})).status).toBe(403)
-    expect((await storedRow()).settings).toEqual({ sourceLanguage: "en" })
+    expect((await storedRow()).settings).toEqual({ sourceLanguage: "en", systemPrompt: "keep me" })
     // Maintainer: unchanged.
-    expect((await patchProjectSettings("bob", { sourceLanguage: "fr", validationCount: 2 })).status).toBe(200)
+    expect((await patchProjectSettings("bob", { validationCount: 2 })).status).toBe(200)
   })
 })

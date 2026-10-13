@@ -12,6 +12,7 @@ import { coerceMatchOptions, resolveMatchOptions } from "../../../src/lib/termin
 import type { ConceptMatchInput, TermMatchingSettings, TermRendering } from "../../../src/lib/terminology/model"
 import type { TermFormTally, TermOccurrencePage, TermOccurrenceWire } from "../../../src/lib/terminology/occurrence-page"
 import { verdictForKnownMatch } from "../../../src/lib/terminology/verdict"
+import { applyRenderingLaneScope, renderingLaneScope } from "./rendering-lane-scope"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 import { visibleSourceSql } from "./hidden-cells-scope"
 import { inCountedFileSql } from "../../../db/shared/counted-files"
@@ -69,7 +70,12 @@ function parseRenderings(raw: unknown): TermRendering[] {
     const status = (item as { status?: unknown }).status
     if (typeof rendering !== "string" || !rendering.trim()) continue
     if (status !== "preferred" && status !== "admitted" && status !== "forbidden") continue
-    out.push({ rendering, status })
+    const laneId = (item as { laneId?: unknown }).laneId
+    out.push({
+      rendering,
+      status,
+      ...(typeof laneId === "string" && laneId !== "" ? { laneId } : {}),
+    })
   }
   return out
 }
@@ -211,6 +217,11 @@ export async function queryConceptOccurrences(
   opts: { offset: number; limit: number; lane?: string },
 ): Promise<TermOccurrencePage> {
   const lane = opts.lane ?? ""
+  const scope = await renderingLaneScope(db, projectId, lane)
+  const judged = {
+    ...concept,
+    renderings: applyRenderingLaneScope(concept.renderings ?? [], scope),
+  }
   const occurrences: TermOccurrenceWire[] = []
   const forms = new Map<string, TermFormTally>()
   const resolved = resolveMatchOptions(concept, termMatching)
@@ -249,7 +260,7 @@ export async function queryConceptOccurrences(
         if (!excluded) live = true
       }
       if (!live) continue
-      const verdict = verdictForKnownMatch(concept, translated)
+      const verdict = verdictForKnownMatch(judged, translated)
       if (verdict === "enforced") enforced += 1
       else infringed += 1
       total += 1

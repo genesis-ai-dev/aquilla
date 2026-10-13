@@ -12,6 +12,7 @@ import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 import { rulesForLane } from "@/lib/rules/rule-engine"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
+import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import type { Concept } from "@/lib/terminology/types"
 
 /**
@@ -135,13 +136,27 @@ export function useRules(
   // every compiled concept, subscribed org termbases included — matching runs
   // against THIS project's source text, so the morphology that matters is the
   // one of the language being worked on here, not the termbase's owner org.
+  // A lane (including '') sees only that lane's renderings. Management
+  // surfaces omit `lane` and keep every rendering. No `''` lane row yet
+  // leaves the lists alone — conceptsForLaneTag's rule.
+  const laneConcepts = useMemo(() => {
+    if (lane === undefined) return null
+    const lanes = project?.lanes ?? []
+    return {
+      subscribed: conceptsForLaneTag(subscribedConcepts ?? [], lane, lanes),
+      local: terminology ? conceptsForLaneTag(terminology, lane, lanes) : undefined,
+    }
+  }, [lane, subscribedConcepts, terminology, project?.lanes])
+
   const terminologyRules = useMemo(
     () =>
       compileConceptsToRules(
-        [...(subscribedConcepts ?? []), ...(terminology ?? [])],
+        laneConcepts
+          ? [...laneConcepts.subscribed, ...(laneConcepts.local ?? [])]
+          : [...(subscribedConcepts ?? []), ...(terminology ?? [])],
         project?.termMatching,
       ),
-    [subscribedConcepts, terminology, project?.termMatching],
+    [laneConcepts, subscribedConcepts, terminology, project?.termMatching],
   )
 
   // Order: builtins → org rules → project rules → terminology

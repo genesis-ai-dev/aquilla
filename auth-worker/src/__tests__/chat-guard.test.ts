@@ -343,6 +343,36 @@ describe("chat /api/v1/chat/completions — budget enforcement", () => {
     // Must pass through (upstream mocked to 200), not 429.
     expect(res.status).toBe(200)
   })
+
+  // AQU-617: in log-only mode the counters can never reject a request, so
+  // they must not cost the translator a round trip — they ride waitUntil.
+  // They still have to count: the admin usage view and a later switch to
+  // enforce both read these rows, user and global alike.
+  it("log-only mode counts the request after the response, user and global both", async () => {
+    await seedUser(6, "frank")
+    const jwt = await jwtFor("frank")
+    mockUpstreamSuccess()
+    const deferred: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => void deferred.push(p), passThroughOnException() {}, props: {} }
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      withEnvOverrides({ OPENROUTER_API_KEY: "test-key" }),
+      ctx as unknown as ExecutionContext,
+    )
+    expect(res.status).toBe(200)
+    expect(deferred.length).toBeGreaterThan(0)
+    await Promise.all(deferred)
+
+    const counts = await env.AQUILLA_PG
+      .prepare(`SELECT user_id, request_count FROM ai_usage_daily ORDER BY user_id`)
+      .all<{ user_id: number; request_count: number }>()
+    expect(counts.results).toEqual([
+      { user_id: 0, request_count: 1 },
+      { user_id: 6, request_count: 1 },
+    ])
+  })
 })
 
 // ── AQU-414 follow-up: chat spend org attribution ────────────────────────────
@@ -472,5 +502,203 @@ describe("chat /api/v1/chat/completions — org credit attribution (AQU-414 foll
       attributionEnv(),
     )
     expect(passed.status).toBe(200)
+  })
+
+  // AQU-617: sparkle predictions stream, and every awaited write between the
+  // provider's headers and our first byte is latency the translator waits
+  // through. The ledger row for a streamed reply must ride waitUntil, not the
+  // response path, and must still land with the same org attribution.
+  it("defers a streamed reply's ledger write past the response, and it still lands", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+    const deferred: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => void deferred.push(p), passThroughOnException() {}, props: {} }
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL, { projectId: PROJECT, stream: true }) },
+      attributionEnv(),
+      ctx as unknown as ExecutionContext,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain("OK")
+    expect(deferred.length).toBeGreaterThan(0)
+
+    await Promise.all(deferred)
+    expect(await llmLedger()).toEqual([{ org_id: 1, user_id: 1 }])
+  })
+})
+
+// WHY: AQU-1871. A streamed reply was recorded as a flat 1¢ whatever it cost,
+// because the route declined to look inside the stream. A 16k-output reply on
+// a frontier model is ~25¢, so the ledger, the org caps and the usage
+// dashboard all under-reported real spend by 10–25× — caps would not have
+// tripped even after an admin turned enforcement on. The provider already
+// reports its cost in the stream's final usage frame; the fix reads it.
+describe("chat /api/v1/chat/completions — streamed cost + project-less attribution (AQU-1871)", () => {
+  const PROJECT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+  async function seedOrgProjectWorld() {
+    await seedUser(1, "wendi")
+    await seedUser(2, "mallory")
+    await pg.exec(`INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)`)
+    await pg.exec(`INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 600, 1)`)
+    await pg.exec(
+      `INSERT INTO projects (id, name, created_by, org_id) VALUES ('${PROJECT}', 'Test Project', 1, 1)`,
+    )
+    await pg.exec(
+      `INSERT INTO project_members (project_id, user_id, role_level) VALUES ('${PROJECT}', 1, 600)`,
+    )
+  }
+
+  /** The llm ledger with the money column, which is what this issue is about. */
+  async function llmSpend(): Promise<Array<{ org_id: number; user_id: number; raw_cost_cents: number; units: number }>> {
+    const res = await env.AQUILLA_PG
+      .prepare(`SELECT org_id, user_id, raw_cost_cents, units FROM org_credit_usage_daily
+                 WHERE rail = 'llm' ORDER BY org_id, user_id`)
+      .all<{ org_id: number; user_id: number; raw_cost_cents: number; units: number }>()
+    return res.results ?? []
+  }
+
+  /** An SSE reply shaped like OpenRouter's: content deltas, then a final frame
+   *  carrying `usage.cost` in dollars, then the terminal frame. */
+  function mockUpstreamStream(frames: string) {
+    return vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(frames, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    )
+  }
+
+  /** Drive a streamed chat request to completion, including the deferred
+   *  bookkeeping that rides waitUntil (AQU-617). */
+  async function streamChat(jwt: string, body: string, testEnv: typeof env) {
+    const deferred: Promise<unknown>[] = []
+    const ctx = { waitUntil: (p: Promise<unknown>) => void deferred.push(p), passThroughOnException() {}, props: {} }
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body },
+      testEnv,
+      ctx as unknown as ExecutionContext,
+    )
+    const text = await res.text() // drains the stream, so its real cost is known
+    await Promise.all(deferred)
+    return { res, text }
+  }
+
+  const attributionEnv = () => withEnvOverrides({ OPENROUTER_API_KEY: "test-key" })
+
+  it("records the provider's real streamed cost, not a flat 1¢", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    mockUpstreamStream(
+      'data: {"id":"gen-1","choices":[{"delta":{"content":"Hello"}}]}\n\n' +
+        'data: {"id":"gen-1","choices":[],"usage":{"cost":0.25}}\n\n' +
+        "data: [DONE]\n\n",
+    )
+    const { res, text } = await streamChat(
+      jwt,
+      chatBody(ALLOWED_MODEL, { projectId: PROJECT, stream: true }),
+      attributionEnv(),
+    )
+    expect(res.status).toBe(200)
+    // The client still receives every byte the provider sent, usage frame included.
+    expect(text).toContain("Hello")
+    expect(text).toContain("[DONE]")
+    // $0.25 → 25¢, the whole point: not 1.
+    expect(await llmSpend()).toEqual([{ org_id: 1, user_id: 1, raw_cost_cents: 25, units: 1 }])
+  })
+
+  it("keeps the usage frame's cost when the client stops reading at [DONE]", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    mockUpstreamStream(
+      'data: {"choices":[],"usage":{"cost":0.04}}\n\ndata: [DONE]\n\n',
+    )
+    const { res } = await streamChat(
+      jwt,
+      chatBody(ALLOWED_MODEL, { projectId: PROJECT, stream: true }),
+      attributionEnv(),
+    )
+    expect(res.status).toBe(200)
+    expect(await llmSpend()).toEqual([{ org_id: 1, user_id: 1, raw_cost_cents: 4, units: 1 }])
+  })
+
+  // An unresolved cost is not a cost. The request is still counted (units), so
+  // the gap is visible in the dashboard rather than priced at an invented rate.
+  it("records a stream that reports no cost as zero cost and one unit", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    mockUpstreamStream('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n')
+    const { res } = await streamChat(
+      jwt,
+      chatBody(ALLOWED_MODEL, { projectId: PROJECT, stream: true }),
+      attributionEnv(),
+    )
+    expect(res.status).toBe(200)
+    expect(await llmSpend()).toEqual([{ org_id: 1, user_id: 1, raw_cost_cents: 0, units: 1 }])
+  })
+
+  it("asks a non-OpenRouter upstream for streamed usage, or its cost would never arrive", async () => {
+    await seedOrgProjectWorld()
+    const jwt = await jwtFor("wendi")
+    const upstream = mockUpstreamStream('data: {"choices":[],"usage":{"cost":0.01}}\n\ndata: [DONE]\n\n')
+    await streamChat(
+      jwt,
+      chatBody(ALLOWED_MODEL, { projectId: PROJECT, stream: true }),
+      withEnvOverrides({ OPENROUTER_API_KEY: "test-key", OPENROUTER_BASE_URL: "http://127.0.0.1:8787/v1" }),
+    )
+    const body = JSON.parse((upstream.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.stream_options).toEqual({ include_usage: true })
+  })
+
+  // Org 0 is the no-org fallback every project-less chat lands in. Guarding it
+  // as if it were one organisation meant one user's spend consumed everybody
+  // else's cap — and a user could never be capped on their own spend.
+  describe("project-less chat is capped per user, not against the shared org-0 bucket", () => {
+    const perUserCapEnv = () =>
+      withEnvOverrides({
+        OPENROUTER_API_KEY: "test-key",
+        CREDIT_ENFORCE: "true",
+        CREDIT_DAILY_CAP: "10", // 100 raw cents × 4 markup = 400 credits ≫ 10
+      })
+
+    async function seedOrgZeroSpend(userId: number) {
+      const today = new Date().toISOString().slice(0, 10)
+      await pg.exec(
+        `INSERT INTO org_credit_usage_daily (org_id, user_id, date_utc, rail, raw_cost_cents, units)
+         VALUES (0, ${userId}, '${today}', 'llm', 100, 1)`,
+      )
+    }
+
+    it("lets a user through when it is somebody else who is over the cap", async () => {
+      await seedOrgProjectWorld()
+      await seedOrgZeroSpend(2) // mallory burned her allowance
+      mockUpstreamSuccess()
+      const res = await app.request(
+        "/api/v1/chat/completions",
+        { method: "POST", headers: authHeader(await jwtFor("wendi")), body: chatBody(ALLOWED_MODEL) },
+        perUserCapEnv(),
+      )
+      expect(res.status).toBe(200)
+    })
+
+    it("429s the user who is over the cap on their own project-less spend", async () => {
+      await seedOrgProjectWorld()
+      await seedOrgZeroSpend(1) // wendi burned her own allowance
+      const upstream = mockUpstreamSuccess()
+      const res = await app.request(
+        "/api/v1/chat/completions",
+        { method: "POST", headers: authHeader(await jwtFor("wendi")), body: chatBody(ALLOWED_MODEL) },
+        perUserCapEnv(),
+      )
+      expect(res.status).toBe(429)
+      expect((await res.json() as { error: string }).error).toBe("credit_cap_exceeded")
+      expect(upstream).not.toHaveBeenCalled()
+    })
   })
 })

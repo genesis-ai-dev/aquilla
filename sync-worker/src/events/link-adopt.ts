@@ -249,7 +249,7 @@ async function adoptFile(
         `SELECT cell_id, value, value_html, type, canonical_ref, anchor_cell_id,
                 start_ms, end_ms, metadata, event_id, hidden_at
            FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND tombstoned_at IS NULL AND cell_id IN (${chunk.map(() => '?').join(', ')})`,
       )
       .bind(upstreamProjectId, upstreamFileId, ...chunk.map((pair) => pair.upstreamCellId))

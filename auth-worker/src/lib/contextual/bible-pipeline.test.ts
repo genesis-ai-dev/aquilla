@@ -42,7 +42,7 @@ async function deps(bible: SpanBible | undefined, llm: RunSpanDeps["llm"]): Prom
       llm,
       persistBrief: async () => "sb1",
       lint: async (draft) =>
-        lintSpanDraft([], pairs, draft, [], { expectations: data.expectations, profile: data.profile }),
+        lintSpanDraft([], pairs, draft, [], undefined, { expectations: data.expectations, profile: data.profile }),
       stage: async (draft): Promise<StagedOutcome> => {
         staged.push(draft)
         return { proposalId: "p", spanId: draft.spanId, stagedCellIds: draft.cells.map((c) => c.cellId), verdicts: {} }

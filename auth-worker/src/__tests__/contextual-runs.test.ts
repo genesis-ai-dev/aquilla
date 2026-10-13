@@ -36,6 +36,7 @@ import {
   tryAcquireContextualProjectLease,
   renewContextualProjectLease,
   releaseContextualProjectLease,
+  countRecentContextualStarts,
   STEERING_MAX_BYTES,
   type ContextualRunEventDetails,
   type SpanCursor,
@@ -44,6 +45,8 @@ import {
 const db = env.AQUILLA_PG
 const PROJECT = "proj-ctx"
 const FILE = "file-mrk"
+/** The lane id the fake adapter below hands back for the default lane. */
+const LANE_DEFAULT = "lane-def"
 
 const seed = (n: number) => ({
   id: `${FILE}#s${n}`,
@@ -73,16 +76,15 @@ async function seedTargetCell(
   targetLang = "",
 ): Promise<void> {
   await db.prepare(
-    `INSERT INTO cells
-        (project_id, file_id, cell_id, side, target_lang, value, event_id, last_edit_at)
-     VALUES (?, ?, ?, 'target', ?, ?, ?, 0)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id) VALUES (?, ?, ?, 'target', ?, ?, 0, (SELECT aquilla_test_resolve_target_lane(?, ?)))`,
   ).bind(
     PROJECT,
     FILE,
     cellId,
-    targetLang,
     value,
     `ev-${cellId}-${targetLang || "default"}`,
+    PROJECT,
+    targetLang,
   ).run()
 }
 
@@ -164,15 +166,21 @@ describe("cross-isolate project capacity leases", () => {
     const leaseOne = await tryAcquireContextualProjectLease(db, {
       projectId: PROJECT,
       runId: first.id,
+      orgId: 0,
       weight: 3,
       limit: 4,
+      orgLimit: 1000,
+      globalLimit: 1000,
     })
     expect(leaseOne).not.toBeNull()
     expect(await tryAcquireContextualProjectLease(db, {
       projectId: PROJECT,
       runId: second.id,
+      orgId: 0,
       weight: 2,
       limit: 4,
+      orgLimit: 1000,
+      globalLimit: 1000,
     })).toBeNull()
 
     // An evicted Worker cannot run finally; expiry is the durable recovery
@@ -183,8 +191,11 @@ describe("cross-isolate project capacity leases", () => {
     const leaseTwo = await tryAcquireContextualProjectLease(db, {
       projectId: PROJECT,
       runId: second.id,
+      orgId: 0,
       weight: 2,
       limit: 4,
+      orgLimit: 1000,
+      globalLimit: 1000,
     })
     expect(leaseTwo).not.toBeNull()
     if (!leaseTwo) throw new Error("stale capacity was not reclaimed")
@@ -194,6 +205,111 @@ describe("cross-isolate project capacity leases", () => {
       "SELECT COUNT(*) AS count FROM contextual_project_leases WHERE project_id = ?",
     ).bind(PROJECT).first<{ count: number }>()
     expect(Number(remaining?.count ?? -1)).toBe(0)
+  })
+})
+
+// AQU-1847. WHY: the per-project ceiling was the ONLY ceiling, so it
+// multiplied — one tenant with ten self-created projects held ten times it in
+// flight (~3x that again in requests, once the verifier panel fans out) and
+// could exhaust the shared provider key's rate limit for every other tenant.
+// Fairness between tenants and headroom for interactive calls are properties
+// of the capacity authority, so they are tested at it.
+describe("org and platform-wide autopilot capacity ceilings", () => {
+  /** The lease table keys on project id and carries org id; it has no foreign
+   *  key to contextual_runs, so these use synthetic run ids to keep each test
+   *  about the capacity decision and nothing else. */
+  const seedProject = async (projectId: string, orgId: number | null) => {
+    await db.prepare(
+      `INSERT INTO projects (id, name, org_id, created_by)
+       VALUES (?, ?, ?, 1)
+       ON CONFLICT (id) DO UPDATE SET org_id = EXCLUDED.org_id`,
+    ).bind(projectId, `Project ${projectId}`, orgId).run()
+  }
+  const acquire = (
+    projectId: string,
+    orgId: number,
+    runId: string,
+    over: { weight?: number; limit?: number; orgLimit?: number; globalLimit?: number } = {},
+  ) => tryAcquireContextualProjectLease(db, {
+    projectId,
+    orgId,
+    runId,
+    weight: over.weight ?? 4,
+    limit: over.limit ?? 4,
+    orgLimit: over.orgLimit ?? 6,
+    globalLimit: over.globalLimit ?? 1000,
+  })
+
+  it("stops one org's projects from adding their per-project ceilings together", async () => {
+    await seedProject("org7-a", 7)
+    await seedProject("org7-b", 7)
+    await seedProject("org9-a", 9)
+
+    // Each project is inside its own ceiling (4 of 4) — the org ceiling of 6
+    // is what the second one runs into.
+    expect(await acquire("org7-a", 7, "run-org7-a")).not.toBeNull()
+    expect(await acquire("org7-b", 7, "run-org7-b")).toBeNull()
+
+    // ...and a DIFFERENT org is unaffected: this is a fairness ceiling, not a
+    // global one. (The acceptance criterion about a second org staying
+    // responsive while the first runs heavy autopilot rests on exactly this.)
+    expect(await acquire("org9-a", 9, "run-org9-a")).not.toBeNull()
+
+    // Partial capacity inside the org is still handed out, up to the ceiling:
+    // 4 used of 6, so a 2-wide wave fits and a 3-wide one does not.
+    expect(await acquire("org7-b", 7, "run-org7-b-narrow", { weight: 3 })).toBeNull()
+    const narrow = await acquire("org7-b", 7, "run-org7-b-fits", { weight: 2 })
+    expect(narrow?.orgId).toBe(7)
+    expect(narrow?.weight).toBe(2)
+  })
+
+  it("holds a platform-wide ceiling across unrelated orgs, and reclaims it on expiry", async () => {
+    await seedProject("glob-a", 11)
+    await seedProject("glob-b", 12)
+    await seedProject("glob-c", 13)
+
+    const limits = { weight: 3, limit: 3, orgLimit: 3, globalLimit: 6 }
+    const first = await acquire("glob-a", 11, "run-glob-a", limits)
+    expect(first).not.toBeNull()
+    expect(await acquire("glob-b", 12, "run-glob-b", limits)).not.toBeNull()
+    // 6 of 6 platform-wide. A third org is refused even though neither its
+    // project nor its org ceiling is anywhere near full.
+    expect(await acquire("glob-c", 13, "run-glob-c", limits)).toBeNull()
+
+    // An evicted Worker cannot release in finally, so expiry is the recovery
+    // path for the platform ceiling too — and the GC has to reach rows the
+    // acquirer's own project and org have nothing to do with.
+    await db.prepare(
+      "UPDATE contextual_project_leases SET expires_at = now() - interval '1 second' WHERE id = ?",
+    ).bind(first?.id).run()
+    expect(await acquire("glob-c", 13, "run-glob-c-retry", limits)).not.toBeNull()
+    const live = await db.prepare(
+      "SELECT COUNT(*) AS count FROM contextual_project_leases WHERE expires_at > now()",
+    ).first<{ count: number }>()
+    expect(Number(live?.count ?? -1)).toBe(2)
+  })
+
+  it("buckets a project with no billing workspace into org 0 rather than exempting it", async () => {
+    await seedProject("unowned-a", null)
+    await seedProject("unowned-b", null)
+    const limits = { weight: 2, limit: 2, orgLimit: 2, globalLimit: 1000 }
+    expect(await acquire("unowned-a", 0, "run-unowned-a", limits)).not.toBeNull()
+    expect(await acquire("unowned-b", 0, "run-unowned-b", limits)).toBeNull()
+  })
+
+  it("never lets a misconfigured outer ceiling sit below the one inside it", async () => {
+    await seedProject("widen-a", 21)
+    // orgLimit 1 is narrower than the project's own 4. Clamping up keeps the
+    // project ceiling binding instead of making a configured project limit
+    // unreachable — a misconfiguration must not silently stop all work.
+    const lease = await acquire("widen-a", 21, "run-widen-a", {
+      weight: 4,
+      limit: 4,
+      orgLimit: 1,
+      globalLimit: 1,
+    })
+    expect(lease).not.toBeNull()
+    expect(lease?.weight).toBe(4)
   })
 })
 
@@ -293,17 +409,25 @@ describe("durable sanitized activity", () => {
     let draftId = ""
     const executor: PgExecutor = {
       async run(sql, params) {
+        // AQU-1610: the store resolves the lane ref to a lane id before it
+        // writes, and asks which column the live-row indexes are keyed on, so
+        // the adapter has to answer both lookups too.
+        if (sql.includes("FROM lanes")) return { rows: [{ id: LANE_DEFAULT }], rowCount: 1 }
+        if (sql.includes("FROM pg_indexes")) {
+          return { rows: [{ indexdef: "… (project_id, file_id, cell_id, lane_id) …" }], rowCount: 1 }
+        }
         if (sql.includes("SELECT id FROM contextual_runs")) return { rows: [], rowCount: 0 }
         if (sql.includes("FROM contextual_runs WHERE id")) {
           return { rows: runRow ? [runRow] : [], rowCount: runRow ? 1 : 0 }
         }
         if (sql.includes("INSERT INTO contextual_runs")) {
-          roleParam = params[5]
+          roleParam = params[4]
           runRow = {
-            id: params[0], project_id: params[1], file_id: params[2], target_lang: params[3],
-            status: "running", initiated_by: params[4], role_snapshot: params[5], span_cursor: null,
+            id: params[0], project_id: params[1], file_id: params[2], target_lang: "",
+            status: "running", initiated_by: params[3], role_snapshot: params[4], span_cursor: null,
             done_spans: 0, total_spans: 0, failed_spans: 0, units_spent: 0, calls_spent: 0,
-            last_error: null, steering_cursor: null, anchor_cell_id: params[6], scope_group: params[7],
+            lane_id: params[8],
+            last_error: null, steering_cursor: null, anchor_cell_id: params[5], scope_group: params[6],
             created_at: "2026-08-11T00:00:00.000Z", updated_at: "2026-08-11T00:00:00.000Z",
           }
           return { rows: [runRow], rowCount: 1 }
@@ -316,8 +440,8 @@ describe("durable sanitized activity", () => {
         if (sql.includes("UPDATE contextual_drafts")) return { rows: [], rowCount: 0 }
         if (sql.includes("INSERT INTO contextual_drafts")) {
           draftId = String(params[0])
-          verdictParam = params[8]
-          provenanceParam = params[9]
+          verdictParam = params[7]
+          provenanceParam = params[8]
           return { rows: [], rowCount: 1 }
         }
         if (sql.includes("SELECT id, run_id") && sql.includes("FROM contextual_drafts")) {
@@ -325,7 +449,7 @@ describe("durable sanitized activity", () => {
             rows: [{
               id: draftId, run_id: (runRow as Record<string, unknown>).id,
               project_id: PROJECT, file_id: FILE, cell_id: "c-json",
-              target_lang: "", scene_brief_id: null,
+              target_lang: "", lane_id: LANE_DEFAULT, scene_brief_id: null,
               text: "structured", verdicts: verdictParam, provenance: provenanceParam,
               status: "proposed", created_at: "2026-08-11T00:00:00.000Z",
               reviewed_at: null, reviewed_by: null,
@@ -481,6 +605,25 @@ describe("durable sanitized activity", () => {
       details: { done: 2, total: 5, failed: 0 },
     })
     expect(queued.summary).toBe("Autopilot has work queued")
+    // AQU-1847: a run holding its place in line for model capacity is neither
+    // idle nor stalled. Before this status had its own line it fell through to
+    // "Autopilot status changed", which is exactly what made a run queued
+    // behind another tenant look broken.
+    const waiting = await appendContextualRunEvent(db, {
+      runId: run.id,
+      projectId: PROJECT,
+      fileId: FILE,
+      kind: "run_state",
+      status: "queued",
+      details: { done: 1, total: 5, failed: 0 },
+    })
+    expect(waiting.summary).toBe("Autopilot is waiting for model capacity")
+    expect(waiting.status).toBe("queued")
+    // Dated before the others so the latest-tail assertion below keeps testing
+    // ordering rather than insertion order in this test.
+    await db.prepare("UPDATE contextual_run_events SET created_at = '2025-12-31T00:00:00Z' WHERE id = ?")
+      .bind(waiting.id)
+      .run()
     // Explicit timestamps make the latest-tail assertion independent of two
     // uuidv7s generated within the same millisecond.
     await db.prepare("UPDATE contextual_run_events SET created_at = '2026-01-01T00:00:00Z' WHERE id = ?")
@@ -864,5 +1007,61 @@ describe("staged drafts", () => {
       expect(rejected.draft.reviewedBy).toBe("lead")
       expect(rejected.draft.reviewedAt).not.toBeNull()
     }
+  })
+})
+
+// AQU-1847. WHY count STARTS and not runs: one project-wide start creates a
+// run per file (up to 24), so a run-counting throttle would refuse the second
+// legitimate press of the button. And WHY count from the durable rows rather
+// than an isolate counter: the next start may land on a different Worker.
+describe("per-user autopilot start throttle counter", () => {
+  const startedBy = async (
+    userId: number,
+    over: { scopeGroup?: string | null; fileId: string; ageMinutes?: number },
+  ) => {
+    const made = await createRun(db, {
+      projectId: PROJECT,
+      fileId: over.fileId,
+      initiatedBy: `u${userId}`,
+      roleSnapshot: { userId, username: `u${userId}`, level: 400 },
+      ...(over.scopeGroup ? { scopeGroup: over.scopeGroup } : {}),
+    })
+    expect(made.status).toBe("ok")
+    if (made.status !== "ok") throw new Error("unreachable")
+    if (over.ageMinutes) {
+      await db.prepare(
+        "UPDATE contextual_runs SET created_at = now() - make_interval(mins => ?) WHERE id = ?",
+      ).bind(over.ageMinutes, made.run.id).run()
+    }
+    // Terminate so the next seeded run on another file is unobstructed and the
+    // one-active-run-per-(project,file,lane) rule stays out of this test.
+    await terminateRun(db, made.run.id)
+    return made.run
+  }
+
+  it("counts one project-wide fan-out once, counts single-file starts individually, and is per user", async () => {
+    const group = "scope-group-one"
+    await startedBy(1, { fileId: "throttle-a", scopeGroup: group })
+    await startedBy(1, { fileId: "throttle-b", scopeGroup: group })
+    await startedBy(1, { fileId: "throttle-c", scopeGroup: group })
+    expect(await countRecentContextualStarts(db, 1)).toBe(1)
+
+    await startedBy(1, { fileId: "throttle-d" })
+    await startedBy(1, { fileId: "throttle-e" })
+    expect(await countRecentContextualStarts(db, 1)).toBe(3)
+
+    // Another user's starts are not this user's budget.
+    await startedBy(2, { fileId: "throttle-f" })
+    expect(await countRecentContextualStarts(db, 1)).toBe(3)
+    expect(await countRecentContextualStarts(db, 2)).toBe(1)
+  })
+
+  it("is a ROLLING window — starts older than it stop counting, so the throttle recovers", async () => {
+    await startedBy(3, { fileId: "stale-a", ageMinutes: 60 })
+    await startedBy(3, { fileId: "fresh-a" })
+    expect(await countRecentContextualStarts(db, 3)).toBe(1)
+    // Widen the window and the old start is back in view: nothing was deleted,
+    // it simply aged out of the throttle's horizon.
+    expect(await countRecentContextualStarts(db, 3, 7200)).toBe(2)
   })
 })

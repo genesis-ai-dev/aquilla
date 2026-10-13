@@ -26,10 +26,43 @@ import type { ServerLinkUpstreamChanged } from '../project-do-handlers'
  *  this is a hint for a targeted client refetch, not the source of truth. */
 const LINK_NOTIFY_CELL_ID_CAP = 64
 
-/** Per-commit cap on the number of downstream projects notified. At scale
- *  (spec: up to 600 downstreams) the rest converge lazily on next file open;
- *  notifying is strictly best-effort so under-notifying is safe. */
-const LINK_NOTIFY_DOWNSTREAM_CAP = 50
+/** Safety ceiling on downstreams notified for one commit batch — a guard on
+ *  the Workers subrequest budget, NOT a product cap. AQU-1830: this used to be
+ *  50, which silently stopped notifying the 51st downstream of a popular base
+ *  text, so those downstreams only ever caught up on next file open. What
+ *  actually bounds the fan-out now is the idle skip below: a downstream nobody
+ *  is looking at costs no subrequest. Hitting this ceiling is a scale event
+ *  worth a log line, not normal operation.
+ *  (Spec §8 sizes the population at up to 600 downstreams.) */
+const LINK_NOTIFY_DOWNSTREAM_CAP = 900
+
+/** AQU-1830: at most one notify per downstream per window. A burst of upstream
+ *  commits (a re-import, or someone simply typing) collapses to a leading
+ *  frame plus one trailing frame per window instead of one frame per commit.
+ *  The trailing edge is load-bearing: the client folds the whole delta from
+ *  the server on ANY frame (`createLinkUpstreamChangedHandler`), so the frame
+ *  is a trigger rather than a payload — but the LAST commit of a burst must
+ *  still produce one, or an open downstream sits stale until it reloads. */
+const LINK_NOTIFY_COALESCE_WINDOW_MS = 2_000
+
+/** AQU-1830: how long a downstream whose DO reported zero connected sockets is
+ *  skipped outright. `__broadcast` already answers with `recipients`, so one
+ *  send per TTL tells us whether anybody is there — an idle downstream costs
+ *  one subrequest per TTL instead of one per upstream commit. Kept short
+ *  because a client that connects mid-window hears nothing until it lapses;
+ *  that is harmless (the lazy mirror sync on file open is the deterministic
+ *  floor) but it should not last long. */
+const LINK_NOTIFY_IDLE_TTL_MS = 10_000
+
+/** AQU-1830: DO subrequests in flight at once. With the 50-downstream
+ *  truncation gone, bound how many sends are concurrent rather than how many
+ *  downstreams are reached. */
+const LINK_NOTIFY_SEND_CONCURRENCY = 16
+
+/** Only sweep the per-downstream coalescer bookkeeping once it is big enough
+ *  to be worth walking (both maps are isolate-lifetime, keyed by downstream
+ *  id, and each entry is a few words). */
+const LINK_NOTIFY_STATE_SWEEP_THRESHOLD = 1_000
 
 /** How long a project's downstream list is cached in-isolate before being
  *  re-queried (spec §8: "cached in-memory per isolate with short TTL"). Link
@@ -62,16 +95,70 @@ interface DownstreamCacheEntry {
   expiresAt: number
 }
 
-// Isolate-lifetime cache — module scope is intentional (mirrors the pattern
+/** What a downstream is owed once its coalesce window closes, merged across
+ *  every commit batch that landed inside the window. */
+interface PendingNotify {
+  upstream: string
+  fileIds: Set<string>
+  cellIds: Set<string>
+  filesChanged: boolean
+  untilSeq: number
+}
+
+interface CoalesceEntry {
+  /** When a frame was last actually handed to this downstream's DO. */
+  lastSentAt: number
+  /** Merged delta waiting for the window to close; null when nothing is owed. */
+  pending: PendingNotify | null
+  /** True while a trailing flush for this downstream is already armed. */
+  flushScheduled: boolean
+}
+
+// Isolate-lifetime caches — module scope is intentional (mirrors the pattern
 // already used for per-isolate memoization elsewhere in this worker). Keyed
 // by upstream project id.
 const downstreamCache = new Map<string, DownstreamCacheEntry>()
 
-/** Test-only escape hatch: the cache is module-scoped (isolate lifetime) by
- *  design, which otherwise leaks state between test cases running in the
+// AQU-1830 coalescer + idle bookkeeping, keyed by DOWNSTREAM project id.
+// Isolate-lifetime like the cache above, and like it, losing the state to an
+// isolate eviction only costs an extra notify (or a skipped coalesce) — never
+// convergence, which the lazy mirror sync owns.
+const coalesceState = new Map<string, CoalesceEntry>()
+/** Downstream id → timestamp until which its DO is treated as having no sockets. */
+const idleUntil = new Map<string, number>()
+
+/** Knobs the tests pin so coalescing and the idle skip can be asserted
+ *  without depending on wall-clock timing (AGENTS.md: machine speed must not
+ *  decide correctness). Production always runs the defaults. */
+interface LinkNotifyTuning {
+  coalesceWindowMs: number
+  idleTtlMs: number
+  now: () => number
+  sleep: (ms: number) => Promise<void>
+}
+
+const DEFAULT_TUNING: LinkNotifyTuning = {
+  coalesceWindowMs: LINK_NOTIFY_COALESCE_WINDOW_MS,
+  idleTtlMs: LINK_NOTIFY_IDLE_TTL_MS,
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}
+
+let tuning: LinkNotifyTuning = DEFAULT_TUNING
+
+/** Test-only escape hatch: every map here is module-scoped (isolate lifetime)
+ *  by design, which otherwise leaks state between test cases running in the
  *  same vitest module instance. Not used by production code paths. */
-export function __resetLinkNotifyDownstreamCacheForTests(): void {
+export function __resetLinkNotifyStateForTests(): void {
   downstreamCache.clear()
+  coalesceState.clear()
+  idleUntil.clear()
+  tuning = DEFAULT_TUNING
+}
+
+/** Test-only escape hatch — see `LinkNotifyTuning`. */
+export function __setLinkNotifyTuningForTests(next: Partial<LinkNotifyTuning>): void {
+  tuning = { ...DEFAULT_TUNING, ...next }
 }
 
 /** True when `kind` is mirrored by a live link of this shape. */
@@ -154,6 +241,164 @@ async function loadLiveDownstreams(
   return downstreams
 }
 
+/** True while this downstream's DO is known to have no connected sockets.
+ *  Lapsed entries are dropped as we read them, so the map self-cleans on the
+ *  hot path and the sweep below only has to catch downstreams that stopped
+ *  receiving commits altogether. */
+function isIdleDownstream(downstreamId: string, now: number): boolean {
+  const until = idleUntil.get(downstreamId)
+  if (until === undefined) return false
+  if (until > now) return true
+  idleUntil.delete(downstreamId)
+  return false
+}
+
+/** Drop bookkeeping for downstreams that have gone quiet. Only walks the maps
+ *  once they are large enough to matter — an isolate serving a handful of
+ *  projects never pays for this. */
+function sweepLinkNotifyState(now: number): void {
+  if (coalesceState.size > LINK_NOTIFY_STATE_SWEEP_THRESHOLD) {
+    const staleBefore = now - tuning.coalesceWindowMs * 10
+    for (const [id, entry] of coalesceState) {
+      if (entry.pending || entry.flushScheduled || entry.lastSentAt > staleBefore) continue
+      coalesceState.delete(id)
+    }
+  }
+  if (idleUntil.size > LINK_NOTIFY_STATE_SWEEP_THRESHOLD) {
+    for (const [id, until] of idleUntil) {
+      if (until <= now) idleUntil.delete(id)
+    }
+  }
+}
+
+/** Bound how many DO subrequests are in flight at once without bounding how
+ *  many downstreams are reached. Scoped to one call, so a trailing flush armed
+ *  by this request shares its budget. */
+function makeSendLimiter(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
+  let active = 0
+  const waiting: Array<() => void> = []
+  return async function run<T>(fn: () => Promise<T>): Promise<T> {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve))
+    active++
+    try {
+      return await fn()
+    } finally {
+      active--
+      waiting.shift()?.()
+    }
+  }
+}
+
+function frameFor(
+  downstreamId: string,
+  upstream: string,
+  delta: LaneDelta,
+  untilSeq: number,
+): ServerLinkUpstreamChanged {
+  return { t: 'link.upstream-changed', project: downstreamId, upstream, untilSeq, ...delta }
+}
+
+function frameFromPending(downstreamId: string, pending: PendingNotify): ServerLinkUpstreamChanged {
+  return {
+    t: 'link.upstream-changed',
+    project: downstreamId,
+    upstream: pending.upstream,
+    untilSeq: pending.untilSeq,
+    fileIds: [...pending.fileIds],
+    cellIds: [...pending.cellIds],
+    filesChanged: pending.filesChanged,
+  }
+}
+
+/** Fold one batch's delta into what the downstream is already owed. The cell
+ *  id set stops growing at the per-frame cap for the same reason the immediate
+ *  path slices: ids are a refetch hint, and the mirror sync folds the rest. */
+function mergePending(
+  existing: PendingNotify | null,
+  upstream: string,
+  delta: LaneDelta,
+  untilSeq: number,
+): PendingNotify {
+  const pending: PendingNotify =
+    existing ?? { upstream, fileIds: new Set(), cellIds: new Set(), filesChanged: false, untilSeq: 0 }
+  pending.upstream = upstream
+  for (const file of delta.fileIds) pending.fileIds.add(file)
+  for (const cell of delta.cellIds) {
+    if (pending.cellIds.size >= LINK_NOTIFY_CELL_ID_CAP) break
+    pending.cellIds.add(cell)
+  }
+  if (delta.filesChanged) pending.filesChanged = true
+  if (untilSeq > pending.untilSeq) pending.untilSeq = untilSeq
+  return pending
+}
+
+/**
+ * Hand one frame to a downstream's DO. The reply carries the DO's socket count
+ * (`__broadcast` → `{ ok, recipients }`), which is how AQU-1830 learns that
+ * nobody is connected downstream and stops waking it every commit. A reply
+ * without the field (older DO, or a caller's stub in a test) simply leaves the
+ * idle state untouched.
+ */
+async function sendNotify(
+  projectSync: DurableObjectNamespace,
+  secretKey: string,
+  downstreamId: string,
+  frame: ServerLinkUpstreamChanged,
+): Promise<void> {
+  const stub = projectSync.get(projectSync.idFromName(downstreamId))
+  try {
+    const res = await stub.fetch('http://do.internal/__broadcast', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(frame),
+    })
+    if (!res.ok) {
+      console.warn(`[events/route] link-notify broadcast failed for ${downstreamId}: HTTP ${res.status}`)
+      return
+    }
+    const recipients = await readRecipientCount(res)
+    if (recipients === 0) idleUntil.set(downstreamId, tuning.now() + tuning.idleTtlMs)
+    else if (recipients !== null) idleUntil.delete(downstreamId)
+  } catch (err) {
+    console.warn('[events/route] link-notify broadcast error:', err)
+  }
+}
+
+async function readRecipientCount(res: Response): Promise<number | null> {
+  try {
+    const body = (await res.json()) as { recipients?: unknown }
+    return typeof body.recipients === 'number' ? body.recipients : null
+  } catch {
+    return null
+  }
+}
+
+/** Trailing edge of the coalesce window: wait out the remainder, then send
+ *  whatever accumulated. Skipped when the downstream went idle meanwhile —
+ *  nobody is listening, and the mirror sync on next open is the floor. */
+async function flushPendingNotify(
+  projectSync: DurableObjectNamespace,
+  secretKey: string,
+  downstreamId: string,
+  dueInMs: number,
+  limit: <T>(fn: () => Promise<T>) => Promise<T>,
+): Promise<void> {
+  if (dueInMs > 0) await tuning.sleep(dueInMs)
+  const entry = coalesceState.get(downstreamId)
+  if (!entry) return
+  entry.flushScheduled = false
+  const pending = entry.pending
+  entry.pending = null
+  if (!pending) return
+  const now = tuning.now()
+  if (isIdleDownstream(downstreamId, now)) return
+  entry.lastSentAt = now
+  await limit(() => sendNotify(projectSync, secretKey, downstreamId, frameFromPending(downstreamId, pending)))
+}
+
 /**
  * Send `link.upstream-changed` frames to every live downstream of every
  * project that just committed lane-relevant events in this request. Called
@@ -164,6 +409,20 @@ async function loadLiveDownstreams(
  * `committed` is `collectLaneTouches`' output: grouped by upstream (the
  * project that committed). Each downstream hears only about the kinds its own
  * link shape mirrors, and is skipped when the batch held none of them.
+ *
+ * AQU-1830 narrows WHO gets woken rather than capping it:
+ *   - a downstream whose DO last reported zero sockets is skipped outright
+ *     until the idle TTL lapses (it catches up on next file open, as today);
+ *   - a downstream notified inside the coalesce window has the batch merged
+ *     into one trailing frame instead of getting a frame per commit;
+ *   - every remaining downstream is reached — the old 50 cap silently starved
+ *     the rest, and the ceiling now sits at the subrequest budget.
+ *
+ * One consequence: when a trailing frame is owed, the returned promise stays
+ * pending for the rest of that downstream's window (~2s). That is deliberate
+ * and costs the author nothing — the caller is `ctx.waitUntil` AFTER the
+ * response — and it is also what keeps the trailing frame from being lost to
+ * an isolate that would otherwise have nothing left to run.
  */
 export async function notifyLiveDownstreamsOfUpstreamChanges(
   db: AquillaDb,
@@ -171,7 +430,9 @@ export async function notifyLiveDownstreamsOfUpstreamChanges(
   secretKey: string,
   committed: ReadonlyMap<string, readonly LaneTouch[]>,
 ): Promise<void> {
-  const now = Date.now()
+  const now = tuning.now()
+  sweepLinkNotifyState(now)
+  const limit = makeSendLimiter(LINK_NOTIFY_SEND_CONCURRENCY)
   const sends: Promise<void>[] = []
 
   for (const [upstreamProjectId, touches] of committed) {
@@ -189,9 +450,26 @@ export async function notifyLiveDownstreamsOfUpstreamChanges(
       const delta = laneDeltaFor(touches, shape)
       if (delta) deltaByShape.set(shape, delta)
     }
-    const notified = downstreams
-      .filter((d) => deltaByShape.has(d.consumes))
+    const relevant = downstreams.filter((d) => deltaByShape.has(d.consumes))
+    // AQU-1830: idle downstreams drop out here, BEFORE the subrequest — that,
+    // not a count cap, is what keeps a popular base text's fan-out small.
+    const notified = relevant
+      .filter((d) => !isIdleDownstream(d.id, now))
       .slice(0, LINK_NOTIFY_DOWNSTREAM_CAP)
+    if (relevant.length > LINK_NOTIFY_DOWNSTREAM_CAP) {
+      console.warn(
+        `[events/route] link-notify: ${upstreamProjectId} has ${relevant.length} live downstreams, ` +
+          `above the ${LINK_NOTIFY_DOWNSTREAM_CAP} subrequest ceiling`,
+      )
+    }
+    // One line for the whole batch, never one per downstream — an upstream
+    // with hundreds of sleeping downstreams would otherwise bury the log.
+    if (notified.length < relevant.length) {
+      console.log(
+        `[events/route] link-notify: ${upstreamProjectId} → ${notified.length} of ` +
+          `${relevant.length} downstreams, ${relevant.length - notified.length} asleep`,
+      )
+    }
     if (notified.length === 0) continue
 
     // Advisory only — the client never gates on this value, it's an
@@ -208,35 +486,36 @@ export async function notifyLiveDownstreamsOfUpstreamChanges(
     }
 
     for (const downstream of notified) {
-      const frame: ServerLinkUpstreamChanged = {
-        t: 'link.upstream-changed',
-        project: downstream.id,
-        upstream: upstreamProjectId,
-        untilSeq: untilSeqByShape.get(downstream.consumes) ?? 0,
-        ...deltaByShape.get(downstream.consumes)!,
+      const delta = deltaByShape.get(downstream.consumes)!
+      const untilSeq = untilSeqByShape.get(downstream.consumes) ?? 0
+      const entry = coalesceState.get(downstream.id)
+
+      if (entry && now - entry.lastSentAt < tuning.coalesceWindowMs) {
+        // Inside the window: fold the batch in and let the trailing flush
+        // carry it, so a burst costs one more subrequest rather than N.
+        entry.pending = mergePending(entry.pending, upstreamProjectId, delta, untilSeq)
+        if (!entry.flushScheduled) {
+          entry.flushScheduled = true
+          const dueIn = entry.lastSentAt + tuning.coalesceWindowMs - now
+          sends.push(flushPendingNotify(projectSync, secretKey, downstream.id, dueIn, limit))
+        }
+        continue
       }
-      const id = projectSync.idFromName(downstream.id)
-      const stub = projectSync.get(id)
+
+      // Leading edge — nothing owed, send straight away.
+      const next: CoalesceEntry = entry ?? { lastSentAt: 0, pending: null, flushScheduled: false }
+      next.lastSentAt = now
+      next.pending = null
+      coalesceState.set(downstream.id, next)
       sends.push(
-        stub
-          .fetch('http://do.internal/__broadcast', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${secretKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(frame),
-          })
-          .then(async (res) => {
-            if (!res.ok) {
-              console.warn(
-                `[events/route] link-notify broadcast failed for ${downstream.id}: HTTP ${res.status}`,
-              )
-            }
-          })
-          .catch((err) => {
-            console.warn('[events/route] link-notify broadcast error:', err)
-          }),
+        limit(() =>
+          sendNotify(
+            projectSync,
+            secretKey,
+            downstream.id,
+            frameFor(downstream.id, upstreamProjectId, delta, untilSeq),
+          ),
+        ),
       )
     }
   }

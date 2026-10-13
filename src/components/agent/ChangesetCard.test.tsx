@@ -711,7 +711,8 @@ describe("ChangesetCard — assignment (P1 §2.2)", () => {
     )
     render(<ChangesetCard item={liveItem()} />)
 
-    expect(await screen.findByText("Routed to priya")).toBeInTheDocument()
+    expect(await screen.findByText("priya")).toBeInTheDocument()
+    expect(screen.getByText(/Routed to/)).toBeInTheDocument()
     expect(screen.getByText(/approves nothing/i)).toBeInTheDocument()
     // Assignment never changes status — it is still awaiting a person.
     expect(screen.getByText("Pending review")).toBeInTheDocument()
@@ -724,7 +725,9 @@ describe("ChangesetCard — assignment (P1 §2.2)", () => {
       routedFetch({ approval: () => json(liveApproval({ assignedToUserId: "77" })) }),
     )
     render(<ChangesetCard item={liveItem()} />)
-    expect(await screen.findByText("Routed to 77")).toBeInTheDocument()
+    const chip = await screen.findByText("User")
+    expect(chip.closest("[data-slot=user-chip]")).toHaveAttribute("data-user-id", "77")
+    expect(screen.queryByText("Routed to 77")).not.toBeInTheDocument()
   })
 
   it("renders no routing line when the changeset is unassigned", async () => {

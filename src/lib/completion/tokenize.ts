@@ -23,7 +23,45 @@
 
 const TOKEN_RE = /[\p{L}\p{N}\p{M}]+/gu
 
+export interface TextToken {
+  /** Lowercased token text. */
+  text: string
+  start: number
+  end: number
+}
+
 /** Split a string into lowercase Unicode tokens. */
 export function tokenize(s: string): string[] {
   return Array.from(s.matchAll(TOKEN_RE), (m) => m[0].toLowerCase())
+}
+
+/** Same tokens as `tokenize`, with the source offsets #946's span matcher needs. */
+export function tokenizeWithOffsets(s: string): TextToken[] {
+  return Array.from(s.matchAll(TOKEN_RE), (m) => ({
+    text: m[0].toLowerCase(),
+    start: m.index,
+    end: m.index + m[0].length,
+  }))
+}
+
+/** One token of `tokenize`, with its UTF-16 offsets in the string and its original case. */
+export interface TokenSpan {
+  token: string
+  raw: string
+  start: number
+  end: number
+}
+
+/**
+ * The same tokens as `tokenize`, in the same order, with where each one sits
+ * in the string (AQU-1694). Word alignment stores a token's index; drawing it
+ * on the text needs its offsets, and the two must come from one regex.
+ */
+export function tokenSpans(s: string): TokenSpan[] {
+  return Array.from(s.matchAll(TOKEN_RE), (m) => ({
+    token: m[0].toLowerCase(),
+    raw: m[0],
+    start: m.index,
+    end: m.index + m[0].length,
+  }))
 }

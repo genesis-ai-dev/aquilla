@@ -26,6 +26,9 @@
  * derived from the lane ROWS (`lanes.archived_at`) — the legacy
  * `settings.archivedLanes` blob is a list of non-empty tags and never names
  * the `''` lane.
+ *
+ * Non-empty tags match the same way as `listed()` in `archived-lane.ts`:
+ * case-insensitive, and a different spelling of the same language does not.
  */
 export function isLaneArchived(
   lane: string,

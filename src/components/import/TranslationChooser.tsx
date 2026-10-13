@@ -30,13 +30,23 @@
  * cells: the lane filled and the lane read have to be the same one. A switch
  * re-derives the open file's lines from rows already loaded; when it does have
  * to load, a drop waits on the dialog's opening gate like any other file.
+ *
+ * AQU-1673: "Stage as proposals for review" is the one choice that changes
+ * what the review's final button does. Ticked, the reviewed matches become
+ * one changeset of proposals behind the approval gate instead of committed
+ * text. It sits beside the language picker — a destination choice, made
+ * before the drop — so the review opens already titled for it. The other
+ * ways (eBible, a paired spreadsheet) only ever write, so they wait while it
+ * is ticked.
  */
 
 import { useEffect, useState } from "react"
 import { ArrowLeftRight, ChevronDown, FileText, Library, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { LaneCombobox, type LaneComboboxOption } from "@/components/LaneCombobox"
 import { FileTargetLanePicker } from "@/components/import/FileTargetLanePicker"
+import type { FileTargetImportMode } from "@/components/import/FileTargetImportPanel"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -83,6 +93,11 @@ interface TranslationChooserProps {
   lane?: string
   /** Moves the editor to another lane, which is what the import then fills. */
   onLaneChange?: (lane: string) => void
+  /** AQU-1673: where the review's matches land — written into the file, or
+   *  staged as proposals for review. Absent, no choice is offered and the
+   *  review writes. */
+  mode?: FileTargetImportMode
+  onModeChange?: (mode: FileTargetImportMode) => void
 }
 
 const OTHER_WAYS: {
@@ -108,11 +123,14 @@ export function TranslationChooser({
   laneOptions,
   lane = "",
   onLaneChange,
+  mode = "commit",
+  onModeChange,
 }: TranslationChooserProps) {
   const t = useT()
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const chosen = value !== null ? files.find((file) => file.id === value) ?? null : null
+  const proposing = mode === "proposal"
   const options: LaneComboboxOption[] = files.map((file) => ({ value: file.id, label: file.name }))
   // AQU-1631: the picker hides itself below two lanes, so the same test
   // decides where the sentence naming the language goes.
@@ -230,6 +248,28 @@ export function TranslationChooser({
         </div>
       )}
 
+      {/* AQU-1673: before the drop zone, so the review opens already named
+          for it. The hint says what changes: nothing is written until approved. */}
+      {onModeChange && (
+        <label
+          className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5"
+          data-testid="translation-propose-for-review"
+        >
+          <Checkbox
+            checked={proposing}
+            onCheckedChange={(checked) => onModeChange(checked ? "proposal" : "commit")}
+            className="mt-0.5"
+            aria-label={t("importExport.translation.proposeForReview")}
+          />
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-sm font-medium leading-tight">{t("importExport.translation.proposeForReview")}</span>
+            <span className="text-xs leading-relaxed text-muted-foreground">
+              {t("importExport.translation.proposeForReviewHint")}
+            </span>
+          </span>
+        </label>
+      )}
+
       {notice && <p className="text-xs text-amber-700 dark:text-amber-400">{notice}</p>}
 
       <div
@@ -317,13 +357,17 @@ export function TranslationChooser({
           <h3 id="translation-other-ways" className="px-0.5 text-xs font-medium text-muted-foreground/70">
             {t("importExport.translation.otherWays")}
           </h3>
-          {!chosen && <p className="px-0.5 text-xs text-muted-foreground">{t("importExport.translation.chooseFileFirst")}</p>}
+          {proposing ? (
+            <p className="px-0.5 text-xs text-muted-foreground">{t("importExport.translation.otherWaysWriteDirectly")}</p>
+          ) : (
+            !chosen && <p className="px-0.5 text-xs text-muted-foreground">{t("importExport.translation.chooseFileFirst")}</p>
+          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {OTHER_WAYS.map(({ id, icon: Icon, titleKey, descriptionKey }) => (
               <button
                 key={id}
                 type="button"
-                disabled={!chosen}
+                disabled={!chosen || proposing}
                 onClick={() => onOtherWay(id)}
                 className="flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent"
               >

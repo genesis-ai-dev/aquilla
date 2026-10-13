@@ -1,0 +1,484 @@
+{
+  "generation": 1,
+  "storageFormatVersion": 6,
+  "storeId": "aquilla-offline",
+  "eventShapes": {
+    "v1.CellRemoved": "{ readonly projectId: string; readonly fileId: string; readonly cellId: string; readonly side: \"source\" | \"target\" }",
+    "v1.CellSynced": "{ readonly projectId: string; readonly fileId: string; readonly cellId: string; readonly side: \"source\" | \"target\"; readonly value: string | null; readonly valueHtml: string | null; readonly eventId: string | null; readonly sourceEventId: string | null; readonly validated: boolean; readonly aiDrafted: boolean; readonly sequenceIndex: number; readonly canonicalRef: string | null }",
+    "v1.CellsRemoved": "{ readonly projectId: string; readonly fileId: string; readonly cells: ReadonlyArray<{ readonly cellId: string; readonly side: \"source\" | \"target\" }> }",
+    "v1.CellsSynced": "{ readonly projectId: string; readonly fileId: string; readonly rows: ReadonlyArray<{ readonly cellId: string; readonly side: \"source\" | \"target\"; readonly value: string | null; readonly valueHtml: string | null; readonly eventId: string | null; readonly sourceEventId: string | null; readonly validated: boolean; readonly aiDrafted: boolean; readonly sequenceIndex: number; readonly canonicalRef: string | null }> }",
+    "v1.EventDequeued": "{ readonly id: string }",
+    "v1.EventQueueStatusSet": "{ readonly id: string; readonly status: \"pending\" | \"flushing\" | \"failed\" }",
+    "v1.EventQueued": "{ readonly id: string; readonly projectId: string; readonly fileId: string | null; readonly cellId: string | null; readonly kind: string; readonly payload: unknown; readonly parentId: string | null; readonly author: string; readonly schemaVersion: number; readonly clientTs: Date; readonly createdAt: Date }",
+    "v1.FileRemoved": "{ readonly id: string }",
+    "v1.FileSynced": "{ readonly id: string; readonly projectId: string; readonly name: string; readonly type: string; readonly sequenceIndex: number }",
+    "v1.OfflineProjectRemoved": "{ readonly projectId: string }",
+    "v1.OfflineProjectStatusSet": "{ readonly projectId: string; readonly status: \"downloading\" | \"ready\" | \"removing\"; readonly syncedAt: Date | null; readonly queueDepth: number }",
+    "v1.ProjectRemoved": "{ readonly id: string }",
+    "v1.ProjectSynced": "{ readonly id: string; readonly name: string; readonly orgId: string; readonly settings: unknown; readonly syncedAt: Date | null }",
+    "v1.SyncCursorSet": "{ readonly projectId: string; readonly fileId: string; readonly serverSeq: number | null; readonly projectEpoch: number | null }",
+    "v1.SyncCursorsRemoved": "{ readonly projectId: string }",
+    "v2.CellRemoved": "{ readonly projectId: string; readonly fileId: string; readonly cellId: string; readonly side: \"source\" | \"target\"; readonly laneKey: string }",
+    "v2.CellSynced": "{ readonly projectId: string; readonly fileId: string; readonly cellId: string; readonly side: \"source\" | \"target\"; readonly targetLang: string; readonly laneId: string | null; readonly value: string | null; readonly valueHtml: string | null; readonly eventId: string | null; readonly sourceEventId: string | null; readonly validated: boolean; readonly aiDrafted: boolean; readonly sequenceIndex: number; readonly canonicalRef: string | null }",
+    "v2.CellsRemoved": "{ readonly projectId: string; readonly fileId: string; readonly cells: ReadonlyArray<{ readonly cellId: string; readonly side: \"source\" | \"target\"; readonly laneKey: string }> }",
+    "v2.CellsSynced": "{ readonly projectId: string; readonly fileId: string; readonly rows: ReadonlyArray<{ readonly cellId: string; readonly side: \"source\" | \"target\"; readonly targetLang: string; readonly laneId: string | null; readonly value: string | null; readonly valueHtml: string | null; readonly eventId: string | null; readonly sourceEventId: string | null; readonly validated: boolean; readonly aiDrafted: boolean; readonly sequenceIndex: number; readonly canonicalRef: string | null }> }"
+  },
+  "events": [
+    {
+      "name": "v1.OfflineProjectStatusSet",
+      "args": {
+        "projectId": "proj1",
+        "status": "downloading",
+        "syncedAt": null,
+        "queueDepth": 0
+      }
+    },
+    {
+      "name": "v1.ProjectSynced",
+      "args": {
+        "id": "proj1",
+        "name": "Genesis",
+        "orgId": "org1",
+        "settings": {
+          "targetLanguage": "es"
+        },
+        "syncedAt": "2026-10-05T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "v1.FileSynced",
+      "args": {
+        "id": "file1",
+        "projectId": "proj1",
+        "name": "GEN",
+        "type": "usfm",
+        "sequenceIndex": 0
+      }
+    },
+    {
+      "name": "v1.FileSynced",
+      "args": {
+        "id": "file2",
+        "projectId": "proj1",
+        "name": "EXO",
+        "type": "usfm",
+        "sequenceIndex": 1
+      }
+    },
+    {
+      "name": "v1.CellsSynced",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file1",
+        "rows": [
+          {
+            "cellId": "GEN 1:1",
+            "side": "source",
+            "value": "Source GEN 1:1",
+            "valueHtml": "<p>Source GEN 1:1</p>",
+            "eventId": "src-GEN 1:1",
+            "sourceEventId": null,
+            "validated": false,
+            "aiDrafted": false,
+            "sequenceIndex": 0,
+            "canonicalRef": "GEN 1:1"
+          },
+          {
+            "cellId": "GEN 1:2",
+            "side": "source",
+            "value": "Source GEN 1:2",
+            "valueHtml": "<p>Source GEN 1:2</p>",
+            "eventId": "src-GEN 1:2",
+            "sourceEventId": null,
+            "validated": false,
+            "aiDrafted": false,
+            "sequenceIndex": 1,
+            "canonicalRef": "GEN 1:2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "v1.CellSynced",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file1",
+        "cellId": "GEN 1:3",
+        "side": "source",
+        "value": "Source GEN 1:3",
+        "valueHtml": "<p>Source GEN 1:3</p>",
+        "eventId": "src-GEN 1:3",
+        "sourceEventId": null,
+        "validated": false,
+        "aiDrafted": false,
+        "sequenceIndex": 2,
+        "canonicalRef": "GEN 1:3"
+      }
+    },
+    {
+      "name": "v1.CellRemoved",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file1",
+        "cellId": "GEN 1:3",
+        "side": "source"
+      }
+    },
+    {
+      "name": "v1.CellsRemoved",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file1",
+        "cells": [
+          {
+            "cellId": "GEN 1:2",
+            "side": "source"
+          }
+        ]
+      }
+    },
+    {
+      "name": "v2.CellsSynced",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file1",
+        "rows": [
+          {
+            "cellId": "GEN 1:1",
+            "side": "source",
+            "targetLang": "",
+            "laneId": null,
+            "value": "Source GEN 1:1",
+            "valueHtml": "<p>Source GEN 1:1</p>",
+            "eventId": "src-GEN 1:1",
+            "sourceEventId": null,
+            "validated": false,
+            "aiDrafted": false,
+            "sequenceIndex": 0,
+            "canonicalRef": "GEN 1:1"
+          },
+          {
+            "cellId": "GEN 1:2",
+            "side": "source",
+            "targetLang": "",
+            "laneId": null,
+            "value": "Source GEN 1:2",
+            "valueHtml": "<p>Source GEN 1:2</p>",
+            "eventId": "src-GEN 1:2",
+            "sourceEventId": null,
+            "validated": false,
+            "aiDrafted": false,
+            "sequenceIndex": 1,
+            "canonicalRef": "GEN 1:2"
+          },
+          {
+            "cellId": "GEN 1:1",
+            "side": "target",
+            "targetLang": "es",
+            "laneId": "lane-es",
+            "value": "En el principio",
+            "valueHtml": "<p>Source GEN 1:1</p>",
+            "eventId": "src-GEN 1:1",
+            "sourceEventId": null,
+            "validated": false,
+            "aiDrafted": false,
+            "sequenceIndex": 0,
+            "canonicalRef": "GEN 1:1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "v2.CellSynced",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file2",
+        "cellId": "EXO 1:1",
+        "side": "source",
+        "targetLang": "",
+        "laneId": null,
+        "value": "Source EXO 1:1",
+        "valueHtml": "<p>Source EXO 1:1</p>",
+        "eventId": "src-EXO 1:1",
+        "sourceEventId": null,
+        "validated": false,
+        "aiDrafted": false,
+        "sequenceIndex": 0,
+        "canonicalRef": "EXO 1:1"
+      }
+    },
+    {
+      "name": "v2.CellSynced",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file2",
+        "cellId": "EXO 1:2",
+        "side": "source",
+        "targetLang": "",
+        "laneId": null,
+        "value": "Source EXO 1:2",
+        "valueHtml": "<p>Source EXO 1:2</p>",
+        "eventId": "src-EXO 1:2",
+        "sourceEventId": null,
+        "validated": false,
+        "aiDrafted": false,
+        "sequenceIndex": 1,
+        "canonicalRef": "EXO 1:2"
+      }
+    },
+    {
+      "name": "v2.CellRemoved",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file2",
+        "cellId": "EXO 1:2",
+        "side": "source",
+        "laneKey": "tag:"
+      }
+    },
+    {
+      "name": "v2.CellsRemoved",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file1",
+        "cells": [
+          {
+            "cellId": "GEN 1:2",
+            "side": "source",
+            "laneKey": "tag:"
+          }
+        ]
+      }
+    },
+    {
+      "name": "v1.SyncCursorSet",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file1",
+        "serverSeq": 42,
+        "projectEpoch": 1
+      }
+    },
+    {
+      "name": "v1.SyncCursorSet",
+      "args": {
+        "projectId": "proj1",
+        "fileId": "file2",
+        "serverSeq": 17,
+        "projectEpoch": 1
+      }
+    },
+    {
+      "name": "v1.OfflineProjectStatusSet",
+      "args": {
+        "projectId": "proj1",
+        "status": "ready",
+        "syncedAt": "2026-10-05T12:00:00.000Z",
+        "queueDepth": 0
+      }
+    },
+    {
+      "name": "v1.EventQueued",
+      "args": {
+        "id": "q1",
+        "projectId": "proj1",
+        "fileId": "file1",
+        "cellId": "GEN 1:1",
+        "kind": "target.cell.commit",
+        "payload": {
+          "html": "<p>En el principio creó Dios</p>",
+          "text": "En el principio creó Dios"
+        },
+        "parentId": "srv-GEN 1:1",
+        "author": "translator@example.test",
+        "schemaVersion": 1,
+        "clientTs": "2026-10-05T12:00:00.000Z",
+        "createdAt": "2026-10-05T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "v1.EventQueued",
+      "args": {
+        "id": "q2",
+        "projectId": "proj1",
+        "fileId": "file1",
+        "cellId": "GEN 1:2",
+        "kind": "target.cell.commit",
+        "payload": {
+          "html": "<p>Y la tierra estaba desordenada</p>",
+          "text": "Y la tierra estaba desordenada"
+        },
+        "parentId": "srv-GEN 1:2",
+        "author": "translator@example.test",
+        "schemaVersion": 1,
+        "clientTs": "2026-10-05T12:00:00.000Z",
+        "createdAt": "2026-10-05T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "v1.EventQueued",
+      "args": {
+        "id": "q3",
+        "projectId": "proj1",
+        "fileId": "file1",
+        "cellId": "EXO 1:1",
+        "kind": "target.cell.commit",
+        "payload": {
+          "html": "<p>Estos son los nombres</p>",
+          "text": "Estos son los nombres"
+        },
+        "parentId": "srv-EXO 1:1",
+        "author": "translator@example.test",
+        "schemaVersion": 1,
+        "clientTs": "2026-10-05T12:00:00.000Z",
+        "createdAt": "2026-10-05T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "v1.EventQueued",
+      "args": {
+        "id": "q4",
+        "projectId": "proj1",
+        "fileId": "file1",
+        "cellId": "GEN 1:1",
+        "kind": "target.cell.commit",
+        "payload": {
+          "html": "<p>En el principio creó Dios los cielos</p>",
+          "text": "En el principio creó Dios los cielos"
+        },
+        "parentId": "srv-GEN 1:1",
+        "author": "translator@example.test",
+        "schemaVersion": 1,
+        "clientTs": "2026-10-05T12:00:00.000Z",
+        "createdAt": "2026-10-05T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "v1.EventQueueStatusSet",
+      "args": {
+        "id": "q1",
+        "status": "flushing"
+      }
+    },
+    {
+      "name": "v1.EventDequeued",
+      "args": {
+        "id": "q1"
+      }
+    },
+    {
+      "name": "v1.EventQueueStatusSet",
+      "args": {
+        "id": "q2",
+        "status": "flushing"
+      }
+    },
+    {
+      "name": "v1.EventQueueStatusSet",
+      "args": {
+        "id": "q3",
+        "status": "failed"
+      }
+    },
+    {
+      "name": "v1.OfflineProjectStatusSet",
+      "args": {
+        "projectId": "proj2",
+        "status": "ready",
+        "syncedAt": "2026-10-05T12:00:00.000Z",
+        "queueDepth": 0
+      }
+    },
+    {
+      "name": "v1.ProjectSynced",
+      "args": {
+        "id": "proj2",
+        "name": "Mark",
+        "orgId": "org1",
+        "settings": null,
+        "syncedAt": "2026-10-05T12:00:00.000Z"
+      }
+    },
+    {
+      "name": "v1.FileSynced",
+      "args": {
+        "id": "file3",
+        "projectId": "proj2",
+        "name": "MRK",
+        "type": "usfm",
+        "sequenceIndex": 0
+      }
+    },
+    {
+      "name": "v1.SyncCursorSet",
+      "args": {
+        "projectId": "proj2",
+        "fileId": "file3",
+        "serverSeq": 3,
+        "projectEpoch": 2
+      }
+    },
+    {
+      "name": "v1.SyncCursorsRemoved",
+      "args": {
+        "projectId": "proj2"
+      }
+    },
+    {
+      "name": "v1.FileRemoved",
+      "args": {
+        "id": "file3"
+      }
+    },
+    {
+      "name": "v1.ProjectRemoved",
+      "args": {
+        "id": "proj2"
+      }
+    },
+    {
+      "name": "v1.OfflineProjectRemoved",
+      "args": {
+        "projectId": "proj2"
+      }
+    }
+  ],
+  "expected": {
+    "queue": [
+      {
+        "id": "q2",
+        "status": "flushing",
+        "cellId": "GEN 1:2",
+        "payload": {
+          "html": "<p>Y la tierra estaba desordenada</p>",
+          "text": "Y la tierra estaba desordenada"
+        }
+      },
+      {
+        "id": "q3",
+        "status": "failed",
+        "cellId": "EXO 1:1",
+        "payload": {
+          "html": "<p>Estos son los nombres</p>",
+          "text": "Estos son los nombres"
+        }
+      },
+      {
+        "id": "q4",
+        "status": "pending",
+        "cellId": "GEN 1:1",
+        "payload": {
+          "html": "<p>En el principio creó Dios los cielos</p>",
+          "text": "En el principio creó Dios los cielos"
+        }
+      }
+    ],
+    "counts": {
+      "projects": 1,
+      "files": 2,
+      "cells": 3,
+      "offlineProjects": 1,
+      "syncCursors": 2
+    }
+  }
+}

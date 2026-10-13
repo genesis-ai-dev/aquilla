@@ -13,11 +13,25 @@ import {
   setUnresolvedCommentHighlight,
 } from "@/lib/store/unresolved-comment-highlight-pref"
 import {
+  getHealthScoreColorCoding,
+  resetHealthScoreColorCodingCacheForTests,
+  setHealthScoreColorCoding,
+} from "@/lib/store/health-score-color-coding-pref"
+import {
+  getVisibleStyleSegments,
+  resetVisibleStyleSegmentsCacheForTests,
+  setVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
+import {
   __resetLowMemoryForTests,
   getLowMemoryMode,
   isLowMemoryActive,
   setLowMemoryMode,
 } from "@/lib/perf/low-memory"
+import {
+  getBibleDataViewPrefs,
+  resetBibleDataViewPrefsCacheForTests,
+} from "@/lib/store/bible-data-view-prefs"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -66,6 +80,10 @@ beforeEach(() => {
   setMilestoneSplit(false)
   resetUnresolvedCommentHighlightCacheForTests()
   setUnresolvedCommentHighlight(false)
+  resetHealthScoreColorCodingCacheForTests()
+  setHealthScoreColorCoding(false)
+  resetVisibleStyleSegmentsCacheForTests()
+  setVisibleStyleSegments(false)
   setLowMemoryMode("auto")
   __resetLowMemoryForTests()
 })
@@ -82,6 +100,9 @@ describe("ViewSettingsMenu popover", () => {
 
     const panel = screen.getByTestId("view-settings-popover")
     expect(panel).toBeTruthy()
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller).toHaveClass("overflow-y-auto")
+    expect(scroller).toHaveClass("overflow-x-hidden")
     expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeTruthy()
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
@@ -91,6 +112,22 @@ describe("ViewSettingsMenu popover", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("scrolls the settings list and toggles visible style segments", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller.className).toContain("overflow-y-auto")
+
+    const toggle = screen.getByRole("switch", { name: "Visible style segments" })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+
+    expect(screen.getByRole("switch", { name: "Visible style segments" })).toBeChecked()
+    expect(getVisibleStyleSegments()).toBe(true)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
   })
 
@@ -379,5 +416,129 @@ describe("ViewSettingsMenu — highlight open comments", () => {
     fireEvent.click(toggle)
 
     expect(getUnresolvedCommentHighlight()).toBe(false)
+  })
+})
+
+// AQU-1687: each person's options for the Voices enrichment. They exist only
+// where the project has Voices on, and they are device preferences, like the
+// milestone split: what one person likes to see while reading.
+describe("ViewSettingsMenu — Bible data", () => {
+  beforeEach(() => {
+    resetBibleDataViewPrefsCacheForTests()
+  })
+
+  it("has no Bible data section when the project does not show Voices", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
+    expect(screen.queryByRole("switch", { name: "Voice chips" })).toBeNull()
+  })
+
+  it("switches voice chips and speech rails, and picks the label language, for this device", () => {
+    renderViewSettings({ bibleDataVoicesEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const section = screen.getByTestId("bible-data-view-settings")
+    expect(within(section).getByText("Bible data")).toBeTruthy()
+
+    // Both on by default, and the label chain starts at the project's names.
+    const chips = within(section).getByRole("switch", { name: "Voice chips" })
+    const rails = within(section).getByRole("switch", { name: "Speech rails" })
+    expect(chips.getAttribute("aria-checked")).toBe("true")
+    expect(rails.getAttribute("aria-checked")).toBe("true")
+    expect(within(section).getByRole("radio", { name: "Project names" }).getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(chips)
+    fireEvent.click(within(section).getByRole("radio", { name: "English names" }))
+
+    // AQU-1689: the Who's Who options stay at their defaults.
+    const expected = {
+      voiceChips: false,
+      speechRails: true,
+      labelMode: "english",
+      whosWhoHighlights: "hover",
+      impliedSubjectHints: "names",
+    }
+    expect(getBibleDataViewPrefs()).toEqual(expected)
+    // Survives a reload: stored on this device.
+    resetBibleDataViewPrefsCacheForTests()
+    expect(getBibleDataViewPrefs()).toEqual(expected)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  // AQU-1689: Who's Who's options appear where the project has Who's Who on,
+  // and only its own: a project with Voices off shows no voice switches.
+  it("offers Who's Who highlights and implied-subject hints where the project has Who's Who on", () => {
+    renderViewSettings({ bibleDataWhosWhoEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const section = screen.getByTestId("bible-data-view-settings")
+    expect(within(section).queryByRole("switch", { name: "Voice chips" })).toBeNull()
+
+    const highlights = within(section).getByRole("radiogroup", { name: "Who's Who highlights" })
+    const hints = within(section).getByRole("radiogroup", { name: "Implied-subject hints" })
+    expect(within(highlights).getByRole("radio", { name: "On hover or focus" }).getAttribute("aria-checked")).toBe("true")
+    expect(within(hints).getByRole("radio", { name: "Names only" }).getAttribute("aria-checked")).toBe("true")
+    // Names follow the same label chain as Voices.
+    expect(within(section).getByRole("radiogroup", { name: "Label language" })).toBeTruthy()
+
+    fireEvent.click(within(highlights).getByRole("radio", { name: "Always on" }))
+    fireEvent.click(within(hints).getByRole("radio", { name: "Off" }))
+
+    expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
+    resetBibleDataViewPrefsCacheForTests()
+    expect(getBibleDataViewPrefs()).toMatchObject({ whosWhoHighlights: "always", impliedSubjectHints: "off" })
+  })
+
+  it("has no Bible data section when the project shows neither Voices nor Who's Who", () => {
+    renderViewSettings({ bibleDataVoicesEnabled: false, bibleDataWhosWhoEnabled: false })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
+  })
+})
+
+describe("ViewSettingsMenu — health score color coding", () => {
+  it("offers the toggle off by default and stores the opt-in", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    expect(getHealthScoreColorCoding()).toBe(false)
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(true)
+    expect(
+      screen.getByRole("switch", { name: "Health Score Color Coding" }).getAttribute("aria-checked"),
+    ).toBe("true")
+  })
+
+  it("renders on from a stored preference and turns back off", () => {
+    setHealthScoreColorCoding(true)
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(false)
+  })
+
+  it("is disabled with no file open, since there are no drafts to mark", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-disabled")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(false)
   })
 })

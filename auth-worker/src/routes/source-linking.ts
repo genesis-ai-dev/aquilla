@@ -31,6 +31,10 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
+import {
+  clearInheritedSettings,
+  seedInheritedSettings,
+} from "../../../db/shared/inherited-settings"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRoleIncludingArchived } from "../services/project-permissions"
@@ -50,6 +54,8 @@ import {
   loadUpstreamFileIds,
   matchFilesForReplace,
   parseLinkFileIds,
+  liveLinkKeepsLane,
+  resolveUpstreamLinkLane,
   snapshotSourceCells,
   triggerLinkSeedSync,
 } from "../services/source-linking"
@@ -98,6 +104,19 @@ const replaceFilePairSchema = z.object({
 })
 
 /** Why a set of replace pairs cannot be honoured as given, or null. */
+/** Postgres `undefined_column` (42703), including when a transaction wrapper
+ *  puts the code on `cause`. */
+function isPgUndefinedColumn(error: unknown): boolean {
+  const candidates: unknown[] = [error]
+  if (error && typeof error === "object" && "cause" in error) {
+    candidates.push((error as { cause?: unknown }).cause)
+  }
+  return candidates.some((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false
+    return (candidate as { code?: unknown }).code === "42703"
+  })
+}
+
 function replacePairsProblem(
   pairs: ReadonlyArray<{ upstreamFileId: string; fileId: string }>,
 ): string | null {
@@ -120,6 +139,23 @@ const linkSourceSchema = z.object({
   // got past that is a 400 rather than a link that can never sync. The cap is a
   // whole Bible and then some; files.id is a UUID, hence 256.
   fileIds: z.array(z.string().min(1).max(256)).min(1).max(5000).optional(),
+  // AQU-1605: WHICH of the upstream's lanes this link consumes, by `lanes.id`.
+  // Omitted: the server picks when the choice is unambiguous (the upstream
+  // source lane, or the one non-archived target lane this caller can see) and
+  // 400s otherwise. A new link always stores a concrete id. Existing rows may
+  // still be null until AQU-1616's backfill; that null means the '' lane.
+  laneId: z.string().min(1).max(256).optional(),
+  // AQU-1075: which settings this downstream copies. Omitted fields use the
+  // defaults (brief, knowledge documents, and workflow policy on; living
+  // memory, smart quotes, and AI instructions off).
+  inherit: z.object({
+    translationBrief: z.boolean().optional(),
+    knowledgeDocs: z.boolean().optional(),
+    workflowPolicy: z.boolean().optional(),
+    livingMemory: z.boolean().optional(),
+    smartQuotes: z.boolean().optional(),
+    systemPrompt: z.boolean().optional(),
+  }).optional(),
   // Each pair costs a read of both files' source lines before the link is
   // saved, so the cap is a Bible's worth of books rather than the selection's.
   replaceFiles: z.array(replaceFilePairSchema).min(1).max(200).optional(),
@@ -142,7 +178,9 @@ sourceLinking.post(
       consumes = "source",
       gate = "validated",
       fileIds,
+      laneId,
       replaceFiles,
+      inherit,
     } = c.req.valid("json")
 
     // AQU-1559: deduped so the stored list is the set it is read as, and
@@ -200,6 +238,42 @@ sourceLinking.post(
     const sourceRole = await resolveProjectRoleIncludingArchived(c.env, user, sourceProjectId)
     if (!sourceRole) {
       return c.json({ error: "not found or no access to source project" }, 403)
+    }
+
+    // AQU-1605: the chosen upstream lane, checked against this caller's access
+    // to the upstream — see resolveUpstreamLinkLane. Done after the source-role
+    // check above so an outsider learns nothing about the upstream's lanes.
+    const lane = await resolveUpstreamLinkLane(c.env, {
+      upstreamProjectId: sourceProjectId,
+      consumes,
+      laneId,
+      userId: user.id,
+      upstreamRole: sourceRole.level,
+    })
+    if (!lane.ok) return c.json({ error: lane.error }, lane.status)
+
+    // Re-pointing a live link at a different lane leaves the downstream source
+    // as a mix of the old lane's text and the new one's. The stored cells are
+    // not rewritten here. Detach first (that snapshots and clears the lane),
+    // or send the lane the link already follows.
+    if (project.source_project_id && project.source_link_mode === "live") {
+      const stored = await c.env.AQUILLA_PG.prepare(
+        `SELECT source_link_lane_id FROM projects WHERE id = ?`,
+      )
+        .bind(projectId)
+        .first<{ source_link_lane_id: string | null }>()
+      const keeps = await liveLinkKeepsLane(c.env, {
+        upstreamProjectId: sourceProjectId,
+        consumes,
+        storedLaneId: stored?.source_link_lane_id ?? null,
+        requestedLaneId: lane.laneId,
+      })
+      if (!keeps) {
+        return c.json(
+          { error: "detach the link before changing which upstream lane it follows" },
+          409,
+        )
+      }
     }
 
     // Cycle check: starting at the prospective source, walk its source
@@ -261,6 +335,7 @@ sourceLinking.post(
                 source_link_consumes = ?,
                 source_link_gate     = ?,
                 source_link_file_ids = ?,
+                source_link_lane_id  = ?,
                 ${adoptionJson !== null ? "source_link_adopt    = ?," : ""}
                 source_link_cursor   = 0,
                 updated_at           = CURRENT_TIMESTAMP
@@ -275,20 +350,27 @@ sourceLinking.post(
           consumes,
           gate,
           followedFileIdsJson,
+          lane.laneId,
           ...(adoptionJson !== null ? [adoptionJson] : []),
           projectId,
         )
         .run()
     } catch (err) {
       // AQU-1559: `source_link_file_ids` arrives with migration 0127, and this
-      // worker can be deployed before it is applied (a per-PR preview runs new
-      // code against the shared development database). A whole-project link does
-      // not need the column at all, so it falls back to the pre-slice statement
-      // rather than failing a link that worked before this slice. A link that
-      // asked to follow a subset genuinely cannot be honoured there, and saying
-      // so is better than silently saving a whole-project link instead.
-      // AQU-1679: the same goes for a link that asked to replace a file.
-      if (followedFileIdsJson !== null || adoptionJson !== null) {
+      // worker can be deployed before it is applied. A whole-project link does
+      // not need that column, so an undefined-column (42703) retries without
+      // it. The lane is still written — dropping it would save a default-lane
+      // link (AQU-1605). A subset link cannot be honoured without the column,
+      // and a missing lane column cannot either; both fail closed.
+      // AQU-1679: `source_link_adopt` is named only when a replace was asked
+      // for, so a database that predates it still saves a link that replaces
+      // nothing. A replace that cannot be recorded fails closed — dropping the
+      // column would mirror those files in as copies. The retry below drops
+      // only `source_link_file_ids`, never the lane or the adoption.
+      const cause = err && typeof err === "object" ? (err as { cause?: { code?: unknown } }).cause : undefined
+      const missingColumn =
+        (err as { code?: unknown } | null)?.code === "42703" || cause?.code === "42703"
+      if (followedFileIdsJson !== null || adoptionJson !== null || !missingColumn) {
         console.error("link-source UPDATE failed:", err)
         return c.json({ error: "link failed" }, 500)
       }
@@ -299,11 +381,12 @@ sourceLinking.post(
                   source_link_mode     = ?,
                   source_link_consumes = ?,
                   source_link_gate     = ?,
+                  source_link_lane_id  = ?,
                   source_link_cursor   = 0,
                   updated_at           = CURRENT_TIMESTAMP
             WHERE id = ?`,
         )
-          .bind(sourceProjectId, mode, consumes, gate, projectId)
+          .bind(sourceProjectId, mode, consumes, gate, lane.laneId, projectId)
           .run()
       } catch (retryErr) {
         console.error("link-source UPDATE failed:", retryErr)
@@ -338,6 +421,23 @@ sourceLinking.post(
     //   clone semantics (§2: "snapshot at birth"), not a side effect of
     //   detach. There is no later resync for clones, so this is the only
     //   chance to seed.
+    // AQU-1075: the choice is stored and the current values are copied now,
+    // under the link, after the row names its upstream. A later upstream save
+    // keeps a live link current. A failure here does not undo the link — the
+    // text mirror is the thing the caller is waiting on.
+    try {
+      await seedInheritedSettings(c.env.AQUILLA_PG, {
+        downstreamProjectId: projectId,
+        upstreamProjectId: sourceProjectId,
+        choice: inherit,
+        updatedBy: user.id,
+        blobs: c.env.SNAPSHOTS ?? null,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+    } catch (err) {
+      console.error("inherited settings seed failed:", err)
+    }
+
     let seeded = false
     if (mode === "live") {
       seeded = await triggerLinkSeedSync(c.env, projectId)
@@ -361,6 +461,8 @@ sourceLinking.post(
       gate,
       // AQU-1559: the stored selection, echoed back. null = the whole project.
       fileIds: followedFileIds,
+      // AQU-1605: the stored lane. Always a concrete upstream lane id.
+      laneId: lane.laneId,
       // AQU-1679: the pairs recorded, echoed back. null = nothing replaced.
       replaceFiles: replaceFiles ?? null,
       previousSourceProjectId: project.source_project_id,
@@ -845,44 +947,65 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   // write a followed-into file's source onto that file, not into a new copy.
   const adoption = await loadLinkAdoption(c.env, projectId)
 
-  try {
-    // AQU-476: clear link metadata too — detach makes the project fully
-    // self-contained (mode/consumes/gate no longer apply; cursor resets so
-    // a future re-link starts clean).
-    await c.env.AQUILLA_PG.prepare(
-      `UPDATE projects
-          SET source_project_id    = NULL,
-              source_link_mode     = NULL,
-              source_link_consumes = NULL,
-              source_link_gate     = NULL,
-              source_link_file_ids = NULL,
-              source_link_cursor   = 0,
-              updated_at           = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-    )
-      .bind(projectId)
-      .run()
-  } catch (err) {
-    // AQU-1559: a database that predates migration 0127 has nothing to clear in
-    // that one column, and detach is not the operation to break over it — it
-    // worked before this slice. Retry without it.
+  // AQU-476: clear link metadata too — detach makes the project fully
+  // self-contained (mode/consumes/gate no longer apply; cursor resets so
+  // a future re-link starts clean).
+  //
+  // The three columns that arrived after the original link metadata
+  // (`source_link_file_ids`, `source_link_lane_id`, `source_link_adopt`) are
+  // cleared in the same statement when they exist. A database missing one of
+  // them retries without only that column: dropping the lane because the file
+  // list or the adoption column is absent would leave a detached project still
+  // naming a lane. Tried fewest-omissions first, and every attempt that still
+  // names the lane before any that drops it.
+  const detachColumns = ["source_link_file_ids", "source_link_lane_id", "source_link_adopt"]
+  const detachOmissions: ReadonlyArray<ReadonlyArray<string>> = [
+    [],
+    ["source_link_file_ids"],
+    ["source_link_adopt"],
+    ["source_link_file_ids", "source_link_adopt"],
+    ["source_link_lane_id"],
+    ["source_link_file_ids", "source_link_lane_id"],
+    ["source_link_adopt", "source_link_lane_id"],
+    ["source_link_file_ids", "source_link_lane_id", "source_link_adopt"],
+  ]
+  let detached = false
+  let detachErr: unknown
+  for (const omit of detachOmissions) {
+    const dropped = new Set(omit)
+    const assignments = [
+      "source_project_id = NULL",
+      "source_link_mode = NULL",
+      "source_link_consumes = NULL",
+      "source_link_gate = NULL",
+      ...detachColumns.filter((col) => !dropped.has(col)).map((col) => `${col} = NULL`),
+      "source_link_cursor = 0",
+      "updated_at = CURRENT_TIMESTAMP",
+    ]
     try {
       await c.env.AQUILLA_PG.prepare(
-        `UPDATE projects
-            SET source_project_id    = NULL,
-                source_link_mode     = NULL,
-                source_link_consumes = NULL,
-                source_link_gate     = NULL,
-                source_link_cursor   = 0,
-                updated_at           = CURRENT_TIMESTAMP
-          WHERE id = ?`,
+        `UPDATE projects SET ${assignments.join(", ")} WHERE id = ?`,
       )
         .bind(projectId)
         .run()
-    } catch (retryErr) {
-      console.error("detach-source UPDATE failed:", err, retryErr)
-      return c.json({ error: "detach failed" }, 500)
+      detached = true
+      break
+    } catch (err) {
+      detachErr = err
+      if (!isPgUndefinedColumn(err)) break
     }
+  }
+  if (!detached) {
+    console.error("detach-source UPDATE failed:", detachErr)
+    return c.json({ error: "detach failed" }, 500)
+  }
+
+  // AQU-1075: the copied values stay; the choice does not, so a later re-link
+  // starts from the defaults instead of a detach left over from this one.
+  try {
+    await clearInheritedSettings(c.env.AQUILLA_PG, projectId, user.id)
+  } catch (err) {
+    console.error("inherited settings clear failed:", err)
   }
 
   // AQU-1560: a pending addition was for the link that just ended.

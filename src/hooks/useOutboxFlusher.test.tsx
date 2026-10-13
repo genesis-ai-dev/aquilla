@@ -124,6 +124,16 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
+// AQU-1838: the retry schedule now carries ±30% jitter so a fleet that failed
+// on the same server fault does not retry in lockstep. A draw of exactly 0.5
+// is the jitter's identity factor (1 + (0.5×2−1)×0.3 = 1), so pinning
+// Math.random here keeps every nominal-delay assertion below exact while the
+// jitter stays live in production. The tests that assert the jitter itself
+// pass their own draw explicitly.
+beforeEach(() => {
+  vi.spyOn(Math, "random").mockReturnValue(0.5)
+})
+
 describe("useOutboxFlusher", () => {
   // -- enabled: false --------------------------------------------------------
 
@@ -311,14 +321,79 @@ describe("useOutboxFlusher", () => {
 
     const callsBefore = mockRequeue.mock.calls.length
 
-    // Fire the online event.
+    // Fire the online event. AQU-1838: the handler staggers the drain across
+    // ONLINE_FLUSH_SPREAD_MS so a shared outage ending does not turn into one
+    // fleet-wide burst of POSTs — at the pinned 0.5 draw that is 1250ms.
     await act(async () => {
       window.dispatchEvent(new Event("online"))
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(1_300)
     })
 
     // requeueTransientlyFailedOutboxEvents must have been called.
     expect(mockRequeue.mock.calls.length).toBeGreaterThan(callsBefore)
+  })
+
+  it("AQU-1838: defers the online-event drain instead of flushing the instant the network returns", async () => {
+    Object.defineProperty(navigator, "locks", {
+      value: undefined,
+      configurable: true,
+    })
+    Object.defineProperty(navigator, "onLine", {
+      value: true,
+      configurable: true,
+      writable: true,
+    })
+    mockFlush.mockResolvedValue(SUCCESS)
+
+    renderHook(() =>
+      useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const callsBefore = mockRequeue.mock.calls.length
+    await act(async () => {
+      window.dispatchEvent(new Event("online"))
+      // A shared outage ends for every client at once. Nothing may go out in
+      // the same tick; at the pinned 0.5 draw the drain is due at 1250ms.
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(mockRequeue.mock.calls.length).toBe(callsBefore)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300)
+    })
+    expect(mockRequeue.mock.calls.length).toBeGreaterThan(callsBefore)
+  })
+
+  it("AQU-1838: a burst of online events collapses to one staggered drain", async () => {
+    Object.defineProperty(navigator, "locks", {
+      value: undefined,
+      configurable: true,
+    })
+    Object.defineProperty(navigator, "onLine", {
+      value: true,
+      configurable: true,
+      writable: true,
+    })
+    mockFlush.mockResolvedValue(SUCCESS)
+
+    renderHook(() =>
+      useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    const callsBefore = mockRequeue.mock.calls.length
+    await act(async () => {
+      window.dispatchEvent(new Event("online"))
+      window.dispatchEvent(new Event("online"))
+      window.dispatchEvent(new Event("online"))
+      await vi.advanceTimersByTimeAsync(1_300)
+    })
+    expect(mockRequeue.mock.calls.length).toBe(callsBefore + 1)
   })
 
   // -- Backoff reset on success ----------------------------------------------
@@ -604,6 +679,54 @@ describe("useOutboxFlusher", () => {
       expect(result.madeProgress).toBe(true)
       expect(result.sawAuthError).toBe(false) // inactive failures do not degrade active UI
       expect(states.get("alice")?.nextAttemptAt).toBe(10_000)
+    })
+
+    it("AQU-1838: jitters the per-owner retry delay so two clients that failed together do not retry together", async () => {
+      const failing = {
+        posted: 0, accepted: 0, networkError: false, authError: true,
+        authStatus: 401, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+      }
+      const delayFor = async (draw: number) => {
+        const states = new Map<string, TargetRetryState>()
+        await drainFlushTargets(
+          [target("alice")],
+          states,
+          async () => failing,
+          () => 0,
+          () => draw,
+        )
+        return states.get("alice")?.nextAttemptAt ?? 0
+      }
+
+      // One failure → nominal 5s × 2^1 = 10s, scattered ±30%.
+      expect(await delayFor(0)).toBe(7_000)
+      expect(await delayFor(0.5)).toBe(10_000)
+      expect(await delayFor(1)).toBe(13_000)
+    })
+
+    it("AQU-1838: the 60s ceiling still holds once jittered", async () => {
+      const failing = {
+        posted: 0, accepted: 0, networkError: false, authError: true,
+        authStatus: 401, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+      }
+      const delayAtCeiling = async (draw: number) => {
+        const states = new Map<string, TargetRetryState>([
+          ["alice", { authEpoch: "alice-jwt", failures: 7, nextAttemptAt: 0 }],
+        ])
+        await drainFlushTargets(
+          [target("alice")],
+          states,
+          async () => failing,
+          () => 0,
+          () => draw,
+        )
+        return states.get("alice")?.nextAttemptAt ?? 0
+      }
+
+      // At the top of the schedule the scatter may only pull a retry earlier —
+      // a jittered delay must never push past the documented ceiling.
+      expect(await delayAtCeiling(1)).toBe(60_000)
+      expect(await delayAtCeiling(0)).toBe(42_000)
     })
 
     it("backs off only the rejected owner and retries immediately when its exact JWT epoch changes", async () => {

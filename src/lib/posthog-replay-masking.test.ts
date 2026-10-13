@@ -53,7 +53,7 @@ describe("session replay masking", () => {
   })
 
   it("comment bodies opt in explicitly — they quote the draft", () => {
-    for (const file of ["../components/CommentThread.tsx", "../components/CommentsPage.tsx"]) {
+    for (const file of ["../components/CommentThread.tsx", "../components/CommentsPage.tsx", "../components/NotificationsInbox.tsx"]) {
       expect(read(file), `${file} must mask its rendered comment body`).toMatch(/data-ph-mask/)
     }
   })

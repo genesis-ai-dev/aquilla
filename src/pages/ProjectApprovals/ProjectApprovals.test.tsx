@@ -57,13 +57,15 @@ function listRow(
 
 /** The auth-worker approval GET payload for a row. Its digest deliberately
  *  differs from the list row's, so a test can prove which one is approved. */
-function approvalFor(id: string) {
+function approvalFor(id: string, credentialId = "cred-1") {
   return {
     changesetId: id,
     projectId: PROJECT_ID,
     projectName: "Blackfoot",
     status: "staged",
     autonomyMode: "ask",
+    // AQU-1673: WHO staged it decides whether approving must also commit.
+    credentialId,
     summary: { translationsAdded: 2 },
     digest: `sha256:${id}-approval-digest`,
     createdAt: "2026-08-10T00:00:00.000Z",
@@ -82,6 +84,10 @@ function stubFetch(options: {
   list: { changesets: unknown[]; heldCount: number; surfacedCap: number }
   onApprove?: (id: string, digest: string) => Response
   onReject?: (id: string) => Response
+  /** AQU-1673: per-changeset `credentialId` on the approval GET. Default is an
+   *  agent credential, so existing cases keep asserting the old no-commit
+   *  behaviour. */
+  approvalCredentialIds?: Record<string, string>
 }) {
   const calls: { url: string; method: string; body?: string }[] = []
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -91,12 +97,23 @@ function stubFetch(options: {
     if (url.includes("/sync-token")) {
       return new Response(JSON.stringify(SYNC_TOKEN_BODY), { status: 200 })
     }
+    // AQU-1673: the sync-worker commit a session-staged approval now makes.
+    // MUST precede the list route below — that one matches this path too.
+    if (url.includes("/api/v1/changesets/") && url.includes("/commit")) {
+      return new Response(
+        JSON.stringify({ ...(options.list.changesets[0] ?? {}), status: "committed" }),
+        { status: 200 },
+      )
+    }
     if (url.includes("/api/v1/changesets/")) {
       return new Response(JSON.stringify(options.list), { status: 200 })
     }
     if (url.endsWith("/approval")) {
       const id = url.split("/api/v2/changesets/")[1].split("/")[0]
-      return new Response(JSON.stringify(approvalFor(id)), { status: 200 })
+      return new Response(
+        JSON.stringify(approvalFor(id, options.approvalCredentialIds?.[id])),
+        { status: 200 },
+      )
     }
     if (url.endsWith("/approve")) {
       const id = url.split("/api/v2/changesets/")[1].split("/")[0]
@@ -331,5 +348,62 @@ describe("ProjectApprovals (AQU-841)", () => {
     // The keyed 403 copy, not the server's raw "no project membership".
     expect(screen.getByText(/aren't authorized/i)).toBeInTheDocument()
     expect(screen.queryByText(/no project membership/i)).not.toBeInTheDocument()
+  })
+
+  /**
+   * AQU-1673 — approving has to APPLY a plan the app staged itself.
+   *
+   * Approval and commit are two calls. For an agent's plan the agent commits,
+   * so this page must not. For a plan staged from the app ("Import as
+   * proposals") nobody is watching, and a QA walk of PR #1176 found exactly
+   * that hole: approving reported success, the plan stayed `staged`, and the
+   * approved text never reached a cell.
+   */
+  it("commits a session-staged plan after approving it, because no agent will", async () => {
+    const calls = stubFetch({
+      list: {
+        changesets: [listRow("cs-import", { translationsAdded: 2 })],
+        heldCount: 0,
+        surfacedCap: 3,
+      },
+      approvalCredentialIds: { "cs-import": "session" },
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitFor(() => expect(rowFor("cs-import")).toBeInTheDocument())
+    await user.click(within(rowFor("cs-import")).getByRole("button", { name: /approve/i }))
+
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === "POST" && c.url.includes("/cs-import/commit")),
+      ).toBe(true),
+    )
+    // And in the right order: approve mints the confirmation commit consumes.
+    const approveAt = calls.findIndex((c) => c.url.endsWith("/cs-import/approve"))
+    const commitAt = calls.findIndex((c) => c.url.includes("/cs-import/commit"))
+    expect(approveAt).toBeGreaterThanOrEqual(0)
+    expect(commitAt).toBeGreaterThan(approveAt)
+  })
+
+  it("does NOT commit an agent's plan — the agent is watching for that approval", async () => {
+    const calls = stubFetch({
+      list: {
+        changesets: [listRow("cs-agent", { translationsAdded: 2 })],
+        heldCount: 0,
+        surfacedCap: 3,
+      },
+      // No override: approvalFor defaults to an agent credential.
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await waitFor(() => expect(rowFor("cs-agent")).toBeInTheDocument())
+    await user.click(within(rowFor("cs-agent")).getByRole("button", { name: /approve/i }))
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.endsWith("/cs-agent/approve"))).toBe(true),
+    )
+    expect(calls.some((c) => c.url.includes("/commit"))).toBe(false)
   })
 })

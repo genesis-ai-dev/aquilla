@@ -47,6 +47,7 @@ import { harmonizer } from "./harmonizer"
 import { bibleData } from "./bibleData"
 import { languageProfile } from "./languageProfile"
 import { projectDecisions } from "./projectDecisions"
+import { bibleAlignment } from "./bibleAlignment"
 import { bibleChecks } from "./bibleChecks"
 
 export const NAMESPACES = [
@@ -81,5 +82,6 @@ export const NAMESPACES = [
   bibleData,
   languageProfile,
   projectDecisions,
+  bibleAlignment,
   bibleChecks,
 ] as const

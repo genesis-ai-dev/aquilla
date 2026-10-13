@@ -1,10 +1,27 @@
 import { useState } from "react";
+import { LaneAccessFields } from "@/components/LaneAccessFields";
+import { ROLE } from "@/lib/frontier/roles";
+import {
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+  type MemberLaneAccess,
+} from "@/lib/lanes/lane-access-choice";
+import type { TargetLaneOption } from "@/hooks/useCurrentTargetLanes";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GrantScopeNotice } from "@/components/GrantScopeNotice";
 import { RoleSelect } from "@/components/RoleSelect";
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
+import { toast } from "@/components/ui/toast";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
 import { useI18n } from "@/lib/i18n/I18nProvider";
+import {
+  describeGrant,
+  grantButtonLabel,
+  type GrantScope,
+} from "@/lib/access/grant-scope-sentence";
 
 /**
  * AQU-734: per-person outcome of a batch add, mirrored from the server's
@@ -43,7 +60,11 @@ interface MemberMultiAddRowProps {
    * and keeps the ones who failed staged, naming them. Implementations send a
    * single batch request (never a client-side fan-out).
    */
-  onAdd: (usernames: string[], role: number) => Promise<MemberAddOutcome[]>;
+  onAdd: (
+    usernames: string[],
+    role: number,
+    laneAccess?: MemberLaneAccess,
+  ) => Promise<MemberAddOutcome[]>;
   /** User ids hidden from search results / suggestions (already members). */
   excludedUserIds?: readonly number[];
   /** Disable for org membership, where search should find any Aquilla user. */
@@ -63,6 +84,18 @@ interface MemberMultiAddRowProps {
   onBatchErrorMessage?: (e: unknown) => string | null;
   disabled?: boolean;
   buttonSize?: "sm" | "default";
+  /**
+   * AQU-1030: when set, a live sentence above Add states who will join as
+   * which role at this scope, the button echoes the scope, and a success
+   * toast repeats the sentence for the people who landed.
+   */
+  grantScope?: GrantScope;
+  /**
+   * AQU-1808: current target lanes. When this list is non-empty and the
+   * chosen role is below project lead, Add stays disabled until the sharer
+   * picks every lane or names the ones this person may use.
+   */
+  targetLanes?: readonly TargetLaneOption[];
 }
 
 /**
@@ -83,8 +116,10 @@ export function MemberMultiAddRow({
   onBatchErrorMessage,
   disabled = false,
   buttonSize = "default",
+  grantScope,
+  targetLanes = [],
 }: MemberMultiAddRowProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   // Typeahead-mode-only here. Email-mode is for project-link invites
   // (handled in MultiProjectInviteDialog / SharePanel), not direct grants —
   // granting requires a real Frontier user id, which we don't have for an
@@ -98,6 +133,7 @@ export function MemberMultiAddRow({
   // or pressing Enter accumulates people here so they survive new searches.
   const [staged, setStaged] = useState<StagedRecipient[]>([]);
   const [role, setRole] = useState(defaultRole);
+  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -146,6 +182,13 @@ export function MemberMultiAddRow({
   async function handleAdd() {
     const toAdd = effectiveStaged();
     if (toAdd.length === 0) return;
+    const submittedRole = role;
+    const askingLanes = needsLaneChoice(submittedRole, targetLanes.length);
+    if (askingLanes && !laneChoiceReady(laneChoice, submittedRole, targetLanes.length)) {
+      setAddError(t("projectSettings.share.laneChoiceRequired"));
+      return;
+    }
+    const laneAccess = askingLanes && laneChoice ? toMemberLaneAccess(laneChoice) : undefined;
     setAdding(true);
     setAddError(null);
     onAddStart?.();
@@ -153,7 +196,8 @@ export function MemberMultiAddRow({
     try {
       results = await onAdd(
         toAdd.map((s) => s.username),
-        role,
+        submittedRole,
+        laneAccess,
       );
     } catch (e) {
       setAdding(false);
@@ -171,8 +215,20 @@ export function MemberMultiAddRow({
     const failures = results.filter((r) => !r.ok);
     // Keep only the people who failed staged so they can be corrected/retried;
     // drop everyone who landed. Also clear the leftover search text.
+    const landed = toAdd.filter((s) => succeeded.has(s.username.toLowerCase()));
     setStaged(toAdd.filter((s) => !succeeded.has(s.username.toLowerCase())));
     setRecipient({ mode: "username", raw: "" });
+    if (grantScope && landed.length > 0) {
+      toast.add({
+        type: "success",
+        title: describeGrant(t, {
+          names: landed.map((s) => s.username),
+          roleLevel: submittedRole,
+          scope: liveGrantScope(grantScope, targetLanes, submittedRole, laneChoice),
+          locale,
+        }).sentence,
+      });
+    }
     if (failures.length > 0) {
       setAddError(formatFailures(failures));
     } else {
@@ -182,6 +238,18 @@ export function MemberMultiAddRow({
 
   const stagedUsernames = new Set(staged.map((s) => s.username.toLowerCase()));
   const canAdd = staged.length > 0 || recipient.raw.trim().length > 0;
+  const shownScope = grantScope
+    ? liveGrantScope(grantScope, targetLanes, role, laneChoice)
+    : undefined;
+  const lanesChosen = laneChoiceReady(laneChoice, role, targetLanes.length);
+  const grantCopy = shownScope
+    ? describeGrant(t, {
+        names: effectiveStaged().map((s) => s.username),
+        roleLevel: role,
+        scope: shownScope,
+        locale,
+      })
+    : null;
 
   return (
     <div className="space-y-2">
@@ -205,6 +273,7 @@ export function MemberMultiAddRow({
           ))}
         </ul>
       )}
+      {grantCopy && <GrantScopeNotice sentence={grantCopy.sentence} />}
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_max-content_max-content] sm:items-start">
         <div className="min-w-0">
           <UsernameTypeahead
@@ -235,11 +304,22 @@ export function MemberMultiAddRow({
           size={buttonSize}
           className="sm:whitespace-nowrap"
           onClick={() => void handleAdd()}
-          disabled={adding || disabled || !canAdd}
+          disabled={adding || disabled || !canAdd || !lanesChosen}
         >
-          {adding ? "Adding…" : "Add"}
+          {adding ? "Adding…" : grantCopy ? grantButtonLabel(t, t("common.add"), grantCopy.scopeEcho) : "Add"}
         </Button>
       </div>
+      {needsLaneChoice(role, targetLanes.length) && (
+        <LaneAccessFields
+          lanes={targetLanes}
+          value={laneChoice}
+          onChange={setLaneChoice}
+          disabled={adding || disabled}
+        />
+      )}
+      {role >= ROLE.PROJECT_LEAD && targetLanes.length > 0 && (
+        <p className="text-[10px] text-muted-foreground">{t("projectSettings.share.laneChoiceLeadNote")}</p>
+      )}
       {addError && <p className="text-xs text-destructive">{addError}</p>}
     </div>
   );
@@ -250,6 +330,19 @@ export function MemberMultiAddRow({
  * message that names each person who didn't land and why — so a partial
  * success ("2 of 3 added") never reads as an all-or-nothing failure.
  */
+function liveGrantScope(
+  scope: GrantScope,
+  lanes: readonly TargetLaneOption[],
+  role: number,
+  choice: LaneAccessChoice | null,
+): GrantScope {
+  if (scope.kind !== "project" || !needsLaneChoice(role, lanes.length)) return scope;
+  if (!choice) return { ...scope, lanes: "unknown" };
+  if (choice.kind === "all") return { ...scope, lanes: "all" };
+  const labels = lanes.filter((lane) => choice.laneIds.includes(lane.id)).map((lane) => lane.label);
+  return { ...scope, lanes: labels };
+}
+
 function formatFailures(failures: MemberAddOutcome[]): string {
   const parts = failures.map((f) =>
     f.error ? `${f.username} (${f.error})` : f.username,

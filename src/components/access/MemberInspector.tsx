@@ -4,6 +4,8 @@ import type { AccessChainEntry, MemberAccess, ScopePath, ScopeType } from "@/lib
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
+import { UserChip } from "@/components/UserChip"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { originLabel, roleLabel } from "./labels"
 
 const SCOPE_ORDER: readonly ScopeType[] = ["org", "team", "project", "lane"]
@@ -44,13 +46,7 @@ export function MemberInspector({
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(locale, { month: "short", day: "numeric" })
   }
   const meta = (e: AccessChainEntry) =>
-    [
-      originLabel(t, e.origin),
-      e.grantedBy ? t("org.access.inspector.grantedBy", { name: e.grantedBy }) : null,
-      e.grantedAt ? fmtDate(e.grantedAt) : null,
-    ]
-      .filter(Boolean)
-      .join(", ")
+    [originLabel(t, e.origin), e.grantedAt ? fmtDate(e.grantedAt) : null].filter(Boolean).join(", ")
 
   const org = herePath[0]?.type === "org" ? herePath[0] : undefined
   const groups = SCOPE_ORDER.map((type) => ({
@@ -60,7 +56,13 @@ export function MemberInspector({
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 text-sm" data-testid="member-inspector">
       <header className="flex items-baseline justify-between gap-3">
-        <h3 className="truncate font-medium">{isSelf ? t("org.access.inspector.yourAccess") : member.displayName}</h3>
+        <h3 className="truncate font-medium">
+          {isSelf ? (
+            t("org.access.inspector.yourAccess")
+          ) : (
+            <UserChip userId={member.userId} username={member.displayName} size="sm" nameClassName="text-sm" />
+          )}
+        </h3>
         {member.isGuest && (
           <span className="shrink-0 text-xs text-muted-foreground" data-testid="inspector-guest">
             {org ? t("org.access.inspector.guestOf", { org: org.name }) : t("org.access.inspector.guest")}
@@ -78,7 +80,27 @@ export function MemberInspector({
             <li key={`${scopePathKey(e.scopePath)}#${i}`} className="flex flex-wrap gap-x-2">
               <span>{roleLabel(t, e.roleLevel)}</span>
               <span className="text-muted-foreground">@ {formatScopePath(e.scopePath)}</span>
-              <span className="text-xs text-muted-foreground">({meta(e)})</span>
+              <span className="inline-flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+                (
+                {meta(e)}
+                {meta(e) && e.grantedBy ? ", " : ""}
+                {e.grantedBy ? (
+                  <RichMessage
+                    k="org.access.inspector.grantedBy"
+                    values={{
+                      name: (
+                        <UserChip
+                          userId={e.grantedByUserId}
+                          username={e.grantedBy}
+                          size="xs"
+                          nameClassName="text-xs font-normal"
+                        />
+                      ),
+                    }}
+                  />
+                ) : null}
+                )
+              </span>
             </li>
           ))}
         </ul>

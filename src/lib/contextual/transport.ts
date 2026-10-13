@@ -47,11 +47,17 @@ import type { RunCommandIntent } from "../../../shared/run-command-intent"
 /** Generic non-OK response from a contextual run route. */
 export class ContextualApiError extends Error {
   public status: number
+  /** Server error envelope's stable `error.code`, when it sent one. The
+   *  message is already interpolated into `message` for logs; callers that
+   *  need to render a SPECIFIC localized explanation (AQU-1847's start
+   *  throttle) branch on this instead of matching on prose. */
+  public code: string | null
   /** AQU-1691: the server's reason code (`error.details.reason`), when it sent one. */
   public reason: string | null
-  constructor(message: string, status: number, reason: string | null = null) {
+  constructor(message: string, status: number, code: string | null = null, reason: string | null = null) {
     super(message)
     this.status = status
+    this.code = code
     this.reason = reason
   }
 }
@@ -77,7 +83,12 @@ async function throwFromResponse(res: Response, fallback: string): Promise<never
   }
   const message = body?.error?.message ?? fallback
   const reason = typeof body?.error?.details?.reason === "string" ? body.error.details.reason : null
-  throw new ContextualApiError(`${fallback}: HTTP ${res.status} — ${message}`, res.status, reason)
+  throw new ContextualApiError(
+    `${fallback}: HTTP ${res.status} — ${message}`,
+    res.status,
+    body?.error?.code ?? null,
+    reason,
+  )
 }
 
 // ── Plumbing ────────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ import { checkSpanBible, newBibleMetrics, recordBible, type SpanBible } from "./
 import { repairExpectations, type RepairCell } from "./bible-repair"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
 import type { ProjectFact } from "../../../../db/shared/project-facts"
+import type { TermMatchingSettings } from "../../../../src/lib/terminology/model"
 import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
 import { summarizeConstrual, renderConstrualL2 } from "./summarize"
 import { tallyVotes } from "./quorum"
@@ -75,6 +76,8 @@ export interface RunSpanDeps {
   /** AQU-1691: the decision log (scoped to the span in here) and the Language profile. */
   projectFacts?: ProjectFact[]
   languageProfile?: LanguageProfile
+  /** The project's affix inventory, so terms are found as the editor finds them. */
+  termMatching?: TermMatchingSettings
   /** AQU-1690: Bible data for this span, when autopilot uses it. */
   bible?: SpanBible
   steeringDirections?: string[]
@@ -289,7 +292,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   // the prompt buries the eight entries that matter for this passage. Computed
   // once from the span's source text, before the redraft loop.
   const spanTerms = deps.concepts
-    ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source))
+    ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source), deps.termMatching)
     : []
   // AQU-1691: same scoping for the project's decisions: a fact for ACT 16
   // reaches a span in ACT 16 and no other.

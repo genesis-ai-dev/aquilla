@@ -156,6 +156,8 @@ interface OccurrenceRowProps {
   translated: string
   canEdit: boolean
   projectId: string
+  /** AQU-1902: the lane these occurrences are read from — edits commit to it. */
+  activeLane: string
   username: string
   onOptimisticEdit: (
     cell: { cellId: string; fileId: string },
@@ -172,6 +174,7 @@ function OccurrenceRow({
   translated,
   canEdit,
   projectId,
+  activeLane,
   username,
   onOptimisticEdit,
   onCellCommitted,
@@ -195,6 +198,10 @@ function OccurrenceRow({
         value,
         valueHtml,
         author: username,
+        // AQU-1902: the occurrences are read from this lane (useTermOccurrences
+        // `lane`), so the inline edit commits to it. Omitting it addressed the
+        // default lane, which projects created today do not have.
+        targetLang: activeLane,
       })
         .then(() => onCellCommitted())
         .catch((err: unknown) => {
@@ -207,6 +214,7 @@ function OccurrenceRow({
       cell.targetEventId,
       cell.sourceEventId,
       projectId,
+      activeLane,
       username,
       onOptimisticEdit,
       onCellCommitted,
@@ -311,6 +319,9 @@ export interface TerminologyTermDetailProps {
   suggestionsLoading?: boolean
   canEdit: boolean
   projectId: string
+  /** AQU-1902: legacy tag of the lane the occurrences are read from (`''` =
+   *  a legacy default lane). Inline edits commit to this lane. */
+  activeLane?: string
   username: string
   onClose: () => void
   /** Called after any commit so the parent can trigger a revalidate. */
@@ -368,6 +379,7 @@ export function TerminologyTermDetail({
   cells,
   canEdit,
   projectId,
+  activeLane = "",
   username,
   onClose,
   onCellCommitted,
@@ -657,6 +669,7 @@ export function TerminologyTermDetail({
                   translated={cell.translated}
                   canEdit={canEdit}
                   projectId={projectId}
+                  activeLane={activeLane}
                   username={username}
                   onOptimisticEdit={onOptimisticEdit}
                   onCellCommitted={onCellCommitted}

@@ -38,10 +38,10 @@
 -- statement, so the table is rewritten once, not twice. Apply it at a quiet
 -- time, as with 0123.
 --
--- DEPLOY ORDER. Apply this migration BEFORE the auth-worker that reads these
--- columns. On a database without them the gate's settings read fails, the
--- gate treats that as "no explicit choice", and a project that switched Bible
--- data OFF while it has scripture files would get it back on.
+-- DEPLOY ORDER. Apply this migration before the auth-worker that reads these
+-- columns, so the gate gets the cheap read. It is no longer a safety
+-- requirement: on a database without them the gate falls back to reading the
+-- switches from the blob as it did before, so an explicit OFF stays off.
 
 BEGIN;
 -- Give up after 5s of WAITING for the lock (this does not limit how long the

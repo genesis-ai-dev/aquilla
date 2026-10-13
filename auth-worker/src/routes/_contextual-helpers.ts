@@ -29,6 +29,8 @@ type ErrorCode =
   | "usage_accounting_unavailable"
   | "weekly_ai_allowance_exhausted"
   | "release_disabled"
+  /** AQU-1847 — per-user autopilot start throttle. */
+  | "start_throttled"
   // AQU-1690: "Check with Bible data" (routes/contextual-bible-check.ts).
   | "bible_data_off"
   | "no_bible_refs"

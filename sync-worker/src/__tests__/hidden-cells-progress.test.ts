@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { makeTestDb } from './helpers/pg-test-db'
+import { progressRowsForLane } from './helpers/progress-rows'
 import {
   fileProgressRecomputeStmt,
   fullProgressRecomputeStmts,
@@ -73,9 +74,14 @@ interface ProgressRow {
   filled_count: number
 }
 
-async function fileRow(db: Awaited<ReturnType<typeof fixture>>): Promise<ProgressRow | undefined> {
-  const all = await db.rows<ProgressRow>('file_section_progress')
-  return all.find((row) => row.scope === 'file')
+/**
+ * The DEFAULT LANE's file row. AQU-1599 gave the source lane a row of its own,
+ * so the whole table holds two rows per key and `find(scope === 'file')` would
+ * pick whichever one the engine listed first.
+ */
+async function fileRow(t: Awaited<ReturnType<typeof fixture>>): Promise<ProgressRow | undefined> {
+  const lane = await progressRowsForLane<ProgressRow>(t.pg, PROJECT, 'target', { tag: '' })
+  return lane.find((row) => row.scope === 'file')
 }
 
 describe('AQU-1424 — hidden cells leave the progress projection', () => {
@@ -93,7 +99,7 @@ describe('AQU-1424 — hidden cells leave the progress projection', () => {
   it('makes the section and book rows agree with the file figure', async () => {
     const hidden = await fixture(tenCells({ hideC10: true }))
     await hidden.db.batch(fullProgressRecomputeStmts(hidden.db, PROJECT, FILE, 100))
-    const all = await hidden.rows<ProgressRow>('file_section_progress')
+    const all = await progressRowsForLane<ProgressRow>(hidden.pg, PROJECT, 'target', { tag: '' })
     expect(all.find((r) => r.scope === 'section' && r.section_key === 'GEN 1'))
       .toMatchObject({ total_count: 9, filled_count: 9 })
     expect(all.find((r) => r.scope === 'book'))
@@ -109,7 +115,7 @@ describe('AQU-1424 — hidden cells leave the progress projection', () => {
       source('c2', 'GEN 2:1'), target('c2', 'dos'),
     ])
     await t.db.batch(fullProgressRecomputeStmts(t.db, PROJECT, FILE, 100))
-    expect((await t.rows<ProgressRow>('file_section_progress'))
+    expect((await progressRowsForLane<ProgressRow>(t.pg, PROJECT, 'target', { tag: '' }))
       .some((r) => r.section_key === 'GEN 2')).toBe(true)
 
     await t.pg.query(
@@ -118,7 +124,7 @@ describe('AQU-1424 — hidden cells leave the progress projection', () => {
       [PROJECT, FILE],
     )
     await t.db.batch(fullProgressRecomputeStmts(t.db, PROJECT, FILE, 101))
-    expect((await t.rows<ProgressRow>('file_section_progress'))
+    expect((await progressRowsForLane<ProgressRow>(t.pg, PROJECT, 'target', { tag: '' }))
       .some((r) => r.section_key === 'GEN 2')).toBe(false)
     expect(await fileRow(t)).toMatchObject({ total_count: 1, filled_count: 1 })
   })

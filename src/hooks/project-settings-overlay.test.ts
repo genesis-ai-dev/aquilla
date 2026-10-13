@@ -53,6 +53,14 @@ describe("overlaySettings", () => {
     expect(out.harmonize_min_role).toBe("maintainer")
   })
 
+  // AQU-1686: the settings card showed a stored {voices: "off"} as a switch
+  // that is on. The overlay now reads the value the way the server does.
+  it("drops unknown enrichment ids and values that are not booleans", () => {
+    const blob = { bibleEnrichments: { voices: "off", nope: true, places: false } } as unknown as ProjectWideSettings
+    const out = overlaySettings(makeRecord({}), blob)
+    expect(out.bibleEnrichments).toEqual({ places: false })
+  })
+
   it("carries stored false booleans and the rest of the Settings-page fields", () => {
     const blob: ProjectWideSettings = {
       sourceLanguage: "English",

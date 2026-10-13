@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { TargetValidationControl } from "./TargetValidationControl"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 function renderControl(activeValidators: string[], onValidationChange = vi.fn()) {
   return render(
@@ -239,7 +240,7 @@ describe("TargetValidationControl", () => {
       fireEvent.pointerEnter(button, { pointerType: "mouse" })
       fireEvent.mouseEnter(button)
       fireEvent.mouseMove(button, { movementX: 5, movementY: 5 })
-      expect(await screen.findByText("Text validated by", {}, { timeout: 2000 })).toBeInTheDocument()
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
 
       // Past Base UI's 500 ms "patient click" window, where the click used to close it.
       await wait(650)
@@ -253,7 +254,7 @@ describe("TargetValidationControl", () => {
       expect(screen.getByText("Text validated by")).toBeInTheDocument()
 
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
-      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
 
       // Closed lists open again on the next click.
       fireEvent.pointerDown(button, { pointerType: "mouse" })
@@ -273,7 +274,7 @@ describe("TargetValidationControl", () => {
       fireEvent.click(screen.getByRole("button", { name: /Validated/ }))
       fireEvent.click(await screen.findByRole("button", { name: "Remove your validation" }))
       expect(onValidationChange).toHaveBeenCalledWith(false)
-      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
     })
 
     // PR 1 area 5 step 6 (Sam, 2026-10-03): open the list with a click, remove
@@ -297,7 +298,7 @@ describe("TargetValidationControl", () => {
       expect(onValidationChange).toHaveBeenCalledWith(false)
       // The server agrees: only bo's vote is left, so there is still a list to show.
       rerender(<TargetValidationControl {...props} validationStatus="others" activeValidators={["bo"]} />)
-      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument())
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
 
       const check = screen.getByRole("button", { name: /Validated by others/ })
       fireEvent.mouseLeave(check, { relatedTarget: document.body })
@@ -305,7 +306,7 @@ describe("TargetValidationControl", () => {
       fireEvent.pointerEnter(check, { pointerType: "mouse" })
       fireEvent.mouseEnter(check)
       fireEvent.mouseMove(check, { movementX: 5, movementY: 5 })
-      expect(await screen.findByText("Text validated by", {}, { timeout: 2000 })).toBeInTheDocument()
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
       expect(screen.getByText("bo")).toBeInTheDocument()
     })
   })

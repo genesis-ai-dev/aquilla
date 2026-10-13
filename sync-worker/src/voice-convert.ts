@@ -21,6 +21,12 @@
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
+// Shared with the Inworld proxy: both bound their one upstream subrequest with
+// AbortSignal.timeout and need the same DOMException check to tell a blown
+// deadline apart from a dead upstream.
+import { isAbortTimeout } from "./inworld-tts"
+import { logVendorTimeout, VENDOR_TIMEOUT_MS } from "../../shared/vendor-timeouts"
+import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/shared/rate-limit"
 
 export interface VoiceConvertEnv {
   SNAPSHOTS: R2Bucket
@@ -30,6 +36,56 @@ export interface VoiceConvertEnv {
   SEED_VC_URL?: string
   /** Shared secret matching the Modal `seed-vc-auth` secret's SEED_VC_TOKEN. */
   SEED_VC_TOKEN?: string
+  /** Postgres shim — backs the per-user conversion throttle (AQU-1854). */
+  AQUILLA_PG?: AquillaDb
+}
+
+// AQU-1854: ceiling on every clip this route buffers. Conversion is the one
+// audio path that holds more than one object at a time — source + reference go
+// up to Modal and the converted wav comes back — so it cannot inherit /audio's
+// 95 MB MAX_AUDIO_BYTES, which three concurrent copies of would blow the
+// Worker's 128 MB heap on its own. 20 MB is ~20 minutes of 64 kbps mono, far
+// past the single-cell clips this feature re-voices, and comfortably above the
+// 8 MB the recorder already enforces client-side for reference clips
+// (MAX_REFERENCE_BYTES in src/components/VoiceCloneSection.tsx).
+export const MAX_VOICE_CLIP_BYTES = 20 * 1024 * 1024
+
+/** Whole-request ceiling for the multipart POST: one clip plus form overhead. */
+export const MAX_VOICE_CONVERT_REQUEST_BYTES = MAX_VOICE_CLIP_BYTES + 1024 * 1024
+
+/**
+ * AQU-1854: hard deadline on the one Seed-VC subrequest. Generous enough for a
+ * cold L40S container to load the checkpoints off the Volume and run 50
+ * diffusion steps, far below Modal's own 600 s function timeout — so a hung
+ * GPU returns this 504 instead of pinning a Worker invocation until the
+ * platform kills it with no diagnosis.
+ *
+ * AQU-1849: the number moved to `shared/vendor-timeouts.ts` alongside every
+ * other vendor deadline; the name stays for the callers and tests using it.
+ */
+export const SEED_VC_REQUEST_TIMEOUT_MS = VENDOR_TIMEOUT_MS.modalVoiceConvert
+
+/**
+ * AQU-1854: per-user sliding window (15 min, shared primitive with the TTS and
+ * Agent-API throttles). Every call starts billed L40S GPU time, so this sits
+ * well below TTS synthesis' 200: a contributor re-voicing a chapter in one
+ * sitting never trips it, a scripted loop stops costing money after a minute.
+ */
+export const VOICE_CONVERT_MAX_PER_USER_PER_WINDOW = 60
+
+/** 413 naming which input blew the cap. "too large" + the bracketed status is
+ *  what categorizeAiError's `request-too-large` branch reads client-side. */
+function clipTooLarge(what: string): Response {
+  const mb = Math.round(MAX_VOICE_CLIP_BYTES / (1024 * 1024))
+  return Response.json(
+    {
+      error: "audio too large",
+      input: what,
+      maxBytes: MAX_VOICE_CLIP_BYTES,
+      message: `${what} is too large for voice conversion (limit ${mb} MB). Trim the clip or use a compressed format like mp3.`,
+    },
+    { status: 413 },
+  )
 }
 
 const VOICE_CONVERT_PATH = "/api/v1/voice/convert"
@@ -89,7 +145,18 @@ export async function handleVoiceReferenceRequest(
     if (verified.claims.role < WRITE_ROLE_LEVEL) {
       return new Response("insufficient role", { status: 403 })
     }
+    // AQU-1854: this PUT buffered the whole body with no size check at all —
+    // the only unbounded audio write left in the worker. Reject on the declared
+    // length first (mirrors /audio's PUT), then backstop after buffering, since
+    // Content-Length is advisory.
+    const declaredRefLength = Number(request.headers.get("Content-Length"))
+    if (Number.isFinite(declaredRefLength) && declaredRefLength > MAX_VOICE_CLIP_BYTES) {
+      return clipTooLarge("reference clip")
+    }
     const body = await request.arrayBuffer()
+    if (body.byteLength > MAX_VOICE_CLIP_BYTES) {
+      return clipTooLarge("reference clip")
+    }
     // [Pen test] Input validation & injection (2026-08-26): same deny-list fix
     // as /audio — this route stored the client-declared Content-Type verbatim
     // and served it back unsanitized.
@@ -141,6 +208,14 @@ export async function handleVoiceConvertRequest(
     return new Response("voice conversion not configured", { status: 503 })
   }
 
+  // AQU-1854: formData() buffers the entire multipart body, so the declared
+  // length is checked before parsing rather than after. The per-clip checks
+  // below are the backstop for a missing or lying Content-Length.
+  const declaredLength = Number(request.headers.get("Content-Length"))
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_VOICE_CONVERT_REQUEST_BYTES) {
+    return clipTooLarge("source clip")
+  }
+
   let form: FormData
   try {
     form = await request.formData()
@@ -180,14 +255,34 @@ export async function handleVoiceConvertRequest(
     return new Response("insufficient role", { status: 403 })
   }
 
-  // Resolve the source bytes: inline upload, or an existing R2 recording.
-  let sourceBytes: ArrayBuffer
-  let sourceType = "audio/wav"
+  // AQU-1854: per-user throttle. Unlike TTS this route had no volumetric
+  // control of any kind, so one contributor looping requests could hold open
+  // as many L40S containers as Modal would start. Fails CLOSED when the
+  // database is unbound: unmetered GPU spend is the worse failure mode.
+  const db = env.AQUILLA_PG
+  if (!db) return new Response("database not configured", { status: 500 })
+  const rateLimitIdentifier = `user:${verified.claims.userId}`
+  const recentConversions = await countRecentRateLimitEvents(db, "voice_convert", rateLimitIdentifier)
+  if (recentConversions >= VOICE_CONVERT_MAX_PER_USER_PER_WINDOW) {
+    return Response.json(
+      { error: "rate_limited", message: "Too many requests, slow down." },
+      { status: 429 },
+    )
+  }
+  await recordRateLimitEvent(db, "voice_convert", rateLimitIdentifier)
+
+  // Resolve the source clip: inline upload, or an existing R2 recording.
+  //
+  // AQU-1854: both branches hand Modal the Blob they already hold rather than
+  // round-tripping through an ArrayBuffer and a second Blob. That halves what
+  // this route keeps resident per input — Modal reads the bytes and writes
+  // them to source.wav/reference.wav regardless of the declared type, so the
+  // re-wrap was only ever carrying metadata nothing downstream reads.
+  let sourceBlob: Blob
   if (sourceEntry && typeof sourceEntry !== "string") {
     // A Blob/File upload (workers-types models the non-string entry as Blob).
-    const blob = sourceEntry as Blob
-    sourceBytes = await blob.arrayBuffer()
-    sourceType = blob.type || sourceType
+    sourceBlob = sourceEntry as Blob
+    if (sourceBlob.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("source clip")
   } else if (typeof sourceAudioId === "string" && sourceAudioId) {
     // sourceAudioId is a form field (unlike /audio's URL-path ids) and lands
     // directly in an R2 key via audioObjectKey — see audio.ts's isPathSafeId
@@ -197,8 +292,11 @@ export async function handleVoiceConvertRequest(
     }
     const obj = await env.SNAPSHOTS.get(audioObjectKey(env, projectId, fileId, sourceAudioId))
     if (!obj) return new Response("source audio not found", { status: 404 })
-    sourceBytes = await obj.arrayBuffer()
-    sourceType = obj.httpMetadata?.contentType || sourceType
+    // R2 reports the object size without reading it, so an oversize stored
+    // recording is rejected before any of it reaches the Worker heap.
+    if (obj.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("stored source recording")
+    sourceBlob = await obj.blob()
+    if (sourceBlob.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("stored source recording")
   } else {
     return new Response("provide a source file or sourceAudioId", { status: 400 })
   }
@@ -206,14 +304,15 @@ export async function handleVoiceConvertRequest(
   // Resolve the reference clip (project-scoped).
   const refObj = await env.SNAPSHOTS.get(voiceRefObjectKey(env, projectId, referenceAudioId))
   if (!refObj) return new Response("reference audio not found", { status: 404 })
-  const refBytes = await refObj.arrayBuffer()
-  const refType = refObj.httpMetadata?.contentType || "audio/wav"
+  if (refObj.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("reference clip")
+  const refBlob = await refObj.blob()
+  if (refBlob.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("reference clip")
 
   // Call Seed-VC on Modal. It expects multipart source + reference and returns
   // a wav. The shared secret travels in X-Auth-Token, never to the browser.
   const modalForm = new FormData()
-  modalForm.append("source", new Blob([sourceBytes], { type: sourceType }), "source")
-  modalForm.append("reference", new Blob([refBytes], { type: refType }), "reference")
+  modalForm.append("source", sourceBlob, "source")
+  modalForm.append("reference", refBlob, "reference")
   modalForm.append("diffusion_steps", String(clampSteps(form.get("diffusionSteps"))))
 
   let modalRes: Response
@@ -222,8 +321,19 @@ export async function handleVoiceConvertRequest(
       method: "POST",
       headers: { "X-Auth-Token": env.SEED_VC_TOKEN },
       body: modalForm,
+      // AQU-1854: without this a hung GPU held the Worker invocation open until
+      // the platform killed it, which surfaced as a spinner that never resolved
+      // rather than an error the user could retry.
+      signal: AbortSignal.timeout(SEED_VC_REQUEST_TIMEOUT_MS),
     })
   } catch (err) {
+    if (isAbortTimeout(err)) {
+      logVendorTimeout("modalVoiceConvert", err)
+      return new Response(
+        `voice conversion upstream did not respond within ${Math.round(SEED_VC_REQUEST_TIMEOUT_MS / 1000)}s`,
+        { status: 504 },
+      )
+    }
     console.error("[voice-convert] upstream unreachable:", err)
     return new Response("voice conversion upstream unreachable", { status: 502 })
   }

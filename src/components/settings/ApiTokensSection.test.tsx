@@ -39,6 +39,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listCredentials, mintCredential, revokeCredential } from "@/lib/sync/credentials"
 import { listMyOrgs } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjectsResult } from "@/lib/sync/cloud-projects"
+import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const mockUseFrontierSession = vi.mocked(useFrontierSession)
 const mockListCredentials = vi.mocked(listCredentials)
@@ -165,11 +166,11 @@ describe("ApiTokensSection", () => {
       window.history.replaceState(null, "", "/preferences/api-tokens?awaiting=1")
       mockListCredentials.mockResolvedValue([])
       render(<ApiTokensSection />)
-      await vi.waitFor(() => expect(screen.getByText(/No tokens yet/)).toBeInTheDocument())
+      await vi.waitFor(() => expect(screen.getByText(/No tokens yet/)).toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
 
       mockListCredentials.mockResolvedValue([ASK_CREDENTIAL])
       await vi.advanceTimersByTimeAsync(3000)
-      await vi.waitFor(() => expect(screen.getByText(/aqk_abc123/)).toBeInTheDocument())
+      await vi.waitFor(() => expect(screen.getByText(/aqk_abc123/)).toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
 
       // Having found it, the section stops polling rather than refreshing forever.
       const calls = mockListCredentials.mock.calls.length
@@ -185,7 +186,7 @@ describe("ApiTokensSection", () => {
     vi.useFakeTimers()
     try {
       render(<ApiTokensSection />)
-      await vi.waitFor(() => expect(mockListCredentials).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(mockListCredentials).toHaveBeenCalledTimes(1), { timeout: STALL_WATCHDOG_MS })
       await vi.advanceTimersByTimeAsync(30000)
       expect(mockListCredentials).toHaveBeenCalledTimes(1)
     } finally {

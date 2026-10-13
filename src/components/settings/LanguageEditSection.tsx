@@ -4,10 +4,9 @@
 // TermbaseEditSection (termbaseEditMinRole) — read that file first; the two
 // differ in exactly two ways:
 //
-//   1. Its default is Maintainer (600), not Project lead. 600 is the floor
-//      every project setting has always sat behind, so leaving this alone
-//      preserves today's behaviour byte-for-byte and an org opts IN to
-//      project-lead language editing.
+//   1. Its default is Project lead (500) when the org has not stored a floor
+//      (AQU-984). An explicit choice, including Maintainer, is what the stored
+//      `languageEditMinRole` number is — absence of the key is "never set."
 //   2. Its scope is the language keys — `sourceLanguage`, `targetLanguage`,
 //      and the extra-lane registry (`targetLanes` / `archivedLanes`). Lanes
 //      ride along with the default target on purpose: a lead who can change

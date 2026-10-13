@@ -66,6 +66,10 @@ vi.mock("@/lib/sync/outbox-flush", async (orig) => ({
   ...(await orig<typeof import("@/lib/sync/outbox-flush")>()),
   subscribeAppliedEvents: () => () => {},
 }))
+// AQU-1721: the pane also reads subscribed termbases; none in these tests.
+vi.mock("@/hooks/useSubscribedConcepts", () => ({
+  useSubscribedConcepts: () => ({ concepts: [], error: null }),
+}))
 
 const fetchConcepts = vi.fn<(projectId: string, jwt: string) => Promise<Concept[]>>()
 vi.mock("@/lib/sync/concepts-read", async (orig) => {

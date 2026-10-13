@@ -13,6 +13,16 @@ import {
   setUnresolvedCommentHighlight,
 } from "@/lib/store/unresolved-comment-highlight-pref"
 import {
+  getHealthScoreColorCoding,
+  resetHealthScoreColorCodingCacheForTests,
+  setHealthScoreColorCoding,
+} from "@/lib/store/health-score-color-coding-pref"
+import {
+  getVisibleStyleSegments,
+  resetVisibleStyleSegmentsCacheForTests,
+  setVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
+import {
   __resetLowMemoryForTests,
   getLowMemoryMode,
   isLowMemoryActive,
@@ -70,6 +80,10 @@ beforeEach(() => {
   setMilestoneSplit(false)
   resetUnresolvedCommentHighlightCacheForTests()
   setUnresolvedCommentHighlight(false)
+  resetHealthScoreColorCodingCacheForTests()
+  setHealthScoreColorCoding(false)
+  resetVisibleStyleSegmentsCacheForTests()
+  setVisibleStyleSegments(false)
   setLowMemoryMode("auto")
   __resetLowMemoryForTests()
 })
@@ -86,6 +100,9 @@ describe("ViewSettingsMenu popover", () => {
 
     const panel = screen.getByTestId("view-settings-popover")
     expect(panel).toBeTruthy()
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller).toHaveClass("overflow-y-auto")
+    expect(scroller).toHaveClass("overflow-x-hidden")
     expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeTruthy()
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
@@ -95,6 +112,22 @@ describe("ViewSettingsMenu popover", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("scrolls the settings list and toggles visible style segments", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const scroller = screen.getByTestId("view-settings-scroller")
+    expect(scroller.className).toContain("overflow-y-auto")
+
+    const toggle = screen.getByRole("switch", { name: "Visible style segments" })
+    expect(toggle).not.toBeChecked()
+    fireEvent.click(toggle)
+
+    expect(screen.getByRole("switch", { name: "Visible style segments" })).toBeChecked()
+    expect(getVisibleStyleSegments()).toBe(true)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
   })
 
@@ -497,5 +530,49 @@ describe("ViewSettingsMenu — Bible data", () => {
     renderViewSettings({ bibleDataVoicesEnabled: false, bibleDataWhosWhoEnabled: false })
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
     expect(screen.queryByTestId("bible-data-view-settings")).toBeNull()
+  })
+})
+
+describe("ViewSettingsMenu — health score color coding", () => {
+  it("offers the toggle off by default and stores the opt-in", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    expect(getHealthScoreColorCoding()).toBe(false)
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(true)
+    expect(
+      screen.getByRole("switch", { name: "Health Score Color Coding" }).getAttribute("aria-checked"),
+    ).toBe("true")
+  })
+
+  it("renders on from a stored preference and turns back off", () => {
+    setHealthScoreColorCoding(true)
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-checked")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(false)
+  })
+
+  it("is disabled with no file open, since there are no drafts to mark", () => {
+    renderViewSettings({ fileOpen: false })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+
+    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    expect(toggle.getAttribute("aria-disabled")).toBe("true")
+
+    fireEvent.click(toggle)
+
+    expect(getHealthScoreColorCoding()).toBe(false)
   })
 })

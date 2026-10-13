@@ -43,6 +43,27 @@ describe("spansToRunXml", () => {
     expect(xml).toContain("<w:i/>")
   })
 
+  // AQU-1719: a Google Docs base rPr already declares every toggle, usually as an
+  // explicit off flag. Splicing ours in beside it would leave two contradictory
+  // flags for one property.
+  it("replaces an explicit off toggle in the base rPr instead of contradicting it", () => {
+    const base = '<w:rPr><w:b w:val="0"/><w:bCs w:val="0"/><w:i w:val="0"/><w:sz w:val="24"/></w:rPr>'
+    const xml = spansToRunXml(htmlToSpans("<strong>x</strong>"), base)
+    expect(xml).not.toContain('<w:b w:val="0"/>')
+    expect(xml).toContain("<w:b/>")
+    // untouched properties survive, including the complex-script sibling
+    expect(xml).toContain('<w:bCs w:val="0"/>')
+    expect(xml).toContain('<w:i w:val="0"/>')
+    expect(xml).toContain('<w:sz w:val="24"/>')
+  })
+
+  it("leaves base toggles the translator did not set alone", () => {
+    const base = '<w:rPr><w:b/><w:sz w:val="24"/></w:rPr>'
+    const xml = spansToRunXml(htmlToSpans("<em>x</em>"), base)
+    expect(xml).toContain("<w:b/>")
+    expect(xml).toContain("<w:i/>")
+  })
+
   it("escapes XML special chars in text", () => {
     expect(spansToRunXml(htmlToSpans("a & b < c"), null)).toContain("a &amp; b &lt; c")
   })
@@ -59,6 +80,18 @@ describe("spansToRunXml", () => {
 })
 
 describe("spansToRuns", () => {
+  it("replaces a base off toggle rather than appending a duplicate (AQU-1719)", () => {
+    const doc = new DOMParser().parseFromString("<root/>", "application/xml")
+    const base = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:rPr")
+    const off = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:b")
+    off.setAttribute("w:val", "0")
+    base.appendChild(off)
+    const runs = spansToRuns(doc, htmlToSpans("<b>x</b>"), base)
+    const flags = runs[0].getElementsByTagName("w:b")
+    expect(flags.length).toBe(1)
+    expect(flags[0].getAttribute("w:val")).toBeNull()
+  })
+
   it("emits one w:r per span with bold toggle", () => {
     const doc = new DOMParser().parseFromString("<root/>", "application/xml")
     const runs = spansToRuns(doc, htmlToSpans("a <b>b</b>"), null)

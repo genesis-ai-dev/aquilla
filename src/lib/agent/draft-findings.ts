@@ -6,15 +6,23 @@
  * Stored shape (the draft's `verdicts` jsonb): `{ "<code>": "flag",
  * _triage: "human" | "advisory", _severity: "0".."4", _decidedBy }`. Codes and
  * categories only — there is no model prose to show, by design.
+ *
+ * AQU-1690: a Bible data finding is `bkp:<check>` ("bkp:V2"). Its value is
+ * the finding's reason and pack evidence as encoded params (never prose),
+ * which the chips format with the editor's Bible data check messages.
  */
 
-export type FindingKind = "dissent" | "lint" | "unsupported" | "redrafted"
+import { decodeBibleParams } from "../../../db/shared/bible-checks/params"
+
+export type FindingKind = "dissent" | "lint" | "bkp" | "unsupported" | "redrafted"
 
 export interface DraftFinding {
   code: string
   kind: FindingKind
-  /** The verifier (dissent) or rule id (lint); null for the bare codes. */
+  /** The verifier (dissent), rule id (lint) or Bible data check (bkp, e.g. "V2"); null for the bare codes. */
   detail: string | null
+  /** A `bkp:` finding's reason and evidence, when the server stored them. */
+  params?: Record<string, string>
 }
 
 export interface DraftFindings {
@@ -23,19 +31,23 @@ export interface DraftFindings {
   severity: number
 }
 
-function parseCode(code: string): DraftFinding | null {
+function parseCode(code: string, value: string | undefined): DraftFinding | null {
   if (code === "unsupported" || code === "redrafted") return { code, kind: code, detail: null }
   const [prefix, ...rest] = code.split(":")
   const detail = rest.join(":")
   if ((prefix === "dissent" || prefix === "lint") && detail) return { code, kind: prefix, detail }
+  if (prefix === "bkp" && detail) {
+    const params = decodeBibleParams(value)
+    return { code, kind: "bkp", detail, ...(Object.keys(params).length > 0 ? { params } : {}) }
+  }
   return null
 }
 
 export function findingsFromVerdicts(verdicts: Record<string, string> | null | undefined): DraftFindings {
   if (!verdicts) return { findings: [], triage: null, severity: 0 }
-  const findings = Object.keys(verdicts)
-    .filter((k) => !k.startsWith("_"))
-    .map(parseCode)
+  const findings = Object.entries(verdicts)
+    .filter(([k]) => !k.startsWith("_"))
+    .map(([k, v]) => parseCode(k, v))
     .filter((f): f is DraftFinding => f !== null)
   const triage = verdicts._triage === "human" || verdicts._triage === "advisory" ? verdicts._triage : null
   const severity = Number.parseInt(verdicts._severity ?? "0", 10)

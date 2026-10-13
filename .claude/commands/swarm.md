@@ -7,12 +7,12 @@ You are the **swarm orchestrator** for codex-web-app. You take the name of a Lin
 **project**, find it, and work through every issue it contains — decomposing oversized
 issues into sub-issues, ordering the work so agents don't step on each other, fanning out
 sonnet subagents that each run the per-issue `/issue` lifecycle, accumulating verified work
-on an integration branch, and promoting to main only when green. This is `/issue` at fleet
+on an integration branch, and landing it on `dev` (the trunk) via a PR only when green. This is `/issue` at fleet
 scale, governed by the Swarm Orchestration skill's hard rules.
 
 Arguments: $ARGUMENTS
 
-You are the ONLY actor that merges to main. Subagents never push, never deploy, never
+You are the ONLY actor that merges to `dev`. Subagents never push, never deploy, never
 promote. Convergence — every eligible issue Fixed-or-blocked and integration green — is the
 success state. **Do not manufacture work.**
 
@@ -20,13 +20,20 @@ success state. **Do not manufacture work.**
 
 - Linear team: `Aquilla` (id `de0f5d29-418f-4f62-ade7-02f77974c598`)
 - Per-issue lifecycle: `.claude/commands/issue.md` — the contract every agent follows.
-- Status pipeline: `Triage → Backlog → Todo → Dispatched → Fixed → Ready for Review → Ready for QA` *(terminal)*.
+- Status pipeline: `Triage → Backlog → Todo → Dispatched → Fixed → Ready for QA → Awaiting Deployment` *(the swarm's terminal)*.
+  `Deployed` happens only when a person deploys a `release/YYYY/MM/DD[-NN]` branch cut from `dev`
+  (`docs/DEPLOYMENT-ENVIRONMENTS.md` → "Cutting a release"). `main` is retired — never target it.
   - **`Triage`** (id `086173c5-e3e4-4f37-93d5-ae2f069ab6a6`) = the **human / HITL queue** (decisions,
     reviews, human-implementation, un-vetted issues). **The swarm never touches it** — intake is `Todo` only.
   - **`Todo`** (id `a3c6383f-3893-4691-a75a-b4add1ff1ce1`) = agent-ready (AFK), the swarm's only intake.
   - **`Dispatched`** (id `539bcf69-8c7a-4282-93d0-5631430b66ed`) = "Dev/AI has begun work; if it
     stalls it may be eligible to be picked up again." It is the swarm's **claim/lock**: an issue in
-    `Dispatched` is owned by a live agent and MUST NOT be picked up by another agent or a `/swarm` re-run.
+    `Dispatched` is owned by a live agent and MUST NOT be picked up by another agent or a `/swarm` re-run
+    — **unless it is stale** (see Step 0.5). `Dispatched` is never a parking status: nothing may sit
+    there without a live owner, and every `/swarm` run sweeps the whole team for stale claims.
+  - **Stale** = BOTH (a) the issue's Linear `updatedAt` is older than **3 days**, AND (b) no branch or PR
+    for it has a commit in the last 3 days (check `get_issue` → `gitBranchName` and its attachments;
+    `git log origin/<branch> --since=3.days`; the PR's last push).
 - Spec source of truth: `~/frontierrnd/aquilla-specs` (agents reconcile per `/issue` Step 2.5).
 - Durable swarm state: `docs/swarm/ORCHESTRATION.md` + `docs/swarm/TRACES.md`. **These survive
   context compaction — they are the source of truth, not your context window.** Read them every
@@ -34,7 +41,7 @@ success state. **Do not manufacture work.**
 
 ## Flags
 
-- `--deploy` — after main is green, deploy to staging and advance Fixed issues per `/issue` Step 3. Default: stop at Fixed-on-main.
+- `--deploy` — after integration is green, open the PR to `dev` and drive it through the bot walk + merge per `/issue` Steps 3–4 (issues → `Ready for QA` → `Awaiting Deployment`). Default: stop at Fixed on `swarm/integration`.
 - `--no-verify` — pass through to agents only when the user explicitly insists. This may skip live/dev-stack
   verification, but it never waives required test updates. Mark the swarm incomplete if affected tests or the
   build are red. The full smoke suite may remain unrun during implementation, but must pass before push,
@@ -50,6 +57,30 @@ success state. **Do not manufacture work.**
    names. If exactly one matches, use it. If several, **ask which one** — never guess.
 2. Record the project id + name. Announce: *"Swarming project **<name>** (id …)."*
 
+## Step 0.5 — Sweep stale `Dispatched` claims (team-wide)
+
+Run this on **every** `/swarm` run, before building the backlog, and regardless of which project
+was named. The goal: nothing slips through the cracks. A ticket left in `Dispatched` with no live
+owner is stranded work, and an agent that "could not finish" must not leave it there.
+
+1. `list_issues` for the **whole team** with `state: Dispatched` (not only the swarm's project).
+2. Keep only **stale** issues (definition in Constants: no Linear update AND no branch/PR commit in
+   3 days). Skip anything a live agent in this session owns (listed in §3 of ORCHESTRATION.md).
+3. For each stale issue, decide ONE outcome, and always post a Linear comment naming the evidence:
+
+   | Finding | Action |
+   |---|---|
+   | Its `AQU-###` is in a commit **subject** (or a merge commit's branch name) on `origin/dev` or in the newest calver tag. Body-only mentions do not count. | Advance the status: `Awaiting Deployment` if on `dev` only, `Deployed` if in the tag. Check `git log --grep Revert` first. |
+   | A branch or PR exists with real work. | Keep the branch. Revert to `Todo` with a comment pointing at it, so the next wave resumes from that branch instead of restarting. |
+   | Nothing exists and the ticket still needs code. | Revert to `Todo`; it joins this run's backlog (Step 1). |
+   | The last agent comment records an **environment blocker** (e.g. no Docker, no prod DB access). | Move to `Blocked` (or `Triage` if the team has no Blocked state) with the blocker quoted. Do not retry it in a loop. |
+   | The ticket looks mistaken, already satisfied, or needs a human decision. | Move to `Triage` with a one-line reason. A human cancels it. |
+
+4. **Never** move a swept issue to `Done`, `Canceled`, or `Duplicate` on your own, and never to
+   `Deployed` without a commit-subject match in the tag. When unsure, choose `Triage`.
+5. Record every swept issue (id, old status, new status, reason) in §M of ORCHESTRATION.md and in
+   the final report. With `--dry-run`, list the planned moves and apply none.
+
 ## Step 1 — Build the backlog
 
 1. `list_issues` for the project. **Eligible = status `Todo` only** (`a3c6383f-3893-4691-a75a-b4add1ff1ce1`) —
@@ -62,14 +93,13 @@ success state. **Do not manufacture work.**
    - **`Backlog` is not eligible** — it is agent-ready-but-deferred. If the maintainer wants Backlog work
      drained, they promote it to `Todo` first. (Note this in the report if the queue looks thin because
      work is parked in Backlog.)
-   - **Treat `Dispatched` issues as already-claimed locks — skip them** (another live agent or a
-     concurrent `/swarm` owns them). If a `Dispatched` issue is clearly **stale** (no live agent this
-     session, no recent activity), it is eligible to be reclaimed: revert it to `Todo` first (record why
-     in §M), then treat it as normal `Todo`.
+   - **Treat non-stale `Dispatched` issues as already-claimed locks — skip them** (another live agent or a
+     concurrent `/swarm` owns them). Stale ones were already resolved in Step 0.5; anything it reverted
+     to `Todo` is eligible here as normal `Todo`.
 2. For each, capture: AQU-###, title, priority, estimate, the rough surface/files it touches
    (skim the description), and any `blocked-by`/parent relations.
 3. **Exclude and record why** (in §EXCLUDED of ORCHESTRATION.md): issues whose primary file is
-   **dirty in main right now** (run `git status` — these are another actor's in-flight work and
+   **dirty in the main checkout right now** (run `git status` — these are another actor's in-flight work and
    are forbidden paths), issues already assigned to someone else and in progress, and obvious
    junk/test issues. When in doubt, exclude and note it rather than clobber.
 
@@ -141,7 +171,7 @@ If `--dry-run`: print the wave plan and **stop here.**
       integrated result with no skipped/weakened assertions added merely to make the gate green.
 - [ ] `cd sync-worker && npx tsc --noEmit && npm test` (and auth-worker) green **if** any agent touched them.
 - [ ] Each fix verified on the **real dev stack (live UI)** before its issue → Fixed; spec reconciled per `/issue` Step 2.5.
-- [ ] Promoted to main only with main's working tree clean apart from recorded protected files (never clobbered).
+- [ ] Landed on `dev` only via a PR whose bot walk is PASS at its head sha, and only with the main checkout's working tree clean apart from recorded protected files (never clobbered).
 - [ ] Every remaining gap traced in `docs/swarm/TRACES.md`.
 
 ## Step 5 — Fan out (one wave at a time)
@@ -171,8 +201,9 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/aqu-###/node_modules"
   kept) — do not re-claim or reassign; just restate repro/acceptance, fix surgically (systematic-debugging for bugs /
   brainstorming for improvements), verify, reconcile the spec (Step 2.5), then move the issue
   **`Dispatched → Fixed`** and post a Linear comment. A user-facing change without its corresponding journey
-  tests is unfinished. **Leave it in `Dispatched` if you cannot finish**
-  — report the blocker; the orchestrator decides whether to revert it to `Todo`.
+  tests is unfinished. **If you cannot finish, do not leave it in `Dispatched`.** Post a handoff
+  comment (what you tried, what you ruled out, the blocker, concrete next steps, branch name), then
+  report it; the orchestrator reverts it to `Todo` (resumable), `Blocked`, or `Triage` per Step 0.5.
 - **Files you OWN** (the issue's surface) and **FORBIDDEN files** (every other wave member's surface +
   recorded protected paths) — explicit lists. Ownership MUST include the matching `e2e/specs/<area>/`
   spec, shared page object, and `e2e/JOURNEYS.md` when the work changes or adds a user journey. Schedule
@@ -228,11 +259,12 @@ judges its result unsuccessful (and is not immediately respawning a finisher int
 **revert the issue from `Dispatched` back to `Todo`** so it becomes eligible to be picked up again.
 Comment on the issue with why (what failed, any SWARM-TODO/blocker), and update §3/§M. An issue should
 only be left in `Dispatched` while a live agent owns it; a stale `Dispatched` with no owner is a bug —
-release it to `Todo`. If the issue is genuinely blocked (needs an external unblock), say so in the
-Linear comment and trace it rather than churning it back into the queue.
-5. **Promote to main** only when integration is green, the full smoke suite passes, AND `git status` on main is clean apart from
+release it using the Step 0.5 table. If the issue is genuinely blocked (needs an external unblock), say
+so in the Linear comment, move it to `Blocked` (or `Triage`), and trace it rather than churning it back
+into the queue.
+5. **Land on `dev`** (open/refresh the `swarm/integration` → `dev` PR; merge once the bot walk is PASS at its head sha) only when integration is green, the full smoke suite passes, AND `git status` in the main checkout is clean apart from
    recorded protected files: `H != base`, `D == 0` (or only untracked files you own), no `MERGE_HEAD`.
-   FF if possible; squash-merge if histories diverged deeply (see REFERENCE.md §5). If main is dirty
+   Squash-merge if histories diverged deeply (see REFERENCE.md §5). If the main checkout is dirty
    in a way that overlaps your changes — **hold, never force.**
 6. Unlock the next wave as prerequisites merge; dispatch it (Step 5).
 
@@ -241,13 +273,14 @@ Linear comment and trace it rather than churning it back into the queue.
 When the §0 checklist is fully green: stop. This is single-pass — no cron. Re-run `/swarm <project>`
 to resume (it reads ORCHESTRATION.md/TRACES.md and continues). Do not spin agents on finished work.
 
-If `--deploy` was passed and main is green: deploy to staging and advance each Fixed issue to
-`Ready for Review` per `/issue` Step 3 (if staging infra is absent, say so and leave at Fixed).
+If `--deploy` was passed and integration is green: open the PR to `dev`, advance each Fixed issue to
+`Ready for QA` when the walk passes, merge, then advance them to `Awaiting Deployment` per `/issue`
+Steps 3–4. Staging is retired; never run a production deploy — release deploys are a person's call.
 
 ## Step 9 — Report
 
 End with: project name; a table of every issue and the status it now sits in (Fixed / blocked /
-Ready for Review) with its Linear URL; what was verified (tsc, vitest, build, live-UI); what was
-promoted to main (sha); any sub-issues created; and the explicit next action + owner. **Surface
+Ready for QA / Awaiting Deployment) with its Linear URL; what was verified (tsc, vitest, build, live-UI); what was
+merged to `dev` (PR + sha); any sub-issues created; and the explicit next action + owner. **Surface
 everything skipped or blocked — never claim "complete" if the verification gate, smoke suite, or a
 promotion was bypassed.**

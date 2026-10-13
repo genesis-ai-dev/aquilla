@@ -83,7 +83,7 @@ export async function isOwnLaneAssignment(
   try {
     const row = await db
       .prepare(
-        'SELECT created_by, target_lang, unassigned_at FROM assignments WHERE assignment_id = ? AND project_id = ?',
+        'SELECT a.created_by, COALESCE(l.legacy_tag, \'\') AS target_lang, a.unassigned_at FROM assignments a LEFT JOIN lanes l ON l.project_id = a.project_id AND l.id = a.lane_id WHERE a.assignment_id = ? AND a.project_id = ?',
       )
       .bind(assignmentId, projectId)
       .first<{ created_by: number | string; target_lang: string | null; unassigned_at: number | null }>()

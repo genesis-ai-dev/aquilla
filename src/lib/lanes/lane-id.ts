@@ -9,3 +9,8 @@ export function newLaneId(): string {
   crypto.getRandomValues(b)
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 }
+
+/** True when `value` is the opaque id shape {@link newLaneId} mints. A language never is. */
+export function isLaneId(value: string): boolean {
+  return /^[0-9a-f]{8}$/.test(value)
+}

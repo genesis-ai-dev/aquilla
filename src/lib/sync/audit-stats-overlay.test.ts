@@ -477,4 +477,75 @@ describe("applyOutboxOverlay — lane scoping (AQU-1506)", () => {
     })
     expect(out.get("c1")!.waivers.map((w) => w.ruleId)).toEqual(["rule-1"])
   })
+
+  // ── AQU-1740: per-finding waivers ────────────────────────────────────────
+  // The overlay is what makes a waive feel instant, so it has to key the same
+  // way the projection does — otherwise waiving a second repeated word would
+  // appear to lift the first until the authoritative read lands.
+  it("keys pending waivers by (ruleId, matchHash), so a second finding adds a row", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec({ ...waive("w1", "c1", "alice", "rule-1", 1100), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-b" } }, 1200),
+      ],
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.matchHash)).toEqual(["h-a", "h-b"])
+  })
+
+  it("re-waiving the SAME finding replaces its entry (set semantics preserved)", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec({ ...waive("w1", "c1", "alice", "rule-1", 1100), payload: { ruleId: "rule-1", matchHash: "h-a", reason: "old" } }, 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-a", reason: "new" } }, 1200),
+      ],
+    })
+    const waivers = out.get("c1")!.waivers
+    expect(waivers).toHaveLength(1)
+    expect(waivers[0].reason).toBe("new")
+  })
+
+  it("a per-finding waiver does not displace the cell-wide one, or vice versa", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec(waive("w1", "c1", "alice", "rule-1", 1100), 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1200),
+      ],
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.matchHash)).toEqual([undefined, "h-a"])
+  })
+
+  it("un-waiving one finding leaves the rule's other findings waived", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec({ ...waive("w1", "c1", "alice", "rule-1", 1100), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-b" } }, 1200),
+        rec({ ...unwaive("u1", "c1", "alice", "rule-1", 1300), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1300),
+      ],
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.matchHash)).toEqual(["h-b"])
+  })
+
+  it("a cell-wide unwaive does not lift per-finding waivers", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [
+        rec(waive("w1", "c1", "alice", "rule-1", 1100), 1100),
+        rec({ ...waive("w2", "c1", "alice", "rule-1", 1200), payload: { ruleId: "rule-1", matchHash: "h-a" } }, 1200),
+        rec(unwaive("u1", "c1", "alice", "rule-1", 1300), 1300),
+      ],
+    })
+    expect(out.get("c1")!.waivers.map((w) => w.matchHash)).toEqual(["h-a"])
+  })
+
+  it("omits matchHash for a cell-wide waive, matching the read route's wire shape", () => {
+    const out = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(waive("w1", "c1", "alice", "rule-1", 1100), 1100)],
+    })
+    expect("matchHash" in out.get("c1")!.waivers[0]).toBe(false)
+  })
 })

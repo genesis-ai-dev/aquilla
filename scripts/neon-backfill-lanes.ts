@@ -44,7 +44,7 @@
 //        --statement-timeout <pg interval>  --lock-timeout <pg interval>
 import { retryingLaneIdCollision } from '../db/shared/lanes'
 import { resolveProjectRoleIncludingArchivedShared } from '../db/shared/project-roles'
-import { makePostgres, type AquillaDb } from '../db/shim/postgres'
+import { makeMaintenancePostgres, type AquillaDb } from '../db/shim/postgres'
 import { planLanesForProject, type LaneRolePlan } from '../src/lib/lanes/backfill-plan'
 import { planLaneGrants } from '../src/lib/lanes/grant-backfill'
 import { newLaneId } from '../src/lib/lanes/lane-id'
@@ -357,14 +357,19 @@ async function main(): Promise<void> {
   const statementTimeout = flagValue('--statement-timeout') ?? '300s'
   const lockTimeout = flagValue('--lock-timeout') ?? '3s'
 
-  const db = makePostgres(connectionString(), 1)
+  const db = makeMaintenancePostgres(connectionString(), 1)
   try {
     // Prod-safety: bound each statement and never wait long on a lock.
     await db.exec(`SET statement_timeout = '${statementTimeout}'`)
     await db.exec(`SET lock_timeout = '${lockTimeout}'`)
     await requireBackfillTables(db)
 
-    let sql = `SELECT p.id, ps.source_language, ps.target_language, ps.target_lanes
+    // 0156 dropped the generated columns. The keys remain inside settings;
+    // this backfill is allowed to read them. It must not name the columns.
+    let sql = `SELECT p.id,
+                      (ps.settings::jsonb)->>'sourceLanguage' AS source_language,
+                      (ps.settings::jsonb)->>'targetLanguage' AS target_language,
+                      (ps.settings::jsonb)->'targetLanes' AS target_lanes
                  FROM projects p
                  LEFT JOIN project_settings ps ON ps.project_id = p.id`
     const binds: unknown[] = []

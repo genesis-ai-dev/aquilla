@@ -471,9 +471,10 @@ describe("non-scripture unit copy (AQU-658)", () => {
 
 // ── AQU-538 (§3.5): lane select ──────────────────────────────────────────────
 describe("lane select (AQU-538)", () => {
-  it("is hidden when the project has no extra lanes", () => {
-    render(<AssignModal {...BASE_PROPS} />)
+  it("names the only lane instead of hiding the field", () => {
+    render(<AssignModal {...BASE_PROPS} defaultLaneLabel="French" />)
     expect(screen.queryByRole("combobox", { name: /language lane/i })).toBeNull()
+    expect(screen.getByTestId("assign-modal-lane-fixed")).toHaveTextContent("French")
   })
 
   it("renders and pre-fills from defaultLane when the project has extra lanes", () => {

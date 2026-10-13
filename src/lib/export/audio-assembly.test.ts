@@ -3,8 +3,10 @@ import {
   applyTrimPcm,
   assembleAudioEntries,
   buildTimeline,
-  writeTimelineTrack,
+  SILENCE_CHUNK_SAMPLES,
+  writeTimelineTrackParts,
   type AudioAssemblyArgs,
+  type TimelineClip,
 } from "./audio-assembly"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import type { CellData } from "@/hooks/useCells"
@@ -273,31 +275,63 @@ describe("assembleAudioEntries — voice-clips", () => {
   })
 })
 
+/** A placed clip as the assembler hands them to the timeline: PCM16 in blob
+ *  storage, never a Float32Array (AQU-1862). */
+function placedClip(
+  cellId: string,
+  voiceId: string,
+  samples: number,
+  value = 0,
+): TimelineClip {
+  return { cellId, voiceId, samples, data: new Blob([new Int16Array(samples).fill(value)]) }
+}
+
+async function pcm16Of(parts: readonly Blob[]): Promise<Int16Array> {
+  const buf = await new Blob(parts as BlobPart[]).arrayBuffer()
+  return new Int16Array(buf)
+}
+
 describe("voice-timeline", () => {
   it("buildTimeline places clips at cumulative document-order offsets", () => {
     const timeline = buildTimeline([
-      { cellId: "c1", voiceId: "v-mary", pcm: new Float32Array(100) },
-      { cellId: "c2", voiceId: "v-john", pcm: new Float32Array(150) },
-      { cellId: "c3", voiceId: "v-mary", pcm: new Float32Array(50) },
+      placedClip("c1", "v-mary", 100),
+      placedClip("c2", "v-john", 150),
+      placedClip("c3", "v-mary", 50),
     ])
     expect(timeline.totalSamples).toBe(300)
     expect(timeline.placements.map((p) => p.offset)).toEqual([0, 100, 250])
   })
 
-  it("writeTimelineTrack fills only that voice's spans, zeros elsewhere", () => {
+  it("writeTimelineTrackParts fills only that voice's spans, zeros elsewhere", async () => {
     const timeline = buildTimeline([
-      { cellId: "c1", voiceId: "v-mary", pcm: new Float32Array(100).fill(0.5) },
-      { cellId: "c2", voiceId: "v-john", pcm: new Float32Array(150).fill(0.4) },
-      { cellId: "c3", voiceId: "v-mary", pcm: new Float32Array(50).fill(0.3) },
+      placedClip("c1", "v-mary", 100, 500),
+      placedClip("c2", "v-john", 150, 400),
+      placedClip("c3", "v-mary", 50, 300),
     ])
-    const mary = writeTimelineTrack(timeline, "v-mary")
+    const mary = await pcm16Of(writeTimelineTrackParts(timeline, "v-mary"))
     expect(mary.length).toBe(300)
-    expect(mary[0]).toBe(0.5)
-    expect(mary[99]).toBe(0.5)
+    expect(mary[0]).toBe(500)
+    expect(mary[99]).toBe(500)
     expect(mary[100]).toBe(0) // silence while John speaks
     expect(mary[249]).toBe(0)
-    // Float32Array storage rounds 0.3 to the nearest float32.
-    expect(mary[250]).toBe(Math.fround(0.3))
+    expect(mary[250]).toBe(300)
+  })
+
+  it("emits a stem's silence in bounded chunks, never one full-length buffer", async () => {
+    // A long middle clip by another voice is the gap that used to be allocated
+    // whole on every other voice's stem (AQU-1862).
+    const gap = SILENCE_CHUNK_SAMPLES * 2 + 5
+    const timeline = buildTimeline([
+      placedClip("c1", "v-mary", 1, 7),
+      placedClip("c2", "v-john", gap, 9),
+      placedClip("c3", "v-mary", 1, 7),
+    ])
+    const parts = writeTimelineTrackParts(timeline, "v-mary")
+    const total = parts.reduce((n, b) => n + b.size, 0)
+    expect(total).toBe(timeline.totalSamples * 2)
+    // Every part Mary's stem allocates is a chunk or a clip, both bounded.
+    expect(Math.max(...parts.map((b) => b.size))).toBeLessThanOrEqual(SILENCE_CHUNK_SAMPLES * 2)
+    expect(parts.length).toBeGreaterThan(2)
   })
 
   it("emits equal-length stems per voice with clips at their offsets", async () => {
@@ -328,5 +362,49 @@ describe("voice-timeline", () => {
     expect(john[0]).toBe(0)
     expect(john[150]).not.toBe(0)
     expect(john[250]).toBe(0)
+  })
+})
+
+// AQU-1862: an hour of audio is ~690 MB of Float32, so what the assembler is
+// still HOLDING when it moves to the next clip is the whole bug. peakPcmBytes
+// reports it; these lock it to roughly one clip in every mode.
+describe("assembleAudioEntries — retained PCM is bounded by one clip", () => {
+  const clips = { "a1.webm": clipBytes(50, 100), "a2.webm": clipBytes(40, 150), "a3.webm": clipBytes(30, 50) }
+  const cells = [
+    audioCell("c1", "a1", "webm"),
+    audioCell("c2", "a2", "webm"),
+    audioCell("c3", "a3", "webm"),
+  ]
+  /** Decoded Float32 (4 B) + its PCM16 copy (2 B) for the biggest clip. */
+  const oneClipCeiling = 150 * 6
+  const allClipsFloat32 = (100 + 150 + 50) * 4
+
+  for (const mode of ["file-clip", "voice-clips", "voice-timeline"] as const) {
+    it(`${mode} never retains more than the clip in flight`, async () => {
+      const { fetchBytes } = makeFetch(clips)
+      const result = await assembleAudioEntries(baseArgs({ mode, cells, fetchBytes }))
+      expect(result.entries.length).toBeGreaterThan(0)
+      expect(result.peakPcmBytes).toBeLessThanOrEqual(oneClipCeiling)
+      expect(result.peakPcmBytes).toBeLessThan(allClipsFloat32)
+    })
+  }
+
+  it("drops a clip shared by several cells once the last cell has had it", async () => {
+    // Shared clips are decoded once and must not then sit in the cache for the
+    // rest of the file — with 3 cells on one clip that is 3× the retention.
+    const { fetchBytes, calls } = makeFetch({ "shared.webm": clipBytes(60, 200) })
+    const result = await assembleAudioEntries(baseArgs({
+      mode: "separate-clips",
+      cells: [
+        audioCell("c1", "shared", "webm", { trimStartMs: 1 }),
+        audioCell("c2", "shared", "webm", { trimStartMs: 1 }),
+        audioCell("c3", "shared", "webm", { trimStartMs: 1 }),
+      ],
+      fetchBytes,
+    }))
+    expect(calls).toEqual(["shared.webm"]) // one fetch+decode, as before
+    expect(result.entries).toHaveLength(3)
+    // 200 samples Float32 + the trimmed PCM16 copy of one cell's slice.
+    expect(result.peakPcmBytes).toBeLessThanOrEqual(200 * 4 + 200 * 2)
   })
 })

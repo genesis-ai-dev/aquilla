@@ -8,6 +8,7 @@
 // marks disputed (slice 3). AQU-1692: a "Check" badge where the data is unsure
 // who speaks, a maintainer's correction ("Corrected by …") with the action
 // that opens the correction dialog, and "Adopt voices as cast".
+// AQU-1693: "Add to terminology" by each name the project has not agreed yet.
 
 import { Fragment } from "react"
 import { AlertTriangle, CircleHelp } from "lucide-react"
@@ -25,6 +26,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { chapterOf } from "@/lib/bible-data/voice-cast"
 import type { AppliedVoiceOverride } from "@/lib/bible-data/voice-overrides"
+import { EntityTermAction } from "./EntityTermAction"
 import type { CellVoiceView } from "./voices-context"
 import { evidenceSourceKey, labelSourceKey, narratorKey, speechTypeKey } from "./voice-text"
 
@@ -104,7 +106,13 @@ export function VoiceDetails({ id, view, nameOf, placement = "popover" }: VoiceD
                   <dt dir="auto">
                     <bdi>{label.label}</bdi>
                   </dt>
-                  <dd className="text-muted-foreground">{t(labelSourceKey(label))}</dd>
+                  <dd className="flex flex-wrap items-baseline gap-x-2 text-muted-foreground">
+                    <span>{t(labelSourceKey(label))}</span>
+                    <EntityTermAction
+                      entity={Object.hasOwn(context.entities, id) ? context.entities[id] : undefined}
+                      name={label.label}
+                    />
+                  </dd>
                 </Fragment>
               )
             })}

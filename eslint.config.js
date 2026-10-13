@@ -24,7 +24,9 @@ export default defineConfig([
   // .claude holds local agent worktrees (full repo copies with their own
   // node_modules); ESLint 10 traverses dot-directories and resolves each file's
   // nearest eslint.config.js, so without this ignore it loads those copies' configs.
-  globalIgnores(['dist', '.claude']),
+  // Browser smoke builds and Wrangler bundles are generated, and Wrangler
+  // removes its temporary files while the local test stack runs.
+  globalIgnores(['dist', 'dist-e2e-*', '**/.wrangler/**', '.claude', '.worktrees']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

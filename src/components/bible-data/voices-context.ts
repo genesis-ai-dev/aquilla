@@ -28,7 +28,10 @@ export interface BibleVoicesContextValue {
   showRails: boolean
   /** Filter the editor to the cells where `speaker` speaks. */
   showLinesBy: (speaker: BkpEntityId) => void
-  /** AQU-1692: the book's participants (the pack's `people` layer), for a maintainer's picker. */
+  /**
+   * The book's participants (the pack's `people` layer): a maintainer's picker
+   * (AQU-1692) and "Add to terminology" on a speaker or listener (AQU-1693).
+   */
   entities: Readonly<Record<BkpEntityId, BkpEntity>>
   /** AQU-1692: what a maintainer may do from the voice details; null for everyone else. */
   maintainer: VoiceMaintainerActions | null

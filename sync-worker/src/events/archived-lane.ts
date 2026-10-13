@@ -8,6 +8,7 @@ import {
   archivedTagsFromSettings,
   type ArchiveLaneRow,
 } from '../../../src/lib/lanes/archived-lane'
+import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import type { RequestCache } from './request-cache'
 
 const rowsByCache = new WeakMap<RequestCache, Map<string, Promise<ArchiveLaneRow[]>>>()
@@ -18,7 +19,9 @@ async function loadRows(db: AquillaDb, projectId: string): Promise<ArchiveLaneRo
     .filter((lane) => lane.role === 'target')
     .map((lane) => ({
       id: lane.id,
-      name: lane.name,
+      // AQU-1592: the refusal message names the lane the way the screen does —
+      // the name when one was set, else the language.
+      name: laneDisplayName(lane),
       legacyTag: lane.legacyTag,
       archivedAt: lane.archivedAt,
     }))
@@ -54,9 +57,25 @@ export function targetLaneRowsFor(
 
 /**
  * AQU-1532: true when the project has a target lane row whose legacy tag is
- * exactly `tag` — the same match the projection's lane_id lookup uses. The
- * default lane (`''`) always counts as present. Shares the per-request lane
- * list with the archived-lane check.
+ * exactly `tag` — the same match the projection's lane_id lookup uses, so a
+ * false here is exactly the write that would resolve a NULL `lane_id`.
+ * A named tag has to exist or the write is a 422.
+ *
+ * `''` — the omitted tag, the former default lane — resolves when the project
+ * HAS the `''` row (a legacy/migrated project), and on a project with NO target
+ * lane at all. That second case is the only one where the `''` bridge can
+ * still be minted: a lane-less `target.cell.*` write splices
+ * `ensureBlankTargetBridgeStmt` into its own batch, and a validation may ride
+ * the same outbox flush as that commit (a brand-new project), which this
+ * pre-flight read cannot see.
+ *
+ * AQU-1884 closed the `''` waiver for validations, AQU-1900 for
+ * `target.cell.*`. Since AQU-1615 the bridge INSERT adds a row only when the
+ * project has no target lane, so on a project whose target lanes all carry a
+ * real tag either write projected a NULL `lane_id` and failed the whole batch
+ * as a per-event 500 ("DB batch failed") instead of saying so.
+ *
+ * Shares the per-request lane list with the archived-lane check.
  */
 export async function targetLaneRowExists(
   db: AquillaDb,
@@ -64,9 +83,9 @@ export async function targetLaneRowExists(
   tag: string,
   cache: RequestCache,
 ): Promise<boolean> {
-  if (tag === '') return true
   const lanes = await rowsFor(db, projectId, cache)
-  return lanes.some((lane) => lane.legacyTag === tag)
+  if (lanes.some((lane) => lane.legacyTag === tag)) return true
+  return tag === '' && lanes.length === 0
 }
 
 /**

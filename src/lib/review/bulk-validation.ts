@@ -9,7 +9,7 @@
 // visible symptom was a batch that took longer than it should.
 //
 // One predicate, used by both, is what stops that happening again.
-import { isBulkValidationEligible, type BulkReviewPolicy } from "@/lib/review/review-eligibility"
+import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { isOwnTextEdit } from "@/lib/review/text-validation-policy"
 import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 
@@ -20,7 +20,7 @@ export interface BulkValidatableCell {
   lastEditor?: string | null
 }
 
-export type BulkValidatePolicy = BulkReviewPolicy & {
+export interface BulkValidatePolicy {
   /** The project's "Allow self-validation". Only `false` withholds anything. */
   allowSelfValidation?: boolean
 }
@@ -32,7 +32,7 @@ export function isBulkValidatableByMe(
   activeLane: string,
   policy: BulkValidatePolicy = {},
 ): boolean {
-  if (!isBulkValidationEligible(cell, policy)) return false
+  if (!isBulkValidationEligible(cell)) return false
   // AQU-633: a scoped member's validate on an out-of-scope cell is a
   // guaranteed 403. The server stays authoritative; this only keeps the
   // doomed event out of the outbox.

@@ -17,8 +17,12 @@ import { describe, it, expect } from "vitest"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
+import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import { JHN_A_STRUCTURE } from "../../../db/shared/bible-checks/__fixtures__/pack-a"
+import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import {
   scanTermConsistency,
+  scanCapitalization,
   checkableRules,
   groupInfractionsByRule,
   runDeterministicCheck,
@@ -191,6 +195,81 @@ describe("scanTermConsistency", () => {
 })
 
 // ---------------------------------------------------------------------------
+// scanCapitalization (AQU-1734)
+// ---------------------------------------------------------------------------
+
+describe("scanCapitalization", () => {
+  it("flags a one-off mixed-case typo, grouped by the offending form", () => {
+    const cells = [
+      cell("He said the word", "Alisema tHe neno", { cellLabel: "MAT 1:1" }),
+      cell("He went", "Alienda", { cellLabel: "MAT 1:2" }),
+    ]
+    const { findings, exceptions } = scanCapitalization(cells)
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({ code: "mixed-case", form: "tHe" })
+    expect(findings[0].cells).toEqual([{ cellId: cells[0].id, cellLabel: "MAT 1:1" }])
+    expect(exceptions).toEqual([])
+  })
+
+  it("proposes a recurring lowercase-prefix pattern as an exception instead of flagging every cell", () => {
+    // The failure this guards: 40 cells using the project's own noun-class
+    // prefix would otherwise be 40 findings nobody can act on.
+    const cells = Array.from({ length: 40 }, (_, i) =>
+      cell(`verse ${i}`, i % 2 === 0 ? `wanasema kiSwahili ${i}` : `lugha ya kiNgozi ${i}`, {
+        id: `c${i}`,
+      }),
+    )
+    const { findings, exceptions } = scanCapitalization(cells)
+    expect(findings).toEqual([])
+    expect(exceptions.map((e) => e.form)).toEqual(["ki-"])
+    expect(exceptions[0].examples).toEqual(["kiNgozi", "kiSwahili"])
+  })
+
+  it("keeps flagging a genuine typo in a project that has learned exceptions", () => {
+    const cells = [
+      cell("a", "kiSwahili moja"),
+      cell("b", "kiSwahili mbili"),
+      cell("c", "kiNgozi tatu"),
+      cell("d", "hii ni tHe typo", { cellLabel: "MAT 1:4" }),
+    ]
+    const { findings, exceptions } = scanCapitalization(cells)
+    expect(exceptions.map((e) => e.form)).toEqual(["ki-"])
+    expect(findings.map((f) => f.form)).toEqual(["tHe"])
+  })
+
+  it("excepts a form the source already writes that way", () => {
+    const cells = [cell("Buy an iPhone", "Nunua iPhone")]
+    expect(scanCapitalization(cells).findings).toEqual([])
+  })
+
+  it("flags a heading cell that opens with a lowercase letter, never a body cell", () => {
+    const cells = [
+      cell("The call of Simon", "mwito wa Simoni", { type: "heading", cellLabel: "MRK 1:16" }),
+      cell("to Simon, Put out into the deep", "kwa Simoni, shusha nyavu", { cellLabel: "MRK 1:17" }),
+    ]
+    const { findings } = scanCapitalization(cells)
+    expect(findings).toHaveLength(1)
+    expect(findings[0].code).toBe("lowercase-heading-start")
+    expect(findings[0].cells).toEqual([{ cellId: cells[0].id, cellLabel: "MRK 1:16" }])
+  })
+
+  it("produces no findings for a caseless-script project", () => {
+    const cells = [
+      cell("He said to him", "وَقَالَ لَهُ", { cellLabel: "MAT 1:1" }),
+      cell("The call of Simon", "دَعْوَةُ سِمْعَانَ", { type: "heading", cellLabel: "MRK 1:16" }),
+      cell("He said", "他说。", { cellLabel: "MAT 1:2" }),
+    ]
+    const { findings, exceptions } = scanCapitalization(cells)
+    expect(findings).toEqual([])
+    expect(exceptions).toEqual([])
+  })
+
+  it("ignores untranslated cells", () => {
+    expect(scanCapitalization([cell("He said tHe word", "")]).findings).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Rule pass helpers
 // ---------------------------------------------------------------------------
 
@@ -265,6 +344,10 @@ describe("runDeterministicCheck", () => {
       { cellId: cells[1].id, cellLabel: "MAT 1:2" },
     ])
 
+    // Capitalization: nothing mixed-case in these targets.
+    expect(result.capitalizationFindings).toEqual([])
+    expect(result.caseExceptions).toEqual([])
+
     // Total = 2 infractions + 1 flagged term cell.
     expect(result.totalFindingCount).toBe(3)
   })
@@ -279,6 +362,7 @@ describe("runDeterministicCheck", () => {
     })
     expect(result.totalFindingCount).toBe(0)
     expect(result.ruleFindings).toEqual([])
+    expect(result.capitalizationFindings).toEqual([])
     // Consistent concept still reported (UI may show "1 of 1") but flags none.
     expect(result.termFindings[0].flaggedCells).toEqual([])
     expect(result.checkedCellCount).toBe(1)
@@ -299,5 +383,127 @@ describe("runDeterministicCheck", () => {
     expect(result.checkedCellCount).toBe(450)
     expect(result.termFindings[0].totalOccurrences).toBe(450)
     expect(result.termFindings[0].flaggedCells).toHaveLength(225)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-1667: Number integrity with Arabic-Indic / Persian digits, end to end
+// ---------------------------------------------------------------------------
+
+describe("Number integrity through Check file and the editor (AQU-1667)", () => {
+  it("accepts native digits and still flags a wrong number, with the source underline in place", async () => {
+    // The real built-in rule exactly as useRules hands it to both surfaces.
+    const rules = resolveBuiltinRules(undefined).filter((r) => r.id === "builtin:number-integrity")
+    expect(rules).toHaveLength(1)
+    expect(rules[0].enabled).toBe(true)
+
+    const cells = [
+      cell("Isaiah 40:25", "إشعياء ٤٠:٢٥", { id: "arabic", cellLabel: "ISA 40:25" }),
+      cell("Isaiah 40:25", "اشعیا ۴۰:۲۵", { id: "persian", cellLabel: "ISA 40:25" }),
+      cell("Isaiah 40:25", "یسعیاہ ۴٠:25", { id: "mixed", cellLabel: "ISA 40:25" }),
+      cell("Isaiah 40:25", "إشعياء ٤١:٢٥", { id: "wrong", cellLabel: "ISA 40:25" }),
+      cell("Isaiah 40:25", "Isaías 40:25", { id: "western", cellLabel: "ISA 40:25" }),
+    ]
+
+    // Check file.
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules, concepts: [] })
+    expect(result.ruleFindings).toHaveLength(1)
+    expect(result.ruleFindings[0].rule.id).toBe("builtin:number-integrity")
+    expect(result.ruleFindings[0].infractions).toEqual([
+      {
+        ruleId: "builtin:number-integrity",
+        cellId: "wrong",
+        fileId: "file-1",
+        reason: "builtin:number-integrity",
+        reasonParams: undefined,
+        spans: [{ side: "source", start: 7, end: 9, matchedText: "40" }],
+      },
+    ])
+    expect(result.totalFindingCount).toBe(1)
+
+    // Editor underline (useHealth runs this same call per cell).
+    const editor = Object.fromEntries(
+      cells.map((c) => [c.id, checkRulesForCell(c, c.fileId, rules)]),
+    )
+    expect(editor.arabic).toEqual([])
+    expect(editor.persian).toEqual([])
+    expect(editor.mixed).toEqual([])
+    expect(editor.western).toEqual([])
+    expect(editor.wrong).toEqual(result.ruleFindings[0].infractions)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-1761: Extra numbers, the other direction, end to end
+// ---------------------------------------------------------------------------
+
+describe("Extra numbers through Check file and the editor (AQU-1761)", () => {
+  const cells = [
+    cell("He fasted forty days.", "Il jeûna 40 jours.", { id: "added", cellLabel: "MAT 4:2" }),
+    cell("He fasted 40 days.", "Il jeûna 41 jours.", { id: "changed", cellLabel: "MAT 4:2" }),
+    cell("He fasted 40 days.", "Il jeûna 40 jours.", { id: "clean", cellLabel: "MAT 4:2" }),
+  ]
+
+  it("is on by default as a minor check, and flags only what the translation added", async () => {
+    const rules = resolveBuiltinRules(undefined).filter((r) => r.id === "builtin:number-integrity-extra")
+    expect(rules).toHaveLength(1)
+    expect(rules[0].enabled).toBe(true)
+    expect(rules[0].severity).toBe("minor")
+
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules, concepts: [] })
+    expect(result.ruleFindings).toHaveLength(1)
+    expect(result.ruleFindings[0].infractions.map((i) => [i.cellId, i.reason, i.spans])).toEqual([
+      ["added", "builtin:number-integrity-extra", [{ side: "target", start: 9, end: 11, matchedText: "40" }]],
+      ["changed", "builtin:number-integrity-extra", [{ side: "target", start: 9, end: 11, matchedText: "41" }]],
+    ])
+
+    // The editor runs the same call per cell.
+    expect(checkRulesForCell(cells[2], cells[2].fileId, rules)).toEqual([])
+    expect(checkRulesForCell(cells[0], cells[0].fileId, rules)).toEqual([result.ruleFindings[0].infractions[0]])
+  })
+
+  it("has its own switch and severity, apart from Number integrity", async () => {
+    const all = resolveBuiltinRules({ "number-integrity-extra": { enabled: false } })
+    expect(all.find((r) => r.id === "builtin:number-integrity-extra")!.enabled).toBe(false)
+    expect(all.find((r) => r.id === "builtin:number-integrity")!.enabled).toBe(true)
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: all, concepts: [] })
+    expect(result.ruleFindings.map((f) => f.rule.id)).not.toContain("builtin:number-integrity-extra")
+
+    const major = resolveBuiltinRules({ "number-integrity-extra": { enabled: true, severity: "major" } })
+    expect(major.find((r) => r.id === "builtin:number-integrity-extra")!.severity).toBe("major")
+  })
+})
+
+// AQU-1697: the Bible data scans (S1 headings, S8 verse numbering) need the
+// whole file in order, so they run here and nowhere else. WHY: their findings
+// must reach the same drawer as every other rule, under their own built-in
+// rule, and only when the project has that rule switched on.
+describe("runDeterministicCheck with the Bible data scans", () => {
+  const verse = (ref: string) => cell("src", "text", { id: ref, globalReferences: [ref] })
+  const heading = cell("The Wedding", "La noce", { id: "h1", type: "heading", globalReferences: ["JHN 2:s1:1"] })
+  const cells = [heading, ...Array.from({ length: 25 }, (_, i) => verse(`JHN 2:${i + 1}`))]
+  const bibleRules = resolveBuiltinRules(undefined, { bibleChecks: true })
+  const bibleScan = { structure: JHN_A_STRUCTURE, profile: { headings: "pericope" as const } }
+
+  it("reports a passage without a heading under the S1 rule", async () => {
+    const result = await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [], bibleScan })
+    const s1 = result.ruleFindings.find((group) => group.rule.id === "builtin:bkp:S1")
+    expect(s1?.infractions).toEqual([
+      expect.objectContaining({
+        cellId: "JHN 2:13",
+        fileId: "file-1",
+        reason: "builtin:bkp:S1",
+        reasonParams: expect.objectContaining({ kind: "heading-missing", evidence: "pericope", refs: "JHN 2:13" }),
+      }),
+    ])
+    expect(result.totalFindingCount).toBe(1)
+  })
+
+  it("reports nothing for a switched-off scan, a dormant one, or without the pack data", async () => {
+    const off = resolveBuiltinRules({ "bkp:S1": { enabled: false } }, { bibleChecks: true })
+    expect((await runDeterministicCheck({ fileId: "file-1", cells, rules: off, concepts: [], bibleScan })).totalFindingCount).toBe(0)
+    const dormant = { ...bibleScan, profile: {} }
+    expect((await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [], bibleScan: dormant })).totalFindingCount).toBe(0)
+    expect((await runDeterministicCheck({ fileId: "file-1", cells, rules: bibleRules, concepts: [] })).totalFindingCount).toBe(0)
   })
 })

@@ -6,6 +6,8 @@
  * that name). Row identity is `lane_id`. `target_lang` remains the legacy tag.
  */
 
+import type { AquillaDb } from '../../../db/shim/postgres'
+
 /**
  * Scalar subquery for a projected row's `lane_id` from (project, side, tag).
  *
@@ -53,15 +55,31 @@ export function laneIdResolveFromColSql(
 /**
  * artifact_bindings resolution (slice 8): a 'source' binding_role -> the
  * project's single source lane; any other role -> the target lane whose
- * legacy_tag matches target_lang. Mirrors the backfill's ARTIFACT_BINDINGS
- * rule (scripts/neon-backfill-lanes.ts). Returns NULL until the project's
- * lanes exist. The caller MUST splice {@link laneIdResolveBindingBinds}.
+ * legacy_tag matches the inbound lane tag. Mirrors the backfill's
+ * ARTIFACT_BINDINGS rule (scripts/neon-backfill-lanes.ts). AQU-1611's expand
+ * step keeps `target_lang`; this resolver fills `lane_id` from the tag the
+ * caller still sends. Returns NULL when the project's lanes do not exist,
+ * which the NOT NULL column then rejects. The caller MUST splice
+ * {@link laneIdResolveBindingBinds}.
  */
 export function laneIdResolveBindingSql(): string {
   return `(SELECT id FROM public.lanes WHERE project_id = ?
     AND ( (? = 'source' AND role = 'source')
        OR (? <> 'source' AND role = 'target' AND legacy_tag = ?) )
     LIMIT 1)`
+}
+
+/**
+ * The column an `artifact_bindings` upsert names in `ON CONFLICT`.
+ *
+ * Migration 0134 added `artifact_bindings_lane_member_key` on `lane_id`.
+ * AQU-1611 (0155) dropped the tag-keyed UNIQUE with the `target_lang` column,
+ * so the conflict target is `lane_id`.
+ */
+export async function artifactBindingConflictColumn(
+  _db: AquillaDb,
+): Promise<"lane_id"> {
+  return "lane_id"
 }
 
 /** Binds for {@link laneIdResolveBindingSql}: projectId, role, role, targetLang. */

@@ -57,6 +57,19 @@ describe("archivedLaneReason", () => {
     expect(archivedLaneReason({ tag: "Spanish", lanes, archivedTags: [] })).toBe("lane 'Spanish' is archived")
   })
 
+  it("does not archive a second lane of the same language", () => {
+    const latin: ArchiveLaneRow = {
+      id: "eslane02",
+      name: "Spanish B",
+      legacyTag: "spa",
+      archivedAt: null,
+    }
+    expect(archivedLaneReason({ tag: "spa", lanes: [...lanes, latin], archivedTags: [] })).toBeNull()
+    expect(archivedLaneReason({ tag: "es", lanes: [...lanes, latin], archivedTags: [] })).toBe(
+      "lane 'Spanish' is archived",
+    )
+  })
+
   it("refuses a tag that is only in settings.archivedLanes, including a different case", () => {
     expect(archivedLaneReason({ tag: "sw", lanes, archivedTags: ["SW"] })).toBe("lane 'sw' is archived")
   })

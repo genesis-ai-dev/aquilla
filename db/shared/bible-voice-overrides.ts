@@ -42,19 +42,52 @@ export function isSpeechId(id: string): boolean {
   return id.startsWith('sp:') && id.length > 3
 }
 
+/** Shown by describe_command("PatchSettings") and in validation errors. */
+export const BIBLE_VOICE_OVERRIDES_TYPE_NAME =
+  '{ [speechId: "sp:…"]: { speaker?: string, addressee?: string, note: string, by: string, at: string } }'
+
+/**
+ * Null when `entry` is one well-formed correction — it changes the speaker or
+ * the addressee, and says why — else what is wrong with it.
+ */
+export function bibleVoiceOverrideProblem(entry: unknown, id = 'a speech'): string | null {
+  if (!isPlainObject(entry)) return `the correction for ${id} must be an object`
+  const unknown = Object.keys(entry).find((key) => !OVERRIDE_FIELDS.has(key))
+  if (unknown !== undefined) return `the correction for ${id} has an unknown field "${unknown}"`
+  if (entry.speaker !== undefined && !nonEmpty(entry.speaker)) return `the correction for ${id} has an empty speaker`
+  if (entry.addressee !== undefined && !nonEmpty(entry.addressee)) return `the correction for ${id} has an empty addressee`
+  if (entry.speaker === undefined && entry.addressee === undefined) {
+    return `the correction for ${id} changes neither the speaker nor the addressee`
+  }
+  for (const field of ['note', 'by', 'at'] as const) {
+    if (!nonEmpty(entry[field])) return `the correction for ${id} needs a non-empty "${field}"`
+  }
+  return null
+}
+
 /** One well-formed correction: it changes the speaker or the addressee, and says why. */
 export function isBibleVoiceOverride(value: unknown): value is BibleVoiceOverride {
-  if (!isPlainObject(value)) return false
-  if (!Object.keys(value).every((key) => OVERRIDE_FIELDS.has(key))) return false
-  if (value.speaker !== undefined && !nonEmpty(value.speaker)) return false
-  if (value.addressee !== undefined && !nonEmpty(value.addressee)) return false
-  if (value.speaker === undefined && value.addressee === undefined) return false
-  return nonEmpty(value.note) && nonEmpty(value.by) && nonEmpty(value.at)
+  return bibleVoiceOverrideProblem(value) === null
+}
+
+/**
+ * Null when the whole map is well-formed, else what is wrong with it. Writers
+ * are held to this: the settings-key registry and the settings route both
+ * refuse a map with a problem.
+ */
+export function bibleVoiceOverridesProblem(value: unknown): string | null {
+  if (!isPlainObject(value)) return 'bibleVoiceOverrides must be an object keyed by speech id'
+  for (const [id, entry] of Object.entries(value)) {
+    if (!isSpeechId(id)) return `"${id}" is not a speech id ("sp:…")`
+    const problem = bibleVoiceOverrideProblem(entry, `"${id}"`)
+    if (problem) return problem
+  }
+  return null
 }
 
 /** The whole map is well-formed. Writers are held to this. */
 export function isBibleVoiceOverrides(value: unknown): value is BibleVoiceOverrides {
-  return isPlainObject(value) && Object.entries(value).every(([id, entry]) => isSpeechId(id) && isBibleVoiceOverride(entry))
+  return bibleVoiceOverridesProblem(value) === null
 }
 
 /** A stored map as readers take it: malformed entries are dropped, never thrown on. */

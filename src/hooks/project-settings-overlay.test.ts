@@ -53,6 +53,14 @@ describe("overlaySettings", () => {
     expect(out.harmonize_min_role).toBe("maintainer")
   })
 
+  // AQU-1686: the settings card showed a stored {voices: "off"} as a switch
+  // that is on. The overlay now reads the value the way the server does.
+  it("drops unknown enrichment ids and values that are not booleans", () => {
+    const blob = { bibleEnrichments: { voices: "off", nope: true, places: false } } as unknown as ProjectWideSettings
+    const out = overlaySettings(makeRecord({}), blob)
+    expect(out.bibleEnrichments).toEqual({ places: false })
+  })
+
   it("carries stored false booleans and the rest of the Settings-page fields", () => {
     const blob: ProjectWideSettings = {
       sourceLanguage: "English",
@@ -62,6 +70,9 @@ describe("overlaySettings", () => {
       cellEditingFloor: "contributor",
       bibleResourcesEnabled: false,
       bibleEnrichments: { voices: false, autopilot: true },
+      languageProfile: {
+        quoteMarks: { levels: [{ open: "«", close: "»" }], continuation: "continuation-mark" },
+      },
       bibleVoiceOverrides: { "sp:a-b": { speaker: "person:Jesus", note: "FCBH", by: "mara", at: "2026-10-06T00:00:00Z" } },
       importExcludeFrontMatter: true,
       draftContext: { precedingTargetCells: 4 },
@@ -77,6 +88,9 @@ describe("overlaySettings", () => {
     // AQU-1686: a dropped key would load layers for enrichments the project
     // switched off.
     expect(out.bibleEnrichments).toEqual({ voices: false, autopilot: true })
+    // AQU-1688: a dropped profile would leave Bible data checks dormant for a
+    // project that has set its quotation marks.
+    expect(out.languageProfile?.quoteMarks?.levels).toEqual([{ open: "«", close: "»" }])
     // AQU-1692: a dropped key would save a maintainer's voice correction and
     // never show it.
     expect(out.bibleVoiceOverrides?.["sp:a-b"]?.speaker).toBe("person:Jesus")

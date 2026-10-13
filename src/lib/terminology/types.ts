@@ -10,9 +10,15 @@
  */
 
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import type { RenderingStatus, TermMatchOptions, TermRendering } from "./model"
+import type { ConceptExternalIds, RenderingStatus, TermMatchOptions, TermRendering } from "./model"
 
-export type { RenderingStatus, TermMatchOptions, TermMatchingSettings, TermRendering } from "./model"
+export type {
+  ConceptExternalIds,
+  RenderingStatus,
+  TermMatchOptions,
+  TermMatchingSettings,
+  TermRendering,
+} from "./model"
 
 /**
  * `MessageKey` for a rendering status's display label — resolve with
@@ -59,6 +65,17 @@ export interface Concept {
   caseSensitive?: boolean
   /** Matching options; see TermMatchOptions. Absent = all defaults. */
   match?: TermMatchOptions
+  /**
+   * AQU-1693: the Bible entity this concept names. Plain data: it is stored,
+   * synced and exported whatever any flag says. Absent = not linked.
+   */
+  externalIds?: ConceptExternalIds
+  /**
+   * Set only on a concept read from a termbase this project subscribes to
+   * (useSubscribedConcepts, AQU-1721): the id of the project that owns it.
+   * Such a concept is read-only here, so no surface may offer to edit it.
+   */
+  termbaseProjectId?: string
 }
 
 /** Payload from the editor "Add to terminology" popover. */
@@ -79,4 +96,6 @@ export interface ConceptDraft {
    */
   approve?: boolean
   match?: TermMatchOptions
+  /** AQU-1693: "Add to terminology" from a Voices or Who's Who popover links the entity. */
+  externalIds?: ConceptExternalIds
 }

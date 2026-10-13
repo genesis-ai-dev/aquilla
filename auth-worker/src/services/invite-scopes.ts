@@ -69,9 +69,15 @@ export function parseScopeLanes(raw: string | null | undefined): string[] {
 }
 
 /**
- * Apply an invite's lane scopes to a member on accept. Idempotent and additive:
- * inserts kind='lane' rows with ON CONFLICT DO NOTHING so re-redeeming the same
- * link never errors and a member who already has a lane keeps it.
+ * Apply an invite's lane scopes to a member on accept.
+ *
+ * AQU-1808: the invite's choice is the whole truth about the joiner's lanes.
+ * Removing a member deletes only `project_members`, so the scope and grant
+ * rows of an earlier membership survive; unioned into them, an every-lane
+ * link used to leave a stale one-lane scope that the client narrowed by, and
+ * a one-lane link used to keep an earlier every-lane grant set. Both tables
+ * are cleared for this (project, user) first, so the membership this accept
+ * creates starts from no lane rows.
  *
  * Callers must only invoke this for a *newly inserted* membership: applying a
  * lane scope to an existing unscoped member would silently narrow their access
@@ -88,6 +94,16 @@ export async function applyInviteLaneScopes(
   createdBy: number,
   finalRole: number,
 ): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    "DELETE FROM project_member_scopes WHERE project_id = ? AND user_id = ? AND kind = 'lane'",
+  )
+    .bind(projectId, userId)
+    .run()
+  await env.AQUILLA_PG.prepare(
+    "DELETE FROM project_member_lane_roles WHERE project_id = ? AND user_id = ?",
+  )
+    .bind(projectId, userId)
+    .run()
   if (finalRole >= ROLE.MAINTAINER || finalRole < ROLE.VIEWER) return
 
   // Project lead+ stays unscoped on the old scopes table (AD-12). An empty

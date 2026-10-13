@@ -19,7 +19,7 @@
 // Shares the EXACT code path with the worker (`migrateProjectConcepts` over the
 // same Postgres shim), so there is no second implementation to drift.
 
-import { makePostgres } from "../db/shim/postgres"
+import { makeMaintenancePostgres } from "../db/shim/postgres"
 import { migrateProjectConcepts, migrationSkipWarning } from "../sync-worker/src/events/migrate-concepts"
 import fs from "node:fs"
 import path from "node:path"
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   const apply = args.includes("--apply")
   const only = args.find((a) => !a.startsWith("--")) ?? null
 
-  const db = makePostgres(connectionString(), 4)
+  const db = makeMaintenancePostgres(connectionString(), 4)
   try {
     // Only projects that still carry a non-empty `terminology` array.
     const pending = await db

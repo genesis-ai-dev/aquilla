@@ -286,13 +286,10 @@ describe("TeamsList — AQU-166: search + sort", () => {
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText(/no internal teams/i)).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: /clear/i }))
-    await waitFor(
-      () => {
-        expect(screen.getByText(/no teams in this org yet/i)).toBeInTheDocument()
-        expect(screen.getByPlaceholderText("Search teams…")).toBeInTheDocument()
-        expect(screen.getByRole("combobox", { name: /filter teams by visibility/i })).toBeInTheDocument()
-      },
-      { timeout: 3000 },
-    )
+    await waitFor(() => {
+      expect(screen.getByText(/no teams in this org yet/i)).toBeInTheDocument()
+      expect(screen.getByPlaceholderText("Search teams…")).toBeInTheDocument()
+      expect(screen.getByRole("combobox", { name: /filter teams by visibility/i })).toBeInTheDocument()
+    })
   })
 })

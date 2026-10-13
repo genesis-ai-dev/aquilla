@@ -137,7 +137,7 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
     await expect(inlineEditor).not.toBeVisible({ timeout: 3_000 })
   })
 
-  await test.step("Import from doc and Suggest from edits dialogs open", async () => {
+  await test.step("Import from doc dialog opens; rule suggestions live in the list", async () => {
     const importDocBtn = alice.getByRole("button", { name: /Import from doc/i })
     await expect(importDocBtn).toBeVisible({ timeout: 10_000 })
     await importDocBtn.click()
@@ -150,16 +150,11 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
     await alice.keyboard.press("Escape")
     await expect(importDialog).not.toBeVisible({ timeout: 3_000 })
 
-    const suggestBtn = alice.getByRole("button", { name: /Suggest from edits/i })
-    await expect(suggestBtn).toBeVisible({ timeout: 5_000 })
-    await suggestBtn.click()
-
-    const suggestDialog = alice.getByRole("dialog")
-    await expect(suggestDialog).toBeVisible({ timeout: 5_000 })
+    // Suggestions are reviewed in place at the foot of the project rules
+    // list — no modal to open and lose them in.
     await expect(
-      suggestDialog.getByRole("heading", { name: /Suggest rules from/i }),
-    ).toBeVisible()
-    await alice.keyboard.press("Escape")
-    await expect(suggestDialog).not.toBeVisible({ timeout: 3_000 })
+      alice.getByRole("button", { name: /Suggest rules from my edits/i }),
+    ).toBeVisible({ timeout: 5_000 })
+    await expect(alice.getByRole("textbox", { name: /What the suggested rules should be about/i })).toBeVisible()
   })
 })

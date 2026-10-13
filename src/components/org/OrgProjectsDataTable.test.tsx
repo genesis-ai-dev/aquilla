@@ -80,7 +80,6 @@ function renderTable(
   projects: PortfolioProject[],
   opts: {
     role?: number
-    defaultLabels?: Record<string, string>
     jwt?: string | null
     viewerUsername?: string | null
     layout?: "page" | "embedded"
@@ -94,14 +93,12 @@ function renderTable(
   const roleByProjectId = new Map<string, CloudProjectSummary["role"]>(
     projects.map((p) => [p.id, { level: opts.role ?? 600, name: "maintainer", source: "direct" }]),
   )
-  const defaultLaneLabelByProjectId = new Map(Object.entries(opts.defaultLabels ?? {}))
   return render(
     <MemoryRouter>
       <OrgProjectsDataTable
         projects={projects}
         now={now}
         roleByProjectId={roleByProjectId}
-        defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
         filesByProjectId={new Map()}
         orgId={1}
         jwt={opts.jwt === undefined ? "jwt" : opts.jwt}
@@ -222,8 +219,9 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
         { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
         { lane: "fr", totalCells: 100, filledCells: 50, validatedCells: 30, lastEditAt: now },
       ],
+      targetLanguage: "en-target",
     })
-    renderTable([p], { defaultLabels: { p1: "en-target" } })
+    renderTable([p])
 
     const defaultChip = screen.getByTestId("lane-chip-p1-")
     expect(defaultChip).toHaveTextContent("en-target")
@@ -241,10 +239,10 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
   })
 
   it("labels a migrated project's default lane from the project target language (AQU-606)", () => {
-    // Post-lanes-migration shape: the target lives on project settings and no
-    // per-file hint reaches the table, so the chip used to read "Default".
+    // Post-lanes-migration shape: the target lives on project settings, which
+    // a resolver that did not read it rendered as "Default".
     const p = baseProject({ id: "p6", name: "Migrated", totalCells: 100, filledCells: 25, targetLanguage: "French" })
-    renderTable([p], { defaultLabels: {} })
+    renderTable([p])
 
     const chip = screen.getByTestId("lane-chip-p6-")
     expect(chip).toHaveTextContent("French")
@@ -253,14 +251,17 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
 
   it("shows the neutral placeholder when the project has no target language (AQU-606)", () => {
     const p = baseProject({ id: "p7", name: "Untargeted", totalCells: 100, filledCells: 25 })
-    renderTable([p], { defaultLabels: {} })
+    renderTable([p])
 
     expect(screen.getByTestId("lane-chip-p7-")).toHaveTextContent("Default")
   })
 
   it("renders a single chip for a project with no lane breakdown (single-lane, no regression)", () => {
-    const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100 })
-    renderTable([p], { defaultLabels: { p2: "sw" } })
+    // AQU-1596: the chip's label comes off the project's own target language.
+    // It used to be able to come from a per-file declared-language hint, which
+    // could name a language the lane does not have.
+    const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100, targetLanguage: "sw" })
+    renderTable([p])
 
     const chip = screen.getByTestId("lane-chip-p2-")
     expect(chip).toHaveTextContent("sw")
@@ -303,7 +304,7 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
       { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
-    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })], { defaultLabels: { p1: "en-target" } })
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes, targetLanguage: "en-target" })])
     fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
 
     const defaultRow = screen.getByTestId("project-lane-row-p1-")
@@ -326,7 +327,7 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
       { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
       { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
     ]
-    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })], { defaultLabels: { p1: "en-target" } })
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes, targetLanguage: "en-target" })])
     fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
 
     const defaultOpen = within(screen.getByTestId("project-lane-row-p1-")).getByRole("link", {

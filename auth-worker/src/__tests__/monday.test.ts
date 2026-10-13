@@ -532,6 +532,53 @@ describe("re-linking a board Aquilla has written to before", () => {
     expect(itemLink!.external_item_id).toBe("555")
   })
 
+  it("moves the reused item into the projects group once, and never on later pushes", async () => {
+    await seedOrgProject()
+    await seedLink({
+      lastPushedAt: null,
+      config: {
+        ...baseConfig,
+        groupId: "group_aq",
+        columns: [...baseConfig.columns, { columnId: "text_aq", columnType: "text", metric: "external_id" }],
+      },
+    })
+    const calls: string[] = []
+    mockFetch((url, body) => {
+      if (!url.startsWith("https://api.monday.com/v2")) return null
+      calls.push(body)
+      if (body.includes("items_page_by_column_values")) {
+        return jsonResponse({
+          data: { items_page_by_column_values: { items: [{ id: 555, column_values: [{ id: "text_aq", text: "proj-1" }] }] } },
+        })
+      }
+      if (body.includes("move_item_to_group")) return jsonResponse({ data: { g0: { id: "555" } } })
+      if (body.includes("change_multiple_column_values")) return jsonResponse({ data: { u0: { id: "555" } } })
+      return null
+    })
+    const push = () =>
+      app.request(
+        "/api/v2/monday/internal/push",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.SYNC_SECRET_KEY}` },
+          body: JSON.stringify({ projectId: "proj-1" }),
+        },
+        menv,
+      )
+    expect((await push()).status).toBe(200)
+    const moves = calls.filter((b) => b.includes("move_item_to_group"))
+    expect(moves).toHaveLength(1)
+    expect(moves[0]).toContain('item_id: \\"555\\"')
+    expect(moves[0]).toContain('group_id: \\"group_aq\\"')
+
+    // The row is known now: a later push updates it where it is.
+    calls.length = 0
+    await env.AQUILLA_PG.prepare("UPDATE integration_links SET last_pushed_at = NULL WHERE id = 'link-1'").run()
+    expect((await push()).status).toBe(200)
+    expect(calls.some((b) => b.includes("move_item_to_group"))).toBe(false)
+    expect(calls.some((b) => b.includes("change_multiple_column_values"))).toBe(true)
+  })
+
   it("saving a link to a board with an Aquilla ID column always adds the match rule and maps the column", async () => {
     await seedOrgProject()
     await seedConnection()

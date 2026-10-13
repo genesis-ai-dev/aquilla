@@ -376,6 +376,16 @@ async function upsertEntities(
       }
     }
     await saveItemLinks(env, link.id, matchedLinks)
+    // A row Aquilla adopts from the board (found by its Aquilla ID or name,
+    // not created) joins the projects group, like a row it creates. Only at
+    // adoption: later pushes never move a row the user dragged elsewhere.
+    if (mapping.groupId && matchedLinks.length > 0) {
+      await moveItemsToGroupBestEffort(
+        token,
+        matchedLinks.map((m) => m.itemId),
+        mapping.groupId,
+      )
+    }
   }
 
   // 3. Create missing items (aliased batches; column values included up-front).
@@ -424,6 +434,21 @@ async function upsertEntities(
   }
 
   return entities.length
+}
+
+/** Move rows into a group; a failure never fails the push (the values still land). */
+async function moveItemsToGroupBestEffort(token: string, itemIds: string[], groupId: string): Promise<void> {
+  try {
+    await runAliasedMutations(
+      token,
+      itemIds.map((itemId, i) => ({
+        alias: `g${i}`,
+        body: `move_item_to_group(item_id: ${gqlString(itemId)}, group_id: ${gqlString(groupId)}) { id }`,
+      })),
+    )
+  } catch (err) {
+    console.warn("[monday] moving adopted rows into the projects group failed (best-effort):", err)
+  }
 }
 
 /** Rows per item-link upsert statement — keeps a 66-file push to one write. */

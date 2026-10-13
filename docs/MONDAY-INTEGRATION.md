@@ -31,8 +31,9 @@ Defined twice, kept in lockstep: `auth-worker/src/lib/monday/types.ts` and
   client or the AI: the group a project on this board already uses (so a
   renamed group keeps working), else a group titled "Aquilla projects", else a
   new one created above the board's own groups. Linking a project whose group
-  changed moves its existing rows there once; pushes never move a row, so one
-  the user drags elsewhere stays put. A mapping edit (PATCH) keeps the saved
+  changed moves its existing rows there once, and the push that adopts a row
+  already on the board (found by its Aquilla ID or name) moves it there too;
+  otherwise pushes never move a row, so one the user drags elsewhere stays put. A mapping edit (PATCH) keeps the saved
   group. If Monday refuses the group the link still saves, without one.
 - `columns`: Monday column id → Aquilla metric (`completion_pct`,
   `validated_pct`, `audio_validated_pct`, `has_audio_pct`, counts,

@@ -67,8 +67,9 @@ function errMsg(e: unknown): string {
 }
 
 function syncNoticeText(res: MondaySyncResult): string {
+  const items = res.itemsUpserted
   return res.ok
-    ? `Pushed to Monday${res.itemsUpserted != null ? ` (${res.itemsUpserted} items)` : ""}.`
+    ? `Pushed to Monday${items != null ? ` (${items} ${items === 1 ? "item" : "items"})` : ""}.`
     : `Sync failed${res.error ? `: ${res.error}` : ""}.`
 }
 
@@ -128,9 +129,13 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   }, [])
 
   // ── Initial load: link status + org connection status ────────────────────
+  // The spinner is for the first load only. A refresh (coming back to the
+  // tab, after Sync now) keeps the page as it is, so the mapping editor and
+  // any rows not yet saved stay put while the new data loads.
+  const loadedOnceRef = useRef(false)
   const load = useCallback(async () => {
     if (!jwt) return
-    setLoading(true)
+    if (!loadedOnceRef.current) setLoading(true)
     setStatusError(null)
     setError(null)
     try {
@@ -150,7 +155,10 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
     } catch (e) {
       if (aliveRef.current) setStatusError(errMsg(e))
     } finally {
-      if (aliveRef.current) setLoading(false)
+      if (aliveRef.current) {
+        loadedOnceRef.current = true
+        setLoading(false)
+      }
     }
   }, [jwt, projectId, orgId, t, refreshBoard])
 
@@ -367,6 +375,8 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               onSyncNow={handleSyncNow}
               onSaveMapping={handleSaveMapping}
               newColumns={newColumns}
+              checkingBoard={board.checking}
+              structureLoading={board.structureLoading}
               requestedRow={requestedRow}
               onMapColumn={(column) => setRequestedRow((r) => ({ column, nonce: (r?.nonce ?? 0) + 1 }))}
               onDismissColumn={(columnId) => void handleDismissColumn(columnId)}

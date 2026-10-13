@@ -483,7 +483,10 @@ export function MondaySetupWizard({
   )
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // A click outside never closes the setup: a double-click on the button
+    // that opened it, or on Next, would land on the backdrop and throw the
+    // scan away. Escape and the X still close it.
+    <Dialog open={open} onOpenChange={onOpenChange} disablePointerDismissal>
       <DialogContent className="max-w-xl" data-testid="monday-setup-wizard">
         <DialogHeader>
           {stepNumber != null && (

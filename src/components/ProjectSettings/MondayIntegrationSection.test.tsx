@@ -366,4 +366,49 @@ describe("Add columns (linked board)", () => {
       expect(await screen.findByRole("button", { name: /map it/i })).toBeTruthy()
     })
   })
+
+  describe("on a slow connection", () => {
+    it("coming back to the tab keeps the page and any mapping rows not yet saved", async () => {
+      mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
+      mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+      renderSection()
+      await screen.findByTestId("monday-mapping-editor")
+      const rowsBefore = screen.getAllByRole("button", { name: /remove mapping row/i }).length
+      fireEvent.click(screen.getByRole("button", { name: /add row/i }))
+      let resolveLink: (v: Awaited<ReturnType<typeof api.fetchMondayLink>>) => void = () => {}
+      mocked.fetchMondayLink.mockReturnValue(new Promise((resolve) => { resolveLink = resolve }))
+      fireEvent(window, new Event("focus"))
+      // While the refresh is out, the editor stays (no full-section spinner).
+      expect(screen.queryByText(/loading monday integration/i)).toBeNull()
+      expect(screen.getAllByRole("button", { name: /remove mapping row/i })).toHaveLength(rowsBefore + 1)
+      resolveLink({ linked: true, link: makeLink() })
+      await waitFor(() => expect(mocked.fetchMondayLink).toHaveBeenCalledTimes(2))
+      expect(screen.getAllByRole("button", { name: /remove mapping row/i })).toHaveLength(rowsBefore + 1)
+    })
+
+    it("the new-column buttons wait while the board is being re-read", async () => {
+      mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink({ structureStale: true }) })
+      mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+      const columns = [{ id: "numeric_b", title: "Budget", type: "numbers" }]
+      mocked.fetchMondayBoardChanges.mockResolvedValue({
+        structureStale: true, newColumns: columns, structure: { columns, groups: [] },
+      })
+      renderSection()
+      const map = (await screen.findByRole("button", { name: /map it/i })) as HTMLButtonElement
+      await waitFor(() => expect(map.disabled).toBe(false))
+      mocked.fetchMondayBoardChanges.mockReturnValue(new Promise(() => {}))
+      fireEvent(window, new Event("focus"))
+      await waitFor(() => expect((screen.getByRole("button", { name: /map it/i }) as HTMLButtonElement).disabled).toBe(true))
+      expect((screen.getByRole("button", { name: /not needed/i }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it("says the board's columns are loading instead of showing raw column ids", async () => {
+      mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
+      mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+      mocked.fetchMondayBoardChanges.mockReturnValue(new Promise(() => {}))
+      renderSection()
+      expect(await screen.findByText(/loading the board's columns/i)).toBeTruthy()
+      expect(screen.queryByText("numbers_1")).toBeNull()
+    })
+  })
 })

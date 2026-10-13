@@ -48,6 +48,8 @@ export function MondayLinkedView({
   requestedRow = null,
   onMapColumn,
   onDismissColumn,
+  checkingBoard = false,
+  structureLoading = false,
 }: {
   link: MondayBoardLink
   structure: MondayBoardStructure | null
@@ -73,6 +75,10 @@ export function MondayLinkedView({
   requestedRow?: { column: MondayNewColumn; nonce: number } | null
   onMapColumn?: (column: MondayNewColumn) => void
   onDismissColumn?: (columnId: string) => void
+  /** A board read or a dismiss is running: what the box offers may change. */
+  checkingBoard?: boolean
+  /** The board's columns haven't loaded yet, so the mapping has no titles. */
+  structureLoading?: boolean
 }) {
   const { t } = useI18n()
   const showNewColumns = canManage && newColumns.length > 0
@@ -96,6 +102,7 @@ export function MondayLinkedView({
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={checkingBoard}
                         onClick={() => {
                           onMapColumn?.(column)
                           document
@@ -108,7 +115,12 @@ export function MondayLinkedView({
                     ) : (
                       <span className="text-xs">{t("projectSettings.monday.boardChangesReadOnly")}</span>
                     )}
-                    <Button size="sm" variant="ghost" onClick={() => onDismissColumn?.(column.id)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={checkingBoard}
+                      onClick={() => onDismissColumn?.(column.id)}
+                    >
                       {t("projectSettings.monday.boardChangesDismiss")}
                     </Button>
                   </li>
@@ -199,7 +211,11 @@ export function MondayLinkedView({
       <div className="space-y-2">
         <p className="text-sm font-medium">{t("projectSettings.monday.columnMappingLabel")}</p>
         {missingColumns}
-        {canManage ? (
+        {canManage && structureLoading ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+            <Spinner /> {t("projectSettings.monday.loadingBoardColumns")}
+          </p>
+        ) : canManage ? (
           <MondayMappingEditor
             key={JSON.stringify(link.config.columns)}
             initialColumns={link.config.columns}

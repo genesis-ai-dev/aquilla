@@ -1183,6 +1183,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.orgNoAccessibleProjects": "No accessible projects in this organization.",
     "projectSettings.monday.orgProjectLinkedTo": "Linked to {board}",
     "projectSettings.monday.orgProjectNotLinked": "Not linked yet",
+    "projectSettings.monday.orgProjectLinksLoading": "Checking which projects are linked…",
+    "projectSettings.monday.orgProjectLinksFailed": "Couldn't check which projects are linked to Monday.",
     "projectSettings.monday.orgProjectSetUp": "Set up",
     "projectSettings.monday.orgProjectManageInSettings": "Manage in project settings",
     "projectSettings.monday.orgProjectViewInSettings": "View in project settings",
@@ -1218,6 +1220,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.boardChangesIntro":
       "New on your Monday board since it was linked. Map a column to fill it from Aquilla (then pick what it shows and save the mapping), or mark it not needed.",
     "projectSettings.monday.boardChangesMap": "Map it",
+    "projectSettings.monday.loadingBoardColumns": "Loading the board's columns…",
     "projectSettings.monday.boardChangesDismiss": "Not needed",
     "projectSettings.monday.boardChangesReadOnly": "Aquilla can't fill this kind of column.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
@@ -2270,6 +2273,12 @@ export const projectSettings = defineNamespace({
         description: "Under a project's name in Org settings → Monday.com: the Monday board the project pushes to.",
         placeholders: { board: "The Monday board's name (Monday data, not translated)." },
       },
+      "projectSettings.monday.orgProjectLinksLoading": {
+        description: "Shown above the project list in Org settings → Monday.com while Aquilla reads which projects have a board.",
+      },
+      "projectSettings.monday.orgProjectLinksFailed": {
+        description: "Shown above the project list in Org settings → Monday.com when reading which projects have a board failed; a Retry button sits beside it.",
+      },
       "projectSettings.monday.orgProjectNotLinked": {
         description: "Under a project's name in Org settings → Monday.com when the project has no board yet.",
       },
@@ -2293,6 +2302,9 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.monday.boardChangesIntro": {
         description: "Amber banner on a linked Monday board listing columns someone added on Monday since the link was saved; each listed column has 'Map it' and 'Not needed' buttons.",
+      },
+      "projectSettings.monday.loadingBoardColumns": {
+        description: "Shown in place of the column mapping on a linked Monday board while Aquilla reads the board's column names.",
       },
       "projectSettings.monday.boardChangesMap": {
         description: "Button beside a new Monday column: adds a row for it to the mapping table below, to fill it from Aquilla.",

@@ -36,6 +36,7 @@ export function OrgMondayProjectLinks({
 }) {
   const { t } = useI18n()
   const [links, setLinks] = useState<Map<string, MondayOrgProjectLink> | null>(null)
+  const [linksFailed, setLinksFailed] = useState(false)
   const [setupFor, setSetupFor] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -43,9 +44,10 @@ export function OrgMondayProjectLinks({
     try {
       const got = await fetchMondayOrgLinks(jwt, orgId)
       setLinks(new Map(got.map((link) => [link.projectId, link])))
+      setLinksFailed(false)
     } catch {
-      // The rows still work without their status.
-      setLinks(null)
+      // The rows still lead to project settings; say why the rest is missing.
+      setLinksFailed(true)
     }
   }, [jwt, canManageOrg, orgId])
 
@@ -55,6 +57,19 @@ export function OrgMondayProjectLinks({
 
   return (
     <>
+      {canManageOrg && !links && !linksFailed && (
+        <p className="text-sm text-muted-foreground" role="status">
+          {t("projectSettings.monday.orgProjectLinksLoading")}
+        </p>
+      )}
+      {linksFailed && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 text-sm text-destructive">
+          <span>{t("projectSettings.monday.orgProjectLinksFailed")}</span>
+          <Button size="sm" variant="outline" onClick={() => void load()}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      )}
       {projects.map((project) => {
         const link = links?.get(project.id)
         const canSetUp = project.role.level >= ROLE.MAINTAINER

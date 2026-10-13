@@ -101,3 +101,13 @@ it("links to the connected Monday account once, from the Open Monday.com button"
   expect(screen.getByText("acme-team")).toBeTruthy()
   expect(screen.queryByRole("link", { name: "acme-team" })).toBeNull()
 })
+
+it("says when it couldn't check which projects are linked, and retries", async () => {
+  vi.mocked(fetchMondayConnection).mockResolvedValue({ connected: true })
+  vi.mocked(fetchMondayOrgLinks).mockRejectedValueOnce(new Error("502"))
+  render(<MemoryRouter><OrgSettingsMonday /></MemoryRouter>)
+  expect((await screen.findByRole("alert")).textContent).toMatch(/couldn't check which projects are linked/i)
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+  expect(await screen.findByText("Not linked yet")).toBeTruthy()
+  expect(screen.queryByRole("alert")).toBeNull()
+})

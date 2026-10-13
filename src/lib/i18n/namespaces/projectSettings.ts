@@ -1283,7 +1283,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.inherit.field.knowledgeDocs": "Knowledge-base documents",
     "projectSettings.inherit.field.workflowPolicy": "Workflow policy",
     "projectSettings.inherit.field.workflowPolicyDetail":
-      "Validation count and role floors, self-validation, autopilot and agent mode, structural-cell counting, and check penalties.",
+      "Who may validate, self-validation, autopilot and agent mode, and check penalties.",
     "projectSettings.inherit.field.livingMemory": "Living-memory notes",
     "projectSettings.inherit.field.smartQuotes": "Smart quotes",
     "projectSettings.inherit.field.systemPrompt": "AI instructions",
@@ -2525,7 +2525,7 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.inherit.field.workflowPolicy": {
         description:
-          "Checkbox label. Validation counts, role floors, self-validation, autopilot, agent mode, structural-cell counting, and check penalties are copied when this is on.",
+          "Checkbox label. Validation role floors, self-validation, autopilot, agent mode, and check penalties are copied when this is on.",
       },
       "projectSettings.inherit.field.workflowPolicyDetail": {
         description: "Secondary line under the workflow-policy checkbox, listing what that one choice covers.",

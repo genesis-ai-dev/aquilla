@@ -66,3 +66,14 @@ describe("inherited settings vocabulary (AQU-1075)", () => {
     expect(patched?.inheritedFromLink).toEqual(config)
   })
 })
+
+describe("what a linked project never copies (AQU-1771)", () => {
+  it("how progress is counted follows the project, then its org: never copied from upstream", async () => {
+    const { INHERIT_FIELD_KEYS } = await import("./inherited-settings")
+    const copied = Object.values(INHERIT_FIELD_KEYS).flat()
+    for (const key of ["validationCount", "validationCountAudio", "countStructuralCells"]) {
+      expect(copied).not.toContain(key)
+    }
+  })
+})
+

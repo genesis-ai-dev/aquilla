@@ -36,16 +36,18 @@ export const INHERIT_DEFAULTS: Record<InheritFieldId, boolean> = {
 export const INHERIT_FIELD_KEYS: Record<InheritFieldId, readonly string[]> = {
   translationBrief: ["translationBrief"],
   knowledgeDocs: [],
+  // How progress is COUNTED (approvals needed, headings counted) is never
+  // copied (AQU-1771): it follows the project's own value, then its org's
+  // default. A copied value read as "this project set its own", so org
+  // default changes skipped linked projects and an upstream change copied
+  // it back over a reset.
   workflowPolicy: [
-    "validationCount",
-    "validationCountAudio",
     "validationRoleFloor",
     "validationRoleFloorAudio",
     "allowSelfValidation",
     "allowSelfValidationAudio",
     "autopilotEnabled",
     "agentMode",
-    "countStructuralCells",
     "rulePenalties",
   ],
   livingMemory: ["livingMemoryEntries"],

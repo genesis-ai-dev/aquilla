@@ -97,6 +97,7 @@ describe("inherited settings along a chain (AQU-1075)", () => {
       translationBrief: { summary: "one" },
       systemPrompt: "translate English to French",
       validationCount: 2,
+      validationRoleFloor: "reviewer",
       validationNamedUsers: ["ada"],
       rules: [{ id: "upstream-rule" }],
     }, true)
@@ -105,6 +106,7 @@ describe("inherited settings along a chain (AQU-1075)", () => {
       translationBrief: { summary: "one" },
       systemPrompt: "keep mine",
       validationCount: 2,
+      validationRoleFloor: "reviewer",
       validationNamedUsers: ["bea"],
       rules: [{ id: "local-rule" }],
       inheritedFromLink: receiving,
@@ -118,6 +120,7 @@ describe("inherited settings along a chain (AQU-1075)", () => {
       translationBrief: { summary: "two" },
       systemPrompt: "translate English to French, revised",
       validationCount: 4,
+      validationRoleFloor: "maintainer",
       validationNamedUsers: ["ada", "bo"],
       rules: [{ id: "upstream-rule-2" }],
     })
@@ -126,8 +129,12 @@ describe("inherited settings along a chain (AQU-1075)", () => {
     const c = await settingsOf(C)
     expect(b.translationBrief).toEqual({ summary: "two" })
     expect(c.translationBrief).toEqual({ summary: "two" })
-    expect(b.validationCount).toBe(4)
-    expect(c.validationCount).toBe(4)
+    // The workflow policy flows down...
+    expect(b.validationRoleFloor).toBe("maintainer")
+    expect(c.validationRoleFloor).toBe("maintainer")
+    // ...but how progress is counted stays each project's own (AQU-1771).
+    expect(b.validationCount).toBe(2)
+    expect(c.validationCount).toBe(2)
     expect(b.systemPrompt).toBe("keep mine")
     expect(c.systemPrompt).toBe("keep C")
     expect(b.validationNamedUsers).toEqual(["bea"])

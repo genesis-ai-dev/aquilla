@@ -312,7 +312,22 @@ usage.get("/org/:orgId", async (c) => {
   }
 
   // ── Merge LLM + TTS, keyed by userId ────────────────────────────────────────
-  const allUserIds = new Set([...llmByUser.keys(), ...ttsByUser.keys()])
+  let allUserIds = new Set([...llmByUser.keys(), ...ttsByUser.keys()])
+  // AQU-1771: below Maintainer, only the org's own members. The rows above
+  // also count people who reach one of the org's projects through a direct
+  // project grant without belonging to the org; when this read was
+  // Maintainer-only that was a manager's view, but an org that opens the floors
+  // to contributors must not show them outsiders' names and usage. The total
+  // is summed over the rows shown, so it cannot be used to work them out.
+  if (role < ROLE.MAINTAINER && allUserIds.size > 0) {
+    const { results } = await c.env.AQUILLA_PG.prepare(
+      "SELECT user_id FROM org_members WHERE org_id = ?",
+    )
+      .bind(orgId)
+      .all<{ user_id: number | string }>()
+    const orgMemberIds = new Set((results ?? []).map((r) => Number(r.user_id)))
+    allUserIds = new Set([...allUserIds].filter((uid) => orgMemberIds.has(Number(uid))))
+  }
   const members: MemberUsage[] = []
 
   for (const uid of allUserIds) {

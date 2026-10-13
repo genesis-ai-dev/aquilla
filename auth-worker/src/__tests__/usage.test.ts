@@ -242,6 +242,37 @@ describe("GET /api/v1/usage/org/:orgId", () => {
     expect(res.status).toBe(403)
   })
 
+  // AQU-1771: people who reach an org project through a direct project grant
+  // without belonging to the org are counted in these rows. A manager has
+  // always seen them; a contributor the org opened the card to must not.
+  it("shows a contributor only the org's own members, a maintainer everyone", async () => {
+    await seedOrgWithMembers()
+    await seedUser(7, "guest")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 7, 400, 1)",
+    ).run()
+    await setOrgFloors({ memberProgressViewMinRole: 400, rosterViewMinRole: 400 })
+    const dt = today()
+    await seedTtsRow(2, 1, dt, 30, 1)
+    await seedTtsRow(7, 1, dt, 90, 2)
+    await seedLlmRow(7, dt, 5)
+
+    const rows = async (username: string) => {
+      const res = await app.request("/api/v1/usage/org/1", { headers: authHeader(await jwtFor(username)) }, env)
+      expect(res.status).toBe(200)
+      return (await res.json()) as {
+        members: Array<{ username: string | null }>
+        orgTotal: { audioSeconds: number; llmRequests: number }
+      }
+    }
+    const contributorView = await rows("anna")
+    expect(contributorView.members.map((m) => m.username)).toEqual(["anna"])
+    expect(contributorView.orgTotal).toMatchObject({ audioSeconds: 30, llmRequests: 0 })
+
+    const managerView = await rows("wendi")
+    expect(managerView.members.map((m) => m.username).sort()).toEqual(["anna", "guest"])
+  })
+
   it("returns 403 for a non-member (outsider) — intent: not a member at all means no access", async () => {
     await seedOrgWithMembers()
     const res = await app.request(

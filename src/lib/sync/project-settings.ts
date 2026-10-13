@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "./project-org-policy"
 import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
@@ -97,6 +98,15 @@ export interface ProjectWideSettings {
    * meaning for, so choosing the default deletes the key.
    */
   autoPropagateRepetitions?: boolean
+  /**
+   * AQU-1771: this project's own floors for who sees its member list and
+   * each member's progress — role levels, stricter-only. The project enforces
+   * the higher of this and its org's floor, so a value at or below the org's
+   * means nothing. ABSENT means "follow the organization"; choosing the org's
+   * floor deletes the key.
+   */
+  rosterViewMinRole?: number
+  memberProgressViewMinRole?: number
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
@@ -489,6 +499,16 @@ export interface ProjectSettingsResponse {
    * the project has no org; optional on an older server.
    */
   orgAllowBulkValidateAiDrafts?: boolean | null
+  /**
+   * AQU-1771: the rest of the org's policy this project's surfaces apply —
+   * both visibility floors, assignment authority, the repetition default, the
+   * export floor — carried here so a member outside the org gets the org's
+   * real values. Optional: a server that predates it omits it. See
+   * src/lib/sync/project-org-policy.ts.
+   */
+  orgPolicy?: ProjectOrgPolicy
+  /** AQU-1771: each visibility floor as the org sets it, as this project sets it, and as enforced. */
+  visibilityFloors?: ProjectVisibilityFloors
   /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
   lanes?: ProjectLaneView[]
 }

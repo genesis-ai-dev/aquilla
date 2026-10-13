@@ -98,6 +98,7 @@ import {
 } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { UserError } from "@/lib/errors/user-error"
+import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { ROLE } from "@/lib/frontier/roles"
 import { canOpenAssignUi } from "@/lib/sync/role-policy"
 import {
@@ -393,7 +394,7 @@ export function ProjectOverview() {
   // button so it spins + disables instead of sitting idle and re-clickable.
   // `openingOverlay` blocks the rest of the page while the open is in flight.
   const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
-  const { project, status, refresh, pm, roleLevel } = useProject(id)
+  const { project, status, refresh, pm, roleLevel, projectSettings } = useProject(id)
   useNavHistoryTitle(project?.name)
   // AQU-1586: the target lane ROWS — the only place a lane's language is
   // recorded. A lane's `legacy_tag` is its event key and can be the opaque
@@ -558,11 +559,16 @@ export function ProjectOverview() {
 
   // AQU-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
-  // project's org. The portfolio endpoint is org-scoped, so fall back to the
-  // project's own (server-verified) orgId when it differs from the active
-  // org — `useProject` already gatekept access, so any orgId it returns is
-  // one this user can legitimately query the portfolio for.
-  const portfolioOrgId = activeOrgId ?? project?.orgId ?? null
+  // project's org. The portfolio endpoint is org-scoped, so use the project's
+  // own (server-verified) orgId — `useProject` already gatekept access, so any
+  // orgId it returns is one this user can legitimately query the portfolio for.
+  //
+  // AQU-1771: the PROJECT's org first, always. The active org came first, so a
+  // viewer whose switcher sat on org A, looking at a project in org B, read
+  // org A's portfolio and org A's visibility floors — and an owner of A saw a
+  // badge that would have written A's. Nothing is read until the project has
+  // resolved, so the wrong org never flashes in first.
+  const portfolioOrgId = project ? (project.orgId ?? activeOrgId ?? null) : null
 
   // AQU-486: per-section visibility chrome. The roster + team-progress floors
   // come from AQU-485's org settings; `projectRoleLevel` (not orgRoleLevel)
@@ -584,6 +590,26 @@ export function ProjectOverview() {
     ?? (activeOrg?.id === portfolioOrgId ? activeOrg.role.level : null)
     ?? null
   const orgSettings = useOrgSettings(portfolioOrgId, orgRoleLevel, projectRoleLevel)
+  // AQU-1771: the org policy THIS project applies, carried on its own settings
+  // response so a member outside the org gets the org's real values (the org
+  // read above is refused for them). See src/lib/sync/project-org-policy.ts.
+  const carriedOrgPolicy = projectSettings?.orgPolicy
+  const carriedVisibilityFloors = projectSettings?.visibilityFloors
+  const projectSettingsBlob = projectSettings?.settings
+  const projectPolicy = useMemo(
+    () => resolveProjectPolicy({
+      orgPolicy: carriedOrgPolicy,
+      visibilityFloors: carriedVisibilityFloors,
+      projectSettings: projectSettingsBlob,
+      org: orgSettings,
+      roleLevel: projectRoleLevel,
+    }),
+    [carriedOrgPolicy, carriedVisibilityFloors, projectSettingsBlob, orgSettings, projectRoleLevel],
+  )
+  // Primitives, so the memos below depend on values rather than on the
+  // policy object (a new one every render).
+  const policyAllowSelfAssignment = projectPolicy.allowSelfAssignment
+  const policyAssignmentMinRole = projectPolicy.assignmentMinRole
   const canEditVisibility = canEditRosterProgressFloor(orgRoleLevel)
   // Names on the Team card are the roster. A progress floor of maintainer
   // must not keep that card (and its "maintainers & owners" badge) open after
@@ -1204,8 +1230,8 @@ export function ProjectOverview() {
   const canManage = (project?.syncRole?.level ?? 0) >= 600
   const canAssign = canOpenAssignUi(
     project?.syncRole?.level ?? null,
-    orgSettings.allowSelfAssignment,
-    orgSettings.assignmentMinRole,
+    policyAllowSelfAssignment,
+    policyAssignmentMinRole,
   )
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
@@ -1226,8 +1252,8 @@ export function ProjectOverview() {
       jwt,
       author: session?.username ?? "",
       roleLevel: project?.syncRole?.level ?? 0,
-      allowSelfAssignment: orgSettings.allowSelfAssignment,
-      assignmentMinRole: orgSettings.assignmentMinRole,
+      allowSelfAssignment: policyAllowSelfAssignment,
+      assignmentMinRole: policyAssignmentMinRole,
       // AssignModal resolves the caller from `author` against the roster it
       // fetches, which is the only identity this page actually has — the
       // overview never reads the caller's numeric user id.
@@ -1239,8 +1265,8 @@ export function ProjectOverview() {
     }
   }, [
     canAssign, isArchived, jwt, id, selectedUnitFileId, documentFiles, project?.targetLanes,
-    project?.targetLanguage, project?.syncRole?.level, session?.username, orgSettings.allowSelfAssignment,
-    orgSettings.assignmentMinRole, handleAssigned,
+    project?.targetLanguage, project?.syncRole?.level, session?.username, policyAllowSelfAssignment,
+    policyAssignmentMinRole, handleAssigned,
   ])
 
   const planInspector = selectedPlanUnit ? (
@@ -2561,8 +2587,8 @@ export function ProjectOverview() {
                               defaultLaneLabel={project?.targetLanguage ?? ""}
                               laneRows={targetLaneRows}
                               roleLevel={project?.syncRole?.level ?? 0}
-                              allowSelfAssignment={orgSettings.allowSelfAssignment}
-                              assignmentMinRole={orgSettings.assignmentMinRole}
+                              allowSelfAssignment={policyAllowSelfAssignment}
+                              assignmentMinRole={policyAssignmentMinRole}
                               onAssigned={handleAssigned}
                             />
                           </div>

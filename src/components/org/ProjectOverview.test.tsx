@@ -289,7 +289,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
 const useOrgSettingsMock = vi.fn<() => OrgSettingsMock>(defaultOrgSettingsMock)
 const canEditRosterProgressFloorMock = vi.fn((level: number | null | undefined) => (level ?? 0) >= 700)
 vi.mock("@/hooks/useOrgSettings", () => ({
-  useOrgSettings: () => useOrgSettingsMock(),
+  useOrgSettings: (...args: unknown[]) => (useOrgSettingsMock as (...a: unknown[]) => OrgSettingsMock)(...args),
   canEditRosterProgressFloor: (level: number | null | undefined) => canEditRosterProgressFloorMock(level),
 }))
 
@@ -1150,6 +1150,31 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     // Portfolio was queried using the project's own orgId (99), not activeOrgId (null).
     await waitFor(() => expect(getPortfolio).toHaveBeenCalledWith("jwt", 99))
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  // AQU-1771: the project's org, not the switcher's. Org 1 is active (default
+  // mock), the project lives in org 99: its portfolio and its settings are 99's.
+  it("reads the PROJECT's org even when another org is active", async () => {
+    const orgIds: Array<number | null | undefined> = []
+    useOrgSettingsMock.mockImplementation((...args: unknown[]) => {
+      orgIds.push(args[0] as number | null | undefined)
+      return defaultOrgSettingsMock()
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, orgId: 99, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    await waitFor(() => expect(getPortfolio).toHaveBeenCalledWith("jwt", 99))
+    expect(getPortfolio).not.toHaveBeenCalledWith("jwt", 1)
+    // (The sidebar reads the ACTIVE org's settings for its own nav, so org 1
+    // may appear among all calls; the overview's own read is org 99's.)
+    expect(orgIds).toContain(99)
   })
 
   it("still redirects to / when the user genuinely has no access (status = not-found)", async () => {

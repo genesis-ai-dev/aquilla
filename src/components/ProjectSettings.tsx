@@ -130,6 +130,7 @@ import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useOrg } from "@/hooks/useOrg"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav"
@@ -488,6 +489,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // AQU-1771: what "Organization default" means for the two counts.
     orgValidationCount,
     orgValidationCountAudio,
+    // AQU-1771: the rest of the org policy, carried for this project.
+    orgPolicy: carriedOrgPolicy,
+    visibilityFloors: carriedVisibilityFloors,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
     // AQU-1086: the org's language-edit floor rides on the project record, so
     // the language fields below can be enabled for a project lead when the org
@@ -524,12 +528,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // AQU-485: Members is a privacy-gated settings pane. Hide it entirely for
   // callers below rosterViewMinRole — no "Roster hidden" disclosure, no nav
   // row. Local (unsynced) projects have no org floor, so the pane stays.
+  //
+  // AQU-1771: the floor is the one THIS project enforces — its org's, or its
+  // own when stricter — and comes with the project's settings, so a member
+  // outside the org gets the org's real values rather than built-in defaults.
   const rosterOrgId = project?.orgId ?? activeOrg?.activeOrgId ?? null
-  const { canViewRoster, autoPropagateRepetitions: orgAutoPropagateRepetitions } = useOrgSettings(
+  const orgSettingsForProject = useOrgSettings(
     rosterOrgId,
     activeOrg?.activeOrg?.role?.level,
     project?.syncRole?.level ?? null,
   )
+  const projectPolicy = resolveProjectPolicy({
+    orgPolicy: carriedOrgPolicy,
+    visibilityFloors: carriedVisibilityFloors,
+    projectSettings: sharedSettingsBlob,
+    org: orgSettingsForProject,
+    roleLevel: project?.syncRole?.level ?? null,
+  })
+  const orgAutoPropagateRepetitions = projectPolicy.autoPropagateRepetitions
+  const canViewRoster =
+    projectPolicy.ready
+    && (project?.syncRole?.level ?? 0) >= projectPolicy.rosterViewMinRole.effective
   const canSeeMembers = !isCloudProject || canViewRoster
   const [privilegedOpen, setPrivilegedOpen] = useState(false)
   // project.files is a fresh array each render; key on the file ids. The key is

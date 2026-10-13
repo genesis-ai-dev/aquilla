@@ -98,6 +98,7 @@ import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
 import { resolveFileGenre } from "@/lib/rules/file-genre"
 import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
+import { effectiveRepetitionPropagation, resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { useActiveOrg } from "@/context/OrgContext"
 import { resolveOverlayFileId } from "@/lib/navigation/overlay-file-restore"
 import {
@@ -5116,21 +5117,7 @@ export function ProjectWorkspace() {
   // on Y.Doc maps and the v1.x event grammar isn't in this build, so these are
   // no-ops and the drawer renders empty.
   // Org-level rules: fetch from org settings and merge with project rules.
-  const {
-    orgRules,
-    canExport: canExportByOrgPolicy,
-    hasFetched: orgSettingsFetched,
-    // AQU-496: whether below-lead members may self-assign work.
-    allowSelfAssignment,
-    // AQU-581: whether a lane-scoped member may assign work to OTHERS inside
-    // the lanes the org scoped them to.
-    allowScopedLaneAssignment,
-    // AQU-1037: org-configured floor for assigning work to anyone.
-    assignmentMinRole,
-    // AQU-1391: org default for repetition auto-propagation (a project may
-    // override it either way).
-    autoPropagateRepetitions: orgAutoPropagateRepetitions,
-  } = useOrgSettings(
+  const orgSettingsForProject = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
     // FRO-253 WARN fix: compare the project-resolved role (AD-12 max-wins), not
@@ -5139,6 +5126,32 @@ export function ProjectWorkspace() {
     // written by the sync-token onRole callback above.
     project?.syncRole?.level ?? null,
   )
+  const { orgRules } = orgSettingsForProject
+  // AQU-1771: the org policy THIS project applies, from the project's own
+  // settings response — which a member outside the org can read, unlike the
+  // org's settings. The org read above is only the fallback for a server that
+  // predates it. See src/lib/sync/project-org-policy.ts.
+  const projectPolicy = resolveProjectPolicy({
+    orgPolicy: projectSettings?.orgPolicy,
+    visibilityFloors: projectSettings?.visibilityFloors,
+    projectSettings: projectSettings?.settings,
+    org: orgSettingsForProject,
+    roleLevel: project?.syncRole?.level ?? null,
+  })
+  const {
+    canExport: canExportByOrgPolicy,
+    ready: orgSettingsFetched,
+    // AQU-496: whether below-lead members may self-assign work.
+    allowSelfAssignment,
+    // AQU-581: whether a lane-scoped member may assign work to OTHERS inside
+    // the lanes the org scoped them to.
+    allowScopedLaneAssignment,
+    // AQU-1037: org-configured floor for assigning work to anyone.
+    assignmentMinRole,
+    // AQU-1391: org default for repetition auto-propagation (a project may
+    // override it either way). OFF until the org's answer is known.
+    autoPropagateRepetitions: orgAutoPropagateRepetitions,
+  } = projectPolicy
   const { rules } = useRules(
     project ?? null,
     refresh,
@@ -12458,9 +12471,14 @@ export function ProjectWorkspace() {
   // answer, else its org's, else on. Same three-state shape as
   // `countStructuralCells`: an absent project key means "inherit", so a
   // project that has never been configured follows its org.
-  const autoPropagateRepetitions =
-    projectSettings?.settings?.autoPropagateRepetitions
-    ?? orgAutoPropagateRepetitions
+  //
+  // AQU-1771: the org's half comes with the PROJECT's settings, so a member
+  // outside the org (who cannot read the org's settings) no longer reads it as
+  // the built-in ON and writes copies the org turned off.
+  const autoPropagateRepetitions = effectiveRepetitionPropagation(
+    projectSettings?.settings?.autoPropagateRepetitions,
+    { autoPropagateRepetitions: orgAutoPropagateRepetitions },
+  )
 
   // AQU-1391: which sources repeat in the OPEN file, for the "Repetition ×N"
   // badge. Gated on the setting so a project that opted out grows no new

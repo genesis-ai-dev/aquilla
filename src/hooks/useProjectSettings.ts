@@ -16,6 +16,7 @@ import {
   type ProjectSettingsEditor,
   settingsEditorName,
 } from "@/lib/sync/project-settings"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
@@ -279,6 +280,14 @@ export interface UseProjectSettings {
    *  own settings response so a member outside the org sees it too. Null when
    *  the project has no org, or before the first response that carries it. */
   orgAllowBulkValidateAiDrafts: boolean | null
+  /**
+   * AQU-1771: the org policy this project's surfaces apply, and the
+   * visibility floors it enforces, from the same response. Null before the
+   * first response that carries them, and on a server that predates them —
+   * read both through `resolveProjectPolicy` (src/lib/sync/project-org-policy.ts).
+   */
+  orgPolicy: ProjectOrgPolicy | null
+  visibilityFloors: ProjectVisibilityFloors | null
   /** AQU-1418: the project's lane rows from the last settings response.
    *  Null before the first response that carries them, and on a server
    *  that predates lane rows. */
@@ -501,6 +510,8 @@ export function useProjectSettings(
   const [orgAllowBulkValidateAiDrafts, setOrgAllowBulkValidateAiDrafts] = useState<boolean | null>(null)
   const [orgValidationCount, setOrgValidationCount] = useState<number | null>(null)
   const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
+  const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
+  const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
@@ -513,6 +524,8 @@ export function useProjectSettings(
     }
     if (next?.orgValidationCount !== undefined) setOrgValidationCount(next.orgValidationCount)
     if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
+    if (next?.orgPolicy !== undefined) setOrgPolicy(next.orgPolicy)
+    if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
 
@@ -992,6 +1005,8 @@ export function useProjectSettings(
     orgAllowBulkValidateAiDrafts,
     orgValidationCount,
     orgValidationCountAudio,
+    orgPolicy,
+    visibilityFloors,
     lanes,
     isOnline,
     canEdit,

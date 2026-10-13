@@ -114,6 +114,37 @@ describe("useProjectSettings — StrictMode race (BUG-TERM-1)", () => {
 })
 
 describe("useProjectSettings — read path", () => {
+  // AQU-1771: the org policy rides on this response so a member outside the
+  // org gets the org's real values; the hook must hand it on.
+  it("exposes the org policy and visibility floors carried on the settings response", async () => {
+    const orgPolicy = {
+      rosterViewMinRole: 600,
+      memberProgressViewMinRole: 500,
+      allowSelfAssignment: true,
+      allowScopedLaneAssignment: false,
+      assignmentMinRole: 400,
+      autoPropagateRepetitions: false,
+      exportMinRole: null,
+    }
+    const visibilityFloors = {
+      rosterViewMinRole: { org: 600, project: 700, effective: 700 },
+      memberProgressViewMinRole: { org: 500, project: null, effective: 500 },
+    }
+    mockSettingsFetch({
+      version: 1,
+      updatedAt: "x",
+      updatedBy: null,
+      settings: { rosterViewMinRole: 700 },
+      orgPolicy,
+      visibilityFloors,
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 400))
+
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.orgPolicy).toEqual(orgPolicy)
+    expect(result.current.visibilityFloors).toEqual(visibilityFloors)
+  })
+
   it("starts exactly one settings request on an initially-online mount", async () => {
     const fetchSpy = mockSettingsFetch({
       version: 1,

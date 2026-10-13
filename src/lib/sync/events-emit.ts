@@ -538,7 +538,8 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
 
 // ── Cell waiver helpers ───────────────────────────────────────────────────
 // Non-chain-mutating (parentId omitted), like validation. A waiver dismisses
-// one QA rule's infraction on a cell; the projection keys on (cell, ruleId).
+// one QA rule finding on a cell; the projection keys on
+// (cell, ruleId, matchHash).
 
 export interface CellWaiveInput {
   projectId: string
@@ -546,6 +547,12 @@ export interface CellWaiveInput {
   cellId: string
   /** Stable id of the QA rule whose infraction is being dismissed. */
   ruleId: string
+  /**
+   * AQU-1740: hash of the matched text, narrowing the waiver to ONE finding of
+   * this rule on this cell (`spanMatchHash`, src/lib/rules/match-hash.ts).
+   * Omit to waive the rule across the whole cell.
+   */
+  matchHash?: string
   /** Optional human-entered justification. */
   reason?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
@@ -567,6 +574,7 @@ export async function emitCellWaive(input: CellWaiveInput): Promise<string> {
     author: input.author,
     payload: {
       ruleId: input.ruleId,
+      ...(input.matchHash ? { matchHash: input.matchHash } : {}),
       ...(input.reason ? { reason: input.reason } : {}),
       ...targetLaneFields(input),
     },
@@ -580,6 +588,9 @@ export interface CellUnwaiveInput {
   fileId: string
   cellId: string
   ruleId: string
+  /** AQU-1740: the waived finding's hash. Must name the waiver being lifted —
+   *  omitting it lifts the rule-wide waiver, not the per-finding ones. */
+  matchHash?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -597,7 +608,11 @@ export async function emitCellUnwaive(input: CellUnwaiveInput): Promise<string> 
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { ruleId: input.ruleId, ...targetLaneFields(input) },
+    payload: {
+      ruleId: input.ruleId,
+      ...(input.matchHash ? { matchHash: input.matchHash } : {}),
+      ...targetLaneFields(input),
+    },
     clientTs: input.clientTs,
   })
   return eventId

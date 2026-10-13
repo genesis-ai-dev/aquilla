@@ -29,6 +29,7 @@ const STATIC_REASON_KEY: Partial<Record<RuleInfractionReason, MessageKey>> = {
   "builtin:repeated-word": "rules.infraction.builtin.repeatedWord",
   "builtin:unpaired-symbols": "rules.infraction.builtin.unpairedSymbols",
   "builtin:abbreviation-mismatch": "rules.infraction.builtin.abbreviationMismatch",
+  "builtin:usfm-structure": "rules.infraction.builtin.usfmStructure",
   "builtin:capitalization": "rules.infraction.builtin.capitalization",
   "builtin:footnote-quote-mismatch": "rules.infraction.builtin.footnoteQuoteMismatch",
 }

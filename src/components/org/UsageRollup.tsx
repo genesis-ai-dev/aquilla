@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { getOrgUsage, type OrgUsage } from "@/lib/sync/usage"
 import { Section } from "@/components/ui/page"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -6,26 +6,45 @@ import { UserChip } from "@/components/UserChip"
 
 /**
  * Per-member usage rollup for the org Overview (manager oversight). Fetches
- * the maintainer-gated usage endpoint; a non-manager caller gets a 403, which
- * getOrgUsage translates to null — so the section simply doesn't render.
- * Also renders nothing when all member usage is zero (org hasn't used TTS/AI
- * yet), so it never adds noise to a fresh workspace.
+ * the usage endpoint, which the org's member-progress and member-list settings
+ * gate (AQU-1771). A refusal (403, which getOrgUsage translates to null) is
+ * reported through `onRefused` so the parent drops the card altogether; a
+ * transient failure, and an org whose members have used nothing yet, render
+ * nothing, so it never adds noise to a fresh workspace.
  *
  * Mirrors WorkloadRollup exactly: same effect pattern, same self-hiding logic.
  */
-export function UsageRollup({ jwt, orgId, action }: { jwt: string; orgId: number; action?: ReactNode }) {
+export function UsageRollup({
+  jwt,
+  orgId,
+  action,
+  onRefused,
+}: {
+  jwt: string
+  orgId: number
+  action?: ReactNode
+  /** The server refused the read (403): the caller is below the org's settings. */
+  onRefused?: () => void
+}) {
   const t = useT()
   const [data, setData] = useState<OrgUsage | null>(null)
+  // Read through a ref so a parent's inline callback does not refetch.
+  const onRefusedRef = useRef(onRefused)
+  useEffect(() => { onRefusedRef.current = onRefused }, [onRefused])
 
   useEffect(() => {
     let cancelled = false
     getOrgUsage(jwt, orgId)
-      .then((d) => { if (!cancelled) setData(d) })
+      .then((d) => {
+        if (cancelled) return
+        setData(d)
+        if (d === null) onRefusedRef.current?.()
+      })
       .catch(() => { if (!cancelled) setData(null) }) // transient error → hide
     return () => { cancelled = true }
   }, [jwt, orgId])
 
-  // null = 403 (non-manager) or fetch error → hide
+  // null = refused or fetch error → hide
   if (!data) return null
 
   const hasUsage = data.members.some(

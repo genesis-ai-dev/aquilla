@@ -1534,6 +1534,43 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
   })
 })
 
+// AQU-1771: a refused read is not an empty one. The card used to catch the
+// 403 into an empty list and say "No open assignments in this project yet."
+describe("ProjectOverview Team card when the server refuses the read (AQU-1771)", () => {
+  afterEach(async () => {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectAssignments).mockResolvedValue([])
+  })
+
+  it("hides the card instead of claiming there are no open assignments", async () => {
+    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    const { UserError } = await import("@/lib/errors/user-error")
+    vi.mocked(getProjectAssignments).mockRejectedValue(new UserError(403, "", "project"))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    await waitFor(() => expect(vi.mocked(getProjectAssignments)).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument())
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+  })
+
+  it("still says there are no open assignments when the read succeeds empty", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    expect(await screen.findByText("No open assignments in this project yet.")).toBeInTheDocument()
+  })
+})
+
 // ── AQU-1172: Team card expand/collapse ─────────────────────────────────────
 
 describe("ProjectOverview Team card collapse (AQU-1172)", () => {

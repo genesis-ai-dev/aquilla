@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { getWorkload, unassignAssignment, type OrgWorkloadAssignment } from "@/lib/sync/assignments"
 import { Section } from "@/components/ui/page"
@@ -9,14 +9,16 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UserChip } from "@/components/UserChip"
 import { progressPercent } from "@/lib/progress/progress-percent"
+import { UserError } from "@/lib/errors/user-error"
 
 /**
  * Team-workload rollup for the org Overview (manager oversight). One row per
  * open assignment, with its project attribution (AQU-494 — a per-assignee
  * aggregate couldn't say which project an assignment belonged to). Fetches
- * the maintainer-gated workload endpoint; a non-manager caller gets a 403,
- * which we swallow so the section simply doesn't render for them. Renders
- * nothing when there are no open assignments, so it never adds noise to an org
+ * the workload endpoint, which the org's member-progress and member-list
+ * settings gate (AQU-1771). A refusal (403) is reported through `onRefused`
+ * so the parent drops the card altogether; any other failure, and an org with
+ * no open assignments, render nothing, so the card never adds noise to an org
  * that isn't using assignments yet.
  *
  * Each row has a Remove action that emits `assignment.unassign` (AQU-494:
@@ -38,11 +40,14 @@ export function WorkloadRollup({
   orgId,
   action,
   canUnassignProject = () => true,
+  onRefused,
 }: {
   jwt: string
   orgId: number
   action?: ReactNode
   canUnassignProject?: (projectId: string) => boolean
+  /** The server refused the read (403): the caller is below the org's settings. */
+  onRefused?: () => void
 }) {
   const t = useT()
   const [rows, setRows] = useState<OrgWorkloadAssignment[] | null>(null)
@@ -50,11 +55,19 @@ export function WorkloadRollup({
   const [removeError, setRemoveError] = useState<string | null>(null)
   const { session } = useFrontierSession()
 
+  // Read through a ref so a parent's inline callback does not refetch.
+  const onRefusedRef = useRef(onRefused)
+  useEffect(() => { onRefusedRef.current = onRefused }, [onRefused])
+
   const load = useCallback(() => {
     let cancelled = false
     getWorkload(jwt, orgId)
       .then((w) => { if (!cancelled) setRows(w) })
-      .catch(() => { if (!cancelled) setRows(null) }) // 403 (non-manager) or transient → hide
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setRows(null)
+        if (err instanceof UserError && err.status === 403) onRefusedRef.current?.()
+      })
     return () => { cancelled = true }
   }, [jwt, orgId])
 

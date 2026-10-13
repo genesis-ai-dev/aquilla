@@ -245,6 +245,10 @@ export const org = defineNamespace({
     "org.orgHome.workloadVisibilityDescription":
       "Who can see each teammate's assignment progress on this org's overview.",
     "org.orgHome.usageVisibilityDescription": "Who can see each teammate's usage on this org's overview.",
+    // AQU-1771: the org overview's Team workload / Team usage cards list
+    // people by name, so they can never be more open than the member list.
+    "org.orgHome.teamVisibilityRosterFloorHint":
+      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower the member list in Settings → Security first.",
 
     "org.orgHome.lens.recentLabel": "Recently updated",
     "org.orgHome.lens.recentDescription": "Latest project activity across all organizations",
@@ -2653,6 +2657,13 @@ export const org = defineNamespace({
           done: "Whole-number count of cells completed in this assignment.",
           total: "Whole-number count of cells total in this assignment's scope.",
           pct: "Whole-number completion percentage, e.g. 40.",
+        },
+      },
+      "org.orgHome.teamVisibilityRosterFloorHint": {
+        description:
+          "Note in the org overview's Team workload and Team usage visibility popovers, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the cards show people by name, so they can't be more open than the member list) and where to lower the member list first. 'Settings → Security' is the org settings page — use its localized name.",
+        placeholders: {
+          floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
         },
       },
       "org.projectOverview.teamVisibilityRosterFloorHint": {

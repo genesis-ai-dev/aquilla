@@ -960,6 +960,9 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     useOrgSettingsMock.mockReturnValue({
       ...defaultOrgSettingsMock(),
       memberProgressViewMinRole: 600,
+      // The member list is open too, so the progress setting can go all the
+      // way down (AQU-1771: the card names people, so it follows both).
+      rosterViewMinRole: 100,
       patch,
     })
     canEditRosterProgressFloorMock.mockReturnValue(true)
@@ -985,6 +988,80 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     fireEvent.keyDown(option, { key: "Enter" })
 
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: 100 }))
+  })
+})
+
+// AQU-1771: the Team cards name people, so they follow the higher of the
+// member-progress and member-list settings, as the server does.
+describe("OrgOverview Team cards follow both visibility settings (AQU-1771)", () => {
+  const workloadRow = { assignmentId: "a1", projectId: "p1", projectName: "Legacy Translation", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, deadline: null }
+
+  async function asContributor() {
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 400, name: "contributor" } }])
+  }
+
+  it("stays hidden from a contributor when only member progress is opened to contributors", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 400,
+      rosterViewMinRole: 600,
+    })
+    await asContributor()
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    vi.mocked(getWorkload).mockResolvedValue([workloadRow])
+
+    renderMemberOverview()
+    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+
+    expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("section-team-usage")).not.toBeInTheDocument()
+  })
+
+  it("shows to a contributor once both settings are opened, badged with the higher one", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 400,
+      rosterViewMinRole: 500,
+    })
+    // A project lead meets both.
+    const { listMyOrgs } = await import("@/lib/frontier/orgs")
+    vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 500, name: "project_lead" } }])
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    vi.mocked(getWorkload).mockResolvedValue([workloadRow])
+
+    renderMemberOverview()
+    const section = await screen.findByTestId("section-team-workload")
+    expect(within(section).getByTestId("section-visibility-badge")).toHaveTextContent(/project leads & up/i)
+  })
+
+  it("offers nothing below the member-list setting in the Team workload picker", async () => {
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      rosterViewMinRole: 600,
+    })
+    canEditRosterProgressFloorMock.mockReturnValue(true)
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    vi.mocked(getWorkload).mockResolvedValue([workloadRow])
+
+    renderMemberOverview()
+    const section = await screen.findByTestId("section-team-workload")
+    fireEvent.click(await within(section).findByRole("button", { name: /change section visibility/i }))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+    const everyone = await screen.findByRole("option", { name: /everyone with access/i })
+    expect(everyone).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("drops the Team workload card when the server refuses the read, instead of an empty card", async () => {
+    useOrgSettingsMock.mockReturnValue(defaultOrgSettingsMock())
+    const { getWorkload } = await import("@/lib/sync/assignments")
+    const { UserError } = await import("@/lib/errors/user-error")
+    vi.mocked(getWorkload).mockRejectedValue(new UserError(403, "", "org"))
+
+    renderMemberOverview()
+    await waitFor(() => expect(vi.mocked(getWorkload)).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument())
   })
 })
 

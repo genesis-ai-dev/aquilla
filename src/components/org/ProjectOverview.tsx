@@ -97,6 +97,7 @@ import {
   type UnitAssignment,
 } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { UserError } from "@/lib/errors/user-error"
 import { ROLE } from "@/lib/frontier/roles"
 import { canOpenAssignUi } from "@/lib/sync/role-policy"
 import {
@@ -499,6 +500,7 @@ export function ProjectOverview() {
   const [pmDialogOpen, setPmDialogOpen] = useState(false)
   const [pmSelection, setPmSelection] = useState<string>("")
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
+  const [workloadRefused, setWorkloadRefused] = useState(false)
 
   // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
   // cross-lane behavior, byte-identical (StatTiles read the PortfolioProject
@@ -622,12 +624,18 @@ export function ProjectOverview() {
   // AQU-495: extracted into a callback so a fresh assignment (onAssigned) can
   // revalidate the workload list live, not only on mount — the walkthrough bug
   // was "No open assignments in this project yet." lingering until manual reload.
+  //
+  // AQU-1771: a refusal (403) hides the Team card outright. Read as an empty
+  // list it showed "No open assignments in this project yet." to someone the
+  // server would not tell, which is a claim, not an absence.
   const loadWorkload = useCallback(async () => {
     if (!jwt || !id) return
     try {
       setWorkload(await getProjectAssignments(jwt, id))
-    } catch {
+      setWorkloadRefused(false)
+    } catch (err) {
       setWorkload([])
+      setWorkloadRefused(err instanceof UserError && err.status === 403)
     }
   }, [jwt, id])
 
@@ -2425,143 +2433,145 @@ export function ProjectOverview() {
                   this card exist at all, not an empty/placeholder version.
                   Names on the rows are also the roster, so an owner-only
                   roster floor raises this gate with them (AQU-1172). */}
-              <SectionVisibilityGate
-                minRole={teamNamesFloor}
-                viewerRoleLevel={projectRoleLevel}
-                ready={orgSettings.hasFetched}
-              >
-                <div
-                  className={cn(
-                    "relative rounded-lg border bg-card px-5",
-                    teamOpen ? "py-5" : "py-3",
-                    sectionTintClass(teamNamesFloor),
-                  )}
-                  data-testid="overview-team-card"
-                  data-expanded={teamOpen ? "true" : "false"}
+              {!workloadRefused && (
+                <SectionVisibilityGate
+                  minRole={teamNamesFloor}
+                  viewerRoleLevel={projectRoleLevel}
+                  ready={orgSettings.hasFetched}
                 >
-                  <div className={cn("flex items-center justify-between gap-2", teamOpen && "mb-3")}>
-                    {/* Heading wraps the button: a button may only contain
-                        phrasing content, and an h2 inside it is invalid.
-                        Same header treatment as the Members card (AQU-1171). */}
-                    <h2 className="contents">
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                        aria-expanded={teamOpen}
-                        aria-controls="overview-team-panel"
-                        data-testid="overview-team-toggle"
-                        onClick={() => setTeamOpen((open) => !open)}
-                      >
-                        {teamOpen
-                          ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
-                          : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
-                        {t("editor.navTitle.team")}
-                      </button>
-                    </h2>
-                    <SectionVisibilityBadge
-                      minRole={teamNamesFloor}
-                      canEdit={canEditVisibility}
-                      onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
-                      description={t("org.projectOverview.teamVisibilityDescription")}
-                      // AQU-1779: the badge shows the higher of the two floors
-                      // but writes only the progress floor, so a value below
-                      // the roster floor would save, snap back, and loosen
-                      // per-member progress org-wide unseen. Offer only what
-                      // can show; the roster is lowered on the Members card.
-                      minSelectableRole={orgSettings.rosterViewMinRole}
-                      // Re-picking the shown floor still writes when progress
-                      // sits below it, so an owner can undo the old loosening.
-                      storedMinRole={orgSettings.memberProgressViewMinRole}
-                      belowMinSelectableHint={t("org.projectOverview.teamVisibilityRosterFloorHint", {
-                        floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
-                      })}
-                    />
-                  </div>
-                  {teamOpen && (
-                    <div id="overview-team-panel">
-                      {workload.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
-                      ) : (
-                        <ul className="space-y-2">
-                          {workload.map((w) => {
-                            const donePct = progressPercent(w.cellsDone, w.cellsTotal)
-                            const isSelected = w.username != null && w.username === selectedMemberUsername
-                            return (
-                              <li key={w.userId} className="flex items-center gap-3 text-sm">
-                                {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
-                                <UserChip
-                                  userId={w.userId}
-                                  username={w.username}
-                                  size="sm"
-                                  className="w-40 shrink-0"
-                                />
-                                <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                                  <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
-                                </span>
-                                <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
-                                  {t("org.projectOverview.openAssignmentsStat", {
-                                    count: w.openAssignments,
-                                    percent: bidiIsolate(`${donePct}%`),
-                                  })}
-                                </span>
-                                {/* AQU-498: select a teammate to see their recent actions +
-                                    files-worked-on rollup. Sits inside this SAME
-                                    memberProgressViewMinRole gate, so no separate
-                                    permission plumbing is needed here. */}
-                                {w.username != null && (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
-                                    aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
-                                    aria-pressed={isSelected}
-                                    onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
-                                  >
-                                    {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
-                                  </Button>
-                                )}
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      )}
-
-                      {selectedMemberUsername && (
-                        <MemberActivityPanel
-                          projectId={id}
-                          username={selectedMemberUsername}
-                          getToken={getMemberActivityToken}
-                          onClose={() => setSelectedMemberUsername(null)}
-                        />
-                      )}
-
-                      {canAssign && !isArchived && activeOrgId != null && documentFiles.length > 0 && (
-                        <div className="mt-3 pt-3 border-t">
-                          <AssignWork
-                            projectId={id}
-                            files={documentFiles}
-                            jwt={jwt ?? ""}
-                            author={session?.username ?? ""}
-                            arrivedLane={showLaneTabs ? selectedLaneTag : null}
-                            laneTags={
-                              targetLaneRows.length > 0
-                                ? [...new Set(targetLaneRows.map((lane) => lane.legacyTag ?? ""))]
-                                : ["", ...(project?.targetLanes ?? [])]
-                            }
-                            laneLabels={autopilotLaneLabels}
-                            defaultLaneLabel={project?.targetLanguage ?? ""}
-                            laneRows={targetLaneRows}
-                            roleLevel={project?.syncRole?.level ?? 0}
-                            allowSelfAssignment={orgSettings.allowSelfAssignment}
-                            assignmentMinRole={orgSettings.assignmentMinRole}
-                            onAssigned={handleAssigned}
-                          />
-                        </div>
-                      )}
+                  <div
+                    className={cn(
+                      "relative rounded-lg border bg-card px-5",
+                      teamOpen ? "py-5" : "py-3",
+                      sectionTintClass(teamNamesFloor),
+                    )}
+                    data-testid="overview-team-card"
+                    data-expanded={teamOpen ? "true" : "false"}
+                  >
+                    <div className={cn("flex items-center justify-between gap-2", teamOpen && "mb-3")}>
+                      {/* Heading wraps the button: a button may only contain
+                          phrasing content, and an h2 inside it is invalid.
+                          Same header treatment as the Members card (AQU-1171). */}
+                      <h2 className="contents">
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-start text-xs font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          aria-expanded={teamOpen}
+                          aria-controls="overview-team-panel"
+                          data-testid="overview-team-toggle"
+                          onClick={() => setTeamOpen((open) => !open)}
+                        >
+                          {teamOpen
+                            ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+                            : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
+                          {t("editor.navTitle.team")}
+                        </button>
+                      </h2>
+                      <SectionVisibilityBadge
+                        minRole={teamNamesFloor}
+                        canEdit={canEditVisibility}
+                        onChangeMinRole={async (next) => { await orgSettings.patch({ memberProgressViewMinRole: next }) }}
+                        description={t("org.projectOverview.teamVisibilityDescription")}
+                        // AQU-1779: the badge shows the higher of the two floors
+                        // but writes only the progress floor, so a value below
+                        // the roster floor would save, snap back, and loosen
+                        // per-member progress org-wide unseen. Offer only what
+                        // can show; the roster is lowered on the Members card.
+                        minSelectableRole={orgSettings.rosterViewMinRole}
+                        // Re-picking the shown floor still writes when progress
+                        // sits below it, so an owner can undo the old loosening.
+                        storedMinRole={orgSettings.memberProgressViewMinRole}
+                        belowMinSelectableHint={t("org.projectOverview.teamVisibilityRosterFloorHint", {
+                          floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
+                        })}
+                      />
                     </div>
-                  )}
-                </div>
-              </SectionVisibilityGate>
+                    {teamOpen && (
+                      <div id="overview-team-panel">
+                        {workload.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {workload.map((w) => {
+                              const donePct = progressPercent(w.cellsDone, w.cellsTotal)
+                              const isSelected = w.username != null && w.username === selectedMemberUsername
+                              return (
+                                <li key={w.userId} className="flex items-center gap-3 text-sm">
+                                  {/* AQU-491: click-to-reveal affordance, see file-name cell above. */}
+                                  <UserChip
+                                    userId={w.userId}
+                                    username={w.username}
+                                    size="sm"
+                                    className="w-40 shrink-0"
+                                  />
+                                  <span className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                    <span className="block h-full rounded-full bg-primary transition-all" style={{ width: `${donePct}%` }} />
+                                  </span>
+                                  <span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">
+                                    {t("org.projectOverview.openAssignmentsStat", {
+                                      count: w.openAssignments,
+                                      percent: bidiIsolate(`${donePct}%`),
+                                    })}
+                                  </span>
+                                  {/* AQU-498: select a teammate to see their recent actions +
+                                      files-worked-on rollup. Sits inside this SAME
+                                      memberProgressViewMinRole gate, so no separate
+                                      permission plumbing is needed here. */}
+                                  {w.username != null && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      className="h-6 shrink-0 px-2 text-xs text-muted-foreground"
+                                      aria-label={t("org.projectOverview.viewActivityAria", { username: w.username })}
+                                      aria-pressed={isSelected}
+                                      onClick={() => setSelectedMemberUsername(isSelected ? null : (w.username as string))}
+                                    >
+                                      {isSelected ? t("org.projectOverview.hide") : t("autopilot.inspector.activity.title")}
+                                    </Button>
+                                  )}
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        )}
+
+                        {selectedMemberUsername && (
+                          <MemberActivityPanel
+                            projectId={id}
+                            username={selectedMemberUsername}
+                            getToken={getMemberActivityToken}
+                            onClose={() => setSelectedMemberUsername(null)}
+                          />
+                        )}
+
+                        {canAssign && !isArchived && activeOrgId != null && documentFiles.length > 0 && (
+                          <div className="mt-3 pt-3 border-t">
+                            <AssignWork
+                              projectId={id}
+                              files={documentFiles}
+                              jwt={jwt ?? ""}
+                              author={session?.username ?? ""}
+                              arrivedLane={showLaneTabs ? selectedLaneTag : null}
+                              laneTags={
+                                targetLaneRows.length > 0
+                                  ? [...new Set(targetLaneRows.map((lane) => lane.legacyTag ?? ""))]
+                                  : ["", ...(project?.targetLanes ?? [])]
+                              }
+                              laneLabels={autopilotLaneLabels}
+                              defaultLaneLabel={project?.targetLanguage ?? ""}
+                              laneRows={targetLaneRows}
+                              roleLevel={project?.syncRole?.level ?? 0}
+                              allowSelfAssignment={orgSettings.allowSelfAssignment}
+                              assignmentMinRole={orgSettings.assignmentMinRole}
+                              onAssigned={handleAssigned}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </SectionVisibilityGate>
+              )}
 
               {/* ── Members card (AQU-1171) — same add / change-role / revoke
                   surface as Project Settings → Team members. Collapsed on

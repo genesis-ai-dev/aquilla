@@ -19,6 +19,7 @@ import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
   sectionTintClass,
+  visibilityRolePickerLabelKey,
 } from "./SectionVisibilityBadge"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { UserError } from "@/lib/errors/user-error"
@@ -117,6 +118,36 @@ export function OrgOverview() {
   const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
   const memberProgressReady = orgSettings.hasFetched
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
+  // AQU-1771: Team workload and Team usage list people by name, so they need
+  // the member-list setting as well as the member-progress one — the higher
+  // of the two decides, exactly as the server reads both and as the project
+  // overview's Team card does.
+  const teamNamesFloor = Math.max(
+    orgSettings.memberProgressViewMinRole,
+    orgSettings.rosterViewMinRole,
+  )
+  // A card whose read the server refused stays hidden, rather than showing an
+  // empty state that claims there is nothing to see. Keyed by org, so moving
+  // to another org asks again.
+  const [workloadRefusedOrg, setWorkloadRefusedOrg] = useState<number | null>(null)
+  const [usageRefusedOrg, setUsageRefusedOrg] = useState<number | null>(null)
+  const teamNamesBadge = (description: string) => (
+    <SectionVisibilityBadge
+      minRole={teamNamesFloor}
+      canEdit={canEditVisibility}
+      onChangeMinRole={async (next) => {
+        await orgSettings.patch({ memberProgressViewMinRole: next })
+      }}
+      description={description}
+      // The badge writes only the progress setting, so it offers nothing below
+      // the member-list setting: such a value would save and then not show.
+      minSelectableRole={orgSettings.rosterViewMinRole}
+      storedMinRole={orgSettings.memberProgressViewMinRole}
+      belowMinSelectableHint={t("org.orgHome.teamVisibilityRosterFloorHint", {
+        floor: t(visibilityRolePickerLabelKey(orgSettings.rosterViewMinRole)),
+      })}
+    />
+  )
   const assignmentRoleByProjectId = useMemo(
     () => new Map(accessibleProjects.map((project) => [project.id, project.role.level])),
     [accessibleProjects],
@@ -358,16 +389,16 @@ export function OrgOverview() {
                 </div>
               </Section>
 
-              {jwt && activeOrgId != null && (
+              {jwt && activeOrgId != null && workloadRefusedOrg !== activeOrgId && (
                 <SectionVisibilityGate
-                  minRole={orgSettings.memberProgressViewMinRole}
+                  minRole={teamNamesFloor}
                   viewerRoleLevel={memberProgressViewerRole}
                   ready={memberProgressReady}
                 >
                   <div
                     className={cn(
                       "relative rounded-lg",
-                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                      sectionTintClass(teamNamesFloor),
                     )}
                     data-testid="section-team-workload"
                   >
@@ -378,46 +409,30 @@ export function OrgOverview() {
                         (assignmentRoleByProjectId.get(projectId) ?? 0) >=
                         orgSettings.assignmentMinRole
                       }
-                      action={
-                        <SectionVisibilityBadge
-                          minRole={orgSettings.memberProgressViewMinRole}
-                          canEdit={canEditVisibility}
-                          onChangeMinRole={async (next) => {
-                            await orgSettings.patch({ memberProgressViewMinRole: next })
-                          }}
-                          description={t("org.orgHome.workloadVisibilityDescription")}
-                        />
-                      }
+                      onRefused={() => setWorkloadRefusedOrg(activeOrgId)}
+                      action={teamNamesBadge(t("org.orgHome.workloadVisibilityDescription"))}
                     />
                   </div>
                 </SectionVisibilityGate>
               )}
-              {jwt && activeOrgId != null && (
+              {jwt && activeOrgId != null && usageRefusedOrg !== activeOrgId && (
                 <SectionVisibilityGate
-                  minRole={orgSettings.memberProgressViewMinRole}
+                  minRole={teamNamesFloor}
                   viewerRoleLevel={memberProgressViewerRole}
                   ready={memberProgressReady}
                 >
                   <div
                     className={cn(
                       "relative rounded-lg",
-                      sectionTintClass(orgSettings.memberProgressViewMinRole),
+                      sectionTintClass(teamNamesFloor),
                     )}
                     data-testid="section-team-usage"
                   >
                     <UsageRollup
                       jwt={jwt}
                       orgId={activeOrgId}
-                      action={
-                        <SectionVisibilityBadge
-                          minRole={orgSettings.memberProgressViewMinRole}
-                          canEdit={canEditVisibility}
-                          onChangeMinRole={async (next) => {
-                            await orgSettings.patch({ memberProgressViewMinRole: next })
-                          }}
-                          description={t("org.orgHome.usageVisibilityDescription")}
-                        />
-                      }
+                      onRefused={() => setUsageRefusedOrg(activeOrgId)}
+                      action={teamNamesBadge(t("org.orgHome.usageVisibilityDescription"))}
                     />
                   </div>
                 </SectionVisibilityGate>

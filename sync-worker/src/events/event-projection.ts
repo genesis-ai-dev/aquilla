@@ -3756,6 +3756,17 @@ export function isChainArbitrated(kind: string, parentId: string | null | undefi
 }
 
 /**
+ * AQU-1767: a removal that was later undone (`source.cell.restore` stamps its
+ * archive `restored_by`) holds no slot any more. The restore releases its
+ * `chain_claims` row, but the winner rules read the `events` log, where the
+ * old removal stays the parent's first child forever — so without this every
+ * later remove (or reorder) of the restored row lost as a "stale sibling".
+ * Kept in step with `prefetchChainWinners` in route.ts.
+ */
+export const RESTORED_REMOVAL_SQL = `EXISTS (SELECT 1 FROM removed_cell_archive a
+            WHERE a.delete_event_id = events.id AND a.restored_by IS NOT NULL)`
+
+/**
  * AD-2 first-child-of-parent guard. Returns true if this event is the
  * winning child for its `(project_id, file_id, cell_id, parent_id)` — that
  * is, no other CHAIN-MUTATING event with the same key has been accepted
@@ -3802,17 +3813,19 @@ export async function isWinningChild(
        WHERE project_id = ? AND file_id = ? AND cell_id = ?
          AND parent_id IS NULL
          AND kind IN (${kindList})
+         AND (id = ? OR NOT ${RESTORED_REMOVAL_SQL})
        ORDER BY server_seq ASC, id ASC
        LIMIT 100`
     : `SELECT id, server_seq, kind, payload FROM events
        WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_id = ?
          AND kind IN (${kindList})
+         AND (id = ? OR NOT ${RESTORED_REMOVAL_SQL})
        ORDER BY server_seq ASC, id ASC
        LIMIT 100`
 
   const stmt = parentIsNull
-    ? db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId)
-    : db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.parentId)
+    ? db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.id)
+    : db.prepare(sql).bind(candidate.projectId, candidate.fileId, candidate.cellId, candidate.parentId, candidate.id)
 
   const { results } = await stmt.all<{ id: string; server_seq: number; kind: string; payload: string }>()
 

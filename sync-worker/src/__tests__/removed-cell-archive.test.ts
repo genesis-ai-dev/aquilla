@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildEventProjectionStmts, type PersistedEvent } from '../events/event-projection'
+import { buildEventProjectionStmts, isWinningChild, type PersistedEvent } from '../events/event-projection'
 import { buildChainClaimStmt, eventQualifiedParentKey } from '../events/chain-claims'
 import { CELLS_RESTORE_COLUMNS, findRestorableRemoval } from '../events/removed-cell-archive'
 import { authorize } from '../events/authorize'
@@ -218,6 +218,25 @@ describe('source.cell.restore', () => {
     expect(await rows(`SELECT value, event_id FROM cells WHERE cell_id = '${C}' AND side = 'source'`)).toEqual([
       { value: 'In the very beginning', event_id: 'edit-1' },
     ])
+  })
+
+  it('a restored row can be removed again: the undone removal no longer wins its slot', async () => {
+    await seedFullCell()
+    const logEvent = async (e: PersistedEvent) =>
+      h.pg.query(
+        `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq)
+         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [e.id, e.projectId, e.fileId, e.cellId, e.kind, e.author, JSON.stringify(e.payload), e.clientTs, e.serverTs, e.parentId, e.serverSeq],
+      )
+    const del1 = await project('source.cell.delete', {}, { id: 'del-1', parentId: 'src-create' }, true)
+    await logEvent(del1)
+    await project('source.cell.restore', { deleteEventId: 'del-1' }, { id: 'restore-1' })
+    // The second removal chains on the same restored head as the first did.
+    const del2 = { ...del1, id: 'del-2', serverSeq: (del1.serverSeq ?? 0) + 10, clientTs: del1.clientTs + 10, serverTs: del1.serverTs + 10 }
+    await logEvent(del2)
+    expect(await isWinningChild(h.db, del2)).toBe(true)
+    // ...and replaying the first removal still lets it have its slot.
+    expect(await isWinningChild(h.db, del1)).toBe(true)
   })
 
   it('a gated removal that lost its slot archives nothing', async () => {

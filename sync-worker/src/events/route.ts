@@ -32,6 +32,7 @@ import {
   isChainArbitrated,
   isChainMutatingKind,
   laneOfEvent,
+  RESTORED_REMOVAL_SQL,
   type PersistedEvent,
 } from './event-projection'
 import {
@@ -371,6 +372,7 @@ async function prefetchChainWinners(
          FROM events
          WHERE kind IN (${kindList})
            AND (project_id, file_id, cell_id) IN (${placeholders})
+           AND NOT ${RESTORED_REMOVAL_SQL}
        ) ranked
        WHERE rn <= 100`,
     )

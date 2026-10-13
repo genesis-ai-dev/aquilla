@@ -658,13 +658,12 @@ export function ProjectOverview() {
   // settings write gate — Maintainer and up on the project, which every org
   // owner is — not the org-owner gate that guards the org's own setting.
   const canEditVisibility = Boolean(projectSettings?.canEdit) && projectPolicy.ready
-  const patchProjectVisibility = async (
+  /** Store `own` as this project's value for `key`, or remove it (undefined: follow the org). */
+  const writeProjectVisibility = async (
     key: "rosterViewMinRole" | "memberProgressViewMinRole",
-    next: number,
-    followAtOrBelow: number,
+    own: number | undefined,
   ) => {
     if (!projectSettings) return
-    const own = next > followAtOrBelow ? next : undefined
     // Following the org already and choosing to follow it: nothing to write.
     if (own === undefined && projectSettings.settings[key] === undefined) return
     const outcome = await projectSettings.patch({ [key]: own })
@@ -673,6 +672,16 @@ export function ProjectOverview() {
     const why = visibilitySaveRefusal(outcome, t)
     if (why) toast.add({ type: "error", title: t("org.projectOverview.visibilitySaveFailed"), description: why })
   }
+  const patchProjectVisibility = (
+    key: "rosterViewMinRole" | "memberProgressViewMinRole",
+    next: number,
+    followAtOrBelow: number,
+  ) => writeProjectVisibility(key, next > followAtOrBelow ? next : undefined)
+  // Sam, 2026-10-13: a stricter value this project set may be loosened only by
+  // someone at or above it ("Owners only" binds maintainers); the server
+  // refuses anyone else. The badges need no lock of their own for it: each
+  // sits inside a gate at the floor it shows, which is at least the project's
+  // own value, so everyone who can open one already meets that value.
 
   const loadRow = useCallback(async () => {
     if (!jwt || portfolioOrgId == null) return
@@ -2571,8 +2580,14 @@ export function ProjectOverview() {
                         minSelectableRole={teamOrgShown}
                         storedMinRole={progressFloor.effective}
                         orgDefaultRole={
-                          progressFloor.org >= rosterFloor.effective ? progressFloor.org : undefined
+                          progressFloor.project == null && progressFloor.org >= rosterFloor.effective
+                            ? progressFloor.org
+                            : undefined
                         }
+                        // While the project has its own progress value, a plain
+                        // way back to the org's, whatever the member list says.
+                        followOrgRole={progressFloor.project != null ? teamOrgShown : undefined}
+                        onFollowOrg={() => writeProjectVisibility("memberProgressViewMinRole", undefined)}
                         origin={
                           (progressFloor.effective >= rosterFloor.effective
                             ? progressFloor.project

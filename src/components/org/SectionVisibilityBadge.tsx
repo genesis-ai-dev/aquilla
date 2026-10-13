@@ -132,8 +132,19 @@ export interface SectionVisibilityBadgeProps {
   origin?: "org" | "project"
   /** AQU-1771: the option that means "follow the organization" — labelled so. */
   orgDefaultRole?: number
+  /**
+   * AQU-1771: when set, a first option "Follow the org (<level>)" that clears
+   * this project's own value (`onFollowOrg`); `followOrgRole` is the level the
+   * section would then show. Offered while the project has its own value, so
+   * that value can always be cleared.
+   */
+  followOrgRole?: number
+  onFollowOrg?: () => void | Promise<void>
   className?: string
 }
+
+/** The Select value of the "Follow the org" option — never a role level. */
+const FOLLOW_ORG_VALUE = "follow-org"
 
 /**
  * Compact "who can see this" affordance for a dashboard section. Renders as a
@@ -151,6 +162,8 @@ export function SectionVisibilityBadge({
   belowMinSelectableHint,
   origin,
   orgDefaultRole,
+  followOrgRole,
+  onFollowOrg,
   className,
 }: SectionVisibilityBadgeProps) {
   const t = useT()
@@ -172,7 +185,15 @@ export function SectionVisibilityBadge({
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
   const isSelectable = (level: number) => minSelectableRole == null || level >= minSelectableRole
+  const offersFollow = followOrgRole != null && typeof onFollowOrg === "function"
   const someDisabled = VISIBILITY_ROLE_OPTIONS.some((opt) => !isSelectable(opt.level))
+  const followLabel = followOrgRole != null
+    ? t("org.sectionVisibilityBadge.followOrgOption", { label: t(visibilityRolePickerLabelKey(followOrgRole)) })
+    : ""
+  const selectItems = [
+    ...(offersFollow ? [{ value: FOLLOW_ORG_VALUE, label: followLabel }] : []),
+    ...VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: optionLabel(opt) })),
+  ]
 
   const badgeContent = (
     <Badge
@@ -202,6 +223,16 @@ export function SectionVisibilityBadge({
   }
 
   async function handleChange(value: string | null) {
+    if (value === FOLLOW_ORG_VALUE) {
+      if (!onFollowOrg) return
+      setBusy(true)
+      try {
+        await onFollowOrg()
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     if (!value || !onChangeMinRole) return
     const next = Number(value)
     if (!Number.isFinite(next) || next === (storedMinRole ?? minRole) || !isSelectable(next)) return
@@ -257,7 +288,7 @@ export function SectionVisibilityBadge({
             )}
           </div>
           <Select
-            items={VISIBILITY_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: optionLabel(opt) }))}
+            items={selectItems}
             value={String(minRole)}
             onValueChange={(v) => void handleChange(v)}
             disabled={busy}
@@ -267,6 +298,11 @@ export function SectionVisibilityBadge({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
+                {offersFollow && (
+                  <SelectItem value={FOLLOW_ORG_VALUE}>
+                    {followLabel}
+                  </SelectItem>
+                )}
                 {VISIBILITY_ROLE_OPTIONS.map((opt) => (
                   <SelectItem key={opt.level} value={String(opt.level)} disabled={!isSelectable(opt.level)}>
                     {optionLabel(opt)}

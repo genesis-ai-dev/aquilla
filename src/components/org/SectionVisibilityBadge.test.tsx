@@ -47,6 +47,29 @@ describe("SectionVisibilityBadge", () => {
     )
   })
 
+  // AQU-1771: a project's own value can always be cleared from the badge.
+  it("offers a 'Follow the org' first option only when given one, and calls onFollowOrg", async () => {
+    const onFollowOrg = vi.fn()
+    const onChangeMinRole = vi.fn()
+    render(
+      <SectionVisibilityBadge
+        minRole={ROLE.OWNER}
+        canEdit
+        onChangeMinRole={onChangeMinRole}
+        followOrgRole={ROLE.MAINTAINER}
+        onFollowOrg={onFollowOrg}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("section-visibility-badge"))
+    fireEvent.click(await screen.findByRole("combobox", { name: /who can see this section/i }))
+    const follow = await screen.findByRole("option", { name: "Follow the org (Maintainers and owners)" })
+    fireEvent.pointerMove(follow)
+    fireEvent.mouseMove(follow)
+    fireEvent.keyDown(follow, { key: "Enter" })
+    await waitFor(() => expect(onFollowOrg).toHaveBeenCalledOnce())
+    expect(onChangeMinRole).not.toHaveBeenCalled()
+  })
+
   it("renders a plain, non-interactive badge when the caller cannot edit", () => {
     render(<SectionVisibilityBadge minRole={ROLE.MAINTAINER} />)
     const badge = screen.getByTestId("section-visibility-badge")

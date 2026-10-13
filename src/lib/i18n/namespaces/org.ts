@@ -973,6 +973,7 @@ export const org = defineNamespace({
     "org.sectionVisibilityBadge.originOrg": "Org default",
     "org.sectionVisibilityBadge.originProject": "Stricter for this project",
     "org.sectionVisibilityBadge.orgDefaultOption": "{label} (org default)",
+    "org.sectionVisibilityBadge.followOrgOption": "Follow the org ({label})",
 
     // -- WorkloadRollup: org Overview team-workload manager rollup --
     "org.workloadRollup.title": "Team workload",
@@ -2713,6 +2714,13 @@ export const org = defineNamespace({
       "org.projectOverview.visibilitySaveForbidden": {
         description:
           "Body of that error toast when the person's role does not allow changing this project's settings.",
+      },
+      "org.sectionVisibilityBadge.followOrgOption": {
+        description:
+          "First option in a project's 'Who can see this section' picker when the project has its own (stricter) setting. Choosing it removes the project's own setting so the project follows its organization again; the label in parentheses is what the section would then show.",
+        placeholders: {
+          label: "The resulting already-localized role label, e.g. 'Maintainers and owners'.",
+        },
       },
       "org.projectOverview.visibilityOrgFloorHint": {
         description:

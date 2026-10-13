@@ -1980,11 +1980,42 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     expect(patch).not.toHaveBeenCalled()
   })
 
-  it("choosing the org's shown value clears the project's own progress floor", async () => {
+  it("offers 'Follow the org' while the project has its own progress value, and it clears it", async () => {
     const patch = await openTeamPicker({ progressOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })
 
-    choose(await screen.findByRole("option", { name: "Maintainers and owners (org default)" }))
+    choose(await screen.findByRole("option", { name: "Follow the org (Maintainers and owners)" }))
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: undefined }))
+  })
+
+  it("can always clear the project's own progress value, even when the member list is what the card then shows", async () => {
+    // Org progress is Contributors, the member list Maintainers: no level
+    // option can mean "follow the org" here, so the follow option is the way.
+    const patch = await openTeamPicker({ progressOrg: ROLE.CONTRIBUTOR, rosterOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER })
+
+    choose(await screen.findByRole("option", { name: "Follow the org (Maintainers and owners)" }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ memberProgressViewMinRole: undefined }))
+  })
+
+  it("offers no 'Follow the org' while the project already follows it", async () => {
+    await openTeamPicker({ progressOrg: ROLE.MAINTAINER, rosterOrg: ROLE.MAINTAINER })
+    expect(await screen.findByRole("option", { name: "Maintainers and owners (org default)" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /follow the org/i })).not.toBeInTheDocument()
+  })
+
+  // Sam, 2026-10-13: "Owners only" binds maintainers — only an owner may
+  // loosen it. A maintainer never even gets the picker for it: the Team card
+  // is closed to them under an Owners-only progress value.
+  it("gives a maintainer no Team picker under the project's own Owners-only progress value", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: ROLE.MAINTAINER, orgId: 1 }),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock({ progressOrg: ROLE.MAINTAINER, progressOwn: ROLE.OWNER }),
+    })
+    renderOverview()
+
+    await screen.findByRole("button", { name: "Open project" })
+    expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
   })
 
   it("stores a Team value that only matches the member list, rather than following the org", async () => {

@@ -614,6 +614,8 @@ export const org = defineNamespace({
       "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
     // AQU-1771: amber line under the Team card's visibility badge right after a
     // Members change moved the Team card's level with it.
+    "org.projectOverview.teamVisibilityAdjusted": "Visibility adjusted",
+    "org.projectOverview.teamVisibilityAdjustedWhyAriaLabel": "Why the visibility was adjusted",
     "org.projectOverview.teamVisibilityMovedByMembers":
       "Changed to “{level}” because Members changed. This card lists members, so it is never more open than the member list.",
     // AQU-1771: under a project's Team / Members visibility picker when the
@@ -2689,9 +2691,17 @@ export const org = defineNamespace({
           floor: "The member list's current setting as its already-localized picker label, e.g. 'Maintainers and owners' or 'Owners only'.",
         },
       },
+      "org.projectOverview.teamVisibilityAdjusted": {
+        description:
+          "Two-word amber warning under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility moved who can see the Team card. A small circled-i beside it opens the full explanation.",
+      },
+      "org.projectOverview.teamVisibilityAdjustedWhyAriaLabel": {
+        description:
+          "Screen-reader label for the small circled-i button beside 'Visibility adjusted' on the Team card; pressing it shows why the visibility changed.",
+      },
       "org.projectOverview.teamVisibilityMovedByMembers": {
         description:
-          "Small amber warning under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility (or the org's member-list setting) moved who can see the Team card. 'Members' is the card of that name on the same page — use its localized name.",
+          "The full explanation opened from the circled-i beside the Team card's 'Visibility adjusted' note: a small line under the project overview's Team card visibility badge, shown right after a change to the Members card's visibility (or the org's member-list setting) moved who can see the Team card. 'Members' is the card of that name on the same page — use its localized name.",
         placeholders: {
           level: "The Team card's new setting as its already-localized picker label, e.g. 'Project leads and up'.",
         },

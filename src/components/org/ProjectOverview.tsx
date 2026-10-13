@@ -1,7 +1,7 @@
 import { ProjectMondayCard } from "./ProjectMondayCard"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, ChevronDown, ChevronRight } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -659,6 +659,8 @@ export function ProjectOverview() {
   // the Team level next moves on its own (its badge, or the org's progress
   // setting). Any Members change counts, this tab's or a teammate's.
   const [teamMovedByMembers, setTeamMovedByMembers] = useState<number | null>(null)
+  // The note is two words; its (i) opens the why (Sam, 2026-10-13).
+  const [teamMovedWhyOpen, setTeamMovedWhyOpen] = useState(false)
   const lastVisibilityRef = useRef<{ roster: number; team: number } | null>(null)
   useEffect(() => {
     if (!projectPolicy.ready) return
@@ -666,6 +668,7 @@ export function ProjectOverview() {
     lastVisibilityRef.current = { roster: rosterFloor.effective, team: teamNamesFloor }
     if (!last || last.team === teamNamesFloor) return
     setTeamMovedByMembers(last.roster !== rosterFloor.effective ? teamNamesFloor : null)
+    setTeamMovedWhyOpen(false)
   }, [projectPolicy.ready, rosterFloor.effective, teamNamesFloor])
   // The badges write THIS project's own values, so they follow the project
   // settings write gate — Maintainer and up on the project, which every org
@@ -2620,15 +2623,34 @@ export function ProjectOverview() {
                       />
                     </div>
                     {teamMovedByMembers != null && (
-                      <p
+                      <div
                         role="status"
                         data-testid="overview-team-visibility-moved"
-                        className={cn("mt-1 text-end text-xs text-amber-700 dark:text-amber-400", teamOpen && "mb-3")}
+                        className={cn("mt-1 flex flex-col items-end gap-0.5", teamOpen && "mb-3")}
                       >
-                        {t("org.projectOverview.teamVisibilityMovedByMembers", {
-                          level: t(visibilityRolePickerLabelKey(teamMovedByMembers)),
-                        })}
-                      </p>
+                        <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                          {t("org.projectOverview.teamVisibilityAdjusted")}
+                          {/* A click, not a hover, like the badge's own (i): a
+                              tooltip would not reach touch screens. */}
+                          <button
+                            type="button"
+                            data-testid="overview-team-visibility-moved-info"
+                            className="inline-flex size-4 items-center justify-center rounded-full transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                            aria-label={t("org.projectOverview.teamVisibilityAdjustedWhyAriaLabel")}
+                            aria-expanded={teamMovedWhyOpen}
+                            onClick={() => setTeamMovedWhyOpen((v) => !v)}
+                          >
+                            <Info className="size-3.5" aria-hidden />
+                          </button>
+                        </span>
+                        {teamMovedWhyOpen && (
+                          <p className="max-w-sm text-end text-xs text-muted-foreground" data-testid="overview-team-visibility-moved-why">
+                            {t("org.projectOverview.teamVisibilityMovedByMembers", {
+                              level: t(visibilityRolePickerLabelKey(teamMovedByMembers)),
+                            })}
+                          </p>
+                        )}
+                      </div>
                     )}
                     {teamOpen && (
                       <div id="overview-team-panel">

@@ -1260,6 +1260,52 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
   return eventId
 }
 
+/**
+ * AQU-1767: undo a cut — remove the new piece, give the first piece its old
+ * end back, and (when the cut renamed it) its old name — as ONE outbox write.
+ * Queued one at a time, a tab closed in between kept the removal and lost the
+ * trim, leaving the take's tail missing. Returns the three event ids in order
+ * (the rename's only when there is one).
+ */
+export async function emitCellAudioUncut(input: {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The piece the cut made. */
+  removeAudioId: string
+  /** The piece that was cut, and its whole window back. */
+  audioId: string
+  trimStartMs: number | null
+  trimEndMs: number | null
+  /** Set when the cut renamed the first piece ("Take 1" → "Take 1 · 1"). */
+  rename?: { label: string | null }
+  targetLang?: string
+  laneId?: string
+  author: string
+}): Promise<string[]> {
+  const base = {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+  }
+  const lane = targetLaneFields(input)
+  const inputs: BuildEventInput<OutboxEventKind>[] = [
+    { ...base, kind: "cell.audio.remove", payload: { audioId: input.removeAudioId, ...lane } },
+    {
+      ...base,
+      kind: "cell.audio.trim",
+      payload: { audioId: input.audioId, trimStartMs: input.trimStartMs, trimEndMs: input.trimEndMs, ...lane },
+    },
+    ...(input.rename
+      ? [{ ...base, kind: "cell.audio.rename" as const, payload: { audioId: input.audioId, label: input.rename.label, ...lane } }]
+      : []),
+  ] as BuildEventInput<OutboxEventKind>[]
+  const queued = await enqueueEvents(inputs)
+  return queued.map((q) => q.eventId)
+}
+
 // ── Audio validation (AQU-490) ────────────────────────────────────────────
 // A vote is on a TAKE, so these carry an audioId where the text pair carries
 // an editEventId. Non-chain-mutating like the text pair, for the same reason:

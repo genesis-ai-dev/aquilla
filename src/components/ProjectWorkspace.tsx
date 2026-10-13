@@ -253,7 +253,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -3333,24 +3333,12 @@ export function ProjectWorkspace() {
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
       })
+      // The overlay REPLACES the attachment, so it is the whole take with the
+      // new window (AQU-1767): a hand-listed copy dropped `pieceOf`, `label`
+      // and the placement, and a cut piece vanished from the timeline while
+      // its trim saved. Votes ride along too (AQU-490: trim keeps them).
       injectOptimisticAudioTrim(takeFileId, cellId, {
-        audioId,
-        url: att.url,
-        slot,
-        mimeType: null,
-        voiceId: att.voiceId ?? null,
-        referenceAudioId: att.referenceAudioId ?? null,
-        durationMs: att.durationMs ?? null,
-        // AQU-490: the overlay REPLACES the attachment rather than merging
-        // into it, so a field omitted here is a field the editor stops seeing
-        // for as long as the shadow lives. Both are optional, so leaving them
-        // out compiles clean and fails silently — the trap this file's own
-        // comment warns about. Until 2026-09-21 the omission happened to match
-        // the server, which discarded votes on trim; now that trim keeps them,
-        // dropping them here would flicker the line to unvalidated on every
-        // drag of the crop handle.
-        ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
-        ...(att.validators ? { validators: att.validators } : {}),
+        ...attachmentOutFrom(audioId, att, slot),
         trimStartMs: trims.trimStartMs ?? null,
         trimEndMs: trims.trimEndMs ?? null,
       }, trimP)
@@ -3470,16 +3458,11 @@ export function ProjectWorkspace() {
         author: currentUsername,
       })
       if (att) {
+        // The whole take with its new place (see the trim above): a piece
+        // must keep its `pieceOf`, or it drops out of its group while saving.
+        const slot = att.slot ?? (audioId === cell.selectedAudioId ? "recording" : "generatedVoice")
         injectOptimisticAudioPlace(takeFileId, cellId, {
-          audioId,
-          url: att.url,
-          slot: att.slot ?? (audioId === cell.selectedAudioId ? "recording" : "generatedVoice"),
-          mimeType: null,
-          voiceId: att.voiceId ?? null,
-          referenceAudioId: att.referenceAudioId ?? null,
-          durationMs: att.durationMs ?? null,
-          trimStartMs: att.trimStartMs ?? null,
-          trimEndMs: att.trimEndMs ?? null,
+          ...attachmentOutFrom(audioId, att, slot),
           targetOffsetMs,
         }, placeP)
       } else if (takeFileId !== activeFileId) {
@@ -3572,60 +3555,26 @@ export function ProjectWorkspace() {
     },
     [project?.id, readTake, activeLane, currentUsername, getTokenForProjectFile],
   )
-  const applyTakeRemove = useCallback(
-    async (cellId: string, audioId: string) => {
-      if (!project?.id) return
-      const cur = readTake(cellId, audioId)
-      if (!cur) return
-      const slot = cur.att.slot ?? "recording"
-      const removeP = emitCellAudioRemove({
-        projectId: project.id,
-        fileId: cur.owner.fileId,
-        cellId,
-        audioId,
-        ...(activeLane ? { targetLang: activeLane } : {}),
-        author: currentUsername,
-      })
-      injectOptimisticAudioRemove(cur.owner.fileId, cellId, audioId, slot, removeP)
-      await removeP
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      notifyAudioAttachmentsChanged(cur.owner.fileId)
-    },
-    [project?.id, readTake, activeLane, currentUsername, getTokenForProjectFile],
-  )
-  const applyTakeRename = useCallback(
-    async (cellId: string, audioId: string, label: string | null) => {
-      if (!project?.id) return
-      const cur = readTake(cellId, audioId)
-      if (!cur) return
-      await emitCellAudioRename({
-        projectId: project.id,
-        fileId: cur.owner.fileId,
-        cellId,
-        audioId,
-        label,
-        ...(activeLane ? { targetLang: activeLane } : {}),
-        author: currentUsername,
-      })
-    },
-    [project?.id, readTake, activeLane, currentUsername],
-  )
   const handleCutTargets = useCallback(
     async (cuts: readonly { cellId: string; audioId: string; atMs: number }[]) => {
+      // Decide every cut and RECORD THE STEP before any of them saves: an
+      // Undo pressed while a cut is still on its way must undo the cut, not
+      // the step before it (slow-network pass, 2026-10-13).
       const made: CutRecord[] = []
       for (const cut of cuts) {
         const cur = readTake(cut.cellId, cut.audioId)
         if (!cur || !canCutAt(cur.att, cut.atMs)) continue
-        const newAudioId = newPieceAudioId(cut.cellId, cut.audioId)
-        const before = {
-          trimEndMs: cur.att.trimEndMs ?? null,
-          label: cur.att.label ?? null,
-          targetOffsetMs: cur.att.targetOffsetMs ?? null,
-        }
-        const renamed = pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null
-        if (await applyTakeCut(cut.cellId, cut.audioId, cut.atMs, newAudioId)) {
-          made.push({ ...cut, atMs: Math.round(cut.atMs), newAudioId, before, renamed })
-        }
+        made.push({
+          ...cut,
+          atMs: Math.round(cut.atMs),
+          newAudioId: newPieceAudioId(cut.cellId, cut.audioId),
+          before: {
+            trimEndMs: cur.att.trimEndMs ?? null,
+            label: cur.att.label ?? null,
+            targetOffsetMs: cur.att.targetOffsetMs ?? null,
+          },
+          renamed: pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null,
+        })
       }
       if (made.length === 0) {
         toast.add({ type: "info", title: t("editor.history.nothingToCut") })
@@ -3637,19 +3586,48 @@ export function ProjectWorkspace() {
           cuts: made,
           readTake: (cellId, audioId) => readTake(cellId, audioId)?.att ?? null,
           cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
+          // Remove the new piece, give the first its old end (and name) back,
+          // as ONE outbox write (slow-network pass, 2026-10-13): queued one at
+          // a time, a tab closed in between kept the removal and lost the trim,
+          // leaving the take's tail missing.
           uncut: async (c) => {
-            await applyTakeRemove(c.cellId, c.newAudioId)
-            await applyTakeTrim(c.cellId, c.audioId, {
-              trimStartMs: readTake(c.cellId, c.audioId)?.att.trimStartMs ?? undefined,
-              trimEndMs: c.before.trimEndMs ?? undefined,
+            const cur = readTake(c.cellId, c.audioId)
+            if (!project?.id || !cur) return
+            const fileId = cur.owner.fileId
+            const slot = cur.att.slot ?? (c.audioId === cur.owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+            const piece = readTake(c.cellId, c.newAudioId)
+            const trimStartMs = cur.att.trimStartMs ?? null
+            const batchP = emitCellAudioUncut({
+              projectId: project.id,
+              fileId,
+              cellId: c.cellId,
+              removeAudioId: c.newAudioId,
+              audioId: c.audioId,
+              trimStartMs,
+              trimEndMs: c.before.trimEndMs,
+              ...(c.renamed ? { rename: { label: c.before.label } } : {}),
+              ...(activeLane ? { targetLang: activeLane } : {}),
+              author: currentUsername,
             })
-            if (c.renamed) await applyTakeRename(c.cellId, c.audioId, c.before.label)
+            if (piece) {
+              injectOptimisticAudioRemove(fileId, c.cellId, c.newAudioId, piece.att.slot ?? slot, batchP.then((ids) => ids[0]!))
+            }
+            injectOptimisticAudioTrim(fileId, c.cellId, {
+              ...attachmentOutFrom(c.audioId, cur.att, slot),
+              trimStartMs,
+              trimEndMs: c.before.trimEndMs,
+              ...(c.renamed ? { label: c.before.label } : {}),
+            }, batchP.then((ids) => ids[1]!))
+            await batchP
+            await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+            notifyAudioAttachmentsChanged(fileId)
           },
           newPieceId: (c) => newPieceAudioId(c.cellId, c.audioId),
         }),
       )
+      for (const c of made) await applyTakeCut(c.cellId, c.audioId, c.atMs, c.newAudioId)
     },
-    [readTake, applyTakeCut, applyTakeRemove, applyTakeTrim, applyTakeRename, t],
+    [readTake, applyTakeCut, project?.id, activeLane, currentUsername, getTokenForProjectFile, t],
   )
   // Cmd/Ctrl+Z and its friends, app-wide; say what was undone, or why not.
   useEffect(() => {

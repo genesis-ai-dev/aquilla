@@ -44,5 +44,6 @@ describe("whisperLanguageFromTag", () => {
     expect(whisperLanguageFromTag("")).toBeUndefined()
     expect(whisperLanguageFromTag("   ")).toBeUndefined()
     expect(whisperLanguageFromTag("english")).toBeUndefined() // 7 letters, falls through
+    expect(whisperLanguageFromTag("a3f09c1e")).toBeUndefined() // lane id, never a language
   })
 })

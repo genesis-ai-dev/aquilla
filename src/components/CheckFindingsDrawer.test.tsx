@@ -39,6 +39,8 @@ const baseResult: CheckRunResult = {
   checkedTermCount: 8,
   ruleFindings: [],
   termFindings: [],
+  capitalizationFindings: [],
+  caseExceptions: [],
   totalFindingCount: 0,
 }
 
@@ -139,6 +141,50 @@ describe("CheckFindingsDrawer", () => {
     fireEvent.click(screen.getByText("MAT 1:16"))
     expect(onNavigateToCell).toHaveBeenCalledWith("c2")
     // Rule finding's cell reference navigates too.
+    fireEvent.click(screen.getByText("MAT 1:1"))
+    expect(onNavigateToCell).toHaveBeenCalledWith("c1")
+  })
+
+  it("accounts for learned capitalization exceptions even on a clean result (AQU-1734)", () => {
+    render(
+      <CheckFindingsDrawer
+        result={{ ...baseResult, caseExceptions: [{ form: "ki-", occurrences: 40 }] }}
+        running={false} cells={[]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+      />,
+    )
+    expect(screen.getByText(/no issues found/)).toBeInTheDocument()
+    expect(screen.getByText(/Not flagged .* ki-/)).toBeInTheDocument()
+  })
+
+  it("renders capitalization findings and names the exceptions it learned (AQU-1734)", () => {
+    const onNavigateToCell = vi.fn()
+    const cells = [makeCell("c1", "MAT 1:1", "Alisema tHe neno"), makeCell("c2", "MRK 1:16", "mwito wa Simoni")]
+    const result: CheckRunResult = {
+      ...baseResult,
+      capitalizationFindings: [
+        { code: "mixed-case", form: "tHe", cells: [{ cellId: "c1", cellLabel: "MAT 1:1" }] },
+        { code: "lowercase-heading-start", form: "", cells: [{ cellId: "c2", cellLabel: "MRK 1:16" }] },
+      ],
+      caseExceptions: [{ form: "ki-", occurrences: 40, examples: ["kiNgozi", "kiSwahili"] }],
+      totalFindingCount: 2,
+    }
+
+    render(
+      <CheckFindingsDrawer
+        result={result} running={false} cells={cells}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={onNavigateToCell}
+      />,
+    )
+
+    expect(screen.getByText("Capitalization (2)")).toBeInTheDocument()
+    // The offending form is raw cell content — rendered verbatim, not translated.
+    expect(screen.getByText("tHe")).toBeInTheDocument()
+    expect(screen.getByText("1 cell writes a capital inside this word")).toBeInTheDocument()
+    expect(screen.getByText("Heading starts with a lowercase letter")).toBeInTheDocument()
+    // What was let through is visible rather than silent.
+    expect(screen.getByText(/Not flagged .* ki-/)).toBeInTheDocument()
+
     fireEvent.click(screen.getByText("MAT 1:1"))
     expect(onNavigateToCell).toHaveBeenCalledWith("c1")
   })

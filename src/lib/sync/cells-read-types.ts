@@ -31,8 +31,11 @@ export interface FileSummary {
   kind?: string | null
   /** The text file an audio-cue sibling annotates. Null on ordinary files. */
   anchorFileId?: string | null
-  sourceLanguage: string | null
-  targetLanguage: string | null
+  /** AQU-1596: what the file's header claimed at import. Import information,
+   *  never a lane's language — it can disagree with the lane the rows live in.
+   *  A language shown to a user comes off the lane, not off here. */
+  declaredSourceLanguage: string | null
+  declaredTargetLanguage: string | null
   sourceTextDirection?: "ltr" | "rtl" | null
   targetTextDirection?: "ltr" | "rtl" | null
   cellCount: number

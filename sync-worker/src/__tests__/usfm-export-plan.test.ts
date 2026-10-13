@@ -27,8 +27,7 @@ let seq = 0
 /** An imported verse: it has an address and no origin marker. */
 async function verse(cellId: string, ref: string, anchor: string | null = null): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, anchor_cell_id, event_id, last_edit_at)
-     VALUES ($1, $2, $3, 'source', '', 'source text', $4, $5, $6, 1)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, anchor_cell_id, event_id, last_edit_at) VALUES ($1, $2, $3, 'source', 'source text', $4, $5, $6, 1)`,
     [PROJECT, FILE, cellId, ref, anchor, `head-${cellId}`],
   )
 }
@@ -37,8 +36,7 @@ async function verse(cellId: string, ref: string, anchor: string | null = null):
  *  and the notes are parked in metadata (AQU-1283). */
 async function contentOnlyVerse(cellId: string, ref: string, metadata: unknown): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, metadata, event_id, last_edit_at)
-     VALUES ($1, $2, $3, 'source', '', 'source text', $4, $5, $6, 1)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, metadata, event_id, last_edit_at) VALUES ($1, $2, $3, 'source', 'source text', $4, $5, $6, 1)`,
     [PROJECT, FILE, cellId, ref, JSON.stringify(metadata), `head-${cellId}`],
   )
 }
@@ -46,16 +44,14 @@ async function contentOnlyVerse(cellId: string, ref: string, metadata: unknown):
 /** A cell somebody added in the app: the origin marker, and no address. */
 async function addedCell(cellId: string, anchor: string | null): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, anchor_cell_id, metadata, event_id, last_edit_at)
-     VALUES ($1, $2, $3, 'source', '', '', NULL, $4, $5, $6, 1)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, anchor_cell_id, metadata, event_id, last_edit_at) VALUES ($1, $2, $3, 'source', '', NULL, $4, $5, $6, 1)`,
     [PROJECT, FILE, cellId, anchor, JSON.stringify({ aquillaOrigin: { version: 1, kind: "user-insert" } }), `head-${cellId}`],
   )
 }
 
 async function translation(cellId: string, value: string, lane = LANE, validated = false): Promise<void> {
   await t.pg.query(
-    `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, validated, event_id, last_edit_at)
-     VALUES ($1, $2, $3, 'target', $4, $5, $6, $7, 1)`,
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, validated, event_id, last_edit_at, lane_id) VALUES ($1, $2, $3, 'target', $5, $6, $7, 1, (SELECT aquilla_test_resolve_target_lane($1, $4)))`,
     [PROJECT, FILE, cellId, lane, value, validated ? 1 : 0, `tgt-${cellId}-${lane}`],
   )
 }
@@ -65,7 +61,7 @@ async function translation(cellId: string, value: string, lane = LANE, validated
 async function hide(cellId: string): Promise<void> {
   await t.pg.query(
     `UPDATE cells SET hidden_at = 1
-      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source' AND target_lang = ''`,
+      WHERE project_id = $1 AND file_id = $2 AND cell_id = $3 AND side = 'source'`,
     [PROJECT, FILE, cellId],
   )
 }
@@ -274,8 +270,7 @@ describe("buildUsfmExportPlan — content added in the app", () => {
     // must have added it" would be wrong about every non-scripture import.
     await verse("c4", "GEN 1:4")
     await t.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, anchor_cell_id, event_id, last_edit_at)
-       VALUES ($1, $2, 'plain', 'source', '', 'text', NULL, 'c4', 'head-plain', 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, anchor_cell_id, event_id, last_edit_at) VALUES ($1, $2, 'plain', 'source', 'text', NULL, 'c4', 'head-plain', 1)`,
       [PROJECT, FILE],
     )
     await translation("plain", "Some translation.")
@@ -527,8 +522,7 @@ describe("buildUsfmExportPlan — verses the editor HID (AQU-1423)", () => {
   it("does not reach into another file or project", async () => {
     await verse("c4", "GEN 1:4")
     await t.pg.query(
-      `INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, canonical_ref, hidden_at, event_id, last_edit_at)
-       VALUES ($1, 'other-file', 'c4', 'source', '', 's', 'GEN 1:4', 1, 'h-other', 1)`,
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, hidden_at, event_id, last_edit_at) VALUES ($1, 'other-file', 'c4', 'source', 's', 'GEN 1:4', 1, 'h-other', 1)`,
       [PROJECT],
     )
 

@@ -75,8 +75,20 @@ describe("LanguageComboboxInput", () => {
     // rather than on there being only one. French itself ranks first either way
     // (AQU-1457).
     const [best] = screen.getAllByRole("option", { name: /French/ })
-    expect(best.textContent).toMatch(/^French/)
-    expect(listbox.textContent).toContain("fr")
+    expect(best.textContent).toBe("French")
+    expect(listbox.textContent).not.toMatch(/\bfr\b|\bfra\b/)
+  })
+
+  it("offers Traditional Han, not the code, when zh-hant is typed (AQU-1792)", async () => {
+    render(<Harness />)
+    typeInto(screen.getByLabelText("Language"), "zh-hant")
+    await settleFullCatalog()
+
+    const option = await screen.findByRole("option", { name: "Traditional Han" })
+    expect(option).toHaveTextContent("Traditional Han")
+    expect(option.textContent).not.toMatch(/zh-hant/i)
+    fireEvent.click(option)
+    expect(screen.getByTestId("committed")).toHaveTextContent("Traditional Han")
   })
 
   it("stores the display name — not the code — when a suggestion is picked", async () => {
@@ -375,7 +387,7 @@ describe("LanguageComboboxInput", () => {
 
       // Exact name: the full catalog also has "Old Spanish" / "Spanish Sign
       // Language", so a loose /Spanish/ matches several rows.
-      fireEvent.click(await screen.findByRole("option", { name: "Spanish spa" }))
+      fireEvent.click(await screen.findByRole("option", { name: "Spanish" }))
 
       expect(commits).toEqual([])
       expect((screen.getByLabelText("Language") as HTMLInputElement).value).toBe("Spanish")

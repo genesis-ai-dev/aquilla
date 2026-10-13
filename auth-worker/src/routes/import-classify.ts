@@ -21,6 +21,11 @@ import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import { resolveProjectRole } from "../services/project-permissions"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import {
+  logVendorTimeout,
+  vendorDeadline,
+  vendorTimeoutMessage,
+} from "../../../shared/vendor-timeouts"
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -181,6 +186,10 @@ imports.post(
         return c.json({ error: "usage_accounting_unavailable" }, 503)
       }
     }
+    // AQU-1849: total deadline (`stream: false` — nothing arrives until the
+    // completion is whole), linked to the client's signal so a user who
+    // navigates away still cancels upstream.
+    const deadline = vendorDeadline("openRouterNonStreaming", c.req.raw.signal)
     try {
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
         method: "POST",
@@ -197,7 +206,7 @@ imports.post(
           ...openRouterExtras(c.env.OPENROUTER_BASE_URL),
           response_format: { type: "json_object" },
         }),
-        signal: c.req.raw.signal,
+        signal: deadline.signal,
       })
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "")
@@ -248,11 +257,20 @@ imports.post(
       }
       return c.json({ classification: classification.data })
     } catch (error) {
+      if (deadline.timedOut()) {
+        logVendorTimeout("openRouterNonStreaming", error)
+        return c.json({
+          error: "import_classifier_timeout",
+          message: vendorTimeoutMessage("openRouterNonStreaming"),
+        }, 504)
+      }
       console.error("Import classification failed:", error)
       return c.json({
         error: "import_classifier_unavailable",
-        message: error instanceof Error ? error.message : String(error),
+        message: "Import classification is temporarily unavailable",
       }, 502)
+    } finally {
+      deadline.clear()
     }
   },
 )

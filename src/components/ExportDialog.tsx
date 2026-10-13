@@ -20,7 +20,7 @@
 // a "Voice" filter appears letting users export only one voice's cells across
 // all camera angles.
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback, type ComponentType } from "react"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
@@ -89,6 +89,12 @@ import {
   type SubtitleTarget,
 } from "@/lib/export/export-dialog-memory"
 import type { CellData } from "@/hooks/useCells"
+import { partnerIdmlExportOptionsFor } from "@/lib/partners/registry"
+import type {
+  PartnerIdmlExportOption,
+  PartnerIdmlExportPanelProps,
+  PartnerIdmlExportTransform,
+} from "@/lib/partners/types"
 import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { isSubtitleImportFile } from "@/lib/parsers/types"
@@ -102,7 +108,7 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
 
@@ -159,6 +165,15 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     labelKey: "importExport.format.sdbhXml.label",
     ext: ".XML",
     descriptionKey: "importExport.format.sdbhXml.description",
+    lossy: false,
+  },
+  {
+    // AQU-525: JSON round-trip. Translations go back in by JSON path, so only
+    // the keys picked at import change. Only shown for files imported as JSON.
+    id: "json",
+    labelKey: "importExport.format.json.label",
+    ext: ".json",
+    descriptionKey: "importExport.format.json.description",
     lossy: false,
   },
   {
@@ -284,6 +299,7 @@ const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
   idml: "idml",
   md: "md",
   txt: "txt",
+  json: "json",
   vtt: "vtt",
   srt: "srt",
   xliff: "xlf",
@@ -392,6 +408,41 @@ interface ExportDialogProps {
    * "HTML/validation health errors" blocked export). Defaults to 0.
    */
   outstandingInfractionCount?: number
+}
+
+function profileIdFromCells(cells: readonly CellData[]): string | null {
+  for (const cell of cells) {
+    const metadata = cell.metadata
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) continue
+    const profileId = (metadata as { aquillaImport?: { profileId?: unknown } }).aquillaImport?.profileId
+    if (typeof profileId === "string" && profileId.length > 0) return profileId
+  }
+  return null
+}
+
+function idmlBlob(bytes: Uint8Array, type: string): Blob {
+  return new Blob(
+    [bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer],
+    { type },
+  )
+}
+
+function LazyPartnerIdmlExportPanel({
+  option,
+  ...props
+}: { option: PartnerIdmlExportOption } & PartnerIdmlExportPanelProps) {
+  const [Panel, setPanel] = useState<ComponentType<PartnerIdmlExportPanelProps> | null>(null)
+  useEffect(() => {
+    let live = true
+    void option.panel().then((mod) => {
+      if (live) setPanel(() => mod.default)
+    })
+    return () => {
+      live = false
+    }
+  }, [option])
+  if (!Panel) return null
+  return <Panel {...props} />
 }
 
 export function ExportDialog({
@@ -635,6 +686,23 @@ export function ExportDialog({
     setFormat(nativeFormatId ?? "tsv")
   }, [activeFileId, nativeFormatId])
 
+  const activeProfileId = useMemo(() => profileIdFromCells(cells), [cells])
+  const idmlExportOptions = useMemo(
+    () => partnerIdmlExportOptionsFor(activeProfileId),
+    [activeProfileId],
+  )
+  const [idmlTransform, setIdmlTransform] = useState<PartnerIdmlExportTransform | null>(null)
+  const onIdmlTransformChange = useCallback((next: PartnerIdmlExportTransform | null) => {
+    setIdmlTransform(next)
+  }, [])
+  const loadSourcePackage = useCallback(async () => {
+    if (!activeFileId) throw new Error("Choose a file before checking Bible Swap compatibility.")
+    const bytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
+    return new Uint8Array(bytes)
+  }, [activeFileId, projectId, getToken, targetLang])
+  const showIdmlExportOptions = idmlExportOptions.length > 0
+    && (nativeFormatId === "idml" || format === "idml")
+
   // audio-by-character, vtt, docx, pptx, and plain-text-dump only support file scope.
   /**
    * Which array to export audio from.
@@ -855,7 +923,7 @@ export function ExportDialog({
   const effectiveSubtitleTarget: SubtitleTarget =
     subtitleTarget === "audio" && hasAudioSibling ? "audio" : "subtitle"
 
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -869,7 +937,7 @@ export function ExportDialog({
    *
    * Exactly the formats built from the in-memory cell array (the `filteredCells`
    * branch of handleExport). The round-trip formats are deliberately absent:
-   * USFM/DOCX/PPTX/IDML reinject translations into the ORIGINAL document —
+   * USFM/DOCX/PPTX/IDML/JSON reinject translations into the ORIGINAL document —
    * USFM server-side — so there is no cell array to filter, and handing back a
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
@@ -899,6 +967,7 @@ export function ExportDialog({
       if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
       if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" // only for idml imports
+      if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
       return true
@@ -1070,7 +1139,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "json" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
@@ -1266,13 +1335,50 @@ export function ExportDialog({
           diagnostics: result.diagnostics,
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
-        downloadBlob(result.blob, `${baseName}.idml`)
         const fileName = `${baseName}.idml`
+        let blob = result.blob
+        let msg = result.report.translated === 0
+          ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
+          : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated })
+        if (idmlTransform) {
+          setStatus({ kind: "busy", msg: idmlTransform.busyMessage })
+          try {
+            const swapped = await idmlTransform.apply(new Uint8Array(await result.blob.arrayBuffer()))
+            blob = idmlBlob(swapped.bytes, result.blob.type)
+            msg = swapped.statusMessage
+          } catch (err) {
+            msg = idmlTransform.failureMessage(err instanceof Error ? err.message : String(err))
+          }
+        }
+        downloadBlob(blob, fileName)
+        setStatus({ kind: "ok", msg })
+      } else if (fmt === "json") {
+        // AQU-525: JSON round-trip. Each cell carries its JSON path in
+        // `context`, so translations are placed BY KEY: only the keys the user
+        // picked at import change, and every other key, value and nesting
+        // level of the original document is preserved byte-for-byte.
+        //
+        // A hidden or (in validated-only mode) unvalidated cell contributes no
+        // translation (scopeRoundTripCells blanks it), so `exportJson` falls
+        // back to that key's original value. Unlike docx/pptx this export
+        // never drops the key: removing it would change the document's shape,
+        // which is exactly what the importer promised to preserve.
+        setStatus({ kind: "busy", msg: t("importExport.status.fetchingOriginalDocument") })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
+        setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
+        const { exportJson } = await import("@/lib/parsers/json-i18n")
+        const scoped = scopeRoundTripCells(cells, contentMode)
+        // TextDecoder strips a UTF-8 BOM, which JSON.parse would otherwise reject.
+        const jsonBlob = exportJson(new TextDecoder().decode(rawBytes), scoped, { keyed: true })
+        const baseName = buildExportStem(false) // AQU-437: user-chosen stem
+        const fileName = `${baseName}.json`
+        downloadBlob(jsonBlob, fileName)
+        const injected = scoped.filter((c) => c.translated.trim().length > 0).length
         setStatus({
           kind: "ok",
-          msg: result.report.translated === 0
-            ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
-            : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated }),
+          msg: injected === 0
+            ? t("importExport.status.downloadedNoTranslations", { fileName })
+            : t("importExport.status.downloadedJsonValuesTranslated", { fileName, count: injected }),
         })
       } else if (fmt === "audio-by-character") {
         // A TOAST, not just the dialog's own line (Sam, 2026-08-18). This is
@@ -2230,6 +2336,21 @@ export function ExportDialog({
               {structuralNote && ` ${t(structuralNote)}`}
               {hiddenNote && ` ${t(hiddenNote)}`}
             </p>
+          </div>
+        )}
+
+        {showIdmlExportOptions && (
+          <div className="flex flex-col gap-3">
+            {idmlExportOptions.map((option) => (
+              <LazyPartnerIdmlExportPanel
+                key={`${option.id}:${activeFileId ?? ""}`}
+                option={option}
+                disabled={isBusy}
+                fileName={activeFileName}
+                loadSourcePackage={loadSourcePackage}
+                onTransformChange={onIdmlTransformChange}
+              />
+            ))}
           </div>
         )}
 

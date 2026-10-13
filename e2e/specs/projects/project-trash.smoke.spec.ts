@@ -29,14 +29,14 @@ test("Archive removes project from active projects list", async ({ alice }) => {
 
   // Project creation lands on the project Overview (/projects/:id).
   await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  await expect(alice.getByRole("heading", { name: archiveName })).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByRole("heading", { name: archiveName, exact: true })).toBeVisible({ timeout: 10_000 })
 
   // Open the header overflow menu and click "Archive", then confirm.
   await alice.getByRole("button", { name: /More actions/i }).click()
   const archiveItem = alice.getByRole("menuitem", { name: /^Archive$/ })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
-  const dialog = alice.getByRole("dialog")
+  const dialog = alice.getByRole("dialog", { name: "Archive project", exact: true })
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await dialog.getByRole("checkbox", { name: /I understand this project will be hidden/i }).check()
   await dialog.getByRole("button", { name: /^Archive$/ }).click()

@@ -76,6 +76,11 @@ interface Props {
   repetitionPropagationRow?: ReactNode
   /** Tooltip shown on hover when disabled is true. */
   disabledTooltip?: ReactNode
+  /**
+   * AQU-1075: "from <upstream>" plus Detach when workflow policy is still
+   * being copied. Rendered above the text group.
+   */
+  notice?: ReactNode
   onChange: (
     updates: Partial<
       Pick<
@@ -117,6 +122,7 @@ export function ValidationSettingsSection({
   allowSelfValidationAudio = true,
   disabled = false,
   disabledTooltip,
+  notice,
   structuralCellsRow,
   repetitionPropagationRow,
   onChange,
@@ -144,6 +150,7 @@ export function ValidationSettingsSection({
 
   return (
     <>
+      {notice}
       <SettingsGroup label={t("projectSettings.validation.textGroup")}>
         <SettingsRow
           label={<label htmlFor="validation-count">{t("projectSettings.validation.requiredTextLabel")}</label>}

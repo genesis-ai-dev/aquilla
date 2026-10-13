@@ -8,37 +8,82 @@
  * or a lane whose language is the project's default, gets the opaque lane id
  * as its tag so the two rows do not collide and the default lane (`''`) is
  * left alone.
+ *
+ * AQU-1592: the plan stores only what the user typed — the language, plus a
+ * name and a code override ONLY when they set one. A derived display name and
+ * a derived language code are never part of the plan, because a code captured
+ * here keeps claiming the old language after the label is edited (AQU-1585).
+ * The language is required; the name is optional and the language stands in
+ * for it; the code override must be a well-formed BCP 47 tag.
  */
 
 import { languagesEqual } from "../language-normalize"
-import { codeForLanguageLabel } from "./backfill-plan"
+import { canonicalLanguageCodeOverride, laneDisplayName } from "./lane-display"
 import { laneNameProblem, type LaneNameProblem } from "./lane-name"
 
 export interface ExistingLaneIdentity {
   id: string
-  name: string
+  /** AQU-1592: null on a lane that only carries a language. */
+  name: string | null
+  /** AQU-1592: null on a row that predates migration 0152. */
+  language?: string | null
   legacyTag: string | null
 }
 
+export type NewTargetLaneProblem = LaneNameProblem | "malformed_code"
+
 export type PlanNewTargetLaneResult =
-  | { ok: true; name: string; legacyTag: string; langCode: string | null }
-  | { ok: false; problem: LaneNameProblem }
+  | {
+      ok: true
+      /** Stored as typed. Required. */
+      language: string
+      /** Stored only when the user gave one; null means "display the language". */
+      name: string | null
+      legacyTag: string
+      /** Stored only when the user set one; null means "derive on read". */
+      langCode: string | null
+    }
+  | { ok: false; problem: NewTargetLaneProblem }
 
 export function planNewTargetLane(input: {
   laneId: string
+  /** Optional display override. Blank means "just show the language". */
   name: string
+  /** Required. The freeform language the lane translates into. */
   language: string
+  /** Optional BCP 47 override from the "Advanced" disclosure. */
+  code?: string | null
   targetLanguage: string | null
   existing: readonly ExistingLaneIdentity[]
+  /**
+   * AQU-1784: accept a lane whose display name duplicates an existing one.
+   * The languages screen warns about the collision inline BEFORE the save and
+   * then lets it through — two lanes of one language is a legitimate shape
+   * (two teams, one language), and since the switcher now tells colliding
+   * labels apart, refusing the create was costing more than it bought.
+   * Everything else about the name (empty, over-long) still refuses.
+   */
+  allowDuplicateName?: boolean
 }): PlanNewTargetLaneResult {
   const language = input.language.trim()
-  const name = input.name.trim() || language
+  const name = input.name.trim() || null
+
+  // Uniqueness is on what people SEE, so a new lane showing only its language
+  // still collides with an existing lane whose name renders the same string.
+  // The collision is still computed when `allowDuplicateName` is set — the
+  // empty and over-long rules below it are not negotiable.
+  const display = laneDisplayName({ role: "target", language, name })
   const problem = laneNameProblem({
     laneId: input.laneId,
-    name,
-    others: input.existing.map((lane) => ({ id: lane.id, name: lane.name })),
+    name: language || name ? display : "",
+    others: input.existing.map((lane) => ({ id: lane.id, name: laneDisplayName(lane) })),
   })
-  if (problem) return { ok: false, problem }
+  if (problem && !(problem === "duplicate" && input.allowDuplicateName)) {
+    return { ok: false, problem }
+  }
+
+  const override = canonicalLanguageCodeOverride(input.code)
+  if (!override.ok) return { ok: false, problem: "malformed_code" }
 
   const taken = new Set(
     input.existing
@@ -52,10 +97,5 @@ export function planNewTargetLane(input: {
       ? language
       : input.laneId
 
-  return {
-    ok: true,
-    name,
-    legacyTag,
-    langCode: codeForLanguageLabel(language) ?? codeForLanguageLabel(name),
-  }
+  return { ok: true, language, name, legacyTag, langCode: override.code }
 }

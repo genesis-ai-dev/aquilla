@@ -9,7 +9,7 @@ import {
   MultiSelectComboboxTrigger,
   MultiSelectComboboxValue,
 } from "@/components/ui/multi-select-combobox"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 const DEFAULT_AVATAR_CAP = 3
@@ -74,13 +74,12 @@ export function MemberMultiSelect({
             const overflow = names.length - shown.length
             return (
               <span className="flex min-w-0 flex-1 items-center gap-2">
-                {/* Same AvatarGroup + square InitialsAvatar stack as MembershipAvatars. */}
                 <AvatarGroup
-                  className="-space-x-1.5 *:data-[slot=avatar]:ring-background"
+                  className="-space-x-1.5 *:data-[slot=user-chip]:ring-background"
                   aria-hidden
                 >
                   {shown.map((username) => (
-                    <InitialsAvatar key={username} name={username} size="sm" />
+                    <UserChip key={username} username={username} size="sm" avatarOnly />
                   ))}
                   {overflow > 0 && (
                     <AvatarGroupCount className="size-6 text-[10px] font-semibold">

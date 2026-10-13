@@ -189,6 +189,11 @@ async function seedBaseProjects(): Promise<TestDb> {
      ON CONFLICT (id) DO NOTHING`,
     [PROJECT, FILE],
   )
+  await tdb.pg.query(
+    `INSERT INTO lanes (id, project_id, role, legacy_tag, position)
+     VALUES ('deflane1', $1, 'target', '', 1)`,
+    [PROJECT],
+  )
   return tdb
 }
 
@@ -264,7 +269,7 @@ describe('permission parity — SetTranslation requires CONTRIBUTOR (400)+ at pr
     const { token } = await seedRoleCredential(tdb, level)
 
     const prep = await prepareChangeset(tdb, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hello' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'hello' },
     ])
 
     // Prepare now enforces the SAME floor as commit (target.cell.commit →
@@ -357,7 +362,7 @@ describe('permission parity — UpdateProjectSettings requires MAINTAINER (600)+
     const { token } = await seedRoleCredential(tdb, level)
 
     const prep = await prepareChangeset(tdb, token, [
-      { kind: 'UpdateProjectSettings', projectId: PROJECT, settings: { targetLanguage: 'de' }, ifMatchVersion: 0 },
+      { kind: 'UpdateProjectSettings', projectId: PROJECT, settings: { systemPrompt: 'plain' }, ifMatchVersion: 0 },
     ])
 
     if (level === null || level < ROLE.MAINTAINER) {
@@ -474,7 +479,7 @@ describe('permission parity — non-member is denied every operation', () => {
   it('prepare (any command kind) is 403 permission_denied — no changeset is staged', async () => {
     const { token } = await seedRoleCredential(tdb, null)
     const prep = await prepareChangeset(tdb, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'x' },
     ])
     expect(prep.status).toBe(403)
     expect(prep.body.error.code).toBe('permission_denied')
@@ -514,7 +519,7 @@ describe('parity — prepare enforces a role/membership gate (fixed)', () => {
   it('non-member credential is denied at prepare (no summary leak)', async () => {
     const { token } = await seedRoleCredential(tdb, null)
     const { status, body } = await prepareChangeset(tdb, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'x' },
     ])
     expect(status).toBe(403)
     expect(body.error?.code).toBe('permission_denied')
@@ -533,7 +538,7 @@ describe('invariant — ask-mode credential can never commit without a consumed 
   ])('role=$name (level=$level)', async ({ level }) => {
     const { token } = await seedRoleCredential(tdb, level, 'ask')
     const { body: prep } = await prepareChangeset(tdb, token, [
-      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'ask-mode-value' },
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'ask-mode-value' },
     ])
     expect(prep.changeset.autonomyMode).toBe('ask')
 
@@ -567,7 +572,7 @@ describe('invariant — credential scoped to project A cannot touch project B', 
     const res = (await handleExternalChangesetsRequest(
       req(`https://w/api/v1/external/projects/${OTHER_PROJECT}/changesets`, {
         method: 'POST', token,
-        body: { commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'x' }] },
+        body: { commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'x' }] },
       }),
       env(tdb),
     ))!
@@ -605,7 +610,7 @@ describe('invariant — credential scoped to project A cannot touch project B', 
           jsonrpc: '2.0', id: 1, method: 'tools/call',
           params: {
             name: 'prepare_translations',
-            arguments: { projectId: OTHER_PROJECT, translations: [{ fileId: FILE, cellId: 'cell-1', value: 'x' }] },
+            arguments: { projectId: OTHER_PROJECT, translations: [{ fileId: FILE, cellId: 'cell-1', laneId: 'deflane1', value: 'x' }] },
           },
         }),
       }),

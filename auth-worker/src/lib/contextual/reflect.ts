@@ -26,6 +26,7 @@ import {
   type ContextualRunReflection,
 } from "../../../../db/shared/contextual-runs"
 import type { AquillaDb } from "../../../../db/shim/postgres"
+import { modelLanguageForLane } from "../../../../db/shared/lane-language"
 import { loadProjectContext } from "./project-context"
 import { chargeBudget, createRunBudget, type LlmCall } from "./types"
 
@@ -336,7 +337,7 @@ export async function loadReflectionKnown(
   run: ContextualRun,
 ): Promise<{ known: ReflectionKnown; takenPaths: Set<string> }> {
   const [ctx, approved, proposed] = await Promise.all([
-    loadProjectContext(db, run.projectId),
+    loadProjectContext(db, run.projectId, { laneId: run.laneId, targetLang: run.targetLang }),
     listMemories(db, run.projectId, "approved"),
     listMemories(db, run.projectId, "proposed"),
   ])
@@ -348,7 +349,12 @@ export async function loadReflectionKnown(
         .join(", ")
       return renderings ? `${concept.sourceTerm} → ${renderings}` : concept.sourceTerm
     })
-  const targetLanguage = run.targetLang || ctx.targetLanguage
+  const targetLanguage = await modelLanguageForLane(
+    db,
+    run.projectId,
+    { laneId: run.laneId, tag: run.targetLang },
+    ctx.targetLanguage,
+  )
   return {
     known: {
       ...(targetLanguage ? { targetLanguage } : {}),

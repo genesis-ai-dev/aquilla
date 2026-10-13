@@ -108,7 +108,7 @@ export async function removedCellsForFile(
       .prepare(
         `SELECT cell_id
            FROM cells
-          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+          WHERE project_id = ? AND file_id = ? AND side = 'source'
             AND cell_id IN (${livePlaceholders})`,
       )
       .bind(projectId, fileId, ...candidates)

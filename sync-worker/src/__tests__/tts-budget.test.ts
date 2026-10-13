@@ -11,7 +11,14 @@
 //     so infra hiccups don't block users who are within budget.
 
 import { describe, it, expect } from "vitest"
-import { checkTtsBudget, recordTtsUsage, runTtsGuard } from "../tts-budget"
+import {
+  checkTtsBudget,
+  estimateTtsSecondsFromText,
+  recordTtsUsage,
+  runTtsGuard,
+  TTS_ESTIMATE_CHARS_PER_SECOND,
+  TTS_ESTIMATE_MIN_SECONDS,
+} from "../tts-budget"
 
 // ── Minimal AquillaDb stub ──────────────────────────────────────────────────
 
@@ -298,5 +305,48 @@ describe("runTtsGuard", () => {
       TTS_BUDGET_ENFORCE: "true",
     })
     expect(result.ok).toBe(true)
+  })
+})
+
+// ── estimateTtsSecondsFromText (AQU-1872) ───────────────────────────────────
+//
+// WHY these tests matter: before this, a clip whose duration could not be
+// parsed was recorded as 0 seconds — it counted toward no daily budget and no
+// credit ledger, so synthesis through that path was free and invisible. The
+// estimate is the floor that makes such a clip cost something.
+
+describe("estimateTtsSecondsFromText", () => {
+  it("divides the character count by the documented speaking rate", () => {
+    // 30 chars at 15 chars/s = 2s.
+    expect(estimateTtsSecondsFromText("a".repeat(30))).toBeCloseTo(2)
+    expect(estimateTtsSecondsFromText("a".repeat(150))).toBeCloseTo(10)
+  })
+
+  it("uses the documented constants, not a hard-coded divisor", () => {
+    const chars = TTS_ESTIMATE_CHARS_PER_SECOND * 4
+    expect(estimateTtsSecondsFromText("x".repeat(chars))).toBeCloseTo(4)
+  })
+
+  it("floors a very short clip at the minimum charge", () => {
+    // WHY: a one-word clip still costs the provider a whole request; charging
+    // a fraction of a second would make a flood of tiny clips near-free.
+    expect(estimateTtsSecondsFromText("hi")).toBe(TTS_ESTIMATE_MIN_SECONDS)
+    expect(estimateTtsSecondsFromText("a")).toBe(TTS_ESTIMATE_MIN_SECONDS)
+  })
+
+  it("never returns zero, even for empty or whitespace-only text", () => {
+    // WHY: 0 is exactly the bug — nothing may be charged nothing.
+    expect(estimateTtsSecondsFromText("")).toBe(TTS_ESTIMATE_MIN_SECONDS)
+    expect(estimateTtsSecondsFromText("   \n  ")).toBe(TTS_ESTIMATE_MIN_SECONDS)
+  })
+
+  it("ignores surrounding whitespace when counting characters", () => {
+    expect(estimateTtsSecondsFromText(`  ${"a".repeat(30)}  `)).toBeCloseTo(2)
+  })
+
+  it("grows monotonically with the text length", () => {
+    const short = estimateTtsSecondsFromText("a".repeat(30))
+    const long = estimateTtsSecondsFromText("a".repeat(60))
+    expect(long).toBeGreaterThan(short)
   })
 })

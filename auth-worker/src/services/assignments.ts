@@ -43,6 +43,8 @@ import {
 } from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
 import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
+import { laneDisplayNameSql } from "../../../db/shared/lanes"
+import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
 
 /** Per-assignee rollup for the manager workload view. */
 export interface AssigneeWorkload {
@@ -225,9 +227,9 @@ export async function getOrgAssignmentWorkload(
             a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
-            a.target_lang      AS target_lang,
+            COALESCE(ln.legacy_tag, '') AS target_lang,
             a.lane_id          AS lane_id,
-            ln.name            AS lane_name,
+            ${laneDisplayNameSql("ln")} AS lane_name,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
@@ -504,7 +506,7 @@ export async function getUnitAssignments(
             a.assignee_user_id AS assignee_user_id,
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
-            a.target_lang      AS target_lang,
+            COALESCE(ln.legacy_tag, '') AS target_lang,
             a.lane_id          AS lane_id,
             a.deadline         AS deadline,
             -- AQU-1278. One row per (assignment, chapter) rather than per
@@ -522,7 +524,7 @@ export async function getUnitAssignments(
             -- with the bar drawn above this panel the moment somebody changed
             -- the required number.
             COUNT(*) FILTER (WHERE au.dub_votes >= ?)::integer AS audio_validated,
-            MAX(ln.name) AS lane_name
+            MAX(${laneDisplayNameSql("ln")}) AS lane_name
        FROM assignments a
        -- SOURCE rows are the denominator, exactly as in CELLS_TOTAL_SUBQUERY:
        -- they are what membership resolves to, they are lane-independent, and
@@ -576,7 +578,7 @@ export async function getUnitAssignments(
         AND NOT (pol.exclude_structural AND COALESCE(ac.type, '') IN ('heading', 'paratext'))
         ${sectionPredicate}
       GROUP BY a.assignment_id, a.assignee_user_id, u.username, a.scope_label,
-               a.target_lang, a.lane_id, a.deadline, a.created_at,
+               COALESCE(ln.legacy_tag, ''), a.lane_id, a.deadline, a.created_at,
                ${unitSectionKeyExpr("ac", "ik")}
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
@@ -801,8 +803,8 @@ export async function getMyAssignments(
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
-            a.target_lang AS target_lang,
-            ln.name AS lane_name,
+            ${wireLegacyTagSql("a")} AS target_lang,
+            ${laneDisplayNameSql("ln")} AS lane_name,
             a.lane_id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
@@ -889,7 +891,7 @@ export async function getAssignmentsGivenBy(
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT a.assignment_id AS assignment_id, a.assignee_user_id AS assignee_user_id,
             u.username AS username, a.scope_label AS scope_label,
-            a.target_lang AS target_lang,
+            ${wireLegacyTagSql("a")} AS target_lang,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             (SELECT ac.file_id FROM assignment_member_cells ac
@@ -945,8 +947,8 @@ export async function getMyAssignmentsAcrossOrg(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             p.name AS project_name,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
-            a.target_lang AS target_lang,
-            ln.name AS lane_name,
+            ${wireLegacyTagSql("a")} AS target_lang,
+            ${laneDisplayNameSql("ln")} AS lane_name,
             a.lane_id AS lane_id,
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,

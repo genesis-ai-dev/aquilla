@@ -35,6 +35,9 @@ describe("IDML AI completion contract", () => {
 
     expect(idmlCompletionPromptSource(cell, unit.sourceText)).toBe(unit.sourceHtml)
     expect(idmlCompletionSystemAddendum([cell])).toBe(IDML_COMPLETION_INSTRUCTION)
+    expect(IDML_COMPLETION_INSTRUCTION).toMatch(/translate the sentence as a whole/)
+    expect(IDML_COMPLETION_INSTRUCTION).toMatch(/Do not translate each run by itself/)
+    expect(IDML_STRUCTURE_REPAIR_INSTRUCTION).toMatch(/Do not retranslate each slot as its own phrase/)
   })
 
   it("accepts exact anchors, derives plain text, and preserves rich HTML for persistence", async () => {
@@ -186,6 +189,8 @@ describe("IDML AI completion contract", () => {
       expect(messages[0]?.content).toBe(IDML_STRUCTURE_REPAIR_INSTRUCTION)
       expect(messages[1]?.content).toContain(unit.sourceHtml)
       expect(messages[1]?.content).toContain("EDITABLE SLOTS")
+      expect(messages[1]?.content).toContain("parts of one sentence")
+      expect(messages[1]?.content).not.toContain("translate each")
       expect(messages[1]?.content).toContain("plain broken draft")
       return JSON.stringify({ slots: [{ i: 0, t: "Bon" }, { i: 1, t: "JOUR" }] })
     })

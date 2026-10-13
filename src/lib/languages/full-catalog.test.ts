@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 
 import {
+  codeFromLanguageCatalog,
   LANGUAGES,
   LANGUAGE_SUGGESTION_LIMIT,
   filterLanguages,
@@ -104,6 +105,12 @@ describe("the widened catalog keeps the AQU-988 contract", () => {
 
   it("suggests nothing for a freeform register label", () => {
     expect(filterLanguages("Grade 7 English", { catalog })).toEqual([])
+    expect(codeFromLanguageCatalog("Grade 7 English", catalog)).toBeNull()
+  })
+
+  it("derives a 639-3 code when the language has no two-letter code (AQU-1792)", () => {
+    expect(codeFromLanguageCatalog("Turkana", catalog)).toBe("tuv")
+    expect(codeFromLanguageCatalog("Spanish", catalog)).toBe("es")
   })
 
   it("still caps the rendered list", () => {

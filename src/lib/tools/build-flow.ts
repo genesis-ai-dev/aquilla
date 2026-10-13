@@ -7,7 +7,8 @@
 
 import { lintToolSource, formatLintIssues } from "../../../shared/tools/lint"
 import type { ToolManifest } from "../../../shared/tools/manifest"
-import type { BuildAttempt } from "./tools-api"
+import type { BuildAttempt, BuildReviewSummary } from "./tools-api"
+import type { ToolRequirement } from "../../../shared/tools/requirements"
 import { formatSmokeErrors, type SmokeResult } from "./smoke"
 
 export const MAX_REPAIRS = 2
@@ -40,6 +41,9 @@ export interface BuildFlowResult {
   cost: number
   model: string | null
   failures: string[]
+  /** The builder's checklist (the latest non-empty one across attempts). */
+  requirements: ToolRequirement[]
+  review: BuildReviewSummary | null
 }
 
 /** `base` turns a build (build_tool) into a change to an existing tool (edit_tool / Heal it). */
@@ -53,12 +57,16 @@ export async function runBuildFlow(
   const failures: string[] = []
   let cost = 0
   let model: string | null = null
+  let requirements: ToolRequirement[] = []
+  let review: BuildReviewSummary | null = null
 
   for (let attempt = 0; attempt <= MAX_REPAIRS; attempt++) {
     deps.onPhase?.(repair ? { kind: "repairing", attempt, failure: repair.failure } : { kind: "generating", attempt })
     const out = await deps.attempt({ request, attempt, ...(repair ? { repair } : {}), ...baseBody })
     cost += out.usage.cost
     model = out.model
+    if (out.requirements?.length) requirements = out.requirements
+    if (out.ok && out.review) review = out.review
 
     if (!out.ok) {
       failures.push(out.failure)
@@ -87,10 +95,10 @@ export async function runBuildFlow(
     }
 
     deps.onPhase?.({ kind: "done", attempts: attempt + 1 })
-    return { ok: true, source: out.source, manifest: out.manifest, attempts: attempt + 1, cost, model, failures }
+    return { ok: true, source: out.source, manifest: out.manifest, attempts: attempt + 1, cost, model, failures, requirements, review }
   }
 
   const last = failures[failures.length - 1] ?? "unknown failure"
   deps.onPhase?.({ kind: "failed", attempts: MAX_REPAIRS + 1, failure: last })
-  return { ok: false, source: null, manifest: null, attempts: MAX_REPAIRS + 1, cost, model, failures }
+  return { ok: false, source: null, manifest: null, attempts: MAX_REPAIRS + 1, cost, model, failures, requirements, review }
 }

@@ -144,7 +144,8 @@ export const SDK_EDIT = String.raw`
         var ai = st.ai, aligning = ai.phase === "aligning";
         var phaseText = ai.phase === "searching" ? t("editor.ai.lookingUpExamples") : aligning ? t("editor.ai.aligningStyles") : t("editor.ai.generatingTranslation");
         // apiRev 5: Align styles keeps the overlay over existing text, as the built-in does.
-        if (!(targetPlain || "").trim() || aligning) {
+        var peerTyping = !editing && peersFor(id).some(function (p) { return p.draftText !== null && p.draftText !== undefined; });
+        if ((!(targetPlain || "").trim() && !peerTyping) || aligning) {
           var ov = el("div", { class: "ai-overlay", "aria-live": "polite", "aria-busy": "true" });
           if (ai.preview && !aligning) ov.appendChild(el("p", { dir: "auto" }, [ai.preview, el("span", { class: "ai-caret", "aria-hidden": "true" })]));
           else ov.appendChild(el("div", { class: "ai-pill" }, [phaseText]));

@@ -3,6 +3,7 @@
  */
 
 import { AUTH_API_URL } from "@/lib/sync/sync-token"
+import type { ToolRequirement } from "../../../shared/tools/requirements"
 import type { ToolManifest, ToolScope } from "../../../shared/tools/manifest"
 import type { LintIssue } from "../../../shared/tools/lint"
 import type { ToolWrite, TouchedCellState } from "../../../shared/tools/revert"
@@ -70,8 +71,15 @@ export interface BuildUsage {
   cost: number
 }
 
+/** The builder's self-review summary (absent from older workers). */
+export interface BuildReviewSummary {
+  reviewed: boolean
+  ui: { check: string; ok: boolean; note?: string }[]
+  fixed: boolean
+}
+
 export type BuildAttempt =
-  | { ok: true; source: string; manifest: ToolManifest; model: string; usage: BuildUsage }
+  | { ok: true; source: string; manifest: ToolManifest; model: string; usage: BuildUsage; requirements?: ToolRequirement[]; review?: BuildReviewSummary }
   | {
       ok: false
       failure: string
@@ -80,6 +88,7 @@ export type BuildAttempt =
       lint: LintIssue[]
       model: string
       usage: BuildUsage
+      requirements?: ToolRequirement[]
     }
 
 export class ToolsApiError extends Error {

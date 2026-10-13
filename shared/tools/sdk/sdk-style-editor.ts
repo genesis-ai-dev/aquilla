@@ -58,6 +58,12 @@ export const SDK_EDITOR_STYLE = String.raw`
   .chapter-row .tb-end { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
   .vp-lg .chapter-row .chrome-pad { flex: 1 1 0%; }
   .navw { min-width: 0; max-width: 100%; width: 100%; } .vp-lg .navw { width: auto; }
+  /* An extension's toolbar can be far narrower than the viewport (its own column, the host's
+     chrome reserved at the end): size the chapter nav by the ROW, not the viewport, so the
+     nav, "Suggested passages" and the extension's own buttons never draw over each other. */
+  .chapter-row { container-type: inline-size; }
+  .chapter-row .slot { gap: 4px; }
+  .chapter-row .slot > :not(.aq-nav), .chapter-row .aq-nav > * { flex-shrink: 0; }
   .bgroup { display: flex; align-items: stretch; }
   .btn-o { display: inline-flex; align-items: center; justify-content: center; height: 32px; box-sizing: border-box; border: 1px solid var(--border);
            background: var(--background); box-shadow: var(--shadow-soft-xs, 0 1px 2px -1px rgb(0 0 0 / .08)); font-size: 14px; font-weight: 500;
@@ -77,6 +83,11 @@ export const SDK_EDITOR_STYLE = String.raw`
   .ms-trigger svg { opacity: .5; }
   .btn-g { display: inline-flex; align-items: center; gap: 6px; height: 28px; border: 1px solid transparent; box-sizing: border-box; border-radius: var(--r-md); padding: 0 10px; font-size: 12px; font-weight: 500; white-space: nowrap; color: var(--foreground); }
   .btn-g:hover { background: var(--muted); }
+  @container (max-width: 760px) {
+    .vp-xl .ms-trigger { width: auto; min-width: 32px; }
+    .vp-xl .ms-trigger .lbl span { display: none; }
+    .chapter-row .aq-nav > .btn-g { font-size: 0; gap: 0; padding: 0 7px; }
+  }
 
   /* Popovers (picker, menus, validators, footnote, dialogs) */
   .pop { position: fixed; z-index: 50; background: var(--popover, var(--card)); color: var(--popover-foreground, var(--card-foreground)); border-radius: var(--r-lg);

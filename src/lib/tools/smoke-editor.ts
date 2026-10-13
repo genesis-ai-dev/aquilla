@@ -88,7 +88,7 @@ export function stubEditorData(populated: boolean): ToolEditorHostData {
     openAttachments: yes,
     openRule: yes,
     listPeers: async () =>
-      populated ? [{ username: "someone", color: "#7c3aed", cellId: "c3", editing: true, draftText: "Jesús n", caret: { anchor: 7, head: 7 } }] : [],
+      populated ? [{ username: "someone", color: "#7c3aed", cellId: "c4", editing: true, draftText: "Encab", caret: { anchor: 5, head: 5 } }] : [],
     typing: yes,
     viewing: yes,
     visible: yes,

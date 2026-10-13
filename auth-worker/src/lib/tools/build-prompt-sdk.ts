@@ -60,8 +60,8 @@ Cell helpers:     aq.cell.state(id) (= useCell(id).value), aq.cell.refresh(id), 
                   aq.cell.words(text) (word count, footnotes excluded), aq.cell.plain(html), aq.cell.isStructural(id),
                   aq.cell.toggleDetails(id), aq.cell.scrollTo(id, "center"), aq.cell.focusRow(id).
 UI kit (Aquilla-styled; use these instead of your own CSS):
-                  aq.ui.Page({ title, subtitle, actions:[…], children:[…] }), aq.ui.Panel({ title, actions, children }) (side
-                  panel), aq.ui.Card({ title, subtitle, actions, children, tone, onClick }), aq.ui.Stack({ row, gap, align,
+                  aq.ui.Page({ actions:[…], children:[…] }), aq.ui.Panel({ actions, children }) (side panel) — no title:
+                  the host header already shows the extension's name (title/subtitle exist for embedded sub-pages only), aq.ui.Card({ title, subtitle, actions, children, tone, onClick }), aq.ui.Stack({ row, gap, align,
                   wrap, children }), aq.ui.Heading({ text, subtitle }), aq.ui.Text({ text, muted, small }),
                   aq.ui.Button({ label, icon, variant:"primary"|"outline"|"ghost"|"danger", size:"sm", onClick, disabled }),
                   aq.ui.IconButton({ icon, label, onClick }), aq.ui.Badge({ text, tone:"neutral"|"primary"|"success"|"warning"|
@@ -80,7 +80,7 @@ Example — a side panel (mounts ["page","panel"], scopes ["read:cells"], "sdk":
   const cells = aq.useCells();
   const total = aq.ui.Stat({ label: "words translated", value: "…" });
   const list = aq.ui.Stack({ gap: 6 });
-  aq.mount(aq.ui.Panel({ title: "Word count", children: [total, list] }));
+  aq.mount(aq.ui.Panel({ children: [total, list] }));
   function render() {
     const rows = cells.value.filter((c) => !aq.cell.isStructural(c.cellId));
     let sum = 0;
@@ -100,7 +100,7 @@ Example — a side panel (mounts ["page","panel"], scopes ["read:cells"], "sdk":
 Example — one card per verse with the real editor parts (mounts ["page"], scopes ["read:cells","write:target","write:validation"], "sdk": 1):
 \`\`\`
 <script>
-aq.mount(aq.ui.Page({ title: "Verse cards", children: [aq.CellList({ row: (id) => aq.h("div", { style: { padding: "6px 0" } }, [
+aq.mount(aq.ui.Page({ children: [aq.CellList({ row: (id) => aq.h("div", { style: { padding: "6px 0" } }, [
   aq.ui.Card({ title: aq.cell.ref(id), actions: [aq.ValidateButton(id)], children: [aq.SourceText(id), aq.TargetEditor(id)] }) ]) })] }));
 </script>
 \`\`\`

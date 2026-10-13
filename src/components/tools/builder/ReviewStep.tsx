@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import type { BuildCandidate } from "@/lib/tools/build-jobs"
 import { ExtensionPreview } from "./ExtensionPreview"
 import { MetaChips, MountIcon } from "./ExtensionFacts"
+import { RequirementsList } from "./RequirementsList"
 
 export type ReviewCandidate = BuildCandidate
 
@@ -70,6 +71,8 @@ export function ReviewStep({
       <ExtensionPreview source={candidate.source} manifest={manifest} />
 
       <MetaChips mounts={manifest.mounts} scopes={manifest.scopes} />
+
+      {candidate.requirements && <RequirementsList requirements={candidate.requirements} />}
 
       {progress ?? (changeOpen ? (
         <form

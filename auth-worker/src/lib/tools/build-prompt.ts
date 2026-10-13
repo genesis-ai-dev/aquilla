@@ -5,6 +5,8 @@
 
 import { TOOLS_API_REV, TOOL_SCOPES } from "../../../../shared/tools/manifest"
 import { TOOLS_SDK_PROMPT } from "./build-prompt-sdk"
+import { TOOLS_DESIGN_PROMPT, TOOLS_DOMAIN_PROMPT } from "./build-prompt-guide"
+import { normalizeRequirements, type ToolRequirement } from "../../../../shared/tools/requirements"
 import { MAX_TOOL_SOURCE_BYTES } from "../../../../shared/tools/lint"
 
 export const TOOLS_BUILDER_SYSTEM_PROMPT = `You build "tools" for Aquilla, a Bible/content translation workspace.
@@ -19,13 +21,14 @@ through the global \`aquilla\` object the host injects before your code runs.
 - Never touch window.parent / window.top — only the aquilla API.
 - Plain modern JavaScript (ES2020) in a classic <script>; no modules, no JSX, no build step.
 - Forms are fine, but every submit handler must call event.preventDefault() (navigation is blocked).
-- Keep it under ${Math.floor(MAX_TOOL_SOURCE_BYTES / 1024)} KB. No external fonts or images.
+- Keep it under ${Math.floor(MAX_TOOL_SOURCE_BYTES / 1024)} KB, and compact: build on the aq SDK components, no code
+  comments, no repeated markup. No external fonts or images.
 - The tool MUST render something sensible in EVERY state: no files, a file with no cells,
   cells with empty translations, no terms. It must never throw on empty data.
 - It MUST render visibly in EVERY mount it declares (check aquilla.context.mount): the side
   panel is ~300px wide, so lay out for that width too. The pre-save check renders each declared
-  mount with sample data and rejects a blank one. Put static UI (a heading, a "Loading…" line)
-  in the HTML so something shows before any await.
+  mount with sample data and rejects a blank one. Put a loading skeleton in the static HTML so
+  something shows before any await (see Design rules).
 - Style with the CSS variables the host provides (they track the app's light/dark theme):
   --background --foreground --card --card-foreground --muted --muted-foreground --primary
   --primary-foreground --accent --accent-foreground --border --destructive --ring.
@@ -151,9 +154,20 @@ Start your script with: \`(async () => { … })()\` and render a loading state f
 
 ${TOOLS_SDK_PROMPT}
 
-## Output format — exactly two fenced blocks, nothing else
+${TOOLS_DESIGN_PROMPT}
+
+${TOOLS_DOMAIN_PROMPT}
+
+## Output format — exactly three fenced blocks, in this order, nothing else
+First plan, then code. The requirements block is your checklist of what the user asked for, numbered,
+written BEFORE the code (at most 12 rows, each one short line). Mark each "must" (the request depends on it)
+or "should". Set status "planned" for what you will build, or "not_possible" with a one-sentence "note"
+saying why when the bridge cannot support it (see "What Aquilla has"). Then build every planned row.
+\`\`\`requirements
+[{ "id": 1, "text": "…", "priority": "must", "status": "planned" }, { "id": 2, "text": "…", "priority": "must", "status": "not_possible", "note": "…" }]
+\`\`\`
 \`\`\`json
-{ "name": "…", "description": "one sentence", "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1 }
+{ "name": "…", "description": "one short sentence", "scopes": [${TOOL_SCOPES.map((s) => `"${s}"`).join(", ")} — only those you use], "mounts": ["page", …any of "panel", "inline", "editor" that fit], "sdk": 1 }
 \`\`\`
 \`\`\`html
 <!doctype html>
@@ -175,6 +189,7 @@ export function buildUserMessage(
     ? [
         `Change this existing tool (edit_tool). Keep everything that works; return the COMPLETE updated tool.`,
         `Requested change:\n\n${request}`,
+        `The requirements block lists only this change's requirements.`,
         `Current manifest:\n\`\`\`json\n${base.manifest}\n\`\`\``,
         `Current source:\n\`\`\`html\n${base.source}\n\`\`\``,
       ].join("\n\n")
@@ -192,6 +207,19 @@ export function buildUserMessage(
 export interface ParsedBuild {
   manifest: unknown
   source: string
+  /** The model's checklist (empty when the reply had none). */
+  requirements: ToolRequirement[]
+}
+
+/** The ```requirements block, if any (a malformed one is ignored, never fatal). */
+export function parseRequirementsBlock(text: string): ToolRequirement[] {
+  const m = /```requirements\s*\n([\s\S]*?)\n```/i.exec(text)
+  if (!m) return []
+  try {
+    return normalizeRequirements(JSON.parse(m[1]))
+  } catch {
+    return []
+  }
 }
 
 /** Pull the json + html blocks out of the model's reply. */
@@ -206,5 +234,5 @@ export function parseBuildReply(text: string): ParsedBuild | { error: string } {
   } catch (err) {
     return { error: `manifest block is not valid JSON: ${err instanceof Error ? err.message : String(err)}` }
   }
-  return { manifest, source: html[1].trim() }
+  return { manifest, source: html[1].trim(), requirements: parseRequirementsBlock(text) }
 }

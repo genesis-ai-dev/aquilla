@@ -8,6 +8,7 @@
 
 import { useSyncExternalStore } from "react"
 import type { ToolManifest } from "../../../shared/tools/manifest"
+import type { ToolRequirement } from "../../../shared/tools/requirements"
 import { runBuildFlow, type BuildPhase } from "./build-flow"
 import { runToolSmoke } from "./smoke"
 import { buildToolAttempt } from "./tools-api"
@@ -18,7 +19,9 @@ export interface BuildCandidate {
   source: string
   manifest: ToolManifest
   origin: "builder" | "starter"
-  buildMeta?: { request: string; model: string | null; attempts: number; cost: number }
+  /** The builder's checklist: what was asked, covered or not possible (empty for templates). */
+  requirements?: ToolRequirement[]
+  buildMeta?: { request: string; model: string | null; attempts: number; cost: number; requirements?: ToolRequirement[] }
 }
 
 export interface BuildJob {
@@ -135,7 +138,8 @@ export async function startBuild(
           source: result.source,
           manifest: result.manifest,
           origin: "builder",
-          buildMeta: { request: words, model: result.model, attempts: result.attempts, cost: result.cost },
+          requirements: result.requirements,
+          buildMeta: { request: words, model: result.model, attempts: result.attempts, cost: result.cost, requirements: result.requirements },
         },
       })
     }

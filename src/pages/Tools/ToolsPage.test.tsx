@@ -42,8 +42,12 @@ function renderAt(url = "/project/p1/extensions") {
   )
 }
 
+const REQS = [
+  { id: 1, text: "Word count per verse", priority: "must", status: "covered" },
+  { id: 2, text: "Show alignment data", priority: "must", status: "not_possible", note: "Aquilla has no alignment data." },
+]
 const ok = (manifest: ToolManifest): BuildFlowResult =>
-  ({ ok: true, source: "<!doctype html><p>hi</p>", manifest, model: "m", attempts: 1, cost: 0.1, failures: [] }) as unknown as BuildFlowResult
+  ({ ok: true, source: "<!doctype html><p>hi</p>", manifest, model: "m", attempts: 1, cost: 0.1, failures: [], requirements: REQS, review: null }) as unknown as BuildFlowResult
 
 const box = () => screen.findByRole("textbox", { name: "Describe your extension" })
 
@@ -96,6 +100,11 @@ describe("Smart Extensions builder", () => {
     expect(within(review).getByTestId("where-chip")).toHaveTextContent("Side panel")
     expect(within(review).getByTestId("scope-summary")).toHaveTextContent("Reads verses")
     expect(screen.getByText("Try it").closest("li")).toHaveAttribute("aria-current", "step")
+    // The checklist opens itself because something can't be built, and says why.
+    const reqs = within(review).getByTestId("requirements")
+    expect(reqs).toHaveTextContent("1 of 2 covered")
+    expect(reqs).toHaveTextContent("1 not possible yet")
+    expect(within(reqs).getByText("Aquilla has no alignment data.")).toBeInTheDocument()
   })
 
   it("Discard returns to Describe with the words kept", async () => {

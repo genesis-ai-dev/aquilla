@@ -22,6 +22,10 @@ const WORD_COUNT = path.join(__dirname, "../../fixtures/tools/word-count-built.h
 const FIXTURE = path.join(__dirname, "../../fixtures/tools/key-terms.usfm")
 const usage = { promptTokens: 9000, completionTokens: 2400, cost: 0.21 }
 const BUILD = /\/tools\/build$/
+const REQUIREMENTS = [
+  { id: 1, text: "Word count per verse and for the file", priority: "must", status: "covered" },
+  { id: 2, text: "Typing speed per verse", priority: "should", status: "not_possible", note: "The bridge has no keystroke timing." },
+]
 
 test("describe → watch it build → try it on sample verses → add it → it opens in the side panel", async ({ alice }) => {
   test.setTimeout(120_000)
@@ -35,7 +39,7 @@ test("describe → watch it build → try it on sample verses → add it → it 
   await alice.route(BUILD, async (route: Route) => {
     requests.push((route.request().postDataJSON() as { request: string }).request)
     await held
-    await route.fulfill({ json: { ok: true, source, manifest, model: "anthropic/claude-opus-5.5", usage } })
+    await route.fulfill({ json: { ok: true, source, manifest, model: "anthropic/claude-opus-5.5", usage, requirements: REQUIREMENTS, review: { reviewed: true, ui: [], fixed: false } } })
   })
 
   const tools = new ToolsPage(alice)
@@ -64,6 +68,10 @@ test("describe → watch it build → try it on sample verses → add it → it 
   await expect(review.getByTestId("candidate-request")).toContainText(`“${words}”`)
   await expect(review.getByTestId("where-chip")).toHaveText("Side panel")
   await expect(review.getByTestId("scope-summary")).toContainText("Reads verses")
+  // The builder's checklist: what was covered, and what can't be built yet (and why), stated, not dropped.
+  const checklist = review.getByTestId("requirements")
+  await expect(checklist).toContainText("1 of 2 covered")
+  await expect(checklist.locator('[data-status="not_possible"]')).toContainText("The bridge has no keystroke timing.")
   const preview = review.getByTestId("extension-preview-frame").contentFrame()
   await expect(preview.locator("body")).toContainText("words", { timeout: 30_000 })
 

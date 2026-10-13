@@ -30,7 +30,7 @@ describe("build jobs (a build outlives the page)", () => {
   })
 
   it("keeps a failure until cleared", async () => {
-    runBuildFlow.mockResolvedValue({ ok: false, failures: ["lint"], attempts: 3, cost: 0, model: null, source: null, manifest: null })
+    runBuildFlow.mockResolvedValue({ ok: false, failures: ["lint"], attempts: 3, cost: 0, model: null, source: null, manifest: null, requirements: [], review: null })
     await jobs.startBuild("p1", "jwt", { words: "x", request: "x" })
     expect(jobs.getBuildState("p1").job).toMatchObject({ status: "failed", failure: "lint" })
     jobs.clearJob("p1")

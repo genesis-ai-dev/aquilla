@@ -344,4 +344,38 @@ describe("applyEBibleTargetImport — commit shape", () => {
     })
     expect(await peekOutboxBatch(100)).toHaveLength(2)
   })
+
+  // AQU-1365: the Import button now opens a translation import for
+  // Contributors (400), while the artifact routes refuse anyone below
+  // Project lead (500). That refusal must not cost them the import itself.
+  it("still imports a Contributor's text when the server refuses the preserved copy for their role", async () => {
+    const requests: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      requests.push(url)
+      return new Response("role too low for source upload", { status: 403 })
+    }))
+    const withArtifact: EBibleMatchResult = {
+      ...matchResult,
+      sourceArtifact: { name: "JON-tatar.usfm", bytes: new TextEncoder().encode("\\id JON").buffer, format: "usfm" },
+    }
+
+    const result = await applyEBibleTargetImport(withArtifact, new Set(["cell-1", "cell-3"]), { ...ctx, targetLang: "tt" })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatch(/\/files\/file-a\/source$/)
+    expect(result.committedCount).toBe(2)
+    const rows = await peekOutboxBatch(100)
+    expect(rows.map((row) => row.event.cellId).sort()).toEqual(["cell-1", "cell-3"])
+  })
+
+  it("still stops before any edit when preserving the copy fails for another reason", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad format", { status: 400 })))
+    const withArtifact: EBibleMatchResult = {
+      ...matchResult,
+      sourceArtifact: { name: "JON-tatar.usfm", bytes: new TextEncoder().encode("\\id JON").buffer, format: "usfm" },
+    }
+
+    await expect(applyEBibleTargetImport(withArtifact, new Set(["cell-1"]), ctx)).rejects.toThrow()
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
+  })
 })

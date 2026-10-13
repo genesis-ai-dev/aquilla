@@ -9,12 +9,13 @@ const EMPTY_TARGET_REFS: FileTargetCellRef[] = []
 
 /** Closed import dialogs need neither whole-file allocations nor changing
  * props. Open dialogs always derive from the current file/lane summaries,
- * including current event heads for safe commit parents.
+ * including current event heads for safe commit parents. The Import dialog
+ * needs both shapes while open: source refs for eBible's target mode and
+ * Paired translation, target refs for its translation review (AQU-1365).
  */
 export function useImportCellRefs(
   cells: readonly CellSummary[],
   importOpen: boolean,
-  fileImportOpen: boolean,
 ) {
   const importSourceCells = useMemo(() => importOpen ? cells.map((cell) => ({
     cellId: cell.id,
@@ -25,7 +26,7 @@ export function useImportCellRefs(
     canonicalRef: cell.group,
   })) : EMPTY_SOURCE_REFS, [cells, importOpen])
 
-  const fileTargetCells = useMemo(() => fileImportOpen ? cells.map(fileTargetCellRef) : EMPTY_TARGET_REFS, [cells, fileImportOpen])
+  const fileTargetCells = useMemo(() => importOpen ? cells.map(fileTargetCellRef) : EMPTY_TARGET_REFS, [cells, importOpen])
 
   return { importSourceCells, fileTargetCells }
 }

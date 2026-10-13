@@ -3,7 +3,8 @@
  * DID (tool chips with verdicts + expandable results) IN THE ORDER it did it
  * (chips interleaved with prose, not stacked), what it SAID (markdown), what
  * it COST (usage line), and when it FAILED or got CAPPED — the transparency
- * half of the propose-then-apply trust model.
+ * half of the propose-then-apply trust model. Usage is NOT repeated per reply:
+ * it lives in the composer's AgentUsageRing.
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -152,17 +153,25 @@ describe("AgentRunView", () => {
     expect(screen.getByText("3 cells")).toBeInTheDocument()
   })
 
-  it("renders the usage line in credits, never raw $", () => {
-    render(
+  it("keeps usage out of the reply; only a budget stop shows inline", () => {
+    // Usage is one glance away in the composer ring, not noise under every
+    // message. A run that STOPPED on its budget still says so here, because
+    // that explains why this particular reply ended.
+    const { unmount } = render(
       <AgentRunView
         run={makeRun({
           usage: { promptTokens: 12000, completionTokens: 3400, costCredits: 13 },
+          budget: { spentCredits: 120, capCredits: 500, exhausted: false },
         })}
       />,
     )
-    expect(
-      screen.getByText(/12,000 prompt \+ 3,400 completion tokens · 13 cr/),
-    ).toBeInTheDocument()
+    expect(screen.queryByText(/completion tokens/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/13 cr/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/of the run budget used/)).not.toBeInTheDocument()
+    unmount()
+
+    render(<AgentRunView run={makeRun({ budget: { spentCredits: 500, capCredits: 500, exhausted: true } })} />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Run stopped")
   })
 
   it("renders error and capped states, and a running indicator with progress", () => {

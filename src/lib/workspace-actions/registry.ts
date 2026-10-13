@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Download, CheckSquare, Upload, Mic, Wand2 } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2 } from "lucide-react"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
@@ -57,12 +57,18 @@ export const workspaceActions: WorkspaceAction[] = [
     // affordance (WorkspaceHeaderActions) rather than vanishing; `isAvailable`
     // is what makes the click itself refuse. Fails OPEN on an unknown role, so
     // local/legacy projects with no syncRole are unaffected.
-    isAvailable: (c) => roleAllows(c, "file.create"),
+    //
+    // AQU-1365: the same dialog now also brings in a translation of a file
+    // already in the project, which only commits target cells
+    // (`target.cell.commit`, CONTRIBUTOR 400). So the action opens from
+    // Contributor up; the dialog greys out New source text below Project lead.
+    isAvailable: (c) => roleAllows(c, "file.create") || roleAllows(c, "target.cell.commit"),
     isDefault: (c) => c.activeFileId == null,
     run: (_c, args) => args.openImport(),
   },
   {
     id: "run-completions", labelKey: "nav.workspaceActions.runCompletions.label", icon: Sparkles, group: "primary",
+    opensFileModal: "draft-next",
     isAvailable: (c) => c.activeFileId != null && roleAllows(c, "target.cell.commit"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
@@ -90,6 +96,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "complete-all", labelKey: "nav.workspaceActions.completeAll.label", icon: Sparkles, group: "primary",
+    opensFileModal: "draft-all",
     isAvailable: (c) => {
       if (!c.activeFileId) return false
       if (!roleAllows(c, "target.cell.commit")) return false
@@ -113,6 +120,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "batch-validate", labelKey: "nav.workspaceActions.batchValidate.label", icon: CheckSquare, group: "primary",
+    opensFileModal: "validate",
     isAvailable: (c) => c.activeFileId != null && roleAllows(c, "cell.validate"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
@@ -196,26 +204,6 @@ export const workspaceActions: WorkspaceAction[] = [
       return !!p && p.total > 0 && p.validated === p.total
     },
     run: (_c, args) => args.runExport(),
-  },
-  {
-    // AQU-503: the label must carry the word "target" so PMs looking for the
-    // "Target Import" option can find it — this file-scoped importer populates
-    // the open file's TARGET column, distinct from the primary "Import" (source).
-    id: "import-into-file", labelKey: "nav.workspaceActions.importIntoFile", icon: Upload, group: "secondary",
-    isAvailable: (c) => c.activeFileId != null,
-    run: (_c, args) => args.runImportIntoFile(),
-  },
-  {
-    // AQU-1673: sits right next to the direct import so a partner holding
-    // candidate translations finds it where they already looked. The label
-    // carries the difference ("as proposals for review") because the two
-    // dialogs are otherwise identical until the final button.
-    id: "import-proposals-into-file",
-    labelKey: "nav.workspaceActions.importProposalsIntoFile",
-    icon: Upload,
-    group: "secondary",
-    isAvailable: (c) => c.activeFileId != null,
-    run: (_c, args) => args.runImportProposalsIntoFile(),
   },
   {
     id: "transcribe-all", labelKey: "nav.workspaceActions.transcribeAll.label", icon: Mic, group: "secondary",

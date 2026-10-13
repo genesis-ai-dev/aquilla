@@ -18,7 +18,9 @@ import { describe, it, expect } from 'vitest'
 import { validateCommands, parseImportOrigin, type SetTranslationCommand } from '../external/commands'
 import { IMPORTED_ORIGIN_FILENAME_MAX } from '../events/types'
 
-const BASE = { kind: 'SetTranslation', fileId: 'f1', cellId: 'c1', value: 'hola' }
+// AQU-1615: a target lane is addressed by lanes.id and is required; the
+// provenance claims below are about importOrigin, not the lane.
+const BASE = { kind: 'SetTranslation', fileId: 'f1', cellId: 'c1', value: 'hola', laneId: 'lane-1' }
 
 function validateOne(cmd: Record<string, unknown>) {
   const res = validateCommands([cmd])

@@ -1,3 +1,5 @@
+import app from '../index'
+import { authHeader, jwtFor, seedUser } from './helpers/db'
 import { readFileSync } from 'node:fs'
 import { URL } from 'node:url'
 import { env } from 'cloudflare:test'
@@ -169,4 +171,51 @@ it('reports the same allowance and period admission uses, capped at 100 for disp
   await env.AQUILLA_PG.prepare('UPDATE organizations SET billing_scope = NULL WHERE id = 1').run()
   await env.AQUILLA_PG.prepare('DELETE FROM workspace_plan_entitlements WHERE org_id = 1').run()
   expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toBeNull()
+})
+
+it('consumes an audited partner grant through the actual usage ledger without resetting spent capacity', async () => {
+  const { input, now, period } = await setup()
+  await seedUser(7, 'root')
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, maxRawCostCents: 5 }, now)
+  await settleWorkspaceUsage(env.AQUILLA_PG, 1, input.requestId, 5)
+  await env.AQUILLA_PG.prepare('DELETE FROM workspace_subscription_state WHERE org_id = 1').run()
+  await env.AQUILLA_PG.prepare('DELETE FROM workspace_plan_entitlements WHERE org_id = 1').run()
+  await env.AQUILLA_PG.prepare("UPDATE workspace_checkout_attempts SET resolved_at = now(), resolution = 'expired' WHERE org_id = 1").run()
+  // Keep the exact existing period while converting this fixture to negotiated access.
+  await env.AQUILLA_PG.prepare('UPDATE organizations SET created_at = ?::timestamptz, billing_scope = NULL WHERE id = 1')
+    .bind(period.start).run()
+  const grant = (allowance: number | null) => app.request('/api/v2/admin/billing/org/1/weekly-allowance', {
+    method: 'PATCH', headers: authHeader(jwtForSync), body: JSON.stringify({ allowance, reason: 'Partner allocation' }),
+  }, env)
+  const jwtForSync = await jwtFor('root')
+  expect((await grant(100)).status).toBe(200)
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toMatchObject({ percent: 20, resetsAt: period.end })
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'partner-request' }, now)
+  expect((await readUsageTotals(env.AQUILLA_PG, 1, period)).committed).toBe(60 * MICRO_UNITS_PER_UNIT)
+  expect((await grant(0)).status).toBe(200)
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toMatchObject({ percent: 100 })
+  await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'zero' }, now)).rejects.toThrow('exhausted')
+  expect(await env.AQUILLA_PG.prepare("SELECT action FROM admin_audit_log WHERE action = 'billing.weekly_allowance.update' LIMIT 1").first()).toEqual({ action: 'billing.weekly_allowance.update' })
+  const denied = await app.request('/api/v2/admin/billing/org/1/weekly-allowance', {
+    method: 'PATCH', headers: authHeader(await jwtFor('alice')),
+    body: JSON.stringify({ allowance: 999, reason: 'Unauthorized' }),
+  }, env)
+  expect(denied.status).toBe(403)
+  expect((await grant(null)).status).toBe(200)
+  await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'cleared' }, now)).rejects.toThrow('explicit supported entitlement')
+})
+
+it('uses an admin Free allowance change in both admission and displayed percentage', async () => {
+  const { input, now } = await setup()
+  await env.AQUILLA_PG.prepare('DELETE FROM workspace_subscription_state WHERE org_id = 1').run()
+  await env.AQUILLA_PG.prepare('DELETE FROM workspace_plan_entitlements WHERE org_id = 1').run()
+  await env.AQUILLA_PG.prepare('UPDATE organizations SET created_at = ?::timestamptz WHERE id = 1').bind(now.toISOString()).run()
+  await seedUser(7, 'root')
+  const response = await app.request('/api/v2/admin/billing/plans', {
+    method: 'PATCH', headers: authHeader(await jwtFor('root')),
+    body: JSON.stringify({ freeWeeklyAllowance: 100, ifMatchVersion: 0 }),
+  }, env)
+  expect(response.status).toBe(200)
+  await reserveWorkspaceUsage(env.AQUILLA_PG, input, now)
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toMatchObject({ percent: 40 })
 })

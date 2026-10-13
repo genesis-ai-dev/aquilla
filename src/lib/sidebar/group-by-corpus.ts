@@ -1,4 +1,4 @@
-import { compareByCanonicalBookOrder, bookCodeFromFileName } from "@/lib/file-labeling/bible-book-names"
+import { compareByCanonicalBookOrder, bookCodeFromFileName, bookCodeFromFileNameStrict } from "@/lib/file-labeling/bible-book-names"
 import { getTestament } from "@/lib/codex-editor/bible-books"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -63,6 +63,14 @@ function mayBeScripture(file: GroupableFile): boolean {
   return file.hasScriptureContent === true || (file.type !== undefined && NAME_FALLBACK_TYPES.has(file.type))
 }
 
+/**
+ * Identity string of the synthetic no-marker bucket — the value callers
+ * compare `CorpusGroup.label` against. i18n-exempt control-flow value, not
+ * display text (see the `label` doc comment); `labelKey` carries what the
+ * user reads.
+ */
+export const UNGROUPED_GROUP = "Ungrouped"
+
 function normalize(marker: string): string {
   return marker.trim().toLowerCase()
 }
@@ -116,6 +124,35 @@ function corpusFileCompare(label: string, a: GroupableFile, b: GroupableFile): n
 }
 
 /**
+ * The Bible book a file holds, as a USFM code: its server-backed `bookCode`,
+ * or, for a scripture-capable file without one (a migrated Codex project's
+ * "1CH"), the code read off its name. Undefined for anything else. Shared by
+ * the grouping below and by the translation import's book matching (AQU-1365),
+ * so both agree on which file is which book.
+ */
+export function fileBookCode(file: GroupableFile): string | undefined {
+  return file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
+}
+
+/**
+ * True when `fileBookCode` is more than a guess: the file stores its book, or
+ * its name names the book outright ("JON-source", "Judges"), not just starts
+ * or ends with three letters that happen to be a code. AQU-1365 review: the
+ * translation check only offers to update a file's source text in place on
+ * this, since a wrong guess would reconcile one book's verses over another's.
+ */
+export function fileBookCodeIsCertain(file: GroupableFile): boolean {
+  if (file.bookCode) return true
+  return mayBeScripture(file) && bookCodeFromFileNameStrict(file.name) !== undefined
+}
+
+/** The testament a Scripture file's book code puts it in, if it has one. */
+function derivedTestament(file: GroupableFile): string | undefined {
+  const code = fileBookCode(file)
+  return code ? getTestament(code) : undefined
+}
+
+/**
  * The marker a file groups under. `corpusMarker` always wins so custom
  * groupings (seasons, series, …) are untouched. It is client-local state
  * though, and often missing after a reload or on a fresh device (see
@@ -133,10 +170,29 @@ function corpusFileCompare(label: string, a: GroupableFile, b: GroupableFile): n
 function resolveMarker(file: GroupableFile): { marker: string; derived: boolean } | null {
   const raw = file.corpusMarker?.trim()
   if (raw) return { marker: raw, derived: false }
-  const code = file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
-  const testament = code ? getTestament(code) : undefined
+  const testament = derivedTestament(file)
   if (testament) return { marker: testament, derived: true }
   return null
+}
+
+/**
+ * AQU-1702: the group label a file WOULD land under if its `corpusMarker`
+ * were `marker` (`null` / blank = cleared). The answer is not always the
+ * marker: clearing a Bible book's marker hands it back to the `derived`
+ * testament fallback above, so "move this to Ungrouped" is a thing the
+ * sidebar cannot always express. A cross-group drag asks this before it
+ * writes, and refuses the drop when the answer is not the group the pointer
+ * was over — never a silent visual-only move.
+ */
+export function groupLabelForMarker(file: GroupableFile, marker: string | null): string {
+  const trimmed = marker?.trim()
+  if (trimmed) return trimmed
+  return derivedTestament(file) ?? UNGROUPED_GROUP
+}
+
+/** Whether two group labels name the same group, by the same rule `groupByCorpus` keys on. */
+export function sameGroup(a: string, b: string): boolean {
+  return normalize(a) === normalize(b)
 }
 
 export function groupByCorpus<T extends GroupableFile>(
@@ -184,9 +240,7 @@ export function groupByCorpus<T extends GroupableFile>(
   })
 
   if (ungrouped.length > 0) {
-    // i18n-exempt control-flow identity value, not display text — labelKey
-    // carries the translated text; see the CorpusGroup.label doc comment.
-    named.push({ label: "Ungrouped", labelKey: "nav.fileList.ungroupedLabel", files: ungrouped })
+    named.push({ label: UNGROUPED_GROUP, labelKey: "nav.fileList.ungroupedLabel", files: ungrouped })
   }
   return named
 }

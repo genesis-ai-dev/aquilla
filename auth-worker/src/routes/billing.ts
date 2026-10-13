@@ -1,3 +1,4 @@
+import { workspaceBillingMode } from '../lib/billing/environment'
 import { reconcileWorkspaceLifecycle, workspaceLifecycleEvents } from '../lib/billing/workspace-lifecycle'
 // Org billing — Field Plan checkout, word add-ons, customer portal, Stripe webhook.
 //
@@ -34,7 +35,6 @@ import { readOrgBilling, readWordSnapshot } from "../lib/billing/words"
 
 import { readBillingOffers, unavailableOffers } from "../lib/billing/catalog"
 
-import { workspaceCheckoutRehearsalEnabled } from "../lib/billing/workspace-checkout"
 import { reconcileWorkspacePayment } from "../lib/billing/workspace-payment"
 
 const billing = new Hono<AuthHonoEnv>()
@@ -170,8 +170,8 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
     if (err instanceof StripeConfigError) {
       return c.json({ error: "stripe_unconfigured", message: err.message }, 503)
     }
-    const message = err instanceof Error ? err.message : "Checkout failed"
-    return c.json({ error: "stripe_error", message }, 502)
+    console.error("[billing] checkout failed:", err)
+    return c.json({ error: "stripe_error", message: "Checkout failed" }, 502)
   }
 })
 
@@ -195,8 +195,8 @@ billing.post("/orgs/:orgId/billing/portal", authMiddleware, async (c) => {
     if (err instanceof StripeConfigError) {
       return c.json({ error: "stripe_unconfigured", message: err.message }, 503)
     }
-    const message = err instanceof Error ? err.message : "Portal failed"
-    return c.json({ error: "stripe_error", message }, 502)
+    console.error("[billing] portal failed:", err)
+    return c.json({ error: "stripe_error", message: "Portal failed" }, 502)
   }
 })
 
@@ -245,7 +245,7 @@ billing.post("/billing/webhook", async (c) => {
       : (obj.parent as { subscription_details?: { subscription?: unknown } } | undefined)
         ?.subscription_details?.subscription
     const markedWorkspace = [metadata, invoiceMetadata, legacyInvoiceMetadata]
-      .some(meta => meta?.kind === "workspace_plan_rehearsal" || meta?.checkoutAttemptId != null)
+      .some(meta => meta?.kind === "workspace_plan" || meta?.kind === "workspace_plan_rehearsal" || meta?.checkoutAttemptId != null)
     const storedWorkspace = !markedWorkspace && (
       (type.startsWith("checkout.session.") && typeof obj.id === "string"
         && await c.env.AQUILLA_PG.prepare(
@@ -256,7 +256,7 @@ billing.post("/billing/webhook", async (c) => {
       ).bind(subscriptionId).first())
     )
     if (markedWorkspace || storedWorkspace) {
-      if (!secret || !workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) {
+      if (!secret || !workspaceBillingMode(c.env, c.req.url)) {
         return c.json({ error: "workspace_activation_disabled" }, 503)
       }
       if (workspaceLifecycleEvents.includes(type)) {

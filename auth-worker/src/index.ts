@@ -16,6 +16,7 @@
 //   GET  /api/v2/users/lookup
 //   GET  /api/v2/users/search
 //   GET  /api/v2/orgs/me
+//   DELETE /api/v2/orgs/:orgId   (owner; 409 while any project row remains)
 //   GET  /api/v2/orgs/:orgId/deleted-files
 //   GET  /api/v2/orgs/:orgId/members
 //   POST /api/v2/orgs/:orgId/members
@@ -76,6 +77,7 @@ import usersRoutes from "./routes/users"
 import meRoutes from "./routes/me"
 import accessRoutes from "./routes/access"
 import orgAccessRoutes from "./routes/org-access"
+import accessAuditRoutes from "./routes/access-audit"
 import adminRoutes from "./routes/admin"
 import testResetRoutes from "./routes/test-reset"
 import devSeedRoutes from "./routes/dev-seed"
@@ -87,6 +89,8 @@ import aiDraftInternalRoutes from "./routes/ai-draft-internal"
 import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aiSeamsRoutes from "./routes/ai-seams"
 import aiPassageTagsRoutes from "./routes/ai-passage-tags"
+import aiSmartEditsRoutes from "./routes/ai-smart-edits"
+import aiHarmonizeRoutes from "./routes/ai-harmonize"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
@@ -98,6 +102,7 @@ import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
 import agentMemoryRoutes from "./routes/agent-memory"
+import aiInterventionRoutes from "./routes/ai-interventions"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
@@ -106,6 +111,7 @@ import teamHandoffRoutes from "./routes/team-handoffs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
+import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
@@ -278,6 +284,7 @@ app.route("/api/v2/users", usersRoutes)
 app.route("/api/v2/users", accessRoutes)
 app.route("/api/v2/me", meRoutes)
 app.route("/api/v2/orgs", orgAccessRoutes)
+app.route("/api/v2/orgs", accessAuditRoutes)
 app.route("/api/v2/orgs", orgSettingsRoutes)
 // Org termbase publish/subscribe (migration 0030). Mounted under BOTH prefixes
 // — /orgs/:orgId/published-termbases lives here, the rest under /projects/:id/
@@ -303,6 +310,9 @@ app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 // file, doesn't touch projects.ts. Session-JWT authed; agent-channel semantics
 // keyed off the x-aquilla-agent-run header (see routes/agent-memory.ts).
 app.route("/api/v2/projects", agentMemoryRoutes)
+// AI intervention audit trail (AQU-1656): prompts, outputs and examples
+// behind each AI draft. Sibling router (routes/ai-interventions.ts).
+app.route("/api/v2/projects", aiInterventionRoutes)
 // Scene briefs (contextual translation pipeline §9). Sibling router — same
 // agent-channel semantics as agent-memory (routes/scene-briefs.ts).
 app.route("/api/v2/projects", sceneBriefRoutes)
@@ -391,6 +401,11 @@ app.route("/api/v1/ai/agent", aiDraftInternalRoutes)
 // AQU-1282: server-to-server L1 brief-summary render for the external Agent
 // API's RegenerateBriefSummary / SetBrief auto-render. Shared-secret only.
 app.route("/api/v1/ai/agent", aiBriefInternalRoutes)
+// AQU-1762: server-to-server knowledge-base upload / list for the external Agent
+// API's /api/v1/external/projects/:projectId/knowledge routes. Shared-secret
+// only (sync-worker → here); runs the same uploader, extraction and indexing the
+// in-app route does (routes/knowledge-internal.ts).
+app.route("/api/v2/internal", knowledgeInternalRoutes)
 // AQU-1386: seam classification for meaning-unit drafting. Session-authed;
 // batches a window of cell boundaries into one Jev decision call and falls back
 // to punctuation whenever the model is unavailable or unconfident.
@@ -400,6 +415,13 @@ app.route("/api/v1/ai/seams", aiSeamsRoutes)
 // route; answers who is in a passage, whether it opens a scene, whether it is
 // speech, and which passages it leans on.
 app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
+// Smart edits: suggestions distilled from the project's own human edits
+// (memory → Jev verify). Same session auth and per-user window as the seam
+// route; never fails its caller.
+app.route("/api/v1/ai/smart-edits", aiSmartEditsRoutes)
+// Harmonizer: cross-cell checks by SFL metafunction (quotation continuity
+// first). One batched Jev call per passage; never fails its caller.
+app.route("/api/v1/ai/harmonize", aiHarmonizeRoutes)
 // Bible Aquifer reference proxy (bibletranslation.org) — read-only search/page
 // + gated publish. See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
 app.route("/api/v1/aquifer", aquiferRoutes)

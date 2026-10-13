@@ -131,8 +131,8 @@ describe("project: countStructuralCells is a lead-level, key-exact carve-out", (
       countStructuralCells: false,
       sourceLanguage: "fr",
     })
-    expect(res.status).toBe(403)
-    expect((await res.json() as { error: string }).error).toMatch(/maintainer/)
+    expect(res.status).toBe(400)
+    expect((await res.json() as { error: string }).error).toMatch(/not settings/)
     expect((await storedProject()).countStructuralCells).toBeUndefined()
   })
 
@@ -144,7 +144,6 @@ describe("project: countStructuralCells is a lead-level, key-exact carve-out", (
     await seedProject(JSON.stringify({ countStructuralCells: false, sourceLanguage: "en" }))
     const res = await patchProject(await jwtFor("leo"), {
       countStructuralCells: false,
-      sourceLanguage: "en",
     })
     expect(res.status).toBe(200)
   })

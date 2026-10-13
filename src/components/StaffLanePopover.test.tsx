@@ -31,6 +31,7 @@ function renderPopover(orgId: number | null = 1, laneId?: string) {
         lane="es"
         laneId={laneId}
         laneLabel="Spanish"
+        projectName="Mark"
         orgId={orgId}
       />
     </MemoryRouter>,
@@ -186,10 +187,12 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
-    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300)
+    expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
+      scopeLanes: ["es"],
+    })
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 10, [
@@ -197,7 +200,9 @@ describe("StaffLanePopover", () => {
     ])
 
     await waitFor(() =>
-      expect(screen.getByText(/maria is now reviewer on spanish/i)).toBeInTheDocument(),
+      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
+        /maria will join as a reviewer on mark, spanish lane only/i,
+      ),
     )
   })
 
@@ -210,7 +215,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
@@ -236,7 +241,7 @@ describe("StaffLanePopover", () => {
     renderPopover(1, "ln-es")
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
@@ -259,7 +264,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     expect(mockAddProjectMember).not.toHaveBeenCalled()
@@ -270,13 +275,17 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    fireEvent.click(screen.getByRole("button", { name: /add as lead \(unscoped\)/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add as lead — every lane/i }))
 
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
     expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 500)
     expect(mockPutMemberScopes).not.toHaveBeenCalled()
 
-    await waitFor(() => expect(screen.getByText(/maria is now a lead/i)).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
+        /maria will join as a project lead on mark — every lane/i,
+      ),
+    )
   })
 
   it("handles the server's 'leads unscopable' 400 gracefully as a success outcome", async () => {
@@ -285,7 +294,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
 
     await waitFor(() =>
       expect(screen.getByText(/already leads this project/i)).toBeInTheDocument(),
@@ -344,6 +353,34 @@ describe("StaffLanePopover", () => {
       expect(blockedRow()).toHaveAttribute("data-reason", "hidden")
       expect(screen.getByText(/hides its member list/i)).toBeInTheDocument()
       expect(screen.queryByText(/no one in your organization yet/i)).not.toBeInTheDocument()
+    })
+
+    it("staffs a direct invite onto this lane when the org roster is hidden (AQU-1798)", async () => {
+      mockRoster = { members: [], rosterHidden: true }
+      mockProjectMembers = [
+        {
+          userId: 22,
+          username: "kean",
+          role: { level: 100, name: "viewer", source: "override" },
+          secondarySources: [],
+        },
+      ]
+      renderPopover()
+      openPopover()
+
+      expect(screen.queryByTestId("staff-lane-roster-blocked")).not.toBeInTheDocument()
+      expect(screen.getByTestId("staff-lane-roster-note")).toHaveAttribute("data-reason", "hidden")
+      fireEvent.click(screen.getByText("kean"))
+      fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+
+      await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
+      expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "kean", 300, {
+        scopeLanes: ["es"],
+      })
+      await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
+      expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 22, [
+        { kind: "lane", value: "es" },
+      ])
     })
 
     it("tells a non-org-member project admin that they can't see the roster", () => {
@@ -417,9 +454,9 @@ describe("StaffLanePopover", () => {
       // Picking a name advances to the role step instead of navigating away.
       pickMaria()
       expect(onRowClick).not.toHaveBeenCalled()
-      expect(screen.getByRole("button", { name: /add to spanish/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /spanish lane only/i })).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
+      fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
       await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
       expect(onRowClick).not.toHaveBeenCalled()
     })

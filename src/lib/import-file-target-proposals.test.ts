@@ -6,8 +6,9 @@
 // skipped, what provenance rides along, and that a non-staged answer is
 // reported as a failure rather than as a success the reviewer can't find.
 
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FileTargetMatchedCell } from "@/lib/import-file-target"
+import { resetProjectTargetLanesForTests, setProjectTargetLanes } from "@/lib/sync/project-target-lanes"
 
 const prepareSessionChangeset = vi.fn()
 vi.mock("@/lib/agent/changeset-api", () => ({
@@ -43,9 +44,23 @@ function staged(id = "cs-1") {
   return { id, status: "staged" }
 }
 
+// AQU-1615: the session changeset route addresses a lane by `lanes.id` and
+// aliases nothing, so the lib resolves the editor's tag through the same
+// registry every other target write uses (AQU-1902). Two rows: a legacy
+// default lane (tag '') and a tagged one.
+const LANE_ROWS = [
+  { id: "lane-default", legacyTag: "" },
+  { id: "lane-es", legacyTag: "es" },
+]
+
 beforeEach(() => {
   prepareSessionChangeset.mockReset()
   prepareSessionChangeset.mockResolvedValue(staged())
+  setProjectTargetLanes("proj-1", LANE_ROWS)
+})
+
+afterEach(() => {
+  resetProjectTargetLanesForTests()
 })
 
 describe("isUnchangedProposal", () => {
@@ -135,16 +150,46 @@ describe("stageTargetImportAsProposals", () => {
     expect(commands[0].importOrigin.fileName).toHaveLength(IMPORT_ORIGIN_FILENAME_MAX)
   })
 
-  it("sends laneId for a non-default lane", async () => {
+  it("sends the lane ROW's id for the editor's lane tag — the worker aliases no tag (AQU-1615)", async () => {
     const matched = [cell({ cellId: "c1" })]
     await stageTargetImportAsProposals(matched, new Set(["c1"]), { ...CTX, targetLang: "es" })
-    expect(prepareSessionChangeset.mock.calls[0][2][0].laneId).toBe("es")
+    expect(prepareSessionChangeset.mock.calls[0][2][0].laneId).toBe("lane-es")
   })
 
-  it("omits laneId for the default lane — the worker rejects '' as a lane id", async () => {
+  it("resolves the legacy default lane ('') to its row id rather than omitting the lane", async () => {
+    // The worker rejects an omitted lane id just as it rejects ''; the
+    // default lane is a row like any other.
     const matched = [cell({ cellId: "c1" })]
     await stageTargetImportAsProposals(matched, new Set(["c1"]), { ...CTX, targetLang: "" })
-    expect(prepareSessionChangeset.mock.calls[0][2][0]).not.toHaveProperty("laneId")
+    expect(prepareSessionChangeset.mock.calls[0][2][0].laneId).toBe("lane-default")
+  })
+
+  it("refuses to stage when the tag names no lane of this project", async () => {
+    const matched = [cell({ cellId: "c1" })]
+    await expect(
+      stageTargetImportAsProposals(matched, new Set(["c1"]), { ...CTX, targetLang: "fr" }),
+    ).rejects.toThrow(/names no lane/)
+    expect(prepareSessionChangeset).not.toHaveBeenCalled()
+  })
+
+  it("waits for the project's lanes rather than staging into a lane it cannot name", async () => {
+    resetProjectTargetLanesForTests()
+    setProjectTargetLanes("proj-1", null)
+    const matched = [cell({ cellId: "c1" })]
+    await expect(
+      stageTargetImportAsProposals(matched, new Set(["c1"]), { ...CTX, targetLang: "es" }),
+    ).rejects.toThrow(/have not loaded/)
+    expect(prepareSessionChangeset).not.toHaveBeenCalled()
+  })
+
+  it("refuses on a project with no target lane row — a changeset cannot mint the bridge", async () => {
+    resetProjectTargetLanesForTests()
+    setProjectTargetLanes("proj-1", [])
+    const matched = [cell({ cellId: "c1" })]
+    await expect(
+      stageTargetImportAsProposals(matched, new Set(["c1"]), { ...CTX, targetLang: "" }),
+    ).rejects.toThrow(/names no lane/)
+    expect(prepareSessionChangeset).not.toHaveBeenCalled()
   })
 
   it("never sends AD-2 parent ids — prepare computes preconditions server-side", async () => {

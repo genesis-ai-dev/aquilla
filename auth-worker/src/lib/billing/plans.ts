@@ -144,6 +144,7 @@ export function periodAllowanceWords(args: {
 }
 
 export interface FieldPlanSettings {
+  freeWeeklyAllowance?: number
   priceCents?: number
   includedWords?: number
   addonWords?: number
@@ -160,6 +161,7 @@ export interface FieldPlanSettings {
 }
 
 export interface ResolvedFieldPlan {
+  freeWeeklyAllowance: number
   name: string
   intervalDays: number
   priceCents: number
@@ -205,6 +207,7 @@ export function resolveFieldPlan(
       ? Math.max(0, Math.floor(stored.enterpriseCreditsPerLanguagePerYear))
       : TIER_CREDITS.enterprise.creditsPerLanguagePerYear
   return {
+    freeWeeklyAllowance: stored?.freeWeeklyAllowance ?? 25,
     name: FIELD_PLAN.name,
     intervalDays: stored?.intervalDays ?? FIELD_PLAN.intervalDays,
     priceCents: stored?.priceCents ?? FIELD_PLAN.priceCents,

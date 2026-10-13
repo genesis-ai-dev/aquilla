@@ -40,6 +40,7 @@ async function orgExists(db: AquillaDb, orgId: number): Promise<boolean> {
 
 function publicPlan(plan: ReturnType<typeof resolveFieldPlan>) {
   return {
+    freeWeeklyAllowance: plan.freeWeeklyAllowance,
     name: plan.name,
     intervalDays: plan.intervalDays,
     priceCents: plan.priceCents,
@@ -63,6 +64,7 @@ adminBilling.get("/billing/plans", async (c) => {
   return c.json({
     plan: publicPlan(plan),
     version: rec.version,
+    weeklyUsageEnforced: c.env.BILLING_WEEKLY_USAGE_ENFORCE === "true",
     stripeConfigured: stripeConfigured(c.env),
     note: stripeConfigured(c.env)
       ? "Saving a new dollar amount creates a Stripe Price for future checkouts. Existing subscribers keep their current price."
@@ -71,6 +73,7 @@ adminBilling.get("/billing/plans", async (c) => {
 })
 
 const fieldPlanPatchSchema = z.object({
+  freeWeeklyAllowance: z.number().int().min(0).max(10_000_000).optional(),
   priceCents: z.number().int().min(100).max(10_000_000).optional(),
   addonPriceCents: z.number().int().min(100).max(10_000_000).optional(),
   includedWords: z.number().int().min(0).max(100_000_000).optional(),
@@ -140,14 +143,18 @@ adminBilling.get("/billing/orgs", async (c) => {
   const rec = await loadPlatformSettings(c.env)
   const catalog = resolveFieldPlan(rec.settings.fieldPlan, c.env)
   const { results } = await c.env.AQUILLA_PG.prepare(
-    `SELECT id, name FROM organizations ORDER BY name ASC NULLS LAST, id ASC`,
-  ).all<{ id: number; name: string | null }>()
+    `SELECT o.id, o.name, u.username AS owner_username, b.weekly_allowance
+      FROM organizations o LEFT JOIN users u ON u.id = o.owner_user_id
+      LEFT JOIN org_billing b ON b.org_id = o.id ORDER BY o.name ASC NULLS LAST, o.id ASC`,
+  ).all<{ id: number; name: string | null; owner_username: string | null; weekly_allowance: number | null }>()
 
   const orgs = []
   for (const org of results) {
     const snap = await readWordSnapshot(c.env.AQUILLA_PG, org.id, catalog)
     orgs.push({
       orgId: org.id,
+      ownerUsername: org.owner_username,
+      weeklyAllowance: org.weekly_allowance,
       orgName: org.name,
       plan: snap.plan,
       status: snap.status,
@@ -285,4 +292,34 @@ adminBilling.post("/billing/org/:orgId/reset-credits", zValidator("json", resetS
   return c.json({ orgId, deleted })
 })
 
+const weeklyGrantSchema = z.object({
+  allowance: z.number().int().min(0).max(10_000_000).nullable(),
+  reason: z.string().trim().min(1).max(500),
+}).strict()
+adminBilling.patch('/billing/org/:orgId/weekly-allowance', zValidator('json', weeklyGrantSchema), async c => {
+  const raw = c.req.param('orgId') ?? ''
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: 'invalid_org' }, 400)
+  const db = c.env.AQUILLA_PG
+  if (!db.transaction) return c.json({ error: 'transactions_unavailable' }, 503)
+  const { allowance, reason } = c.req.valid('json')
+  const result = await db.transaction(async tx => {
+    const org = await tx.prepare('SELECT id FROM organizations WHERE id = ? FOR UPDATE').bind(orgId).first()
+    if (!org) return 'not_found' as const
+    const pending = await tx.prepare(`SELECT id FROM workspace_checkout_attempts a
+      WHERE a.org_id = ? AND a.resolved_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM workspace_plan_entitlements e WHERE e.org_id = a.org_id)`)
+      .bind(orgId).first()
+    if (pending) return 'checkout_pending' as const
+    await tx.prepare(`INSERT INTO org_billing (org_id, weekly_allowance) VALUES (?, ?)
+      ON CONFLICT (org_id) DO UPDATE SET weekly_allowance = excluded.weekly_allowance`)
+      .bind(orgId, allowance).run()
+    // Audit failure rolls back the grant. Never reset usage or rewrite a subscription.
+    await tx.prepare('INSERT INTO admin_audit_log (user_id, action, detail) VALUES (?, ?, ?)')
+      .bind(c.get('user').id, 'billing.weekly_allowance.update', JSON.stringify({ orgId, allowance, reason })).run()
+    return 'saved' as const
+  })
+  if (result === 'checkout_pending') return c.json({ error: 'checkout_pending' }, 409)
+  return result === 'saved' ? c.json({ orgId, weeklyAllowance: allowance }) : c.json({ error: 'not_found' }, 404)
+})
 export default adminBilling

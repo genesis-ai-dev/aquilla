@@ -29,10 +29,7 @@ async function seedScope(t: TestDb): Promise<void> {
     [FILE, PROJECT],
   )
   await t.pg.query(
-    `INSERT INTO contextual_runs (id, project_id, file_id, target_lang, status)
-     VALUES
-       ('run-default', $1, $2, '', 'done'),
-       ('run-french', $1, $2, 'fr', 'done')`,
+    `INSERT INTO contextual_runs (id, project_id, file_id, status, lane_id) VALUES ('run-default', $1, $2, 'done', (SELECT aquilla_test_resolve_target_lane($1, ''))), ('run-french', $1, $2, 'done', (SELECT aquilla_test_resolve_target_lane($1, 'fr')))`,
     [PROJECT, FILE],
   )
 }
@@ -49,9 +46,7 @@ async function seedDraft(
   },
 ): Promise<void> {
   await t.pg.query(
-    `INSERT INTO contextual_drafts
-        (id, run_id, project_id, file_id, cell_id, target_lang, text, status, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'proposed', to_timestamp($8::double precision / 1000.0))`,
+    `INSERT INTO contextual_drafts (id, run_id, project_id, file_id, cell_id, text, status, created_at, lane_id) VALUES ($1, $2, $3, $4, $5, $7, 'proposed', to_timestamp($8::double precision / 1000.0), (SELECT aquilla_test_resolve_target_lane($3, $6)))`,
     [
       input.id,
       input.runId ?? "run-default",
@@ -225,7 +220,8 @@ describe("target.cell.commit contextual draft reconciliation", () => {
       const loserCell = await t.pg.query(
         `SELECT 1 FROM cells
           WHERE project_id = $1 AND file_id = $2 AND cell_id = 'cell-loser'
-            AND side = 'target' AND target_lang = ''`,
+            AND side = 'target'
+            AND lane_id = (SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = '')`,
         [PROJECT, FILE],
       )
       expect(loserCell.rows).toHaveLength(0)
@@ -343,7 +339,8 @@ describe("target.cell.commit contextual draft reconciliation", () => {
       const rebuilt = await t.pg.query<{ event_id: string; value: string }>(
         `SELECT event_id, value FROM cells
           WHERE project_id = $1 AND file_id = $2 AND cell_id = $3
-            AND side = 'target' AND target_lang = ''`,
+            AND side = 'target'
+            AND lane_id = (SELECT id FROM lanes WHERE project_id = $1 AND role = 'target' AND legacy_tag = '')`,
         [PROJECT, FILE, cellId],
       )
       expect(rebuilt.rows[0]).toEqual({ event_id: eventId, value: "Historical cell value" })

@@ -13,7 +13,11 @@
 // reports `invalid_state` instead of silently clobbering.
 
 import type { AquillaDb } from "../shim/postgres"
+import { targetLaneIdSql, wireLegacyTagSql } from "./lane-sql"
 import { MEMORY_MAX_BYTES, detectSecret } from "./agent-memory"
+import { laneRef, liveLaneKey, resolveLane, type LaneRef } from "./lane-ref"
+
+export type { LaneRef } from "./lane-ref"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Types
@@ -94,6 +98,11 @@ export interface ContextualRun {
   id: string
   projectId: string
   fileId: string
+  /** The lane this run drafts into — `lanes.id`, the run's lane identity
+   *  (AQU-1610). Every lane-scoped query keys on this. */
+  laneId: string
+  /** The lane's legacy tag. Carried for the un-dropped `target_lang` column
+   *  and for clients that still speak tags; never a key (AQU-1611). */
   targetLang: string
   status: ContextualRunStatus
   initiatedBy: string | null
@@ -154,7 +163,9 @@ export interface ContextualDraft {
   projectId: string
   fileId: string
   cellId: string
-  /** Lane copied from the owning run at insert. '' = project default. */
+  /** Lane copied from the owning run at insert — `lanes.id` (AQU-1610). */
+  laneId: string
+  /** The owning lane's legacy tag; never a key (AQU-1611). */
   targetLang: string
   sceneBriefId: string | null
   text: string
@@ -169,6 +180,10 @@ export interface ContextualDraft {
 export interface ContextualProjectLease {
   id: string
   projectId: string
+  /** Billing workspace the project belongs to; 0 for an unowned project.
+   *  Carried on the lease so the org ceiling can be summed without joining
+   *  back to `projects` inside the acquire statement (AQU-1847). */
+  orgId: number
   runId: string
   weight: number
   expiresAt: string
@@ -342,6 +357,7 @@ interface RunRow {
   project_id: string
   file_id: string
   target_lang: string
+  lane_id: string
   status: ContextualRunStatus
   initiated_by: string | null
   role_snapshot: unknown
@@ -380,6 +396,7 @@ function rowToRun(r: RunRow): ContextualRun {
     id: r.id,
     projectId: r.project_id,
     fileId: r.file_id,
+    laneId: r.lane_id,
     targetLang: r.target_lang,
     status: r.status,
     initiatedBy: r.initiated_by,
@@ -404,7 +421,7 @@ function rowToRun(r: RunRow): ContextualRun {
   }
 }
 
-const RUN_COLS = `id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
+const RUN_COLS = `id, project_id, file_id, ${wireLegacyTagSql("contextual_runs")} AS target_lang, lane_id, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
   last_error, steering_cursor, blocked_on_decision_id, span_allowance, park_reason,
   anchor_cell_id, scope_group, created_at, updated_at`
@@ -444,6 +461,7 @@ interface DraftRow {
   file_id: string
   cell_id: string
   target_lang: string
+  lane_id: string
   scene_brief_id: string | null
   text: string
   verdicts: unknown
@@ -461,6 +479,7 @@ function rowToDraft(r: DraftRow): ContextualDraft {
     projectId: r.project_id,
     fileId: r.file_id,
     cellId: r.cell_id,
+    laneId: r.lane_id,
     targetLang: r.target_lang,
     sceneBriefId: r.scene_brief_id,
     text: r.text,
@@ -473,7 +492,7 @@ function rowToDraft(r: DraftRow): ContextualDraft {
   }
 }
 
-const DRAFT_COLS = `id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text,
+const DRAFT_COLS = `id, run_id, project_id, file_id, cell_id, ${wireLegacyTagSql("contextual_drafts")} AS target_lang, lane_id, scene_brief_id, text,
   verdicts, provenance, status, created_at, reviewed_at, reviewed_by`
 
 interface RunEventRow {
@@ -713,6 +732,10 @@ function eventSummary(input: AppendContextualRunEventInput, details: ContextualR
         pausing: "Pause requested",
         paused: "Autopilot paused",
         parked: "Autopilot is idle",
+        // AQU-1847: the run holds its place in line for model capacity. It is
+        // NOT paused, idle or failed, and saying so is the whole point — a run
+        // waiting behind another tenant's work used to look stalled.
+        queued: "Autopilot is waiting for model capacity",
         done: "Autopilot completed",
         failed: "Autopilot stopped after an error",
         terminated: "Autopilot terminated",
@@ -862,10 +885,9 @@ export async function listContextualRunEvents(
 // Runs
 // ──────────────────────────────────────────────────────────────────────────
 
-export interface CreateRunInput {
+export interface CreateRunInput extends LaneRef {
   projectId: string
   fileId: string
-  targetLang?: string
   initiatedBy?: string | null
   roleSnapshot?: RoleSnapshot | null
   /** Cell the user was looking at — rotates the first wave to start there. */
@@ -886,37 +908,37 @@ export type CreateRunResult =
  *  lane). The pre-check gives a friendly error; the partial UNIQUE index
  *  (contextual_runs_active) closes the check-then-insert race. */
 export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<CreateRunResult> {
-  const lane = input.targetLang ?? ""
+  const lane = await resolveLane(db, input.projectId, input)
   const activePlaceholders = ACTIVE_STATUSES.map(() => "?").join(",")
   const active = await db
     .prepare(
       `SELECT id FROM contextual_runs
-        WHERE project_id = ? AND file_id = ? AND target_lang = ?
+        WHERE project_id = ? AND file_id = ? AND lane_id = ?
           AND status IN (${activePlaceholders})
         LIMIT 1`,
     )
-    .bind(input.projectId, input.fileId, lane, ...ACTIVE_STATUSES)
+    .bind(input.projectId, input.fileId, lane.laneId, ...ACTIVE_STATUSES)
     .first<{ id: string }>()
   if (active) return { status: "active_exists", runId: active.id }
 
   try {
     const row = await db
       .prepare(
-        // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
-        // (db/shared cannot import sync-worker's lane-id-sql); NULL until lanes
-        // exist, filled by the backfill. Mirrors laneIdResolveSql('target').
+        // A resolved lane id is bound as itself. A tag with no lane row
+        // resolves through the same subquery the cell writers use: NULL in
+        // production (the NOT NULL column rejects it), and under the test
+        // harness the lane is minted from the tag. The projection column
+        // is not filled either way.
         `INSERT INTO contextual_runs
-            (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
+            (id, project_id, file_id, status, initiated_by, role_snapshot,
              anchor_cell_id, scope_group, span_allowance, lane_id)
-         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?,
-                 (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
+         VALUES (?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?, ${lane.laneId ? "?" : targetLaneIdSql("?", "?")})
          RETURNING ${RUN_COLS}`,
       )
       .bind(
         uuidv7(),
         input.projectId,
         input.fileId,
-        lane,
         input.initiatedBy ?? null,
         input.roleSnapshot ?? null,
         input.anchorCellId ?? null,
@@ -928,9 +950,7 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
           : input.spanAllowance === null
             ? null
             : Math.max(0, Math.round(input.spanAllowance)),
-        // AQU-1240 slice 8: resolve lane_id from (project, target_lang).
-        input.projectId,
-        lane,
+        ...(lane.laneId ? [lane.laneId] : [input.projectId, lane.targetLang]),
       )
       .first<RunRow>()
     if (!row) throw new Error("insert returned no row")
@@ -938,14 +958,25 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
   } catch (err) {
     // Unique-index race: someone else created the active run between our
     // check and insert — report theirs.
+    // The insert can also be rejected by a PRE-0151 `contextual_runs_active`,
+    // which is keyed on the tag: a lane with no legacy tag then collides with
+    // the former default lane's run even though their lane ids differ. Look
+    // the racing run up by whichever column that index is keyed on, so the
+    // caller gets `active_exists` rather than a raw database error.
+    const activeKey = await liveLaneKey(db, "contextual_runs_active")
     const racing = await db
       .prepare(
         `SELECT id FROM contextual_runs
-          WHERE project_id = ? AND file_id = ? AND target_lang = ?
+          WHERE project_id = ? AND file_id = ? AND ${activeKey} = ?
             AND status IN (${activePlaceholders})
           LIMIT 1`,
       )
-      .bind(input.projectId, input.fileId, lane, ...ACTIVE_STATUSES)
+      .bind(
+        input.projectId,
+        input.fileId,
+        activeKey === "lane_id" ? lane.laneId : lane.targetLang,
+        ...ACTIVE_STATUSES,
+      )
       .first<{ id: string }>()
     if (racing) return { status: "active_exists", runId: racing.id }
     throw err
@@ -970,9 +1001,8 @@ export interface ContextualRunListCursor {
   runId: string
 }
 
-export interface ListRunsInput {
+export interface ListRunsInput extends LaneRef {
   fileId?: string
-  targetLang?: string
   limit?: number
   /** Review drill-down: only runs that still own proposed drafts. */
   proposedOnly?: boolean
@@ -1000,9 +1030,9 @@ export async function listRuns(
     where.push("file_id = ?")
     binds.push(input.fileId)
   }
-  if (input.targetLang !== undefined) {
-    where.push("target_lang = ?")
-    binds.push(input.targetLang)
+  if (input.laneId !== undefined || input.targetLang !== undefined) {
+    where.push("lane_id = ?")
+    binds.push((await resolveLane(db, projectId, input)).laneId)
   }
   if (input.proposedOnly) {
     where.push(`EXISTS (
@@ -1061,17 +1091,18 @@ export async function getActiveRun(
   db: AquillaDb,
   projectId: string,
   fileId: string,
-  targetLang = "",
+  lane: LaneRef | string = "",
 ): Promise<ContextualRun | null> {
+  const resolved = await resolveLane(db, projectId, laneRef(lane))
   const activePlaceholders = ACTIVE_STATUSES.map(() => "?").join(",")
   const row = await db
     .prepare(
       `SELECT ${RUN_COLS} FROM contextual_runs
-        WHERE project_id = ? AND file_id = ? AND target_lang = ?
+        WHERE project_id = ? AND file_id = ? AND lane_id = ?
           AND status IN (${activePlaceholders})
         LIMIT 1`,
     )
-    .bind(projectId, fileId, targetLang, ...ACTIVE_STATUSES)
+    .bind(projectId, fileId, resolved.laneId, ...ACTIVE_STATUSES)
     .first<RunRow>()
   return row ? rowToRun(row) : null
 }
@@ -1612,29 +1643,37 @@ export async function insertDrafts(
     owner.projectId !== input.projectId ||
     owner.fileId !== input.fileId
   ) return []
-  const lane = owner.targetLang
+  // AQU-1610: lane identity comes off the owning run's lane_id, never its tag.
+  const laneId = owner.laneId
+  const laneTag = owner.targetLang
+  // The live-proposal index is keyed on lane_id after migration 0151 and on
+  // the tag before it, and this statement has to name whichever exists.
+  const liveKey = await liveLaneKey(db, "contextual_drafts_live")
+  const liveValue = liveKey === "lane_id" ? laneId : laneTag
   const cellIds = input.drafts.map((d) => d.cellId)
   const placeholders = cellIds.map(() => "?").join(",")
   const stmts = [
     db
       .prepare(
         `UPDATE contextual_drafts SET status = 'superseded', reviewed_at = now()
-          WHERE project_id = ? AND file_id = ? AND target_lang = ?
+          WHERE project_id = ? AND file_id = ? AND ${liveKey} = ?
             AND cell_id IN (${placeholders})
             AND status = 'proposed'`,
       )
-      .bind(input.projectId, input.fileId, lane, ...cellIds),
+      .bind(input.projectId, input.fileId, liveValue, ...cellIds),
     ...input.drafts.map((d) =>
       db
         .prepare(
-          // AQU-1240 slice 8: resolve lane_id from (project, target_lang). Inlined
-        // (db/shared cannot import sync-worker's lane-id-sql). COALESCE on
-        // conflict so a resolved id is never regressed to NULL.
+          // AQU-1610: lane_id is bound from the owning run; the conflict
+        // target is whichever column the live-proposal index is keyed on
+        // (lane_id after migration 0151, the tag before it). `lane_id` is
+        // re-set on conflict so that in the pre-0151 world, where the losing
+        // row may belong to a sibling lane, the row ends up owned by the
+        // writer whose text it now carries.
         `INSERT INTO contextual_drafts
-              (id, run_id, project_id, file_id, cell_id, target_lang, scene_brief_id, text, verdicts, provenance, lane_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb,
-                   (SELECT id FROM public.lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?))
-           ON CONFLICT (project_id, file_id, cell_id, target_lang) WHERE status = 'proposed'
+              (id, run_id, project_id, file_id, cell_id, scene_brief_id, text, verdicts, provenance, lane_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
+           ON CONFLICT (project_id, file_id, cell_id, ${liveKey}) WHERE status = 'proposed'
            DO UPDATE SET
              id = EXCLUDED.id,
              run_id = EXCLUDED.run_id,
@@ -1642,7 +1681,7 @@ export async function insertDrafts(
              text = EXCLUDED.text,
              verdicts = EXCLUDED.verdicts,
              provenance = EXCLUDED.provenance,
-             lane_id = COALESCE(EXCLUDED.lane_id, contextual_drafts.lane_id),
+             lane_id = EXCLUDED.lane_id,
              created_at = now()`,
         )
         .bind(
@@ -1651,13 +1690,11 @@ export async function insertDrafts(
           input.projectId,
           input.fileId,
           d.cellId,
-          lane,
           input.sceneBriefId ?? null,
           d.text,
           d.verdicts ?? null,
           d.provenance ?? null,
-          input.projectId,
-          lane,
+          laneId,
         ),
     ),
   ]
@@ -1665,10 +1702,10 @@ export async function insertDrafts(
   const { results } = await db
     .prepare(
       `SELECT ${DRAFT_COLS} FROM contextual_drafts
-        WHERE project_id = ? AND file_id = ? AND target_lang = ? AND status = 'proposed'
+        WHERE project_id = ? AND file_id = ? AND lane_id = ? AND status = 'proposed'
           AND cell_id IN (${placeholders})`,
     )
-    .bind(input.projectId, input.fileId, lane, ...cellIds)
+    .bind(input.projectId, input.fileId, laneId, ...cellIds)
     .all<DraftRow>()
   return results.map(rowToDraft)
 }
@@ -1678,7 +1715,7 @@ export async function listDrafts(
   projectId: string,
   fileId: string,
   status?: ContextualDraftStatus,
-  targetLang = "",
+  lane: LaneRef | string = "",
 ): Promise<ContextualDraft[]> {
   const where = ["project_id = ?", "file_id = ?"]
   const binds: unknown[] = [projectId, fileId]
@@ -1686,8 +1723,8 @@ export async function listDrafts(
     where.push("status = ?")
     binds.push(status)
   }
-  where.push("target_lang = ?")
-  binds.push(targetLang)
+  where.push("lane_id = ?")
+  binds.push((await resolveLane(db, projectId, laneRef(lane))).laneId)
   const { results } = await db
     .prepare(
       `SELECT ${DRAFT_COLS} FROM contextual_drafts
@@ -1721,7 +1758,7 @@ export async function listDraftsByRun(
           .bind(projectId, runId)
       : db
           .prepare(
-            `SELECT ${DRAFT_COLS}
+            `SELECT *
                FROM (
                  SELECT ${DRAFT_COLS} FROM contextual_drafts
                   WHERE project_id = ? AND run_id = ?
@@ -1779,7 +1816,7 @@ export async function listDraftPageByRun(
   )
   const { results } = await db
     .prepare(
-      `SELECT ${DRAFT_COLS}
+      `SELECT *
          FROM (
            SELECT ${DRAFT_COLS} FROM contextual_drafts
             WHERE ${where.join(" AND ")}
@@ -1832,7 +1869,7 @@ export async function reviewDraft(
              AND target.file_id = contextual_drafts.file_id
              AND target.cell_id = contextual_drafts.cell_id
              AND target.side = 'target'
-             AND target.target_lang = contextual_drafts.target_lang
+             AND target.lane_id = contextual_drafts.lane_id
              AND target.value = contextual_drafts.text
         )`
     : ""
@@ -1875,11 +1912,13 @@ export async function reviewDraft(
  */
 export async function findOccupiedCells(
   db: AquillaDb,
-  scope: { projectId: string; fileId: string; cellIds: string[]; targetLang?: string },
+  scope: { projectId: string; fileId: string; cellIds: string[] } & LaneRef,
 ): Promise<Set<string>> {
   if (scope.cellIds.length === 0) return new Set()
   const placeholders = scope.cellIds.map(() => "?").join(",")
-  const lanePredicate = scope.targetLang === undefined ? "" : " AND target_lang = ?"
+  const scoped = scope.laneId !== undefined || scope.targetLang !== undefined
+  const laneId = scoped ? (await resolveLane(db, scope.projectId, scope)).laneId : null
+  const lanePredicate = scoped ? " AND lane_id = ?" : ""
   const { results } = await db
     .prepare(
       `SELECT cell_id FROM cells
@@ -1891,7 +1930,7 @@ export async function findOccupiedCells(
       scope.projectId,
       scope.fileId,
       ...scope.cellIds,
-      ...(scope.targetLang === undefined ? [] : [scope.targetLang]),
+      ...(scoped ? [laneId] : []),
     )
     .all<{ cell_id: string }>()
   return new Set(results.map((r) => r.cell_id))
@@ -1903,18 +1942,59 @@ export async function findOccupiedCells(
  * run are excluded from this reservation so explicit refresh remains valid. */
 export async function findProposedCellsFromOtherRuns(
   db: AquillaDb,
-  scope: { projectId: string; fileId: string; runId: string; targetLang: string },
+  scope: { projectId: string; fileId: string; runId: string } & LaneRef,
 ): Promise<Set<string>> {
+  const { laneId } = await resolveLane(db, scope.projectId, scope)
   const { results } = await db
     .prepare(
       `SELECT cell_id FROM contextual_drafts
         WHERE project_id = ? AND file_id = ? AND status = 'proposed'
           AND run_id <> ?
-          AND target_lang = ?`,
+          AND lane_id = ?`,
     )
-    .bind(scope.projectId, scope.fileId, scope.runId, scope.targetLang)
+    .bind(scope.projectId, scope.fileId, scope.runId, laneId)
     .all<{ cell_id: string }>()
   return new Set(results.map((row) => row.cell_id))
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Per-user start throttle
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Window the per-user autopilot start throttle counts over (AQU-1847). */
+export const CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS = 300
+/** Starts one user may make inside that window, across every project they can
+ *  reach. Sized for real use — a translator starting one project, noticing a
+ *  brief is wrong, stopping and restarting a few times stays well under it —
+ *  while refusing the loop that turns one account into platform-wide load.
+ *
+ *  This throttles STARTS, not runs: one project-wide start creates up to
+ *  MAX_PROJECT_FILES runs and must count once. */
+export const CONTEXTUAL_MAX_STARTS_PER_USER = 10
+
+/** Starts this user made in the throttle window. A project-wide start shares
+ *  one `scope_group` across its runs and so counts once; a single-file start
+ *  has no scope group and is counted by its own run id.
+ *
+ *  Counted from the durable run rows rather than a side table so a restarted
+ *  isolate, a second Worker, or a run started through any other surface is
+ *  still visible to the throttle. */
+export async function countRecentContextualStarts(
+  db: AquillaDb,
+  userId: number,
+  windowSeconds = CONTEXTUAL_START_THROTTLE_WINDOW_SECONDS,
+): Promise<number> {
+  const seconds = Math.max(1, Math.min(86_400, Math.floor(windowSeconds)))
+  const row = await db
+    .prepare(
+      `SELECT COUNT(DISTINCT COALESCE(NULLIF(scope_group, ''), id)) AS starts
+         FROM contextual_runs
+        WHERE role_snapshot->>'userId' = ?
+          AND created_at > now() - make_interval(secs => ?)`,
+    )
+    .bind(String(Math.floor(userId)), seconds)
+    .first<{ starts: number | string | null }>()
+  return Number(row?.starts ?? 0)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1924,6 +2004,7 @@ export async function findProposedCellsFromOtherRuns(
 interface ProjectLeaseRow {
   id: string
   project_id: string
+  org_id: number | string | null
   run_id: string
   weight: number
   expires_at: unknown
@@ -1933,6 +2014,7 @@ function rowToProjectLease(row: ProjectLeaseRow): ContextualProjectLease {
   return {
     id: row.id,
     projectId: row.project_id,
+    orgId: Number(row.org_id ?? 0),
     runId: row.run_id,
     weight: Number(row.weight),
     expiresAt: toIso(row.expires_at),
@@ -1942,16 +2024,42 @@ function rowToProjectLease(row: ProjectLeaseRow): ContextualProjectLease {
 export interface TryAcquireContextualProjectLeaseInput {
   projectId: string
   runId: string
+  /** Billing workspace this project belongs to; 0 when it has none. Every
+   *  unowned project shares the org-0 bucket on purpose — nothing should be
+   *  able to opt out of the org ceiling by having no billing workspace. */
+  orgId: number
   /** Maximum aggregate wave width permitted for this project. */
   limit: number
+  /** Maximum aggregate wave width permitted across every project in this org
+   *  (AQU-1847). One tenant with ten projects must not be able to consume the
+   *  shared provider key by multiplying per-project ceilings. */
+  orgLimit: number
+  /** Maximum aggregate wave width permitted platform-wide (AQU-1847). Sized
+   *  BELOW the provider's real ceiling so interactive, user-facing calls —
+   *  which take no lease — always have headroom behind background autopilot. */
+  globalLimit: number
   /** Maximum span width this runOneTick call may execute. */
   weight: number
   leaseSeconds?: number
 }
 
-/** Atomically reserve weighted project capacity across Worker isolates.
- * Locking the canonical project row serializes the sum-and-insert decision;
- * a module-local semaphore alone cannot protect two Cloudflare isolates. */
+/** Serialization point for the capacity decision. A per-project row lock was
+ * enough while the only ceiling was per-project; the org and platform ceilings
+ * (AQU-1847) sum across projects, so two acquirers in different projects would
+ * otherwise both read the same global total and both insert over it. One fixed
+ * advisory key is held for a single statement + commit, so it costs no more
+ * lock wait than the old project row did — and it is taken in the same round
+ * trip as the project existence check, so the statement count is unchanged. */
+const CONTEXTUAL_CAPACITY_ADVISORY_KEY = 18470001
+
+/** Autopilot capacity has three ceilings, checked together: this project, this
+ * project's billing workspace, and the whole platform. Weight is span width,
+ * which is NOT request count — a high-risk span fans its verifier panel out
+ * three-wide, so in-flight requests run ~3x these numbers.
+ *
+ * Atomically reserve all three across Worker isolates: a module-local
+ * semaphore cannot protect two Cloudflare isolates, and nothing below the
+ * database can see another tenant's in-flight work at all. */
 export async function tryAcquireContextualProjectLease(
   db: AquillaDb,
   input: TryAcquireContextualProjectLeaseInput,
@@ -1960,53 +2068,80 @@ export async function tryAcquireContextualProjectLease(
     throw new Error("contextual_project_lease_transaction_unavailable")
   }
   const limit = Math.max(1, Math.min(1000, Math.floor(input.limit)))
+  // Each ceiling is at least as wide as the one inside it: a project limit
+  // above its org's (or an org's above the platform's) is a misconfiguration
+  // that would make the outer ceiling unreachable rather than binding.
+  const orgLimit = Math.max(limit, Math.min(100_000, Math.floor(input.orgLimit)))
+  const globalLimit = Math.max(orgLimit, Math.min(1_000_000, Math.floor(input.globalLimit)))
   const weight = Math.max(1, Math.min(limit, Math.floor(input.weight)))
+  const orgId = Number.isFinite(input.orgId) ? Math.max(0, Math.floor(input.orgId)) : 0
   const leaseSeconds = Math.max(
     30,
     Math.min(3600, Math.floor(input.leaseSeconds ?? CONTEXTUAL_PROJECT_LEASE_SECONDS)),
   )
   return db.transaction(async (tx) => {
     const project = await tx
-      .prepare("SELECT id FROM projects WHERE id = ? FOR UPDATE")
-      .bind(input.projectId)
+      .prepare(
+        // Cast explicitly: pg_advisory_xact_lock is overloaded (bigint, and
+        // int+int), and an untyped bind parameter leaves the resolution to the
+        // driver's parameter typing rather than to this statement.
+        `SELECT id, pg_advisory_xact_lock(?::bigint) AS capacity_lock
+           FROM projects WHERE id = ?`,
+      )
+      .bind(CONTEXTUAL_CAPACITY_ADVISORY_KEY, input.projectId)
       .first<{ id: string }>()
     if (!project) return null
 
     // AQU-1005: GC + capacity check + conditional insert in ONE statement, so
-    // the project row lock above spans a single round trip + commit instead of
-    // three sequential Hyperdrive round trips (the old span queued lease
-    // acquirers for 2.5s mean of pure lock wait). `used` excludes expired rows
-    // by predicate — same-snapshot CTEs don't see gc's deletes and don't need
-    // to; gc (a data-modifying CTE) always executes, even when the insert arm
-    // returns nothing.
+    // the lock above spans a single round trip + commit instead of three
+    // sequential Hyperdrive round trips (the old span queued lease acquirers
+    // for 2.5s mean of pure lock wait). `live` excludes expired rows by
+    // predicate — same-snapshot CTEs don't see gc's deletes and don't need to;
+    // gc (a data-modifying CTE) always executes, even when the insert arm
+    // returns nothing. GC is platform-wide now rather than project-scoped: the
+    // global ceiling is only honest if every expired row anywhere is gone
+    // before the sums are taken.
     const row = await tx
       .prepare(
         `WITH gc AS (
            DELETE FROM contextual_project_leases
-            WHERE project_id = ? AND expires_at <= now()
-         ), used AS (
-           SELECT COALESCE(SUM(weight), 0) AS weight
+            WHERE expires_at <= now()
+         ), live AS (
+           SELECT project_id, org_id, weight
              FROM contextual_project_leases
-            WHERE project_id = ? AND expires_at > now()
+            WHERE expires_at > now()
+         ), used AS (
+           SELECT
+             COALESCE(SUM(weight) FILTER (WHERE project_id = ?), 0) AS project_weight,
+             COALESCE(SUM(weight) FILTER (WHERE org_id = ?), 0)     AS org_weight,
+             COALESCE(SUM(weight), 0)                               AS global_weight
+             FROM live
          )
          INSERT INTO contextual_project_leases
-            (id, project_id, run_id, weight, expires_at)
-         SELECT ?, ?, ?, ?, now() + make_interval(secs => ?)
+            (id, project_id, org_id, run_id, weight, expires_at)
+         SELECT ?, ?, ?, ?, ?, now() + make_interval(secs => ?)
            FROM used
-          WHERE used.weight + ? <= ?
+          WHERE used.project_weight + ? <= ?
+            AND used.org_weight + ? <= ?
+            AND used.global_weight + ? <= ?
          ON CONFLICT (run_id) DO NOTHING
-         RETURNING id, project_id, run_id, weight, expires_at`,
+         RETURNING id, project_id, org_id, run_id, weight, expires_at`,
       )
       .bind(
         input.projectId,
-        input.projectId,
+        orgId,
         uuidv7(),
         input.projectId,
+        orgId,
         input.runId,
         weight,
         leaseSeconds,
         weight,
         limit,
+        weight,
+        orgLimit,
+        weight,
+        globalLimit,
       )
       .first<ProjectLeaseRow>()
     return row ? rowToProjectLease(row) : null
@@ -2136,19 +2271,20 @@ export interface ActiveAutopilotRunFile {
 export async function listActiveAutopilotRunFiles(
   db: AquillaDb,
   projectId: string,
-  targetLang = "",
+  lane: LaneRef | string = "",
 ): Promise<ActiveAutopilotRunFile[]> {
+  const { laneId } = await resolveLane(db, projectId, laneRef(lane))
   const activePlaceholders = ACTIVE_STATUSES.map(() => "?").join(",")
   const { results } = await db
     .prepare(
       `SELECT file_id, id, status,
               (status = 'parked' AND done_spans + failed_spans < total_spans) AS work_queued
          FROM contextual_runs
-        WHERE project_id = ? AND target_lang = ?
+        WHERE project_id = ? AND lane_id = ?
           AND status IN (${activePlaceholders})
         ORDER BY file_id ASC`,
     )
-    .bind(projectId, targetLang, ...ACTIVE_STATUSES)
+    .bind(projectId, laneId, ...ACTIVE_STATUSES)
     .all<{
       file_id: string
       id: string
@@ -2182,8 +2318,9 @@ export async function listActiveAutopilotRunFiles(
 export async function listAutopilotCandidateFiles(
   db: AquillaDb,
   projectId: string,
-  targetLang = "",
+  lane: LaneRef | string = "",
 ): Promise<AutopilotCandidateFile[]> {
+  const { laneId } = await resolveLane(db, projectId, laneRef(lane))
   const placeholders = NON_DISCOURSE_KINDS.map(() => "?").join(",")
   const { results } = await db
     .prepare(
@@ -2193,10 +2330,10 @@ export async function listAutopilotCandidateFiles(
          FROM files f
          JOIN cells s
            ON s.project_id = f.project_id AND s.file_id = f.id
-          AND s.side = 'source' AND s.target_lang = ''
+          AND s.side = 'source'
          LEFT JOIN cells t
            ON t.project_id = s.project_id AND t.file_id = s.file_id
-          AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?
+          AND t.cell_id = s.cell_id AND t.side = 'target' AND t.lane_id = ?
         WHERE f.project_id = ? AND f.deleted_at IS NULL
           AND COALESCE(f.kind, '') NOT IN (${placeholders})
         GROUP BY f.id, f.name, f.kind
@@ -2205,12 +2342,12 @@ export async function listAutopilotCandidateFiles(
                    SELECT MAX(prior.created_at) FROM contextual_runs prior
                     WHERE prior.project_id = f.project_id
                       AND prior.file_id = f.id
-                      AND prior.target_lang = ?
+                      AND prior.lane_id = ?
                  ) ASC NULLS FIRST,
                  untranslated DESC,
                  f.id ASC`,
     )
-    .bind(targetLang, projectId, ...NON_DISCOURSE_KINDS, targetLang)
+    .bind(laneId, projectId, ...NON_DISCOURSE_KINDS, laneId)
     .all<{ id: string; name: string; kind: string; untranslated: number; has_refs: boolean | null }>()
 
   return results
@@ -2229,7 +2366,10 @@ export async function listAutopilotCandidateFiles(
 
 export interface ProjectAutopilotFileRow {
   fileId: string
-  /** Lane identity: the same file may have independent target-language runs. */
+  /** Lane identity (`lanes.id`): the same file may have independent
+   *  target-language runs, one row per lane (AQU-1610). */
+  laneId: string
+  /** The lane's legacy tag; never a key (AQU-1611). */
   targetLang: string
   runId: string
   status: ContextualRunStatus
@@ -2283,12 +2423,12 @@ export async function getProjectAutopilotSummary(
   const { results } = await db
     .prepare(
       `WITH newest AS (
-         SELECT DISTINCT ON (file_id, target_lang)
-                id, file_id, target_lang, status, done_spans, total_spans, failed_spans,
+         SELECT DISTINCT ON (file_id, lane_id)
+                id, file_id, ${wireLegacyTagSql("contextual_runs")} AS target_lang, lane_id, status, done_spans, total_spans, failed_spans,
                 units_spent, last_error, park_reason, updated_at
           FROM contextual_runs
          WHERE project_id = ?
-          ORDER BY file_id, target_lang, created_at DESC, id DESC
+          ORDER BY file_id, lane_id, created_at DESC, id DESC
        ),
        drafts_by_run AS MATERIALIZED (
          SELECT d.run_id,
@@ -2352,6 +2492,7 @@ export async function getProjectAutopilotSummary(
       id: string
       file_id: string
       target_lang: string
+      lane_id: string
       status: ContextualRunStatus
       done_spans: number
       total_spans: number
@@ -2371,6 +2512,7 @@ export async function getProjectAutopilotSummary(
 
   const files: ProjectAutopilotFileRow[] = results.map((r) => ({
     fileId: r.file_id,
+    laneId: r.lane_id,
     targetLang: r.target_lang,
     runId: r.id,
     status: r.status,
@@ -2414,15 +2556,16 @@ export async function countDrafts(
   db: AquillaDb,
   projectId: string,
   fileId: string,
-  targetLang = "",
+  lane: LaneRef | string = "",
 ): Promise<Record<ContextualDraftStatus, number>> {
+  const { laneId } = await resolveLane(db, projectId, laneRef(lane))
   const { results } = await db
     .prepare(
       `SELECT status, COUNT(*) AS n FROM contextual_drafts
-        WHERE project_id = ? AND file_id = ? AND target_lang = ?
+        WHERE project_id = ? AND file_id = ? AND lane_id = ?
         GROUP BY status`,
     )
-    .bind(projectId, fileId, targetLang)
+    .bind(projectId, fileId, laneId)
     .all<{ status: ContextualDraftStatus; n: number }>()
   const out: Record<ContextualDraftStatus, number> = {
     proposed: 0,

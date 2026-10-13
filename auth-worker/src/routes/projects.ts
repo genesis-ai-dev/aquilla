@@ -79,6 +79,7 @@ import {
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { loadTeamsInOrg, TEAM_ATTACH_DEFAULT_ROLE, TEAM_CREATE_MIN_ROLE } from "../services/team-roles"
+import { loadLaneMateIds, selectMentionCandidates } from "../services/mention-candidates"
 import { hasActiveElevation, isPlatformAdminEmail } from "../middleware/platform-admin"
 import { projectElevationDenial } from "../services/elevation-gate"
 import { lookupUserByUsername } from "../services/user-lookup"
@@ -89,7 +90,6 @@ import {
   MAX_INVITE_SCOPE_LANES,
   MAX_LANE_VALUE_LENGTH,
   parseScopeLanes,
-  resolveInviteLaneScopes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
 import {
@@ -97,7 +97,15 @@ import {
   notifySyncWorkerOfMemberRoleChange,
 } from "../services/sync-worker-notify"
 import { loadLinkFileIds } from "../services/source-linking"
+import {
+  applyDirectAddLaneGrants,
+  replaceMemberLaneScopes,
+  syncMemberLaneGrants,
+} from "../services/lane-grants"
+import { resolveExplicitLaneChoice } from "../services/lane-choice"
 import { createProjectShared } from "../../../db/shared/projects"
+import { countedFileSql } from "../../../db/shared/counted-files"
+import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
 
@@ -135,8 +143,11 @@ interface FileProjection {
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
-  sourceLanguage?: string
-  targetLanguage?: string
+  /** AQU-1596: what this file's header claimed, as import information. It is
+   *  not the language of any lane and may disagree with one — a language shown
+   *  to a user comes off the lane row, never off here. */
+  declaredSourceLanguage?: string
+  declaredTargetLanguage?: string
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
   /** Linked core video, read from files.meta like the fields above. AQU-646:
@@ -211,8 +222,8 @@ export async function loadFilesByProject(
     const list = byProject.get(f.project_id) ?? []
     // Timeline-segment-model: order lens lives in meta (JSON), same as langs.
     let orderedBy: string | undefined
-    let sourceLanguage: string | undefined
-    let targetLanguage: string | undefined
+    let declaredSourceLanguage: string | undefined
+    let declaredTargetLanguage: string | undefined
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
@@ -229,10 +240,6 @@ export async function loadFilesByProject(
           coreMediaUrl?: unknown
           timingMode?: unknown
           trackOverrides?: unknown
-          source_language?: string
-          target_language?: string
-          sourceLanguage?: string
-          targetLanguage?: string
           source_text_direction?: string
           target_text_direction?: string
           sourceTextDirection?: string
@@ -246,8 +253,12 @@ export async function loadFilesByProject(
           sortIndex?: unknown
         }
         if (m.orderedBy) orderedBy = m.orderedBy
-        sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
-        targetLanguage = normalizeLanguage(m.target_language ?? m.targetLanguage)
+        // AQU-1596: read through the declared-languages contract, which
+        // prefers the canonical keys and still accepts the legacy spellings
+        // that untouched blobs carry.
+        const declared = readDeclaredLanguages(m)
+        declaredSourceLanguage = normalizeLanguage(declared.declaredSourceLanguage ?? undefined)
+        declaredTargetLanguage = normalizeLanguage(declared.declaredTargetLanguage ?? undefined)
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
@@ -304,8 +315,8 @@ export async function loadFilesByProject(
       // a renumber stamps on the first file), and `...(0 ? …)` would drop it.
       ...(sortIndex !== undefined ? { sortIndex } : {}),
       ...(orderedBy ? { orderedBy } : {}),
-      ...(sourceLanguage ? { sourceLanguage } : {}),
-      ...(targetLanguage ? { targetLanguage } : {}),
+      ...(declaredSourceLanguage ? { declaredSourceLanguage } : {}),
+      ...(declaredTargetLanguage ? { declaredTargetLanguage } : {}),
       ...(sourceTextDirection ? { sourceTextDirection } : {}),
       ...(targetTextDirection ? { targetTextDirection } : {}),
       ...(coreMediaUrl ? { coreMediaUrl } : {}),
@@ -407,7 +418,7 @@ projects.post(
       const leadsEveryTeam = teamRoles.size > 0 &&
         [...teamRoles.values()].every((r) => r != null && r >= TEAM_CREATE_MIN_ROLE)
       const genuinelyAllowed = (orgRole != null && orgRole >= ROLE.MAINTAINER) || leadsEveryTeam
-      if (!genuinelyAllowed && isPlatformAdminEmail(c.env, user.email)) {
+      if (!genuinelyAllowed && await isPlatformAdminEmail(c.env, user.email)) {
         if (!(await hasActiveElevation(c))) {
           return c.json(
             { error: "elevation required to create a project in an org with platform-admin access" },
@@ -543,7 +554,7 @@ projects.get("/", authMiddleware, async (c) => {
 
   // Platform operators see every project in an org-scoped list, or one page
   // of the tenancy in picker mode. Unparameterized boot never bypasses.
-  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const isAdmin = await isPlatformAdminEmail(c.env, user.email)
   const adminBypass = isAdmin && (orgFilter !== null || pickerMode)
   const minRoleBind = minRole !== null && !adminBypass ? minRole : null
 
@@ -804,8 +815,10 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     : null
   let sourceLinkUpstreamFileCount: number | null = null
   if (sourceLinkFileIds && row.source_project_id) {
+    // AQU-1566: the files a person can pick, so a cue sheet or a caption
+    // track's hidden content file never shows up as "3 of 5 files".
     const countRow = await c.env.AQUILLA_PG.prepare(
-      `SELECT COUNT(*) AS n FROM files WHERE project_id = ? AND deleted_at IS NULL`,
+      `SELECT COUNT(*) AS n FROM files f WHERE f.project_id = ? AND ${countedFileSql("f")}`,
     )
       .bind(row.source_project_id)
       .first<{ n: number | string }>()
@@ -1073,6 +1086,49 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
 // (maintainer+). AQU-507.
 // ──────────────────────────────────────────────────────────────────────────
 
+/**
+ * AQU-984: naming a project's PM also adds a visible Project lead membership.
+ * An existing project_members role at or above Project lead is left alone.
+ * Returns the grant only when a row was inserted or raised, so the caller can
+ * notify live sessions. Clearing the PM does not call this.
+ */
+async function ensureProjectLeadMembership(
+  env: Env,
+  projectId: string,
+  target: { id: number; username: string },
+  actor: AuthUser,
+): Promise<{ userId: number; username: string; role: number } | null> {
+  const existing = await env.AQUILLA_PG.prepare(
+    "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+  )
+    .bind(projectId, target.id)
+    .first<{ role_level: number }>()
+  const current = existing ? Number(existing.role_level) : null
+  if (current != null && current >= ROLE.PROJECT_LEAD) return null
+
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(project_id, user_id) DO UPDATE SET
+       role_level = excluded.role_level,
+       granted_by = excluded.granted_by,
+       granted_at = CURRENT_TIMESTAMP
+     WHERE project_members.role_level < excluded.role_level`,
+  )
+    .bind(projectId, target.id, ROLE.PROJECT_LEAD, actor.id)
+    .run()
+
+  await auditMembershipChange(env, actor, {
+    action: current == null ? "project.member.grant" : "project.member.role",
+    where: { scope: "project", projectId },
+    target: { id: target.id, username: target.username },
+    roleBefore: current,
+    roleAfter: ROLE.PROJECT_LEAD,
+  })
+
+  return { userId: target.id, username: target.username, role: ROLE.PROJECT_LEAD }
+}
+
 const pmBody = z.object({ pmUserId: z.number().int().nullable() })
 projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), async (c) => {
   const user = c.get("user")
@@ -1111,11 +1167,18 @@ projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), asy
     pm = { id: match.userId, username: match.username }
   }
 
+  // Grant first, then record the PM. A failed grant must not leave a PM who
+  // still cannot edit the project. Clearing (pm null) does not touch membership.
+  const raised = pm
+    ? await ensureProjectLeadMembership(c.env, projectId, pm, user)
+    : null
+
   await c.env.AQUILLA_PG.prepare(
     "UPDATE projects SET pm_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
   )
     .bind(pmUserId, projectId)
     .run()
+  if (raised) notifyRoleChangeBestEffort(c, projectId, raised)
   return c.json({ ok: true, pm })
 })
 
@@ -1447,6 +1510,45 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
   })
 })
 
+/**
+ * AQU-1815: GET /api/v2/projects/:projectId/mention-candidates — the people
+ * the caller may @-mention in a comment, readable by every project member.
+ *
+ * The comment composer used to draw on GET …/members, so everyone below the
+ * effective roster floor (AQU-485 / AQU-1308) saw "No one on this project to
+ * mention" and, since a mention is only stored when a suggestion is picked,
+ * could mention nobody at all. A caller who may read the roster gets the
+ * roster; everyone else gets their lane-mates plus Maintainer and above, with
+ * `restricted: true`. Usernames and ids only — never emails. See
+ * services/mention-candidates.ts for the rule.
+ */
+projects.get("/:projectId/mention-candidates", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+
+  const project = await c.env.AQUILLA_PG.prepare(
+    "SELECT created_by, org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ created_by: number; org_id: number | null }>()
+  if (!project) return c.json({ error: "project not found" }, 404)
+
+  const callerCanViewRoster =
+    project.org_id == null ||
+    canViewRoster(role.level, await getProjectRosterViewMinRole(c.env, project.org_id))
+
+  const [members, laneMateIds] = await Promise.all([
+    listEffectiveProjectMembers(c.env, projectId, project.org_id, project.created_by),
+    callerCanViewRoster
+      ? Promise.resolve(new Set<number>())
+      : loadLaneMateIds(c.env, projectId, user.id),
+  ])
+
+  return c.json(selectMentionCandidates({ members, callerCanViewRoster, laneMateIds }))
+})
+
 // ──────────────────────────────────────────────────────────────────────────
 // POST /api/v2/projects/:projectId/members — direct add by username
 // ──────────────────────────────────────────────────────────────────────────
@@ -1461,6 +1563,13 @@ const roleLevelSchema = z
 const projectMemberSingle = z.object({
   username: z.string().min(1),
   role: roleLevelSchema,
+  /** AQU-1808: explicit "every current target lane". Omitted is not that choice. */
+  allCurrentLanes: z.literal(true).optional(),
+  /** AQU-1808: the lanes this person may use. Absent is not "every lane". */
+  scopeLanes: z
+    .array(z.string().max(MAX_LANE_VALUE_LENGTH))
+    .max(MAX_INVITE_SCOPE_LANES)
+    .optional(),
 })
 
 // AQU-736: the endpoint accepts EITHER the legacy single-user body
@@ -1481,6 +1590,9 @@ const PROJECT_GRANT_ERROR_STATUS: Record<string, 400 | 403 | 404> = {
   user_not_found: 404,
   self_grant: 400,
   target_outranks_caller: 403,
+  lane_choice_required: 400,
+  lane_choice_conflict: 400,
+  lane_unresolved: 400,
 }
 
 type ProjectGrantOutcome =
@@ -1500,7 +1612,7 @@ async function grantProjectMemberOne(
   projectId: string,
   callerRole: { level: number; name: string },
   callerUserId: number,
-  entry: { username: string; role: number },
+  entry: { username: string; role: number; allCurrentLanes?: boolean; scopeLanes?: string[] },
   actor: AuthUser,
 ): Promise<ProjectGrantOutcome> {
   const { username, role } = entry
@@ -1522,16 +1634,16 @@ async function grantProjectMemberOne(
     return { ok: false, username, code: "self_grant", message: "cannot grant role to self" }
   }
 
+  const existing = await env.AQUILLA_PG.prepare(
+    "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+  )
+    .bind(projectId, target.id)
+    .first<{ role_level: number }>()
   // AQU-285 (F-B6): target-level cap — you cannot add-over (change the role
   // of) a member whose current level is >= yours, unless you are owner (700).
   // Owners may modify any member. For a new member (no existing row), this
   // check is a no-op (existing.role_level will be 0).
   if (callerRole.level < ROLE.OWNER) {
-    const existing = await env.AQUILLA_PG.prepare(
-      "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
-    )
-      .bind(projectId, target.id)
-      .first<{ role_level: number }>()
     const targetCurrentLevel = existing ? Number(existing.role_level) : 0
     if (targetCurrentLevel >= callerRole.level) {
       return {
@@ -1541,6 +1653,18 @@ async function grantProjectMemberOne(
         message: `cannot modify a member whose current role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
       }
     }
+  }
+
+  // AQU-1808: a new member below project lead must say which lanes. A role
+  // change does not ask again — the lanes they already hold stay put.
+  const laneChoice = await resolveExplicitLaneChoice(env, [projectId], {
+    role,
+    allCurrentLanes: entry.allCurrentLanes,
+    scopeLanes: entry.scopeLanes,
+    requireChoice: !existing,
+  })
+  if (!laneChoice.ok) {
+    return { ok: false, username, code: laneChoice.code, message: laneChoice.error }
   }
 
   const roleBefore = await priorMembershipRole(env, actor, { scope: "project", projectId }, target.id)
@@ -1554,6 +1678,33 @@ async function grantProjectMemberOne(
   )
     .bind(projectId, target.id, role, callerUserId)
     .run()
+
+  // AQU-1808: the choice made on this add is the whole truth about the
+  // person's lanes. Removing a member deletes only `project_members`, so the
+  // scope and grant rows of an earlier membership survive the removal. Before
+  // this they narrowed a re-add that chose "every current lane" (the planner
+  // only re-levels grant rows that already exist, and the stale scope row kept
+  // the client on that one lane), and they kept an earlier every-lane grant
+  // set under a re-add that named one lane. So a fresh membership starts from
+  // no lane rows, and a lane list given for an existing member replaces the
+  // lanes they held. A project lead is never lane-scoped (AD-12): a promotion
+  // drops the stale scope rows the client's lane list would narrow by.
+  //
+  // AQU-1782: a role change of an existing member that names no lanes keeps
+  // the lanes they hold and rewrites only the level on those rows.
+  const freshMembership = !existing
+  if (laneChoice.kind === "lanes") {
+    await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+    await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, laneChoice.laneIds, callerUserId)
+  } else if (laneChoice.kind === "all" || freshMembership) {
+    await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+    await syncMemberLaneGrants(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+  } else {
+    if (role >= ROLE.PROJECT_LEAD) {
+      await replaceMemberLaneScopes(env.AQUILLA_PG, projectId, target.id, [], callerUserId)
+    }
+    await applyDirectAddLaneGrants(env.AQUILLA_PG, projectId, target.id, role, callerUserId)
+  }
   await auditMembershipChange(env, actor, {
     action: roleBefore === null ? "project.member.grant" : "project.member.role",
     where: { scope: "project", projectId },
@@ -1830,14 +1981,15 @@ const createInviteSchema = z.object({
   /** Client-requested TTL in days. Null = no expiry. Omit = server default (30 days). */
   expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
   /**
-   * AQU-528: optional lane (target-language) scopes to auto-grant on join.
-   * Omitted/empty = unscoped invite (today's behavior). A lane value is a
-   * target-language code; '' is the default lane.
+   * AQU-528 / AQU-1808: lanes to auto-grant on join. Naming lanes limits the
+   * joiner to those. Omitting them is not "every lane" — send allCurrentLanes
+   * for that. A value is a lane id or a legacy tag that names exactly one lane.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
     .max(MAX_INVITE_SCOPE_LANES)
     .optional(),
+  allCurrentLanes: z.literal(true).optional(),
 })
 
 const acceptInviteSchema = z.object({
@@ -1852,7 +2004,7 @@ projects.post(
   async (c) => {
     const user = c.get("user")
     const projectId = c.req.param("projectId") as string
-    const { role, email, expires_in_days, scopeLanes } = c.req.valid("json")
+    const { role, email, expires_in_days, scopeLanes, allCurrentLanes } = c.req.valid("json")
 
     const resolved = await resolveProjectRole(c.env, user, projectId)
     if (!resolved) {
@@ -1886,23 +2038,29 @@ projects.post(
             Date.now() + (expires_in_days !== undefined ? expires_in_days : 30) * 24 * 60 * 60 * 1000
           ).toISOString()
 
-    // AQU-528: persist lane scopes so accept can auto-grant them. null when
-    // the invite is unscoped (omitted/empty scopeLanes).
     // AQU-1607: stored as lane ids. A legacy tag naming exactly one of this
     // project's lanes is converted; one naming two lanes, or none, is refused
     // here rather than minting a link that grants the wrong lane or no lane.
-    const laneScopes = await resolveInviteLaneScopes(c.env, [projectId], scopeLanes ?? [])
-    if (!laneScopes.ok) {
+    // AQU-1808: omitted lanes are refused when the project has current target
+    // lanes. allCurrentLanes stores no scopes, which accept treats as every lane.
+    const laneChoice = await resolveExplicitLaneChoice(c.env, [projectId], {
+      role: grantedRole,
+      allCurrentLanes,
+      scopeLanes,
+      requireChoice: true,
+    })
+    if (!laneChoice.ok) {
       return c.json(
         {
-          error: "scopeLanes must each name one lane of this project",
-          ...(laneScopes.ambiguous.length > 0 ? { ambiguous: laneScopes.ambiguous } : {}),
-          ...(laneScopes.unmatched.length > 0 ? { unmatched: laneScopes.unmatched } : {}),
+          error: laneChoice.error,
+          code: laneChoice.code,
+          ...(laneChoice.ambiguous ? { ambiguous: laneChoice.ambiguous } : {}),
+          ...(laneChoice.unmatched ? { unmatched: laneChoice.unmatched } : {}),
         },
         400,
       )
     }
-    const scopeLanesJson = serializeScopeLanes(laneScopes.laneIds)
+    const scopeLanesJson = serializeScopeLanes(laneChoice.kind === "lanes" ? laneChoice.laneIds : [])
 
     try {
       await c.env.AQUILLA_PG.prepare(
@@ -2171,8 +2329,12 @@ projects.post(
       return c.json({ error: "Invite already used", code: "used" }, 410)
     }
 
+    // [Pen test 2026-10-06] A same-user re-click must not restore a role the
+    // owner has since lowered: only a first redemption may raise the role.
     const finalRole = existing
-      ? Math.max(existing.role_level, invite.role_level)
+      ? invite.used_at
+        ? existing.role_level
+        : Math.max(existing.role_level, invite.role_level)
       : invite.role_level
 
     try {
@@ -2241,7 +2403,7 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
   const unelevated = await projectElevationDenial(c, callerRole)
   if (unelevated) return unelevated
 
-  const invite = isAdminActor(c.env, user)
+  const invite = await isAdminActor(c.env, user)
     ? await c.env.AQUILLA_PG.prepare(
         "SELECT role_level, email FROM project_invites WHERE token = ? AND project_id = ? AND used_by IS NULL",
       )

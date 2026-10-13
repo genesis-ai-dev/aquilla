@@ -384,8 +384,9 @@ export interface SetTranslationCommandInput {
   fileId: string
   cellId: string
   value: string
-  /** Omit for the project's default lane. */
-  laneId?: string
+  /** The target lane row's id (`lanes.id`). Required: the worker aliases no
+   *  tag and knows no "default" lane (AQU-1615). */
+  laneId: string
   importOrigin?: { fileName: string; importedAt: number }
 }
 

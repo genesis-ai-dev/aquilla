@@ -233,6 +233,14 @@ Those are notes, not a walk.
 
 ## Comment template
 
+The release planner reads the heading by machine
+(`scripts/release-plan-walk.mjs`). Write it exactly as
+`## Bot walk — PR <n> @ <sha>`, with `<sha>` the PR's full 40-character head
+sha, no backticks, nothing before or after. A re-walk uses the same heading;
+say why on the status line (`**PASS** · re-walk, Manager fixture · …`). A
+heading the planner cannot read counts as no walk, and that PR holds the
+release.
+
 Short. A reviewer reads the first line and knows whether to look. Status
 is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**,
 **NOT CHECKED**. Never "approved" or "LGTM": the bot may say the change

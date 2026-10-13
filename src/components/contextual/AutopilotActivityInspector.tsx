@@ -553,6 +553,11 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
       return t("autopilot.inspector.event.idle")
     }
     if (event.status === "running") return t("autopilot.inspector.event.running")
+    // AQU-1847: the run holds its place in line for model capacity — behind
+    // another file, another project in this workspace, or another tenant. It
+    // is neither working nor stalled, and the generic "status changed" this
+    // used to fall through to read as the latter.
+    if (event.status === "queued") return t("autopilot.inspector.event.queuedForCapacity")
     if (event.status === "pausing") return t("autopilot.inspector.event.pauseRequested")
     if (event.status === "paused") return t("autopilot.inspector.event.paused")
     if (event.status === "done") return t("autopilot.inspector.event.completed")
@@ -1727,7 +1732,28 @@ export function AutopilotActivityInspector({
                         return (
                           <div key={item.id} className="flex items-start justify-between gap-3 text-sm">
                             <div>
-                              <p className="font-medium">{itemLabel}</p>
+                              {/* AQU-1672: the "Set up" link below appears only
+                                  while an item is unfinished, so a project past
+                                  first setup lost every path to the surface
+                                  behind it — including the translation brief,
+                                  whose only route from the dashboard this is. A
+                                  finished item links from its own title instead,
+                                  so every row with a surface has exactly one
+                                  link to it at every level. */}
+                              {item.href && item.level === "ready" ? (
+                                <Link
+                                  to={`/project/${projectId}/${item.href}`}
+                                  className="block font-medium text-primary underline-offset-2 hover:underline"
+                                  // Same reason as the action link below: SPA
+                                  // navigation leaves this sheet mounted over
+                                  // the destination unless it is closed.
+                                  onClick={() => onOpenChange(false)}
+                                >
+                                  {itemLabel}
+                                </Link>
+                              ) : (
+                                <p className="font-medium">{itemLabel}</p>
+                              )}
                               <p className="text-muted-foreground">
                                 {readinessItemDetail(item, t)}
                               </p>

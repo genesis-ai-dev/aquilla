@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest"
 import {
+  backtranslationsReadQuery,
   isBacktranslationStale,
   overlayBacktranslation,
   readingsDisagree,
@@ -180,6 +181,14 @@ describe("selectBtFewShotExamples", () => {
   })
 })
 
+describe("backtranslationsReadQuery", () => {
+  it("omits the param for the default lane and sends a named lane", () => {
+    expect(backtranslationsReadQuery("")).toBe("")
+    expect(backtranslationsReadQuery("es")).toBe("?lane=es")
+    expect(backtranslationsReadQuery("zh-Hans")).toBe("?lane=zh-Hans")
+  })
+})
+
 describe("recordFromHydrationRow", () => {
   it("leaves forText empty so overlay can derive it from the live pin", () => {
     const rec = recordFromHydrationRow({
@@ -210,6 +219,19 @@ describe("localStorage round-trip", () => {
     const got = readLocalBacktranslation("p", "c1")
     expect(got?.forText).toBe("abc")
     expect(got?.polished).toBe(false)
+  })
+
+  it("keeps a named lane's local reading off the default lane", () => {
+    writeLocalBacktranslation("p", record({ btText: "default reading" }))
+    writeLocalBacktranslation("p", record({ btText: "spanish reading" }), "es")
+    expect(readLocalBacktranslation("p", "c1")?.btText).toBe("default reading")
+    expect(readLocalBacktranslation("p", "c1", "es")?.btText).toBe("spanish reading")
+    expect(readLocalBacktranslation("p", "c1", "fr")).toBeUndefined()
+
+    const cell = { id: "c1", translated: "casa", targetEventId: "evt-1" }
+    expect(overlayBacktranslation(cell, undefined, "p", "es").backtranslation).toBe("spanish reading")
+    expect(overlayBacktranslation(cell, undefined, "p", "fr").backtranslation).toBeUndefined()
+    expect(overlayBacktranslation(cell, undefined, "p").backtranslation).toBe("default reading")
   })
 
   it("does not read a previous account's local backtranslation", () => {

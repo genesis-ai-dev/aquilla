@@ -146,6 +146,7 @@ describe("DcsCatalogBrowser", () => {
     expect(toDcsLangSeed("en")).toBe("en")
     expect(toDcsLangSeed("es-419")).toBe("es-419")
     expect(toDcsLangSeed("hbo")).toBe("hbo") // 3-letter code DCS uses verbatim
+    expect(toDcsLangSeed("Traditional Han")).toBe("zh-Hant")
     expect(toDcsLangSeed("Klingon")).toBe("") // unmappable word → empty, not a name
     expect(toDcsLangSeed("")).toBe("")
     expect(toDcsLangSeed(undefined)).toBe("")

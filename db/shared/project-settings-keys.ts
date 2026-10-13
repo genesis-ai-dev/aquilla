@@ -19,6 +19,8 @@
 // Adding a settings key? Add it here too, or agents cannot write it.
 
 import { TEXT_DIRECTION_SETTING_VALUES } from './text-direction'
+import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
+import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
 
 /** How a key's value is described to callers (validation errors + docs). */
 export type SettingsValueKind =
@@ -34,15 +36,32 @@ export interface SettingsKeySpec {
   kind: SettingsValueKind
   /** Allowed values when `kind` is 'enum'. */
   values?: readonly string[]
+  /**
+   * AQU-1686: when `kind` is 'object', the only keys the object may hold, and
+   * each must hold a boolean. Absent means any plain object.
+   */
+  booleanFlags?: readonly string[]
+  /**
+   * AQU-1688: when `kind` is 'object', a structural check the value must also
+   * pass. Returns null when it is fine, else what is wrong.
+   */
+  problem?: (value: Record<string, unknown>) => string | null
+  /** AQU-1688: the type shown in errors and describe_command, when `kind` undersells it. */
+  typeName?: string
 }
 
-function isPlainObject(v: unknown): boolean {
+function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /** Human-readable type name for a spec — used in errors and describe_command. */
 export function settingsTypeName(spec: SettingsKeySpec): string {
-  return spec.kind === 'enum' ? (spec.values ?? []).map((v) => `"${v}"`).join(' | ') : spec.kind
+  if (spec.typeName) return spec.typeName
+  if (spec.kind === 'enum') return (spec.values ?? []).map((v) => `"${v}"`).join(' | ')
+  if (spec.kind === 'object' && spec.booleanFlags) {
+    return `{ ${spec.booleanFlags.map((flag) => `"${flag}"?: boolean`).join(', ')} }`
+  }
+  return spec.kind
 }
 
 function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
@@ -55,8 +74,15 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       return typeof value === 'boolean'
     case 'string[]':
       return Array.isArray(value) && value.every((v) => typeof v === 'string')
-    case 'object':
-      return isPlainObject(value)
+    case 'object': {
+      if (!isPlainObject(value)) return false
+      if (spec.problem && spec.problem(value) !== null) return false
+      const flags = spec.booleanFlags
+      if (!flags) return true
+      return Object.entries(value).every(
+        ([key, flag]) => flags.includes(key) && typeof flag === 'boolean',
+      )
+    }
     case 'object[]':
       return Array.isArray(value) && value.every(isPlainObject)
     case 'enum':
@@ -94,7 +120,15 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   rules: { kind: 'object[]' },
   rulePenalties: { kind: 'object' },
   algorithmicChecks: { kind: 'object' },
-  terminology: { kind: 'object[]' },
+  // `terminology` is NOT here: it is retired (AQU-1724) — see
+  // RETIRED_TERMINOLOGY_KEY below.
+  // AQU-1688: facts about the target language that Bible data checks need
+  // (db/shared/language-profile.ts). A check whose slot is empty is dormant.
+  languageProfile: {
+    kind: 'object',
+    problem: (value) => languageProfileProblem(value),
+    typeName: LANGUAGE_PROFILE_TYPE_NAME,
+  },
 
   // Validation policy (all POLICY keys — writable in the restrictive direction
   // only, see db/shared/policy-direction.ts; a loosening write resolves to
@@ -140,8 +174,13 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   timingLocked: { kind: 'boolean' },
   audioTimingMode: { kind: 'enum', values: ['dubbing', 'audioFirst'] },
   bibleResourcesEnabled: { kind: 'boolean' },
+  // AQU-1686: one switch per Bible data enrichment (db/shared/bible-enrichments.ts).
+  // A missing id means that enrichment's default.
+  bibleEnrichments: { kind: 'object', booleanFlags: BIBLE_ENRICHMENT_IDS },
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },
+  // AQU-1720: what one imported cell is for docx/txt/md uploads.
+  importCellUnit: { kind: 'enum', values: ['sentence', 'paragraph'] },
   smartQuotes: { kind: 'boolean' },
 
   // Structured blobs
@@ -154,6 +193,21 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
 
 export const PROJECT_SETTINGS_KEYS: readonly string[] = Object.keys(PROJECT_SETTINGS_KEY_SPECS)
 
+/**
+ * AQU-1724: the settings key that used to hold a project's termbase. Key terms
+ * now live in the Postgres `concepts` table, projected from term.* events
+ * (db/postgres/migrations/0084_concepts.sql); scripts/migrate-concepts.ts
+ * deletes this key once a project migrates, and the editor reads it only while
+ * the table has no live rows. A settings write to it is therefore lost without
+ * a word, so every settings door refuses one with this message instead.
+ */
+export const RETIRED_TERMINOLOGY_KEY = 'terminology'
+
+export const RETIRED_TERMINOLOGY_MESSAGE =
+  'settings key "terminology" is retired — key terms live in the concepts table, and a settings write to ' +
+  'this key never reaches the editor. Write terms with term.create / term.update events in an EmitEvents ' +
+  'changeset (read the current termbase with list_terms first).'
+
 export function isKnownSettingsKey(key: string): boolean {
   return Object.prototype.hasOwnProperty.call(PROJECT_SETTINGS_KEY_SPECS, key)
 }
@@ -162,18 +216,23 @@ export function isKnownSettingsKey(key: string): boolean {
  * Validate one `{key, value}` settings op against the registry.
  *
  * Returns null when it is fine, else a message naming what is wrong — the
- * unknown key, or the type the key actually expects. `null` is accepted for
- * every key: JSON cannot carry `undefined`, so storing null is the only way a
- * caller can clear a key (see PatchSettingsOp).
+ * unknown key, the retired one, or the type the key actually expects. `null`
+ * is accepted for every live key: JSON cannot carry `undefined`, so storing
+ * null is the only way a caller can clear a key (see PatchSettingsOp).
  */
 export function validateSettingsKeyValue(key: string, value: unknown): string | null {
+  // Before the null pass-through: clearing the retired key is a write to it
+  // too, and on a project not yet migrated it would delete its only termbase.
+  if (key === RETIRED_TERMINOLOGY_KEY) return RETIRED_TERMINOLOGY_MESSAGE
   const spec = PROJECT_SETTINGS_KEY_SPECS[key]
   if (!spec) {
     return `unknown settings key "${key}" — call describe_command("PatchSettings") for the valid keys`
   }
   if (value === null) return null
   if (!matchesSpec(spec, value)) {
-    return `settings key "${key}" expects ${settingsTypeName(spec)}`
+    // A structural problem names the field at fault, not only the expected type.
+    const detail = spec.problem && isPlainObject(value) ? spec.problem(value) : null
+    return `settings key "${key}" expects ${settingsTypeName(spec)}${detail ? ` (${detail})` : ''}`
   }
   return null
 }

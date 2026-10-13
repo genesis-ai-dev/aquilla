@@ -27,6 +27,9 @@
 import { prepareSessionChangeset, type SetTranslationCommandInput } from "@/lib/agent/changeset-api"
 import { t } from "@/lib/i18n/standalone"
 import type { FileTargetMatchedCell } from "@/lib/import-file-target"
+import { resolveTargetLaneRef } from "@/lib/lanes/target-lane-ref"
+import { TargetLaneUnresolvedError } from "@/lib/sync/events-emit"
+import { getProjectLaneHint, getProjectTargetLanes } from "@/lib/sync/project-target-lanes"
 
 /** Longest `fileName` the worker accepts on import provenance — mirrors
  *  sync-worker's `IMPORTED_ORIGIN_FILENAME_MAX`. Over-long upload names are
@@ -42,15 +45,12 @@ export const IMPORT_ORIGIN_FILENAME_MAX = 256
  * so the reviewer would be approving rows they were never shown. A proposal
  * nobody can see is not reviewable, which makes this a correctness bound.
  *
- * It also keeps this path away from the failure AQU-1670 fixed: that ticket
- * batched the per-cell reads in AUTH-worker's agent staging path, and the
- * session changeset route used here goes through sync-worker's own prepare
- * instead. Prepare's preconditions read is already one batched query, but
- * nothing caps `SetTranslation` count per changeset the way cell-field and
- * visibility commands are capped — so a multi-thousand-row CSV would stage one
- * enormous plan. Raising this bound means giving sync-worker's prepare the
- * same treatment AQU-1670 gave auth-worker's, and raising
- * `MAX_APPROVAL_CHANGES` with it; it is not a number to bump on its own.
+ * The engine has its own, larger bound: sync-worker rejects a changeset of
+ * more than `SET_TRANSLATION_MAX_COMMANDS` (5000) at prepare and applies what
+ * it accepts in chunks (AQU-1852). That bound is about what the engine can
+ * land; this one is about what a reviewer can see, which is why it stays the
+ * smaller of the two. Raising it means raising `MAX_APPROVAL_CHANGES` with
+ * it; it is not a number to bump on its own.
  */
 export const MAX_PROPOSALS_PER_IMPORT = 200
 
@@ -86,7 +86,8 @@ export async function stageTargetImportAsProposals(
   ctx: {
     jwt: string
     projectId: string
-    /** Destination lane; empty/absent means the project's default lane. */
+    /** Destination lane, as the editor names it: the lane row's legacy tag
+     *  (`''` for a legacy default lane). Resolved to the row's id here. */
     targetLang?: string
     /** Name of the uploaded file, recorded as each proposal's provenance. */
     sourceFileName: string
@@ -112,6 +113,22 @@ export async function stageTargetImportAsProposals(
     )
   }
 
+  // AQU-1615: the session changeset route addresses a lane by `lanes.id` and
+  // aliases nothing — not the editor's tag, not an omitted "default" lane.
+  // The review hands this the lane TAG the editor is in, so resolve it against
+  // the project's lane rows the way every other target write does (AQU-1902,
+  // events-emit), and refuse rather than stage into a lane the worker would
+  // reject. A project with no target lane row at all is refused too: a direct
+  // write mints the bridge lane in its own batch, but a changeset cannot.
+  const lane = resolveTargetLaneRef(
+    getProjectTargetLanes(ctx.projectId) ?? null,
+    { targetLang: ctx.targetLang ?? "" },
+    getProjectLaneHint(ctx.projectId),
+  )
+  if (!lane.ok) throw new TargetLaneUnresolvedError("SetTranslation", lane.reason)
+  const laneId = lane.lane.laneId
+  if (laneId === null) throw new TargetLaneUnresolvedError("SetTranslation", "no-such-lane")
+
   // One timestamp for the whole import: every proposal in this changeset came
   // from the same upload, so they share one provenance stamp.
   const importOrigin = {
@@ -123,8 +140,7 @@ export async function stageTargetImportAsProposals(
     fileId: cell.fileId,
     cellId: cell.cellId,
     value: cell.incomingText,
-    // Omit for the default lane — the worker rejects '' as a lane id.
-    ...(ctx.targetLang ? { laneId: ctx.targetLang } : {}),
+    laneId,
     importOrigin,
   }))
 

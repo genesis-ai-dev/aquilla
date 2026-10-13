@@ -24,6 +24,7 @@ import { LaneCombobox, type LaneComboboxOption } from "@/components/LaneCombobox
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { cn } from "@/lib/utils"
 
 export interface FileTargetLanePickerProps {
   /** Lanes the user may send this import to, in registry order. */
@@ -33,6 +34,10 @@ export interface FileTargetLanePickerProps {
   onValueChange: (lane: string) => void
   /** True while the chosen lane's cells are still loading. */
   loading?: boolean
+  /** Trigger size and extra classes, so a host can line the picker up with
+   *  the fields around it (the Import dialog's "A translation" screen). */
+  size?: "sm" | "default"
+  triggerClassName?: string
 }
 
 export function FileTargetLanePicker({
@@ -40,6 +45,8 @@ export function FileTargetLanePicker({
   value,
   onValueChange,
   loading = false,
+  size = "sm",
+  triggerClassName,
 }: FileTargetLanePickerProps) {
   const t = useT()
   if (options.length < 2) return null
@@ -58,10 +65,10 @@ export function FileTargetLanePicker({
           <Button
             type="button"
             variant="outline"
-            size="sm"
+            size={size}
             data-testid="file-target-lane-trigger"
             aria-label={t("importExport.fileTarget.laneLabel")}
-            className="w-full justify-between font-normal"
+            className={cn("w-full justify-between font-normal", triggerClassName)}
           >
             {selected?.label ?? value}
             <ChevronDown className="h-3.5 w-3.5 opacity-60" />

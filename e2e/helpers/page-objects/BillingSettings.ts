@@ -9,6 +9,25 @@ export class BillingSettingsPage {
     this.page = page
   }
 
+  async openPlatformBilling(navigate = true) {
+    if (navigate) await this.page.goto('/admin')
+    await this.page.getByRole('tab', { name: /^Platform$/i }).click()
+    await this.page.getByRole('tab', { name: /^Billing$/i }).click()
+  }
+
+  async setWeeklyAllowance(orgId: number, allowance: number) {
+    await this.openPlatformBilling()
+    const field = this.page.getByTestId(`weekly-allowance-${orgId}`)
+    await expect(field).toBeVisible()
+    await field.fill(String(allowance))
+    const saved = this.page.waitForResponse(response =>
+      response.url().includes(`/billing/org/${orgId}/weekly-allowance`)
+      && response.request().method() === 'PATCH' && response.ok())
+    await field.press('Tab')
+    await saved
+    await expect(field).toHaveValue(String(allowance))
+  }
+
   async reviewSelectedPlan(selection: BillingPlanSelection, workspaceName: string) {
     await this.page.goto(billingSelectionPath(selection))
     await expect(this.page.getByRole('heading', { name: 'Choose a workspace for this plan' })).toBeVisible()

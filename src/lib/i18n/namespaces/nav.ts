@@ -135,43 +135,27 @@ export const nav = defineNamespace({
     }, "takes"),
     "nav.workspaceActions.batchValidate.title": "Batch validate text",
     // AQU-1507: the old `…batchValidate.description` promised the file's whole
-    // unvalidated count — untranslated cells, untouched AI drafts and cells
-    // already signed off by the reader included — while the run validates only
-    // what `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
-    // translated catalogs cannot keep serving the number that was wrong: these
-    // two keys state what THIS run will do, and the skipped cells are named by
-    // the shared `editor.batchValidate.skip.*` clauses after them.
+    // unvalidated count — untranslated cells and cells already signed off by
+    // the reader included — while the run validates only what
+    // `isBulkValidatableByMe` accepts. It is replaced (not reworded) so the
+    // translated catalogs cannot keep serving the number that was wrong: this
+    // key states what THIS run will do, and the skipped cells are named by the
+    // shared `editor.batchValidate.skip.*` clauses after it.
     "nav.workspaceActions.batchValidate.willValidate": plural(
       {
         one:
-          "This validates {count} eligible cell under your name — human-authored " +
-          "or human-edited text you have not signed off yet.",
+          "This validates {count} eligible cell under your name — committed " +
+          "text you have not signed off yet.",
         other:
-          "This validates {count} eligible cells under your name — human-authored " +
-          "or human-edited text you have not signed off yet.",
-      },
-      "count",
-    ),
-    // The org setting that lets bulk validation take untouched AI drafts: with
-    // it on, "human-authored or human-edited" above would misdescribe the very
-    // cells the reader is signing off.
-    "nav.workspaceActions.batchValidate.willValidateWithDrafts": plural(
-      {
-        one:
-          "This validates {count} eligible cell under your name — text you have " +
-          "not signed off yet, including untouched AI drafts, which your " +
-          "organization allows in batch validation.",
-        other:
-          "This validates {count} eligible cells under your name — text you have " +
-          "not signed off yet, including untouched AI drafts, which your " +
-          "organization allows in batch validation.",
+          "This validates {count} eligible cells under your name — committed " +
+          "text you have not signed off yet.",
       },
       "count",
     ),
     "nav.workspaceActions.batchValidate.nothingToValidate":
       "Nothing in this file can be batch-validated right now.",
     // Optional trailing clause (AQU-586 per-run cap), concatenated last in the
-    // confirmation body built from the two keys above — same composition as
+    // confirmation body built from the keys above — same composition as
     // moreAfterThis.
     "nav.workspaceActions.batchValidate.capNote": plural(
       {
@@ -185,10 +169,6 @@ export const nav = defineNamespace({
       "cap",
     ),
     "nav.workspaceActions.export": "Export",
-    "nav.workspaceActions.importIntoFile": "Import target translations into this file",
-    // AQU-1673: sits next to the direct import, and names the difference —
-    // proposals are reviewed, not written.
-    "nav.workspaceActions.importProposalsIntoFile": "Import translations as proposals for review",
     "nav.workspaceActions.transcribeAll.label": "Transcribe all audio",
     "nav.workspaceActions.transcribeAll.title": "Transcribe all audio in this file",
     "nav.workspaceActions.transcribeAll.description": plural(
@@ -230,6 +210,15 @@ export const nav = defineNamespace({
     "nav.workspaceActions.deleteFile.confirmLabel": "Move to Recently deleted",
 
     // -- ProjectWorkspace: fileMenuItems (chapter-row "File options" ⋯ menu) --
+    // AQU-358: headings naming each run of items in the chapter-row ⋯ menu.
+    // The menu absorbed what used to be a labelled chevron dropdown sitting
+    // beside it, so the groups say what they hold instead of being divided by
+    // anonymous lines.
+    "nav.fileMenu.section.editorTools": "Editor tools",
+    "nav.fileMenu.section.runs": "Run on this file",
+    "nav.fileMenu.section.view": "View & navigate",
+    "nav.fileMenu.section.file": "This file",
+
     "nav.fileMenu.diarizing": "Diarizing…",
     "nav.fileMenu.applying": "Applying…",
     "nav.fileMenu.diarizeFailed": "Diarize failed",
@@ -348,6 +337,8 @@ export const nav = defineNamespace({
     // -- ExpandableFileList: hand-placed file order (AQU-1569) --
     "nav.fileList.reorderHandle": "Reorder {name}",
     "nav.fileList.reorderWrongGroup": "A file can only be reordered inside its own group. Use \u201cMove to corpus\u2026\u201d to put it somewhere else.",
+    "nav.fileList.regroupHint": "Drop to move {name} into {group}.",
+    "nav.fileList.regroupStaysInGroup": "{name} is filed under {group} by its book code, so it cannot be moved out of it this way. Rename the group, or give the file a group of its own.",
     "nav.fileList.resetOrder": "Reset the order of {group}",
     "nav.fileList.resetOrderTitle": "Put {group} back in automatic order?",
     "nav.fileList.resetOrderDescription": "The files in this group go back to the order Aquilla picks for them. Everyone on the project sees the change. Nothing else about the files is touched.",
@@ -848,18 +839,6 @@ export const nav = defineNamespace({
         },
         maxLength: 500,
       },
-      "nav.workspaceActions.batchValidate.willValidateWithDrafts": {
-        description:
-          "Replaces willValidate when the run includes untouched AI drafts, which " +
-          "happens only when the organization has turned on bulk validation of AI " +
-          "drafts. Same position and punctuation rules as willValidate: the " +
-          "skipped clause and capNote follow it, so end with a period and no " +
-          "trailing space.",
-        placeholders: {
-          count: "How many cells this run will validate. Selects the plural form.",
-        },
-        maxLength: 500,
-      },
       "nav.workspaceActions.batchValidate.nothingToValidate": {
         description:
           "Stands in for willValidate when the run would validate nothing at all, " +
@@ -881,25 +860,6 @@ export const nav = defineNamespace({
       "nav.workspaceActions.export": {
         description:
           "Primary file-scoped action that opens the export dialog. Imperative verb.",
-      },
-      "nav.workspaceActions.importIntoFile": {
-        description:
-          "AQU-503: secondary action-menu item, distinct from " +
-          "nav.workspaceActions.import — this one is file-scoped and populates the " +
-          "open file's TARGET column from an already-translated document. Must keep " +
-          "a word equivalent to 'target' so it isn't confused with the primary " +
-          "source import.",
-        maxLength: 60,
-      },
-      "nav.workspaceActions.importProposalsIntoFile": {
-        description:
-          "AQU-1673: secondary action-menu item sitting directly beside " +
-          "nav.workspaceActions.importIntoFile. Same file-scoped target import, " +
-          "except the translations are staged for human approval instead of " +
-          "written into the file. The two items are otherwise identical, so this " +
-          "label must carry the difference — keep wording equivalent to 'as " +
-          "proposals' and 'for review'.",
-        maxLength: 60,
       },
       "nav.workspaceActions.transcribeAll.label": {
         description:
@@ -978,6 +938,34 @@ export const nav = defineNamespace({
       },
 
       // -- ProjectWorkspace: fileMenuItems (chapter-row 'File options' ⋯ menu) --
+      "nav.fileMenu.section.editorTools": {
+        description:
+          "Heading over the first group of the chapter-row 'File options' ⋯ menu: " +
+          "the whole-view editor passes ('Draft as you read', 'Check file'). Not " +
+          "clickable — it names the items under it.",
+        maxLength: 20,
+      },
+      "nav.fileMenu.section.runs": {
+        description:
+          "Heading over the ⋯ menu group that runs a bulk job across the open " +
+          "file (AI drafting, batch validation, transcription, synthesis, " +
+          "diarization). Not clickable — it names the items under it.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.section.view": {
+        description:
+          "Heading over the ⋯ menu group that changes what the editor shows or " +
+          "jumps within the file ('View settings', 'Next unfinished'). Not " +
+          "clickable — it names the items under it.",
+        maxLength: 24,
+      },
+      "nav.fileMenu.section.file": {
+        description:
+          "Heading over the ⋯ menu group that acts on the file itself (rename, " +
+          "move, assign, segment, analyze, export, delete). Not clickable — it " +
+          "names the items under it.",
+        maxLength: 20,
+      },
       "nav.fileMenu.diarizing": {
         description:
           "Transient state of the 'Diarize' action-menu item while speaker " +
@@ -1450,9 +1438,32 @@ export const nav = defineNamespace({
       "nav.fileList.reorderWrongGroup": {
         description:
           "Live-region message shown when a file is dragged over a DIFFERENT corpus " +
-          "group than its own, which is refused (AQU-1569). \u201cMove to corpus\u2026\u201d " +
-          "names the separate menu action that does change a file's group \u2014 keep it " +
-          "worded identically to fileDetails.moveToCorpus in this locale.",
+          "group than its own on a surface that cannot move it there (AQU-1569; since " +
+          "AQU-1702 the editor sidebar CAN, so this is the fallback for a file list " +
+          "wired without the move handler). \u201cMove to corpus\u2026\u201d names the " +
+          "separate menu action that does change a file's group \u2014 keep it worded " +
+          "identically to fileDetails.moveToCorpus in this locale.",
+      },
+      "nav.fileList.regroupHint": {
+        description:
+          "Live-region message while a file is held over a DIFFERENT corpus group that " +
+          "will accept it (AQU-1702). Releasing moves the file into that group at the " +
+          "marked slot. {name} is the dragged file, {group} the group under the pointer.",
+        placeholders: {
+          name: "The dragged file's display name.",
+          group: "The group under the pointer, as its header reads.",
+        },
+      },
+      "nav.fileList.regroupStaysInGroup": {
+        description:
+          "Live-region message refusing a cross-group drop that could not be written " +
+          "(AQU-1702): the file is a Bible book, so with no group of its own Aquilla " +
+          "files it under its testament \u2014 dropping it on Ungrouped would appear to " +
+          "do nothing. {name} is the dragged file, {group} the group it stays in.",
+        placeholders: {
+          name: "The dragged file's display name.",
+          group: "The group the file is filed under regardless (its testament).",
+        },
       },
       "nav.fileList.resetOrder": {
         description:

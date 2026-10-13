@@ -1,3 +1,4 @@
+import { stripeLiveMode, validCheckoutSessionId } from './environment'
 import { z } from 'zod'
 import type { Env } from '../../types'
 import { applyBillingEvent } from './apply'
@@ -13,7 +14,7 @@ const selectionSchema = z.object({
   offer: z.enum(paidOffers), interval: z.enum(['month', 'year']), quantity: z.literal(1),
 })
 const sessionSchema = z.object({
-  id: z.string().regex(/^cs_test_[a-zA-Z0-9_]+$/), livemode: z.literal(false),
+  id: z.string().regex(/^cs_(test|live)_[a-zA-Z0-9_]+$/), livemode: z.boolean(),
   mode: z.literal('subscription'), status: z.literal('complete'),
   payment_status: z.literal('paid'), client_reference_id: z.string(),
   customer: z.string().regex(/^cus_[a-zA-Z0-9_]+$/),
@@ -22,7 +23,7 @@ const sessionSchema = z.object({
   amount_total: z.number().int(), metadata: z.record(z.string(), z.string()),
 })
 const subscriptionSchema = z.object({
-  id: z.string(), customer: z.string(), livemode: z.literal(false),
+  id: z.string(), customer: z.string(), livemode: z.boolean(),
   status: z.literal('active'), currency: z.literal('usd'),
   collection_method: z.literal('charge_automatically'),
   metadata: z.record(z.string(), z.string()),
@@ -32,12 +33,12 @@ const subscriptionSchema = z.object({
   })).min(1).max(2) }),
 })
 interface Attempt {
-  id: string; org_id: number; account_id: string; session_id: string | null
+  id: string; org_id: number; account_id: string; session_id: string | null; sandbox: boolean
   catalog_json: unknown; prices_json: unknown; quote_json: unknown
   request_params: Record<string, string | number>
 }
 
-/** Initial local sandbox activation only. No lifecycle policy is inferred here.
+/** Initial signed payment activation. No lifecycle policy is inferred here.
  * Stripe reads finish before the receipt/entitlement transaction starts.
  */
 export async function reconcileWorkspacePayment(
@@ -46,7 +47,7 @@ export async function reconcileWorkspacePayment(
   object: Record<string, unknown>,
   now = new Date(),
 ) {
-  if (event.livemode !== false || !Number.isSafeInteger(event.created)
+  if (event.livemode !== stripeLiveMode(env) || !Number.isSafeInteger(event.created)
     || event.created <= 0 || event.created * 1000 > now.getTime()
     || !['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) {
     throw new Error('Unsupported workspace payment event')
@@ -54,20 +55,21 @@ export async function reconcileWorkspacePayment(
   // An unpaid completion may precede a later async success. Its older event
   // timestamp must never become the activation anchor on a delayed retry.
   if (object.payment_status !== 'paid') throw new Error('Payment event is not paid')
-  const sessionId = z.string().regex(/^cs_test_[a-zA-Z0-9_]+$/).parse(object.id)
+  const sessionId = z.string().regex(/^cs_(test|live)_[a-zA-Z0-9_]+$/).parse(object.id)
   // Retrieve from the configured Stripe account; never grant from event metadata alone.
   const session = sessionSchema.parse(await stripeForm(env, 'GET',
     `/checkout/sessions/${encodeURIComponent(sessionId)}`))
-  if (session.id !== sessionId) throw new Error('Checkout identity mismatch')
+  if (session.id !== sessionId || !validCheckoutSessionId(sessionId, event.livemode)
+    || session.livemode !== event.livemode) throw new Error('Checkout identity mismatch')
   const attemptId = z.string().uuid().parse(session.metadata.checkoutAttemptId)
-  const attempt = await env.AQUILLA_PG.prepare(`SELECT id, org_id, account_id,
+  const attempt = await env.AQUILLA_PG.prepare(`SELECT id, org_id, account_id, sandbox,
     session_id, catalog_json, prices_json, quote_json, request_params
     FROM workspace_checkout_attempts WHERE id = ?`).bind(attemptId).first<Attempt>()
-  if (!attempt || (attempt.session_id !== null && attempt.session_id !== session.id)) {
+  if (!attempt || attempt.sandbox !== !event.livemode || (attempt.session_id !== null && attempt.session_id !== session.id)) {
     throw new Error('Checkout request not found or session changed')
   }
   const catalog = catalogSchema.parse(attempt.catalog_json)
-  if (catalog.accountId !== attempt.account_id || catalog.bindings.some(b => b.live)
+  if (catalog.accountId !== attempt.account_id || catalog.bindings.some(b => b.live !== event.livemode)
     || (event.account !== undefined && event.account !== attempt.account_id)) {
     throw new Error('Checkout account mismatch')
   }
@@ -81,10 +83,11 @@ export async function reconcileWorkspacePayment(
     || session.currency !== quote.currency) throw new Error('Checkout quote mismatch')
   const subscription = subscriptionSchema.parse(await stripeForm(env, 'GET',
     `/subscriptions/${encodeURIComponent(session.subscription)}`))
-  if (subscription.id !== session.subscription || subscription.customer !== session.customer) {
+  if (subscription.id !== session.subscription || subscription.customer !== session.customer
+    || subscription.livemode !== event.livemode) {
     throw new Error('Checkout subscription mismatch')
   }
-  const expectedMetadata = { orgId: String(attempt.org_id), kind: 'workspace_plan_rehearsal',
+  const expectedMetadata = { orgId: String(attempt.org_id), kind: event.livemode ? 'workspace_plan' : 'workspace_plan_rehearsal',
     checkoutAttemptId: attempt.id, offer: quote.offer, billingInterval: quote.interval,
     priceVersion: quote.priceVersion, entitlementVersion: quote.entitlementVersion }
   for (const [key, value] of Object.entries(expectedMetadata)) {

@@ -38,8 +38,7 @@ import {
 import { MenuItem } from "@/components/ui/menu-parts"
 import { Section } from "@/components/ui/page"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { UserChip } from "@/components/UserChip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
@@ -51,9 +50,12 @@ import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/f
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 
 export interface OverviewLaneTableProps {
   projectId: string
+  /** Display name for the staffing grant sentence. */
+  projectName?: string | null
   /** Org that owns the project — for StaffLanePopover's roster + AssignModal. */
   orgId: number | null
   jwt: string | null
@@ -84,6 +86,11 @@ function laneTagId(lane: string): string {
   return lane === "" ? "default" : lane
 }
 
+/** Staff opens one popover. Two rows can share a tag (`""`); the lane id cannot. */
+function laneStaffKey(lane: PortfolioLane): string {
+  return lane.laneId ?? laneTagId(lane.lane)
+}
+
 function laneOpenTo(projectId: string, lane: { lane: string; laneId?: string | null }): string {
   const key = lane.laneId || lane.lane
   if (!key) return `/project/${projectId}/editor?lane=`
@@ -101,9 +108,7 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
   return (
     <AvatarGroup data-size="sm">
       {shown.map((m) => (
-        <AppTooltip key={m.userId} content={m.username}>
-          <InitialsAvatar name={m.username} size="sm" />
-        </AppTooltip>
+        <UserChip key={m.userId} userId={m.userId} username={m.username} size="sm" avatarOnly />
       ))}
       {extra > 0 && <AvatarGroupCount>+{extra}</AvatarGroupCount>}
     </AvatarGroup>
@@ -111,7 +116,8 @@ function LanePeople({ members }: { members: ProjectMember[] }) {
 }
 
 function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string }) {
-  const width = Math.round(pct * 100)
+  // AQU-1493: never 100 while a cell in the lane is outstanding.
+  const width = progressPercentOfFraction(pct)
   return (
     <span className="flex items-center gap-2">
       <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
@@ -124,6 +130,7 @@ function LaneProgressBar({ pct, fillClass }: { pct: number; fillClass: string })
 
 export function OverviewLaneTable({
   projectId,
+  projectName,
   orgId,
   jwt,
   lanes,
@@ -282,11 +289,12 @@ export function OverviewLaneTable({
                     lane={row.original.lane}
                     laneId={row.original.laneId}
                     laneLabel={label}
+                    projectName={projectName}
                     orgId={orgId}
                     anchorOnly
-                    open={staffLane === row.original.lane}
+                    open={staffLane === laneStaffKey(row.original)}
                     onOpenChange={(next) => {
-                      setStaffLane(next ? row.original.lane : null)
+                      setStaffLane(next ? laneStaffKey(row.original) : null)
                     }}
                     trigger={
                       <span
@@ -345,8 +353,8 @@ export function OverviewLaneTable({
     >
       <DataTable
         columns={columns}
-        data={lanes}
-        getRowId={(l) => laneTagId(l.lane)}
+        data={lanes.filter((lane) => lane.role !== "source")}
+        getRowId={(l) => l.laneId ?? laneTagId(l.lane)}
         getRowAttributes={(l) => ({
           "data-testid": `overview-lane-row-${laneTagId(l.lane)}`,
         })}
@@ -368,7 +376,7 @@ export function OverviewLaneTable({
               </MenuItem>
               <MenuItem
                 data-testid={`overview-lane-staff-menu-${tagId}`}
-                onClick={() => setStaffLane(l.lane)}
+                onClick={() => setStaffLane(laneStaffKey(l))}
               >
                 <UserPlus className="size-4" />
                 {t("org.overviewLaneTable.staffAction")}

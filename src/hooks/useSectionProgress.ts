@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import type { SectionProgress } from "@/lib/progress/section-progress"
 import { invalidateFileProgress, useFileProgressResource } from "@/lib/progress/file-progress-resource"
+import { progressPercent } from "@/lib/progress/progress-percent"
 
 /**
  * Read compact server-maintained section progress. The hook never fetches cell
@@ -69,6 +70,6 @@ export function useSectionProgressState(
   return { sections, error: resource.error, retry: resource.retry }
 }
 
-function percent(value: number, total: number): number {
-  return total > 0 ? Math.round((value / total) * 100) : 0
-}
+// AQU-1493: the sidebar's chapter figures never round outstanding work up to
+// 100%, and its "complete" colour reads `>= 100`, so this is that test too.
+const percent = progressPercent

@@ -32,7 +32,7 @@ import {
   planUnitStatus,
   type PlanUnit,
 } from "@/lib/plan/plan-status"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UserChip } from "@/components/UserChip"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { PlanBar, PlanRule } from "./PlanBar"
@@ -191,6 +191,7 @@ export const PlanRow = memo(function PlanRow({
   onSelect,
   audioFiles,
   shortChapters,
+  frontMatterShort = false,
   onOpenShortfall,
   assignees,
 }: {
@@ -219,6 +220,11 @@ export const PlanRow = memo(function PlanRow({
   textFiles?: ReadonlySet<string>
   /** Labels of the chapters still short, already ordered — e.g. ["12", "40"]. */
   shortChapters?: string[]
+  /**
+   * AQU-1493: the book's front matter is short too (its title or intro, or a
+   * line added above its first verse), which no chapter label covers.
+   */
+  frontMatterShort?: boolean
   /** Opens the editor at the first outstanding cell. Absent → plain text. */
   onOpenShortfall?: (unit: PlanUnit) => void
   assignees?: readonly PlanRowAssignee[]
@@ -244,6 +250,14 @@ export const PlanRow = memo(function PlanRow({
   // Null from the renderer means nothing is outstanding, which on a unit nobody
   // has marked done is itself the news — see `nothingLeft` in the catalog.
   const leftToDo = nearly ? (shortfallText ?? t("org.projectOverview.plan.nothingLeft")) : null
+  // AQU-1494 (Sam, 2026-10-03): a unit somebody marked done can have work in
+  // it again — a setting that counts headings, a line added, an edit that
+  // un-validated a cell. It stays in Done, because the mark is a person's
+  // decision and the board never takes it back on its own; but it no longer
+  // hides what came back. Same counts and words as every other row.
+  const doneWithWork = unit.doneAt != null && shortfallText !== null
+    ? t("org.projectOverview.plan.markedDoneWithWork", { work: shortfallText })
+    : null
 
   const label = planUnitLabel(unit)
   const nameCellRef = useRef<HTMLSpanElement>(null)
@@ -292,6 +306,15 @@ export const PlanRow = memo(function PlanRow({
     whereText = rest > 0
       ? t("org.projectOverview.plan.shortfallWhereMore", { count: rest, list })
       : t("org.projectOverview.plan.shortfallWhere", { count: chapterList.length, list })
+  }
+  // AQU-1493: front matter is not a chapter, so it is named in its own words,
+  // first because it comes first in the book. Without this a row whose open
+  // cells sat partly in a book's title or above its first verse named only
+  // chapters, and a row short only there named nothing.
+  if (leftToDo !== null && shortfallText !== null && frontMatterShort) {
+    whereText = whereText
+      ? t("org.projectOverview.plan.shortfallWhereWithFrontMatter", { chapters: whereText })
+      : t("org.projectOverview.plan.frontMatter")
   }
 
   /** Two fragments under the separator a translator chose, or whichever exists. */
@@ -409,6 +432,18 @@ export const PlanRow = memo(function PlanRow({
    * " · " here would be untranslated copy in a .tsx.
    */
   const line2Node: ReactNode = (() => {
+    // Amber, the board's "needs attention" colour, in place of "marked <date>":
+    // the date is in the side panel, and this is the line that changed.
+    if (doneWithWork !== null) {
+      return (
+        <span
+          className={`font-medium ${PLAN_TONE.soon.text}`}
+          data-testid={`plan-done-with-work-${unit.fileId}-${unit.sectionKey}`}
+        >
+          {doneWithWork}
+        </span>
+      )
+    }
     if (line2Shortfall === null) return line2Text ?? "—"
     const node = shortfallNode(line2Shortfall)
     if (line2Text === null) return node
@@ -454,17 +489,9 @@ export const PlanRow = memo(function PlanRow({
                 className="shrink-0 -space-x-1.5 *:data-[slot=avatar]:ring-background"
                 aria-label={t("org.projectOverview.plan.assignedTo")}
               >
-                {assignees.slice(0, shown).map((a) => {
-                  // A username is nullable on the wire. The numeric id is a poor
-                  // label but an honest one, and it still colours and initials
-                  // deterministically, so the same person keeps the same chip.
-                  const name = a.username ?? `#${a.userId}`
-                  return (
-                    <AppTooltip key={a.userId} content={name}>
-                      <InitialsAvatar name={name} size="xs" />
-                    </AppTooltip>
-                  )
-                })}
+                {assignees.slice(0, shown).map((a) => (
+                  <UserChip key={a.userId} userId={a.userId} username={a.username} avatarOnly size="xs" />
+                ))}
                 {overflow > 0 && (
                   <AvatarGroupCount
                     className="size-5 text-[9px] font-semibold"

@@ -42,6 +42,15 @@ vi.mock("@/lib/sync/link-source-preview", () => ({
   loadLinkSourcePreview: (...args: unknown[]) => loadLinkSourcePreview(...args),
 }))
 
+// AQU-1679: the server's comparison of one of this project's files with the
+// upstream file it could follow — mocked at the fetch, as in LinkSourceSection's
+// tests; the pairing is pinned in `db/shared/link-file-match.test.ts`.
+const fetchLinkFileMatches = vi.fn()
+
+vi.mock("@/lib/sync/link-file-match", () => ({
+  fetchLinkFileMatches: (...args: unknown[]) => fetchLinkFileMatches(...args),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "lead" }, loading: false }),
 }))
@@ -117,6 +126,7 @@ beforeEach(() => {
   loadLinkSourcePreview.mockReset()
   loadLinkSourcePreview.mockResolvedValue(upstreamPreview())
   loadLinkedSourceFileState.mockResolvedValue(linkState())
+  fetchLinkFileMatches.mockReset()
 })
 
 describe("Source link card — who gets 'Choose files' (AQU-1560)", () => {
@@ -533,5 +543,120 @@ describe("'Choose files' — resuming a stopped file (AQU-1562)", () => {
     await userEvent.click(fileCheckbox("MRK"))
 
     expect(screen.queryByText(/already has a file with the same name/)).toBeNull()
+  })
+})
+
+describe("'Choose files' — replacing the source of a file already here (AQU-1679)", () => {
+  // The upstream's LUK shares a name with exactly one file this project has.
+  function previewWithOwnLuke() {
+    const preview = upstreamPreview(["LUK"])
+    return {
+      ...preview,
+      files: preview.files.map((f) => (f.name === "LUK" ? { ...f, clashFileId: "own-luk" } : f)),
+    }
+  }
+  function matchOf(extra: Record<string, unknown> = {}) {
+    return {
+      upstreamFileId: "up-LUK",
+      fileId: "own-luk",
+      missing: false,
+      upstreamLines: 1151,
+      localLines: 1151,
+      same: 1151,
+      changed: 0,
+      added: 0,
+      kept: 0,
+      canReplace: true,
+      ...extra,
+    }
+  }
+  const replaceCheckbox = () =>
+    screen.getByRole("checkbox", { name: "Replace the source in my existing LUK and keep its translations" })
+
+  beforeEach(() => {
+    loadLinkSourcePreview.mockResolvedValue(previewWithOwnLuke())
+    addLinkedSourceFiles.mockResolvedValue({ added: ["up-LUK"], fileIds: ["up-MAT", "up-MRK", "up-LUK"], complete: true })
+  })
+
+  // WHY: the case the screenshot showed — a link that already exists, a lead
+  // adding the file their team has been translating on its own. Until this the
+  // dialog warned about the duplicate and offered nothing else.
+  it("offers the replace option on a checked same-named file, and posts the pair through the confirm", async () => {
+    fetchLinkFileMatches.mockResolvedValue([matchOf()])
+    const { onFilesAdded } = renderCard()
+    await openDialog()
+    expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
+
+    await userEvent.click(fileCheckbox("LUK"))
+    expect(replaceCheckbox().getAttribute("aria-checked")).toBe("false")
+    expect(screen.getByText(/already has a file with the same name/)).toBeTruthy()
+
+    await userEvent.click(replaceCheckbox())
+
+    expect(await screen.findByText("1151 of 1151 lines are the same in both files.")).toBeTruthy()
+    expect(fetchLinkFileMatches).toHaveBeenCalledWith("tok", PROJECT_ID, UPSTREAM_ID, [
+      { upstreamFileId: "up-LUK", fileId: "own-luk" },
+    ])
+    // Not a copy any more: no duplicate warning, not counted as added.
+    expect(screen.queryByText(/already has a file with the same name/)).toBeNull()
+    expect(screen.queryByText(/source file will be added/)).toBeNull()
+    expect(
+      screen.getByText("1 file you already have will take its source from this link and keep its translations."),
+    ).toBeTruthy()
+
+    // A replace promises something a checkbox does not, so it is reviewed first.
+    await userEvent.click(reviewButton())
+    expect(screen.getByText("Replace the source in this file you already have:")).toBeTruthy()
+    expect(screen.getByText(/No second copy is added/)).toBeTruthy()
+    await userEvent.click(confirmButton())
+
+    expect(addLinkedSourceFiles).toHaveBeenCalledWith("tok", PROJECT_ID, ["up-LUK"], [
+      { upstreamFileId: "up-LUK", fileId: "own-luk" },
+    ])
+    await waitFor(() => expect(onFilesAdded).toHaveBeenCalledTimes(1))
+  })
+
+  // WHY: sharing a name is not sharing content; and turning the option off must
+  // put the lead straight back on the plain add, with the request AQU-1560 made.
+  it("holds the add while a replace is not possible, and adds as a copy once it is turned off", async () => {
+    fetchLinkFileMatches.mockResolvedValue([matchOf({ same: 20, changed: 1131, canReplace: false })])
+    renderCard()
+    await openDialog()
+    await userEvent.click(fileCheckbox("LUK"))
+
+    await userEvent.click(replaceCheckbox())
+
+    expect(await screen.findByText(/not the same material: only 20 of 1151 lines match/)).toBeTruthy()
+    expect(reviewButton().hasAttribute("disabled")).toBe(true)
+
+    await userEvent.click(replaceCheckbox())
+
+    await userEvent.click(addButton())
+    expect(addLinkedSourceFiles).toHaveBeenCalledWith("tok", PROJECT_ID, ["up-LUK"])
+  })
+
+  // WHY: a chain link's source is the upstream's translations, which a file
+  // imported on its own cannot line up with; the server refuses the request.
+  it("does not offer the option on a chain link", async () => {
+    renderCard({ sourceLinkConsumes: "target" })
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("LUK"))
+
+    expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
+    expect(screen.getByText(/already has a file with the same name/)).toBeTruthy()
+  })
+
+  // WHY: a stopped file IS the file already here — resuming it brings the
+  // upstream's text into that same file. Offering to replace "the other" file
+  // would pair the upstream with the wrong one.
+  it("does not offer the option on a stopped file", async () => {
+    loadLinkedSourceFileState.mockResolvedValue(linkState(["up-MAT", "up-MRK"], ["up-LUK"]))
+    renderCard()
+    await openDialog()
+
+    await userEvent.click(fileCheckbox("LUK"))
+
+    expect(screen.queryByRole("checkbox", { name: /^Replace the source/ })).toBeNull()
   })
 })

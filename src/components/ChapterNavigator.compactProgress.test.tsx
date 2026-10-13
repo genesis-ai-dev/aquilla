@@ -176,4 +176,25 @@ describe("MilestoneNavigator clipped titles (AQU-1485)", () => {
       screen.getByRole("combobox", { name: /Current chapter: 1 Corinthians 1:1–31/ }),
     ).toHaveAttribute("title", "1 Corinthians 1:1–31")
   })
+
+  it("never shows 100% beside the marker while a cell is left (AQU-1493)", () => {
+    const jude: MilestoneNavigationItem[] = [
+      {
+        key: "scripture:JUD:1",
+        kind: "chapter",
+        label: "Jude 1:1–25",
+        shortLabel: "1",
+        description: "220 cells",
+        translated: 219,
+        validated: 219,
+        total: 220,
+      },
+    ]
+    render(<MilestoneNavigator items={jude} activeKey="scripture:JUD:1" onSelect={() => {}} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /Current chapter: Jude 1:1–25/ }))
+
+    expect(screen.getAllByText("99%")).toHaveLength(2)
+    expect(screen.queryByText("100%")).not.toBeInTheDocument()
+    expect(screen.getByText("99% translated")).toHaveClass("sr-only")
+  })
 })

@@ -24,6 +24,7 @@ import { planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { PlanSection } from "@/hooks/usePlanUnitSections"
 import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
 import { PLAN_TONE } from "./plan-tone"
+import { useFrontMatterLabel } from "./use-plan-note"
 
 /**
  * The timeline's own hues, looked up by preset id exactly as `PlanBar` does, so
@@ -149,7 +150,7 @@ export function PlanChapterGrid({
   selectedKey: string | null
   onSelect: (key: string) => void
 }) {
-  const t = useT()
+  const frontMatterLabel = useFrontMatterLabel()
 
   // POSITION BY THE PARSED NUMBER, NEVER BY ARRAY INDEX. A section row exists
   // only where cells exist, and AQU-1083's structural subtraction can empty one
@@ -227,9 +228,8 @@ export function PlanChapterGrid({
       {extras.length > 0 && (
         <div data-testid="plan-chapter-extras" className="flex flex-wrap gap-1">
           {extras.map(({ section, frontMatter }) => {
-            const label = frontMatter
-              ? t("org.projectOverview.plan.frontMatter")
-              : section.key
+            // AQU-1493: "Front matter", a label standing alone (Sam, 2026-10-03).
+            const label = frontMatter ? frontMatterLabel : section.key
             return (
               <PlanTile
                 key={section.key}

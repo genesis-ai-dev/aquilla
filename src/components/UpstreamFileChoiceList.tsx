@@ -12,6 +12,11 @@
 // dialog on the upstream changing — and both of those resets have to reach the
 // rest of their own form, so this component takes the set and reports presses
 // rather than holding anything.
+//
+// AQU-1679: a row whose name matches exactly one file the project already has
+// can also carry "replace the source in my existing file" — the link then
+// follows INTO that file instead of adding a second copy. Only the link flow
+// passes `replace`; a project being created has no files of its own to replace.
 
 import { useMemo } from "react"
 import { Badge } from "@/components/ui/badge"
@@ -19,6 +24,17 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { summarizeFileSelection } from "@/lib/sync/link-file-selection"
 import type { LinkSourcePreviewFile } from "@/lib/sync/link-source-preview"
+import type { ReplaceMatchState } from "@/hooks/useReplaceFileChoices"
+
+export type { ReplaceMatchState }
+
+export interface UpstreamFileReplaceChoice {
+  /** The upstream file ids set to replace the project's own same-named file. */
+  fileIds: ReadonlySet<string>
+  onToggle: (fileId: string, replace: boolean) => void
+  /** How each of those compares with the project's own file, once asked. */
+  matches: ReadonlyMap<string, ReplaceMatchState>
+}
 
 export interface UpstreamFileChoiceListProps {
   /** The upstream's files, in the upstream's own order. Empty renders nothing —
@@ -30,6 +46,9 @@ export interface UpstreamFileChoiceListProps {
   onToggleFile: (fileId: string) => void
   /** The check-all control pressed: true = every file, false = none. */
   onToggleAll: (checked: boolean) => void
+  /** AQU-1679: offer "replace the source in my existing file" on rows that
+   *  have a `clashFileId`. Omitted = never offered. */
+  replace?: UpstreamFileReplaceChoice
   disabled?: boolean
 }
 
@@ -38,6 +57,7 @@ export function UpstreamFileChoiceList({
   selectedFileIds,
   onToggleFile,
   onToggleAll,
+  replace,
   disabled,
 }: UpstreamFileChoiceListProps) {
   const t = useT()
@@ -83,9 +103,71 @@ export function UpstreamFileChoiceList({
                 </Badge>
               )}
             </label>
+            {/* AQU-1679: only on a row that is coming AND has one file here it
+                could stand in for — an unchecked file replaces nothing. */}
+            {replace && f.clashFileId && selectedFileIds.has(f.id) && (
+              <div className="mb-1 ml-6 space-y-1">
+                <label className="flex items-start gap-2 text-xs">
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={replace.fileIds.has(f.id)}
+                    disabled={disabled}
+                    onCheckedChange={(checked) => replace.onToggle(f.id, !!checked)}
+                  />
+                  {t("projectSettings.linkSource.replaceOption", { name: f.name })}
+                </label>
+                {replace.fileIds.has(f.id) && (
+                  <ReplaceMatchNote state={replace.matches.get(f.id)} />
+                )}
+              </div>
+            )}
           </li>
         ))}
       </ul>
     </div>
+  )
+}
+
+/** AQU-1679: what replacing this file's source will do, in the server's own
+ *  numbers — or why it cannot be done. Shared with "Choose files"
+ *  (ChooseLinkedFilesDialog), which offers the same option on an existing link. */
+export function ReplaceMatchNote({ state }: { state: ReplaceMatchState | undefined }) {
+  const t = useT()
+  if (!state || state.status === "loading") {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {t("projectSettings.linkSource.replaceComparing")}
+      </p>
+    )
+  }
+  if (state.status === "failed") {
+    return (
+      <p className="text-xs text-destructive" role="alert">
+        {t("projectSettings.linkSource.replaceCompareFailed")}
+      </p>
+    )
+  }
+  const { match } = state
+  const lines = Math.max(match.upstreamLines, match.localLines)
+  if (!match.canReplace) {
+    return (
+      <p className="text-xs text-destructive" role="alert">
+        {t("projectSettings.linkSource.replaceNoMatch", { same: match.same, count: lines })}
+      </p>
+    )
+  }
+  return (
+    <ul className="text-xs text-muted-foreground">
+      <li>{t("projectSettings.linkSource.replaceMatchSame", { same: match.same, count: lines })}</li>
+      {match.changed > 0 && (
+        <li>{t("projectSettings.linkSource.replaceMatchChanged", { count: match.changed })}</li>
+      )}
+      {match.added > 0 && (
+        <li>{t("projectSettings.linkSource.replaceMatchAdded", { count: match.added })}</li>
+      )}
+      {match.kept > 0 && (
+        <li>{t("projectSettings.linkSource.replaceMatchKept", { count: match.kept })}</li>
+      )}
+    </ul>
   )
 }

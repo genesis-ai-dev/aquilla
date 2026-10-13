@@ -43,16 +43,22 @@ describe("ProposalReceipt", () => {
     expect(onReview).toHaveBeenCalled()
   })
 
-  it("settles once every row is decided: no Review jump, a done marker", () => {
+  it("collapses to a quiet one-line trace once every row is decided", () => {
+    // A finished receipt must get out of the way (the full card lingering
+    // after everything was applied read as "still needs me"), but it keeps
+    // the outcome and Undo, since this is the only place to reverse it.
     render(
       <ProposalReceipt
-        proposal={proposal(["MRK 1:1"])}
-        counts={{ accepted: 1, edited: 0, rejected: 0, undone: 0, pending: 0, checks: 0 }}
+        proposal={proposal(["MRK 1:1", "MRK 1:2"])}
+        counts={{ accepted: 1, edited: 0, rejected: 1, undone: 0, pending: 0, checks: 0 }}
         onReview={() => {}}
+        onUndo={() => {}}
       />,
     )
+    expect(screen.getByTestId("proposal-receipt-settled")).toHaveTextContent("1 accepted · 1 rejected")
+    expect(screen.queryByText("2 drafts staged")).toBeNull()
     expect(screen.queryByRole("button", { name: /Review/ })).toBeNull()
-    expect(screen.getByText("Done")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Undo applied/ })).toBeInTheDocument()
   })
 
   it("offers Undo while applied rows exist, then reports them undone", () => {

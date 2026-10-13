@@ -42,6 +42,15 @@ export const IMPORT_COLLISION_SKIPPED = "import collision skipped"
 /** User chose to overwrite/duplicate colliding files in the collision resolution prompt. */
 export const IMPORT_COLLISION_DUPLICATED = "import collision duplicated"
 
+/**
+ * AQU-1365: a New source text upload looked like a translation of a file
+ * already in the project (its book is here, or it says it's in the target
+ * language), and the person answered "Is this a translation?". Properties:
+ * signal (book | language | both), file_count, flagged_count, choice
+ * (translation | update | separate | choose-file | leave-out | import-all | back).
+ */
+export const IMPORT_TRANSLATION_CHECK = "import translation check"
+
 // ── Editor — first commit + validation ───────────────────────────────────
 
 /**

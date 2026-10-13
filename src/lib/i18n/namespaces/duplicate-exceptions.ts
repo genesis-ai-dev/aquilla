@@ -582,6 +582,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "link and snapshots its data. A casual toggle and a one-way destructive " +
     "operation carry very different weight, and many languages would render " +
     "'detach' with a stronger verb for the latter.",
+  "projectSettings.inherit.detach":
+    "One-click button beside a single setting the project is still copying " +
+    "from its upstream: it stops future copies of that one field and keeps " +
+    "the current value, with no confirmation. projectSettings.sourceLink." +
+    "detachConfirmButton confirms a typed, irreversible dialog that severs the " +
+    "project's whole live source link. Same reasoning as org.teamDetail." +
+    "detachButton above: a light per-field choice and a one-way destructive " +
+    "operation carry different weight, and many languages use a stronger verb " +
+    "for the latter.",
   "terminology.editor.errorImportFailed":
     "Failure notice for importing TERMS into the project termbase — a glossary " +
     "operation. importExport.errors.importFailed reports a failed SOURCE-DOCUMENT " +
@@ -761,15 +770,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "many languages lexicalize 'a term's review state' and 'a project's state' " +
     "differently, or decline the noun differently depending on the thing it " +
     "describes.",
-  "rules.createDialog.descriptionLabel":
-    "Visible field label above the free-text description input in the standalone " +
-    "rule-creation dialog — a sighted user reads it beside the input. " +
-    "nav.report.descriptionFieldLabel is a visually-hidden (screen-reader-only) " +
-    "label for a bug-report textarea that shows a placeholder instead of a visible " +
-    "label. A visible form label and an sr-only accessible name serve different " +
-    "audiences and often take different phrasing (e.g. a visible label can be " +
-    "terser since layout already implies context; an sr-only label must stand " +
-    "alone).",
   "audio.voice.clear":
     "One of a fixed set of one-word Gemini TTS voice tone descriptions (see " +
     "audio.voice.bright) — an ADJECTIVE describing how a voice sounds ('distinct, " +
@@ -911,4 +911,40 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "data the agent READS is a different UI role from a navigation entry, and " +
     "languages that distinguish the subject matter from the place it lives " +
     "should be free to split them.",
+  "bibleData.enrichment.voices.label":
+    "AQU-1686: names the Bible data enrichment that labels who SPEAKS in the " +
+    "Bible text (Jesus, the narrator, a crowd). common.voices is the panel of " +
+    "synthetic text-to-speech voices. People speaking and machine voices are " +
+    "different words in most target languages.",
+  "bibleData.enrichment.terms.label":
+    "AQU-1686: names the enrichment that marks biblical key terms (a term of art " +
+    "in Bible translation, as in Paratext's Biblical Terms) in the source text. " +
+    "autopilot.readiness.terminology.label names the readiness check on the " +
+    "project's own approved renderings, which several languages call terminology.",
+  "bibleData.voices.author":
+    "AQU-1687: the writer of a Bible letter (Paul, Peter), shown in the voice chip " +
+    "where a Gospel shows 'Narrator'. comments.filter.authorLabel filters comments " +
+    "by the person who wrote them. A biblical author and a comment's author are " +
+    "different words in many languages (writer of scripture vs. poster).",
+  "bibleData.voices.type.dialogue":
+    "AQU-1687: a kind of quotation in the Bible text, people talking with each " +
+    "other in the story. agentWorkspace.conversation is the user's chat thread with " +
+    "the AI agent. A dialogue between characters and a chat session are different " +
+    "words in most target languages.",
+  "bibleData.whosWho.pronoun.secondSingular":
+    "AQU-1689: the grammatical pronoun for ONE person addressed in the Bible text, " +
+    "inside a hint '[you = Samaritan woman]'. agent.emptyState.introYou addresses " +
+    "the app's user. Languages with a polite form use it for the user and the plain " +
+    "singular here (French 'vous' vs 'tu'), so the two cannot share a translation.",
+  "bibleData.whosWho.panel.edgeTab":
+    "AQU-1689: the people in a Bible passage (Jesus, a Samaritan woman), on the " +
+    "Who's Who panel's tab. org.overviewLaneTable.peopleColumn counts the project's " +
+    "users. Characters in a story and members of a team are different words in " +
+    "many target languages (Indonesian 'tokoh' vs 'orang').",
+  "bibleData.context.tab":
+    "AQU-1689: the tab of an expanded Bible cell holding the verse's original-" +
+    "language context (Greek or Hebrew words, who they refer to). " +
+    "autopilot.inspector.context.title is the material an AI agent was given. " +
+    "Textual context and an AI's input are different words in several target " +
+    "languages.",
 }

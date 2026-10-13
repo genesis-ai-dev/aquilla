@@ -49,11 +49,6 @@ export interface WorkspaceActionRunArgs {
   /** AQU-490: bulk AUDIO validation. Separate from the text one on purpose —
    *  a reviewer signing off translations has not listened to the takes. */
   runBatchValidateAudio: () => void
-  /** File-scoped target import — populate the open file's translations. */
-  runImportIntoFile: () => void
-  /** AQU-1673: the same file-scoped target import, staged as proposals behind
-   *  the human approval gate instead of committed as target text. */
-  runImportProposalsIntoFile: () => void
   runTranscribeAll: () => void
   runSynthAll: () => void
   navigate: NavigateFunction
@@ -68,6 +63,12 @@ export interface WorkspaceAction {
   group: "primary" | "secondary"
   isAvailable: (ctx: WorkspaceActionContext) => boolean
   isDefault?: (ctx: WorkspaceActionContext) => boolean
+  /**
+   * AQU-983: open the file-context batch modal instead of the plain confirm
+   * dialog. The modal is where the reader chooses empty cells versus a
+   * refresh, and ready cells versus untouched AI drafts.
+   */
+  opensFileModal?: "validate" | "draft-next" | "draft-all"
   requiresConfirmation?: {
     titleKey: MessageKey
     /**

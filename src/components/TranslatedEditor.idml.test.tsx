@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto"
 import type { Editor } from "@tiptap/core"
+import { NodeSelection, TextSelection } from "@tiptap/pm/state"
 import { act, cleanup, fireEvent, render } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { validateIdmlTranslation, type IdmlFormatMetadataV2 } from "@aquilla/idml-roundtrip"
+import {
+  resetVisibleStyleSegmentsCacheForTests,
+  setVisibleStyleSegments,
+} from "@/lib/store/visible-style-segments-pref"
 import { TranslatedEditor } from "./TranslatedEditor"
 import {
   serializeIdmlEditorDocument,
@@ -58,9 +63,82 @@ function positionOf(editor: Editor, name: string): number {
   return position
 }
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  setVisibleStyleSegments(false)
+  resetVisibleStyleSegmentsCacheForTests()
+})
 
 describe("TranslatedEditor — protected IDML mode", () => {
+  it("marks an empty style run until the translator types, without saving the mark", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-visible-segments"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    expect(surface.querySelector("[data-idml-slot=\"0\"]")?.hasAttribute("data-style-segment-empty")).toBe(true)
+    expect(surface.querySelector("[data-idml-slot=\"0\"]")?.getAttribute("data-style-plain-group")).toBe("label")
+    expect(surface.querySelector("[data-idml-slot=\"1\"]")?.hasAttribute("data-style-segment-empty")).toBe(true)
+    expect(surface.querySelector("[data-idml-slot=\"1\"]")?.hasAttribute("data-style-plain-group")).toBe(false)
+
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.keyDown(surface, { key: "A" })
+      fireEvent.blur(surface)
+    })
+
+    expect(surface.querySelector("[data-idml-slot=\"0\"]")?.hasAttribute("data-style-segment-empty")).toBe(false)
+    expect(surface.querySelector("[data-idml-slot=\"0\"]")?.textContent).toBe("A")
+    expect(surface.querySelector("[data-idml-slot=\"1\"]")?.hasAttribute("data-style-segment-empty")).toBe(true)
+    const committed = onCommit.mock.calls.at(-1)?.[0] as { valueHtml: string }
+    expect(committed.valueHtml).not.toContain("data-style-segment-empty")
+    expect(committed.valueHtml).not.toContain("data-style-plain-group")
+    expect(committed.valueHtml).not.toContain("idml-style-")
+  })
+
+  it("steps ArrowRight from the end of one style run into the next", async () => {
+    setVisibleStyleSegments(true)
+    const onCommit = vi.fn()
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-segment-arrow"
+        initialPlain={"Source\tSecond"}
+        initialHtml={SOURCE_HTML}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    let end = -1
+    editor.state.doc.descendants((node, position) => {
+      if (end >= 0) return false
+      if (node.type.name !== "idmlSlot") return true
+      end = position + 1 + node.content.size
+      return false
+    })
+    act(() => {
+      fireEvent.focus(surface)
+      editor.view.dispatch(
+        editor.state.tr.setSelection(TextSelection.create(editor.state.doc, end)),
+      )
+      fireEvent.keyDown(surface, { key: "ArrowRight" })
+    })
+    expect(editor.state.selection.$from.parent.attrs.slot).toBe(1)
+    expect(editor.state.selection.$from.parentOffset).toBe(0)
+  })
+
   it("places the caret inside an empty protected slot when the editor is activated", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML
@@ -262,6 +340,92 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(
       nativeAnchor === firstSlot || (nativeAnchor ? firstSlot.contains(nativeAnchor) : false),
     ).toBe(true)
+  })
+
+  it("places the caret in the clicked slot when the first click selected the whole cell", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-one-click-slot"
+        initialPlain={"asd\tSecond"}
+        initialHtml={SOURCE_HTML.replace(">Source</span>", ">asd</span>")}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={() => {}}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const boldSlot = surface.querySelector("span[data-idml-slot=\"1\"]")!
+    const paragraph = positionOf(editor, "idmlParagraph")
+
+    act(() => {
+      editor.view.dispatch(
+        editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, paragraph)),
+      )
+      const nativeSelection = window.getSelection()
+      const nativeRange = document.createRange()
+      nativeRange.selectNodeContents(surface)
+      nativeSelection?.removeAllRanges()
+      nativeSelection?.addRange(nativeRange)
+    })
+    expect(editor.state.selection).toBeInstanceOf(NodeSelection)
+    expect(window.getSelection()?.isCollapsed).toBe(false)
+
+    const clickEvent = {
+      target: boldSlot,
+      shiftKey: false,
+      preventDefault: vi.fn(),
+    } as unknown as MouseEvent
+    let handled: boolean | void = undefined
+    act(() => {
+      handled = editor.view.someProp("handleClick", (handler) => handler(
+        editor.view,
+        paragraph,
+        clickEvent,
+      ))
+    })
+
+    expect(handled).toBe(true)
+    expect(editor.state.selection).toBeInstanceOf(TextSelection)
+    expect(editor.state.selection.$from.parent.attrs.slot).toBe(1)
+  })
+
+  it("places the caret in an empty run on the first press", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-empty-run-press"
+        initialPlain={"asd\t"}
+        initialHtml={SOURCE_HTML.replace(">Second</span>", "></span>")}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={() => {}}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const emptySlot = surface.querySelector("span[data-idml-slot=\"1\"]")!
+    const paragraph = positionOf(editor, "idmlParagraph")
+    act(() => {
+      editor.view.dispatch(
+        editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, paragraph)),
+      )
+    })
+
+    const mouseEvent = {
+      target: emptySlot,
+      preventDefault: vi.fn(),
+    } as unknown as MouseEvent
+    let handled: boolean | void = undefined
+    act(() => {
+      handled = editor.view.someProp("handleDOMEvents", (handlers) => (
+        handlers.mousedown?.(editor.view, mouseEvent) ?? false
+      ))
+    })
+
+    expect(handled).toBe(true)
+    expect(editor.state.selection).toBeInstanceOf(TextSelection)
+    expect(editor.state.selection.empty).toBe(true)
+    expect(editor.state.selection.$from.parent.attrs.slot).toBe(1)
   })
 
   it("does not collapse an IDML text range on click (AQU-1031)", async () => {
@@ -539,7 +703,7 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
   })
 
-  it("blocks a leading space and a doubled space at entry while typing (AQU-758)", async () => {
+  it("keeps a space typed as the first character and still drops a doubled space (AQU-758)", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML
       .replace(">Source</span>", "></span>")
@@ -558,8 +722,8 @@ describe("TranslatedEditor — protected IDML mode", () => {
 
     act(() => {
       fireEvent.focus(surface)
-      // A leading space into an empty slot is dropped; then a word, a real
-      // separator space (kept), and a second space (dropped as a double).
+      // A space may start the run. The word follows, a real separator is kept,
+      // and a second space in a row is dropped.
       for (const key of [" ", "a", " ", " ", "b"]) {
         fireEvent.keyDown(surface, { key })
       }
@@ -567,7 +731,7 @@ describe("TranslatedEditor — protected IDML mode", () => {
     })
 
     const slotElement = surface.querySelector("span[data-idml-slot=\"0\"]")
-    expect(slotElement?.textContent).toBe("a b")
+    expect(slotElement?.textContent).toBe(" a b")
     const committed = onCommit.mock.calls.at(-1)?.[0] as { valueHtml: string } | undefined
     expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
   })

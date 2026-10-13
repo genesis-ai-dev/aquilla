@@ -302,9 +302,10 @@ export interface MappedRow {
 
 /**
  * Convert a timestamp string (HH:MM:SS, HH:MM:SS.mmm, or bare number of seconds)
- * to seconds. Returns undefined when unparseable.
+ * to seconds. Returns undefined when unparseable. Exported for the target
+ * import's Start/End columns (AQU-1375), so both read timestamps alike.
  */
-function parseTimestamp(s: string): number | undefined {
+export function parseTimestamp(s: string): number | undefined {
   const trimmed = s.trim()
   if (!trimmed) return undefined
   // Bare number

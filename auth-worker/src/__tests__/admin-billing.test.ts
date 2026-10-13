@@ -171,3 +171,21 @@ describe("admin credit grants and resets", () => {
     expect((await readSpend(env.AQUILLA_PG, 1, cfg)).dayCredits).toBe(0)
   })
 })
+
+it('audits and validates weekly grants independently of the legacy plan', async () => {
+  await seedAdminOrg()
+  const headers = authHeader(await jwtFor('root'))
+  for (const allowance of [-1, 0.5, 10000001]) {
+    expect((await request('/api/v2/admin/billing/org/1/weekly-allowance', {
+      method: 'PATCH', headers, body: JSON.stringify({ allowance, reason: 'Test' }),
+    })).status).toBe(400)
+  }
+  expect((await request('/api/v2/admin/billing/org/1junk/weekly-allowance', {
+    method: 'PATCH', headers, body: JSON.stringify({ allowance: 100, reason: 'Test' }),
+  })).status).toBe(400)
+  expect((await request('/api/v2/admin/billing/org/1/weekly-allowance', {
+    method: 'PATCH', headers, body: JSON.stringify({ allowance: 1000, reason: 'Enterprise rollout' }),
+  })).status).toBe(200)
+  const rows = await request('/api/v2/admin/billing/orgs', { headers })
+  expect(await rows.json()).toMatchObject({ orgs: [{ orgId: 1, ownerUsername: 'wendi', weeklyAllowance: 1000 }] })
+})

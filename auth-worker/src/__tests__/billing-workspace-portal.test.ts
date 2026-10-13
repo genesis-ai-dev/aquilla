@@ -141,3 +141,35 @@ it.each(['active', 'livemode'] as const)('rejects invalid configuration %s', asy
   expect((await openPortal()).status).toBe(503)
   expect(f.requests).toHaveLength(0)
 })
+
+it('opens the production workspace portal after sales are disabled', async () => {
+  const { testStripeCatalog } = await import('./helpers/stripe-catalog')
+  const catalog = { ...testStripeCatalog,
+    bindings: testStripeCatalog.bindings.map(b => ({ ...b, live: true })) }
+  const f = await completedPayment('pro', 'month', catalog)
+  expect((await f.send()).status).toBe(200)
+  const upstream = globalThis.fetch
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    const path = new URL(url).pathname
+    if (path.startsWith('/v1/billing_portal/configurations/')) return Response.json({
+      id: 'bpc_personal', active: true, livemode: true, features: {
+        invoice_history: { enabled: true }, payment_method_update: { enabled: true },
+        subscription_update: { enabled: false }, subscription_cancel: { enabled: false },
+      },
+    })
+    if (path === '/v1/billing_portal/sessions') {
+      const params = new URLSearchParams(String(init?.body))
+      return Response.json({ livemode: true, customer: params.get('customer'),
+        configuration: params.get('configuration'), return_url: params.get('return_url'),
+        url: 'https://billing.stripe.com/p/session/live' })
+    }
+    return upstream(url, init)
+  })
+  const stopped = { ...config(catalog), STRIPE_PORTAL_PERSONAL_CONFIGURATION: 'bpc_personal',
+    BILLING_WORKSPACE_CHECKOUT_ENABLED: 'false' }
+  const response = await app.request('https://api.aquilla.app/api/v2/orgs/1/billing/workspace/portal', {
+    method: 'POST', headers: authHeader(await jwtFor('alice')),
+  }, stopped)
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ sandbox: false, url: 'https://billing.stripe.com/p/session/live' })
+})

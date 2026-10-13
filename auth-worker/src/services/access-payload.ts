@@ -15,6 +15,7 @@ import {
   type ChainLink,
 } from "../../../db/shared/access-grants"
 import { resolveProjectRole } from "./project-permissions"
+import { platformAdminEmailsParam } from "../middleware/platform-admin"
 import {
   canViewRoster,
   getEffectiveOrgRole,
@@ -34,6 +35,8 @@ export interface AccessChainEntry {
   roleLevel: number | null
   origin: GrantOrigin
   grantedBy?: string
+  /** Account id of whoever granted this row. Set when `grantedBy` is their username. */
+  grantedByUserId?: string
   grantedAt?: string
   descendantCount?: number
 }
@@ -252,7 +255,7 @@ export async function buildMemberAccess(
       env.AQUILLA_PG,
       { id: String(subjectId), email: subject.email },
       from.id,
-      env.ADMIN_EMAILS,
+      await platformAdminEmailsParam(env),
     )
     hereLevel = resolved?.level ?? null
     for (const link of resolved?.chain ?? []) {
@@ -293,7 +296,10 @@ export async function buildMemberAccess(
     ok: true,
     payload: {
       userId: String(subjectId),
-      displayName: subject.display_name?.trim() || subject.username,
+      // AQU-1411: the chip's label is the account username. users.display_name
+      // is a real name and stays off this payload, matching the AQU-1180 rule
+      // that a scrubbed identity is not filled back in from another column.
+      displayName: subject.username,
       isGuest,
       effectiveHere: { roleLevel: hereLevel, chain },
       elsewhere,
@@ -348,7 +354,7 @@ export async function hideUnseenAncestors(vs: ViewerScope, entries: AccessChainE
 
 const pathText = (p: ScopePath) => p.map((r) => r.name).join(" › ")
 
-// grantedBy carries a user id until nameGranters swaps in the display name.
+// grantedBy carries a user id until nameGranters swaps in the username.
 export function toEntry(g: NamedGrant): AccessChainEntry {
   return {
     scopePath: scopePathOf(g),
@@ -376,7 +382,7 @@ export async function nameGranters(env: Env, entries: AccessChainEntry[]): Promi
   const ids = [...new Set(entries.map((e) => e.grantedBy).filter((v): v is string => !!v))]
   if (ids.length === 0) return
   const { results } = await env.AQUILLA_PG.prepare(
-    `SELECT id, COALESCE(NULLIF(TRIM(display_name), ''), username) AS name FROM users
+    `SELECT id, username AS name FROM users
       WHERE id::TEXT IN (${ids.map(() => "?").join(", ")})`,
   )
     .bind(...ids)
@@ -385,7 +391,9 @@ export async function nameGranters(env: Env, entries: AccessChainEntry[]): Promi
   for (const e of entries) {
     if (!e.grantedBy) continue
     const n = names.get(e.grantedBy)
-    if (n) e.grantedBy = n
-    else delete e.grantedBy
+    if (n) {
+      e.grantedByUserId = e.grantedBy
+      e.grantedBy = n
+    } else delete e.grantedBy
   }
 }

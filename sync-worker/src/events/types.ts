@@ -26,6 +26,8 @@ export type TermRenderingStatusPayload = 'preferred' | 'admitted' | 'forbidden'
 export interface TermRenderingPayload {
   rendering: string
   status: TermRenderingStatusPayload
+  /** `lanes.id`. Absent means the project's `legacy_tag === ''` lane. */
+  laneId?: string
 }
 
 /** Mirrors `Concept['status']` in src/lib/terminology/types.ts. */
@@ -233,8 +235,10 @@ export interface AiDraftProvenance {
   provider: string
   promptVersion: string
   exampleIds: string[]
+  /** Source/target of examples placed in the prompt (#946 reload). */
+  exampleTexts?: Array<{ cellId: string; source: string; target: string }>
   generatedAt: number
-  mode: 'single' | 'batch' | 'paragraph' | 'agent' | 'read'
+  mode: 'single' | 'batch' | 'paragraph' | 'agent' | 'read' | 'align-styles'
   projectState: {
     sourceLanguage: string
     targetLanguage: string
@@ -471,12 +475,21 @@ export interface EventPayloads {
   }
 
   // ── QA rule waivers ────────────────────────────────────────────────────
-  // `waive` dismisses a single QA rule infraction on a cell; `unwaive`
-  // restores it. Keyed by `ruleId` (one row per (cell, rule)). The DELETE-on-
-  // unwaive shape mirrors validators: a row exists iff the rule is waived.
+  // `waive` dismisses a QA rule finding on a cell; `unwaive` restores it.
+  // Keyed by (cell, rule, matchHash) — one row per waived finding, or one row
+  // with an empty hash for a rule-wide waiver. The DELETE-on-unwaive shape
+  // mirrors validators: a row exists iff that finding is waived.
   'cell.waive': {
     /** Stable id of the QA rule whose infraction is being dismissed. */
     ruleId: string
+    /**
+     * AQU-1740: hash of the matched text identifying ONE finding of this rule
+     * on this cell (`spanMatchHash`, src/lib/rules/match-hash.ts). Omitted
+     * waives the rule across the cell — the only shape that existed before
+     * AQU-1740, and what every stored row predating it means. The projection
+     * stores the absent case as `''` so it fits the primary key.
+     */
+    matchHash?: string
     /** Optional human-entered justification. */
     reason?: string
     /**
@@ -490,6 +503,9 @@ export interface EventPayloads {
   }
   'cell.unwaive': {
     ruleId: string
+    /** AQU-1740: see `cell.waive`. The DELETE is key-exact, so omitting this
+     *  lifts the rule-wide waiver and leaves per-finding ones standing. */
+    matchHash?: string
     /** AQU-1462: see `cell.waive`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -1052,14 +1068,31 @@ export interface EventPayloads {
     /** True = the upstream deleted this cell. Tombstone (stamp
      *  cells.tombstoned_at), never delete the downstream row. */
     deleted?: true
+    /**
+     * AQU-1679: this mirror JOINS a cell the project already had to the
+     * upstream cell named in `upstream.cellId` (link-adopt.ts) — the "replace
+     * the source in my existing file" choice. It carries the upstream's text
+     * like any content mirror, and applies regardless of the row's
+     * `upstream_seq`: the row may hold a seq from an earlier link to a
+     * different upstream, which says nothing about this one.
+     */
+    adopt?: true
     /** Provenance: which upstream event/state this mirror reflects. */
     upstream: {
       projectId: string
+      /**
+       * The upstream's cell. The event's own `cellId` nearly always equals it;
+       * on a file the project already had (AQU-1679) it does not, and the
+       * projection records this one in `cells.upstream_cell_id`.
+       */
       cellId: string
       eventId: string
       /** The upstream event's server_seq — the monotonic apply-guard key. */
       seq: number
       side: 'source' | 'target'
+      /** Upstream lane the text was copied from (`lanes.id`). Provenance only:
+       *  the downstream row is that project's own source lane. */
+      laneId?: string
       contentHash: string
     }
   }

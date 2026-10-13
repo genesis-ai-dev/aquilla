@@ -53,6 +53,12 @@ export function countedFileSql(alias = 'f'): string {
   return `${alias}.deleted_at IS NULL AND ${notHiddenFileSql(alias)}`
 }
 
+/** "`<alias>` is a file whose rows are NOT work" — `countedFileSql`, negated. */
+function uncountedFileSql(alias: string): string {
+  return `(${alias}.deleted_at IS NOT NULL
+            OR COALESCE(${alias}.role, '') IN (${HIDDEN_ROLE_LIST}))`
+}
+
 /**
  * The anti-join form, for a row that carries `project_id` / `file_id` but has
  * no `files` join to hang a predicate on — progress rows, cells, audio takes.
@@ -65,16 +71,121 @@ export function countedFileSql(alias = 'f'): string {
  * silently vanish from every total. Only a file that is present AND uncounted
  * takes its rows out.
  *
- * Cost: one lookup on the `files` primary key per candidate row, so this is a
- * probe rather than a scan. `probe` names the correlation; override it only to
- * avoid a collision with an alias already in the query.
+ * Cost: a correlated probe on `files`, which the planner may run once per
+ * candidate row. That is fine for a statement bounded to one project or one
+ * page. A statement that filters MANY rows across projects wants the set form
+ * below instead. `probe` names the correlation; override it only to avoid a
+ * collision with an alias already in the query.
  */
 export function inCountedFileSql(alias: string, probe = 'uncounted_file'): string {
   return `NOT EXISTS (
     SELECT 1 FROM files ${probe}
      WHERE ${probe}.id = ${alias}.file_id
        AND ${probe}.project_id = ${alias}.project_id
-       AND (${probe}.deleted_at IS NOT NULL
-            OR COALESCE(${probe}.role, '') IN (${HIDDEN_ROLE_LIST}))
+       AND ${uncountedFileSql(probe)}
+  )`
+}
+
+/**
+ * The SET form of `inCountedFileSql`, for a statement that filters many rows
+ * at once (the org dashboard's audio rollup reads every selected dub take in
+ * every project of every org on the page).
+ *
+ * Uncounted files are rare — a few tombstones and hidden companions per
+ * project — so they are gathered ONCE into a small materialized set and the
+ * rows are anti-joined against that. The per-row probe above looks cheap and
+ * was not: on that dashboard it ran ~140k times through `idx_files_project`,
+ * and adding it to a join changed the join's plan enough to read all of
+ * `cells` sequentially. Together those took the all-organizations rollup from
+ * under a second to past the SPA's 15s abort.
+ *
+ * Two halves, used together:
+ *
+ *   * `uncountedFilesCteSql(scope)` goes in the statement's WITH list. `scope`
+ *     is a subquery yielding the project ids the statement is already bounded
+ *     to, so the set never grows past the caller's own reach.
+ *   * `inCountedFileSetSql(alias)` goes where `inCountedFileSql(alias)` would.
+ *
+ * Same direction as the probe, for the same reason: NOT EXISTS over the
+ * uncounted files, so a row whose `files` row is missing stays IN.
+ */
+export const UNCOUNTED_FILES_CTE = 'uncounted_files'
+
+export function uncountedFilesCteSql(projectScopeSql: string): string {
+  return `${UNCOUNTED_FILES_CTE} AS MATERIALIZED (
+       SELECT uf.project_id, uf.id AS file_id
+         FROM files uf
+        WHERE uf.project_id IN (${projectScopeSql})
+          AND ${uncountedFileSql('uf')}
+     )`
+}
+
+export function inCountedFileSetSql(alias: string, probe = 'uncounted'): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM ${UNCOUNTED_FILES_CTE} ${probe}
+     WHERE ${probe}.file_id = ${alias}.file_id
+       AND ${probe}.project_id = ${alias}.project_id
+  )`
+}
+
+/**
+ * The AUDIO form of `inCountedFileSql`: whose RECORDINGS count. (AQU-1566)
+ *
+ * Deleted files and caption-track content are out, as above, but the
+ * `audio-cues` cue sheet stays IN. A dubbing project does not record against
+ * its subtitles: every take hangs off a CUE cell in that hidden sheet
+ * (AQU-1278; see `readPlanUnitsSql` in plan-units.ts, which measures audio
+ * against the sheet for the same reason). Applying the text rule here would
+ * read every dubbed episode as 0% recorded on OrgHome while the plan board,
+ * on the same screen, showed its real coverage.
+ *
+ * Use it for every set that describes recordings, and for the structural
+ * subtractor taken off them, so the two always name the same files. The
+ * matching denominator is the cue sheet's own cell count (the portfolio's
+ * `cue` join), never the text total.
+ *
+ * Same NOT EXISTS direction as `inCountedFileSql`: a take whose `files` row is
+ * missing stays counted.
+ */
+export function inAudioCountedFileSql(alias: string, probe = 'uncounted_audio_file'): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM files ${probe}
+     WHERE ${probe}.id = ${alias}.file_id
+       AND ${probe}.project_id = ${alias}.project_id
+       AND ${uncountedAudioFileSql(probe)}
+  )`
+}
+
+/** "`<alias>` is a file whose RECORDINGS are not work": deleted, or a linked
+ *  video's caption-track content. The cue sheet is not in it. */
+function uncountedAudioFileSql(alias: string): string {
+  return `(${alias}.deleted_at IS NOT NULL
+            OR COALESCE(${alias}.role, '') = 'timeline-content')`
+}
+
+/**
+ * The SET form of `inAudioCountedFileSql`, for the same reason
+ * `inCountedFileSetSql` exists: the org dashboard's audio rollup filters every
+ * selected dub take on the page, and a per-row probe there is what took it
+ * past the SPA's 15s abort. Same two halves: the CTE in the WITH list, scoped
+ * to the projects the statement is already bounded to, and the anti-join where
+ * the probe would go.
+ */
+export const UNCOUNTED_AUDIO_FILES_CTE = 'uncounted_audio_files'
+
+export function uncountedAudioFilesCteSql(projectScopeSql: string): string {
+  return `${UNCOUNTED_AUDIO_FILES_CTE} AS MATERIALIZED (
+       SELECT uaf.project_id, uaf.id AS file_id
+         FROM files uaf
+        WHERE uaf.project_id IN (${projectScopeSql})
+          AND ${uncountedAudioFileSql('uaf')}
+     )`
+}
+
+export function inAudioCountedFileSetSql(alias: string, probe = 'uncounted_audio'): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM ${UNCOUNTED_AUDIO_FILES_CTE} ${probe}
+     WHERE ${probe}.file_id = ${alias}.file_id
+       AND ${probe}.project_id = ${alias}.project_id
   )`
 }

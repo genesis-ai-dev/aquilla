@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { describe, expect, it, vi } from "vitest"
 import { workersBuildPreviewAlias } from "./cloudflare-pr-preview.mjs"
 import { deployStackPreview, previewConfig, previewOrigin, PREVIEW_WORKERS } from "./cloudflare-stack-preview.mjs"
+import { hostedPosthog } from "./hosted-posthog.mjs"
 
 const env = { WORKERS_CI: "1", WORKERS_CI_BRANCH: "feature/example", WORKERS_CI_COMMIT_SHA: "abc123", WRANGLER_CI_OVERRIDE_NAME: "aquilla-web-preview" }
 
@@ -26,6 +27,8 @@ describe("full-stack Cloudflare previews", () => {
         expect(options.env.VITE_AUTH_BASE).toBe(`${authOrigin}/identity`)
         expect(options.env.VITE_CHAT_BASE).toBe(`${authOrigin}/chat`)
         expect(options.env.VITE_SYNC_WORKER_HOST).toBe(`${new URL(syncOrigin).host}/sync`)
+        expect(options.env.VITE_POSTHOG_KEY).toBe(hostedPosthog.projectToken)
+        expect(options.env.VITE_POSTHOG_HOST).toBe(hostedPosthog.ingestHost)
         return { stdout: "" }
       }
       expect(args.slice(0, 3)).toEqual(["exec", "wrangler", "preview"])
@@ -48,6 +51,12 @@ describe("full-stack Cloudflare previews", () => {
     const result = await deployStackPreview({ cwd: "/tmp/preview-contract-fixture", env: { ...env, WRANGLER_OUTPUT_FILE_DIRECTORY: outputDirectory }, run, verify, notify })
     expect(configs.map(({ surface }) => surface)).toEqual(["auth", "sync", "web", "auth", "sync"])
     expect(configs[0].config.previews.vars.SYNC_WORKER_URL).toBe("https://preview-not-ready.invalid")
+    for (const { config } of configs.filter(({ surface }) => surface !== "web")) {
+      expect(config.previews.vars).toMatchObject({
+        POSTHOG_KEY: hostedPosthog.projectToken,
+        POSTHOG_HOST: hostedPosthog.ingestHost,
+      })
+    }
     expect(configs[3].config.previews.vars).toMatchObject({
       BASE_URL: result.urls.web, SYNC_WORKER_URL: `${result.urls.sync}/sync`,
     })
@@ -72,6 +81,18 @@ describe("full-stack Cloudflare previews", () => {
     expect(config.previews.vars).not.toHaveProperty("WRANGLER_LOCAL")
     expect(config.previews.vars).not.toHaveProperty("ALLOW_UNAUTHENTICATED")
     expect(JSON.stringify(config)).not.toContain("api.aquilla.app")
+  })
+
+  it.each(["auth", "sync"])("runs %s previews behind the lane wall, like the development Worker whose rows they read", (surface) => {
+    // Unset, every member sees every lane and a lane-scoped change cannot be
+    // walked on its preview. Read from wrangler so the two cannot drift apart.
+    const wrangler = readFileSync(join(import.meta.dirname, "..", `${surface}-worker`, "wrangler.toml"), "utf8")
+    const start = wrangler.indexOf("\n[env.development.vars]\n")
+    expect(start).toBeGreaterThan(-1)
+    const end = wrangler.indexOf("\n[", start + 1)
+    const wall = /^LANE_READ_WALL = "(.*)"$/m.exec(wrangler.slice(start, end === -1 ? undefined : end))?.[1]
+    expect(wall).toBe("1")
+    expect(previewConfig(surface, { cwd: "/repo" }).previews.vars?.LANE_READ_WALL).toBe(wall)
   })
 
   it("preserves the sync Durable Object migration history", () => {

@@ -80,6 +80,22 @@ describe("computeDecayHealth", () => {
     expect(projectHealth).toBe(67)
   })
 
+  it("never reads 100 while a cell is short (AQU-1493)", () => {
+    // 1,474 of 1,476 fully endorsed is 99.86%, which plain rounding drew as a
+    // full green "100" beside the status bar's "(99%)".
+    const full = Array.from({ length: 1474 }, (_, i) => cell(`v${i}`, 5))
+    const fileCells = new Map<string, CellData[]>([
+      ["isa", [...full.slice(0, 1207), cell("blank1", 0)]],
+      ["jud", [...full.slice(1207), cell("blank2", 0)]],
+    ])
+    const { fileHealth, projectHealth } = computeDecayHealth(fileCells, DECAY_DEFAULTS)
+    expect(projectHealth).toBe(99)
+    expect(fileHealth.get("isa")).toBe(99)
+    expect(fileHealth.get("jud")).toBe(99)
+    // And 100 once nothing is short.
+    expect(computeDecayHealth(new Map([["f", full]]), DECAY_DEFAULTS).projectHealth).toBe(100)
+  })
+
   it("returns 0 health for an empty project", () => {
     expect(computeDecayHealth(new Map(), DECAY_DEFAULTS).projectHealth).toBe(0)
   })

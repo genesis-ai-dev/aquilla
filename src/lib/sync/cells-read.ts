@@ -390,6 +390,12 @@ export async function fetchCellsByIds(
  * is still an offset into that ordering and the cache is invalidated exactly
  * when the watermark changes — so this torn-snapshot reasoning, and the "no
  * `?since=` cursor from a mid-stream watermark change" rule, are unaffected.)
+ * (AQU-1841: the server now pins that ordering INTO the cursor, so while it
+ * can still honor the pin the watermark stays put across the whole stream and
+ * a mid-stream peer commit no longer tears it. Nothing here changes: the rule
+ * is still "same watermark on every page or no cursor", it just fires far less
+ * often. A page-to-page change still means the pin was retired or evicted and
+ * the stream really may be torn.)
  */
 export async function streamFileCells(
   projectId: string,

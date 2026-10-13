@@ -339,6 +339,7 @@ export function SourceLinkSection({
         <ChooseLinkedFilesDialog
           projectId={projectId}
           sourceProjectId={sourceProjectId}
+          sourceLinkConsumes={sourceLinkConsumes}
           followedFileIds={sourceLinkFileIds}
           open={chooseFilesOpen}
           onOpenChange={setChooseFilesOpen}

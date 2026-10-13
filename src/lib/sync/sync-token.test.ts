@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   fetchSyncToken,
   makeSyncTokenFetcher,
+  makeSyncTokenMinter,
   SyncTokenError,
 } from "./sync-token"
 
@@ -334,5 +335,90 @@ describe("pending token requests", () => {
     await old
     expect(await getToken()).toBe("new-token")
     expect(global.fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-1788: forceRefresh — the only way to learn a role lowered mid-session
+// ---------------------------------------------------------------------------
+
+describe("makeSyncTokenMinter forceRefresh (AQU-1788)", () => {
+  const originalFetch = global.fetch
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-10-08T12:00:00Z"))
+  })
+  afterEach(() => {
+    global.fetch = originalFetch
+    vi.useRealTimers()
+  })
+
+  function minted(token: string, level = 400) {
+    return {
+      status: 200,
+      body: { token, expiresIn: 900, role: { level, name: "contributor", source: "override" } },
+    }
+  }
+
+  it("mints again past an unexpired cache, so the new token carries the live role", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(minted("tok-maintainer", 600).body), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(minted("tok-project-lead", 500).body), { status: 200 }),
+      )
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const mint = makeSyncTokenMinter(() => "jwt-user", "proj-1", "file-a", {}, API)
+    expect(await mint()).toEqual({ token: "tok-maintainer", status: 200 })
+    // Cached — the token is nowhere near expiry, which is exactly the state a
+    // mid-session downgrade leaves the client in.
+    expect(await mint()).toEqual({ token: "tok-maintainer", status: 200 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    expect(await mint({ forceRefresh: true })).toEqual({ token: "tok-project-lead", status: 200 })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // The fresh token replaces the cached one for every later caller.
+    expect(await mint()).toEqual({ token: "tok-project-lead", status: 200 })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("evicts the stale token even when the forced mint fails", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(minted("tok-stale").body), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(minted("tok-fresh").body), { status: 200 }),
+      )
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const mint = makeSyncTokenMinter(() => "jwt-user", "proj-1", "file-a", {}, API)
+    expect(await mint()).toEqual({ token: "tok-stale", status: 200 })
+    expect(await mint({ forceRefresh: true })).toEqual({ token: null, status: 503 })
+    // Handing the stale-role token back here is what the gate would refuse
+    // again; the next call must go to the network.
+    expect(await mint()).toEqual({ token: "tok-fresh", status: 200 })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not join a mint already in flight (it may carry the same stale role)", async () => {
+    let finishFirst!: (response: Response) => void
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finishFirst = resolve }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(minted("tok-forced").body), { status: 200 }),
+      )
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const mint = makeSyncTokenMinter(() => "jwt-user", "proj-1", "file-a", {}, API)
+    const inFlight = mint()
+    const forced = mint({ forceRefresh: true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    finishFirst(new Response(JSON.stringify(minted("tok-inflight").body), { status: 200 }))
+    expect(await inFlight).toEqual({ token: "tok-inflight", status: 200 })
+    expect(await forced).toEqual({ token: "tok-forced", status: 200 })
   })
 })

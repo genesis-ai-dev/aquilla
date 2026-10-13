@@ -19,7 +19,7 @@ export function PermissionPrompt({ toolName, prompt }: { toolName: string; promp
     <div
       role="alertdialog"
       aria-label={t("extensions.prompt.message", { extension: toolName, scope: scopeLabel(prompt.scope) })}
-      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-primary/5 px-4 py-3 text-sm transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] starting:-translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0"
+      className="solid-primary flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-primary/5 px-4 py-3 text-sm transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] starting:-translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0"
     >
       <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
         <ShieldQuestion className="size-4" aria-hidden />

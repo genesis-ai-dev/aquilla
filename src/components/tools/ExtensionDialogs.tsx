@@ -89,7 +89,7 @@ export function PermissionsDialog({
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="solid-primary max-w-md">
         <DialogHeader>
           <DialogTitle>{t("extensions.permissions.title", { name: tool.name })}</DialogTitle>
           <DialogDescription>{t("extensions.permissions.hint")}</DialogDescription>
@@ -106,7 +106,7 @@ export function ActivityDialog({ projectId, tool, jwt, author, onClose }: { proj
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="solid-primary sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("extensions.activity.title", { name: tool.name })}</DialogTitle>
           <DialogDescription>{t("extensions.activity.undoHint")}</DialogDescription>
@@ -181,7 +181,7 @@ export function CopyDialog({ projectId, tool, jwt, onClose }: { projectId: strin
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="solid-primary max-w-md">
         <DialogHeader>
           <DialogTitle>{t("extensions.copy.title", { name: tool.name })}</DialogTitle>
           <DialogDescription>{t("extensions.copy.hint")}</DialogDescription>
@@ -212,7 +212,7 @@ export function ReviewCodeDialog({ projectId, tool, jwt, onClose }: { projectId:
   }, [jwt, projectId, tool.id])
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="solid-primary sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("extensions.review.title", { name: tool.name })}</DialogTitle>
           <DialogDescription>{t("extensions.review.note")}</DialogDescription>

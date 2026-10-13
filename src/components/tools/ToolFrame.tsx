@@ -130,7 +130,7 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
         </div>
       ))}
       {errors.length > 0 && (
-        <div role="alert" className="flex items-start gap-2.5 border-b bg-destructive/5 px-4 py-2.5 text-sm" data-testid="extension-error">
+        <div role="alert" className="solid-primary flex items-start gap-2.5 border-b bg-destructive/5 px-4 py-2.5 text-sm" data-testid="extension-error">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
           <div className="min-w-0 flex-1">
             <p className="font-medium text-destructive">{t("extensions.frame.problem")}</p>
@@ -141,7 +141,7 @@ export function ToolFrame({ project, tool, session, roleLevel, mount = "page", c
             </details>
           </div>
           {onHeal && (
-            <Button size="sm" variant="outline" disabled={healing} onClick={() => onHeal(healRequest(errors[errors.length - 1].message))}>
+            <Button size="sm" disabled={healing} onClick={() => onHeal(healRequest(errors[errors.length - 1].message))}>
               {healing ? <Spinner className="size-3.5" /> : <Wand2 className="size-3.5" aria-hidden />}
               {healing ? t("extensions.heal.running") : t("extensions.heal.button")}
             </Button>

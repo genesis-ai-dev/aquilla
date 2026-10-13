@@ -101,7 +101,7 @@ export function ToolRunPage() {
   }
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="solid-primary flex h-dvh flex-col">
       <header className="flex flex-col gap-2 border-b px-3 pt-2 pb-3 sm:px-4">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" render={<Link to={`/project/${projectId}/extensions`} />}>

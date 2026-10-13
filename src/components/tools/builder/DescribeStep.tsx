@@ -102,7 +102,7 @@ export function DescribeStep({
         </div>
         <div className="flex shrink-0 items-center gap-2 self-end">
           <Kbd className="hidden sm:inline-flex" aria-label={t("extensions.describe.shortcut")}>⌘↵</Kbd>
-          <Button size="lg" onClick={onBuild} disabled={!ready} className="gap-1.5 px-4" data-testid="builder-build">
+          <Button size="lg" onClick={onBuild} disabled={!ready} className="gap-1.5 px-4 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100" data-testid="builder-build">
             <ArrowUp className="size-4" aria-hidden />
             {t("extensions.describe.build")}
           </Button>

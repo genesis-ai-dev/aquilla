@@ -159,7 +159,7 @@ export function ToolsPage() {
   ]
 
   return (
-    <div ref={topRef} className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-6 sm:px-6 sm:py-10">
+    <div ref={topRef} className="solid-primary mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-6 sm:px-6 sm:py-10">
       <header className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon-sm" aria-label={t("extensions.backToEditor")} render={<Link to={`/project/${projectId}/editor`} />}>

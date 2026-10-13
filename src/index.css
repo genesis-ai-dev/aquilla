@@ -337,6 +337,23 @@
     color-scheme: dark;
   }
 
+  /* Solid primary for surfaces whose main action must read as THE action
+     (Smart Extensions builder, extension page, permission prompt). The brand
+     --primary is a deliberately muted, light accent with dark text; on these
+     pages it read as disabled next to outline buttons (owner, 2026-10-13).
+     Derived from the brand token (same hue, deeper and more saturated, white
+     text), so every brand and both themes keep their own hue; an achromatic
+     brand primary stays achromatic. Declared on :root so it resolves against
+     the root's --primary; `.solid-primary` then swaps the pair for a subtree. */
+  :root {
+    --primary-solid: oklch(from var(--primary) min(l, 0.52) calc(c * 1.8) h);
+    --primary-solid-foreground: oklch(0.99 0 0);
+  }
+  .solid-primary {
+    --primary: var(--primary-solid);
+    --primary-foreground: var(--primary-solid-foreground);
+  }
+
   /* Links are the one place the hand cursor isn't ours to remove by dropping a
      class: Blink and WebKit pick it in the hit-test whenever the computed
      cursor is `auto` and the node is a link, so no amount of removing
